@@ -49,6 +49,7 @@ Internal boundary (Docker network, not exposed):
 ```makefile
 make setup              # Generate .secrets/internal_secret, MinIO credentials, and dev credentials
 make dev                # docker compose up (gateway, core, postgres, dex)
+make dev-reset-db       # Drop + recreate the database, apply the single seed migration (WARNING: destroys all data)
 make build-gateway      # Docker multi-stage build for Go gateway
 make build-core         # Docker multi-stage build for Elixir core
 make test-unit-go       # go test ./... in container
@@ -57,6 +58,47 @@ make test-integration   # Full Docker Compose stack + Godog Gherkin tests
 make proto              # buf generate (in container)
 make gen-api            # oapi-codegen: openapi.yaml → api_gen.go
 ```
+
+## Database Migration Strategy (Story 13-14)
+
+### Squashed Seed Migration
+
+The gateway ships a **single seed migration** (`gateway/migrations/000001_init.up.sql`) that represents the complete current schema in its final state. The previous 49 incremental migration files (000002–000049) have been deleted.
+
+**Rationale:** Incremental migrations accumulated role-specific ownership transfers (`ALTER TABLE … OWNER TO nebu_migrate`) and backward-compatibility grants (`GRANT EXECUTE … TO nebu`) that required the `nebu_migrate` and `nebu` PostgreSQL roles to exist before migrations ran. On managed database services (Stackit PostgresFlex, AWS Aurora Serverless v2) where the gateway cannot run `CREATE ROLE` DDL, this caused fresh deployments to fail at migration 24.
+
+**Single-role model:** The squashed migration is designed to run as `nebu_app` (the runtime DB user). All objects are created by `nebu_app`; no ownership transfers or legacy grants are needed.
+
+**Key characteristics of `000001_init.up.sql`:**
+
+- Contains all 26+ tables, indexes, triggers, functions, and RLS policies in final state
+- No references to `nebu_migrate` in ownership transfers or function grants
+- No `GRANT EXECUTE … TO nebu` (legacy backward-compat grants removed)
+- Uses `CREATE INDEX IF NOT EXISTS` instead of `CREATE INDEX CONCURRENTLY` — golang-migrate wraps each file in a transaction, and `CONCURRENTLY` cannot run inside a transaction block
+- `NEBU_DB_URL_MIGRATE` is still accepted for backward compatibility but is no longer required; `NEBU_DB_URL` (pointing to `nebu_app`) is used for both migrations and runtime on fresh deployments
+
+**`000001_init.down.sql`** drops all tables and functions in reverse dependency order. Extensions (`pgcrypto`, `uuid-ossp`) are intentionally NOT dropped — they may be shared at the PostgreSQL server level.
+
+**Local dev reset:**
+
+```bash
+make dev-reset-db   # docker compose down --volumes → recreate postgres → apply migration 000001 → start gateway
+                    # WARNING: destroys all local data
+```
+
+After reset the gateway logs `migrations complete` and `GET /ready` returns `{"migrations":{"status":"UP","version":1}}`.
+
+### Stackit PostgresFlex Role Provisioning
+
+The Stackit OpenTofu module (`deploy/tofu/examples/stackit/database.tf`) provisions three PostgresFlex users:
+
+| User | Purpose |
+|---|---|
+| `nebu_app` | Runtime role: owns all objects in the squashed migration; used for both migrations and application queries |
+| `nebu_migrate` | Kept for backward compatibility with existing deployments that pass `NEBU_DB_URL_MIGRATE`. No longer required for fresh deployments. |
+| `nebu` (legacy) | Placeholder required by the original migration history's `GRANT EXECUTE … TO nebu` statements. Not needed for fresh deployments using the squashed migration. |
+
+On fresh Stackit deployments, only `nebu_app` is used. The `nebu_migrate` and `nebu` users are provisioned to avoid breaking existing environments that may reference them, but they do not connect at runtime.
 
 ## Multi-Stage Dockerfiles
 
@@ -739,4 +781,4 @@ helm install nebu deploy/helm/nebu/ \
 
 The `nebu_version` variable in the `nebu-core` shared module already enforces a semver regex and rejects `"latest"` — this constraint remains in force for all release images.
 
-_Source: Story 13-11 staged changes — `.gitlab-ci.yml`, `Makefile`, `deploy/helm/nebu/values.yaml`, `deploy/tofu/examples/*/terraform.tfvars.example`_
+_Source: Story 13-11 staged changes — `.gitlab-ci.yml`, `Makefile`, `deploy/helm/nebu/values.yaml`, `deploy/tofu/examples/*/terraform.tfvars.example`; Story 13-14 (squashed seed migration — single `000001_init.up.sql`, `make dev-reset-db` target, Stackit `nebu_migrate`/`nebu_legacy` backward-compat users)_

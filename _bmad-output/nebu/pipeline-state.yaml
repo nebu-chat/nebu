@@ -1,6 +1,14 @@
 # Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents
 # Do not edit manually during a pipeline run.
-# last_updated: 2026-05-16
+# last_updated: 2026-05-18
+# [13-14] 2026-05-18T11:20Z code-review → CLEAN cycle 2 (0 MAJOR, 4 MINOR patch-only) → cycle 3 polish
+# [13-14] 2026-05-18T11:00Z code-review → 1 CRITICAL (audit_log GUC bypass) + 3 MAJOR + 6 MINOR → cycle 2 (user accepted Option A: honest single-role docs)
+# [13-14] 2026-05-18T10:45Z code-review → 2 MAJOR (FORCE RLS owner bypass; sync_tokens FK lost) + 7 MINOR → cycle 1
+# [13-14] 2026-05-18T10:30Z ci-gate → ✓ unit-go PASS (Elixir unchanged)
+# [13-14] 2026-05-18T10:25Z dev-story → done (cycle 0)
+# [13-14] 2026-05-18T10:06Z test-review → skipped (no ATDD tests)
+# [13-14] 2026-05-18T10:05Z create-story → 13-14-squash-gateway-migrations-single-seed.md
+# [13-14] 2026-05-18T10:00Z pipeline started
 # [14-4] 2026-05-17T01:30Z committed ✓ (1 MAJOR+2 MINOR fixed cycle 1+Kassandra CLEAN 2 LOW applied)
 # [14-4] 2026-05-17T01:15Z arc42-update → 05-building-blocks (GdprDeleteHandler) + 08-concepts (GDPR erasure orchestration, M_USER_DEACTIVATED, Three PII Tiers)
 # [14-4] 2026-05-17T01:00Z security-review → Kassandra APPROVED (0 CRITICAL, 0 HIGH, 0 MEDIUM, 2 LOW applied)
@@ -582,9 +590,14 @@
 # [9-22] 2026-05-06T17:50Z code-review → CLEAN cycle 3 (4 MINOR accepted: cosmetic/new)
 # [9-22] 2026-05-06T17:30Z ci-gate → ✓ build+unit-go+unit-elixir+e2e+integration
 # [9-22] 2026-05-06T16:10Z code-review → 2 MAJOR 3 MINOR → cycle 3
-story: null
-current_step: null
-completed: []
-cycle_count: 0
+story: "13-14"
+current_step: "dev-story"
+completed:
+  - create-story
+  - atdd
+  - test-review
+  - dev-story
+  - ci-gate
+cycle_count: 3
 blocked_reason: null
-last_updated: "2026-05-16T23:37Z"
+last_updated: "2026-05-18T11:41Z"

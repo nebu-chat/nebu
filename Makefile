@@ -15,7 +15,7 @@ CI_REGISTRY_IMAGE ?= registry.gitlab.com/philippb/open-chat
 # Strip the leading 'v' from TAG (e.g. v1.0.0 → 1.0.0) for image tagging.
 IMAGE_VERSION = $(patsubst v%,%,$(TAG))
 
-.PHONY: build-gateway build-core redeploy build-admin-css download-fonts download-vendor dev setup test-unit-go test-unit-elixir test-integration test-integration-elixir test-integration-ci test-e2e test-matrix-compat test-load-silber build-element-e2e test-e2e-element build-fluffychat-e2e test-e2e-fluffychat proto gen-api test-compose-ports test-compose-minio test-iac-validate test-load-syntax release release-push
+.PHONY: build-gateway build-core redeploy build-admin-css download-fonts download-vendor dev dev-reset-db setup test-unit-go test-unit-elixir test-integration test-integration-elixir test-integration-ci test-e2e test-matrix-compat test-load-silber build-element-e2e test-e2e-element build-fluffychat-e2e test-e2e-fluffychat proto gen-api test-compose-ports test-compose-minio test-iac-validate test-load-syntax release release-push
 
 ## download-fonts: Download Inter + JetBrains Mono WOFF2 fonts (run once; commit results)
 download-fonts:
@@ -122,6 +122,27 @@ endif
 ## dev: Start the full local development stack (gateway, core, postgres, dex)
 dev:
 	docker compose up
+
+## dev-reset-db: Drop and recreate the nebu database, then restart the gateway so migrations re-run.
+## Use this after Story 13.14 squash or any time you need a clean database.
+## WARNING: This destroys ALL data in the local database. Use only in development.
+## Usage: make dev-reset-db
+dev-reset-db:
+	@echo "Stopping all containers and removing volumes (this destroys all local DB data)..."
+	docker compose down --volumes
+	@echo "Starting postgres first to ensure roles are provisioned..."
+	docker compose up -d postgres
+	@echo "Waiting for postgres to be ready..."
+	@until docker compose exec -T postgres pg_isready -U postgres -q; do sleep 1; done
+	@echo "Starting all services (gateway will run squashed migration 000001)..."
+	docker compose up -d
+	@echo "Waiting for gateway to be healthy (max 120s)..."
+	@_retries=0; until docker compose exec -T gateway wget -qO- http://localhost:8080/ready 2>/dev/null | grep -q '"status":"UP"'; do \
+		_retries=$$((_retries+1)); \
+		if [ "$$_retries" -ge 60 ]; then echo "ERROR: gateway did not become healthy after 120s"; exit 1; fi; \
+		sleep 2; \
+	done
+	@echo "dev-reset-db complete. Run 'docker compose logs gateway' to verify migrations ran cleanly."
 
 ## setup: First-time setup — generate .secrets/internal_secret, MinIO credentials, and dev credentials
 setup:

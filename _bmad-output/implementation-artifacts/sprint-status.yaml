@@ -1,5 +1,6 @@
 # generated: 2026-03-20
-# last_updated: 2026-05-17
+# last_updated: 2026-05-18
+# story 13-14 done (pipeline: 2 MAJOR fixed 3 cycles + Kassandra CLEAN (1 MEDIUM accepted)): 2026-05-18
 # story 14-4 done (pipeline: 1 MAJOR+2 MINOR fixed cycle 1+Kassandra CLEAN (2 LOW applied)): 2026-05-17
 # story 14-4 done (pipeline: ready-for-dev): 2026-05-17
 # story 14-3c done (pipeline: ATDD+Dev+Code CLEAN (2 MINOR fixed)+Kassandra CLEAN): 2026-05-17
@@ -149,6 +150,7 @@ development_status:
   13-9-oidc-deployment-profile-dex-sidecar-vs-external: done
   13-10-dns-mode-variable-opentofu-aws-stackit: done
   13-11-versioning-and-release-pipeline: done
+  13-14-squash-gateway-migrations-single-seed: done
   epic-13-retrospective: optional
 
   # ─────────────────────────────────────────────────────────────────────────
