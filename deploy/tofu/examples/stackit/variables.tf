@@ -244,3 +244,9 @@ variable "logs_retention_days" {
   default     = 7
 }
 
+variable "enable_element_web" {
+  description = "When true, deploys the Element Web Matrix client as a Docker service and configures nginx to serve it at the root path (/). Matrix API paths (/_matrix/, /.well-known/matrix/, /admin/) continue to route to the gateway. Requires enable_tls = true: without nginx, Element runs on port 7070 while the gateway is on port 8008 — different origins cause CORS preflight failures."
+  type        = bool
+  default     = false
+}
+

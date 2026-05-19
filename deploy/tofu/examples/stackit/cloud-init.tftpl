@@ -88,6 +88,46 @@ write_files:
             - instance_admin
 
 %{ endif ~}
+%{ if enable_element_web ~}
+  # ── /opt/nebu/element-config.json ─────────────────────────────────────────
+  # Element Web configuration. base_url points to the gateway (Matrix CS API).
+  # When TLS is enabled, the gateway is served at https://<server_name>.
+  # When TLS is disabled, element is on its own port 7070 so the Matrix API
+  # is at http://<server_name> (behind the same host, no TLS).
+  - path: /opt/nebu/element-config.json
+    owner: root:root
+    permissions: "0644"
+    content: |
+      {
+        "default_server_config": {
+          "m.homeserver": {
+            "base_url": "${gateway_scheme}://${server_name}${gateway_port}",
+            "server_name": "${server_name}"
+          }
+        },
+        "brand": "Nebu",
+        "disable_custom_urls": true,
+        "disable_guests": true,
+        "disable_3pid_login": true,
+        "default_federate": false,
+        "default_theme": "dark",
+        "room_directory": { "servers": ["${server_name}"] },
+        "integrations_ui_url": null,
+        "integrations_rest_url": null,
+        "integrations_widgets_urls": [],
+        "sso_redirect_options": {
+          "immediate": false
+        },
+        "setting_defaults": {
+          "UIFeature.registration": false,
+          "UIFeature.passwordReset": false,
+          "UIFeature.identityServer": false,
+          "UIFeature.thirdPartyId": false,
+          "breadcrumbs": true
+        }
+      }
+
+%{ endif ~}
 %{ if enable_tls ~}
   # ── /etc/nginx/sites-available/nebu ────────────────────────────────────────
   # certbot --nginx runs after nginx starts and adds the SSL server block + redirect.
@@ -123,6 +163,48 @@ write_files:
               proxy_set_header   X-Forwarded-Proto https;
           }
 %{ endif ~}
+%{ if enable_element_web ~}
+
+          # Matrix API paths — always routed to gateway.
+          location /_matrix/ {
+              proxy_pass         http://127.0.0.1:8008;
+              proxy_http_version 1.1;
+              proxy_set_header   Host              $host;
+              proxy_set_header   X-Real-IP         $remote_addr;
+              proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+              proxy_set_header   X-Forwarded-Proto https;
+              proxy_set_header   Upgrade           $http_upgrade;
+              proxy_set_header   Connection        $connection_upgrade;
+          }
+
+          location /.well-known/matrix/ {
+              proxy_pass         http://127.0.0.1:8008;
+              proxy_http_version 1.1;
+              proxy_set_header   Host              $host;
+              proxy_set_header   X-Real-IP         $remote_addr;
+              proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+              proxy_set_header   X-Forwarded-Proto https;
+          }
+
+          location /admin/ {
+              proxy_pass         http://127.0.0.1:8008;
+              proxy_http_version 1.1;
+              proxy_set_header   Host              $host;
+              proxy_set_header   X-Real-IP         $remote_addr;
+              proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+              proxy_set_header   X-Forwarded-Proto https;
+          }
+
+          # Everything else — Element Web client.
+          location / {
+              proxy_pass         http://127.0.0.1:7070;
+              proxy_http_version 1.1;
+              proxy_set_header   Host              $host;
+              proxy_set_header   X-Real-IP         $remote_addr;
+              proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+              proxy_set_header   X-Forwarded-Proto https;
+          }
+%{ else ~}
 
           location / {
               proxy_pass         http://127.0.0.1:8008;
@@ -134,6 +216,7 @@ write_files:
               proxy_set_header   Upgrade           $http_upgrade;
               proxy_set_header   Connection        $connection_upgrade;
           }
+%{ endif ~}
       }
 
 %{ endif ~}
@@ -214,6 +297,29 @@ write_files:
             timeout: 5s
             retries: 3
             start_period: 10s
+%{ if enable_element_web ~}
+
+        element:
+          image: vectorim/element-web:v1.12.15
+          restart: unless-stopped
+          volumes:
+            - /opt/nebu/element-config.json:/app/config.json:ro
+          ports:
+%{ if enable_tls ~}
+            - "127.0.0.1:7070:80"
+%{ else ~}
+            - "0.0.0.0:7070:80"
+%{ endif ~}
+          depends_on:
+            gateway:
+              condition: service_healthy
+          healthcheck:
+            test: ["CMD", "wget", "-qO-", "http://localhost/"]
+            interval: 10s
+            timeout: 5s
+            retries: 3
+            start_period: 10s
+%{ endif ~}
 
   # ── /etc/systemd/system/nebu.service ───────────────────────────────────────
   # Type=simple: systemd manages the docker compose process directly (no -d flag).

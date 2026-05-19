@@ -116,3 +116,10 @@ dns_mode = "external"  # or: "default"
 
 # Contact email for the Stackit DNS zone (optional, recommended for production).
 # dns_contact_email = ""
+
+# ── Element Web client ────────────────────────────────────────────────────────
+# When true, deploys the Element Web Matrix client as a Docker service.
+# With enable_tls = true: nginx routes /_matrix/, /.well-known/matrix/, and /admin/
+# to the gateway (port 8008), and all other paths (/) to Element (port 7070, loopback only).
+# With enable_tls = false: Element is exposed directly on port 7070 (0.0.0.0).
+# enable_element_web = false

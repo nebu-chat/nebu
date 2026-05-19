@@ -48,3 +48,8 @@ output "logs_ingest_url" {
   description = "Stackit Logs Loki push endpoint. After apply: Portal → Logs → instance → Access tokens → Create (Read+Write role). Then SSH into the VM and run: /opt/nebu/configure-fluent-bit.sh <token>"
   value       = var.enable_logs ? stackit_logs_instance.nebu[0].ingest_url : "disabled"
 }
+
+output "element_url" {
+  description = "Element Web client URL. When enable_element_web = true and enable_tls = true, Element is served at the root path. When enable_tls = false, Element is on port 7070. 'disabled' when enable_element_web = false."
+  value       = var.enable_element_web ? (var.enable_tls ? "https://${var.server_name}/" : "http://${var.server_name}:7070/") : "disabled"
+}

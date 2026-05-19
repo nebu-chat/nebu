@@ -91,6 +91,8 @@ resource "stackit_server" "nebu" {
     logs_ingest_host   = local.logs_ingest_host
     logs_bearer_token  = try(stackit_logs_access_token.nebu[0].access_token, "")
     environment        = var.environment
+    # Element Web — optional Matrix client served at /
+    enable_element_web = var.enable_element_web
   })
 
   lifecycle {
@@ -102,6 +104,16 @@ resource "stackit_server" "nebu" {
     precondition {
       condition     = var.oidc_mode == "dex" || length(var.oidc_issuer) > 0
       error_message = "oidc_issuer must be set when oidc_mode = 'external'."
+    }
+
+    # CORS guard: when Element Web is enabled, nginx must be present to serve both
+    # Element (/) and the Matrix API (/_matrix/) from the same origin.
+    # Without TLS there is no nginx — Element runs on :7070 while the gateway is on
+    # :8008, which are different origins. The browser will block all Matrix API
+    # requests from Element with a CORS preflight failure.
+    precondition {
+      condition     = !var.enable_element_web || var.enable_tls
+      error_message = "enable_element_web requires enable_tls = true. Without nginx (TLS), Element Web runs on port 7070 while the gateway is on port 8008 — different origins cause CORS preflight failures for all Matrix API requests."
     }
   }
 }
