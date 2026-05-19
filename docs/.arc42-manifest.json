@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-05-18T11:59:50Z",
-  "generator": "bmad-maintain-arc42 skill (Story 13-14 delta)",
+  "generated_at": "2026-05-19T00:00:00Z",
+  "generator": "bmad-maintain-arc42 skill (Story 13-15 delta)",
   "source_artifacts": [
     "_bmad-output/planning-artifacts/architecture.md",
     "_bmad-output/planning-artifacts/prd.md",
@@ -49,7 +49,7 @@
     },
     "docs/architecture/07-deployment.md": {
       "editable": false,
-      "generated_at": "2026-05-18T11:59:50Z",
+      "generated_at": "2026-05-19T00:00:00Z",
       "source": "_bmad-output/planning-artifacts/architecture.md",
       "arc42_section": "07 Deployment View"
     },

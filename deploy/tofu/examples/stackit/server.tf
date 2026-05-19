@@ -73,11 +73,11 @@ resource "stackit_server" "nebu" {
     image_registry           = var.image_registry
     nebu_version             = var.nebu_version
     # PostgresFlex connection details — runtime (nebu_app) and migration (nebu_migrate)
-    pg_host            = stackit_postgresflex_user.nebu.host
-    pg_port            = stackit_postgresflex_user.nebu.port
-    pg_user            = stackit_postgresflex_user.nebu.username
-    pg_password        = stackit_postgresflex_user.nebu.password
-    pg_migrate_user    = stackit_postgresflex_user.nebu_migrate.username
+    pg_host             = stackit_postgresflex_user.nebu.host
+    pg_port             = stackit_postgresflex_user.nebu.port
+    pg_user             = stackit_postgresflex_user.nebu.username
+    pg_password         = stackit_postgresflex_user.nebu.password
+    pg_migrate_user     = stackit_postgresflex_user.nebu_migrate.username
     pg_migrate_password = stackit_postgresflex_user.nebu_migrate.password
     # TLS — certbot on the VM handles cert issuance/renewal via HTTP-01 challenge
     enable_tls     = var.enable_tls

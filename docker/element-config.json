@@ -16,7 +16,7 @@
   "integrations_rest_url": null,
   "integrations_widgets_urls": [],
   "sso_redirect_options": {
-    "immediate": true
+    "immediate": false
   },
   "setting_defaults": {
     "UIFeature.registration": false,

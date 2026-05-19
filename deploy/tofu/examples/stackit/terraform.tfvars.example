@@ -118,8 +118,12 @@ dns_mode = "external"  # or: "default"
 # dns_contact_email = ""
 
 # ── Element Web client ────────────────────────────────────────────────────────
-# When true, deploys the Element Web Matrix client as a Docker service.
-# With enable_tls = true: nginx routes /_matrix/, /.well-known/matrix/, and /admin/
-# to the gateway (port 8008), and all other paths (/) to Element (port 7070, loopback only).
-# With enable_tls = false: Element is exposed directly on port 7070 (0.0.0.0).
+# REQUIRES enable_tls = true — a lifecycle precondition blocks `tofu apply` if this
+# constraint is violated. Without nginx (TLS), Element runs on port 7070 while the
+# gateway is on port 8008 — different origins cause CORS preflight failures for all
+# Matrix API requests from Element.
+#
+# When enable_tls = true (required): nginx serves Element at / and proxies Matrix
+# API paths (/_matrix/, /.well-known/matrix/, /admin/) to the gateway (port 8008).
+# Element binds to 127.0.0.1:7070 (loopback only — nginx handles external traffic).
 # enable_element_web = false

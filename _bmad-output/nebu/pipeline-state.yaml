@@ -1,6 +1,16 @@
 # Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents
 # Do not edit manually during a pipeline run.
-# last_updated: 2026-05-18
+# last_updated: 2026-05-19
+# [13-15] 2026-05-19T09:35Z arc42-update → 07-deployment (Element Web topology + nginx routing table + CORS constraint)
+# [13-15] 2026-05-19T09:32Z security-review → Kassandra CLEAN (HIGH+MEDIUM fixed)
+# [13-15] 2026-05-19T09:28Z security-review → HIGH (F-1: /api/v1/ missing from nginx) + MEDIUM (WebSocket headers) → fixes applied
+# [13-15] 2026-05-19T09:25Z code-review → CLEAN (cycle 1)
+# [13-15] 2026-05-19T09:22Z dev-story → done (cycle 1: MAJOR+2 MINOR fixed)
+# [13-15] 2026-05-19T09:20Z code-review → 1 MAJOR (tfvars.example AC8) + 2 MINOR → cycle 1
+# [13-15] 2026-05-19T09:10Z ci-gate → tofu fmt OK (server.tf fix applied)
+# [13-15] 2026-05-19T09:06Z dev-story → skipped (already implemented)
+# [13-15] 2026-05-19T09:05Z create-story → 13-15-element-web-stackit-deployment.md
+# [13-15] 2026-05-19T09:00Z pipeline started
 # [13-14] 2026-05-18T12:15Z committed ✓ (2 MAJOR fixed 3 cycles + Kassandra CLEAN 1 MEDIUM accepted)
 # [13-14] 2026-05-18T12:10Z arc42-update → 07-deployment (squashed migration strategy + Stackit role model) + 08-concepts (audit_log FORCE RLS rationale)
 # [13-14] 2026-05-18T12:00Z security-review → Kassandra CLEAN (0 CRITICAL, 0 HIGH, 1 MEDIUM accepted, 2 LOW)
@@ -595,9 +605,17 @@
 # [9-22] 2026-05-06T17:50Z code-review → CLEAN cycle 3 (4 MINOR accepted: cosmetic/new)
 # [9-22] 2026-05-06T17:30Z ci-gate → ✓ build+unit-go+unit-elixir+e2e+integration
 # [9-22] 2026-05-06T16:10Z code-review → 2 MAJOR 3 MINOR → cycle 3
-story: null
-current_step: null
-completed: []
-cycle_count: 0
+story: "13-15"
+current_step: "commit"
+completed:
+  - create-story
+  - atdd
+  - test-review
+  - dev-story
+  - ci-gate
+  - code-review
+  - security-review
+  - arc42-update
+cycle_count: 1
 blocked_reason: null
-last_updated: "2026-05-18T12:01Z"
+last_updated: "2026-05-19T14:28Z"

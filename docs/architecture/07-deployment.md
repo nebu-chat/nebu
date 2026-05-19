@@ -445,6 +445,11 @@ A new `deploy/tofu/examples/aws/outputs.tf` exports `dns_name = module.nebu_aws.
 - `templatefile()` call no longer passes `kc_user`/`kc_password`; now passes `oidc_mode` and `dex_static_password_hash`
 - `local.effective_oidc_issuer` computed in `main.tf` — auto-set to `http://<server_name>:5556/dex` for dex mode; uses `var.oidc_issuer` for external mode
 
+**Changes in Story 13-15:**
+- Conditional `element` Docker service added (guarded by `%{ if enable_element_web ~}` template directive); see below for full details
+- `/opt/nebu/element-config.json` write_files block added (conditional on `enable_element_web`)
+- nginx routing updated: added `/api/v1/` → gateway and `location /` → Element blocks; WebSocket `Upgrade`/`Connection` headers added to the Element location
+
 **Security invariants:**
 - `pg_password` appears only inside `.env` (mode `0600`), never in plain environment variables or log output
 - `dex_static_password_hash` is written only to `/opt/nebu/dex/config.yaml` (mode `0600`)
@@ -455,6 +460,108 @@ A new `deploy/tofu/examples/aws/outputs.tf` exports `dns_name = module.nebu_aws.
 - `oidc_client_secret` must not contain `"` or `\` characters (YAML interpolation constraint, enforced by variable validation)
 
 Day-2 operations (updates, OIDC profile switching, backup, teardown) are documented in `deploy/tofu/examples/stackit/RUNBOOK.md`.
+
+### Element Web Client (nebu-stackit — Story 13-15)
+
+`deploy/tofu/examples/stackit/` supports an optional Element Web Matrix client deployment controlled by the `enable_element_web` variable. This allows end-users to access Nebu via a browser without installing a separate client.
+
+**Variable:**
+
+| Variable | Type | Default | Purpose |
+|---|---|---|---|
+| `enable_element_web` | bool | `false` | Deploy `vectorim/element-web:v1.12.15` as a Docker Compose service and configure nginx routing |
+
+**CORS constraint — `enable_tls = true` is required:**
+
+When `enable_element_web = true` but `enable_tls = false`, Element Web runs on port 7070 and the gateway runs on port 8008 — different ports mean different origins. Browsers enforce the Same-Origin Policy: every Matrix API call from Element triggers a CORS preflight that fails because the gateway does not emit `Access-Control-Allow-Origin` for the Element origin. **All Matrix API calls from Element silently fail.**
+
+When `enable_tls = true`, nginx terminates TLS and serves both services under a single origin (`https://<server_name>`), eliminating the CORS problem entirely.
+
+A `lifecycle { precondition }` block in `deploy/tofu/examples/stackit/server.tf` enforces this constraint:
+
+```hcl
+condition     = !var.enable_element_web || var.enable_tls
+error_message = "enable_element_web requires enable_tls = true ..."
+```
+
+`tofu apply` fails immediately if an operator sets `enable_element_web = true` with `enable_tls = false`.
+
+**Docker service topology (when `enable_element_web = true`):**
+
+```
+vectorim/element-web:v1.12.15
+  image:    vectorim/element-web:v1.12.15
+  ports:    127.0.0.1:7070:80  (loopback only — nginx is the public entry point)
+  volumes:  /opt/nebu/element-config.json:/app/config.json:ro
+  depends_on: gateway (service_healthy)
+  healthcheck: wget -qO- http://localhost/
+```
+
+Element binds to loopback only (`127.0.0.1:7070`) — it is never reachable directly from the internet. Port 7070 is intentionally absent from the Stackit security group rules. Only nginx (port 443) is the public entry point.
+
+**nginx routing table (when `enable_tls = true` AND `enable_element_web = true`):**
+
+| Path prefix | Proxied to | Purpose |
+|---|---|---|
+| `/_matrix/` | `http://127.0.0.1:8008` | Matrix Client-Server API |
+| `/.well-known/matrix/` | `http://127.0.0.1:8008` | Matrix server discovery |
+| `/admin/` | `http://127.0.0.1:8008` | Nebu Admin UI and API |
+| `/api/v1/` | `http://127.0.0.1:8008` | Internal/compliance API |
+| `/dex/` | `http://127.0.0.1:5556` | Dex IdP (only when `oidc_mode = "dex"`) |
+| `/` | `http://127.0.0.1:7070` | Element Web client (catch-all) |
+
+The `location /` block for Element is always listed last — nginx evaluates prefix locations in longest-match order, ensuring Matrix API paths are never accidentally routed to Element.
+
+The Element location includes WebSocket upgrade headers (`Upgrade`, `Connection`) to support future Matrix `/sync` long-polling and WebSocket transports.
+
+**`element-config.json` — Security hardening:**
+
+`/opt/nebu/element-config.json` is written by cloud-init at boot time with values interpolated from OpenTofu variables:
+
+```json
+{
+  "m.homeserver": { "base_url": "https://<server_name>", "server_name": "<server_name>" },
+  "brand": "Nebu",
+  "disable_custom_urls": true,
+  "disable_guests": true,
+  "disable_3pid_login": true,
+  "default_federate": false,
+  "settingDefaults": {
+    "UIFeature.registration": false,
+    "UIFeature.passwordReset": false,
+    "UIFeature.identityServer": false,
+    "UIFeature.thirdPartyId": false
+  },
+  "sso_redirect_options": { "immediate": false }
+}
+```
+
+`disable_custom_urls: true` prevents users from pointing Element at a different server. `UIFeature.registration` and `UIFeature.passwordReset` are disabled because Nebu uses OIDC-only authentication. The file is absent when `enable_element_web = false`.
+
+**`element_url` output:**
+
+`deploy/tofu/examples/stackit/outputs.tf` exposes an `element_url` output:
+
+| Condition | Output |
+|---|---|
+| `enable_element_web = true` AND `enable_tls = true` | `https://<server_name>/` |
+| `enable_element_web = true` AND `enable_tls = false` | `http://<server_name>:7070/` (blocked by precondition) |
+| `enable_element_web = false` | `"disabled"` |
+
+**`terraform.tfvars.example` documentation section:**
+
+```hcl
+# ── Element Web client ──────────────────────────────────────────────────────
+# REQUIRES enable_tls = true — a lifecycle precondition blocks `tofu apply` if
+# this constraint is violated. Without nginx (TLS), Element runs on port 7070
+# while the gateway is on port 8008 — different origins cause CORS preflight
+# failures for all Matrix API requests from Element.
+#
+# When enable_tls = true (required): nginx serves Element at / and proxies
+# Matrix API paths (/_matrix/, /.well-known/matrix/, /admin/) to the gateway
+# (port 8008). Element binds to 127.0.0.1:7070 (loopback only).
+# enable_element_web = false
+```
 
 ### Helm Chart
 
