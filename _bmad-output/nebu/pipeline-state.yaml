@@ -1,6 +1,11 @@
 # Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents
 # Do not edit manually during a pipeline run.
 # last_updated: 2026-05-18
+# [13-14] 2026-05-18T12:15Z committed ✓ (2 MAJOR fixed 3 cycles + Kassandra CLEAN 1 MEDIUM accepted)
+# [13-14] 2026-05-18T12:10Z arc42-update → 07-deployment (squashed migration strategy + Stackit role model) + 08-concepts (audit_log FORCE RLS rationale)
+# [13-14] 2026-05-18T12:00Z security-review → Kassandra CLEAN (0 CRITICAL, 0 HIGH, 1 MEDIUM accepted, 2 LOW)
+# [13-14] 2026-05-18T11:45Z code-review → CLEAN (cycle 3)
+# [13-14] 2026-05-18T11:35Z dev-story → done (cycle 3 polish pass)
 # [13-14] 2026-05-18T11:20Z code-review → CLEAN cycle 2 (0 MAJOR, 4 MINOR patch-only) → cycle 3 polish
 # [13-14] 2026-05-18T11:00Z code-review → 1 CRITICAL (audit_log GUC bypass) + 3 MAJOR + 6 MINOR → cycle 2 (user accepted Option A: honest single-role docs)
 # [13-14] 2026-05-18T10:45Z code-review → 2 MAJOR (FORCE RLS owner bypass; sync_tokens FK lost) + 7 MINOR → cycle 1
@@ -590,14 +595,9 @@
 # [9-22] 2026-05-06T17:50Z code-review → CLEAN cycle 3 (4 MINOR accepted: cosmetic/new)
 # [9-22] 2026-05-06T17:30Z ci-gate → ✓ build+unit-go+unit-elixir+e2e+integration
 # [9-22] 2026-05-06T16:10Z code-review → 2 MAJOR 3 MINOR → cycle 3
-story: "13-14"
-current_step: "dev-story"
-completed:
-  - create-story
-  - atdd
-  - test-review
-  - dev-story
-  - ci-gate
-cycle_count: 3
+story: null
+current_step: null
+completed: []
+cycle_count: 0
 blocked_reason: null
-last_updated: "2026-05-18T11:41Z"
+last_updated: "2026-05-18T12:01Z"

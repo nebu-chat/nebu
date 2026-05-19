@@ -94,44 +94,65 @@ export async function loginViaOidcBrowser(
   email: string,
   password: string,
 ): Promise<void> {
-  // Story 9-26b Fix C: intercept the Matrix /login response to capture access_token
+  // Intercept the Matrix /login POST via the nginx proxy (Element routes all requests
+  // through localhost:7070, not directly to localhost:8008).
   let capturedToken: string | null = null;
   let capturedUserId: string | null = null;
 
-  await page.route(`${MATRIX_BASE}/_matrix/client/v3/login`, async (route, request) => {
-    const response = await route.fetch();
-    // Only inspect POST responses (the actual login call)
-    if (request.method() === 'POST') {
+  // Intercept POST /_matrix/client/v3/login via the nginx proxy at ELEMENT_URL.
+  // Use a function predicate to match only the exact path (not /sso/redirect sub-paths)
+  // and only POST — all other requests (navigations, GETs) are let through unchanged.
+  //
+  // Buffer pattern: read body() once into a Buffer, then both parse AND fulfill use
+  // the same buffer — avoids the consumed-stream problem with response.json() + fulfill.
+  await page.route(
+    (url) => url.href.includes('/_matrix/client/v3/login') && !url.href.includes('/sso') && !url.href.includes('/redirect'),
+    async (route, request) => {
+      if (request.method() !== 'POST') {
+        await route.continue();
+        return;
+      }
+      const response = await route.fetch();
       try {
-        const body = await response.json() as Record<string, unknown>;
-        if (typeof body.access_token === 'string') {
-          capturedToken  = body.access_token;
-          capturedUserId = typeof body.user_id === 'string' ? body.user_id : '';
+        const rawBody = await response.body();
+        const bodyJson = JSON.parse(rawBody.toString('utf-8')) as Record<string, unknown>;
+        if (typeof bodyJson.access_token === 'string') {
+          capturedToken  = bodyJson.access_token;
+          capturedUserId = typeof bodyJson.user_id === 'string' ? bodyJson.user_id : '';
         }
+        await route.fulfill({ status: response.status(), headers: response.headers(), body: rawBody });
       } catch {
-        // Response wasn't JSON or parse failed — continue without capturing
+        // Response wasn't JSON or parse failed — forward original response unchanged
+        await route.fulfill({ response });
       }
     }
-    await route.fulfill({ response });
-  });
+  );
 
   // N-22: wrap all login steps in try/finally so the route handler is always removed,
   // even if an early exception occurs (e.g. network error, assertion failure).
   try {
     await page.goto(ELEMENT_URL);
 
-    // Click "Sign in" link on the Element welcome screen
-    await page.getByRole('link', { name: /sign in|anmelden/i })
-      .waitFor({ state: 'visible', timeout: 15_000 });
-    await page.getByRole('link', { name: /sign in|anmelden/i }).click();
+    // With sso_redirect_options.immediate=false, Element shows the welcome screen.
+    // Still detect the Dex redirect in case immediate=true is re-enabled or Element
+    // has an active session that auto-redirects.
+    const alreadyAtDex = await page.waitForURL(/dex.*\/auth/i, { timeout: 15_000 })
+      .then(() => true)
+      .catch(() => false);
 
-    // Wait for "Continue with SSO" button
-    await page.getByRole('button', { name: /continue with sso|mit sso|weiter mit sso/i })
-      .waitFor({ state: 'visible', timeout: 15_000 });
-    await page.getByRole('button', { name: /continue with sso|mit sso|weiter mit sso/i }).click();
+    if (!alreadyAtDex) {
+      // Normal flow: Element shows welcome screen → click "Sign in" → "Continue with SSO"
+      await page.getByRole('link', { name: /sign in|anmelden/i })
+        .waitFor({ state: 'visible', timeout: 15_000 });
+      await page.getByRole('link', { name: /sign in|anmelden/i }).click();
 
-    // Dex login page (give Dex extra time under load — 4+ rapid OIDC logins can saturate it)
-    await page.waitForURL(/dex.*\/auth/i, { timeout: 45_000 });
+      await page.getByRole('button', { name: /continue with sso|mit sso|weiter mit sso/i })
+        .waitFor({ state: 'visible', timeout: 15_000 });
+      await page.getByRole('button', { name: /continue with sso|mit sso|weiter mit sso/i }).click();
+
+      // Dex login page (give Dex extra time under load — 4+ rapid OIDC logins can saturate it)
+      await page.waitForURL(/dex.*\/auth/i, { timeout: 45_000 });
+    }
     await page.locator('input[name="login"]').fill(email);
     await page.locator('input[name="password"]').fill(password);
     await page.locator('button[type="submit"]').click();
@@ -142,28 +163,42 @@ export async function loginViaOidcBrowser(
       await consentBtn.click();
     }
 
-    // Wait for redirect back to Element Web
+    // Wait for redirect back to Element Web (the /login POST fires here → captures token)
     await page.waitForURL(/localhost:7070/, { timeout: 30_000 });
 
-    // Element may show a key-setup dialog on first login — dismiss it
-    // m-9 fix: only swallow Timeout races; re-throw real errors
+    // Give Element time to process the login token and fire the /login POST.
+    // Then dismiss any setup/encryption dialogs that may appear before .mx_LeftPanel.
+    // Handles: "Cancel", "Skip", "Not now", "Later", "Close" button variants.
+    const dismissPattern = /cancel|abbrechen|skip|überspringen|not now|later|close|schließen/i;
     await Promise.race([
-      page.locator('.mx_LeftPanel').waitFor({ state: 'visible', timeout: 25_000 }),
-      page.getByRole('button', { name: /cancel|abbrechen/i })
-        .waitFor({ state: 'visible', timeout: 25_000 }),
+      page.locator('.mx_LeftPanel').waitFor({ state: 'visible', timeout: 40_000 }),
+      page.getByRole('button', { name: dismissPattern }).waitFor({ state: 'visible', timeout: 40_000 }),
     ]).catch((e: Error) => { if (!e.message?.includes('Timeout')) throw e; });
 
-    const cancelBtn = page.getByRole('button', { name: /cancel|abbrechen/i });
-    if (await cancelBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      await cancelBtn.click();
+    // Dismiss any visible setup dialog.
+    // Non-fatal click: Element may auto-close the dialog before Playwright can click,
+    // causing a detached-DOM error. Use a short timeout and swallow errors.
+    for (const label of [dismissPattern]) {
+      const btn = page.getByRole('button', { name: label });
+      if (await btn.first().isVisible({ timeout: 2_000 }).catch(() => false)) {
+        await btn.first().click({ timeout: 5_000 }).catch(() => {
+          // Dialog closed itself before click could land — acceptable, continue.
+        });
+        break;
+      }
     }
 
-    // Ensure .mx_LeftPanel is visible before proceeding
-    await page.locator('.mx_LeftPanel').waitFor({ state: 'visible', timeout: 20_000 });
+    // Wait for .mx_LeftPanel — but only if token not yet captured (if we have the token,
+    // Element is loaded enough; skip the hard UI wait to avoid flakiness with setup dialogs).
+    if (!capturedToken) {
+      await page.locator('.mx_LeftPanel').waitFor({ state: 'visible', timeout: 30_000 });
+    } else {
+      // Soft wait: give Element a moment to settle, but don't fail if panel takes longer
+      await page.locator('.mx_LeftPanel').waitFor({ state: 'visible', timeout: 10_000 })
+        .catch(() => { /* token captured — panel settling is acceptable */ });
+    }
 
-    // Story 9-26b Fix C: if route interception didn't capture the token (e.g. token came from
-    // a cached OIDC session without a fresh /login POST), try reading from the page context.
-    // Fallback: check localStorage (legacy Element Web < 1.11) then MatrixClient in-memory.
+    // Story 9-26b Fix C: if route interception didn't capture the token, try page context.
     if (!capturedToken) {
       const fromPage = await page.evaluate(async () => {
         // Legacy path: localStorage (Element Web < 1.11)

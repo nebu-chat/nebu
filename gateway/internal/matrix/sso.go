@@ -436,8 +436,23 @@ func (h *LoginHandler) GetSSOCallback(w http.ResponseWriter, r *http.Request) {
 	// Redirect to the Matrix client with the opaque loginToken.
 	// The client calls POST /_matrix/client/v3/login with
 	// {"type":"m.login.token","token":"<opaqueToken>"}.
+	//
+	// If the redirectUrl contains a fragment (#), the loginToken must be inserted
+	// BEFORE the fragment in the URL query string so that window.location.search
+	// (not window.location.hash) carries it. Appending after the fragment puts the
+	// loginToken inside the hash where hash-based SPA routers may route it to the
+	// wrong page context (e.g. #/?loginToken=xxx instead of #/login?loginToken=xxx),
+	// causing Element Web to ignore the token and restart the SSO flow.
 	redirectTo := entry.redirectURL
-	if strings.Contains(redirectTo, "?") {
+	if fragIdx := strings.Index(redirectTo, "#"); fragIdx != -1 {
+		base := redirectTo[:fragIdx]
+		fragment := redirectTo[fragIdx:]
+		if strings.Contains(base, "?") {
+			redirectTo = base + "&loginToken=" + opaqueToken + fragment
+		} else {
+			redirectTo = base + "?loginToken=" + opaqueToken + fragment
+		}
+	} else if strings.Contains(redirectTo, "?") {
 		redirectTo += "&loginToken=" + opaqueToken
 	} else {
 		redirectTo += "?loginToken=" + opaqueToken

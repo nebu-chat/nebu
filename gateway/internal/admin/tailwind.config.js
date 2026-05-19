@@ -8,7 +8,7 @@ module.exports = {
         obsidian: {
           // DaisyUI semantic token → Obsidian hex value (UX-DR1)
           "primary":          "#f97316",  // color-primary (buttons, active nav)
-          "primary-content":  "#fff7ed",  // color-primary-text
+          "primary-content":  "#1c1917",  // color-primary-text (dark on orange — 5.98:1 WCAG AA)
           "secondary":        "#374151",  // bg-raised (secondary actions)
           "secondary-content":"#f9fafb",
           "accent":           "#f59e0b",  // status-warn (accent/highlight)
@@ -24,7 +24,7 @@ module.exports = {
           "warning":          "#f59e0b",  // status-warn
           "warning-content":  "#431407",
           "error":            "#ef4444",  // status-error
-          "error-content":    "#450a0a",
+          "error-content":    "#000000",  // pure black on error-red — 5.9:1 WCAG AA
           "info":             "#6b7280",  // status-neutral
           "info-content":     "#f9fafb",
         },

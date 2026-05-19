@@ -282,3 +282,46 @@ Then(/^the operator is authenticated \(no redirect to login\)$/, async ({ page }
   await expect(page).not.toHaveURL(/\/login/, { timeout: 5_000 });
   await expect(page).toHaveURL(/\/admin\/dashboard/, { timeout: 10_000 });
 });
+
+// Alias steps used in Story 14-2a/14-2c features (oidc-directory-config, oidc-directory-search).
+// These are semantically equivalent to existing steps above.
+
+Given('bootstrap is already completed', async ({ page }: { page: Page }) => {
+  await doBootstrapAdmin(page);
+});
+
+Given('an admin is logged into the Admin UI', async ({ page }: { page: Page }) => {
+  await page.goto(`${ADMIN_BASE_URL}/admin/login/start`);
+  await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => {});
+  const currentUrl = page.url();
+  if (/\/admin\/(?:dashboard|rooms|users|config|compliance|audit)/.test(currentUrl)) {
+    return;
+  }
+  if (currentUrl.includes('/bootstrap')) {
+    await doBootstrapAdmin(page);
+    return;
+  }
+  if (/dex.*\/auth/i.test(currentUrl) || currentUrl.includes('/admin/login')) {
+    if (currentUrl.includes('/admin/login')) {
+      const ssoLink = page.getByRole('link', { name: /login with sso|sign in with sso/i });
+      if (await ssoLink.isVisible({ timeout: 3_000 }).catch(() => false)) {
+        await ssoLink.click();
+      } else {
+        await page.getByRole('button', { name: /login with sso|sign in with sso/i }).click();
+      }
+      await page.waitForURL(/dex.*\/auth/i, { timeout: 15_000 });
+    }
+    await page.locator('input[name="login"]').fill('kai@example.com');
+    await page.locator('input[name="password"]').fill(DEX_TEST_PASSWORD);
+    await page.locator('button[type="submit"]').click();
+    const grantBtn = page.locator('button[type="submit"]:has-text("Grant"), button[type="submit"]:has-text("Confirm")');
+    if (await grantBtn.first().isVisible({ timeout: 8_000 }).catch(() => false)) {
+      await grantBtn.first().click();
+    }
+    await page.waitForURL(/\/admin\/dashboard/, { timeout: 20_000 });
+  }
+});
+
+When('the admin navigates to {string}', async ({ page }: { page: Page }, urlPath: string) => {
+  await page.goto(`${ADMIN_BASE_URL}${urlPath}`);
+});

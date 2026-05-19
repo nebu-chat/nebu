@@ -35,12 +35,10 @@ test.describe('SSO Login — Element Web via Dex OIDC (Story 4-29)', () => {
   test('[P0] SSO login: Element loads → Dex form → loginToken → room list visible', async ({ page }) => {
     await page.goto(ELEMENT_URL);
 
-    // Welcome screen must be visible (DE: "Willkommen bei Element")
-    await expect(page.getByRole('heading', { name: /welcome to element|willkommen bei element/i }))
-      .toBeVisible({ timeout: 15_000 });
-
-    // Navigate to sign-in (DE: "Anmelden")
-    await page.getByRole('link', { name: /sign in|anmelden/i }).click();
+    // Welcome screen shows "Sign in" link (Element 1.12.15 uses a link, not a heading).
+    const signInLink = page.getByRole('link', { name: /sign in|anmelden/i });
+    await signInLink.waitFor({ state: 'visible', timeout: 15_000 });
+    await signInLink.click();
     await expect(page.getByRole('button', { name: /continue with sso|mit sso fortfahren|weiter mit sso/i }))
       .toBeVisible({ timeout: 15_000 });
 
@@ -250,11 +248,9 @@ test.describe('SSO Logout / Re-Login regression (bugfix-logout-oidc-dex-session)
     for (let iteration = 1; iteration <= ITERATIONS; iteration++) {
       // ── Step 1: Navigate to Element and click Sign In ────────────────────
       await page.goto(ELEMENT_URL);
-      await expect(
-        page.getByRole('heading', { name: /welcome to element|willkommen bei element/i }),
-      ).toBeVisible({ timeout: 15_000 });
-
-      await page.getByRole('link', { name: /sign in|anmelden/i }).click();
+      const iterSignInLink = page.getByRole('link', { name: /sign in|anmelden/i });
+      await iterSignInLink.waitFor({ state: 'visible', timeout: 15_000 });
+      await iterSignInLink.click();
       await expect(
         page.getByRole('button', { name: /continue with sso|mit sso fortfahren|weiter mit sso/i }),
       ).toBeVisible({ timeout: 15_000 });
@@ -310,9 +306,12 @@ test.describe('SSO Logout / Re-Login regression (bugfix-logout-oidc-dex-session)
           await confirmBtn.click();
         }
 
-        // Wait for welcome screen — confirms logout completed
+        // Wait for welcome/login screen — confirms logout completed
+        // Element 1.12.15 shows /#/login with a "Sign in" link after logout (no standalone welcome heading).
         await expect(
-          page.getByRole('heading', { name: /welcome to element|willkommen bei element/i }),
+          page.getByRole('link', { name: /sign in|anmelden/i })
+            .or(page.getByRole('heading', { name: /sign in|willkommen|welcome/i }))
+            .or(page.locator('.mx_Welcome')),
         ).toBeVisible({ timeout: 20_000 });
       }
     }

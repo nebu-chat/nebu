@@ -81,15 +81,18 @@ export default async function globalSetup(): Promise<void> {
     const browser = await chromium.launch();
 
     try {
-      // Warm active users in parallel (tom is reserved for future use, not warmed eagerly)
-      // ensureStorageState() now calls loginViaOidcBrowser() which intercepts the
-      // /_matrix/client/v3/login response and writes the .token.json sidecar.
-      await Promise.all([
-        ensureStorageState(browser, NEBU_USERS.alex),
-        ensureStorageState(browser, NEBU_USERS.marie),
-        ensureStorageState(browser, NEBU_USERS.kai),
-      ]);
-      console.log('[global-setup] Done. auth-state/{alex,marie,kai}.{json,token.json} written.');
+      // Warm active users sequentially to avoid Dex being saturated by parallel OIDC flows.
+      // Errors are non-fatal: admin-UI tests don't need Element Web storage state.
+      // Element-web tests will fail naturally if sidecars are missing.
+      for (const user of [NEBU_USERS.alex, NEBU_USERS.marie, NEBU_USERS.kai]) {
+        try {
+          await ensureStorageState(browser, user);
+          console.log(`[global-setup] Warmed ${user.name}.`);
+        } catch (e) {
+          console.warn(`[global-setup] WARNING: Could not warm storageState for ${user.name}: ${e}. Element-web tests for this user may fail.`);
+        }
+      }
+      console.log('[global-setup] User warm-up complete (partial failures are non-fatal).');
     } finally {
       await browser.close();
     }

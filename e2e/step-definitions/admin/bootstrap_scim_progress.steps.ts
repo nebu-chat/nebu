@@ -331,17 +331,3 @@ Then(
     await expect(btn.first()).toBeEnabled();
   }
 );
-
-/**
- * When the operator clicks {string}
- */
-When('the operator clicks {string}', async ({ page }: { page: Page }, buttonText: string) => {
-  const btn = page.getByRole('button', { name: new RegExp(buttonText, 'i') });
-  const visible = await btn.first().isVisible({ timeout: 5_000 }).catch(() => false);
-  if (!visible) {
-    throw new Error(
-      `Expected button "${buttonText}" to be visible before clicking, but it was not found.`
-    );
-  }
-  await btn.first().click();
-});

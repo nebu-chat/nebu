@@ -208,17 +208,21 @@ test.describe.serial('@smoke Full-Stack Acceptance: Nebu Happy Path', () => {
     await expect(page).toHaveURL(/\/admin\/bootstrap/, { timeout: 10_000 });
 
     await page.getByRole('textbox', { name: 'Instance Name' }).fill('nebuchadnezzar');
-    await page.getByRole('button', { name: 'Next' }).click();
+    await page.getByRole('button', { name: /^next$/i }).click();
     await expect(page.getByRole('heading', { name: /Step 2/ })).toBeVisible({ timeout: 10_000 });
 
-    // Step 2: OIDC Config → Connect with OIDC (current simplified flow)
+    // Step 2: OIDC Configuration → fill fields → Next (NOT "Connect with OIDC" — that is Step 3)
     await page.getByRole('textbox', { name: 'OIDC Issuer URL' })
       .fill('http://dex:5556/dex');
     await page.getByRole('textbox', { name: 'OIDC Client ID' })
       .fill('nebu-admin');
     await page.getByRole('textbox', { name: 'OIDC Client Secret' })
       .fill('nebu-admin-secret');
-    await page.getByRole('button', { name: 'Connect with OIDC' }).click();
+    await page.getByRole('button', { name: /^next$/i }).click();
+    await expect(page.getByRole('heading', { name: /Step 3/ })).toBeVisible({ timeout: 10_000 });
+
+    // Step 3: Claim Mapping — accept pre-filled defaults → Connect with OIDC
+    await page.getByRole('button', { name: /connect with oidc/i }).click();
 
     // Dex Authorization
     await page.waitForURL(/dex.*\/auth/, { timeout: 15_000 });
@@ -226,27 +230,49 @@ test.describe.serial('@smoke Full-Stack Acceptance: Nebu Happy Path', () => {
     await page.locator('input[name="password"]').fill('changeme');
     await page.locator('button[type="submit"]').click();
 
-    // Dex consent page (auto-approve if shown)
+    // Wait for callback / select-claim page (CallbackHandler renders claims at /admin/callback)
+    await page.waitForURL(
+      /\/admin\/callback|\/admin\/bootstrap\/select-claim|\/admin\/dashboard/,
+      { timeout: 25_000 },
+    ).catch(() => {});
+
+    // Dex consent/grant screen (auto-approve if shown)
     const grantBtn = page.locator('button[type="submit"]:has-text("Grant"), button[type="submit"]:has-text("Confirm")');
-    if (await grantBtn.first().isVisible({ timeout: 2_000 }).catch(() => false)) {
+    const grantVisible = await grantBtn.first().isVisible({ timeout: 3_000 }).catch(() => false);
+    if (grantVisible) {
       await grantBtn.first().click();
+      await page.waitForURL(
+        /\/admin\/callback|\/admin\/bootstrap\/select-claim/,
+        { timeout: 15_000 },
+      );
     }
 
-    // Callback → claim selection or done
-    await page.waitForURL(/\/admin\//, { timeout: 15_000 });
     expect(page.url()).not.toMatch(/login\?error=/);
 
-    // Claim selection: pick instance_admin if shown
-    const claimRadio = page.locator('input[type="radio"][value*="instance_admin"]').first();
-    if (await claimRadio.count() > 0) {
-      await claimRadio.check({ force: true });
-      await page.getByRole('button', { name: /Confirm|Continue|Save|Complete/ }).first().click();
-      await page.waitForLoadState('networkidle', { timeout: 10_000 });
+    // Claim selection: pick instance_admin if radio buttons shown, then confirm
+    if (!page.url().includes('/admin/dashboard')) {
+      const claimRadio = page.locator('input[type="radio"][value*="instance_admin"]').first();
+      if (await claimRadio.isVisible({ timeout: 3_000 }).catch(() => false)) {
+        const radioId = await claimRadio.getAttribute('id').catch(() => null);
+        if (radioId) {
+          const label = page.locator(`label[for="${radioId}"]`);
+          if (await label.isVisible({ timeout: 2_000 }).catch(() => false)) {
+            await label.click();
+          } else {
+            await claimRadio.check({ force: true });
+          }
+        } else {
+          await claimRadio.check({ force: true });
+        }
+      }
+      await page.getByRole('button', { name: /confirm admin claim/i }).click();
+      // ClaimSelectionHandler redirects 303 to /admin/dashboard
+      await page.waitForURL(/\/admin\/dashboard/, { timeout: 20_000 });
     }
 
     // Verify bootstrap completed
-    await expect(page.getByRole('heading', { name: /Nebu is ready|Setup Complete|Dashboard/ }))
-      .toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole('heading', { name: /Dashboard/i }))
+      .toBeVisible({ timeout: 10_000 });
   });
 
   // ── Flow 2: Admin Dashboard + Navigation ────────────────────────
@@ -273,10 +299,10 @@ test.describe.serial('@smoke Full-Stack Acceptance: Nebu Happy Path', () => {
 
   test('Flow 3: SSO Login als End-User (Element Web)', async ({ page }) => {
     await page.goto(ELEMENT);
-    await expect(page.getByRole('heading', { name: /willkommen bei element|welcome to element/i }))
-      .toBeVisible({ timeout: 15_000 });
-
-    await page.getByRole('link', { name: /anmelden|sign in/i }).click();
+    // Element 1.12.15: welcome screen shows "Sign in" link, not a standalone "Welcome" heading.
+    const fullStackSignIn = page.getByRole('link', { name: /anmelden|sign in/i });
+    await fullStackSignIn.waitFor({ state: 'visible', timeout: 15_000 });
+    await fullStackSignIn.click();
     await page.getByRole('button', { name: /weiter mit sso|continue with sso/i }).click();
     await page.waitForURL(/dex.*\/auth/i, { timeout: 15_000 });
 

@@ -7,10 +7,10 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o /media ./cmd/media
+RUN CGO_ENABLED=0 GOOS=linux go build -o /app/nebu-media ./cmd/media
 
 FROM alpine:3.19
 RUN apk add --no-cache ca-certificates curl
-COPY --from=builder /media /media
+COPY --from=builder /app/nebu-media /usr/local/bin/nebu-media
 EXPOSE 8009
-ENTRYPOINT ["/media"]
+ENTRYPOINT ["/usr/local/bin/nebu-media"]

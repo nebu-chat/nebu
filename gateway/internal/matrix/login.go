@@ -77,18 +77,18 @@ func generateDeviceID() string {
 }
 
 type LoginHandler struct {
-	displayName              string
-	provider                 *auth.Provider
-	coreClient               CoreClient
-	store                    middleware.TokenStore // optional; nil = skip denylist check in PostLogin
-	serverName               string
-	clientID                 string
-	clientSecret             string
-	roleClaimName            string
-	ssoRedirectSchemes       []string          // extra deep-link schemes from NEBU_SSO_REDIRECT_SCHEMES
-	userIDClaimLoader        UserIDClaimLoader // nil = fall back to legacy "name" claim (AC7)
-	displaynameClaimLoader   UserIDClaimLoader // nil = use hardcoded preferred_username→name→email chain
-	emailClaimLoader         UserIDClaimLoader // nil = use hardcoded "email" claim
+	displayName            string
+	provider               *auth.Provider
+	coreClient             CoreClient
+	store                  middleware.TokenStore // optional; nil = skip denylist check in PostLogin
+	serverName             string
+	clientID               string
+	clientSecret           string
+	roleClaimName          string
+	ssoRedirectSchemes     []string          // extra deep-link schemes from NEBU_SSO_REDIRECT_SCHEMES
+	userIDClaimLoader      UserIDClaimLoader // nil = fall back to legacy "name" claim (AC7)
+	displaynameClaimLoader UserIDClaimLoader // nil = use hardcoded preferred_username→name→email chain
+	emailClaimLoader       UserIDClaimLoader // nil = use hardcoded "email" claim
 }
 
 type LoginConfig struct {
@@ -281,6 +281,11 @@ func (h *LoginHandler) GetLogin(w http.ResponseWriter, r *http.Request) {
 					},
 				},
 			},
+			// m.login.token must be advertised alongside m.login.sso so that
+			// Element Web 1.12+ uses the loginToken that GetSSOCallback embeds
+			// in the redirect URL instead of re-initiating a fresh SSO flow.
+			// Without this, Element ignores the loginToken and loops back to Dex.
+			{Type: "m.login.token"},
 		},
 	}
 	w.Header().Set("Content-Type", "application/json")

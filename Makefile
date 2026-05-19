@@ -286,7 +286,7 @@ test-load-silber:
 test-e2e:
 	cd e2e && \
 	npm install --silent && \
-	npx playwright install chromium --with-deps --quiet && \
+	npx playwright install chromium --with-deps && \
 	npx bddgen && \
 	npx playwright test --reporter=list
 
@@ -300,7 +300,7 @@ build-element-e2e:
 ## Requires: stack running (`make dev`) + `127.0.0.1 dex` in /etc/hosts
 test-e2e-element:
 	cd e2e && npm install --silent && \
-	npx playwright install chromium --with-deps --quiet && \
+	npx playwright install chromium --with-deps && \
 	npx bddgen && \
 	npx playwright test --project=element-web --reporter=list
 
@@ -309,7 +309,7 @@ test-e2e-element:
 test-e2e-element-legacy:
 	docker compose --profile e2e up -d --wait && \
 	cd e2e && npm install --silent && \
-	npx playwright install chromium --with-deps --quiet && \
+	npx playwright install chromium --with-deps && \
 	npx playwright test tests/element_e2e.spec.ts; \
 	EXIT=$$?; exit $$EXIT
 
@@ -318,7 +318,7 @@ test-e2e-element-legacy:
 ## Requires: playwright-bdd installed + stack running
 test-e2e-admin:
 	cd e2e && npm install --silent && \
-	npx playwright install chromium --with-deps --quiet && \
+	npx playwright install chromium --with-deps && \
 	npx bddgen && \
 	npx playwright test --project=admin-ui --reporter=list
 
@@ -334,7 +334,7 @@ build-fluffychat-e2e:
 test-e2e-fluffychat:
 	docker compose --profile e2e up -d --wait && \
 	cd e2e && npm install --silent && \
-	npx playwright install chromium --with-deps --quiet && \
+	npx playwright install chromium --with-deps && \
 	npx playwright test tests/fluffychat_e2e.spec.ts; \
 	EXIT=$$?; exit $$EXIT
 
