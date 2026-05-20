@@ -35,7 +35,7 @@
 Nebu is a chat server that speaks the [Matrix Client-Server API](https://spec.matrix.org/latest/client-server-api/), so any standard Matrix client (Element, Cinny, FluffyChat, …) works out of the box. It's built for organizations that need full data sovereignty: on-premise deployment, no vendor lock-in, no telemetry, no federation overhead.
 
 <!-- markdownlint-disable-next-line MD013 -->
-**Status:** Pre-alpha. Core chat functionality implemented (Epics 1–8 complete). Not production-ready — see [Current Limitations](#current-limitations) before evaluating.
+**Status:** Pre-alpha. Core chat functionality and production deployment tooling implemented (Epics 1–11 complete). Not production-ready — see [Current Limitations](#current-limitations) before evaluating.
 
 ---
 
@@ -214,17 +214,20 @@ All dependencies are Apache 2.0, MIT, BSD, or PostgreSQL License. No AGPLv3, no 
 ## Roadmap
 
 <!-- markdownlint-disable MD013 MD060 -->
-| Phase | Focus                                                            | Status      |
-|-------|------------------------------------------------------------------|-------------|
-| 1–2   | OIDC login, rooms, power levels                                  | Done        |
-| 3     | Ed25519 signatures, audit log, media (AES-256-GCM)              | Done        |
-| 4     | Full Matrix Client-Server API MVP (sync, send, presence, …)     | Done        |
-| 5     | Security hardening, rate limiting, compliance access             | Done        |
-| 6     | Admin API (user/room management)                                 | In progress |
-| 7     | Admin UI (full day-to-day operations)                            | Done        |
-| 8     | Public open-source release (GitHub/GitLab, CI, docs scaffold)   | Done        |
-| 9     | Full-text search (ADR-010 required), Managed E2EE (ADR-011 req.)| Planned     |
-| 10    | Clustering & horizontal scale, GDPR/retention hardening         | Planned     |
+| Phase | Focus                                                                             | Status   |
+|-------|-----------------------------------------------------------------------------------|----------|
+| 1–2   | OIDC login, rooms, power levels                                                   | Done     |
+| 3     | Ed25519 signatures, audit log, media (AES-256-GCM)                               | Done     |
+| 4     | Full Matrix Client-Server API MVP (sync, send, presence, …)                      | Done     |
+| 5     | Security hardening, rate limiting, compliance access                              | Done     |
+| 6     | Admin API (user/room management)                                                  | Done     |
+| 7     | Admin UI (full day-to-day operations)                                             | Done     |
+| 8     | Public open-source release (GitHub/GitLab, CI, docs scaffold)                    | Done     |
+| 9     | Post-MVP API completeness, full-text search, OIDC user directory (SCIM 2.0)      | Done     |
+| 10    | Production deployment (Stackit/AWS/K8s), Element Web integration, certbot TLS    | Done     |
+| 11    | Managed E2EE key escrow (ADR-011 required)                                        | Planned  |
+| 12    | Matrix Spaces + room moderator feature completeness                               | Planned  |
+| 13    | Object storage (MinIO S3), clustering & horizontal scale                          | Planned  |
 <!-- markdownlint-enable MD013 MD060 -->
 
 Detailed roadmap: [`docs/roadmap.md`](docs/roadmap.md)
