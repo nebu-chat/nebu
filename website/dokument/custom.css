@@ -1,0 +1,35 @@
+/*
+ * Nebu brand color overrides for EasyWebsite / opencode theme.
+ *
+ * Story 16.2 — Landing Page + Nebu Brand Identity
+ *
+ * The opencode theme ships with --color-primary: #1544ff (opencode blue).
+ * These overrides replace it with Nebu deep navy (#0a2540) and a
+ * complementary accent (#1a6b9a — steel blue) to maintain adequate
+ * contrast ratios for WCAG AA compliance.
+ *
+ * To verify the override is active in a browser:
+ *   getComputedStyle(document.documentElement).getPropertyValue('--color-primary')
+ *   → should return "#0a2540", not "#1544ff"
+ */
+
+:root {
+  /* Primary brand color: Nebu deep navy */
+  --color-primary: #0a2540;
+
+  /* Accent / interactive highlight: steel blue */
+  --color-accent: #1a6b9a;
+
+  /* Link color: slightly lighter navy for readability on white */
+  --color-link: #1a6b9a;
+  --color-link-hover: #0a2540;
+
+  /* Header / nav background */
+  --color-header-bg: #0a2540;
+  --color-header-text: #ffffff;
+
+  /* Button primary: deep navy with white text */
+  --color-button-primary-bg: #0a2540;
+  --color-button-primary-text: #ffffff;
+  --color-button-primary-hover-bg: #1a6b9a;
+}

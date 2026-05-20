@@ -2,6 +2,12 @@
 # Navigation configuration for the Nebu website.
 # Key = file/directory name (without extension), value = display settings.
 # Order of entries = order in the sidebar menu.
+#
+# logo: path relative to the dokument/ root — rendered in the page header/nav.
+# custom_css: path to a CSS file with brand color overrides.
 ####
+logo: assets/nebu-logo.svg
+custom_css: custom.css
+
 index:
-  title: Startseite
+  title: Home

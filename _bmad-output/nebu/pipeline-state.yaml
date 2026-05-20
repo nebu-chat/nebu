@@ -1,6 +1,10 @@
 # Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents
 # Do not edit manually during a pipeline run.
 # last_updated: 2026-05-20
+# [16-2] 2026-05-20T10:05Z atdd → 3 failing tests (website_smoke.feature)
+# [16-2] 2026-05-20T10:01Z classify → matrix=false, ui=true, security_review=not-needed
+# [16-2] 2026-05-20T10:00Z pipeline started
+# 16-1 2026-05-20T20:07:29Z epic-loop → story done
 # [16-1] 2026-05-20T10:00Z committed ✓ (2 HIGH fixed: md-to-web pinned @1.1.0; $CI_SERVER_FQDN documented — arc42 no-change infra)
 # [16-1] 2026-05-20T09:55Z arc42-update → no arch changes (CI/docs infra only, no application architecture impact)
 # [16-1] 2026-05-20T09:50Z security-review → skipped (not-needed — CI config only, no auth/crypto/route code)
@@ -648,8 +652,8 @@
 # [9-22] 2026-05-06T17:50Z code-review → CLEAN cycle 3 (4 MINOR accepted: cosmetic/new)
 # [9-22] 2026-05-06T17:30Z ci-gate → ✓ build+unit-go+unit-elixir+e2e+integration
 # [9-22] 2026-05-06T16:10Z code-review → 2 MAJOR 3 MINOR → cycle 3
-story: "16-1"
-current_step: "code-review"
+story: "16-2"
+current_step: "test-review"
 completed:
   - atdd
   - test-review
@@ -657,4 +661,4 @@ completed:
   - ci-gate
 cycle_count: 0
 blocked_reason: null
-last_updated: "2026-05-20T19:58Z"
+last_updated: "2026-05-20T20:12Z"

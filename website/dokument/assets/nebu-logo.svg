@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 48" width="200" height="48" role="img" aria-label="Nebu">
+  <!-- Deep navy background pill -->
+  <rect x="0" y="4" width="72" height="40" rx="8" fill="#0a2540"/>
+  <!-- Stylised "N" lettermark in white -->
+  <text x="36" y="32" font-family="system-ui, -apple-system, sans-serif" font-size="26" font-weight="700"
+        fill="#ffffff" text-anchor="middle" dominant-baseline="auto">N</text>
+  <!-- Wordmark "nebu" in brand navy -->
+  <text x="86" y="33" font-family="system-ui, -apple-system, sans-serif" font-size="24" font-weight="600"
+        fill="#0a2540" letter-spacing="-0.5">nebu</text>
+</svg>
