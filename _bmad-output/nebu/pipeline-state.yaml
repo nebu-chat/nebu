@@ -1,6 +1,17 @@
 # Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents
 # Do not edit manually during a pipeline run.
 # last_updated: 2026-05-20
+# [13-17] 2026-05-20T07:10Z arc42-update → no arch changes (CSS theme tokens only)
+# [13-17] 2026-05-20T07:10Z security-review → skipped (not-needed — CSS/theme only)
+# [13-17] 2026-05-20T07:10Z code-review → CLEAN (cycle 1)
+# [13-17] 2026-05-20T07:09Z dev-story → done (cycle 1) — remove redundant role+aria-label from live-metrics div
+# [13-17] 2026-05-20T07:09Z code-review → 1 MINOR (duplicate role=region in dashboard.html) + 2 INFO → cycle 1
+# [13-17] 2026-05-20T07:04Z ci-gate → skipped (code already committed in 7c20168)
+# [13-17] 2026-05-20T07:04Z dev-story → skipped (already implemented in 7c20168)
+# [13-17] 2026-05-20T07:04Z atdd → skipped (visual contrast fix, atdd: not-applicable)
+# [13-17] 2026-05-20T07:04Z create-story → 13-17-wcag-aa-admin-ui-contrast-fix.md
+# [13-17] 2026-05-20T07:01Z pipeline started
+# [13-16] 2026-05-20T07:01Z committed ✓ (2 MAJOR fixed cycle 1 — PROJECT_ROOT 4 levels, DEX_ISSUER_URL const)
 # [13-16] 2026-05-20T07:01Z arc42-update → no arch changes (test-only)
 # [13-16] 2026-05-20T07:00Z security-review → skipped (not-needed — test-only)
 # [13-16] 2026-05-20T07:00Z code-review → CLEAN (cycle 1)
@@ -617,7 +628,7 @@
 # [9-22] 2026-05-06T17:50Z code-review → CLEAN cycle 3 (4 MINOR accepted: cosmetic/new)
 # [9-22] 2026-05-06T17:30Z ci-gate → ✓ build+unit-go+unit-elixir+e2e+integration
 # [9-22] 2026-05-06T16:10Z code-review → 2 MAJOR 3 MINOR → cycle 3
-story: "13-16"
+story: "13-17"
 current_step: "commit"
 completed:
   - create-story
@@ -629,4 +640,4 @@ completed:
   - arc42-update
 cycle_count: 1
 blocked_reason: null
-last_updated: "2026-05-20T07:01Z"
+last_updated: "2026-05-20T07:10Z"

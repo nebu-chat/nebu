@@ -1,5 +1,7 @@
 # generated: 2026-03-20
 # last_updated: 2026-05-20
+# story 13-17 done (pipeline: 1 MINOR fixed cycle 1 (duplicate ARIA landmark in dashboard.html)): 2026-05-20
+# story 13-17 done (implementation already committed in 7c20168; story file created as documentation/audit trail): 2026-05-20
 # story 13-16 done (pipeline: 2 MAJOR fixed cycle 1 (PROJECT_ROOT path, DEX_ISSUER_URL import)): 2026-05-20
 # story 13-15 done (pipeline: 1 MAJOR+2 MINOR fixed cycle 1 + Kassandra HIGH+MEDIUM fixed): 2026-05-19
 # story 13-15 done (implementation already complete; story file created as documentation/audit trail): 2026-05-19
@@ -156,6 +158,7 @@ development_status:
   13-14-squash-gateway-migrations-single-seed: done
   13-15-element-web-stackit-deployment: done
   13-16-e2e-bootstrap-tests-update: done
+  13-17-wcag-aa-admin-ui-contrast-fix: done
   epic-13-retrospective: optional
 
   # ─────────────────────────────────────────────────────────────────────────
