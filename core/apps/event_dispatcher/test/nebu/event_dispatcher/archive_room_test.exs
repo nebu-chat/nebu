@@ -558,8 +558,12 @@ defmodule Nebu.EventDispatcher.ArchiveRoomTest do
       on_exit(fn ->
         Application.delete_env(:event_dispatcher, :admin_db_module)
 
-        if :ets.info(:double_archive_test_db) != :undefined do
+        # on_exit runs in a separate process — guard + delete is TOCTOU-prone.
+        # Use try/rescue to handle the race where another cleanup already deleted the table.
+        try do
           :ets.delete(:double_archive_test_db)
+        rescue
+          ArgumentError -> :ok
         end
       end)
 

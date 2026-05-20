@@ -161,6 +161,7 @@ development_status:
   13-16-e2e-bootstrap-tests-update: done
   13-17-wcag-aa-admin-ui-contrast-fix: done
   13-18-fix-test-unit-go-login-flows: done
+  13-19-fix-test-unit-elixir-ets-toctou: done
   epic-13-retrospective: optional
 
   # ─────────────────────────────────────────────────────────────────────────
