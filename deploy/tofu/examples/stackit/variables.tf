@@ -44,6 +44,54 @@ variable "vm_plan_id" {
   default     = "g2i.2"
 }
 
+variable "gateway_cpu_limit" {
+  description = "CPU limit for the gateway container (Docker Compose deploy.resources.limits.cpus). Default suits a g2i.2 VM (4 vCPU). Go gateway is CPU-light under normal load."
+  type        = string
+  default     = "0.50"
+}
+
+variable "gateway_memory_limit" {
+  description = "Memory limit for the gateway container (Docker Compose deploy.resources.limits.memory). Default suits a g2i.2 VM (8 GB RAM). Go gateway is lean on memory."
+  type        = string
+  default     = "256m"
+}
+
+variable "core_cpu_limit" {
+  description = "CPU limit for the Elixir core container (Docker Compose deploy.resources.limits.cpus). Default suits a g2i.2 VM (4 vCPU). BEAM scheduler uses multiple cores under load."
+  type        = string
+  default     = "1.50"
+}
+
+variable "core_memory_limit" {
+  description = "Memory limit for the Elixir core container (Docker Compose deploy.resources.limits.memory). Default suits a g2i.2 VM (8 GB RAM). BEAM VM allocates aggressively — set this to avoid OOM kills."
+  type        = string
+  default     = "2g"
+}
+
+variable "dex_cpu_limit" {
+  description = "CPU limit for the Dex container (Docker Compose deploy.resources.limits.cpus). Only relevant when oidc_mode = 'dex'."
+  type        = string
+  default     = "0.25"
+}
+
+variable "dex_memory_limit" {
+  description = "Memory limit for the Dex container (Docker Compose deploy.resources.limits.memory). Only relevant when oidc_mode = 'dex'."
+  type        = string
+  default     = "128m"
+}
+
+variable "element_cpu_limit" {
+  description = "CPU limit for the Element Web container (Docker Compose deploy.resources.limits.cpus). Only relevant when enable_element_web = true."
+  type        = string
+  default     = "0.25"
+}
+
+variable "element_memory_limit" {
+  description = "Memory limit for the Element Web container (Docker Compose deploy.resources.limits.memory). Only relevant when enable_element_web = true."
+  type        = string
+  default     = "128m"
+}
+
 variable "alb_plan_id" {
   description = "STACKIT load balancer plan ID. Run `stackit load-balancer plans list` to find available plans. p10 is the smallest billable plan."
   type        = string

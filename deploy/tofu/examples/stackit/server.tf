@@ -97,6 +97,15 @@ resource "stackit_server" "nebu" {
     # Runtime environment + encryption
     nebu_env           = var.nebu_env
     key_encryption_key = var.key_encryption_key
+    # Container resource limits
+    gateway_cpu_limit    = var.gateway_cpu_limit
+    gateway_memory_limit = var.gateway_memory_limit
+    core_cpu_limit       = var.core_cpu_limit
+    core_memory_limit    = var.core_memory_limit
+    dex_cpu_limit        = var.dex_cpu_limit
+    dex_memory_limit     = var.dex_memory_limit
+    element_cpu_limit    = var.element_cpu_limit
+    element_memory_limit = var.element_memory_limit
     # Element Web — optional Matrix client served at /
     enable_element_web = var.enable_element_web
   })

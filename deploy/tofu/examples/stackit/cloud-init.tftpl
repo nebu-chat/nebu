@@ -288,6 +288,11 @@ write_files:
             timeout: 5s
             retries: 3
             start_period: 10s
+          deploy:
+            resources:
+              limits:
+                cpus: '${dex_cpu_limit}'
+                memory: ${dex_memory_limit}
 %{ endif ~}
         core:
           image: $${NEBU_IMAGE_REGISTRY}/nebu-core:$${NEBU_VERSION}
@@ -308,6 +313,11 @@ write_files:
             timeout: 5s
             retries: 3
             start_period: 30s
+          deploy:
+            resources:
+              limits:
+                cpus: '${core_cpu_limit}'
+                memory: ${core_memory_limit}
 
         gateway:
           image: $${NEBU_IMAGE_REGISTRY}/nebu-gateway:$${NEBU_VERSION}
@@ -336,6 +346,11 @@ write_files:
             timeout: 5s
             retries: 3
             start_period: 10s
+          deploy:
+            resources:
+              limits:
+                cpus: '${gateway_cpu_limit}'
+                memory: ${gateway_memory_limit}
 %{ if enable_element_web ~}
 
         element:
@@ -359,6 +374,11 @@ write_files:
             timeout: 5s
             retries: 3
             start_period: 10s
+          deploy:
+            resources:
+              limits:
+                cpus: '${element_cpu_limit}'
+                memory: ${element_memory_limit}
 %{ endif ~}
 
   # ── /etc/systemd/system/nebu.service ───────────────────────────────────────

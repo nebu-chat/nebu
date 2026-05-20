@@ -1,6 +1,12 @@
 # Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents
 # Do not edit manually during a pipeline run.
 # last_updated: 2026-05-20
+# [13-20] 2026-05-20T12:39Z committed ✓ (test-only — 5000ms → 10000ms Horde timeout CLEAN)
+# [13-20] 2026-05-20T12:38Z pipeline started
+# [13-19] 2026-05-20T10:50Z committed ✓ (test-only — try/rescue replaces TOCTOU guard CLEAN)
+# [13-19] 2026-05-20T10:49Z atdd → skipped (failing test already exists: ArchiveRoomTest line 590)
+# [13-19] 2026-05-20T10:49Z create-story → 13-19-fix-test-unit-elixir-ets-toctou.md
+# [13-19] 2026-05-20T10:48Z pipeline started
 # [13-18] 2026-05-20T08:30Z committed ✓ (test-only — assert 2 flows CLEAN)
 # [13-18] 2026-05-20T08:28Z atdd → skipped (test already failing: TestGetLogin_ReturnsSSO login_test.go:138)
 # [13-18] 2026-05-20T08:28Z create-story → 13-18-fix-test-unit-go-login-flows.md
@@ -638,4 +644,4 @@ current_step: null
 completed: []
 cycle_count: 0
 blocked_reason: null
-last_updated: "2026-05-20T08:30Z"
+last_updated: "2026-05-20T12:39Z"
