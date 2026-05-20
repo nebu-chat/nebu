@@ -1,0 +1,72 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":semanticCommits",
+    ":dependencyDashboard"
+  ],
+  "timezone": "Europe/Berlin",
+  "schedule": ["every weekend"],
+  "labels": ["dependencies"],
+  "prConcurrentLimit": 10,
+  "prHourlyLimit": 4,
+  "packageRules": [
+    {
+      "description": "Auto-merge digest-only updates (SHA pin refreshes for GitHub Actions)",
+      "matchUpdateTypes": ["digest"],
+      "automerge": true,
+      "automergeType": "pr",
+      "platformAutomerge": true
+    },
+    {
+      "description": "Group Go patch+minor updates",
+      "matchManagers": ["gomod"],
+      "matchUpdateTypes": ["patch", "minor"],
+      "groupName": "Go dependencies"
+    },
+    {
+      "description": "Group Elixir/Mix patch+minor updates",
+      "matchManagers": ["mix"],
+      "matchUpdateTypes": ["patch", "minor"],
+      "groupName": "Elixir dependencies"
+    },
+    {
+      "description": "Group npm patch+minor updates",
+      "matchManagers": ["npm"],
+      "matchUpdateTypes": ["patch", "minor"],
+      "groupName": "Node.js dependencies"
+    },
+    {
+      "description": "Group OpenTofu/Terraform provider and version constraint updates",
+      "matchManagers": ["terraform"],
+      "groupName": "OpenTofu / Terraform providers"
+    },
+    {
+      "description": "Group GitHub Actions tag version updates (separate from auto-merged digest updates)",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["major", "minor", "patch"],
+      "groupName": "GitHub Actions"
+    },
+    {
+      "description": "Group Docker image updates across Dockerfiles, Compose files, and GitLab CI jobs",
+      "matchManagers": ["dockerfile", "docker-compose", "gitlabci"],
+      "groupName": "Docker images"
+    }
+  ],
+  "customManagers": [
+    {
+      "description": "Track gitleaks version pinned as env var in both CI files",
+      "customType": "regex",
+      "fileMatch": [
+        "^\\.github/workflows/ci\\.yml$",
+        "^\\.gitlab-ci\\.yml$"
+      ],
+      "matchStrings": [
+        "GITLEAKS_VERSION: \"(?<currentValue>[\\d.]+)\""
+      ],
+      "depNameTemplate": "gitleaks/gitleaks",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    }
+  ]
+}
