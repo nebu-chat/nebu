@@ -135,11 +135,14 @@ func TestGetLogin_ReturnsSSO(t *testing.T) {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
-	if len(resp.Flows) != 1 {
-		t.Fatalf("expected 1 flow, got %d", len(resp.Flows))
+	// m.login.token is advertised alongside m.login.sso so Element Web 1.12+
+	// uses the loginToken embedded in the SSO redirect URL instead of
+	// re-initiating a fresh flow (see login.go GetLogin, commit 7c20168).
+	if len(resp.Flows) != 2 {
+		t.Fatalf("expected 2 flows, got %d", len(resp.Flows))
 	}
 	if resp.Flows[0].Type != "m.login.sso" {
-		t.Errorf("expected m.login.sso, got %s", resp.Flows[0].Type)
+		t.Errorf("expected flows[0] m.login.sso, got %s", resp.Flows[0].Type)
 	}
 
 	idps := resp.Flows[0].IdentityProviders
@@ -154,6 +157,13 @@ func TestGetLogin_ReturnsSSO(t *testing.T) {
 	}
 	if idps[0].Icon != nil {
 		t.Errorf("expected icon nil, got %v", idps[0].Icon)
+	}
+
+	if resp.Flows[1].Type != "m.login.token" {
+		t.Errorf("expected flows[1] m.login.token, got %s", resp.Flows[1].Type)
+	}
+	if len(resp.Flows[1].IdentityProviders) != 0 {
+		t.Errorf("expected no identity providers for m.login.token, got %d", len(resp.Flows[1].IdentityProviders))
 	}
 }
 
