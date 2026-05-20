@@ -169,6 +169,23 @@ variable "dex_allowed_cidr" {
   }
 }
 
+variable "nebu_env" {
+  description = "Runtime environment name passed as NEBU_ENV (e.g. 'production', 'staging'). Controls KEK enforcement: non-dev values require NEBU_KEY_ENCRYPTION_KEY to be set."
+  type        = string
+  default     = "production"
+}
+
+variable "key_encryption_key" {
+  description = "64-hex-char (32-byte) master key for encrypting compliance signing keys at rest (NEBU_KEY_ENCRYPTION_KEY). Required when nebu_env is not dev/staging. Generate with: openssl rand -hex 32"
+  type        = string
+  sensitive   = true
+
+  validation {
+    condition     = length(var.key_encryption_key) == 64 && can(regex("^[0-9a-fA-F]+$", var.key_encryption_key))
+    error_message = "key_encryption_key must be exactly 64 hex characters (32 bytes). Generate with: openssl rand -hex 32"
+  }
+}
+
 variable "dex_static_password_hash" {
   description = "bcrypt hash for the Dex static user (operator@example.com). Required when oidc_mode = 'dex'. Generate with: htpasswd -bnBC 12 '' 'yourpassword' | tr -d ':' | sed 's/$2y/$2a/'. This value is written to dex/config.yaml on the VM (mode 0600)."
   type        = string
@@ -178,6 +195,42 @@ variable "dex_static_password_hash" {
   validation {
     condition     = var.dex_static_password_hash == null || startswith(var.dex_static_password_hash, "$2a$") || startswith(var.dex_static_password_hash, "$2b$") || startswith(var.dex_static_password_hash, "$2y$")
     error_message = "dex_static_password_hash must be a bcrypt hash starting with '$2a$', '$2b$', or '$2y$' (all are equivalent bcrypt variants)."
+  }
+}
+
+variable "dex_user1_password_hash" {
+  description = "bcrypt hash for the first static demo user (alice@example.com). Required when oidc_mode = 'dex'. Generate with: htpasswd -bnBC 12 '' 'yourpassword' | tr -d ':' | sed 's/$2y/$2a/'."
+  type        = string
+  sensitive   = true
+  default     = null
+
+  validation {
+    condition     = var.dex_user1_password_hash == null || startswith(var.dex_user1_password_hash, "$2a$") || startswith(var.dex_user1_password_hash, "$2b$") || startswith(var.dex_user1_password_hash, "$2y$")
+    error_message = "dex_user1_password_hash must be a bcrypt hash starting with '$2a$', '$2b$', or '$2y$'."
+  }
+}
+
+variable "dex_user2_password_hash" {
+  description = "bcrypt hash for the second static demo user (bob@example.com). Required when oidc_mode = 'dex'. Generate with: htpasswd -bnBC 12 '' 'yourpassword' | tr -d ':' | sed 's/$2y/$2a/'."
+  type        = string
+  sensitive   = true
+  default     = null
+
+  validation {
+    condition     = var.dex_user2_password_hash == null || startswith(var.dex_user2_password_hash, "$2a$") || startswith(var.dex_user2_password_hash, "$2b$") || startswith(var.dex_user2_password_hash, "$2y$")
+    error_message = "dex_user2_password_hash must be a bcrypt hash starting with '$2a$', '$2b$', or '$2y$'."
+  }
+}
+
+variable "dex_compliance_password_hash" {
+  description = "bcrypt hash for the static compliance officer user (compliance@example.com). Required when oidc_mode = 'dex'. Generate with: htpasswd -bnBC 12 '' 'yourpassword' | tr -d ':' | sed 's/$2y/$2a/'."
+  type        = string
+  sensitive   = true
+  default     = null
+
+  validation {
+    condition     = var.dex_compliance_password_hash == null || startswith(var.dex_compliance_password_hash, "$2a$") || startswith(var.dex_compliance_password_hash, "$2b$") || startswith(var.dex_compliance_password_hash, "$2y$")
+    error_message = "dex_compliance_password_hash must be a bcrypt hash starting with '$2a$', '$2b$', or '$2y$'."
   }
 }
 

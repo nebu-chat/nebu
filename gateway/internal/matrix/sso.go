@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
+	"github.com/nebu/nebu/internal/middleware"
 	"github.com/nebu/nebu/internal/validate"
 	"golang.org/x/oauth2"
 )
@@ -137,7 +138,7 @@ func (s *loginTokenStore) pop(opaqueToken string) (string, bool) {
 // ssoCallbackURL returns the redirect_uri registered with Dex for Matrix SSO.
 func ssoCallbackURL(r *http.Request) string {
 	scheme := "http"
-	if r.TLS != nil {
+	if middleware.IsRequestSecure(r) {
 		scheme = "https"
 	}
 	return scheme + "://" + r.Host + "/_matrix/client/v3/login/sso/redirect/oidc"

@@ -1,6 +1,10 @@
 # Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents
 # Do not edit manually during a pipeline run.
 # last_updated: 2026-05-20
+# [13-18] 2026-05-20T08:30Z committed ✓ (test-only — assert 2 flows CLEAN)
+# [13-18] 2026-05-20T08:28Z atdd → skipped (test already failing: TestGetLogin_ReturnsSSO login_test.go:138)
+# [13-18] 2026-05-20T08:28Z create-story → 13-18-fix-test-unit-go-login-flows.md
+# [13-18] 2026-05-20T08:27Z pipeline started
 # [13-17] 2026-05-20T07:10Z committed ✓ (1 MINOR fixed cycle 1 — duplicate ARIA landmark removed)
 # [13-17] 2026-05-20T07:10Z arc42-update → no arch changes (CSS theme tokens only)
 # [13-17] 2026-05-20T07:10Z security-review → skipped (not-needed — CSS/theme only)
@@ -634,4 +638,4 @@ current_step: null
 completed: []
 cycle_count: 0
 blocked_reason: null
-last_updated: "2026-05-20T07:10Z"
+last_updated: "2026-05-20T08:30Z"

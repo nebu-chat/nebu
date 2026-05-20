@@ -632,3 +632,14 @@ INSERT INTO server_config (key, value, set_at) VALUES
     ('scim_base_url',      '',      (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint),
     ('scim_bearer_token',  '',      (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint)
 ON CONFLICT (key) DO NOTHING;
+
+-- ─── Runtime grants (dual-role: nebu_migrate owns, nebu_app operates) ────────
+-- When migrations run as nebu_migrate (NEBU_DB_URL_MIGRATE), all tables/sequences
+-- are owned by nebu_migrate. nebu_app needs DML access for runtime operation.
+-- In single-role deployments (nebu_app = migration user) these are no-ops.
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO nebu_app;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO nebu_app;
+-- Function grants are scoped explicitly — GRANT ALL FUNCTIONS would include extension-owned
+-- functions (set_user, pg_stat_*) that nebu_migrate does not own and cannot grant.
+GRANT EXECUTE ON FUNCTION events_search_vector_update() TO nebu_app;
+GRANT EXECUTE ON FUNCTION audit_log_event_time_force() TO nebu_app;

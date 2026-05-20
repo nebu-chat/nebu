@@ -7,6 +7,19 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ---
 
+## [0.2.1] – 2026-05-20
+
+### Fixed
+
+- **Stackit deployment — Matrix SSO redirect URI**: `ssoCallbackURL` now respects `NEBU_TRUSTED_PROXY=true` and trusts `X-Forwarded-Proto: https` from nginx, building `https://` redirect URIs instead of `http://` when behind a TLS-terminating reverse proxy. Refactored `isRequestSecure` into `internal/middleware` (shared with admin auth handler).
+- **Stackit deployment — database migrations**: migration SQL (`000001_init.up.sql`) now grants `SELECT`, `INSERT`, `UPDATE`, `DELETE` on all application tables and sequences to `nebu_app` after creation. Required when running migrations as a dedicated `nebu_migrate` role (dual-role deployment). Function grants are scoped explicitly to avoid errors from extension-owned functions (`set_user`, `pg_stat_*`).
+- **Stackit deployment — PostgresFlex ACL**: database ACL now includes the VM's floating IP (`stackit_public_ip.nebu.ip/32`) alongside the VPC CIDR. Docker container traffic reaches PostgresFlex via the public IP, not via internal Stackit routing.
+- **Stackit deployment — runtime environment variables**: `NEBU_ENV`, `NEBU_KEY_ENCRYPTION_KEY`, and `NEBU_TRUSTED_PROXY` are now provisioned via `cloud-init` from Terraform variables (`nebu_env`, `key_encryption_key`). Previously required manual post-deploy configuration. `NEBU_TRUSTED_PROXY` is derived automatically from `enable_tls`.
+- **Stackit deployment — Dex static users**: additional demo users (`alice@example.com`, `bob@example.com`, `compliance@example.com`) can now be provisioned via optional `dex_user1_password_hash`, `dex_user2_password_hash`, `dex_compliance_password_hash` Terraform variables. Users are gated behind `%{ if ... != null }` to keep existing deployments unchanged.
+- **Secret scan**: `terraform.tfstate.*.backup` (numbered OpenTofu state backups) added to `.gitignore`; accidentally committed backup removed from tracking.
+
+---
+
 ## [0.2.0] – 2026-05-20
 
 ### Added

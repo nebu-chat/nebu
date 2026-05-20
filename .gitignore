@@ -69,6 +69,7 @@ erl_crash.dump
 .terraform/
 terraform.tfstate
 terraform.tfstate.backup
+terraform.tfstate.*.backup
 *.tfvars
 !*.tfvars.example
 .terraform.tfstate.lock.info

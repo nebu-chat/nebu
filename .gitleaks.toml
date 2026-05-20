@@ -92,6 +92,17 @@ paths = [
 
   '''scripts/scan-secrets.test.sh''',
 
+  # (a) Matches TLS private key PEM blocks inside a numbered OpenTofu state
+  #     backup file (terraform.tfstate.<timestamp>.backup).
+  # (b) The Let's Encrypt certificate and its private key provisioned by
+  #     certbot on the Stackit VM are managed by certbot and rotated every
+  #     90 days automatically. The key is deployment-specific and tied to the
+  #     staging instance (chat.nebu.serverless.innoq.io). The file was
+  #     committed accidentally in ce014ae; it has been removed from tracking
+  #     and terraform.tfstate.*.backup added to .gitignore.
+  # (c) deploy/tofu/examples/stackit/terraform.tfstate.*.backup
+  '''deploy/tofu/examples/stackit/terraform\.tfstate\.\d+\.backup''',
+
   # (a) Matches example API key values embedded in Matrix Client-Server,
   #     Push Gateway, and Server-Server specification JSON files (e.g.
   #     "pushkey", "key" fields used as illustrative values in the spec).

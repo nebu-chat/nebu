@@ -44,6 +44,9 @@ write_files:
       NEBU_IMAGE_REGISTRY=${image_registry}
       NEBU_VERSION=${nebu_version}
       NEBU_PII_ENCRYPTION_KEY=${pii_encryption_key}
+      NEBU_ENV=${nebu_env}
+      NEBU_KEY_ENCRYPTION_KEY=${key_encryption_key}
+      NEBU_TRUSTED_PROXY=${enable_tls ? "true" : "false"}
 
 %{ if oidc_mode == "dex" ~}
   # ── /opt/nebu/dex/config.yaml ──────────────────────────────────────────────
@@ -86,6 +89,30 @@ write_files:
           userID: "operator-00000000-0000-0000-0000-000000000001"
           groups:
             - instance_admin
+%{ if dex_user1_password_hash != null ~}
+        - email: "alice@example.com"
+          hash: "${dex_user1_password_hash}"
+          username: "alice"
+          userID: "alice-00000000-0000-0000-0000-000000000002"
+          groups:
+            - users
+%{ endif ~}
+%{ if dex_user2_password_hash != null ~}
+        - email: "bob@example.com"
+          hash: "${dex_user2_password_hash}"
+          username: "bob"
+          userID: "bob-000000-0000-0000-0000-000000000003"
+          groups:
+            - users
+%{ endif ~}
+%{ if dex_compliance_password_hash != null ~}
+        - email: "compliance@example.com"
+          hash: "${dex_compliance_password_hash}"
+          username: "compliance"
+          userID: "compliance-0000-0000-0000-000000000004"
+          groups:
+            - compliance_officer
+%{ endif ~}
 
 %{ endif ~}
 %{ if enable_element_web ~}

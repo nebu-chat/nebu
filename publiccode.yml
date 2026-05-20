@@ -4,8 +4,8 @@ name: Nebu
 url: "https://gitlab.opencode.de/nebu/nebu-server"
 landingURL: "https://gitlab.opencode.de/nebu/nebu-server"
 
-softwareVersion: "0.1.0-pre-alpha"
-releaseDate: "2026-05-02"
+softwareVersion: "0.2.1"
+releaseDate: "2026-05-20"
 
 
 logo: "logo.png"

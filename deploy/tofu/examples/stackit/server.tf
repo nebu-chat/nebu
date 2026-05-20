@@ -68,7 +68,10 @@ resource "stackit_server" "nebu" {
     oidc_client_secret       = var.oidc_client_secret
     oidc_issuer              = local.effective_oidc_issuer
     oidc_mode                = var.oidc_mode
-    dex_static_password_hash = var.oidc_mode == "dex" ? var.dex_static_password_hash : ""
+    dex_static_password_hash    = var.oidc_mode == "dex" ? var.dex_static_password_hash : ""
+    dex_user1_password_hash     = var.oidc_mode == "dex" ? var.dex_user1_password_hash : null
+    dex_user2_password_hash     = var.oidc_mode == "dex" ? var.dex_user2_password_hash : null
+    dex_compliance_password_hash = var.oidc_mode == "dex" ? var.dex_compliance_password_hash : null
     server_name              = var.server_name
     image_registry           = var.image_registry
     nebu_version             = var.nebu_version
@@ -91,6 +94,9 @@ resource "stackit_server" "nebu" {
     logs_ingest_host   = local.logs_ingest_host
     logs_bearer_token  = try(stackit_logs_access_token.nebu[0].access_token, "")
     environment        = var.environment
+    # Runtime environment + encryption
+    nebu_env           = var.nebu_env
+    key_encryption_key = var.key_encryption_key
     # Element Web — optional Matrix client served at /
     enable_element_web = var.enable_element_web
   })

@@ -9,10 +9,10 @@ resource "stackit_postgresflex_instance" "nebu" {
   replicas        = var.postgres_replicas
   backup_schedule = "0 2 * * *" # Daily at 02:00 UTC
 
-  # ACL: VMs in the same Stackit project connect via the internal 10.250.0.0/16 network.
-  # The PostgresFlex hostname resolves to a public IP externally, but Stackit routes
-  # VM traffic internally — source IP seen by PostgresFlex is 10.250.x.x, not the floating IP.
-  acl = ["10.250.0.0/16"]
+  # ACL: Docker containers on the VM reach PostgresFlex via the floating IP (not via internal
+  # Stackit routing), so the public IP must be explicitly allowed. The /16 covers the VPC
+  # in case internal routing applies to future VM-native (non-containerised) workloads.
+  acl = [var.network_cidr, "${stackit_public_ip.nebu.ip}/32"]
 
   flavor = {
     cpu = var.postgres_cpu
@@ -57,5 +57,5 @@ resource "stackit_postgresflex_database" "nebu" {
   project_id  = var.stackit_project_id
   instance_id = stackit_postgresflex_instance.nebu.instance_id
   name        = "nebu"
-  owner       = stackit_postgresflex_user.nebu.username
+  owner = stackit_postgresflex_user.nebu.username
 }
