@@ -1,6 +1,14 @@
 # Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents
 # Do not edit manually during a pipeline run.
 # last_updated: 2026-05-20
+# 16-2 2026-05-20T21:30Z epic-loop → story done
+# [16-2] 2026-05-20T21:30Z committed ✓ (6288f65 — M1+M2 test fixes + landing page + logo SVG + CSS override — arc42 no-change)
+# [16-2] 2026-05-20T21:25Z arc42-update → no arch changes (static website content, no application architecture impact)
+# [16-2] 2026-05-20T21:20Z security-review → skipped (not-needed — static content/CSS/SVG only)
+# [16-2] 2026-05-20T21:15Z code-review → CLEAN (cycle 0) — 2 INFO: link targets deferred (16-3/16-4), _meta.yaml logo config uncertainty (deploy-only); inline MINOR-1 fixed (errors array simplified)
+# [16-2] 2026-05-20T21:10Z ci-gate → ✓ build+unit-go+unit-elixir (website e2e self-skip expected — no WEBSITE_BASE_URL)
+# [16-2] 2026-05-20T21:05Z dev-story → done (cycle 0) — index.md full landing page, nebu-logo.svg, custom.css, _meta.yaml logo+custom_css refs
+# [16-2] 2026-05-20T21:00Z test-review-fixes → M1+M2 auto-fixed (test.skip, locator.or expect)
 # [16-2] 2026-05-20T10:05Z atdd → 3 failing tests (website_smoke.feature)
 # [16-2] 2026-05-20T10:01Z classify → matrix=false, ui=true, security_review=not-needed
 # [16-2] 2026-05-20T10:00Z pipeline started
