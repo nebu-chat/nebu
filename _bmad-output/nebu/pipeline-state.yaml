@@ -1,6 +1,18 @@
 # Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents
 # Do not edit manually during a pipeline run.
-# last_updated: 2026-05-19
+# last_updated: 2026-05-20
+# [13-16] 2026-05-20T07:01Z arc42-update → no arch changes (test-only)
+# [13-16] 2026-05-20T07:00Z security-review → skipped (not-needed — test-only)
+# [13-16] 2026-05-20T07:00Z code-review → CLEAN (cycle 1)
+# [13-16] 2026-05-20T06:59Z dev-story → done (cycle 1) — PROJECT_ROOT 4 levels up, DEX_ISSUER_URL const added
+# [13-16] 2026-05-20T06:59Z code-review → 2 MAJOR (PROJECT_ROOT bootstrap-happy-path, DEX_ISSUER_URL bootstrap.steps) + 3 MINOR → cycle 1
+# [13-16] 2026-05-20T06:53Z ci-gate → skipped (code already committed in 7c20168)
+# [13-16] 2026-05-20T06:53Z dev-story → skipped (already implemented in 7c20168)
+# [13-16] 2026-05-20T06:53Z atdd → skipped (test-only, atdd: not-applicable)
+# [13-16] 2026-05-20T06:53Z create-story → 13-16-e2e-bootstrap-tests-update.md
+# [13-16] 2026-05-20T07:10Z create-story → 13-16-e2e-bootstrap-tests-update.md (done — audit trail for 7c20168)
+# [13-16] 2026-05-20T06:46Z pipeline started
+# [13-15] 2026-05-19T09:38Z committed ✓ (1 MAJOR+2 MINOR fixed cycle 1 + Kassandra HIGH+MEDIUM fixed)
 # [13-15] 2026-05-19T09:35Z arc42-update → 07-deployment (Element Web topology + nginx routing table + CORS constraint)
 # [13-15] 2026-05-19T09:32Z security-review → Kassandra CLEAN (HIGH+MEDIUM fixed)
 # [13-15] 2026-05-19T09:28Z security-review → HIGH (F-1: /api/v1/ missing from nginx) + MEDIUM (WebSocket headers) → fixes applied
@@ -605,12 +617,11 @@
 # [9-22] 2026-05-06T17:50Z code-review → CLEAN cycle 3 (4 MINOR accepted: cosmetic/new)
 # [9-22] 2026-05-06T17:30Z ci-gate → ✓ build+unit-go+unit-elixir+e2e+integration
 # [9-22] 2026-05-06T16:10Z code-review → 2 MAJOR 3 MINOR → cycle 3
-story: "13-15"
+story: "13-16"
 current_step: "commit"
 completed:
   - create-story
   - atdd
-  - test-review
   - dev-story
   - ci-gate
   - code-review
@@ -618,4 +629,4 @@ completed:
   - arc42-update
 cycle_count: 1
 blocked_reason: null
-last_updated: "2026-05-19T14:28Z"
+last_updated: "2026-05-20T07:01Z"
