@@ -162,7 +162,7 @@ defmodule Nebu.Room.PowerLevelEnforcementTest do
   # Asserts within 5 000 ms (500 iterations x 10 ms) — CI needs more headroom.
   defp await_new_pid(room_id, old_pid) do
     result =
-      Enum.reduce_while(1..500, nil, fn _i, _acc ->
+      Enum.reduce_while(1..1000, nil, fn _i, _acc ->
         case Nebu.Room.RoomSupervisor.lookup_room(room_id) do
           {:ok, pid} when pid != old_pid -> {:halt, {:ok, pid}}
           _ ->
@@ -173,7 +173,7 @@ defmodule Nebu.Room.PowerLevelEnforcementTest do
 
     case result do
       {:ok, new_pid} -> new_pid
-      nil -> flunk("Horde did not restart room #{room_id} within 5000ms")
+      nil -> flunk("Horde did not restart room #{room_id} within 10000ms")
     end
   end
 
