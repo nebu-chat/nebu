@@ -62,9 +62,11 @@ stages:
   before_script:
     - mkdir -p /kaniko/.docker
     - |
-      printf '{"auths":{"%s":{"auth":"%s"}}}' \
+      printf '{"auths":{"%s":{"auth":"%s"},"%s":{"auth":"%s"}}}' \
         "${CI_REGISTRY}" \
         "$(printf '%s:%s' "${CI_REGISTRY_USER}" "${CI_REGISTRY_PASSWORD}" | base64 | tr -d '\n')" \
+        "${DOCKER_REGISTRY}" \
+        "$(printf '%s:%s' "${DOCKER_REGISTRY_USER}" "${DOCKER_REGISTRY_PASS}" | base64 | tr -d '\n')" \
         > /kaniko/.docker/config.json
 
 build-ci-go:
@@ -285,6 +287,7 @@ integration-test:
     - apk add --no-cache make openssl
     - until docker info; do sleep 1; done
     - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+    - echo "$DOCKER_REGISTRY_PASS" | docker login "$DOCKER_REGISTRY" --username "$DOCKER_REGISTRY_USER" --password-stdin
   script:
     - make test-integration-ci
   rules:
@@ -309,6 +312,7 @@ integration-test-podman:
     - dnf install -y --quiet make openssl python3-pip
     - pip3 install --quiet podman-compose
     - podman login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+    - echo "$DOCKER_REGISTRY_PASS" | podman login "$DOCKER_REGISTRY" --username "$DOCKER_REGISTRY_USER" --password-stdin
     - make setup
   script:
     - podman-compose -f docker-compose.yml -f docker-compose.ci.yml up -d --wait
