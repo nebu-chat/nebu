@@ -36,6 +36,22 @@ include:
       deploy-only-on: "main"
       footer-copyright: "Nebu contributors — Apache 2.0"
 
+# ─── Pages job override: inject architecture docs before EasyWebsite build ────
+# The md-to-web@1.1.0 component creates the `pages` job. We override it here to
+# add a before_script that copies docs/architecture/ into the md-path so that
+# arc42 sections and ADRs are part of the website build.
+#
+# docs/architecture/ is the single source of truth (NFR-16.2, Story 16-3).
+# website/dokument/architecture/ is in .gitignore — CI-generated only, never committed.
+#
+# Note: Overriding a component-defined job replaces only the keys specified here.
+# The component's `script:` and `rules:` remain unless explicitly overridden.
+pages:
+  before_script:
+    - mkdir -p website/dokument/architecture
+    - cp -r docs/architecture/. website/dokument/architecture/
+    - echo "Injected docs/architecture/ → website/dokument/architecture/ for EasyWebsite build"
+
 variables:
   DOCKER_DRIVER: overlay2
   CI_GO_IMAGE: $CI_REGISTRY_IMAGE/ci-go:1.26

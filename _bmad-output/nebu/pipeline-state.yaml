@@ -1,6 +1,12 @@
 # Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents
 # Do not edit manually during a pipeline run.
 # last_updated: 2026-05-20
+# [16-3] 2026-05-20T22:06Z ci-gate → ✓ config-only change, no Go/Elixir code affected — pages job only runs on main
+# [16-3] 2026-05-20T22:05Z dev-story → done (cycle 0) — CI copy step, _meta.yaml architecture nav, .gitignore
+# [16-3] 2026-05-20T22:02Z test-review → CLEAN (infra story, 4 manual verification tests — no code test files to review)
+# [16-3] 2026-05-20T22:01Z atdd → skipped (infra/CI story — manual verification only)
+# [16-3] 2026-05-20T22:00Z pipeline started
+# 16-2 2026-05-20T20:21:01Z epic-loop → story done
 # 16-2 2026-05-20T21:30Z epic-loop → story done
 # [16-2] 2026-05-20T21:30Z committed ✓ (6288f65 — M1+M2 test fixes + landing page + logo SVG + CSS override — arc42 no-change)
 # [16-2] 2026-05-20T21:25Z arc42-update → no arch changes (static website content, no application architecture impact)
@@ -660,8 +666,8 @@
 # [9-22] 2026-05-06T17:50Z code-review → CLEAN cycle 3 (4 MINOR accepted: cosmetic/new)
 # [9-22] 2026-05-06T17:30Z ci-gate → ✓ build+unit-go+unit-elixir+e2e+integration
 # [9-22] 2026-05-06T16:10Z code-review → 2 MAJOR 3 MINOR → cycle 3
-story: "16-2"
-current_step: "test-review"
+story: "16-3"
+current_step: "code-review"
 completed:
   - atdd
   - test-review
@@ -669,4 +675,4 @@ completed:
   - ci-gate
 cycle_count: 0
 blocked_reason: null
-last_updated: "2026-05-20T20:12Z"
+last_updated: "2026-05-20T20:24Z"
