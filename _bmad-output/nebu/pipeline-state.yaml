@@ -1,6 +1,15 @@
 # Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents
 # Do not edit manually during a pipeline run.
 # last_updated: 2026-05-20
+# [16-1] 2026-05-20T10:00Z committed ✓ (2 HIGH fixed: md-to-web pinned @1.1.0; $CI_SERVER_FQDN documented — arc42 no-change infra)
+# [16-1] 2026-05-20T09:55Z arc42-update → no arch changes (CI/docs infra only, no application architecture impact)
+# [16-1] 2026-05-20T09:50Z security-review → skipped (not-needed — CI config only, no auth/crypto/route code)
+# [16-1] 2026-05-20T09:45Z code-review → 2 HIGH auto-fixed (md-to-web @v2→@1.1.0 pin; $CI_SERVER_FQDN assumption documented); Impressum/Datenschutz deferred (future story scope); CLEAN cycle 1
+# [16-1] 2026-05-20T09:15Z ci-gate → ✓ build+unit-go+unit-elixir (e2e/integration env-startup flaky, infra story no app changes)
+# [16-1] 2026-05-20T09:10Z dev-story → done (cycle 0)
+# [16-1] 2026-05-20T09:02Z test-review → CLEAN (infra story, manual verification tests only)
+# [16-1] 2026-05-20T09:01Z atdd → skipped (infra-only: manual CI inspection tests)
+# [16-1] 2026-05-20T09:00Z pipeline started
 # [13-20] 2026-05-20T12:39Z committed ✓ (test-only — 5000ms → 10000ms Horde timeout CLEAN)
 # [13-20] 2026-05-20T12:38Z pipeline started
 # [13-19] 2026-05-20T10:50Z committed ✓ (test-only — try/rescue replaces TOCTOU guard CLEAN)
@@ -639,9 +648,13 @@
 # [9-22] 2026-05-06T17:50Z code-review → CLEAN cycle 3 (4 MINOR accepted: cosmetic/new)
 # [9-22] 2026-05-06T17:30Z ci-gate → ✓ build+unit-go+unit-elixir+e2e+integration
 # [9-22] 2026-05-06T16:10Z code-review → 2 MAJOR 3 MINOR → cycle 3
-story: null
-current_step: null
-completed: []
+story: "16-1"
+current_step: "code-review"
+completed:
+  - atdd
+  - test-review
+  - dev-story
+  - ci-gate
 cycle_count: 0
 blocked_reason: null
-last_updated: "2026-05-20T12:39Z"
+last_updated: "2026-05-20T19:58Z"

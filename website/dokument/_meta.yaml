@@ -1,0 +1,7 @@
+####
+# Navigation configuration for the Nebu website.
+# Key = file/directory name (without extension), value = display settings.
+# Order of entries = order in the sidebar menu.
+####
+index:
+  title: Startseite
