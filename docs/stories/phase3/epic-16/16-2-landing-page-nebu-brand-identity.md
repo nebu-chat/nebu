@@ -1,5 +1,5 @@
 ---
-status: ready-for-dev
+status: done
 epic: 16
 story: 2
 security_review: not-needed
@@ -9,7 +9,7 @@ ui: true
 
 # Story 16.2: Landing Page + Nebu Brand Identity
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
