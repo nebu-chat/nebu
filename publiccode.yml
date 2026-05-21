@@ -2,7 +2,7 @@ publiccodeYmlVersion: "0.4"
 
 name: Nebu
 url: "https://gitlab.opencode.de/nebu/nebu-server"
-landingURL: "https://gitlab.opencode.de/nebu/nebu-server"
+landingURL: "https://nebuchat.eu"
 
 softwareVersion: "0.2.1"
 releaseDate: "2026-05-20"
