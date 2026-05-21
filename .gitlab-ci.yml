@@ -28,7 +28,7 @@
 # To upgrade: change @1.1.0 to the new stable tag after reading release notes.
 
 include:
-  - component: $CI_SERVER_FQDN/open-code/document-writing-tools/document-writing-ci-components/md-to-web@1.1.0
+  - component: $CI_SERVER_FQDN/open-code/document-writing-tools/document-writing-ci-components/md-to-web@v2
     inputs:
       md-path: website/dokument
       document-title: "Nebu"
