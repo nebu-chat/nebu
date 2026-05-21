@@ -49,8 +49,9 @@ pages:
         --output out
         --title "Nebu"
         --theme opencode
-        --copyright "Nebu contributors — Apache 2.0"
+        --copyright "Nebu contributors - Apache 2.0"
         --logo-path "website/dokument/assets/nebu-logo.svg"
+        --copy-to-public-dir "website/dokument/public-extra"
   artifacts:
     paths:
       - out

@@ -116,28 +116,28 @@ job_docs() {
     echo "==> docs (static build → ${REPO_ROOT}/out)"
     _docs_preflight
     _docs_prepare
-    # Mirrors .gitlab-ci.yml pages job (public 2.1.0 — CI used private 1.3.15
-    # from opencode registry which is not available locally and uses old children: API)
     cd "${REPO_ROOT}" && npx --yes @document-writing-tools/markdown-webbook@2.1.0 \
         --input website/dokument \
         --output out \
         --title "Nebu" \
         --theme opencode \
-        --copyright "Nebu contributors — Apache 2.0" \
-        --logo-path ""
+        --copyright "Nebu contributors - Apache 2.0" \
+        --logo-path "website/dokument/assets/nebu-logo.svg" \
+        --copy-to-public-dir "website/dokument/public-extra"
     echo "  Output: ${REPO_ROOT}/out/index.html"
 }
 
 job_docs_watch() {
-    echo "==> docs-watch (dev server — http://localhost:3000)"
+    echo "==> docs-watch (dev server - http://localhost:3000)"
     _docs_preflight
     _docs_prepare
     cd "${REPO_ROOT}" && npx --yes @document-writing-tools/markdown-webbook@2.1.0 \
         --input website/dokument \
         --title "Nebu" \
         --theme opencode \
-        --copyright "Nebu contributors — Apache 2.0" \
-        --logo-path "" \
+        --copyright "Nebu contributors - Apache 2.0" \
+        --logo-path "website/dokument/assets/nebu-logo.svg" \
+        --copy-to-public-dir "website/dokument/public-extra" \
         --watch
 }
 
