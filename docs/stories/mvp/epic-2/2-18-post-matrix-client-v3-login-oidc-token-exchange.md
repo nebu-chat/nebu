@@ -1,4 +1,4 @@
-# Story 2.18: POST /_matrix/client/v3/login — OIDC Token Exchange
+# Story 2.18: POST /_matrix/client/v3/login - OIDC Token Exchange
 
 Status: done
 
@@ -16,7 +16,7 @@ So that I can authenticate with any standard Matrix client using my organisation
 
 2. **Given** the `access_token` in the response,
    **When** used in a subsequent Matrix API request as `Authorization: Bearer <token>`,
-   **Then** it is accepted — the OIDC JWT IS the Matrix access token (stateless validation per request, NFR-S4)
+   **Then** it is accepted - the OIDC JWT IS the Matrix access token (stateless validation per request, NFR-S4)
 
 3. **Given** `POST /login` with an invalid or expired token,
    **When** processed,
@@ -52,9 +52,9 @@ So that I can authenticate with any standard Matrix client using my organisation
 
 ## Dev Notes
 
-### Architecture — Key Design Decision
+### Architecture - Key Design Decision
 
-**Stateless Auth (NFR-S4):** The OIDC JWT IS the Matrix access token. The handler echoes the original JWT back as `access_token`. No session table write, no custom token minting. Every subsequent API request re-validates the JWT against the OIDC provider via JWTMiddleware (Story 2.4). This is the core auth architecture decision — do NOT create session storage.
+**Stateless Auth (NFR-S4):** The OIDC JWT IS the Matrix access token. The handler echoes the original JWT back as `access_token`. No session table write, no custom token minting. Every subsequent API request re-validates the JWT against the OIDC provider via JWTMiddleware (Story 2.4). This is the core auth architecture decision - do NOT create session storage.
 
 **ADR G2:** No token forwarded to Elixir. User identity goes via gRPC metadata (`x-user-id`, `x-system-role`). The `ValidateToken` RPC receives only `display_name` + `email` for provisioning.
 
@@ -70,7 +70,7 @@ type CoreClient interface {
     ValidateToken(ctx context.Context, req *pb.ValidateTokenRequest) (*pb.ValidateTokenResponse, error)
 }
 ```
-Consumer-defined interface — `grpc.Client` already satisfies it. Follows existing pattern: `health.go` uses `coreState` interface for `grpc.Client`.
+Consumer-defined interface - `grpc.Client` already satisfies it. Follows existing pattern: `health.go` uses `coreState` interface for `grpc.Client`.
 
 **1.2 Add fields to LoginHandler:**
 ```go
@@ -152,7 +152,7 @@ func writeMatrixError(w http.ResponseWriter, status int, errcode, message string
     _ = json.NewEncoder(w).Encode(matrixError{ErrCode: errcode, Err: message})
 }
 ```
-Same struct/function signature as `middleware/auth.go` — intentional duplication (unexported in both packages). Future refactoring into shared package is fine but NOT in scope.
+Same struct/function signature as `middleware/auth.go` - intentional duplication (unexported in both packages). Future refactoring into shared package is fine but NOT in scope.
 
 **2.3 Role mapping** (same logic as `middleware.mapRole`):
 ```go
@@ -166,7 +166,7 @@ func mapSystemRole(rawClaim string) string {
 }
 ```
 
-**2.4 Device ID generation** (no new dependency — use crypto/rand):
+**2.4 Device ID generation** (no new dependency - use crypto/rand):
 ```go
 func generateDeviceID() string {
     b := make([]byte, 16)
@@ -178,7 +178,7 @@ func generateDeviceID() string {
 ```
 `gofrs/uuid` is an indirect dep but not worth promoting to direct for one call. Standard `crypto/rand` is sufficient and keeps the dependency graph clean.
 
-**2.5 PostLogin method — complete flow:**
+**2.5 PostLogin method - complete flow:**
 
 ```go
 func (h *LoginHandler) PostLogin(w http.ResponseWriter, r *http.Request) {
@@ -206,7 +206,7 @@ func (h *LoginHandler) PostLogin(w http.ResponseWriter, r *http.Request) {
     verifier := inner.Verifier(&oidc.Config{ClientID: h.clientID})
     idToken, err := verifier.Verify(r.Context(), req.Token)
     if err != nil {
-        // AC: 3 — invalid or expired → 403 M_FORBIDDEN
+        // AC: 3 - invalid or expired → 403 M_FORBIDDEN
         writeMatrixError(w, http.StatusForbidden, "M_FORBIDDEN", "Invalid or expired token")
         return
     }
@@ -237,7 +237,7 @@ func (h *LoginHandler) PostLogin(w http.ResponseWriter, r *http.Request) {
     }
 
     // 7. Return Matrix login response (AC: 1, 2)
-    // access_token = original OIDC JWT (stateless — NFR-S4)
+    // access_token = original OIDC JWT (stateless - NFR-S4)
     resp := LoginTokenResponse{
         AccessToken: req.Token,
         DeviceID:    generateDeviceID(),
@@ -275,14 +275,14 @@ Add after the existing GET route (line 131):
 mux.HandleFunc("POST /_matrix/client/v3/login", loginHandler.PostLogin)
 ```
 
-**CRITICAL:** This route is NOT behind JWTMiddleware. The JWT arrives in the request body, not the Authorization header. This is the login endpoint — users aren't authenticated yet.
+**CRITICAL:** This route is NOT behind JWTMiddleware. The JWT arrives in the request body, not the Authorization header. This is the login endpoint - users aren't authenticated yet.
 
 ### Task 4: Unit Tests
 
 **File:** `gateway/internal/matrix/login_test.go`
 
 **Test infrastructure needed:**
-- Test OIDC server (RSA key signing JWTs) — follow exact pattern from `middleware/auth_test.go`
+- Test OIDC server (RSA key signing JWTs) - follow exact pattern from `middleware/auth_test.go`
 - Mock CoreClient (implements `CoreClient` interface)
 - Test helper to create signed JWTs with custom claims
 
@@ -298,13 +298,13 @@ func (m *mockCoreClient) ValidateToken(ctx context.Context, req *pb.ValidateToke
 }
 ```
 
-**Test OIDC server setup** — reuse the pattern from `middleware/auth_test.go` and `admin/auth_test.go`:
+**Test OIDC server setup** - reuse the pattern from `middleware/auth_test.go` and `admin/auth_test.go`:
 - Create RSA keypair
 - Serve JWKS endpoint at `/.well-known/openid-configuration` and `/keys`
 - Sign test JWTs with the RSA key
 - Create `auth.NewProvider(ctx, server.URL)` pointing to the test server
 
-**Test cases (table-driven — multiple code paths):**
+**Test cases (table-driven - multiple code paths):**
 
 | Test | Input | Expected | AC |
 |------|-------|----------|-----|
@@ -312,24 +312,24 @@ func (m *mockCoreClient) ValidateToken(ctx context.Context, req *pb.ValidateToke
 | Invalid token | `{"type": "m.login.token", "token": "garbage"}` | 403, `M_FORBIDDEN` | 3 |
 | Expired token | `{"type": "m.login.token", "token": "<expired_jwt>"}` | 403, `M_FORBIDDEN` | 3 |
 | Unsupported type | `{"type": "m.login.password", "token": "..."}` | 400, `M_UNKNOWN` | 4 |
-| Malformed JSON | `not-json` | 400, `M_NOT_JSON` | — |
-| Provider unavailable | Valid body but provider.Inner() == nil | 503, `M_UNKNOWN` | — |
+| Malformed JSON | `not-json` | 400, `M_NOT_JSON` | - |
+| Provider unavailable | Valid body but provider.Inner() == nil | 503, `M_UNKNOWN` | - |
 
 **Assertions for the 200 OK case:**
-- `access_token` equals the original JWT (stateless — echoed back)
+- `access_token` equals the original JWT (stateless - echoed back)
 - `device_id` is non-empty and looks like a UUID (contains dashes, 36 chars)
 - `user_id` matches `@<sub>:<server_name>` format
 - `token_type` is `"Bearer"`
 - `Content-Type` is `application/json`
 
-**Testing the OIDC server** — the test OIDC server needs:
+**Testing the OIDC server** - the test OIDC server needs:
 1. A `/.well-known/openid-configuration` endpoint returning `{"issuer": "<url>", "jwks_uri": "<url>/keys", ...}`
 2. A `/keys` endpoint returning the JWKS with the RSA public key
 3. JWT signing with claims: `sub`, `preferred_username`, `email`, `nebu_role`, `aud` (= clientID), `iss` (= server URL), `exp`, `iat`
 
 **Important:** Use `go-jose/v4` for JWT signing in tests (already a direct dependency). Follow the exact JWT creation pattern from `middleware/auth_test.go`.
 
-**Update existing GetLogin test:** The `NewLoginHandler` signature changes (now takes `LoginConfig`). Update `TestGetLogin_ReturnsSSO` to use the new constructor. The test only needs `DisplayName` set — other fields can be zero-valued since `GetLogin` doesn't use them.
+**Update existing GetLogin test:** The `NewLoginHandler` signature changes (now takes `LoginConfig`). Update `TestGetLogin_ReturnsSSO` to use the new constructor. The test only needs `DisplayName` set - other fields can be zero-valued since `GetLogin` doesn't use them.
 
 ### Project Structure Changes
 
@@ -343,24 +343,24 @@ func (m *mockCoreClient) ValidateToken(ctx context.Context, req *pb.ValidateToke
 
 ### Previous Story Intelligence
 
-**From Story 2-17 (GET /login — this file's predecessor):**
-- `LoginHandler` struct pattern established — extend, don't replace
-- `GetLogin` returns static JSON — `PostLogin` does real work but same struct
+**From Story 2-17 (GET /login - this file's predecessor):**
+- `LoginHandler` struct pattern established - extend, don't replace
+- `GetLogin` returns static JSON - `PostLogin` does real work but same struct
 - Test pattern: `httptest.NewRequest` + `httptest.NewRecorder`
-- `Icon *string` for null JSON — pointer-for-null pattern works
+- `Icon *string` for null JSON - pointer-for-null pattern works
 - Route registered directly on `mux`, NOT behind auth middleware
 
 **From Story 2-4 (OIDC JWT Validation Middleware):**
 - `middleware/auth.go` lines 51–101: Full JWT validation flow using `go-oidc` verifier
 - Claims extraction: `idToken.Claims(&allClaims)` then type-assert each field
-- Role mapping: `mapRole()` (unexported) — same logic needed in matrix package
+- Role mapping: `mapRole()` (unexported) - same logic needed in matrix package
 - Provider nil check: `provider.Inner() == nil` → error response
-- Expired token detection: `errors.As(err, &oidc.TokenExpiredError{})` — for PostLogin, we collapse all validation errors to 403 M_FORBIDDEN (AC doesn't distinguish expired vs invalid)
+- Expired token detection: `errors.As(err, &oidc.TokenExpiredError{})` - for PostLogin, we collapse all validation errors to 403 M_FORBIDDEN (AC doesn't distinguish expired vs invalid)
 
 **From Story 2-14 (ValidateToken gRPC Handler):**
-- Proto: `ValidateTokenRequest{DisplayName, Email}` — token is NOT in the request (reserved field 1)
+- Proto: `ValidateTokenRequest{DisplayName, Email}` - token is NOT in the request (reserved field 1)
 - Identity via metadata: `coregrpc.WithUserMetadata(ctx, userID, systemRole)`
-- Elixir trusts Go's validation — no re-validation on core side
+- Elixir trusts Go's validation - no re-validation on core side
 
 **From Story 2-13 (User Provisioning):**
 - `ValidateToken` gRPC call triggers auto-provisioning for new users
@@ -381,11 +381,11 @@ Recent commits show consistent pattern:
 
 ### Architecture Enforcement Rules (Applicable)
 
-1. **Rule #2:** Auth-Token nie an Elixir weitergeben — only `user_id` + `system_role` via gRPC metadata ✓ (PostLogin sends claims via metadata, not the JWT)
-2. **Rule #3:** Matrix-Endpunkte geben Matrix-Format zurück — error responses use `{"errcode": "...", "error": "..."}` ✓
-3. **Rule #4:** Env-Variablen: `NEBU_{COMPONENT}_{KEY}` — no new env vars needed ✓
+1. **Rule #2:** Auth-Token nie an Elixir weitergeben - only `user_id` + `system_role` via gRPC metadata ✓ (PostLogin sends claims via metadata, not the JWT)
+2. **Rule #3:** Matrix-Endpunkte geben Matrix-Format zurück - error responses use `{"errcode": "...", "error": "..."}` ✓
+3. **Rule #4:** Env-Variablen: `NEBU_{COMPONENT}_{KEY}` - no new env vars needed ✓
 4. **Rule #5:** Go table-driven tests for multiple inputs ✓ (PostLogin has 6+ code paths)
-5. **Rule #12:** Secrets via `NEBU_*_FILE` — no new secrets needed ✓
+5. **Rule #12:** Secrets via `NEBU_*_FILE` - no new secrets needed ✓
 
 ### NOT In Scope
 
@@ -397,18 +397,18 @@ Recent commits show consistent pattern:
 
 ### References
 
-- [Source: _bmad-output/planning-artifacts/epics.md#Story 2.18 — OIDC Token Exchange acceptance criteria]
-- [Source: _bmad-output/planning-artifacts/architecture.md — Auth-Token-Flow: Go validates, Elixir trusts, gRPC metadata]
-- [Source: _bmad-output/planning-artifacts/architecture.md — Matrix Error Format: {"errcode": "...", "error": "..."}]
-- [Source: _bmad-output/planning-artifacts/architecture.md — NFR-S4: stateless JWT validation per request]
-- [Source: _bmad-output/planning-artifacts/architecture.md — ADR G2: no token forwarding to Elixir]
-- [Source: gateway/internal/middleware/auth.go — JWT validation pattern with go-oidc verifier]
-- [Source: gateway/internal/grpc/metadata.go — FormatUserID() and WithUserMetadata() helpers]
-- [Source: gateway/internal/grpc/client.go:97-99 — ValidateToken wrapper]
-- [Source: proto/core.proto:102-113 — ValidateTokenRequest/Response with reserved token field]
-- [Source: gateway/internal/matrix/login.go — Current LoginHandler to extend]
-- [Source: gateway/cmd/gateway/main.go:130 — Current NewLoginHandler call site]
-- [Source: gateway/internal/config/config.go — OIDCClientID, OIDCClaimRole, ServerName fields]
+- [Source: _bmad-output/planning-artifacts/epics.md#Story 2.18 - OIDC Token Exchange acceptance criteria]
+- [Source: _bmad-output/planning-artifacts/architecture.md - Auth-Token-Flow: Go validates, Elixir trusts, gRPC metadata]
+- [Source: _bmad-output/planning-artifacts/architecture.md - Matrix Error Format: {"errcode": "...", "error": "..."}]
+- [Source: _bmad-output/planning-artifacts/architecture.md - NFR-S4: stateless JWT validation per request]
+- [Source: _bmad-output/planning-artifacts/architecture.md - ADR G2: no token forwarding to Elixir]
+- [Source: gateway/internal/middleware/auth.go - JWT validation pattern with go-oidc verifier]
+- [Source: gateway/internal/grpc/metadata.go - FormatUserID() and WithUserMetadata() helpers]
+- [Source: gateway/internal/grpc/client.go:97-99 - ValidateToken wrapper]
+- [Source: proto/core.proto:102-113 - ValidateTokenRequest/Response with reserved token field]
+- [Source: gateway/internal/matrix/login.go - Current LoginHandler to extend]
+- [Source: gateway/cmd/gateway/main.go:130 - Current NewLoginHandler call site]
+- [Source: gateway/internal/config/config.go - OIDCClientID, OIDCClaimRole, ServerName fields]
 
 ## Dev Agent Record
 
@@ -421,17 +421,17 @@ Claude Opus 4.6 (1M context)
 ### Completion Notes List
 
 - All 4 tasks completed: LoginHandler extended with CoreClient interface, PostLogin handler implemented with full OIDC token exchange flow, POST route registered in main.go, 7 table-driven unit tests (valid token, invalid token, expired token, unsupported type, malformed JSON, provider unavailable, gRPC failure) all passing
-- Stateless auth design (NFR-S4): OIDC JWT echoed back as access_token — no session storage
+- Stateless auth design (NFR-S4): OIDC JWT echoed back as access_token - no session storage
 - ADR G2 enforced: token NOT forwarded to Elixir, only user_id + system_role via gRPC metadata
 - Matrix error format used for all error responses (errcode + error)
-- Existing GetLogin test updated for new LoginConfig constructor — no regression
+- Existing GetLogin test updated for new LoginConfig constructor - no regression
 
 ### Change Log
 
-- 2026-03-30: Implemented POST /_matrix/client/v3/login — OIDC token exchange with stateless auth, user provisioning via ValidateToken gRPC, table-driven tests
+- 2026-03-30: Implemented POST /_matrix/client/v3/login - OIDC token exchange with stateless auth, user provisioning via ValidateToken gRPC, table-driven tests
 
 ### File List
 
-- gateway/internal/matrix/login.go (MODIFIED) — CoreClient interface, LoginConfig, LoginHandler extension, PostLogin handler, writeMatrixError, mapSystemRole, generateDeviceID
-- gateway/internal/matrix/login_test.go (MODIFIED) — Updated GetLogin test constructor, added TestPostLogin with 7 table-driven test cases, mock CoreClient, OIDC test server
-- gateway/cmd/gateway/main.go (MODIFIED) — Updated NewLoginHandler to LoginConfig, registered POST /_matrix/client/v3/login route
+- gateway/internal/matrix/login.go (MODIFIED) - CoreClient interface, LoginConfig, LoginHandler extension, PostLogin handler, writeMatrixError, mapSystemRole, generateDeviceID
+- gateway/internal/matrix/login_test.go (MODIFIED) - Updated GetLogin test constructor, added TestPostLogin with 7 table-driven test cases, mock CoreClient, OIDC test server
+- gateway/cmd/gateway/main.go (MODIFIED) - Updated NewLoginHandler to LoginConfig, registered POST /_matrix/client/v3/login route

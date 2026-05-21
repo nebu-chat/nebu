@@ -1,6 +1,6 @@
 ---
 story_id: 8-11
-title: "Full-Stack Acceptance Test — Nebu Happy Path (Bootstrap → Chat → Group Chat)"
+title: "Full-Stack Acceptance Test - Nebu Happy Path (Bootstrap → Chat → Group Chat)"
 type: feature
 severity: critical
 epic: 8
@@ -11,10 +11,10 @@ created: 2026-05-01
 
 ## Summary
 
-Vor dem **Public Release** (Story 8.10) muss ein **gesamt Abnahme-Test** beweisen, dass die **komplette Nebu-Plattform** — von Bootstrap Wizard bis hinunter zum multi-user Group Chat — in der live `docker compose`-Stack funktioniert.
+Vor dem **Public Release** (Story 8.10) muss ein **gesamt Abnahme-Test** beweisen, dass die **komplette Nebu-Plattform** - von Bootstrap Wizard bis hinunter zum multi-user Group Chat - in der live `docker compose`-Stack funktioniert.
 
 Dieser Test kombiniert:
-1. **Alle existierenden programmierten Tests** (Go unit, Elixir ExUnit, Godog Gherkin, Playwright unit specs) als **Regression-Suite** — alle müssen grün sein.
+1. **Alle existierenden programmierten Tests** (Go unit, Elixir ExUnit, Godog Gherkin, Playwright unit specs) als **Regression-Suite** - alle müssen grün sein.
 2. Einen **neuen Playwright Click-Through Test**, der den **vollständigen End-to-End-Happy-Path** als menschlicher Nutzer nachstellt: **Bootstrap → Admin Dashboard → SSO Login (Element Web) → Neuen Chat erstellen → Nachricht senden → Neue Chatgruppe erstellen → Group Chat Message**.
 
 **Output:** Eine einzelne Playwright-Suite `e2e/tests/features/acceptance/full-stack-acceptance.spec.ts` + ein CI-gate `make test-acceptance` das vor Story 8.10 blockiert.
@@ -220,31 +220,31 @@ e2e/
 
 ```
 full-stack-acceptance.spec.ts
-├── @smoke tag — runs in < 3 min after pre-seeded DB
+├── @smoke tag - runs in < 3 min after pre-seeded DB
 ├── test.describe("Full-Stack Acceptance: Nebu Happy Path")
-│   ├── test.beforeAll() — stack health check (postgres, gateway, dex, element)
-│   ├── test("Flow 1: Admin Bootstrap Wizard") — ~30s
-│   ├── test("Flow 2: Admin Dashboard + Navigation") — ~15s
-│   ├── test("Flow 3: SSO Login as End-User (Element Web)") — ~20s
-│   ├── test("Flow 4: Create New Chat (1:1 DM)") — ~15s
-│   ├── test("Flow 5: Create New Group Chat (3+ members)") — ~20s
-│   ├── test("Flow 6: Admin Audit Log Entry") — ~10s
-│   └── test.afterAll() — cleanup + state snapshot
+│   ├── test.beforeAll() - stack health check (postgres, gateway, dex, element)
+│   ├── test("Flow 1: Admin Bootstrap Wizard") - ~30s
+│   ├── test("Flow 2: Admin Dashboard + Navigation") - ~15s
+│   ├── test("Flow 3: SSO Login as End-User (Element Web)") - ~20s
+│   ├── test("Flow 4: Create New Chat (1:1 DM)") - ~15s
+│   ├── test("Flow 5: Create New Group Chat (3+ members)") - ~20s
+│   ├── test("Flow 6: Admin Audit Log Entry") - ~10s
+│   └── test.afterAll() - cleanup + state snapshot
 └── test.describe("Regression: All Existing E2E Specs")
     └── (run all e2e/tests/features/** via npx playwright test --grep-invert "smoke")
 ```
 
 ### Key Design Decisions
 
-1. **Sequenzielle Flows, keine parallelen Tests** — Der Happy-Path ist ein **einzelner zusammenhängender Nutzer-Journey**. Flows müssen sequenziell laufen (Flow 1 → Flow 2 → ... → Flow 6).
+1. **Sequenzielle Flows, keine parallelen Tests** - Der Happy-Path ist ein **einzelner zusammenhängender Nutzer-Journey**. Flows müssen sequenziell laufen (Flow 1 → Flow 2 → ... → Flow 6).
 
-2. **Element Web als Test-Ziel** — Chat-Tests laufen gegen Element Web (localhost:7070), nicht gegen Matrix API. Das simulierte echtes Nutzerverhalten.
+2. **Element Web als Test-Ziel** - Chat-Tests laufen gegen Element Web (localhost:7070), nicht gegen Matrix API. Das simulierte echtes Nutzerverhalten.
 
-3. **Multi-Context Pattern** — Für DM/Group-Chat Tests: mehrere Browser-Contexts (alex, marie, kai) für multi-user-Szenarien.
+3. **Multi-Context Pattern** - Für DM/Group-Chat Tests: mehrere Browser-Contexts (alex, marie, kai) für multi-user-Szenarien.
 
-4. **DB Reset zwischen Flows** — Flow 1 (Bootstrap) benötigt fresh DB State. Flow 5 (Group Chat) benötigt mindestens 3 provisionierte Users.
+4. **DB Reset zwischen Flows** - Flow 1 (Bootstrap) benötigt fresh DB State. Flow 5 (Group Chat) benötigt mindestens 3 provisionierte Users.
 
-5. **Auto-skip Guards** — Jeder Flow prüft vorher Erreichbarkeit von Dex + Element + Postgres.
+5. **Auto-skip Guards** - Jeder Flow prüft vorher Erreichbarkeit von Dex + Element + Postgres.
 
 ---
 
@@ -596,11 +596,11 @@ test-acceptance:
 
 ## Dependencies
 
-- **Epic 5** (Admin UI Bootstrap) — Bootstrap Wizard muss completed sein
-- **Epic 6** (Admin API) — Admin Dashboard + Users + Rooms must be functional
-- **Epic 7** (Matrix API) — Chat, Rooms, Sync must work
-- **Story 4-29** (Matrix Client-Server API) — End-User Features must be implemented
-- **Existing E2E Tests** — Alle existierenden E2E Specs müssen bereits grün sein
+- **Epic 5** (Admin UI Bootstrap) - Bootstrap Wizard muss completed sein
+- **Epic 6** (Admin API) - Admin Dashboard + Users + Rooms must be functional
+- **Epic 7** (Matrix API) - Chat, Rooms, Sync must work
+- **Story 4-29** (Matrix Client-Server API) - End-User Features must be implemented
+- **Existing E2E Tests** - Alle existierenden E2E Specs müssen bereits grün sein
 
 ---
 

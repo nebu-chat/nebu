@@ -5,7 +5,7 @@ security_review: required
 created: 2026-04-30
 ---
 
-# Story 7.16e: Bugfix — audit_log_purge SECURITY DEFINER Elevation greift nicht
+# Story 7.16e: Bugfix - audit_log_purge SECURITY DEFINER Elevation greift nicht
 
 Status: ready-for-dev
 
@@ -19,9 +19,9 @@ so that `TestAuditLogPurge_AppRoleCanCallSecurityDefiner` grün wird und abgelau
 
 **Failure:**
 ```
-role_separation_test.go:337: AC6 FAIL: audit_log_purge returned deleted=0, want >= 1 —
+role_separation_test.go:337: AC6 FAIL: audit_log_purge returned deleted=0, want >= 1 -
   the expired row was not deleted (SECURITY DEFINER elevation may be missing or function owner cannot bypass RLS)
-role_separation_test.go:350: AC6 FAIL: seeded row still present after audit_log_purge (count=1) —
+role_separation_test.go:350: AC6 FAIL: seeded row still present after audit_log_purge (count=1) -
   SECURITY DEFINER elevation not effective
 ```
 
@@ -29,7 +29,7 @@ role_separation_test.go:350: AC6 FAIL: seeded row still present after audit_log_
 
 `audit_log_purge` ist als `SECURITY DEFINER`-Funktion definiert, damit `nebu_app` (ohne BYPASSRLS) die Funktion aufruft, die Funktion aber mit den Rechten des Funktions-Owners ausgeführt wird. Allerdings:
 
-1. **Falscher Funktions-Owner:** Wenn die Funktion `nebu_app` gehört (statt `nebu_migrate` oder einem User mit `BYPASSRLS`), hat sie keine Rechte, Rows durch FORCE RLS zu löschen. `SECURITY DEFINER` bedeutet: die Funktion läuft mit den Rechten des **Owners** — und wenn der Owner keine BYPASSRLS-Berechtigung hat, scheitert auch die Funktion.
+1. **Falscher Funktions-Owner:** Wenn die Funktion `nebu_app` gehört (statt `nebu_migrate` oder einem User mit `BYPASSRLS`), hat sie keine Rechte, Rows durch FORCE RLS zu löschen. `SECURITY DEFINER` bedeutet: die Funktion läuft mit den Rechten des **Owners** - und wenn der Owner keine BYPASSRLS-Berechtigung hat, scheitert auch die Funktion.
 
 2. **Fehlende `BYPASSRLS`-Berechtigung für den Funktions-Owner:** Story 5.29a setzte `BYPASSRLS` auf `nebu_migrate`. Die `audit_log_purge`-Funktion muss entweder `nebu_migrate` (mit BYPASSRLS) als Owner haben, oder der Owner braucht explizit `SET ROLE nebu_migrate` im Funktionskörper.
 
@@ -60,12 +60,12 @@ role_separation_test.go:350: AC6 FAIL: seeded row still present after audit_log_
 
 ### Tests written FIRST (before implementation code):
 
-1. [Integration: TestAuditLogPurge_AppRoleCanCallSecurityDefiner] — Go integration (existierender Test)
+1. [Integration: TestAuditLogPurge_AppRoleCanCallSecurityDefiner] - Go integration (existierender Test)
    - Given: 1 abgelaufene Row in audit_log (expires_at in der Vergangenheit)
    - When: `SELECT audit_log_purge(...)` als nebu_app
    - Then: deleted >= 1, Row gelöscht
 
-2. [Integration: TestAppRole_CannotDeleteAuditLog] — Go integration (existierend, Regression-Guard)
+2. [Integration: TestAppRole_CannotDeleteAuditLog] - Go integration (existierend, Regression-Guard)
    - Given: audit_log hat Rows
    - When: direktes `DELETE FROM audit_log` als nebu_app
    - Then: SQLSTATE 42501 permission denied (unverändert)
@@ -73,7 +73,7 @@ role_separation_test.go:350: AC6 FAIL: seeded row still present after audit_log_
 ## Implementation Notes
 
 **Dateien:**
-- `gateway/migrations/` — neue Migration (nächste Nummer nach aktuellem Stand) mit:
+- `gateway/migrations/` - neue Migration (nächste Nummer nach aktuellem Stand) mit:
   ```sql
   ALTER FUNCTION audit_log_purge(interval) OWNER TO nebu_migrate;
   ```

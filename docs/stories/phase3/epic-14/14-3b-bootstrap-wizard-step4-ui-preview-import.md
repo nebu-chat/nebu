@@ -7,7 +7,7 @@ matrix: false
 ui: true
 ---
 
-# Story 14.3b: Bootstrap Wizard Step 4 UI — Preview + Import
+# Story 14.3b: Bootstrap Wizard Step 4 UI - Preview + Import
 
 Status: ready-for-dev
 
@@ -24,28 +24,28 @@ So that I can pre-provision all users during the initial setup without leaving t
 
 ## Acceptance Criteria
 
-**AC1 — Step 4 displayed:**
+**AC1 - Step 4 displayed:**
 Given the Bootstrap Wizard renders,
 When the admin reaches Step 4 (after Claim Mapping OIDC redirect completes),
 Then the "User Import" step is displayed with an "Import from OIDC" button.
 
-**AC2 — Preview table on button click:**
+**AC2 - Preview table on button click:**
 Given the admin is on Step 4,
 When the admin clicks "Import from OIDC",
 When the OIDC user list is fetched via OIDCDirectoryService (story 14.2b),
 Then a preview table is shown with: display name, email, and computed Matrix User ID for each user.
 
-**AC3 — Import all/selected triggers API:**
+**AC3 - Import all/selected triggers API:**
 Given the preview table is shown,
 When the admin clicks "Import all" (or "Import selected"),
 Then `POST /api/v1/admin/bootstrap/import-users` is called and the result (imported/skipped/failed counts) is displayed.
 
-**AC4 — Disabled button when provider does not support listing:**
+**AC4 - Disabled button when provider does not support listing:**
 Given the OIDC directory service is disabled or the provider does not expose a user list endpoint,
 When the wizard renders Step 4,
 Then the "Import from OIDC" button is disabled and a message reads: "Provider does not support user listing".
 
-**AC5 — Playwright+Gherkin scenarios pass:**
+**AC5 - Playwright+Gherkin scenarios pass:**
 Given a Playwright+Gherkin scenario in `e2e/features/admin/bootstrap_import.feature`,
 When `make test-integration` runs,
 Then the scenarios "wizard step 4 displayed", "preview table loaded", and "import button clicked" pass.
@@ -56,37 +56,37 @@ Then the scenarios "wizard step 4 displayed", "preview table loaded", and "impor
 
 ### Tests written FIRST (before implementation code):
 
-1. **AT-1 — Step 4 rendered** — Go httptest (unit)
+1. **AT-1 - Step 4 rendered** - Go httptest (unit)
    - Given: BootstrapHandler with OIDC dir enabled
    - When: GET /admin/bootstrap (or wizard step flow reaches step 4)
    - Then: response body contains "User Import" heading and "Import from OIDC" button
 
-2. **AT-2 — Preview fetch returns table** — Go httptest (unit)
+2. **AT-2 - Preview fetch returns table** - Go httptest (unit)
    - Given: POST /api/v1/admin/bootstrap/preview-users with mock OIDCDirectoryService returning 3 users
    - When: handler processes the request
    - Then: JSON response contains 3 user objects with display_name, email, matrix_user_id fields
 
-3. **AT-3 — Import API called with correct payload** — Go httptest (unit)
+3. **AT-3 - Import API called with correct payload** - Go httptest (unit)
    - Given: POST /api/v1/admin/bootstrap/import-users with mock BulkImportUsers gRPC client
    - When: handler processes the request with user list
    - Then: BulkImportUsers gRPC is called; response JSON has imported/skipped/failed counts
 
-4. **AT-4 — Disabled button when OIDC dir disabled** — Go httptest (unit)
+4. **AT-4 - Disabled button when OIDC dir disabled** - Go httptest (unit)
    - Given: BootstrapHandler with OIDCDirectoryService.IsEnabled() = false
    - When: Step 4 renders
    - Then: "Import from OIDC" button has disabled attribute; message "Provider does not support user listing"
 
-5. **AT-5 — Playwright+Gherkin: wizard step 4 displayed** — e2e/features/admin/bootstrap_import.feature
+5. **AT-5 - Playwright+Gherkin: wizard step 4 displayed** - e2e/features/admin/bootstrap_import.feature
    - Given: admin is at bootstrap step 4
    - When: page loads
    - Then: "User Import" heading visible; "Import from OIDC" button present
 
-6. **AT-6 — Playwright+Gherkin: preview table loaded** — e2e/features/admin/bootstrap_import.feature
+6. **AT-6 - Playwright+Gherkin: preview table loaded** - e2e/features/admin/bootstrap_import.feature
    - Given: mock/stub OIDC users available
    - When: "Import from OIDC" clicked
    - Then: preview table with at least one row visible
 
-7. **AT-7 — Playwright+Gherkin: import button clicked** — e2e/features/admin/bootstrap_import.feature
+7. **AT-7 - Playwright+Gherkin: import button clicked** - e2e/features/admin/bootstrap_import.feature
    - Given: preview table loaded
    - When: "Import all" clicked
    - Then: result section with counts (imported/skipped/failed) visible
@@ -98,10 +98,10 @@ Then the scenarios "wizard step 4 displayed", "preview table loaded", and "impor
 ### What's Done in Previous Stories
 
 **Story 14.2b (gateway/internal/admin/oidc_directory.go):**
-- `OIDCDirectoryService` — `FetchUsers(ctx) ([]OIDCDirectoryUser, error)`
-- `OIDCDirectoryUser` — `{Sub, DisplayName, Email}`
-- `IsEnabled() bool` — reports if OIDC directory is configured
-- `Allow(sessionID string) bool` — rate limiter
+- `OIDCDirectoryService` - `FetchUsers(ctx) ([]OIDCDirectoryUser, error)`
+- `OIDCDirectoryUser` - `{Sub, DisplayName, Email}`
+- `IsEnabled() bool` - reports if OIDC directory is configured
+- `Allow(sessionID string) bool` - rate limiter
 - Cache 30s, singleflight, 10MB cap, HTTPS-only
 
 **Story 14.3a (Core gRPC):**
@@ -117,7 +117,7 @@ Then the scenarios "wizard step 4 displayed", "preview table loaded", and "impor
 - Steps 1–3: Instance Name → OIDC Config → Claim Mapping
 - Step 3 redirects to OIDC login: `http.Redirect(w, r, "/admin/login/start?mode=bootstrap", http.StatusSeeOther)`
 - After OIDC callback: `ClaimSelectionHandler` in `auth.go` finalises bootstrap and sets `bootstrap_completed`
-- **Step 4 does not exist yet** — this story adds it
+- **Step 4 does not exist yet** - this story adds it
 
 The bootstrap flow after this story:
 1. Step 1: Instance Name → Next
@@ -194,7 +194,7 @@ ImportError          string              // non-empty on fetch/import error
 - Returns JSON: `{"imported":N,"skipped":N,"failed":N}`
 - On gRPC error: 502 with `{"error":"core unavailable"}`
 
-**Design note:** Keep it simple — import-users re-fetches users from OIDC dir (cache hit after preview), builds OIDCUserClaims from configured claims, then calls BulkImportUsers. No session storage needed.
+**Design note:** Keep it simple - import-users re-fetches users from OIDC dir (cache hit after preview), builds OIDCUserClaims from configured claims, then calls BulkImportUsers. No session storage needed.
 
 ### Template Changes (gateway/internal/admin/templates/bootstrap.html)
 
@@ -215,7 +215,7 @@ ImportError          string              // non-empty on fetch/import error
    - Result banner (shown when `.ImportResult != nil`)
    - "Skip and finish" link → `/admin/dashboard`
 
-**Implementation approach for Step 4 (no HTMX — use simple form POSTs):**
+**Implementation approach for Step 4 (no HTMX - use simple form POSTs):**
 
 Since the Admin UI uses Go templates without HTMX, implement Step 4 as two sub-steps via the standard form pattern:
 - Sub-step 4a: Show "Import from OIDC" button → POST /admin/bootstrap (step=4, action=preview) → re-render step 4 with preview table
@@ -297,9 +297,9 @@ For `system_role`: always use `"user"` for bulk import (per Story 14.3a spec).
 | `gateway/internal/admin/bootstrap.go` | Add `BulkImportClient` interface; extend `BootstrapHandler` with `oidcDir`, `core`, `serverName`; add `WithImportServices` method; add `case 4:` in `StepHandler` |
 | `gateway/internal/admin/templates/bootstrap.html` | Update steps to 4; add `{{ if eq .Step 4 }}` block |
 | `gateway/internal/admin/auth.go` | Change claim-selection redirect from `/admin/dashboard` to `/admin/bootstrap?step=4` |
-| `gateway/internal/admin/bootstrap_import_test.go` | **New file** — unit tests AT-1..AT-4 |
-| `e2e/features/admin/bootstrap_import.feature` | **New file** — Gherkin scenarios AT-5..AT-7 |
-| `e2e/step-definitions/admin/bootstrap_import.steps.ts` | **New file** — step definitions for AT-5..AT-7 |
+| `gateway/internal/admin/bootstrap_import_test.go` | **New file** - unit tests AT-1..AT-4 |
+| `e2e/features/admin/bootstrap_import.feature` | **New file** - Gherkin scenarios AT-5..AT-7 |
+| `e2e/step-definitions/admin/bootstrap_import.steps.ts` | **New file** - step definitions for AT-5..AT-7 |
 
 ### Step Handler Case 4 Logic
 
@@ -341,7 +341,7 @@ case 4:
 
 ### Back Navigation
 
-Step 4 back button should redirect to `/admin/dashboard` (bootstrap complete, cannot undo). OR go back to step 3 template view. Given that step 3 already triggered OIDC, going back to step 3 doesn't make sense — omit a Back button on step 4, only provide "Skip and finish" and "Import" actions.
+Step 4 back button should redirect to `/admin/dashboard` (bootstrap complete, cannot undo). OR go back to step 3 template view. Given that step 3 already triggered OIDC, going back to step 3 doesn't make sense - omit a Back button on step 4, only provide "Skip and finish" and "Import" actions.
 
 ### E2E Test Approach (Playwright+Gherkin)
 
@@ -369,7 +369,7 @@ func (f *fakeBulkImportClient) BulkImportUsers(_ context.Context, _ *pb.BulkImpo
 }
 ```
 
-### BootstrapHandler GET — Step 4 Query Param
+### BootstrapHandler GET - Step 4 Query Param
 
 Modify the `Handler` (GET) method to check for `?step=4`:
 ```go
@@ -396,15 +396,15 @@ Story key for sprint-status.yaml: `14-3b-bootstrap-wizard-step4-ui-preview-impor
 
 ## Dev Notes
 
-- Do NOT use HTMX — the Admin UI is plain Go templates with standard form POSTs.
-- Keep Step 4 within the existing `BootstrapHandler` — no new handler struct required.
+- Do NOT use HTMX - the Admin UI is plain Go templates with standard form POSTs.
+- Keep Step 4 within the existing `BootstrapHandler` - no new handler struct required.
 - `BulkImportClient` interface must match `CoreServiceClient.BulkImportUsers` signature exactly (including `...grpc.CallOption` variadic).
-- The `mockCoreClient` in `auth_audit_test.go` has a `BulkImportUsers` panic stub — do not rely on it; define `fakeBulkImportClient` separately in the new test file.
-- `sanitizeOIDCSub` is package-internal (lowercase `s`) in `users.go` — accessible from `bootstrap.go` since both are in `package admin`.
+- The `mockCoreClient` in `auth_audit_test.go` has a `BulkImportUsers` panic stub - do not rely on it; define `fakeBulkImportClient` separately in the new test file.
+- `sanitizeOIDCSub` is package-internal (lowercase `s`) in `users.go` - accessible from `bootstrap.go` since both are in `package admin`.
 - For E2E tests: Step 4 is only reachable after bootstrap completes, so E2E scenarios must either use `doBootstrapAdmin()` or mark themselves as requiring a pre-bootstrapped instance.
-- The preview API does NOT need to be a separate REST endpoint — embedding the logic in `StepHandler case 4:` via `action=preview` is sufficient and follows existing patterns.
+- The preview API does NOT need to be a separate REST endpoint - embedding the logic in `StepHandler case 4:` via `action=preview` is sufficient and follows existing patterns.
 - `auth.go` redirect change: find the line that does `http.Redirect(w, r, "/admin/dashboard", http.StatusSeeOther)` inside `ClaimSelectionHandler` after saving bootstrap config. Change to `/admin/bootstrap?step=4`.
-- Claim mapping is saved in `server_config` after the OIDC callback — `oidc_user_id_claim`, `oidc_displayname_claim`, `oidc_email_claim`. For BulkImportUsers, read these from the DB (via `draftStore.LoadDraft` or direct DB query).
+- Claim mapping is saved in `server_config` after the OIDC callback - `oidc_user_id_claim`, `oidc_displayname_claim`, `oidc_email_claim`. For BulkImportUsers, read these from the DB (via `draftStore.LoadDraft` or direct DB query).
 
 ---
 
@@ -415,8 +415,8 @@ Story key for sprint-status.yaml: `14-3b-bootstrap-wizard-step4-ui-preview-impor
 - [ ] `StepHandler` handles `case 4:` with `action=preview` and `action=import`
 - [ ] `bootstrap.html` template updated: 4-step indicator + Step 4 block
 - [ ] `auth.go` `ClaimSelectionHandler` redirects to `/admin/bootstrap?step=4` instead of `/admin/dashboard`
-- [ ] `bootstrap_import_test.go` — AT-1..AT-4 all green
-- [ ] `e2e/features/admin/bootstrap_import.feature` — 3 Gherkin scenarios
-- [ ] `e2e/step-definitions/admin/bootstrap_import.steps.ts` — step definitions
+- [ ] `bootstrap_import_test.go` - AT-1..AT-4 all green
+- [ ] `e2e/features/admin/bootstrap_import.feature` - 3 Gherkin scenarios
+- [ ] `e2e/step-definitions/admin/bootstrap_import.steps.ts` - step definitions
 - [ ] `make test-unit-go` passes
 - [ ] `make test-integration` passes (E2E gate)

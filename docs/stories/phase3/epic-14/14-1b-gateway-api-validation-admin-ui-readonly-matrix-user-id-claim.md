@@ -24,22 +24,22 @@ So that admins receive immediate, actionable feedback without needing to underst
 
 ## Acceptance Criteria
 
-**AC1 — API 400 on post-bootstrap claim change:**
+**AC1 - API 400 on post-bootstrap claim change:**
 Given bootstrap has been completed (`bootstrap_completed` key IS NOT NULL in `server_config`),
 When `PATCH /api/v1/admin/config` is called with a `matrix_user_id_claim` value,
 Then the server returns `400 M_FORBIDDEN` with `error: "matrix_user_id_claim cannot be changed after bootstrap"` (mapped from Core's `FAILED_PRECONDITION` gRPC status code 9)
 
-**AC2 — Admin UI read-only display after bootstrap:**
+**AC2 - Admin UI read-only display after bootstrap:**
 Given an admin navigates to the Claim Mapping settings page (`GET /admin/config/claim-mapping`) after bootstrap,
 When the page loads,
 Then `matrix_user_id_claim` (`oidc_user_id_claim` field) is displayed as read-only text (not an editable `<input>`) and an info banner reads: "This claim cannot be changed after bootstrap."
 
-**AC3 — Bootstrap Wizard info text (Step 3):**
+**AC3 - Bootstrap Wizard info text (Step 3):**
 Given the Bootstrap Wizard Step 3 (Claim Mapping), rendered in `bootstrap.html`,
-When it renders (always, regardless of bootstrap status — it renders pre-bootstrap),
+When it renders (always, regardless of bootstrap status - it renders pre-bootstrap),
 Then an info text is shown: "The Matrix User ID claim cannot be changed after completing setup."
 
-**AC4 — Godog integration test:**
+**AC4 - Godog integration test:**
 Given a Godog scenario in `gateway/features/claim_lock.feature`,
 When `make test-integration` runs,
 Then:
@@ -52,7 +52,7 @@ Then:
 
 ### Tests written FIRST (before implementation code):
 
-**1. Go unit test: `TestPatchAdminConfig_MatrixUserIDClaim_PostBootstrap_Returns400` — ExUnit**
+**1. Go unit test: `TestPatchAdminConfig_MatrixUserIDClaim_PostBootstrap_Returns400` - ExUnit**
 Location: `gateway/internal/api/config_handler_test.go`
 - Given: `mockServerConfigRepository` that reports `bootstrap_completed = "true"` via `GetBootstrapCompleted` (or the repository is extended to return this flag)
 - When: `PATCH /api/v1/admin/config` with body `{"matrix_user_id_claim": "email"}`
@@ -60,14 +60,14 @@ Location: `gateway/internal/api/config_handler_test.go`
 - And: response body JSON contains `"errcode": "M_FORBIDDEN"` and `"error"` field containing `"matrix_user_id_claim cannot be changed after bootstrap"`
 - And: `UpsertServerConfigKey` was NOT called
 
-**2. Go unit test: `TestPatchAdminConfig_MatrixUserIDClaim_PreBootstrap_Returns200` — ExUnit**
+**2. Go unit test: `TestPatchAdminConfig_MatrixUserIDClaim_PreBootstrap_Returns200` - ExUnit**
 Location: `gateway/internal/api/config_handler_test.go`
 - Given: `mockServerConfigRepository` that reports no `bootstrap_completed` (pre-bootstrap)
 - When: `PATCH /api/v1/admin/config` with body `{"matrix_user_id_claim": "preferred_username"}`
 - Then: response status is 200
 - And: gRPC `UpdateServerConfig` was called with `MatrixUserIdClaim: "preferred_username"`
 
-**3. Go unit test: `TestClaimMappingHandler_GetPostBootstrap_ShowsReadOnly` — httptest**
+**3. Go unit test: `TestClaimMappingHandler_GetPostBootstrap_ShowsReadOnly` - httptest**
 Location: `gateway/internal/admin/claim_mapping_handler_test.go`
 - Given: `recordingServerConfigReader.LoadServerConfigKey("bootstrap_completed")` returns `"true"`
 - When: `GET /admin/config/claim-mapping` is called
@@ -75,16 +75,16 @@ Location: `gateway/internal/admin/claim_mapping_handler_test.go`
 - And: response body does NOT contain `name="oidc_user_id_claim"` (no editable input)
 - And: response body contains `"This claim cannot be changed after bootstrap"` (info banner)
 
-**4. Go unit test: `TestClaimMappingHandler_GetPreBootstrap_ShowsEditableInput` — httptest**
+**4. Go unit test: `TestClaimMappingHandler_GetPreBootstrap_ShowsEditableInput` - httptest**
 Location: `gateway/internal/admin/claim_mapping_handler_test.go`
 - Given: `LoadServerConfigKey("bootstrap_completed")` returns `"", sql.ErrNoRows` (pre-bootstrap)
 - When: `GET /admin/config/claim-mapping` is called
 - Then: response body contains `name="oidc_user_id_claim"` (editable input present)
 
-**5. Go unit test: `TestBootstrapHandler_Step3_ShowsInfoText` — httptest**
+**5. Go unit test: `TestBootstrapHandler_Step3_ShowsInfoText` - httptest**
 Location: `gateway/internal/admin/bootstrap_wizard_test.go` (new file or existing)
 - Given: Bootstrap Wizard Step 3 is rendered
-- When: handler renders the template (any state of bootstrap — step 3 is always pre-bootstrap)
+- When: handler renders the template (any state of bootstrap - step 3 is always pre-bootstrap)
 - Then: response body contains `"The Matrix User ID claim cannot be changed after completing setup"`
 
 **6. Godog integration test: `claim_lock.feature` (2 scenarios)**
@@ -105,12 +105,12 @@ Location: `gateway/features/claim_lock.feature`
   - [ ] Add `patchAdminConfig400ForbiddenResp` response type implementing `PatchAdminConfigResponseObject`
   - [ ] Write unit tests (AT#1 and AT#2)
 - [ ] Task 2: Extend `ClaimMappingHandler` to detect bootstrap state and show read-only UI (AC2)
-  - [ ] `ServerConfigReader.LoadServerConfigKey` already exists — no interface change needed
+  - [ ] `ServerConfigReader.LoadServerConfigKey` already exists - no interface change needed
   - [ ] In `ClaimMappingHandler.Handler` (GET), call `h.configReader.LoadServerConfigKey(ctx, "bootstrap_completed")`; if non-empty, set `BootstrapCompleted: true` on `ClaimMappingPageData`
   - [ ] Add `BootstrapCompleted bool` field to `ClaimMappingPageData` in `page_data.go`
   - [ ] Update `claim-mapping.html` template: conditionally render read-only text (not input) for `oidc_user_id_claim` when `BootstrapCompleted` is true, with info banner
   - [ ] Keep editable inputs for `oidc_displayname_claim` and `oidc_email_claim` (only the user-ID claim is locked)
-  - [ ] Block the POST handler: if post-bootstrap and `oidc_user_id_claim` field changed, forward to gRPC call which will return FAILED_PRECONDITION — the UI should not even show the form, but the handler must be robust
+  - [ ] Block the POST handler: if post-bootstrap and `oidc_user_id_claim` field changed, forward to gRPC call which will return FAILED_PRECONDITION - the UI should not even show the form, but the handler must be robust
   - [ ] Write unit tests (AT#3 and AT#4)
 - [ ] Task 3: Add info text to Bootstrap Wizard Step 3 template (AC3)
   - [ ] Update `gateway/internal/admin/templates/bootstrap.html` Step 3 section
@@ -120,8 +120,8 @@ Location: `gateway/features/claim_lock.feature`
   - [ ] Create `gateway/features/claim_lock.feature` with 2 scenarios
   - [ ] Implement step definitions (reuse existing patterns from `claim_mapping.feature`)
 - [ ] Task 5: Run test suites
-  - [ ] `make test-unit-go` — all unit tests pass
-  - [ ] `make test-integration` — `claim_lock.feature` scenarios pass
+  - [ ] `make test-unit-go` - all unit tests pass
+  - [ ] `make test-integration` - `claim_lock.feature` scenarios pass
 
 ---
 
@@ -135,7 +135,7 @@ The Core `UpdateServerConfig` gRPC RPC already returns `GRPC.Status.failed_preco
 
 **Current state of `PatchAdminConfig`** (line 92 in `server.go`):
 - Handles: `instance_name`, `oidc_issuer`, `oidc_client_id`, `oidc_client_secret`, `audit_log_retention_days`
-- All fields go through `s.ServerConfig.UpsertServerConfigKey()` — the handler writes directly to DB
+- All fields go through `s.ServerConfig.UpsertServerConfigKey()` - the handler writes directly to DB
 - `matrix_user_id_claim` must go through Core gRPC (`s.CoreClient.UpdateServerConfig`) because Core owns the bootstrap-lock logic
 
 **New logic to add in `PatchAdminConfig`:**
@@ -162,7 +162,7 @@ if body.MatrixUserIdClaim != nil && *body.MatrixUserIdClaim != "" {
 
 **New response type needed** (follow existing pattern of `patchAdminConfig400Resp`):
 ```go
-// patchAdminConfig400ForbiddenResp — 400 M_FORBIDDEN for post-bootstrap claim lock.
+// patchAdminConfig400ForbiddenResp - 400 M_FORBIDDEN for post-bootstrap claim lock.
 type patchAdminConfig400ForbiddenResp struct{ msg string }
 
 func (r *patchAdminConfig400ForbiddenResp) VisitPatchAdminConfigResponse(w http.ResponseWriter) error {
@@ -237,7 +237,7 @@ Replace the `oidc_user_id_claim` input field block with a conditional:
 {{ end }}
 ```
 
-**The POST handler** (`UpdateHandler`): When `BootstrapCompleted` is true, the template does not render the editable input, so `oidc_user_id_claim` will be absent from the POST body. The handler should use the existing loaded value if the field is empty — or ideally, if the form is posted without the field, the SaveClaimMapping call will use the value from `LoadClaimMapping` for that field. However, the cleanest approach: if bootstrap is complete, reject any attempt to change `oidc_user_id_claim` at the handler level too (defense in depth). Load `bootstrap_completed` in `UpdateHandler` as well; if set and `oidc_user_id_claim` form field differs from DB, return 422 with a message.
+**The POST handler** (`UpdateHandler`): When `BootstrapCompleted` is true, the template does not render the editable input, so `oidc_user_id_claim` will be absent from the POST body. The handler should use the existing loaded value if the field is empty - or ideally, if the form is posted without the field, the SaveClaimMapping call will use the value from `LoadClaimMapping` for that field. However, the cleanest approach: if bootstrap is complete, reject any attempt to change `oidc_user_id_claim` at the handler level too (defense in depth). Load `bootstrap_completed` in `UpdateHandler` as well; if set and `oidc_user_id_claim` form field differs from DB, return 422 with a message.
 
 ### AC3 Implementation: Bootstrap Wizard Step 3 template (`bootstrap.html`)
 
@@ -258,11 +258,11 @@ Note: This info text is ALWAYS shown in the wizard (wizard always runs pre-boots
 
 Pattern: follow `claim_mapping.feature` and `admin_api.feature`. The test needs:
 1. A forged admin session cookie (existing helper)
-2. A way to control whether bootstrap is completed — use the existing "bootstrap is complete and server_config is seeded" step + a direct DB insert to set `bootstrap_completed`
+2. A way to control whether bootstrap is completed - use the existing "bootstrap is complete and server_config is seeded" step + a direct DB insert to set `bootstrap_completed`
 3. A PATCH request to `/api/v1/admin/config` with JSON body `{"matrix_user_id_claim": "email"}`
 
 ```gherkin
-Feature: Claim Lock — matrix_user_id_claim cannot be changed after bootstrap
+Feature: Claim Lock - matrix_user_id_claim cannot be changed after bootstrap
   As an instance admin
   I want the API to reject changes to matrix_user_id_claim after bootstrap
   So that Matrix User IDs remain stable for all existing users
@@ -320,7 +320,7 @@ This is consistent with Matrix spec error format (flat, not nested `error.code`)
 
 ### gRPC imports in `server.go`
 
-Check if `google.golang.org/grpc/codes` and `google.golang.org/grpc/status` are already imported. Look at the top of `gateway/internal/api/server.go` — these imports exist in `gateway/internal/admin/config.go` (line 10-11). Add to `server.go` if not present.
+Check if `google.golang.org/grpc/codes` and `google.golang.org/grpc/status` are already imported. Look at the top of `gateway/internal/api/server.go` - these imports exist in `gateway/internal/admin/config.go` (line 10-11). Add to `server.go` if not present.
 
 ### File structure: what to touch
 
@@ -336,12 +336,12 @@ Check if `google.golang.org/grpc/codes` and `google.golang.org/grpc/status` are 
 | `gateway/internal/admin/claim_mapping_handler_test.go` | UPDATE | Add AT#3 + AT#4 unit tests |
 | `gateway/features/claim_lock.feature` | NEW | Godog integration test (AC4) |
 
-**Do NOT create new Go handler files** — all changes are additions to existing files.
+**Do NOT create new Go handler files** - all changes are additions to existing files.
 
 ### Test patterns from codebase
 
 **Mock for bootstrap state detection in API unit tests** (follow `mockServerConfigRepository`):
-The `mockServerConfigRepository` needs a new method or field to simulate the bootstrap state for the gRPC path. In the API path, `matrix_user_id_claim` goes through `s.CoreClient.UpdateServerConfig` — so the mock needs a `mockCoreClientForConfig` that returns `FailedPrecondition` to simulate post-bootstrap:
+The `mockServerConfigRepository` needs a new method or field to simulate the bootstrap state for the gRPC path. In the API path, `matrix_user_id_claim` goes through `s.CoreClient.UpdateServerConfig` - so the mock needs a `mockCoreClientForConfig` that returns `FailedPrecondition` to simulate post-bootstrap:
 ```go
 func (m *mockCoreClientForConfig) UpdateServerConfig(
     _ context.Context,
@@ -368,9 +368,9 @@ func (r *recordingServerConfigReader) LoadServerConfigKey(_ context.Context, key
 
 ### Preserve existing behavior
 
-- All other claim fields (`oidc_displayname_claim`, `oidc_email_claim`) remain editable after bootstrap — only `matrix_user_id_claim` / `oidc_user_id_claim` is locked
+- All other claim fields (`oidc_displayname_claim`, `oidc_email_claim`) remain editable after bootstrap - only `matrix_user_id_claim` / `oidc_user_id_claim` is locked
 - The existing warning banner in `claim-mapping.html` ("Identity stability warning: Changing Matrix User ID Source Claim...") should be REPLACED by the info banner when bootstrap is completed (lock is active), or remain when bootstrap is NOT completed
-- POST handler for claim-mapping must NOT call `SaveClaimMapping` for `oidc_user_id_claim` when bootstrap is complete — best approach: keep the existing DB value for that field when `BootstrapCompleted` is true
+- POST handler for claim-mapping must NOT call `SaveClaimMapping` for `oidc_user_id_claim` when bootstrap is complete - best approach: keep the existing DB value for that field when `BootstrapCompleted` is true
 - Existing tests in `claim_mapping_handler_test.go` MUST continue to pass (they use pre-bootstrap state by default since `recordingServerConfigReader.LoadServerConfigKey` returns `""`)
 
 ### Sprint Status Key
@@ -402,20 +402,20 @@ None.
 - ATDD tests added: AT#1+AT#2 in `config_handler_test.go`, AT#3+AT#4 in `claim_mapping_handler_test.go`, AT#5 in `bootstrap_wizard_test.go`
 - Integration test: `gateway/features/claim_lock.feature` + `claim_lock_steps_test.go` (2 scenarios)
 - Code review MINOR-2 fixed inline: post-bootstrap UpdateHandler now aborts on `LoadClaimMapping` error
-- Security review: 0 CRITICAL, 0 HIGH, 1 LOW advisory (no API-level format validation on claim value — admin-only, acceptable for MVP)
+- Security review: 0 CRITICAL, 0 HIGH, 1 LOW advisory (no API-level format validation on claim value - admin-only, acceptable for MVP)
 
 ### File List
 
-- `gateway/api/openapi.yaml` — added `matrix_user_id_claim` to `PatchAdminConfigRequest`
-- `gateway/internal/api/api_gen.go` — regenerated (MatrixUserIdClaim field added)
-- `gateway/internal/api/server.go` — gRPC path for matrix_user_id_claim + patchAdminConfig400ForbiddenResp
-- `gateway/internal/api/config_handler_test.go` — AT#1 + AT#2 + UpdateServerConfig mock
-- `gateway/internal/admin/page_data.go` — BootstrapCompleted bool on ClaimMappingPageData
-- `gateway/internal/admin/claim_mapping.go` — bootstrap detection in Handler + UpdateHandler defense
-- `gateway/internal/admin/templates/claim-mapping.html` — conditional read-only display
-- `gateway/internal/admin/templates/bootstrap.html` — Step 3 info text
-- `gateway/internal/admin/claim_mapping_handler_test.go` — AT#3 + AT#4
-- `gateway/internal/admin/bootstrap_wizard_test.go` — AT#5
-- `gateway/features/claim_lock.feature` — Godog integration test (2 scenarios)
-- `gateway/test/integration/claim_lock_steps_test.go` — step definitions
-- `gateway/test/integration/steps_test.go` — registered initializeClaimLockSteps
+- `gateway/api/openapi.yaml` - added `matrix_user_id_claim` to `PatchAdminConfigRequest`
+- `gateway/internal/api/api_gen.go` - regenerated (MatrixUserIdClaim field added)
+- `gateway/internal/api/server.go` - gRPC path for matrix_user_id_claim + patchAdminConfig400ForbiddenResp
+- `gateway/internal/api/config_handler_test.go` - AT#1 + AT#2 + UpdateServerConfig mock
+- `gateway/internal/admin/page_data.go` - BootstrapCompleted bool on ClaimMappingPageData
+- `gateway/internal/admin/claim_mapping.go` - bootstrap detection in Handler + UpdateHandler defense
+- `gateway/internal/admin/templates/claim-mapping.html` - conditional read-only display
+- `gateway/internal/admin/templates/bootstrap.html` - Step 3 info text
+- `gateway/internal/admin/claim_mapping_handler_test.go` - AT#3 + AT#4
+- `gateway/internal/admin/bootstrap_wizard_test.go` - AT#5
+- `gateway/features/claim_lock.feature` - Godog integration test (2 scenarios)
+- `gateway/test/integration/claim_lock_steps_test.go` - step definitions
+- `gateway/test/integration/steps_test.go` - registered initializeClaimLockSteps

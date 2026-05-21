@@ -1,8 +1,8 @@
-# Story 12.7 Security Review — 2026-05-12
+# Story 12.7 Security Review - 2026-05-12
 
 ## Scope
 
-- Story: 12.7 — Media Gateway Security Hardening (SEC Gate 2 Fixes)
+- Story: 12.7 - Media Gateway Security Hardening (SEC Gate 2 Fixes)
 - Reviewer: Kassandra (adversarial security, per-story gate)
 - Diff: `git diff --staged` (story 12.7 changes only)
 - Review trigger: `security_review: required` (story is itself a security fix)
@@ -19,23 +19,23 @@ Full adversarial review of the staged changes against the security scope in `ref
 
 ## Detail
 
-### Finding #1 — OIDC fail-open on startup [LOW / Advisory]
+### Finding #1 - OIDC fail-open on startup [LOW / Advisory]
 
-**Location:** `media/cmd/media/main.go` — OIDC provider initialization block.
+**Location:** `media/cmd/media/main.go` - OIDC provider initialization block.
 
 **What the code does:**
 
 ```go
 oidcProvider, err := oidc.NewProvider(ctx, oidcIssuer)
 if err != nil {
-    slog.Warn("media: OIDC provider unavailable — upload JWT validation disabled until resolved", ...)
+    slog.Warn("media: OIDC provider unavailable - upload JWT validation disabled until resolved", ...)
     // Falls back to MVP bearer-presence check
 }
 ```
 
 **Risk:** If Dex is temporarily unavailable when the media gateway starts, uploads will not be JWT-validated until the gateway is restarted. An operator who does not monitor WARN logs could miss this.
 
-**Why acceptable:** This is the identical pattern used by the API gateway (same codebase, same team). The media gateway is not the primary auth surface — it operates behind the API gateway in normal Matrix client flows. The Warn log is visible in `docker compose logs media`. A production hardening would add periodic OIDC provider health-check retries (deferred to Epic 13).
+**Why acceptable:** This is the identical pattern used by the API gateway (same codebase, same team). The media gateway is not the primary auth surface - it operates behind the API gateway in normal Matrix client flows. The Warn log is visible in `docker compose logs media`. A production hardening would add periodic OIDC provider health-check retries (deferred to Epic 13).
 
 **Severity: LOW** (same as gateway's existing behaviour).
 
@@ -61,8 +61,8 @@ if err != nil {
 CRITICAL: 0
 HIGH: 0
 MEDIUM: 0
-LOW: 1 (advisory — OIDC fail-open at startup; same pattern as gateway; acceptable)
+LOW: 1 (advisory - OIDC fail-open at startup; same pattern as gateway; acceptable)
 
-**Security gate: CLEAN** — story 12.7 may be committed.
+**Security gate: CLEAN** - story 12.7 may be committed.
 
 All SEC Gate 2 findings (3 HIGH, 3 MEDIUM, 5 LOW) from `epic-12-security-review-2026-05-12.md` are correctly remediated. No new vulnerabilities introduced by this story.

@@ -14,7 +14,7 @@ so that every route is automatically wired to its handler and access is restrict
 
 ## Acceptance Criteria
 
-1. `gateway/internal/api/server.go` already defines `AdminServer` — it continues to exist unchanged; all operations still return `501 Not Implemented` (unimplemented stubs remain; this story only wires routing, not real handler logic)
+1. `gateway/internal/api/server.go` already defines `AdminServer` - it continues to exist unchanged; all operations still return `501 Not Implemented` (unimplemented stubs remain; this story only wires routing, not real handler logic)
 
 2. `gateway/internal/api/middleware.go` contains `RequireRole(role string) func(http.Handler) http.Handler`:
    - Reads `ContextKeySystemRole` from the request context (populated by the existing `JWTMiddleware` in `gateway/internal/middleware/auth.go`)
@@ -24,13 +24,13 @@ so that every route is automatically wired to its handler and access is restrict
 
 3. `gateway/internal/api/router.go` exports `RegisterAdminRoutes(mux *http.ServeMux, adminServer *AdminServer, jwtMW func(http.Handler) http.Handler)`:
    - Creates a `StrictHandler` via `NewStrictHandler(adminServer, nil)` (no strict middleware needed)
-   - Registers all routes by calling `HandlerFromMuxWithBaseURL(strictHandler, mux, "/api/v1")` — this wires all operations from the generated spec to `mux`
+   - Registers all routes by calling `HandlerFromMuxWithBaseURL(strictHandler, mux, "/api/v1")` - this wires all operations from the generated spec to `mux`
    - Routes requiring `instance_admin`: `/api/v1/admin/*` group
    - Routes requiring `compliance_officer`: `/api/v1/compliance/*` group
    - `GET /api/v1/health` is unauthenticated (no JWT, no role check)
-   - Role middleware is applied as: `jwtMW(RequireRole("instance_admin")(handler))` — JWT validates first, then role is checked
+   - Role middleware is applied as: `jwtMW(RequireRole("instance_admin")(handler))` - JWT validates first, then role is checked
 
-4. `gateway/cmd/gateway/main.go` calls `api.RegisterAdminRoutes(mux, &api.AdminServer{}, jwtMiddleware)` after existing route registrations, replacing the manually-registered `GET /api/v1/openapi.yaml` handler (which is now covered by the generated router) — **but keep the `openapi.yaml` handler separate since it is unauthenticated and not in the generated spec's protected group**
+4. `gateway/cmd/gateway/main.go` calls `api.RegisterAdminRoutes(mux, &api.AdminServer{}, jwtMiddleware)` after existing route registrations, replacing the manually-registered `GET /api/v1/openapi.yaml` handler (which is now covered by the generated router) - **but keep the `openapi.yaml` handler separate since it is unauthenticated and not in the generated spec's protected group**
 
 5. All Admin API routes are mounted under `/api/v1/` alongside the existing Matrix routes (same port `:8008`, no conflict)
 
@@ -46,22 +46,22 @@ so that every route is automatically wired to its handler and access is restrict
 
 ### Tests written FIRST (before implementation code):
 
-1. **No JWT context → 401** — Go unit test (`net/http/httptest`)
+1. **No JWT context → 401** - Go unit test (`net/http/httptest`)
    - Given: request context has no `ContextKeySystemRole` value (empty string)
    - When: `RequireRole("instance_admin")(nextHandler)` handles the request
    - Then: status 401, body contains `"M_MISSING_TOKEN"`, `nextHandler` is NOT called
 
-2. **Wrong role → 403** — Go unit test
+2. **Wrong role → 403** - Go unit test
    - Given: request context has `ContextKeySystemRole = "user"` (set by `JWTMiddleware`)
    - When: `RequireRole("instance_admin")(nextHandler)` handles the request
    - Then: status 403, body contains `"M_FORBIDDEN"`, `nextHandler` is NOT called
 
-3. **Correct role → handler called** — Go unit test
+3. **Correct role → handler called** - Go unit test
    - Given: request context has `ContextKeySystemRole = "instance_admin"`
    - When: `RequireRole("instance_admin")(nextHandler)` handles the request
    - Then: status 200, `nextHandler.ServeHTTP` was called exactly once
 
-4. **Cross-role rejection** — Go unit test
+4. **Cross-role rejection** - Go unit test
    - Given: request context has `ContextKeySystemRole = "instance_admin"`
    - When: `RequireRole("compliance_officer")(nextHandler)` handles the request
    - Then: status 403, body contains `"M_FORBIDDEN"`
@@ -84,15 +84,15 @@ so that every route is automatically wired to its handler and access is restrict
 - [x] Create `gateway/internal/api/router.go` (AC: #3, #5)
   - [x] Define `RegisterAdminRoutes(mux *http.ServeMux, adminServer *AdminServer, jwtMW func(http.Handler) http.Handler)`
   - [x] Create strict handler: `sh := NewStrictHandler(adminServer, nil)`
-  - [x] Register all routes via explicit `mux.Handle` calls with per-route middleware (Option B from Dev Notes — more explicit and testable than `HandlerFromMuxWithBaseURL` without middleware support)
-  - [x] Middleware order: `jwtMW(RequireRole(role)(http.HandlerFunc(sh.Method)))` — JWT outermost
+  - [x] Register all routes via explicit `mux.Handle` calls with per-route middleware (Option B from Dev Notes - more explicit and testable than `HandlerFromMuxWithBaseURL` without middleware support)
+  - [x] Middleware order: `jwtMW(RequireRole(role)(http.HandlerFunc(sh.Method)))` - JWT outermost
 
 - [x] Update `gateway/cmd/gateway/main.go` (AC: #4)
   - [x] Call `apihandler.RegisterAdminRoutes(mux, &apihandler.AdminServer{}, jwtMiddleware)` after `GET /api/v1/openapi.yaml`
   - [x] Keep the `GET /api/v1/openapi.yaml` registration as-is (unauthenticated, separate from role-gated routes)
   - [x] Removed the manual `GET /api/v1/compliance/access-requests` registration to avoid ServeMux duplicate-pattern panic (Go 1.22+)
 
-- [x] Run `make test-unit-go` — all tests must pass green (AC: #7)
+- [x] Run `make test-unit-go` - all tests must pass green (AC: #7)
 
 ## Dev Notes
 
@@ -100,14 +100,14 @@ so that every route is automatically wired to its handler and access is restrict
 
 | Item | Current State | This Story's Action |
 |---|---|---|
-| `gateway/internal/api/server.go` | EXISTS — `AdminServer` stub, all methods return 501 | **READ ONLY** — do not modify |
-| `gateway/internal/api/api_gen.go` | EXISTS — generated; has `HandlerFromMuxWithBaseURL`, `NewStrictHandler`, `StdHTTPServerOptions` | **READ ONLY** — never edit |
-| `gateway/internal/api/response.go` | EXISTS — `APIResponse[T]`, `Meta`, `APIError`, `WriteJSON`, `ErrorResponse` | **READ ONLY** |
-| `gateway/internal/api/pagination.go` | EXISTS — `EncodeCursor`, `DecodeCursor`, `ErrInvalidCursor` | **READ ONLY** |
+| `gateway/internal/api/server.go` | EXISTS - `AdminServer` stub, all methods return 501 | **READ ONLY** - do not modify |
+| `gateway/internal/api/api_gen.go` | EXISTS - generated; has `HandlerFromMuxWithBaseURL`, `NewStrictHandler`, `StdHTTPServerOptions` | **READ ONLY** - never edit |
+| `gateway/internal/api/response.go` | EXISTS - `APIResponse[T]`, `Meta`, `APIError`, `WriteJSON`, `ErrorResponse` | **READ ONLY** |
+| `gateway/internal/api/pagination.go` | EXISTS - `EncodeCursor`, `DecodeCursor`, `ErrInvalidCursor` | **READ ONLY** |
 | `gateway/internal/api/middleware.go` | MISSING | **CREATE** |
 | `gateway/internal/api/router.go` | MISSING | **CREATE** |
 | `gateway/internal/api/middleware_test.go` | MISSING | **CREATE** |
-| `gateway/cmd/gateway/main.go` | EXISTS — registers routes manually | **MODIFY** (add `RegisterAdminRoutes` call only) |
+| `gateway/cmd/gateway/main.go` | EXISTS - registers routes manually | **MODIFY** (add `RegisterAdminRoutes` call only) |
 
 ### Critical: Role Check Implementation Pattern
 
@@ -123,7 +123,7 @@ if systemRole != "compliance_officer" {
 
 `RequireRole` is the reusable, middleware-wrapped version of this same pattern. Import `github.com/nebu/nebu/internal/middleware` to access `middleware.ContextKeySystemRole`.
 
-**Error response format:** Admin API uses the Admin response format (`{"errcode": "...", "error": "..."}` — same as Matrix error format, NOT the Admin envelope `{"data": null, "error": {...}}`). This is consistent with how existing compliance handlers respond to 401/403 (they use `writeComplianceError` which writes Matrix-style errors). The 401/403 responses from middleware are not Admin API business responses — they are HTTP-layer auth rejections. Use the Matrix error format for consistency with existing middleware patterns.
+**Error response format:** Admin API uses the Admin response format (`{"errcode": "...", "error": "..."}` - same as Matrix error format, NOT the Admin envelope `{"data": null, "error": {...}}`). This is consistent with how existing compliance handlers respond to 401/403 (they use `writeComplianceError` which writes Matrix-style errors). The 401/403 responses from middleware are not Admin API business responses - they are HTTP-layer auth rejections. Use the Matrix error format for consistency with existing middleware patterns.
 
 **401 trigger condition:** The `ContextKeySystemRole` value is an empty string `""` when no JWT is present (the context key has a zero value if `JWTMiddleware` wasn't run). So empty string = unauthenticated. Check: `if systemRole == ""` → 401.
 
@@ -145,31 +145,31 @@ Option A (simplest): Register routes via `HandlerFromMuxWithBaseURL` into a **su
 
 Option B (most explicit): Do NOT use `HandlerFromMuxWithBaseURL`. Instead use `NewStrictHandler` to get the `ServerInterface`, then manually register each route on `mux` with the appropriate middleware chain. This is explicit and gives full control.
 
-**Use Option B** — it matches the story AC exactly ("registers all routes by calling `RegisterHandlersWithBaseURL`" but with middleware). However, since the generated `HandlerFromMuxWithBaseURL` has no per-route middleware injection, the simplest correct implementation is:
+**Use Option B** - it matches the story AC exactly ("registers all routes by calling `RegisterHandlersWithBaseURL`" but with middleware). However, since the generated `HandlerFromMuxWithBaseURL` has no per-route middleware injection, the simplest correct implementation is:
 
 ```go
 // router.go
 func RegisterAdminRoutes(mux *http.ServeMux, adminServer *AdminServer, jwtMW func(http.Handler) http.Handler) {
     sh := NewStrictHandler(adminServer, nil)
 
-    // /api/v1/health — unauthenticated (no JWT, no role)
+    // /api/v1/health - unauthenticated (no JWT, no role)
     mux.HandleFunc("GET /api/v1/health", sh.GetHealth)
 
-    // /api/v1/admin/* — instance_admin role required
+    // /api/v1/admin/* - instance_admin role required
     adminMW := jwtMW(RequireRole("instance_admin")(http.HandlerFunc(sh.GetAdminConfig)))
     mux.Handle("GET /api/v1/admin/config", jwtMW(RequireRole("instance_admin")(http.HandlerFunc(sh.GetAdminConfig))))
     mux.Handle("GET /api/v1/admin/metrics", jwtMW(RequireRole("instance_admin")(http.HandlerFunc(sh.GetAdminMetrics))))
     mux.Handle("GET /api/v1/admin/rooms", jwtMW(RequireRole("instance_admin")(http.HandlerFunc(sh.ListAdminRooms))))
     mux.Handle("GET /api/v1/admin/users", jwtMW(RequireRole("instance_admin")(http.HandlerFunc(sh.ListAdminUsers))))
 
-    // /api/v1/compliance/* — compliance_officer role required
+    // /api/v1/compliance/* - compliance_officer role required
     mux.Handle("GET /api/v1/compliance/access-requests", jwtMW(RequireRole("compliance_officer")(http.HandlerFunc(sh.ListComplianceAccessRequests))))
 }
 ```
 
 This approach is clear, consistent with existing route registrations in `main.go`, and does not fight against the generated code.
 
-**IMPORTANT:** `sh.GetAdminConfig` etc. are methods on `*strictHandler` (private type) — they implement `ServerInterface`. To call them as `http.HandlerFunc`, you need to use the `ServerInterface` methods directly. Since `NewStrictHandler` returns `ServerInterface`, use:
+**IMPORTANT:** `sh.GetAdminConfig` etc. are methods on `*strictHandler` (private type) - they implement `ServerInterface`. To call them as `http.HandlerFunc`, you need to use the `ServerInterface` methods directly. Since `NewStrictHandler` returns `ServerInterface`, use:
 
 ```go
 sh := NewStrictHandler(adminServer, nil)
@@ -182,7 +182,7 @@ The `RequireRole` middleware writes errors directly. Use `encoding/json` inline 
 - 401: `{"errcode":"M_MISSING_TOKEN","error":"Missing access token"}` (matches `writeMatrixError` in `middleware/auth.go`)
 - 403: `{"errcode":"M_FORBIDDEN","error":"instance_admin role required"}` (role name inserted)
 
-Do NOT use `WriteJSON` from `response.go` with `APIResponse` wrapper — that is for business responses, not auth gate responses.
+Do NOT use `WriteJSON` from `response.go` with `APIResponse` wrapper - that is for business responses, not auth gate responses.
 
 Define a private helper in `middleware.go`:
 
@@ -202,29 +202,29 @@ Module path: `github.com/nebu/nebu` (from `gateway/go.mod`). Package declaration
 
 ### Route Conflict Prevention
 
-`HandlerFromMuxWithBaseURL` also registers `GET /api/v1/health` on the provided mux. If `main.go` calls both `apihandler.RegisterAdminRoutes` and has any `GET /api/v1/health` registration, there will be a panic (`http.ServeMux` panics on duplicate patterns in Go 1.22+). **Do NOT register `GET /api/v1/health` elsewhere** — `RegisterAdminRoutes` owns it.
+`HandlerFromMuxWithBaseURL` also registers `GET /api/v1/health` on the provided mux. If `main.go` calls both `apihandler.RegisterAdminRoutes` and has any `GET /api/v1/health` registration, there will be a panic (`http.ServeMux` panics on duplicate patterns in Go 1.22+). **Do NOT register `GET /api/v1/health` elsewhere** - `RegisterAdminRoutes` owns it.
 
 The existing `GET /api/v1/openapi.yaml` handler registered manually in `main.go` is NOT defined in `openapi.yaml` as a path, so it does NOT conflict with the generated registration.
 
 ### Existing Route Coexistence
 
 `main.go` currently registers these `/api/v1/*` routes manually:
-- `POST /api/v1/compliance/access-requests` — compliance handler
-- `GET /api/v1/compliance/access-requests` — compliance handler (via `accessRequestHandler.GetAccessRequests`)
-- `POST /api/v1/compliance/access-requests/{requestId}/approve` — compliance handler
-- `POST /api/v1/compliance/access-requests/{requestId}/reject` — compliance handler
-- `POST /api/v1/compliance/access-requests/{requestId}/session` — session handler
-- `GET /api/v1/compliance/export` — export handler
-- `POST /api/v1/admin/compliance/sessions/{sessionId}/revoke` — revoke handler
-- `DELETE /api/v1/admin/users/{userId}/keys` — key deletion handler
-- `POST /api/v1/admin/users/{userId}/anonymize` — anonymization handler
-- `GET /api/v1/openapi.yaml` — openapi handler
+- `POST /api/v1/compliance/access-requests` - compliance handler
+- `GET /api/v1/compliance/access-requests` - compliance handler (via `accessRequestHandler.GetAccessRequests`)
+- `POST /api/v1/compliance/access-requests/{requestId}/approve` - compliance handler
+- `POST /api/v1/compliance/access-requests/{requestId}/reject` - compliance handler
+- `POST /api/v1/compliance/access-requests/{requestId}/session` - session handler
+- `GET /api/v1/compliance/export` - export handler
+- `POST /api/v1/admin/compliance/sessions/{sessionId}/revoke` - revoke handler
+- `DELETE /api/v1/admin/users/{userId}/keys` - key deletion handler
+- `POST /api/v1/admin/users/{userId}/anonymize` - anonymization handler
+- `GET /api/v1/openapi.yaml` - openapi handler
 
 **The generated router registers `GET /api/v1/compliance/access-requests`.** This CONFLICTS with `accessRequestHandler.GetAccessRequests` already registered in `main.go`.
 
-Resolution: The generated `GET /api/v1/compliance/access-requests` should **replace** the existing manual registration. When `RegisterAdminRoutes` is called, remove the manual `GET /api/v1/compliance/access-requests` registration from `main.go` (it is now handled by the generated stub returning `501` — consistent with the story's intent).
+Resolution: The generated `GET /api/v1/compliance/access-requests` should **replace** the existing manual registration. When `RegisterAdminRoutes` is called, remove the manual `GET /api/v1/compliance/access-requests` registration from `main.go` (it is now handled by the generated stub returning `501` - consistent with the story's intent).
 
-**All other existing routes are fine** — they use HTTP methods or path segments not present in the generated spec (POST, DELETE, paths with `{requestId}` etc.).
+**All other existing routes are fine** - they use HTTP methods or path segments not present in the generated spec (POST, DELETE, paths with `{requestId}` etc.).
 
 ### Testing Pattern (matches Stories 6.1 and 6.2)
 
@@ -253,7 +253,7 @@ func TestRequireRole_MissingToken_Returns401(t *testing.T) {
     handler := api.RequireRole("instance_admin")(next)
 
     req := httptest.NewRequest("GET", "/api/v1/admin/users", nil)
-    // No context value for ContextKeySystemRole — simulates missing JWT
+    // No context value for ContextKeySystemRole - simulates missing JWT
     w := httptest.NewRecorder()
     handler.ServeHTTP(w, req)
 
@@ -285,45 +285,45 @@ func TestRequireRole_WrongRole_Returns403(t *testing.T) {
 }
 ```
 
-Note: `middleware.ContextKeySystemRole` is typed as `contextKey` (private type in `middleware` package). Use it directly via the exported constant — Go type system handles this correctly since the test imports `middleware`.
+Note: `middleware.ContextKeySystemRole` is typed as `contextKey` (private type in `middleware` package). Use it directly via the exported constant - Go type system handles this correctly since the test imports `middleware`.
 
 ### Security Review Note
 
-`security_review: required` — this story creates the role-auth middleware that gates all Admin API endpoints. The `RequireRole` function is a security-critical path: a bug here (e.g., empty string considered a valid role, or early return path skipping the check) could allow unauthorized access to all admin operations. The reviewer must verify:
+`security_review: required` - this story creates the role-auth middleware that gates all Admin API endpoints. The `RequireRole` function is a security-critical path: a bug here (e.g., empty string considered a valid role, or early return path skipping the check) could allow unauthorized access to all admin operations. The reviewer must verify:
 - Empty string `systemRole` → 401, not 403 and not pass-through
 - Middleware wrapping order in `RegisterAdminRoutes`: JWT runs before role check (JWTMiddleware populates `ContextKeySystemRole`, so it must wrap outer)
-- All `/api/v1/admin/*` routes require `instance_admin` — none are accidentally unauthenticated
+- All `/api/v1/admin/*` routes require `instance_admin` - none are accidentally unauthenticated
 - `GET /api/v1/health` is intentionally unauthenticated (documented in spec as `security: []`)
 
 ### Project Structure Notes
 
 **Files to CREATE:**
-- `gateway/internal/api/middleware.go` — `RequireRole` middleware
-- `gateway/internal/api/middleware_test.go` — 4 unit tests
-- `gateway/internal/api/router.go` — `RegisterAdminRoutes`
+- `gateway/internal/api/middleware.go` - `RequireRole` middleware
+- `gateway/internal/api/middleware_test.go` - 4 unit tests
+- `gateway/internal/api/router.go` - `RegisterAdminRoutes`
 
 **Files to MODIFY:**
-- `gateway/cmd/gateway/main.go` — add `RegisterAdminRoutes` call; remove conflicting `GET /api/v1/compliance/access-requests` manual registration
+- `gateway/cmd/gateway/main.go` - add `RegisterAdminRoutes` call; remove conflicting `GET /api/v1/compliance/access-requests` manual registration
 
 **Files NOT to touch:**
-- `gateway/internal/api/api_gen.go` — generated; never edit
-- `gateway/internal/api/server.go` — AdminServer stub; Stories 6.4+ will extend
-- `gateway/internal/api/openapi_handler.go` — unchanged
-- `gateway/internal/api/response.go` — unchanged
-- `gateway/internal/api/pagination.go` — unchanged
-- `gateway/api/openapi.yaml` — no new paths needed
-- `Makefile` — no changes needed
+- `gateway/internal/api/api_gen.go` - generated; never edit
+- `gateway/internal/api/server.go` - AdminServer stub; Stories 6.4+ will extend
+- `gateway/internal/api/openapi_handler.go` - unchanged
+- `gateway/internal/api/response.go` - unchanged
+- `gateway/internal/api/pagination.go` - unchanged
+- `gateway/api/openapi.yaml` - no new paths needed
+- `Makefile` - no changes needed
 
 ### References
 
 - [Source: epics.md#Story-6.3] Full Acceptance Criteria (lines 2698–2717)
-- [Source: epics.md#Story-6.6] `role_overrides` table — Story 6.3 AC says to check JWT `roles` claim AND `role_overrides` table; **however Story 6.6 creates the `role_overrides` table** — this story's middleware only reads `ContextKeySystemRole` from context (JWT-derived). Role override integration is deferred to Story 6.6.
-- [Source: gateway/internal/api/api_gen.go] `HandlerFromMuxWithBaseURL`, `NewStrictHandler`, `StdHTTPServerOptions`, `ServerInterface` — the exact generated function signatures this story uses
-- [Source: gateway/internal/middleware/auth.go] `ContextKeySystemRole`, `JWTMiddleware`, `writeMatrixError` — established JWT middleware and context key
+- [Source: epics.md#Story-6.6] `role_overrides` table - Story 6.3 AC says to check JWT `roles` claim AND `role_overrides` table; **however Story 6.6 creates the `role_overrides` table** - this story's middleware only reads `ContextKeySystemRole` from context (JWT-derived). Role override integration is deferred to Story 6.6.
+- [Source: gateway/internal/api/api_gen.go] `HandlerFromMuxWithBaseURL`, `NewStrictHandler`, `StdHTTPServerOptions`, `ServerInterface` - the exact generated function signatures this story uses
+- [Source: gateway/internal/middleware/auth.go] `ContextKeySystemRole`, `JWTMiddleware`, `writeMatrixError` - established JWT middleware and context key
 - [Source: gateway/internal/compliance/handler.go#PostAccessRequest] Existing role-gate pattern: `systemRole, _ := r.Context().Value(middleware.ContextKeySystemRole).(string)`
-- [Source: gateway/cmd/gateway/main.go lines 940–1103] Existing route registrations — must not conflict; `GET /api/v1/compliance/access-requests` must be deregistered from manual list
-- [Source: architecture.md rule 11] "Admin API Implementation muss `ServerInterface` aus `api_gen.go` erfüllen — kein freestyle routing"
-- [Source: architecture.md rule 3] "Matrix-Endpunkte geben Matrix-Format zurück, Admin-Endpunkte geben Admin-Format zurück — kein Mischen" (but auth rejections at middleware layer use Matrix error format — see Dev Notes)
+- [Source: gateway/cmd/gateway/main.go lines 940–1103] Existing route registrations - must not conflict; `GET /api/v1/compliance/access-requests` must be deregistered from manual list
+- [Source: architecture.md rule 11] "Admin API Implementation muss `ServerInterface` aus `api_gen.go` erfüllen - kein freestyle routing"
+- [Source: architecture.md rule 3] "Matrix-Endpunkte geben Matrix-Format zurück, Admin-Endpunkte geben Admin-Format zurück - kein Mischen" (but auth rejections at middleware layer use Matrix error format - see Dev Notes)
 - [Source: 6-1-openapi-spec-first-setup-codegen-pipeline-strictserverinterface-live-endpoint.md] Package structure, build constraints, module path
 - [Source: 6-2-admin-api-response-format-cursor-pagination.md] `WriteJSON`, `ErrorResponse`, `APIResponse[T]` helpers available in `response.go`
 
@@ -335,7 +335,7 @@ claude-sonnet-4-6
 
 ### Debug Log References
 
-None — implementation was straightforward. Route conflict (GET /api/v1/compliance/access-requests)
+None - implementation was straightforward. Route conflict (GET /api/v1/compliance/access-requests)
 resolved by removing the manual registration in main.go as documented in Dev Notes.
 
 ### Completion Notes List
@@ -359,5 +359,5 @@ resolved by removing the manual registration in main.go as documented in Dev Not
 
 ## Change Log
 
-- 2026-05-01: Story 6.3 implemented — RequireRole middleware, RegisterAdminRoutes router,
+- 2026-05-01: Story 6.3 implemented - RequireRole middleware, RegisterAdminRoutes router,
   main.go wiring. All 1135 tests pass. Status → review.

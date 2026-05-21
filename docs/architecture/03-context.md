@@ -52,9 +52,9 @@ at the protocol level.
 | Go Media → PostgreSQL | PostgreSQL wire protocol (TLS) | Media keys storage |
 
 **Not in scope (explicit exclusions):**
-- `/_matrix/federation/*` — no Server-Server API
-- `/_matrix/identity/*` — no identity server
-- `/_matrix/key/*` — no key server for federation
+- `/_matrix/federation/*` - no Server-Server API
+- `/_matrix/identity/*` - no identity server
+- `/_matrix/key/*` - no key server for federation
 - E2EE key distribution (keys/upload acknowledged as stubs; no real E2EE in MVP)
 
 _Source: `_bmad-output/planning-artifacts/architecture.md`, §Context, §Architektur-Grenzen; `README.md`, §Architecture_

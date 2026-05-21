@@ -1,7 +1,7 @@
 # Story 4.10: POST /join + Room Invitations (FR20/21)
 
 **Status:** review
-**Epic:** 4 — End-Users Can Chat in Rooms Using Any Standard Matrix Client
+**Epic:** 4 - End-Users Can Chat in Rooms Using Any Standard Matrix Client
 **Story Key:** 4-10-post-join-room-invitations-fr20-21
 **Created:** 2026-04-03
 
@@ -17,13 +17,13 @@ so that I can participate in conversations I've been invited to or discover publ
 
 ## Acceptance Criteria
 
-1. `POST /_matrix/client/v3/join/{roomIdOrAlias}` is protected by `JWTMiddleware` — unauthenticated requests return `401 M_MISSING_TOKEN`.
+1. `POST /_matrix/client/v3/join/{roomIdOrAlias}` is protected by `JWTMiddleware` - unauthenticated requests return `401 M_MISSING_TOKEN`.
 2. `POST /_matrix/client/v3/join/{roomIdOrAlias}` calls `gRPC CoreService.JoinRoom` with `user_id` (from JWT) and `room_id_or_alias`; returns `200 {"room_id": "!<id>:<server>"}` on success.
 3. `POST /_matrix/client/v3/join/{roomIdOrAlias}` returns `404 M_NOT_FOUND` if the room does not exist (Core returns `NOT_FOUND` gRPC status).
 4. `POST /_matrix/client/v3/join/{roomIdOrAlias}` returns `403 M_FORBIDDEN` if the room is private and the user has not been invited (Core returns `PERMISSION_DENIED` gRPC status).
 5. `POST /_matrix/client/v3/rooms/{roomId}/join` (accept invitation) calls the same `gRPC CoreService.JoinRoom`; returns `200 {"room_id": ...}` or `403 M_FORBIDDEN` if no invitation exists.
 6. `POST /_matrix/client/v3/rooms/{roomId}/invite` is protected by `JWTMiddleware`; body `{"user_id": "@target:<server>"}` calls `gRPC CoreService.InviteUser`; returns `200 {}` on success, `403 M_FORBIDDEN` if caller lacks invite power level, `400 M_BAD_JSON` on invalid body, `404 M_NOT_FOUND` if room does not exist.
-7. If the user is already a member of the room (idempotent join): `JoinRoom` in Core returns `:ok` (not an error), and Go returns `200 {"room_id": ...}` — Matrix spec requires idempotent join.
+7. If the user is already a member of the room (idempotent join): `JoinRoom` in Core returns `:ok` (not an error), and Go returns `200 {"room_id": ...}` - Matrix spec requires idempotent join.
 8. The gRPC `JoinRoom` stub in `gateway/internal/grpc/client.go` is wired up to call `c.core.JoinRoom(ctx, req)`.
 9. A new `InviteUser` method is added to `gateway/internal/grpc/client.go` calling `c.core.InviteUser(ctx, req)`.
 10. The Elixir `join_room/2` handler in `Nebu.EventDispatcher.Server` is implemented: looks up the Room GenServer via `Nebu.Room.RoomSupervisor.lookup_room/1`, calls `Nebu.Room.Server.join/2`, and returns `%Core.JoinRoomResponse{room_id: room_id}`.
@@ -39,52 +39,52 @@ so that I can participate in conversations I've been invited to or discover publ
 
 ### Tests written FIRST (before implementation code):
 
-**1. Happy path: join a room — Go unit test (httptest)**
+**1. Happy path: join a room - Go unit test (httptest)**
 - Given: valid JWT + mock core client returns `JoinRoomResponse{room_id: "!abc:test.local"}`
 - When: `POST /_matrix/client/v3/join/!abc:test.local`
 - Then: response is `200` with body `{"room_id": "!abc:test.local"}`
 
-**2. Unauthenticated request — Go unit test (httptest)**
+**2. Unauthenticated request - Go unit test (httptest)**
 - Given: no `Authorization` header
 - When: `POST /_matrix/client/v3/join/!abc:test.local`
 - Then: `401` with `{"errcode": "M_MISSING_TOKEN"}`
 
-**3. Room not found — Go unit test (httptest)**
+**3. Room not found - Go unit test (httptest)**
 - Given: valid JWT + mock core client returns gRPC `NOT_FOUND` error
 - When: `POST /_matrix/client/v3/join/!nonexistent:test.local`
 - Then: `404` with `{"errcode": "M_NOT_FOUND"}`
 
-**4. Forbidden (no invite, private room) — Go unit test (httptest)**
+**4. Forbidden (no invite, private room) - Go unit test (httptest)**
 - Given: valid JWT + mock core client returns gRPC `PERMISSION_DENIED` error
 - When: `POST /_matrix/client/v3/join/!private:test.local`
 - Then: `403` with `{"errcode": "M_FORBIDDEN"}`
 
-**5. Invite user — Go unit test (httptest)**
+**5. Invite user - Go unit test (httptest)**
 - Given: valid JWT + mock core client returns `InviteUserResponse{}`
 - When: `POST /_matrix/client/v3/rooms/!abc:test.local/invite` with body `{"user_id": "@bob:test.local"}`
 - Then: `200` with body `{}`
 
-**6. Invite with bad JSON — Go unit test (httptest)**
+**6. Invite with bad JSON - Go unit test (httptest)**
 - Given: valid JWT
 - When: `POST /_matrix/client/v3/rooms/!abc:test.local/invite` with body `{not json`
 - Then: `400` with `{"errcode": "M_BAD_JSON"}`
 
-**7. Elixir: join_room succeeds — ExUnit**
+**7. Elixir: join_room succeeds - ExUnit**
 - Given: Room GenServer running for `"!abc:test.local"` with FakeDB, `@alice:test.local` not yet a member
 - When: `Nebu.EventDispatcher.Server.join_room(%Core.JoinRoomRequest{user_id: "@alice:test.local", room_id_or_alias: "!abc:test.local"}, stream)` is called
 - Then: returns `%Core.JoinRoomResponse{room_id: "!abc:test.local"}` and `Nebu.Room.Server.get_state("!abc:test.local").members` contains `"@alice:test.local"`
 
-**8. Elixir: join_room room not found → GRPC.RPCError NOT_FOUND — ExUnit**
+**8. Elixir: join_room room not found → GRPC.RPCError NOT_FOUND - ExUnit**
 - Given: no Room GenServer running for the given room_id
 - When: `join_room/2` is called for that room_id
 - Then: raises `GRPC.RPCError` with `status: GRPC.Status.not_found()`
 
-**9. Elixir: join_room already member (idempotent) — ExUnit**
+**9. Elixir: join_room already member (idempotent) - ExUnit**
 - Given: `@alice:test.local` is already a member of the room
 - When: `join_room/2` is called again for the same user + room
-- Then: returns `%Core.JoinRoomResponse{room_id: ...}` (no error — Matrix idempotency)
+- Then: returns `%Core.JoinRoomResponse{room_id: ...}` (no error - Matrix idempotency)
 
-**10. Elixir: invite_user stores invitation — ExUnit**
+**10. Elixir: invite_user stores invitation - ExUnit**
 - Given: `@alice:test.local` is a member of the room, `@bob:test.local` is not
 - When: `invite_user/2` is called with caller=alice, invitee=bob
 - Then: returns `%Core.InviteUserResponse{}` and invitation exists in `room_invitations` table
@@ -93,7 +93,7 @@ so that I can participate in conversations I've been invited to or discover publ
 
 ## Technical Requirements
 
-### Go Handlers — `gateway/internal/matrix/rooms.go` (EXTEND EXISTING)
+### Go Handlers - `gateway/internal/matrix/rooms.go` (EXTEND EXISTING)
 
 **CRITICAL:** `rooms.go` was created in Story 4-9 for `CreateRoomHandler`. Do NOT create a new file. Add the new handlers to the SAME file `gateway/internal/matrix/rooms.go`. The architecture spec says: `rooms.go ← POST /createRoom, POST /join/{id}`.
 
@@ -122,7 +122,7 @@ type JoinRoomConfig struct {
 func NewJoinRoomHandler(cfg JoinRoomConfig) *JoinRoomHandler
 ```
 
-**Handler logic (PostJoinRoom — for both `/join/{roomIdOrAlias}` and `/rooms/{roomId}/join`):**
+**Handler logic (PostJoinRoom - for both `/join/{roomIdOrAlias}` and `/rooms/{roomId}/join`):**
 
 1. Extract `roomIdOrAlias` from URL path: `r.PathValue("roomIdOrAlias")` for `/join/{roomIdOrAlias}`; `r.PathValue("roomId")` for `/rooms/{roomId}/join`.
 2. Extract `sub` + `systemRole` from context via `middleware.ContextKeySub` / `middleware.ContextKeySystemRole`.
@@ -135,7 +135,7 @@ func NewJoinRoomHandler(cfg JoinRoomConfig) *JoinRoomHandler
    - other → `500 M_UNKNOWN`
 7. Return `200 {"room_id": resp.RoomId}`.
 
-**NOTE about Go 1.22+ path parameters:** Use `r.PathValue("roomIdOrAlias")` — this is the Go 1.22+ standard `net/http` mux wildcard syntax. The existing routes in `main.go` use this pattern. The room ID contains `!` and `:` characters — the Go mux treats the entire segment as the value without URL-encoding issues when using `{param}` syntax.
+**NOTE about Go 1.22+ path parameters:** Use `r.PathValue("roomIdOrAlias")` - this is the Go 1.22+ standard `net/http` mux wildcard syntax. The existing routes in `main.go` use this pattern. The room ID contains `!` and `:` characters - the Go mux treats the entire segment as the value without URL-encoding issues when using `{param}` syntax.
 
 #### InviteUserHandler
 
@@ -164,7 +164,7 @@ type InviteUserHandler struct {
 5. Map gRPC errors: `codes.PermissionDenied` → `403 M_FORBIDDEN`; `codes.NotFound` → `404 M_NOT_FOUND`; other → `500 M_UNKNOWN`.
 6. Return `200 {}` (empty JSON object: `w.Write([]byte("{}\n"))`).
 
-### Go gRPC Client — `gateway/internal/grpc/client.go` (MODIFY)
+### Go gRPC Client - `gateway/internal/grpc/client.go` (MODIFY)
 
 Wire two stubs:
 
@@ -197,7 +197,7 @@ func (c *Client) InviteUser(ctx context.Context, req *pb.InviteUserRequest) (*pb
 
 Add a new entry for `InviteUser` with the same connection-error pattern.
 
-### Go Router — `gateway/cmd/gateway/main.go` (MODIFY)
+### Go Router - `gateway/cmd/gateway/main.go` (MODIFY)
 
 Register three new routes behind `jwtMiddleware`:
 
@@ -221,13 +221,13 @@ mux.Handle("POST /_matrix/client/v3/rooms/{roomId}/invite",
     jwtMiddleware(http.HandlerFunc(inviteHandler.PostInviteUser)))
 ```
 
-**IMPORTANT:** `coreClient`, `serverName`, and `jwtMiddleware` are already constructed earlier in `main.go` — reuse them directly. Do not redeclare. The `coreClient` variable is of type `*coregrpc.Client`; the consumer-defined interfaces `JoinRoomCoreClient` and `InviteUserCoreClient` are satisfied by `*coregrpc.Client` once the methods are added.
+**IMPORTANT:** `coreClient`, `serverName`, and `jwtMiddleware` are already constructed earlier in `main.go` - reuse them directly. Do not redeclare. The `coreClient` variable is of type `*coregrpc.Client`; the consumer-defined interfaces `JoinRoomCoreClient` and `InviteUserCoreClient` are satisfied by `*coregrpc.Client` once the methods are added.
 
-### Proto — `proto/core.proto` (MODIFY) + Run `make proto`
+### Proto - `proto/core.proto` (MODIFY) + Run `make proto`
 
 `JoinRoom` RPC and its messages (`JoinRoomRequest`, `JoinRoomResponse`) are **ALREADY DEFINED** in `proto/core.proto`. Do NOT duplicate them.
 
-`InviteUser` is **MISSING** — add it:
+`InviteUser` is **MISSING** - add it:
 
 ```protobuf
 // InviteUser
@@ -246,7 +246,7 @@ rpc InviteUser(InviteUserRequest) returns (InviteUserResponse);
 
 **THEN run `make proto`** to regenerate Go and Elixir stubs. This is mandatory since new proto messages are added. The generated files in `gateway/internal/grpc/pb/` and `core/apps/event_dispatcher/lib/pb/` will be updated automatically.
 
-### DB Migration — `gateway/migrations/000012_room_invitations.up.sql` (CREATE NEW)
+### DB Migration - `gateway/migrations/000012_room_invitations.up.sql` (CREATE NEW)
 
 ```sql
 CREATE TABLE room_invitations (
@@ -268,9 +268,9 @@ Also create `000012_room_invitations.down.sql`:
 DROP TABLE IF EXISTS room_invitations;
 ```
 
-Migration runs automatically at gateway startup — no manual step needed. The migration number must be `000012` (after `000011_sync_tokens`).
+Migration runs automatically at gateway startup - no manual step needed. The migration number must be `000012` (after `000011_sync_tokens`).
 
-### Elixir gRPC Handler — `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` (MODIFY)
+### Elixir gRPC Handler - `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` (MODIFY)
 
 Replace the stub `join_room/2` and add `invite_user/2`:
 
@@ -291,7 +291,7 @@ def join_room(request, _stream) do
           %Core.JoinRoomResponse{room_id: room_id}
 
         {:error, :already_member} ->
-          # Matrix spec: idempotent — joining an already-joined room is success
+          # Matrix spec: idempotent - joining an already-joined room is success
           %Core.JoinRoomResponse{room_id: room_id}
 
         {:error, reason} ->
@@ -336,7 +336,7 @@ def invite_user(request, _stream) do
 end
 ```
 
-**DB module for invitations** — the `invite_user/2` handler needs access to a DB module for `room_invitations`. Use the same injectable pattern as `db_module/0`:
+**DB module for invitations** - the `invite_user/2` handler needs access to a DB module for `room_invitations`. Use the same injectable pattern as `db_module/0`:
 
 ```elixir
 defp db_module_invite do
@@ -357,13 +357,13 @@ defmodule Nebu.Room.InviteDB do
 end
 ```
 
-**ALTERNATIVE — simpler MVP scope:** If implementing a full `Nebu.Room.InviteDB` is too broad for this story, the `invite_user/2` handler can store invitations in ETS (volatile, cleared on restart) for MVP and note that Story 4-10 is MVP-scoped. The `room_invitations` DB migration must still be created (for future use in sync). Use this approach only if the DB write path is blocked by missing DB infrastructure.
+**ALTERNATIVE - simpler MVP scope:** If implementing a full `Nebu.Room.InviteDB` is too broad for this story, the `invite_user/2` handler can store invitations in ETS (volatile, cleared on restart) for MVP and note that Story 4-10 is MVP-scoped. The `room_invitations` DB migration must still be created (for future use in sync). Use this approach only if the DB write path is blocked by missing DB infrastructure.
 
-### Elixir Test File — `core/apps/event_dispatcher/test/nebu/event_dispatcher/join_room_test.exs` (CREATE NEW)
+### Elixir Test File - `core/apps/event_dispatcher/test/nebu/event_dispatcher/join_room_test.exs` (CREATE NEW)
 
 Mirror the structure of `create_room_test.exs` exactly:
 
-- `async: false` — Horde + Application.put_env + ETS are process-global
+- `async: false` - Horde + Application.put_env + ETS are process-global
 - Same `FakeDB` module for `room_manager` DB injection
 - Same `FakeInviteDB` for `invite_db_module` injection
 - Setup: inject FakeDB via `Application.put_env(:room_manager, :db_module, FakeDB)` + start a room via `Nebu.Room.RoomSupervisor.start_room/1`
@@ -438,7 +438,7 @@ message InviteUserResponse {}
 
 Add `rpc InviteUser(InviteUserRequest) returns (InviteUserResponse);` to `service CoreService`.
 
-**AFTER modifying proto: run `make proto`** — this regenerates both Go (`pb/core.pb.go`, `pb/core_grpc.pb.go`) and Elixir (`lib/pb/`) stubs. The `client.go` method `InviteUser` and `server.ex` function `invite_user/2` will compile against the new generated types.
+**AFTER modifying proto: run `make proto`** - this regenerates both Go (`pb/core.pb.go`, `pb/core_grpc.pb.go`) and Elixir (`lib/pb/`) stubs. The `client.go` method `InviteUser` and `server.ex` function `invite_user/2` will compile against the new generated types.
 
 ---
 
@@ -452,9 +452,9 @@ roomID := r.PathValue("roomId")           // for {roomId}
 roomIDOrAlias := r.PathValue("roomIdOrAlias")  // for {roomIdOrAlias}
 ```
 
-This is the idiomatic Go 1.22+ approach already used in the codebase (see `main.go` route registration patterns). Do NOT use gorilla/mux or chi — they are not dependencies.
+This is the idiomatic Go 1.22+ approach already used in the codebase (see `main.go` route registration patterns). Do NOT use gorilla/mux or chi - they are not dependencies.
 
-### Pattern: JWT context extraction (from `rooms.go` — Story 4-9)
+### Pattern: JWT context extraction (from `rooms.go` - Story 4-9)
 
 ```go
 sub, _ := r.Context().Value(middleware.ContextKeySub).(string)
@@ -463,7 +463,7 @@ userID := coregrpc.FormatUserID(sub, h.serverName)
 grpcCtx := coregrpc.WithUserMetadata(r.Context(), userID, systemRole)
 ```
 
-Reuse exactly — do NOT reinvent.
+Reuse exactly - do NOT reinvent.
 
 ### Pattern: `writeMatrixError` (defined in `login.go`, used in `rooms.go`)
 
@@ -487,9 +487,9 @@ default:
 
 Define `JoinRoomCoreClient` with only `JoinRoom` method and `InviteUserCoreClient` with only `InviteUser` method. Do NOT use the full `*grpc.Client` type. This is the Go interface-minimality convention (CLAUDE.md).
 
-### Pattern: Elixir room lookup (`get_room_state` in `server.ex` — Story 4-8)
+### Pattern: Elixir room lookup (`get_room_state` in `server.ex` - Story 4-8)
 
-The `get_room_state/2` handler uses `catch :exit, {:noproc, _}` to detect a missing room. For `join_room/2`, use `Nebu.Room.RoomSupervisor.lookup_room/1` instead — it returns `{:error, :not_found}` cleanly without requiring a try/catch. This is the preferred pattern from Story 4-9.
+The `get_room_state/2` handler uses `catch :exit, {:noproc, _}` to detect a missing room. For `join_room/2`, use `Nebu.Room.RoomSupervisor.lookup_room/1` instead - it returns `{:error, :not_found}` cleanly without requiring a try/catch. This is the preferred pattern from Story 4-9.
 
 ### Pattern: Elixir `db_module` injection (from `room_manager/server.ex`)
 
@@ -499,7 +499,7 @@ defp db_module, do: Application.get_env(:room_manager, :db_module, Nebu.Room.DB)
 
 Use the same `Application.get_env` injection pattern for `invite_db_module` in `event_dispatcher/server.ex`.
 
-### Pattern: `room_registry_module` injection (from `server.ex` — Story 4-8)
+### Pattern: `room_registry_module` injection (from `server.ex` - Story 4-8)
 
 ```elixir
 defp room_registry_module do
@@ -507,7 +507,7 @@ defp room_registry_module do
 end
 ```
 
-For `join_room/2`, use `Nebu.Room.RoomSupervisor.lookup_room/1` directly — the supervisor is the correct entry point for room existence checks (not the registry module override). Only use `room_registry_module()` for `get_state`-style calls where test override is needed.
+For `join_room/2`, use `Nebu.Room.RoomSupervisor.lookup_room/1` directly - the supervisor is the correct entry point for room existence checks (not the registry module override). Only use `room_registry_module()` for `get_state`-style calls where test override is needed.
 
 ---
 
@@ -541,7 +541,7 @@ func (m *mockInviteUserCoreClient) InviteUser(_ context.Context, req *pb.InviteU
 }
 ```
 
-Auth test helpers: reuse `setupOIDCServer` and `signJWT` from `login_test.go` (same package — directly accessible, no import needed).
+Auth test helpers: reuse `setupOIDCServer` and `signJWT` from `login_test.go` (same package - directly accessible, no import needed).
 
 gRPC error simulation:
 ```go
@@ -570,7 +570,7 @@ defmodule Nebu.EventDispatcher.JoinRoomTest do
 
   alias Nebu.EventDispatcher.Server
 
-  # Same FakeDB as in create_room_test.exs — copy the module verbatim
+  # Same FakeDB as in create_room_test.exs - copy the module verbatim
   # (or extract to a shared test support file if preferred)
   defmodule FakeDB do
     # ... same as create_room_test.exs FakeDB
@@ -608,15 +608,15 @@ Use `Nebu.Room.RoomSupervisor.start_room/1` to create test rooms. Clean up with 
 
 From Story 4-9 dev notes and implementation:
 
-- **`rooms.go` exists** — extend it, do NOT create a new file. The file already imports `coregrpc`, `pb`, `middleware`, `codes`, `status`, `proto`.
-- **`generate_room_id/0`** is a private function in `server.ex` — not relevant for join, but the file structure is established.
-- **`Nebu.Room.RoomSupervisor.start_room/1` returns `{:ok, pid}` for both new and already-running rooms.** For join, use `lookup_room/1` instead — it returns `{:error, :not_found}` if the room doesn't exist. This correctly maps to `GRPC.Status.not_found()`.
-- **`Nebu.Room.Server.join/2` returns `{:error, :already_member}` if already joined.** The Matrix spec says join is idempotent — return success (not error) in this case.
-- **`writeMatrixError` is in `login.go`** in the `matrix` package — accessible in `rooms.go` without import.
+- **`rooms.go` exists** - extend it, do NOT create a new file. The file already imports `coregrpc`, `pb`, `middleware`, `codes`, `status`, `proto`.
+- **`generate_room_id/0`** is a private function in `server.ex` - not relevant for join, but the file structure is established.
+- **`Nebu.Room.RoomSupervisor.start_room/1` returns `{:ok, pid}` for both new and already-running rooms.** For join, use `lookup_room/1` instead - it returns `{:error, :not_found}` if the room doesn't exist. This correctly maps to `GRPC.Status.not_found()`.
+- **`Nebu.Room.Server.join/2` returns `{:error, :already_member}` if already joined.** The Matrix spec says join is idempotent - return success (not error) in this case.
+- **`writeMatrixError` is in `login.go`** in the `matrix` package - accessible in `rooms.go` without import.
 - **`client_test.go` TestStubsReturnNil**: The `JoinRoom` entry currently expects `nil, nil`. After wiring, update to expect a connection error (same as `CreateRoom` was updated in 4-9). ADD a new test entry for `InviteUser` also expecting a connection error.
 - **`make proto` is required** for this story because `InviteUser` messages are new. In Story 4-9, proto was NOT regenerated (all stubs already existed). This story is different.
-- **Server name for room IDs:** `server_name` is read from `Application.get_env(:event_dispatcher, :server_name, "nebu.local")` — same for `join_room` tests, inject `"test.local"` via `Application.put_env`.
-- **`FakeDB` for create_room tests** is in `create_room_test.exs` — copy the pattern verbatim. Using `async: false` + ETS for isolation.
+- **Server name for room IDs:** `server_name` is read from `Application.get_env(:event_dispatcher, :server_name, "nebu.local")` - same for `join_room` tests, inject `"test.local"` via `Application.put_env`.
+- **`FakeDB` for create_room tests** is in `create_room_test.exs` - copy the pattern verbatim. Using `async: false` + ETS for isolation.
 - **`GRPC.Status.not_found()`**, **`GRPC.Status.permission_denied()`**, **`GRPC.Status.internal()`** are the correct Elixir status helpers (not atoms, not integers).
 
 ---
@@ -624,7 +624,7 @@ From Story 4-9 dev notes and implementation:
 ## Architecture Compliance Checklist
 
 - [ ] `JoinRoomHandler` and `InviteUserHandler` added to existing `gateway/internal/matrix/rooms.go` (same file as `CreateRoomHandler` per architecture spec)
-- [ ] Consumer-defined interfaces `JoinRoomCoreClient` and `InviteUserCoreClient` — minimal, single-method each
+- [ ] Consumer-defined interfaces `JoinRoomCoreClient` and `InviteUserCoreClient` - minimal, single-method each
 - [ ] `r.PathValue()` used for URL path parameters (Go 1.22+ net/http mux)
 - [ ] Test mux used in Go unit tests so `PathValue()` works correctly
 - [ ] No `panic` in handler code (Go convention per CLAUDE.md)
@@ -644,13 +644,13 @@ From Story 4-9 dev notes and implementation:
 ## Tasks / Subtasks
 
 - [x] Write failing tests FIRST (ATDD gate):
-  - [x] Create `gateway/internal/matrix/rooms_join_test.go` with tests 1–6 (Go) — tests were added to `rooms_test.go` by ATDD gate
+  - [x] Create `gateway/internal/matrix/rooms_join_test.go` with tests 1–6 (Go) - tests were added to `rooms_test.go` by ATDD gate
   - [x] Create `core/apps/event_dispatcher/test/nebu/event_dispatcher/join_room_test.exs` with tests 7–10 (Elixir)
-  - [x] Run tests — verify RED (failing)
+  - [x] Run tests - verify RED (failing)
 
 - [x] Update proto + regenerate stubs (prerequisite for all implementation):
   - [x] Add `InviteUser` RPC + messages to `proto/core.proto`
-  - [x] Run `make proto` — verify Go and Elixir pb files updated
+  - [x] Run `make proto` - verify Go and Elixir pb files updated
 
 - [x] Create DB migration:
   - [x] Create `gateway/migrations/000012_room_invitations.up.sql`
@@ -682,8 +682,8 @@ From Story 4-9 dev notes and implementation:
   - [x] Add `db_module_invite/0` private helper to `server.ex`
 
 - [x] Run all tests green (AC #14, #15):
-  - [x] `make test-unit-go` — all gateway tests pass
-  - [x] `make test-unit-elixir` — all umbrella tests pass
+  - [x] `make test-unit-go` - all gateway tests pass
+  - [x] `make test-unit-elixir` - all umbrella tests pass
 
 ---
 
@@ -691,15 +691,15 @@ From Story 4-9 dev notes and implementation:
 
 1. **`PostJoinRoom` vs `PostJoinRoomById`:** The Matrix spec defines two separate endpoints that both join a room: `POST /join/{roomIdOrAlias}` (discovery join) and `POST /rooms/{roomId}/join` (accept invitation). Both call `JoinRoom` gRPC with the same logic. The difference is only in how the room ID is extracted from the URL path. Create two handler methods on `JoinRoomHandler` to handle both routes, or a single shared private method that both public methods call after extracting the room ID.
 
-2. **Room alias resolution (MVP scope):** The Matrix spec allows `{roomIdOrAlias}` to be either a room ID (`!xxx:server`) or a room alias (`#alias:server`). In MVP, aliases are not registered in a separate table. The Elixir `join_room/2` handler should pass `room_id_or_alias` directly to `Nebu.Room.RoomSupervisor.lookup_room/1` — this only works for direct room IDs. Aliases will return `{:error, :not_found}` in MVP. Document this as a known limitation; alias resolution is a future story.
+2. **Room alias resolution (MVP scope):** The Matrix spec allows `{roomIdOrAlias}` to be either a room ID (`!xxx:server`) or a room alias (`#alias:server`). In MVP, aliases are not registered in a separate table. The Elixir `join_room/2` handler should pass `room_id_or_alias` directly to `Nebu.Room.RoomSupervisor.lookup_room/1` - this only works for direct room IDs. Aliases will return `{:error, :not_found}` in MVP. Document this as a known limitation; alias resolution is a future story.
 
 3. **`make proto` side effects:** Running `make proto` regenerates ALL generated files in `gateway/internal/grpc/pb/` and `core/apps/event_dispatcher/lib/pb/`. This is expected and correct. Do not manually edit any `_pb.go` or `.pb.ex` files.
 
-4. **`InviteUser` in Elixir — MVP scope for broadcast:** The epics specify that `invite_user/2` should broadcast an `m.room.member` event to the invitee's sync stream. For MVP Story 4-10, this is out of scope — store the invitation record and return success. The sync broadcasting will be implemented in Story 4-14/4-15 (sync endpoint).
+4. **`InviteUser` in Elixir - MVP scope for broadcast:** The epics specify that `invite_user/2` should broadcast an `m.room.member` event to the invitee's sync stream. For MVP Story 4-10, this is out of scope - store the invitation record and return success. The sync broadcasting will be implemented in Story 4-14/4-15 (sync endpoint).
 
 5. **`room_invitations` FK constraint on `users`:** The migration references `users(user_id)`. In tests, FakeDB does not write to the actual `users` table. Test the Elixir `invite_user/2` with FakeInviteDB (ETS-backed, no FK enforcement) to avoid PostgreSQL dependencies in unit tests.
 
-6. **OpenAPI spec:** Same policy as Story 4-9 — do NOT add Matrix endpoints to `openapi.yaml`. The Matrix API uses direct `mux.Handle` registration.
+6. **OpenAPI spec:** Same policy as Story 4-9 - do NOT add Matrix endpoints to `openapi.yaml`. The Matrix API uses direct `mux.Handle` registration.
 
 ---
 
@@ -711,25 +711,25 @@ From Story 4-9 dev notes and implementation:
 - `core/apps/room_manager/lib/nebu/room/invite_db.ex`
 
 ### Modified files:
-- `gateway/internal/matrix/rooms.go` — added `JoinRoomHandler` + `InviteUserHandler` with all interfaces, structs, and handlers
-- `gateway/internal/grpc/client.go` — wired `JoinRoom` to `c.core.JoinRoom`, added `InviteUser` method
-- `gateway/internal/grpc/client_test.go` — updated `JoinRoom` stub test to expect connection error, added `InviteUser` connection error test
-- `gateway/internal/grpc/stream_test.go` — added `InviteUser` stub to `mockCoreClient` to satisfy updated interface
-- `gateway/cmd/gateway/main.go` — registered 3 new routes: `POST /join/{roomIdOrAlias}`, `POST /rooms/{roomId}/join`, `POST /rooms/{roomId}/invite`
-- `proto/core.proto` — added `InviteUser` RPC, `InviteUserRequest`, `InviteUserResponse` messages
-- `gateway/internal/grpc/pb/core.pb.go` — regenerated by `make proto`
-- `gateway/internal/grpc/pb/core_grpc.pb.go` — regenerated by `make proto`
-- `core/apps/event_dispatcher/lib/pb/core.pb.ex` — regenerated by `make proto`
-- `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` — implemented `join_room/2` + `invite_user/2` + `db_module_invite/0`
-- `core/apps/event_dispatcher/test/nebu/event_dispatcher/join_room_test.exs` — added `FakeInviteDB`, setup for invite ETS table, `invite_user/2` tests (AT #10)
-- `_bmad-output/implementation-artifacts/sprint-status.yaml` — status updated to `review`
+- `gateway/internal/matrix/rooms.go` - added `JoinRoomHandler` + `InviteUserHandler` with all interfaces, structs, and handlers
+- `gateway/internal/grpc/client.go` - wired `JoinRoom` to `c.core.JoinRoom`, added `InviteUser` method
+- `gateway/internal/grpc/client_test.go` - updated `JoinRoom` stub test to expect connection error, added `InviteUser` connection error test
+- `gateway/internal/grpc/stream_test.go` - added `InviteUser` stub to `mockCoreClient` to satisfy updated interface
+- `gateway/cmd/gateway/main.go` - registered 3 new routes: `POST /join/{roomIdOrAlias}`, `POST /rooms/{roomId}/join`, `POST /rooms/{roomId}/invite`
+- `proto/core.proto` - added `InviteUser` RPC, `InviteUserRequest`, `InviteUserResponse` messages
+- `gateway/internal/grpc/pb/core.pb.go` - regenerated by `make proto`
+- `gateway/internal/grpc/pb/core_grpc.pb.go` - regenerated by `make proto`
+- `core/apps/event_dispatcher/lib/pb/core.pb.ex` - regenerated by `make proto`
+- `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` - implemented `join_room/2` + `invite_user/2` + `db_module_invite/0`
+- `core/apps/event_dispatcher/test/nebu/event_dispatcher/join_room_test.exs` - added `FakeInviteDB`, setup for invite ETS table, `invite_user/2` tests (AT #10)
+- `_bmad-output/implementation-artifacts/sprint-status.yaml` - status updated to `review`
 
 ---
 
 ## Change Log
 
-- 2026-04-03: Story 4-10 created — ready-for-dev.
-- 2026-04-03: Story 4-10 implemented — all 15 ACs satisfied, all tests green (make test-unit-go + make test-unit-elixir pass). Status → review.
+- 2026-04-03: Story 4-10 created - ready-for-dev.
+- 2026-04-03: Story 4-10 implemented - all 15 ACs satisfied, all tests green (make test-unit-go + make test-unit-elixir pass). Status → review.
 
 ## Dev Agent Record
 
@@ -737,30 +737,30 @@ From Story 4-9 dev notes and implementation:
 
 Implemented in the following order:
 
-1. **proto/core.proto** — added `InviteUser` RPC, `InviteUserRequest`, `InviteUserResponse`. Ran `make proto` to regenerate all Go and Elixir pb stubs.
+1. **proto/core.proto** - added `InviteUser` RPC, `InviteUserRequest`, `InviteUserResponse`. Ran `make proto` to regenerate all Go and Elixir pb stubs.
 
-2. **DB migrations** — created `000012_room_invitations.up.sql` (table + index) and `000012_room_invitations.down.sql`.
+2. **DB migrations** - created `000012_room_invitations.up.sql` (table + index) and `000012_room_invitations.down.sql`.
 
-3. **gateway/internal/matrix/rooms.go** — extended existing file with:
+3. **gateway/internal/matrix/rooms.go** - extended existing file with:
    - `JoinRoomCoreClient` interface, `JoinRoomResponse`, `JoinRoomHandler`, `JoinRoomConfig`, `NewJoinRoomHandler`
    - `postJoinRoomWithID` shared private method (extracts user from JWT, calls gRPC, maps errors)
    - `PostJoinRoom` (extracts roomIdOrAlias from path) and `PostJoinRoomById` (extracts roomId from path)
    - `InviteUserCoreClient` interface, `InviteUserHandler`, `InviteUserConfig`, `NewInviteUserHandler`, `PostInviteUser`
    - Key: `AlreadyExists` gRPC status → 200 success (Matrix spec idempotency)
 
-4. **gateway/internal/grpc/client.go** — replaced `JoinRoom` stub with `c.core.JoinRoom(ctx, req)`, added `InviteUser` method.
+4. **gateway/internal/grpc/client.go** - replaced `JoinRoom` stub with `c.core.JoinRoom(ctx, req)`, added `InviteUser` method.
 
-5. **gateway/internal/grpc/client_test.go** — updated `JoinRoom` test to expect connection error (not nil/nil), added `InviteUser` connection error test.
+5. **gateway/internal/grpc/client_test.go** - updated `JoinRoom` test to expect connection error (not nil/nil), added `InviteUser` connection error test.
 
-6. **gateway/internal/grpc/stream_test.go** — added `InviteUser` stub to `mockCoreClient` to satisfy the new `pb.CoreServiceClient` interface.
+6. **gateway/internal/grpc/stream_test.go** - added `InviteUser` stub to `mockCoreClient` to satisfy the new `pb.CoreServiceClient` interface.
 
-7. **gateway/cmd/gateway/main.go** — registered 3 new routes behind `jwtMiddleware`.
+7. **gateway/cmd/gateway/main.go** - registered 3 new routes behind `jwtMiddleware`.
 
-8. **core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex** — replaced stub `join_room/2` with full implementation using `RoomSupervisor.lookup_room/1` + `Room.Server.join/2`. Added full `invite_user/2` with member validation + `db_module_invite()` injection. Added `db_module_invite/0` private helper.
+8. **core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex** - replaced stub `join_room/2` with full implementation using `RoomSupervisor.lookup_room/1` + `Room.Server.join/2`. Added full `invite_user/2` with member validation + `db_module_invite()` injection. Added `db_module_invite/0` private helper.
 
-9. **core/apps/room_manager/lib/nebu/room/invite_db.ex** — created `Nebu.Room.InviteDB` with `insert_invitation/3` using raw SQL.
+9. **core/apps/room_manager/lib/nebu/room/invite_db.ex** - created `Nebu.Room.InviteDB` with `insert_invitation/3` using raw SQL.
 
-10. **join_room_test.exs** — added `FakeInviteDB` module, ETS table setup for invitations, updated setup/teardown, and added invite_user tests (AT #10: happy path, permission denied, room not found).
+10. **join_room_test.exs** - added `FakeInviteDB` module, ETS table setup for invitations, updated setup/teardown, and added invite_user tests (AT #10: happy path, permission denied, room not found).
 
 ### Completion Notes
 

@@ -1,7 +1,7 @@
 # Story 4.18: Profile + Presence API
 
 **Status:** review
-**Epic:** 4 — End-Users Can Chat in Rooms Using Any Standard Matrix Client
+**Epic:** 4 - End-Users Can Chat in Rooms Using Any Standard Matrix Client
 **Story Key:** 4-18-profile-presence-api
 **Created:** 2026-04-03
 
@@ -17,13 +17,13 @@ so that my display name and avatar are correct and I can see who is online.
 
 ## Acceptance Criteria
 
-1. `GET /_matrix/client/v3/profile/{userId}` — **unauthenticated** (no JWT required); reads from the `profiles` PostgreSQL table directly in the Go Gateway; returns `200 {"displayname": "...", "avatar_url": "mxc://..."}` or `404 M_NOT_FOUND` if user has no profile row.
+1. `GET /_matrix/client/v3/profile/{userId}` - **unauthenticated** (no JWT required); reads from the `profiles` PostgreSQL table directly in the Go Gateway; returns `200 {"displayname": "...", "avatar_url": "mxc://..."}` or `404 M_NOT_FOUND` if user has no profile row.
 
-2. `PUT /_matrix/client/v3/profile/{userId}/displayname` — **authenticated** (JWT required); body `{"displayname": "..."}` (1–128 chars, non-empty); calls `gRPC CoreService.UpdateProfile`; returns `200 {}` or `403 M_FORBIDDEN` if path `userId` ≠ authenticated user; returns `400 M_INVALID_PARAM` if displayname is empty or longer than 128 chars.
+2. `PUT /_matrix/client/v3/profile/{userId}/displayname` - **authenticated** (JWT required); body `{"displayname": "..."}` (1–128 chars, non-empty); calls `gRPC CoreService.UpdateProfile`; returns `200 {}` or `403 M_FORBIDDEN` if path `userId` ≠ authenticated user; returns `400 M_INVALID_PARAM` if displayname is empty or longer than 128 chars.
 
-3. `PUT /_matrix/client/v3/profile/{userId}/avatar_url` — **authenticated** (JWT required); body `{"avatar_url": "mxc://..."}` (must start with `mxc://`); calls `gRPC CoreService.UpdateProfile`; returns `200 {}` or `403 M_FORBIDDEN` if path `userId` ≠ authenticated user; returns `400 M_INVALID_PARAM` if URL does not start with `mxc://`.
+3. `PUT /_matrix/client/v3/profile/{userId}/avatar_url` - **authenticated** (JWT required); body `{"avatar_url": "mxc://..."}` (must start with `mxc://`); calls `gRPC CoreService.UpdateProfile`; returns `200 {}` or `403 M_FORBIDDEN` if path `userId` ≠ authenticated user; returns `400 M_INVALID_PARAM` if URL does not start with `mxc://`.
 
-4. `GET /_matrix/client/v3/presence/{userId}/status` — **authenticated** (JWT required); calls `gRPC CoreService.GetPresence`; returns `200 {"presence": "online"|"offline"|"unavailable", "last_active_ago": <ms>}` where `last_active_ago` is `now_ms - last_active_at`; returns `404 M_NOT_FOUND` if user is not found.
+4. `GET /_matrix/client/v3/presence/{userId}/status` - **authenticated** (JWT required); calls `gRPC CoreService.GetPresence`; returns `200 {"presence": "online"|"offline"|"unavailable", "last_active_ago": <ms>}` where `last_active_ago` is `now_ms - last_active_at`; returns `404 M_NOT_FOUND` if user is not found.
 
 5. `gRPC CoreService` proto adds:
    - `rpc GetPresence(GetPresenceRequest) returns (GetPresenceResponse)`
@@ -43,77 +43,77 @@ so that my display name and avatar are correct and I can see who is online.
 
 ### Tests written FIRST (before implementation code):
 
-**1. GET /profile/{userId} — existing user → 200 — Go httptest**
+**1. GET /profile/{userId} - existing user → 200 - Go httptest**
 - Given: `profiles` row exists for `@alice:test.local` with `displayname = "Alice"`, `avatar_url = "mxc://test.local/abc123"`; no Authorization header needed
 - When: `GET /_matrix/client/v3/profile/@alice:test.local`
 - Then: `200 {"displayname": "Alice", "avatar_url": "mxc://test.local/abc123"}`
 
-**2. GET /profile/{userId} — no profile row → 404 — Go httptest**
+**2. GET /profile/{userId} - no profile row → 404 - Go httptest**
 - Given: no `profiles` row for `@unknown:test.local`
 - When: `GET /_matrix/client/v3/profile/@unknown:test.local`
 - Then: `404 {"errcode": "M_NOT_FOUND", "error": "..."}`
 
-**3. PUT /profile/{userId}/displayname — happy path → 200 — Go httptest**
+**3. PUT /profile/{userId}/displayname - happy path → 200 - Go httptest**
 - Given: authenticated user `@alice:test.local`; path userId = `@alice:test.local`; body `{"displayname": "Alice Nebu"}`; mock UpdateProfile returns success
 - When: `PUT /_matrix/client/v3/profile/@alice:test.local/displayname`
 - Then: `200 {}`; mock received `UpdateProfileRequest{user_id: "@alice:test.local", displayname: "Alice Nebu"}`
 
-**4. PUT /profile/{userId}/displayname — userId mismatch → 403 — Go httptest**
+**4. PUT /profile/{userId}/displayname - userId mismatch → 403 - Go httptest**
 - Given: authenticated user `@alice:test.local`; path userId = `@bob:test.local`
 - When: `PUT /_matrix/client/v3/profile/@bob:test.local/displayname`
 - Then: `403 {"errcode": "M_FORBIDDEN", ...}`; Core is NOT called
 
-**5. PUT /profile/{userId}/displayname — empty displayname → 400 — Go httptest**
+**5. PUT /profile/{userId}/displayname - empty displayname → 400 - Go httptest**
 - Given: authenticated user `@alice:test.local`; body `{"displayname": ""}`
 - When: `PUT /_matrix/client/v3/profile/@alice:test.local/displayname`
 - Then: `400 {"errcode": "M_INVALID_PARAM", ...}`; Core is NOT called
 
-**6. PUT /profile/{userId}/displayname — displayname > 128 chars → 400 — Go httptest**
+**6. PUT /profile/{userId}/displayname - displayname > 128 chars → 400 - Go httptest**
 - Given: authenticated user `@alice:test.local`; body with `displayname` of 129 chars
 - When: `PUT /_matrix/client/v3/profile/@alice:test.local/displayname`
 - Then: `400 {"errcode": "M_INVALID_PARAM", ...}`; Core is NOT called
 
-**7. PUT /profile/{userId}/avatar_url — valid mxc URI → 200 — Go httptest**
+**7. PUT /profile/{userId}/avatar_url - valid mxc URI → 200 - Go httptest**
 - Given: authenticated user `@alice:test.local`; body `{"avatar_url": "mxc://test.local/img1"}`; mock UpdateProfile returns success
 - When: `PUT /_matrix/client/v3/profile/@alice:test.local/avatar_url`
 - Then: `200 {}`; mock received `UpdateProfileRequest{user_id: "@alice:test.local", avatar_url: "mxc://test.local/img1"}`
 
-**8. PUT /profile/{userId}/avatar_url — non-mxc URL → 400 — Go httptest**
+**8. PUT /profile/{userId}/avatar_url - non-mxc URL → 400 - Go httptest**
 - Given: authenticated user `@alice:test.local`; body `{"avatar_url": "https://cdn.example.com/img.jpg"}`
 - When: `PUT /_matrix/client/v3/profile/@alice:test.local/avatar_url`
 - Then: `400 {"errcode": "M_INVALID_PARAM", "error": "avatar_url must be an mxc:// URI"}`; Core is NOT called
 
-**9. GET /presence/{userId}/status — online user → 200 — Go httptest**
+**9. GET /presence/{userId}/status - online user → 200 - Go httptest**
 - Given: authenticated user; mock GetPresence returns `{presence: "online", last_active_ago: 5000}`
 - When: `GET /_matrix/client/v3/presence/@alice:test.local/status`
 - Then: `200 {"presence": "online", "last_active_ago": 5000}`
 
-**10. GET /presence/{userId}/status — user not found → 404 — Go httptest**
+**10. GET /presence/{userId}/status - user not found → 404 - Go httptest**
 - Given: authenticated user; mock GetPresence returns `codes.NotFound`
 - When: `GET /_matrix/client/v3/presence/@unknown:test.local/status`
 - Then: `404 {"errcode": "M_NOT_FOUND", ...}`
 
-**11. GET /presence/{userId}/status — unauthenticated → 401 — Go httptest**
+**11. GET /presence/{userId}/status - unauthenticated → 401 - Go httptest**
 - Given: no Authorization header
 - When: `GET /_matrix/client/v3/presence/@alice:test.local/status`
 - Then: 401 (JWTMiddleware rejects before handler runs)
 
-**12. Elixir: get_presence → returns status — ExUnit**
+**12. Elixir: get_presence → returns status - ExUnit**
 - Given: `Nebu.Presence.Manager` ETS has `@alice:test.local` with status `:online`, last_active_at = `T`; current time = `T + 5000ms`
 - When: `Nebu.EventDispatcher.Server.get_presence(request, stream)` called with `{user_id: "@alice:test.local"}`
 - Then: returns `%Core.GetPresenceResponse{presence: "online", last_active_ago: 5000}`
 
-**13. Elixir: get_presence — offline default — ExUnit**
+**13. Elixir: get_presence - offline default - ExUnit**
 - Given: `@unknown:test.local` has no ETS entry
 - When: `get_presence` called
 - Then: returns `%Core.GetPresenceResponse{presence: "offline", last_active_ago: 0}`
 
-**14. Elixir: update_profile — upserts profiles table — ExUnit**
+**14. Elixir: update_profile - upserts profiles table - ExUnit**
 - Given: fake profile DB module injected; `user_id = "@alice:test.local"`, `displayname = "Alice Nebu"`, `avatar_url = nil`
 - When: `Nebu.EventDispatcher.Server.update_profile(request, stream)` called
 - Then: fake `upsert_profile/3` was called with `("@alice:test.local", "Alice Nebu", nil)`; `UpdateProfileResponse{}` returned
 
-**15. Elixir: update_profile — avatar_url update — ExUnit**
+**15. Elixir: update_profile - avatar_url update - ExUnit**
 - Given: fake profile DB module; `user_id = "@alice:test.local"`, `displayname = nil`, `avatar_url = "mxc://test.local/abc"`
 - When: `update_profile` called with avatar_url only (displayname is empty string)
 - Then: fake `upsert_profile/3` called; response returned successfully
@@ -127,17 +127,17 @@ so that my display name and avatar are correct and I can see who is online.
 Add to `proto/core.proto` inside `service CoreService`:
 
 ```protobuf
-// GetPresence — returns presence status for a user
+// GetPresence - returns presence status for a user
 rpc GetPresence(GetPresenceRequest) returns (GetPresenceResponse);
 
-// UpdateProfile — upserts displayname and/or avatar_url for a user
+// UpdateProfile - upserts displayname and/or avatar_url for a user
 rpc UpdateProfile(UpdateProfileRequest) returns (UpdateProfileResponse);
 ```
 
 Add message definitions (AFTER existing messages, before the closing brace of the file):
 
 ```protobuf
-// GetPresence — reads from Presence.Manager ETS, never raises not_found (offline default)
+// GetPresence - reads from Presence.Manager ETS, never raises not_found (offline default)
 message GetPresenceRequest {
   string user_id = 1;
 }
@@ -146,7 +146,7 @@ message GetPresenceResponse {
   int64  last_active_ago = 2;  // milliseconds since last active (0 if never seen)
 }
 
-// UpdateProfile — upserts displayname and/or avatar_url in the profiles table
+// UpdateProfile - upserts displayname and/or avatar_url in the profiles table
 // Fields are optional strings: empty string = do not update that field
 message UpdateProfileRequest {
   string user_id      = 1;
@@ -181,7 +181,7 @@ Down migration:
 DROP TABLE IF EXISTS profiles;
 ```
 
-**Why a separate table (not `users`):** The `users` table stores PII as encrypted BLOBs (`display_name_encrypted`, `display_name_nonce`). The `profiles` table stores the plain-text public-facing Matrix profile (`displayname`, `avatar_url`) — these are explicitly public per Matrix spec. Previous migration: `000014_read_receipts` — next is `000015_profiles`.
+**Why a separate table (not `users`):** The `users` table stores PII as encrypted BLOBs (`display_name_encrypted`, `display_name_nonce`). The `profiles` table stores the plain-text public-facing Matrix profile (`displayname`, `avatar_url`) - these are explicitly public per Matrix spec. Previous migration: `000014_read_receipts` - next is `000015_profiles`.
 
 ### Go Handler: profile.go
 
@@ -200,7 +200,7 @@ type ProfileCoreClient interface {
 type ProfileHandler struct {
     coreClient ProfileCoreClient
     serverName string
-    db         ProfileDB  // interface for direct DB reads (GET profile — no gRPC needed)
+    db         ProfileDB  // interface for direct DB reads (GET profile - no gRPC needed)
 }
 
 // ProfileDB is the interface for reading profile data directly from PostgreSQL.
@@ -223,17 +223,17 @@ type ProfileConfig struct {
 func NewProfileHandler(cfg ProfileConfig) *ProfileHandler
 ```
 
-**GET /profile/{userId} — no auth, direct DB:**
+**GET /profile/{userId} - no auth, direct DB:**
 ```go
 // GetProfile handles GET /_matrix/client/v3/profile/{userId}.
-// No JWT required — public endpoint per Matrix spec.
+// No JWT required - public endpoint per Matrix spec.
 // Reads directly from the profiles PostgreSQL table (no gRPC round-trip).
 func (h *ProfileHandler) GetProfile(w http.ResponseWriter, r *http.Request)
 // Flow:
 //  1. Extract userId from r.PathValue("userId").
 //  2. Call h.db.GetProfile(r.Context(), userId).
 //  3. If not found → 404 M_NOT_FOUND.
-//  4. Return 200 {"displayname": "...", "avatar_url": "..."} (omit nil/empty fields? — include both always for Matrix client compat).
+//  4. Return 200 {"displayname": "...", "avatar_url": "..."} (omit nil/empty fields? - include both always for Matrix client compat).
 ```
 
 **PUT /profile/{userId}/displayname:**
@@ -270,7 +270,7 @@ func (h *ProfileHandler) PutAvatarURL(w http.ResponseWriter, r *http.Request)
 
 **ProfileDB implementation (for production use):**
 
-Create `gateway/internal/db/profile_store.go` (or `gateway/internal/matrix/profile_db.go` — check where `db.NewPostgresTokenStore` lives; follow that pattern):
+Create `gateway/internal/db/profile_store.go` (or `gateway/internal/matrix/profile_db.go` - check where `db.NewPostgresTokenStore` lives; follow that pattern):
 
 ```go
 type PostgresProfileDB struct {
@@ -363,7 +363,7 @@ func (c *Client) UpdateProfile(ctx context.Context, req *pb.UpdateProfileRequest
 Add after the receipts handler registration (before `slog.Info("HTTP server starting")`):
 
 ```go
-// Profile DB for direct reads (GET /profile — no gRPC)
+// Profile DB for direct reads (GET /profile - no gRPC)
 profileDB, err := sql.Open("pgx", cfg.DBURL)
 if err != nil {
     slog.Error("failed to open DB for profile store", "err", err)
@@ -376,7 +376,7 @@ profileHandler := matrix.NewProfileHandler(matrix.ProfileConfig{
     ServerName: serverName,
     DB:         db.NewPostgresProfileDB(profileDB),
 })
-// GET is unauthenticated — no jwtMiddleware wrapper
+// GET is unauthenticated - no jwtMiddleware wrapper
 mux.HandleFunc("GET /_matrix/client/v3/profile/{userId}", profileHandler.GetProfile)
 // PUT endpoints require auth
 mux.Handle("PUT /_matrix/client/v3/profile/{userId}/displayname",
@@ -394,9 +394,9 @@ mux.Handle("GET /_matrix/client/v3/presence/{userId}/status",
 
 **Note on DB connection:** Check if the existing `bootstrapDB` or `tokenDB` connection can be reused (prefer reuse over opening another connection). If main.go already has a `*sql.DB` suitable for profile reads, inject it directly instead of opening a new one.
 
-### Elixir: get_presence — implementation in EventDispatcher.Server
+### Elixir: get_presence - implementation in EventDispatcher.Server
 
-Add `get_presence/2` handler (NO configurable module needed — reads directly from `Nebu.Presence.Manager.get_presence/1`):
+Add `get_presence/2` handler (NO configurable module needed - reads directly from `Nebu.Presence.Manager.get_presence/1`):
 
 ```elixir
 def get_presence(request, _stream) do
@@ -422,15 +422,15 @@ end
 ```
 
 **Key facts about `Nebu.Presence.Manager.get_presence/1`:**
-- NEVER returns `{:error, :not_found}` — always returns `{:ok, %{status: :offline, last_active_at: nil}}` for unknown users (from manager.ex line 62-64)
-- Returns `status` as an atom (`:online`, `:offline`, `:unavailable`) — convert with `Atom.to_string/1`
-- `last_active_at` is `nil` for users never seen — handle nil case (→ 0 ms ago)
+- NEVER returns `{:error, :not_found}` - always returns `{:ok, %{status: :offline, last_active_at: nil}}` for unknown users (from manager.ex line 62-64)
+- Returns `status` as an atom (`:online`, `:offline`, `:unavailable`) - convert with `Atom.to_string/1`
+- `last_active_at` is `nil` for users never seen - handle nil case (→ 0 ms ago)
 
-**No 404 path:** Because `get_presence` never errors, this handler always succeeds. The Go handler receives a response with `presence: "offline"` for unknown users — NOT a 404. Update AC4 note: `404 M_NOT_FOUND` only applies if you implement user existence validation. For MVP: always return 200 with status "offline" for unknown users.
+**No 404 path:** Because `get_presence` never errors, this handler always succeeds. The Go handler receives a response with `presence: "offline"` for unknown users - NOT a 404. Update AC4 note: `404 M_NOT_FOUND` only applies if you implement user existence validation. For MVP: always return 200 with status "offline" for unknown users.
 
-> **IMPORTANT MVP DECISION:** Do NOT return 404 for unknown users from `get_presence`. `Nebu.Presence.Manager.get_presence/1` defaults unknown users to offline — this is intentional (Matrix clients handle `{"presence": "offline"}` fine). Remove the `NotFound → 404` gRPC error mapping from `presence.go` Go handler (Core never sends it). This avoids an unnecessary DB user-existence check.
+> **IMPORTANT MVP DECISION:** Do NOT return 404 for unknown users from `get_presence`. `Nebu.Presence.Manager.get_presence/1` defaults unknown users to offline - this is intentional (Matrix clients handle `{"presence": "offline"}` fine). Remove the `NotFound → 404` gRPC error mapping from `presence.go` Go handler (Core never sends it). This avoids an unnecessary DB user-existence check.
 
-### Elixir: update_profile — implementation in EventDispatcher.Server
+### Elixir: update_profile - implementation in EventDispatcher.Server
 
 Add `update_profile/2` handler with configurable DB module:
 
@@ -473,7 +473,7 @@ end
 
 ### Elixir: Nebu.Profile.DB module
 
-Create new module (follow `Nebu.Receipt.DB` pattern — place in `core/apps/event_dispatcher/lib/nebu/profile/db.ex` or check where `Nebu.Receipt.DB` is placed and follow same app):
+Create new module (follow `Nebu.Receipt.DB` pattern - place in `core/apps/event_dispatcher/lib/nebu/profile/db.ex` or check where `Nebu.Receipt.DB` is placed and follow same app):
 
 ```elixir
 defmodule Nebu.Profile.DB do
@@ -509,7 +509,7 @@ end
 
 ### Go: PostgresProfileDB for direct profile reads
 
-Create `gateway/internal/db/profile_store.go` (alongside `postgres_token_store.go` — follow that file's package and pattern):
+Create `gateway/internal/db/profile_store.go` (alongside `postgres_token_store.go` - follow that file's package and pattern):
 
 ```go
 package db
@@ -552,11 +552,11 @@ func (p *PostgresProfileDB) GetProfile(ctx context.Context, userID string) (*mat
 **In profile.go GetProfile handler:** Check `errors.Is(err, db.ErrProfileNotFound)` → 404; other errors → 500.
 
 **Circular import guard:** If `db` package imports from `matrix` package (for `ProfileData`), this creates a circular import since `matrix` would import `db`. Resolve by either:
-- Option A: Define `ProfileData` in the `db` package and have `matrix` import from `db` — then `ProfileDB` interface in `matrix` uses `*db.ProfileData`.
+- Option A: Define `ProfileData` in the `db` package and have `matrix` import from `db` - then `ProfileDB` interface in `matrix` uses `*db.ProfileData`.
 - Option B: Define a separate `ProfileRecord` struct in the `db` package, and keep `ProfileData` in `matrix`; `PostgresProfileDB` implements the interface with a conversion.
-- **Preferred:** Move `PostgresProfileDB` into `gateway/internal/matrix/` as `profile_db.go` (an unexported package-level implementation) — keep everything in the `matrix` package to avoid cross-package imports. Or use `gateway/internal/db/` with a standalone `ProfileData` type that the matrix handler converts.
+- **Preferred:** Move `PostgresProfileDB` into `gateway/internal/matrix/` as `profile_db.go` (an unexported package-level implementation) - keep everything in the `matrix` package to avoid cross-package imports. Or use `gateway/internal/db/` with a standalone `ProfileData` type that the matrix handler converts.
 
-Check how `db.NewPostgresTokenStore` is structured to decide. The cleanest approach for MVP: define a minimal `db.ProfileRow` struct in `gateway/internal/db/profile_store.go` that the `matrix.ProfileDB` interface returns — OR define `ProfileDB` interface to return `(string, string, error)` tuple to avoid struct cross-dependency.
+Check how `db.NewPostgresTokenStore` is structured to decide. The cleanest approach for MVP: define a minimal `db.ProfileRow` struct in `gateway/internal/db/profile_store.go` that the `matrix.ProfileDB` interface returns - OR define `ProfileDB` interface to return `(string, string, error)` tuple to avoid struct cross-dependency.
 
 ---
 
@@ -564,13 +564,13 @@ Check how `db.NewPostgresTokenStore` is structured to decide. The cleanest appro
 
 | File | Action |
 |------|--------|
-| `gateway/internal/matrix/profile.go` | CREATE — ProfileHandler (GET + PUT displayname + PUT avatar_url) |
-| `gateway/internal/matrix/profile_test.go` | CREATE — unit tests (write FIRST) |
-| `gateway/internal/matrix/presence.go` | CREATE — PresenceHandler (GET status) |
-| `gateway/internal/matrix/presence_test.go` | CREATE — unit tests (write FIRST) |
-| `gateway/migrations/000015_profiles.up.sql` | CREATE — profiles table |
-| `gateway/migrations/000015_profiles.down.sql` | CREATE — down migration |
-| `core/apps/event_dispatcher/lib/nebu/profile/db.ex` | CREATE — profile DB module |
+| `gateway/internal/matrix/profile.go` | CREATE - ProfileHandler (GET + PUT displayname + PUT avatar_url) |
+| `gateway/internal/matrix/profile_test.go` | CREATE - unit tests (write FIRST) |
+| `gateway/internal/matrix/presence.go` | CREATE - PresenceHandler (GET status) |
+| `gateway/internal/matrix/presence_test.go` | CREATE - unit tests (write FIRST) |
+| `gateway/migrations/000015_profiles.up.sql` | CREATE - profiles table |
+| `gateway/migrations/000015_profiles.down.sql` | CREATE - down migration |
+| `core/apps/event_dispatcher/lib/nebu/profile/db.ex` | CREATE - profile DB module |
 
 ## Files to Modify
 
@@ -594,43 +594,43 @@ Check how `db.NewPostgresTokenStore` is structured to decide. The cleanest appro
 
 ### Go conventions
 - `profile.go` and `presence.go` are separate files per architecture spec (see `gateway/internal/matrix/` tree in architecture.md: `profile.go` and `presence.go` explicitly listed)
-- Consumer-defined interfaces: `ProfileCoreClient` in `profile.go`; `PresenceCoreClient` in `presence.go`; `ProfileDB` in `profile.go` — NOT in `client.go`
+- Consumer-defined interfaces: `ProfileCoreClient` in `profile.go`; `PresenceCoreClient` in `presence.go`; `ProfileDB` in `profile.go` - NOT in `client.go`
 - Package: `package matrix` for both handler files
-- Error handling: use `writeMatrixError(w, statusCode, errcode, message)` — already exists in `matrix` package
+- Error handling: use `writeMatrixError(w, statusCode, errcode, message)` - already exists in `matrix` package
 - Path values: `r.PathValue("userId")` (Go 1.22+ mux, consistent with typing.go)
 - Auth context: `r.Context().Value(middleware.ContextKeySub).(string)` + `coregrpc.FormatUserID(sub, serverName)`
-- gRPC context: `coregrpc.WithUserMetadata(r.Context(), userID, systemRole)` — see rooms.go
+- gRPC context: `coregrpc.WithUserMetadata(r.Context(), userID, systemRole)` - see rooms.go
 
-### GET /profile is unauthenticated — do NOT wrap with jwtMiddleware
+### GET /profile is unauthenticated - do NOT wrap with jwtMiddleware
 - Matrix spec: profile is public; any client can read
-- `mux.HandleFunc("GET /_matrix/client/v3/profile/{userId}", profileHandler.GetProfile)` — NO jwtMiddleware
-- Go 1.22+ mux: method+path specificity takes precedence — separate registrations for GET, PUT/displayname, PUT/avatar_url
+- `mux.HandleFunc("GET /_matrix/client/v3/profile/{userId}", profileHandler.GetProfile)` - NO jwtMiddleware
+- Go 1.22+ mux: method+path specificity takes precedence - separate registrations for GET, PUT/displayname, PUT/avatar_url
 
-### Presence — offline default, never 404 from Core
-- `Nebu.Presence.Manager.get_presence/1` ALWAYS returns `{:ok, %{status: ..., last_active_at: ...}}` — unknown users default to `:offline`
+### Presence - offline default, never 404 from Core
+- `Nebu.Presence.Manager.get_presence/1` ALWAYS returns `{:ok, %{status: ..., last_active_at: ...}}` - unknown users default to `:offline`
 - Core's `get_presence/2` handler NEVER raises `GRPC.RPCError` with `not_found`
 - Go presence handler: remove `codes.NotFound → 404` error mapping; only map `default → 500`
 - `last_active_ago`: always `0` for offline users with `nil` last_active_at
 
 ### Elixir conventions
-- No configurable module needed for `get_presence` (calls `Nebu.Presence.Manager` directly — it's already testable via its ETS)
+- No configurable module needed for `get_presence` (calls `Nebu.Presence.Manager` directly - it's already testable via its ETS)
 - `update_profile` uses configurable `profile_db_module()` via `Application.get_env` pattern (mandatory for ExUnit testability)
-- No try/rescue — let it crash + Supervisor
-- `Nebu.Grpc.Metadata.trusted_identity/1` is the canonical way to extract `user_id` from stream metadata — check how it's used in `send_receipt/2` of EventDispatcher.Server
+- No try/rescue - let it crash + Supervisor
+- `Nebu.Grpc.Metadata.trusted_identity/1` is the canonical way to extract `user_id` from stream metadata - check how it's used in `send_receipt/2` of EventDispatcher.Server
 
-### profiles table — UPSERT semantics
-- `PRIMARY KEY (user_id)` — one row per user
+### profiles table - UPSERT semantics
+- `PRIMARY KEY (user_id)` - one row per user
 - `COALESCE` on conflict: passing `nil` for a field preserves existing value
-- `updated_at BIGINT NOT NULL` — Unix milliseconds (consistent with all other BIGINT timestamps in schema)
-- FK: `REFERENCES users(user_id)` — user must exist before profile can be created (Core enforces user existence implicitly since authenticated users are provisioned on first login)
+- `updated_at BIGINT NOT NULL` - Unix milliseconds (consistent with all other BIGINT timestamps in schema)
+- FK: `REFERENCES users(user_id)` - user must exist before profile can be created (Core enforces user existence implicitly since authenticated users are provisioned on first login)
 
 ### Migration numbering
-- Previous: `000014_read_receipts` — next MUST be `000015_profiles`
+- Previous: `000014_read_receipts` - next MUST be `000015_profiles`
 - Do NOT skip numbers; do NOT reuse
 
 ### Proto field conventions
-- `GetPresence`: `presence` field returns string atom name (not enum) — consistent with `SetPresence` request using string `"online"|"offline"|"unavailable"`
-- `UpdateProfile`: empty string `""` means "do not update this field" — Core converts `""` to `nil` before upsert
+- `GetPresence`: `presence` field returns string atom name (not enum) - consistent with `SetPresence` request using string `"online"|"offline"|"unavailable"`
+- `UpdateProfile`: empty string `""` means "do not update this field" - Core converts `""` to `nil` before upsert
 - Proto field numbers: start at 1, never reuse
 
 ---
@@ -639,17 +639,17 @@ Check how `db.NewPostgresTokenStore` is structured to decide. The cleanest appro
 
 **Key learnings from Story 4-17 implementation notes:**
 
-1. **`client.go` pattern for wired methods:** `return c.core.MethodName(ctx, req)` — single line; add to `client_test.go` expecting connection error (not nil,nil like stubs).
+1. **`client.go` pattern for wired methods:** `return c.core.MethodName(ctx, req)` - single line; add to `client_test.go` expecting connection error (not nil,nil like stubs).
 
-2. **`stream_test.go` mockCoreClient:** After adding new gRPC methods to proto, add the stub implementation to `mockCoreClient` in `stream_test.go` — otherwise compilation fails. Pattern: `func (m *mockCoreClient) GetPresence(ctx context.Context, req *pb.GetPresenceRequest, ...) (*pb.GetPresenceResponse, error) { return nil, nil }`.
+2. **`stream_test.go` mockCoreClient:** After adding new gRPC methods to proto, add the stub implementation to `mockCoreClient` in `stream_test.go` - otherwise compilation fails. Pattern: `func (m *mockCoreClient) GetPresence(ctx context.Context, req *pb.GetPresenceRequest, ...) (*pb.GetPresenceResponse, error) { return nil, nil }`.
 
-3. **`client_test.go` SetTyping update:** When a stub becomes wired, update its test from "expect nil,nil" to "expect connection error" — consistent with all other wired methods. Do the same for `SetPresence` in this story.
+3. **`client_test.go` SetTyping update:** When a stub becomes wired, update its test from "expect nil,nil" to "expect connection error" - consistent with all other wired methods. Do the same for `SetPresence` in this story.
 
 4. **Receipt DB location:** `Nebu.Receipt.DB` was placed in `core/apps/event_dispatcher/lib/nebu/receipt/db.ex` (not in `room_manager`). Follow same pattern for `Nebu.Profile.DB` → `core/apps/event_dispatcher/lib/nebu/profile/db.ex`.
 
 5. **Route registration order:** Add profile + presence routes AFTER receipts handler, BEFORE `slog.Info("HTTP server starting")`.
 
-6. **`m.read.private`:** Dev added it as valid receipt type (implementation decision). This story has no similar edge — follow the spec strictly.
+6. **`m.read.private`:** Dev added it as valid receipt type (implementation decision). This story has no similar edge - follow the spec strictly.
 
 7. **FK constraints:** Story 4-17 dev omitted FK on `read_receipts.event_id` for test isolation. For `profiles`: `REFERENCES users(user_id)` is safe to keep since authenticated users are always provisioned before they can call PUT /profile.
 
@@ -671,28 +671,28 @@ Check how `db.NewPostgresTokenStore` is structured to decide. The cleanest appro
   - Follow existing pattern: check `core/apps/event_dispatcher/test/` for existing test files to confirm exact location convention
 
 ### Elixir test setup for get_presence
-- `Nebu.Presence.Manager.get_presence/1` reads directly from ETS (`:NebuPresence` table) — no configurable module
+- `Nebu.Presence.Manager.get_presence/1` reads directly from ETS (`:NebuPresence` table) - no configurable module
 - For tests: ensure the ETS table `:NebuPresence` is accessible (Presence.Application starts it in supervised app; for unit tests, start Presence.Application or create the ETS table manually)
-- Simpler test approach: use `Application.put_env` to swap a fake presence module: add `defp presence_module` to EventDispatcher.Server with `Application.get_env(:event_dispatcher, :presence_module, Nebu.Presence.Manager)` and call `presence_module().get_presence(user_id)` — makes tests fast and deterministic without real ETS
+- Simpler test approach: use `Application.put_env` to swap a fake presence module: add `defp presence_module` to EventDispatcher.Server with `Application.get_env(:event_dispatcher, :presence_module, Nebu.Presence.Manager)` and call `presence_module().get_presence(user_id)` - makes tests fast and deterministic without real ETS
 
 ### Elixir test setup for update_profile
-- `Application.put_env(:event_dispatcher, :profile_db_module, FakeProfileDB)` — same pattern as `receipt_db_module`
-- `FakeProfileDB` implements `upsert_profile/3` — capture args via Agent for assertion
+- `Application.put_env(:event_dispatcher, :profile_db_module, FakeProfileDB)` - same pattern as `receipt_db_module`
+- `FakeProfileDB` implements `upsert_profile/3` - capture args via Agent for assertion
 
 ---
 
 ## Dependencies
 
-- Story 4-7 (done): `Nebu.Presence.Manager` with `get_presence/1` — returns `{:ok, %{status, last_active_at}}`; ETS table `:NebuPresence` owned by Presence.Application
-- Story 2-1 (done): `users` table exists with `user_id PRIMARY KEY` — required for `profiles` FK constraint
-- Story 4-17 (review): `read_receipts` migration `000014` done — next is `000015`; `Nebu.Receipt.DB` placement pattern established
-- Story 2-12 (done): User record DB write on first login — authenticated users always have a `users` row before PUT /profile is called
+- Story 4-7 (done): `Nebu.Presence.Manager` with `get_presence/1` - returns `{:ok, %{status, last_active_at}}`; ETS table `:NebuPresence` owned by Presence.Application
+- Story 2-1 (done): `users` table exists with `user_id PRIMARY KEY` - required for `profiles` FK constraint
+- Story 4-17 (review): `read_receipts` migration `000014` done - next is `000015`; `Nebu.Receipt.DB` placement pattern established
+- Story 2-12 (done): User record DB write on first login - authenticated users always have a `users` row before PUT /profile is called
 
 ---
 
 ## Story Completion Status
 
-Ultimate context engine analysis completed — comprehensive developer guide created.
+Ultimate context engine analysis completed - comprehensive developer guide created.
 
 ---
 
@@ -725,23 +725,23 @@ No blocking issues encountered.
 
 ### File List
 
-- `proto/core.proto` — Added `GetPresence` + `UpdateProfile` RPCs and 4 message types
-- `gateway/internal/grpc/pb/core.pb.go` — REGENERATED via `make proto`
-- `gateway/internal/grpc/pb/core_grpc.pb.go` — REGENERATED via `make proto`
-- `core/apps/event_dispatcher/lib/pb/core.pb.ex` — REGENERATED via `make proto`
-- `core/apps/event_dispatcher/lib/pb/core_grpc.pb.ex` — REGENERATED via `make proto`
-- `gateway/migrations/000015_profiles.up.sql` — NEW: profiles table
-- `gateway/migrations/000015_profiles.down.sql` — NEW: down migration
-- `gateway/internal/matrix/profile.go` — NEW: ProfileHandler
-- `gateway/internal/matrix/profile_test.go` — MODIFIED: use ErrProfileNotFound sentinel; remove unused errors import
-- `gateway/internal/matrix/presence.go` — NEW: PresenceHandler
-- `gateway/internal/matrix/presence_test.go` — unchanged (already passing)
-- `gateway/internal/db/profile_store.go` — NEW: PostgresProfileDB
-- `gateway/internal/grpc/client.go` — Implemented SetPresence; added GetPresence + UpdateProfile
-- `gateway/internal/grpc/client_test.go` — Updated SetPresence test; added GetPresence + UpdateProfile tests
-- `gateway/internal/grpc/stream_test.go` — Added GetPresence + UpdateProfile stubs to mockCoreClient
-- `gateway/cmd/gateway/main.go` — Registered 4 new routes; profile DB wired
-- `core/apps/event_dispatcher/lib/nebu/profile/db.ex` — NEW: Nebu.Profile.DB
-- `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` — Added get_presence/2 + update_profile/2 + helpers
-- `core/apps/event_dispatcher/mix.exs` — Added presence umbrella dependency
-- `_bmad-output/implementation-artifacts/sprint-status.yaml` — Updated 4-18 → review
+- `proto/core.proto` - Added `GetPresence` + `UpdateProfile` RPCs and 4 message types
+- `gateway/internal/grpc/pb/core.pb.go` - REGENERATED via `make proto`
+- `gateway/internal/grpc/pb/core_grpc.pb.go` - REGENERATED via `make proto`
+- `core/apps/event_dispatcher/lib/pb/core.pb.ex` - REGENERATED via `make proto`
+- `core/apps/event_dispatcher/lib/pb/core_grpc.pb.ex` - REGENERATED via `make proto`
+- `gateway/migrations/000015_profiles.up.sql` - NEW: profiles table
+- `gateway/migrations/000015_profiles.down.sql` - NEW: down migration
+- `gateway/internal/matrix/profile.go` - NEW: ProfileHandler
+- `gateway/internal/matrix/profile_test.go` - MODIFIED: use ErrProfileNotFound sentinel; remove unused errors import
+- `gateway/internal/matrix/presence.go` - NEW: PresenceHandler
+- `gateway/internal/matrix/presence_test.go` - unchanged (already passing)
+- `gateway/internal/db/profile_store.go` - NEW: PostgresProfileDB
+- `gateway/internal/grpc/client.go` - Implemented SetPresence; added GetPresence + UpdateProfile
+- `gateway/internal/grpc/client_test.go` - Updated SetPresence test; added GetPresence + UpdateProfile tests
+- `gateway/internal/grpc/stream_test.go` - Added GetPresence + UpdateProfile stubs to mockCoreClient
+- `gateway/cmd/gateway/main.go` - Registered 4 new routes; profile DB wired
+- `core/apps/event_dispatcher/lib/nebu/profile/db.ex` - NEW: Nebu.Profile.DB
+- `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` - Added get_presence/2 + update_profile/2 + helpers
+- `core/apps/event_dispatcher/mix.exs` - Added presence umbrella dependency
+- `_bmad-output/implementation-artifacts/sprint-status.yaml` - Updated 4-18 → review

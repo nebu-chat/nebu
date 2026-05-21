@@ -15,29 +15,29 @@ so that I can quickly find and inspect rooms on the instance without scrolling t
 
 ## Acceptance Criteria
 
-1. **Handler upgrade** — `gateway/internal/admin/rooms.go`: `RoomsHandler.ListHandler` is extended to:
+1. **Handler upgrade** - `gateway/internal/admin/rooms.go`: `RoomsHandler.ListHandler` is extended to:
    - Read query params `q` (search string), `visibility` (filter: `"all"` | `"public"` | `"private"`, default `"all"`), and `page` (int, default 0)
    - Filter `stubRooms` by `q` (case-insensitive substring match on `Name`) and by `visibility` param
    - Paginate the filtered slice: page size 5, `HasMore` is true when `len(filtered) > (page+1)*5`
    - Populate `RoomsPageData` with the new fields `Rooms`, `SearchInput`, `FilterBar`, `EmptyState`, `TotalCount`, `CurrentPage`, `HasMore`, `NextPage`
    - Render the `rooms` template via `h.tmpl.render(w, "rooms", data)`
 
-2. **`RoomRowData`** — `gateway/internal/admin/page_data.go`: Add a new `RoomRowData` struct (same pattern as `UserRowData`):
+2. **`RoomRowData`** - `gateway/internal/admin/page_data.go`: Add a new `RoomRowData` struct (same pattern as `UserRowData`):
    - Embeds `StubRoom`
-   - Adds `Badge StatusBadgeData` — pre-computed by the handler: `Status: "active"` → `StatusBadgeData{Status: "active"}`, `Status: "archived"` → `StatusBadgeData{Status: "inactive"}`
+   - Adds `Badge StatusBadgeData` - pre-computed by the handler: `Status: "active"` → `StatusBadgeData{Status: "active"}`, `Status: "archived"` → `StatusBadgeData{Status: "inactive"}`
 
-3. **`RoomsPageData` extended** — `gateway/internal/admin/page_data.go`: Replace the existing `RoomsPageData` definition with one that adds:
-   - `Rooms []RoomRowData` — the filtered, paginated slice (replaces `StubRooms`)
-   - `SearchInput SearchInputData` — pre-filled with current `q` and `name="q"`
-   - `FilterBar []FilterOption` — single `FilterOption` for `visibility` with options `["all", "public", "private"]`
-   - `TotalCount int` — total matching rooms (before pagination)
-   - `CurrentPage int` — current 0-indexed page
-   - `HasMore bool` — whether a next page exists
-   - `NextPage int` — `CurrentPage + 1` (avoids FuncMap `add` helper in templates)
-   - `EmptyState EmptyStateData` — populated when `Rooms` is empty
+3. **`RoomsPageData` extended** - `gateway/internal/admin/page_data.go`: Replace the existing `RoomsPageData` definition with one that adds:
+   - `Rooms []RoomRowData` - the filtered, paginated slice (replaces `StubRooms`)
+   - `SearchInput SearchInputData` - pre-filled with current `q` and `name="q"`
+   - `FilterBar []FilterOption` - single `FilterOption` for `visibility` with options `["all", "public", "private"]`
+   - `TotalCount int` - total matching rooms (before pagination)
+   - `CurrentPage int` - current 0-indexed page
+   - `HasMore bool` - whether a next page exists
+   - `NextPage int` - `CurrentPage + 1` (avoids FuncMap `add` helper in templates)
+   - `EmptyState EmptyStateData` - populated when `Rooms` is empty
    - Existing fields `PageData`, `ActiveItemID`, `ActiveRoom`, `CloseURL` remain unchanged
 
-4. **`rooms.html` template upgrade** — `gateway/internal/admin/templates/rooms.html`: Replace the `{{ define "master_list" }}` block with a full-featured version:
+4. **`rooms.html` template upgrade** - `gateway/internal/admin/templates/rooms.html`: Replace the `{{ define "master_list" }}` block with a full-featured version:
    - `<main>` landmark wrapping all list content (WCAG)
    - `<h1 class="...">Rooms</h1>` visible heading
    - A `<form method="GET" action="/admin/rooms">` wrapping `{{ template "search_input" .SearchInput }}` and `{{ template "filter_bar" .FilterBar }}`
@@ -46,78 +46,78 @@ so that I can quickly find and inspect rooms on the instance without scrolling t
    - `<nav aria-label="pagination">` load-more link when `.HasMore` is true, using `.NextPage`
    - `{{ define "detail_title" }}`, `{{ define "detail_content" }}`, `{{ define "detail_footer" }}` blocks remain unchanged from Story 7.2
 
-5. **Go unit tests** — `gateway/internal/admin/rooms_page_test.go` (`package admin`):
-   - `TestRoomsPageRenders` — `GET /admin/rooms` → HTTP 200, body contains `<h1`, `<main`
-   - `TestRoomsPageSearch` — `GET /admin/rooms?q=general` → body contains "General", does NOT contain "Engineering"
-   - `TestRoomsPageVisibilityFilter` — `GET /admin/rooms?visibility=private` → body contains "Engineering", does NOT contain "General" (General is `public`)
-   - `TestRoomsPageEmptyState` — `GET /admin/rooms?q=zzznomatch` → body contains "No rooms found"
-   - `TestRoomsPageStatusBadge` — `GET /admin/rooms` → body contains `badge-success` (active rooms) AND `badge-error` (archived — "Old Project X" has `Status: "archived"`)
-   - `TestRoomsPagePagination` — `GET /admin/rooms` → page 0 with all 5 stubs, `HasMore = false`; assert body does NOT contain `aria-label="pagination"` (no nav rendered)
+5. **Go unit tests** - `gateway/internal/admin/rooms_page_test.go` (`package admin`):
+   - `TestRoomsPageRenders` - `GET /admin/rooms` → HTTP 200, body contains `<h1`, `<main`
+   - `TestRoomsPageSearch` - `GET /admin/rooms?q=general` → body contains "General", does NOT contain "Engineering"
+   - `TestRoomsPageVisibilityFilter` - `GET /admin/rooms?visibility=private` → body contains "Engineering", does NOT contain "General" (General is `public`)
+   - `TestRoomsPageEmptyState` - `GET /admin/rooms?q=zzznomatch` → body contains "No rooms found"
+   - `TestRoomsPageStatusBadge` - `GET /admin/rooms` → body contains `badge-success` (active rooms) AND `badge-error` (archived - "Old Project X" has `Status: "archived"`)
+   - `TestRoomsPagePagination` - `GET /admin/rooms` → page 0 with all 5 stubs, `HasMore = false`; assert body does NOT contain `aria-label="pagination"` (no nav rendered)
 
-6. **Playwright E2E tests** — `e2e/tests/features/admin/rooms-page.spec.ts` — **REAL tests (not `test.skip`)**:
-   - `search input debounces and updates URL` — navigate to `/admin/rooms`, type `general`, wait for URL to contain `q=general` (≤2s timeout); verify "General" is visible in results
-   - `visibility filter triggers immediate form submit` — navigate to `/admin/rooms`, select `private` from visibility dropdown, URL contains `visibility=private`
-   - `empty state shown when no results` — navigate to `/admin/rooms?q=zzznomatch`, see `<h3>` with text matching `/no rooms/i`
-   - `status badge shows correct color for active room` — navigate to `/admin/rooms`, first `span[role="status"]` has class `badge-success`
+6. **Playwright E2E tests** - `e2e/tests/features/admin/rooms-page.spec.ts` - **REAL tests (not `test.skip`)**:
+   - `search input debounces and updates URL` - navigate to `/admin/rooms`, type `general`, wait for URL to contain `q=general` (≤2s timeout); verify "General" is visible in results
+   - `visibility filter triggers immediate form submit` - navigate to `/admin/rooms`, select `private` from visibility dropdown, URL contains `visibility=private`
+   - `empty state shown when no results` - navigate to `/admin/rooms?q=zzznomatch`, see `<h3>` with text matching `/no rooms/i`
+   - `status badge shows correct color for active room` - navigate to `/admin/rooms`, first `span[role="status"]` has class `badge-success`
    - Auth: `loginAsAdmin` helper (OIDC Authorization Code + PKCE, same pattern as `master-detail.spec.ts`)
 
 ## Acceptance Tests
 
 ### Tests written FIRST (before implementation code):
 
-1. **RoomsPageRenders — GET /admin/rooms returns 200 with WCAG landmarks** — Go `net/http/httptest` (`gateway/internal/admin/rooms_page_test.go`)
+1. **RoomsPageRenders - GET /admin/rooms returns 200 with WCAG landmarks** - Go `net/http/httptest` (`gateway/internal/admin/rooms_page_test.go`)
    - Given: `RoomsHandler.ListHandler` wired to a test HTTP server
    - When: `GET /admin/rooms` (no params)
    - Then: HTTP 200, body contains `<h1`, body contains `<main`
 
-2. **RoomsPageSearch — q param filters to matching rooms** — Go `net/http/httptest`
+2. **RoomsPageSearch - q param filters to matching rooms** - Go `net/http/httptest`
    - Given: handler with full `stubRooms` (includes "General" and "Engineering")
    - When: `GET /admin/rooms?q=general`
    - Then: body contains "General", body does NOT contain "Engineering"
 
-3. **RoomsPageVisibilityFilter — visibility param filters to matching rooms** — Go `net/http/httptest`
+3. **RoomsPageVisibilityFilter - visibility param filters to matching rooms** - Go `net/http/httptest`
    - Given: handler with full `stubRooms` ("General" is `public`, "Engineering" is `private`)
    - When: `GET /admin/rooms?visibility=private`
    - Then: body contains "Engineering", body does NOT contain "General"
 
-4. **RoomsPageEmptyState — no-match query shows empty state** — Go `net/http/httptest`
+4. **RoomsPageEmptyState - no-match query shows empty state** - Go `net/http/httptest`
    - Given: handler with full `stubRooms`
    - When: `GET /admin/rooms?q=zzznomatch`
    - Then: body contains "No rooms found"
 
-5. **RoomsPageStatusBadge — badge class matches room status** — Go `net/http/httptest`
+5. **RoomsPageStatusBadge - badge class matches room status** - Go `net/http/httptest`
    - Given: handler renders the full stub list (includes active and archived rooms; "Old Project X" has `Status: "archived"`)
    - When: `GET /admin/rooms`
    - Then: body contains `badge-success` AND body contains `badge-error`
 
-6. **RoomsPagePagination — 5 stubs fit on page 0, no pagination nav rendered** — Go `net/http/httptest`
+6. **RoomsPagePagination - 5 stubs fit on page 0, no pagination nav rendered** - Go `net/http/httptest`
    - Given: handler with full `stubRooms` (5 entries, pageSize=5)
    - When: `GET /admin/rooms` (page 0, no filter)
    - Then: body does NOT contain `aria-label="pagination"` (HasMore=false → no `<nav>` rendered)
 
-7. **Playwright: search input debounces and updates URL** — Playwright (`e2e/tests/features/admin/rooms-page.spec.ts`)
+7. **Playwright: search input debounces and updates URL** - Playwright (`e2e/tests/features/admin/rooms-page.spec.ts`)
    - Given: full dev stack running, admin logged in
    - When: navigate to `/admin/rooms`, fill `general` in the search input
    - Then: URL changes to contain `q=general` within 2s; "General" is visible in the list
 
-8. **Playwright: visibility filter triggers immediate form submit** — Playwright
+8. **Playwright: visibility filter triggers immediate form submit** - Playwright
    - Given: admin on `/admin/rooms`
    - When: select `private` from the visibility filter dropdown
    - Then: URL contains `visibility=private`
 
-9. **Playwright: empty state heading visible when no results** — Playwright
+9. **Playwright: empty state heading visible when no results** - Playwright
    - Given: admin on `/admin/rooms?q=zzznomatch`
    - When: page renders
    - Then: `<h3>` element with text matching `/no rooms/i` is visible
 
-10. **Playwright: status badge for active room has badge-success class** — Playwright
+10. **Playwright: status badge for active room has badge-success class** - Playwright
     - Given: admin on `/admin/rooms`
     - When: page renders
     - Then: first `span[role="status"]` element has class `badge-success`
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Write failing Go unit tests FIRST — AC: 5
+- [ ] Task 1: Write failing Go unit tests FIRST - AC: 5
   - [ ] 1.1 Create `gateway/internal/admin/rooms_page_test.go` in `package admin`
   - [ ] 1.2 Import: `"net/http/httptest"`, `"net/http"`, `"strings"`, `"testing"`
   - [ ] 1.3 Write `TestRoomsPageRenders`:
@@ -142,10 +142,10 @@ so that I can quickly find and inspect rooms on the instance without scrolling t
     - Assert: body does NOT contain `aria-label="pagination"` (HasMore=false → no nav rendered)
   - [ ] 1.9 Confirm RED: `go test ./internal/admin/...` fails because `RoomsPageData` lacks new fields and `rooms.html` lacks `<main>`/`<h1>`
 
-- [ ] Task 2: Write Playwright E2E tests FIRST — AC: 6
+- [ ] Task 2: Write Playwright E2E tests FIRST - AC: 6
   - [ ] 2.1 Create `e2e/tests/features/admin/rooms-page.spec.ts`
   - [ ] 2.2 Copy `loginAsAdmin` helper from `master-detail.spec.ts` (identical pattern)
-  - [ ] 2.3 Write `test('search input debounces and updates URL')` — NOT test.skip:
+  - [ ] 2.3 Write `test('search input debounces and updates URL')` - NOT test.skip:
     - `loginAsAdmin(page)`, `goto('/admin/rooms')`, `fill('general')` into `input[name="q"]`
     - `expect(page).toHaveURL(/[?&]q=general/, { timeout: 2_000 })`
     - `expect(page.getByText('General')).toBeVisible()`
@@ -163,13 +163,13 @@ so that I can quickly find and inspect rooms on the instance without scrolling t
     - `expect(badge).toHaveClass(/badge-success/)`
   - [ ] 2.7 Confirm RED: running `npx playwright test rooms-page.spec.ts` fails (page lacks `<main>`, search/filter form, etc.)
 
-- [ ] Task 3: Add `RoomRowData` and extend `RoomsPageData` in `page_data.go` — AC: 2, 3
+- [ ] Task 3: Add `RoomRowData` and extend `RoomsPageData` in `page_data.go` - AC: 2, 3
   - [ ] 3.1 Add `RoomRowData` struct to `page_data.go` after `UserRowData`:
     ```go
     // RoomRowData is used in the Rooms list template (Story 7.8).
     // Embeds StubRoom and adds a pre-computed Badge for the status_badge component,
     // normalising StubRoom.Status "archived" → StatusBadgeData{Status: "inactive"}.
-    // This avoids template FuncMap helpers — the handler populates Badge directly.
+    // This avoids template FuncMap helpers - the handler populates Badge directly.
     type RoomRowData struct {
         StubRoom
         Badge StatusBadgeData
@@ -197,9 +197,9 @@ so that I can quickly find and inspect rooms on the instance without scrolling t
         CloseURL     string    // e.g. "/admin/rooms"
     }
     ```
-  - [ ] 3.3 Verify that `master_detail_test.go` (Story 7.2) and any other tests using `RoomsPageData.StubRooms` still compile. Update references from `StubRooms: stubRooms` to `Rooms: toRoomRowDataSlice(stubRooms)` (or equivalent) where needed. This is a compile-time error — the test suite will not compile until fixed.
+  - [ ] 3.3 Verify that `master_detail_test.go` (Story 7.2) and any other tests using `RoomsPageData.StubRooms` still compile. Update references from `StubRooms: stubRooms` to `Rooms: toRoomRowDataSlice(stubRooms)` (or equivalent) where needed. This is a compile-time error - the test suite will not compile until fixed.
 
-- [ ] Task 4: Upgrade `RoomsHandler` in `rooms.go` — AC: 1
+- [ ] Task 4: Upgrade `RoomsHandler` in `rooms.go` - AC: 1
   - [ ] 4.1 Add `filterStubRooms` private helper (in `rooms.go`):
     - Accepts `rooms []StubRoom`, `q string`, `visibility string`
     - `q` filter: case-insensitive substring match on `Name` using `strings.Contains(strings.ToLower(r.Name), strings.ToLower(q))`
@@ -251,10 +251,10 @@ so that I can quickly find and inspect rooms on the instance without scrolling t
         h.tmpl.render(w, "rooms", data)
     }
     ```
-  - [ ] 4.4 Update `DetailHandler` to use `Rooms: toRoomRowDataSlice(stubRooms)` (or pass the full list pre-converted) — `StubRooms` field no longer exists
+  - [ ] 4.4 Update `DetailHandler` to use `Rooms: toRoomRowDataSlice(stubRooms)` (or pass the full list pre-converted) - `StubRooms` field no longer exists
   - [ ] 4.5 Add `import "strconv"` and `import "strings"` to `rooms.go`
 
-- [ ] Task 5: Upgrade `rooms.html` template — AC: 4
+- [ ] Task 5: Upgrade `rooms.html` template - AC: 4
   - [ ] 5.1 Replace `{{ define "master_list" }}` block in `gateway/internal/admin/templates/rooms.html`:
     ```html
     {{ define "master_list" }}
@@ -300,11 +300,11 @@ so that I can quickly find and inspect rooms on the instance without scrolling t
     ```
   - [ ] 5.2 Keep `{{ define "detail_title" }}`, `{{ define "detail_content" }}`, `{{ define "detail_footer" }}` blocks unchanged from Story 7.2
 
-- [ ] Task 6: Verify no regressions — AC: all
-  - [ ] 6.1 Run `make test-unit-go` — all existing tests pass; 6 new rooms page tests pass
-  - [ ] 6.2 Verify `master_detail_test.go` still compiles — fix any `StubRooms` → `Rooms` references
+- [ ] Task 6: Verify no regressions - AC: all
+  - [ ] 6.1 Run `make test-unit-go` - all existing tests pass; 6 new rooms page tests pass
+  - [ ] 6.2 Verify `master_detail_test.go` still compiles - fix any `StubRooms` → `Rooms` references
   - [ ] 6.3 Verify `make build-gateway` exits 0
-  - [ ] 6.4 Run Playwright: `npx playwright test rooms-page.spec.ts` — all 4 tests green against running dev stack
+  - [ ] 6.4 Run Playwright: `npx playwright test rooms-page.spec.ts` - all 4 tests green against running dev stack
 
 ## Dev Notes
 
@@ -326,7 +326,7 @@ With `pageSize = 5` and 5 total stubs: page 0 shows all 5, `HasMore = false`, no
 
 | URL param `visibility=` | Filter logic |
 |---|---|
-| `all` | no filter — show all rooms |
+| `all` | no filter - show all rooms |
 | `public` | `room.Visibility == "public"` |
 | `private` | `room.Visibility == "private"` |
 
@@ -353,11 +353,11 @@ type RoomRowData struct {
 }
 ```
 
-The handler converts `[]StubRoom` → `[]RoomRowData` before populating `RoomsPageData.Rooms`. The template calls `{{ template "status_badge" .Badge }}` per row — no FuncMap needed.
+The handler converts `[]StubRoom` → `[]RoomRowData` before populating `RoomsPageData.Rooms`. The template calls `{{ template "status_badge" .Badge }}` per row - no FuncMap needed.
 
 ### `NextPage` Field (mirrors UsersPageData)
 
-Add `NextPage int` to `RoomsPageData` (set to `CurrentPage + 1` in the handler). The load-more link uses `{{ .NextPage }}` directly — no `add` FuncMap helper needed.
+Add `NextPage int` to `RoomsPageData` (set to `CurrentPage + 1` in the handler). The load-more link uses `{{ .NextPage }}` directly - no `add` FuncMap helper needed.
 
 ### `toRoomRowData` Helper (mirrors `toUserRowData`)
 
@@ -392,22 +392,22 @@ Story 7.2's tests may reference `RoomsPageData.StubRooms`. After this story repl
 
 ### What NOT to Do
 
-- **Do NOT add pagination to `DetailHandler`** — detail view always shows the room; pagination is list-only
-- **Do NOT implement JS infinite scroll** — load-more is a `?page=N` GET link only
-- **Do NOT implement skeleton CSS/JS** — `data-loading-skeleton` attribute is sufficient for this story
-- **Do NOT use `strings.EqualFold`** — use `strings.Contains(strings.ToLower(...), strings.ToLower(q))` for substring search
-- **Do NOT add search to the detail view** — search state is list-view only
+- **Do NOT add pagination to `DetailHandler`** - detail view always shows the room; pagination is list-only
+- **Do NOT implement JS infinite scroll** - load-more is a `?page=N` GET link only
+- **Do NOT implement skeleton CSS/JS** - `data-loading-skeleton` attribute is sufficient for this story
+- **Do NOT use `strings.EqualFold`** - use `strings.Contains(strings.ToLower(...), strings.ToLower(q))` for substring search
+- **Do NOT add search to the detail view** - search state is list-view only
 
 ### File Locations
 
 | File | Action |
 |---|---|
-| `gateway/internal/admin/rooms.go` | Modify — extend `ListHandler`, add `filterStubRooms`, `toRoomRowData`, `toRoomRowDataSlice` |
-| `gateway/internal/admin/page_data.go` | Modify — add `RoomRowData`, replace `RoomsPageData` |
-| `gateway/internal/admin/templates/rooms.html` | Modify — rebuild `master_list` block |
-| `gateway/internal/admin/rooms_page_test.go` | NEW — 6 Go unit tests |
-| `gateway/internal/admin/master_detail_test.go` | Modify — update `StubRooms` → `Rooms` references if present |
-| `e2e/tests/features/admin/rooms-page.spec.ts` | NEW — 4 Playwright E2E tests (all REAL, no skip) |
+| `gateway/internal/admin/rooms.go` | Modify - extend `ListHandler`, add `filterStubRooms`, `toRoomRowData`, `toRoomRowDataSlice` |
+| `gateway/internal/admin/page_data.go` | Modify - add `RoomRowData`, replace `RoomsPageData` |
+| `gateway/internal/admin/templates/rooms.html` | Modify - rebuild `master_list` block |
+| `gateway/internal/admin/rooms_page_test.go` | NEW - 6 Go unit tests |
+| `gateway/internal/admin/master_detail_test.go` | Modify - update `StubRooms` → `Rooms` references if present |
+| `e2e/tests/features/admin/rooms-page.spec.ts` | NEW - 4 Playwright E2E tests (all REAL, no skip) |
 
 ### Upcoming Stories That Depend on This Story
 
@@ -416,4 +416,4 @@ Story 7.2's tests may reference `RoomsPageData.StubRooms`. After this story repl
 
 ## Status Notes
 
-Created: 2026-04-29. Stories 7.1 through 7.7 are done. This story upgrades the `/admin/rooms` page to a full-featured list with search, visibility filter, pagination, WCAG landmarks, and proper `StatusBadge`/`EmptyState` integration. All required component templates (C8 search_input, C9/C10 filter_bar, C13 status_badge, C14 empty_state) are already implemented — this story only wires them into the rooms page. The pattern mirrors Story 7.5 (User List Page) exactly: same `RowData` approach, same `FilterBar` slice, same `NextPage` field, same Playwright E2E structure. Playwright tests are REAL (not `test.skip`) because a production page exists to test against.
+Created: 2026-04-29. Stories 7.1 through 7.7 are done. This story upgrades the `/admin/rooms` page to a full-featured list with search, visibility filter, pagination, WCAG landmarks, and proper `StatusBadge`/`EmptyState` integration. All required component templates (C8 search_input, C9/C10 filter_bar, C13 status_badge, C14 empty_state) are already implemented - this story only wires them into the rooms page. The pattern mirrors Story 7.5 (User List Page) exactly: same `RowData` approach, same `FilterBar` slice, same `NextPage` field, same Playwright E2E structure. Playwright tests are REAL (not `test.skip`) because a production page exists to test against.

@@ -1,4 +1,4 @@
-# Story 2.7: Auth Token Flow — Go to Elixir via gRPC Metadata
+# Story 2.7: Auth Token Flow - Go to Elixir via gRPC Metadata
 
 Status: done
 
@@ -24,7 +24,7 @@ So that Elixir handlers have reliable user context without re-validating tokens.
 
 3. **Given** Elixir's trust model,
    **When** Elixir handlers are reviewed,
-   **Then** no handler re-validates the OIDC token — metadata values are trusted as authoritative
+   **Then** no handler re-validates the OIDC token - metadata values are trusted as authoritative
 
 ## Tasks / Subtasks
 
@@ -39,14 +39,14 @@ So that Elixir handlers have reliable user context without re-validating tokens.
 - [x] Create `gateway/internal/grpc/metadata_test.go` (AC: #1)
   - [x] `TestWithUserMetadata`: set metadata → read back via `metadata.FromOutgoingContext` → assert keys/values
   - [x] Table-driven variant: cases for `("user", "user")`, `("instance_admin", "instance_admin")`, `("", "user")`
-  - [x] `TestFormatUserID`: table-driven — `("abc123", "example.com")` → `"@abc123:example.com"`, `("", "example.com")` → `""`
+  - [x] `TestFormatUserID`: table-driven - `("abc123", "example.com")` → `"@abc123:example.com"`, `("", "example.com")` → `""`
 
 - [x] Create `core/apps/event_dispatcher/lib/nebu/grpc/metadata.ex` (AC: #2, #3)
   - [x] Module `Nebu.Grpc.Metadata`
-  - [x] `user_id(stream)` — extracts `"x-user-id"` from `stream.adapter.payload.headers`, returns `String.t() | nil`
-  - [x] `system_role(stream)` — extracts `"x-system-role"`, defaults to `"user"` if absent
-  - [x] `trusted_identity(stream)` — returns `{user_id(stream), system_role(stream)}`
-  - [x] Private `get_header(stream, key)` — uses `List.keyfind/3` on the headers proplist
+  - [x] `user_id(stream)` - extracts `"x-user-id"` from `stream.adapter.payload.headers`, returns `String.t() | nil`
+  - [x] `system_role(stream)` - extracts `"x-system-role"`, defaults to `"user"` if absent
+  - [x] `trusted_identity(stream)` - returns `{user_id(stream), system_role(stream)}`
+  - [x] Private `get_header(stream, key)` - uses `List.keyfind/3` on the headers proplist
 
 - [x] Create `core/apps/event_dispatcher/test/nebu/grpc/metadata_test.exs` (AC: #2, #3)
   - [x] `test "user_id/1 returns value when header present"`
@@ -59,10 +59,10 @@ So that Elixir handlers have reliable user context without re-validating tokens.
 
 ### What This Story Does
 
-Creates the metadata transport infrastructure for the auth token flow — pure helper code, no wiring yet.
+Creates the metadata transport infrastructure for the auth token flow - pure helper code, no wiring yet.
 
-- **Go:** `gateway/internal/grpc/metadata.go` — `WithUserMetadata` injects `x-user-id`/`x-system-role` into outgoing gRPC context; `FormatUserID` formats `@{sub}:{serverName}`
-- **Elixir:** `Nebu.Grpc.Metadata` — helper module to extract identity from incoming gRPC stream headers
+- **Go:** `gateway/internal/grpc/metadata.go` - `WithUserMetadata` injects `x-user-id`/`x-system-role` into outgoing gRPC context; `FormatUserID` formats `@{sub}:{serverName}`
+- **Elixir:** `Nebu.Grpc.Metadata` - helper module to extract identity from incoming gRPC stream headers
 
 **Scope boundary:** This story creates the helpers. Epic 4 stories wire them into actual Matrix API handlers when stubs are replaced. Do NOT modify `client.go` or `server.ex` stubs.
 
@@ -72,9 +72,9 @@ Creates the metadata transport infrastructure for the auth token flow — pure h
 
 **Package:** `package grpc` (in `gateway/internal/grpc/`)
 
-**Import:** `"google.golang.org/grpc/metadata"` — already available as sub-package of `google.golang.org/grpc v1.79.3` (no new dep needed)
+**Import:** `"google.golang.org/grpc/metadata"` - already available as sub-package of `google.golang.org/grpc v1.79.3` (no new dep needed)
 
-**No new import of `middleware` needed** — `FormatUserID` takes plain strings; caller extracts `sub` from HTTP context using `middleware.ContextKeySub`.
+**No new import of `middleware` needed** - `FormatUserID` takes plain strings; caller extracts `sub` from HTTP context using `middleware.ContextKeySub`.
 
 ```go
 package grpc
@@ -110,9 +110,9 @@ func FormatUserID(sub, serverName string) string {
 }
 ```
 
-**Import alias note:** The `grpc` package already imports `google.golang.org/grpc` as `grpclib` (see `client.go`). The new `google.golang.org/grpc/metadata` sub-package imports as just `"metadata"` — no alias conflict.
+**Import alias note:** The `grpc` package already imports `google.golang.org/grpc` as `grpclib` (see `client.go`). The new `google.golang.org/grpc/metadata` sub-package imports as just `"metadata"` - no alias conflict.
 
-**Usage pattern for Epic 4 handlers (do NOT implement now — for reference only):**
+**Usage pattern for Epic 4 handlers (do NOT implement now - for reference only):**
 ```go
 // In a Matrix API handler, before any gRPC call:
 sub, _ := r.Context().Value(middleware.ContextKeySub).(string)
@@ -197,7 +197,7 @@ defmodule Nebu.Grpc.Metadata do
   @moduledoc """
   Extracts validated user identity from incoming gRPC stream metadata.
 
-  Elixir trusts these values fully — the Go gateway has already validated the OIDC token.
+  Elixir trusts these values fully - the Go gateway has already validated the OIDC token.
   No re-validation in Elixir (Architecture Rule: auth token never forwarded to Elixir).
   """
 
@@ -229,7 +229,7 @@ end
 
 ### Elixir: metadata_test.exs
 
-Tests use a bare map as a fake stream — this works because the module only accesses `stream.adapter.payload.headers` via map key access.
+Tests use a bare map as a fake stream - this works because the module only accesses `stream.adapter.payload.headers` via map key access.
 
 ```elixir
 defmodule Nebu.Grpc.MetadataTest do
@@ -274,8 +274,8 @@ Files to create:
 gateway/
   internal/
     grpc/
-      client.go            ← EXISTS — do NOT touch
-      client_test.go       ← EXISTS — do NOT touch
+      client.go            ← EXISTS - do NOT touch
+      client_test.go       ← EXISTS - do NOT touch
       metadata.go          ← CREATE
       metadata_test.go     ← CREATE
 
@@ -287,7 +287,7 @@ core/
           grpc/
             metadata.ex    ← CREATE (new directory nebu/grpc/)
           event_dispatcher/
-            server.ex      ← EXISTS — do NOT touch
+            server.ex      ← EXISTS - do NOT touch
       test/
         nebu/
           grpc/
@@ -298,22 +298,22 @@ core/
 - `core/apps/event_dispatcher/lib/nebu/grpc/` (new)
 - `core/apps/event_dispatcher/test/nebu/grpc/` (new)
 
-Elixir auto-discovers modules and tests by directory — no registration needed.
+Elixir auto-discovers modules and tests by directory - no registration needed.
 
 ### Cross-Story Context
 
 | Story | Relationship |
 |-------|-------------|
-| 2.4   | `JWTMiddleware` sets `ContextKeySub` + `ContextKeySystemRole` in HTTP context — Story 2.7 reads these via `FormatUserID` call sites |
+| 2.4   | `JWTMiddleware` sets `ContextKeySub` + `ContextKeySystemRole` in HTTP context - Story 2.7 reads these via `FormatUserID` call sites |
 | 2.14  | `ValidateToken` gRPC handler in Elixir uses `Nebu.Grpc.Metadata` to read `x-user-id`/`x-system-role` |
 | 4.x   | All Matrix API gRPC calls (SendEvent, CreateRoom, etc.) will use `WithUserMetadata` before calling Core |
 
 ### Build & Test
 
 ```bash
-make test-unit-go      # go test -race ./... — must pass; includes metadata_test.go
+make test-unit-go      # go test -race ./... - must pass; includes metadata_test.go
 make build-gateway     # verify compilation
-make test-unit-elixir  # mix test — must pass; includes metadata_test.exs
+make test-unit-elixir  # mix test - must pass; includes metadata_test.exs
 ```
 
 ### References
@@ -321,13 +321,13 @@ make test-unit-elixir  # mix test — must pass; includes metadata_test.exs
 - [Source: architecture.md#Auth-Token-Flow] Canonical: Go → Elixir via `x-user-id` + `x-system-role` only
 - [Source: architecture.md#Enforcement rule 2] "Auth-Token nie an Elixir weitergeben"
 - [Source: epics.md#Story-2.7] Acceptance criteria (authoritative)
-- [Source: gateway/internal/middleware/auth.go] `ContextKeySub`, `ContextKeySystemRole` — exported context keys
+- [Source: gateway/internal/middleware/auth.go] `ContextKeySub`, `ContextKeySystemRole` - exported context keys
 - [Source: gateway/internal/config/config.go] `ServerName string // NEBU_SERVER_NAME`
 - [Source: gateway/internal/grpc/client.go] Package pattern, `grpclib` alias convention
 - [Source: gateway/internal/grpc/client_test.go] Test package convention: `package grpc`
 - [Source: core/apps/event_dispatcher/mix.exs] `grpc ~> 0.8`
 - [Source: core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex] Existing gRPC server pattern
-- [Source: gateway/go.mod] `google.golang.org/grpc v1.79.3` — metadata sub-package included
+- [Source: gateway/go.mod] `google.golang.org/grpc v1.79.3` - metadata sub-package included
 
 ## Dev Agent Record
 
@@ -337,7 +337,7 @@ claude-sonnet-4-6 (1M context)
 
 ### Debug Log References
 
-None — implementation was straightforward following story spec exactly.
+None - implementation was straightforward following story spec exactly.
 
 ### Completion Notes List
 

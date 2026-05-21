@@ -29,8 +29,8 @@ so that all Matrix IDs derived from it (`@user:server_name`, `!room:server_name`
 - [x] Task 1: Create `gateway/migrations/000003_server_config.up.sql` (AC: #1, #2, #3, #4)
   - [x] `CREATE TABLE server_config` with specified columns
   - [x] `ALTER TABLE server_config ENABLE ROW LEVEL SECURITY`
-  - [x] `ALTER TABLE server_config FORCE ROW LEVEL SECURITY` (required — see Dev Notes)
-  - [x] `CREATE POLICY config_read_all ON server_config FOR SELECT USING (true)` (added by code review — required under FORCE RLS)
+  - [x] `ALTER TABLE server_config FORCE ROW LEVEL SECURITY` (required - see Dev Notes)
+  - [x] `CREATE POLICY config_read_all ON server_config FOR SELECT USING (true)` (added by code review - required under FORCE RLS)
   - [x] `CREATE POLICY config_insert_only ON server_config FOR INSERT WITH CHECK (true)`
 
 - [x] Task 2: Create `gateway/migrations/000003_server_config.down.sql` (AC: #7)
@@ -41,7 +41,7 @@ so that all Matrix IDs derived from it (`@user:server_name`, `!room:server_name`
   - [x] Check if `server_name` row exists: `SELECT value FROM server_config WHERE key = 'server_name'`
   - [x] If exists: return existing value (ignore serverName param)
   - [x] If missing and serverName != "": INSERT and `slog.Info("Server name set: " + serverName)`
-  - [x] If missing and serverName == "": return `("", nil)` — no error, server name just not set yet
+  - [x] If missing and serverName == "": return `("", nil)` - no error, server name just not set yet
 
 - [x] Task 4: Create `gateway/internal/db/serverconfig_test.go` (AC: #5, #6)
   - [x] Test `InitServerConfig` with unreachable DB returns error
@@ -61,14 +61,14 @@ so that all Matrix IDs derived from it (`@user:server_name`, `!room:server_name`
 ### What This Story Is
 
 Two deliverables:
-1. **SQL migration** `000003_server_config` — schema + RLS policy
-2. **Go code** `gateway/internal/db/serverconfig.go` — `InitServerConfig` startup logic + `main.go` integration
+1. **SQL migration** `000003_server_config` - schema + RLS policy
+2. **Go code** `gateway/internal/db/serverconfig.go` - `InitServerConfig` startup logic + `main.go` integration
 
 **Nothing else changes.** Do NOT modify `db.go`, `migrations.go`, config.go, or any existing file except `main.go`.
 
 ---
 
-### Migration File — Up
+### Migration File - Up
 
 **File:** `gateway/migrations/000003_server_config.up.sql`
 
@@ -99,14 +99,14 @@ CREATE POLICY config_insert_only ON server_config FOR INSERT WITH CHECK (true);
 ```
 
 **Critical notes:**
-- `set_at` is `BIGINT` (Unix milliseconds), NOT `TIMESTAMPTZ` — follows architecture timestamp decision
+- `set_at` is `BIGINT` (Unix milliseconds), NOT `TIMESTAMPTZ` - follows architecture timestamp decision
 - `FORCE ROW LEVEL SECURITY` is required to enforce the policy on the `nebu` user, who is both the table owner (creates via migration) and the application DB user. Without FORCE, the owner bypasses RLS.
 - Policy name `config_insert_only` is explicit (aids error messages)
 - `config_read_all` SELECT policy is **required** because `FORCE ROW LEVEL SECURITY` subjects the owner to default-deny on SELECT. Without it, the gateway cannot read back the server_name after insertion.
 
 ---
 
-### Migration File — Down
+### Migration File - Down
 
 **File:** `gateway/migrations/000003_server_config.down.sql`
 
@@ -139,7 +139,7 @@ import (
 // Behavior:
 //   - If server_name already exists in DB: returns DB value (ignores serverName param)
 //   - If server_name is absent and serverName != "": INSERTs and logs "Server name set: <value>"
-//   - If server_name is absent and serverName == "": returns ("", nil) — no error
+//   - If server_name is absent and serverName == "": returns ("", nil) - no error
 //
 // Call after RunMigrations, before starting the HTTP listener.
 func InitServerConfig(dbURL, serverName string) (string, error) {
@@ -180,8 +180,8 @@ func InitServerConfig(dbURL, serverName string) (string, error) {
 ```
 
 **Key implementation details:**
-- Use `sql.Open("pgx", dbURL)` — NOT `pgx5URL(dbURL)`. The `pgx5URL` helper is only for golang-migrate. Direct `database/sql` usage requires the original `postgres://` URL format. See how `CheckDB` in db.go does the same.
-- `time.Now().UnixMilli()` — standard lib, no new imports
+- Use `sql.Open("pgx", dbURL)` - NOT `pgx5URL(dbURL)`. The `pgx5URL` helper is only for golang-migrate. Direct `database/sql` usage requires the original `postgres://` URL format. See how `CheckDB` in db.go does the same.
+- `time.Now().UnixMilli()` - standard lib, no new imports
 - Log message must match AC exactly: `"Server name set: " + serverName` (not structured slog field)
 - Variable name `database` (not `db`) to avoid shadowing the `db` package name
 
@@ -217,17 +217,17 @@ Use **6-digit zero-padded version**:
 - ❌ `003_server_config.up.sql`
 
 **Current state:**
-- `000001_init.up.sql` — extensions (pgcrypto, uuid-ossp)
-- `000002_message_buffer.up.sql` — message_buffer + message_dead_letter
+- `000001_init.up.sql` - extensions (pgcrypto, uuid-ossp)
+- `000002_message_buffer.up.sql` - message_buffer + message_dead_letter
 - `000003_server_config.up.sql` ← **this story**
 
-**Architecture file shows `002_server_config` — that is the architectural ORDER, not the actual file naming.** The actual naming follows implementation order: message_buffer was already implemented as 000002, so server_config is 000003.
+**Architecture file shows `002_server_config` - that is the architectural ORDER, not the actual file naming.** The actual naming follows implementation order: message_buffer was already implemented as 000002, so server_config is 000003.
 
 ---
 
 ### How the Embed Works
 
-`gateway/migrations/migrations.go` uses `//go:embed *.sql` — adding new `.sql` files is **sufficient**; no code changes needed to migrations.go.
+`gateway/migrations/migrations.go` uses `//go:embed *.sql` - adding new `.sql` files is **sufficient**; no code changes needed to migrations.go.
 
 ---
 
@@ -291,7 +291,7 @@ docker compose exec postgres psql -U nebu -d nebu \
 # Expected: ERROR: new row for relation "server_config" violates row-level security policy
 
 # 6. Test server_name idempotency (AC #6):
-# Run gateway again without NEBU_SERVER_NAME — should use DB value
+# Run gateway again without NEBU_SERVER_NAME - should use DB value
 NEBU_DB_URL="postgres://nebu:nebu_dev_password@localhost:5432/nebu?sslmode=disable" \
   docker compose run --rm gateway
 # Expected: no "Server name set" log; uses existing DB value
@@ -322,11 +322,11 @@ gateway/
 ```
 
 **Files NOT to touch:**
-- `gateway/migrations/migrations.go` (embed — no changes needed)
+- `gateway/migrations/migrations.go` (embed - no changes needed)
 - `gateway/migrations/migrations_test.go` (do not regress)
 - `gateway/migrations/000001_init.up.sql` / `000001_init.down.sql`
 - `gateway/migrations/000002_message_buffer.up.sql` / `000002_message_buffer.down.sql`
-- `gateway/internal/db/db.go` (RunMigrations, CheckDB — no changes)
+- `gateway/internal/db/db.go` (RunMigrations, CheckDB - no changes)
 - `gateway/internal/db/db_test.go` (do not regress)
 - `gateway/internal/config/config.go` (Config struct already has ServerName field)
 - `gateway/go.mod` / `gateway/go.sum`
@@ -335,14 +335,14 @@ gateway/
 
 ### References
 
-- server_config schema + RLS: [Source: architecture.md — "G8 — Server Name: Immutable", SQL block]
+- server_config schema + RLS: [Source: architecture.md - "G8 - Server Name: Immutable", SQL block]
 - FORCE ROW LEVEL SECURITY rationale: PostgreSQL docs (table owner bypasses ENABLE without FORCE)
-- `set_at` as BIGINT: [Source: architecture.md — timestamp convention, all Unix ms as BIGINT]
-- Acceptance Criteria: [Source: epics.md — Epic 1, Story 1.5]
-- Migration naming format: [Source: epics.md — Story 1.3 AC, confirmed by existing `000001_init.up.sql`]
+- `set_at` as BIGINT: [Source: architecture.md - timestamp convention, all Unix ms as BIGINT]
+- Acceptance Criteria: [Source: epics.md - Epic 1, Story 1.5]
+- Migration naming format: [Source: epics.md - Story 1.3 AC, confirmed by existing `000001_init.up.sql`]
 - `//go:embed *.sql` auto-picks up new files: [Source: gateway/migrations/migrations.go]
-- pgx5URL only for golang-migrate: [Source: gateway/internal/db/db.go — pgx5URL() helper]
-- config.ServerName already available: [Source: gateway/internal/config/config.go — NEBU_SERVER_NAME]
+- pgx5URL only for golang-migrate: [Source: gateway/internal/db/db.go - pgx5URL() helper]
+- config.ServerName already available: [Source: gateway/internal/config/config.go - NEBU_SERVER_NAME]
 - Migration version ordering: 000001=init, 000002=message_buffer → 000003=server_config
 - Architecture file shows different numbering (002_server_config): architectural order ≠ implementation file names
 
@@ -360,7 +360,7 @@ None.
 
 - Created `000003_server_config.up.sql` with `CREATE TABLE`, `ENABLE ROW LEVEL SECURITY`, `FORCE ROW LEVEL SECURITY`, and `config_insert_only` INSERT-only policy. FORCE is required because the `nebu` user is the table owner and would otherwise bypass RLS.
 - Created `000003_server_config.down.sql` with `DROP TABLE IF EXISTS server_config`.
-- Created `gateway/internal/db/serverconfig.go` implementing `InitServerConfig` using `sql.Open("pgx", dbURL)` (not `pgx5URL` — that is golang-migrate only). Follows the same pattern as `CheckDB` in `db.go`.
+- Created `gateway/internal/db/serverconfig.go` implementing `InitServerConfig` using `sql.Open("pgx", dbURL)` (not `pgx5URL` - that is golang-migrate only). Follows the same pattern as `CheckDB` in `db.go`.
 - Created `gateway/internal/db/serverconfig_test.go` with two tests: unreachable DB with serverName set returns error; unreachable DB with empty serverName also returns error (connection attempt happens before serverName check).
 - Updated `gateway/cmd/gateway/main.go` to call `db.InitServerConfig` after `db.RunMigrations`. On error: logs and exits. On success: logs `"Gateway using server name"` if non-empty.
 - All tests pass: `go test ./...` green. Build compiles cleanly: `go build ./...` no errors.
@@ -376,5 +376,5 @@ None.
 
 ## Change Log
 
-- 2026-03-20: Story implemented — server_config migration (000003) with RLS + FORCE RLS, InitServerConfig Go function, tests, and main.go integration (claude-sonnet-4-6)
-- 2026-03-20: Code review (claude-opus-4-6) — CRITICAL fix: added `CREATE POLICY config_read_all ON server_config FOR SELECT USING (true)` to up migration. FORCE RLS causes default-deny on SELECT for the table owner; without a SELECT policy, the gateway could never read back the server_name after insertion, breaking AC #6. Status → done.
+- 2026-03-20: Story implemented - server_config migration (000003) with RLS + FORCE RLS, InitServerConfig Go function, tests, and main.go integration (claude-sonnet-4-6)
+- 2026-03-20: Code review (claude-opus-4-6) - CRITICAL fix: added `CREATE POLICY config_read_all ON server_config FOR SELECT USING (true)` to up migration. FORCE RLS causes default-deny on SELECT for the table owner; without a SELECT policy, the gateway could never read back the server_name after insertion, breaking AC #6. Status → done.

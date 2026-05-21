@@ -1,4 +1,4 @@
-# GDPR Right to Erasure — Operations Runbook
+# GDPR Right to Erasure - Operations Runbook
 
 Story 14.4 | GDPR Article 17 | Route: `DELETE /api/v1/admin/users/{userId}`
 
@@ -20,14 +20,14 @@ requester's perspective. Each step is described with its failure behavior.
 
 | Step | Action | Failure Behavior |
 |------|--------|-----------------|
-| 1 | Role gate: require `instance_admin` | 403 M_FORBIDDEN — request rejected |
-| 2 | Path param validation (`userId` ≤ 255 chars) | 400 M_BAD_JSON — request rejected |
-| 3 | Self-delete guard (callerSub ≠ userId) | 403 M_FORBIDDEN — four-eyes approval required |
-| 4 | gRPC `DeactivateUser` — `is_active=false`, all sessions destroyed | 404 on unknown user, 500 on internal error |
-| 5 | gRPC `DeleteUserKeys` — private signing + encryption key material set to NULL | Best-effort: warns on failure, continues |
-| 6 | DB anonymization — `profiles.displayname='Deleted User'`, `profiles.avatar_url=NULL`, `users.anonymized_at=<unix_ms>` | 500 — PII erasure MUST NOT be silently skipped |
-| 7 | Audit log — emits `gdpr_deletion` event with actor + target | Never-raise: audit failure does not block 200 response |
-| 8 | 200 `{"user_id": "...", "status": "gdpr_deleted"}` | — |
+| 1 | Role gate: require `instance_admin` | 403 M_FORBIDDEN - request rejected |
+| 2 | Path param validation (`userId` ≤ 255 chars) | 400 M_BAD_JSON - request rejected |
+| 3 | Self-delete guard (callerSub ≠ userId) | 403 M_FORBIDDEN - four-eyes approval required |
+| 4 | gRPC `DeactivateUser` - `is_active=false`, all sessions destroyed | 404 on unknown user, 500 on internal error |
+| 5 | gRPC `DeleteUserKeys` - private signing + encryption key material set to NULL | Best-effort: warns on failure, continues |
+| 6 | DB anonymization - `profiles.displayname='Deleted User'`, `profiles.avatar_url=NULL`, `users.anonymized_at=<unix_ms>` | 500 - PII erasure MUST NOT be silently skipped |
+| 7 | Audit log - emits `gdpr_deletion` event with actor + target | Never-raise: audit failure does not block 200 response |
+| 8 | 200 `{"user_id": "...", "status": "gdpr_deleted"}` | - |
 
 ## Example Request
 
@@ -101,7 +101,7 @@ LIMIT 1;
 ## Room History Preservation
 
 Per GDPR recital 65, messages sent by the deleted user remain in room history.
-The Matrix event timeline is an immutable append-only log — event content is preserved as sent.
+The Matrix event timeline is an immutable append-only log - event content is preserved as sent.
 The user's PII is removed from their profile, but message content in rooms is not scrubbed.
 This is consistent with Matrix CS API v1.18 behavior.
 

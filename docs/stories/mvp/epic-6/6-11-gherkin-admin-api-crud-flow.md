@@ -41,7 +41,7 @@ so that regressions in user management, room management, and config operations a
 
 ### Tests written FIRST (before implementation code):
 
-1. **User management lifecycle** — Godog/Gherkin integration test
+1. **User management lifecycle** - Godog/Gherkin integration test
    - Given: `kai@example.com` authenticated (has `instance_admin` in Dex groups); `alex@example.com` as target user
    - When: GET /api/v1/admin/users with admin Bearer token
    - Then: 200, body contains `"data"` and `"total"`
@@ -54,7 +54,7 @@ so that regressions in user management, room management, and config operations a
    - When: Matrix GET /sync with alex's token
    - Then: 200
 
-2. **Role assignment** — Godog/Gherkin integration test
+2. **Role assignment** - Godog/Gherkin integration test
    - Given: `alex@example.com` authenticated (no compliance_officer role); `kai@example.com` as admin
    - When: POST /api/v1/admin/users/{alex_user_id}/roles `{"role": "compliance_officer", "action": "grant"}`
    - Then: 200, body contains `"granted"`
@@ -64,7 +64,7 @@ so that regressions in user management, room management, and config operations a
    - When: GET /api/v1/compliance/access-requests with alex's token
    - Then: 403
 
-3. **Room archival** — Godog/Gherkin integration test
+3. **Room archival** - Godog/Gherkin integration test
    - Given: `kai@example.com` creates a room and sends a message; `kai@example.com` also acts as admin
    - When: POST /api/v1/admin/rooms/{room_id}/archive `{"reason": "test archive"}`
    - Then: 200, body contains `"archived"`
@@ -82,7 +82,7 @@ so that regressions in user management, room management, and config operations a
 
 - [ ] Task 2: Create `gateway/test/integration/admin_api_steps_test.go` (AC: #4)
   - [ ] Add build tag `//go:build integration` and package `integration_test`
-  - [ ] Implement `initializeAdminAPISteps(sc *godog.ScenarioContext)` — registers all new steps
+  - [ ] Implement `initializeAdminAPISteps(sc *godog.ScenarioContext)` - registers all new steps
   - [ ] Implement scenario state variables (admin token, target user ID, room ID, etc.)
   - [ ] Implement step: authenticate instance_admin user (reuse `authenticateUser` from room_flow_steps_test.go)
   - [ ] Implement step: GET /api/v1/admin/users with admin token → assert 200 + data + meta.total
@@ -103,13 +103,13 @@ so that regressions in user management, room management, and config operations a
   - [ ] Add call `initializeAdminAPISteps(sc)` to `InitializeScenario`
 
 - [ ] Task 4: Verify all scenarios pass (AC: #5)
-  - [ ] Run `make test-integration` — all three scenarios green
+  - [ ] Run `make test-integration` - all three scenarios green
 
 ## Dev Notes
 
 ### Critical Context: Existing Test Infrastructure
 
-The integration test suite lives in `gateway/test/integration/` with build tag `//go:build integration`. **Do not create a new directory** — add the new files directly to `gateway/test/integration/`.
+The integration test suite lives in `gateway/test/integration/` with build tag `//go:build integration`. **Do not create a new directory** - add the new files directly to `gateway/test/integration/`.
 
 **File naming convention:** `<feature>_steps_test.go` (e.g. `admin_api_steps_test.go`).
 
@@ -117,15 +117,15 @@ The `TestIntegrationSuite` in `main_test.go` loads all `.feature` files from `..
 
 **Package**: `integration_test` (external test package, consistent across all step files).
 
-### Authentication Pattern — CRITICAL
+### Authentication Pattern - CRITICAL
 
-Admin API uses **Matrix access tokens** (Bearer), NOT admin session cookies. The `instance_admin` user is `kai@example.com` (password: `changeme`) — this user has `groups: [instance_admin]` in Dex.
+Admin API uses **Matrix access tokens** (Bearer), NOT admin session cookies. The `instance_admin` user is `kai@example.com` (password: `changeme`) - this user has `groups: [instance_admin]` in Dex.
 
 Authenticate via the **same `authenticateUser` helper** defined in `room_flow_steps_test.go`:
 ```go
 authenticateUser("kai@example.com", "changeme", &adminAccessToken, &adminUserID)
 ```
-This function runs the Dex Authorization Code flow (`iObtainDexTokenFor` → `iPostLoginWithDexToken`) and stores the Matrix `access_token`. This is already defined in the same package — do NOT redefine it.
+This function runs the Dex Authorization Code flow (`iObtainDexTokenFor` → `iPostLoginWithDexToken`) and stores the Matrix `access_token`. This is already defined in the same package - do NOT redefine it.
 
 ### Dex Test Users (from `dev/dex/config.yaml`)
 
@@ -137,20 +137,20 @@ This function runs the Dex Authorization Code flow (`iObtainDexTokenFor` → `iP
 
 ### API Endpoints and Auth
 
-All Admin API endpoints at `gatewayURL` (port 8080 in integration) — **not** `matrixURL` (port 8008):
-- `GET  /api/v1/admin/users` — requires `Authorization: Bearer <kai_access_token>`
-- `POST /api/v1/admin/users/{userId}/deactivate` — body: `{"reason": "..."}`
-- `POST /api/v1/admin/users/{userId}/reactivate` — no body required
-- `POST /api/v1/admin/users/{userId}/roles` — body: `{"role": "compliance_officer", "action": "grant"|"revoke"}`
-- `POST /api/v1/admin/rooms/{roomId}/archive` — body: `{"reason": "..."}`
+All Admin API endpoints at `gatewayURL` (port 8080 in integration) - **not** `matrixURL` (port 8008):
+- `GET  /api/v1/admin/users` - requires `Authorization: Bearer <kai_access_token>`
+- `POST /api/v1/admin/users/{userId}/deactivate` - body: `{"reason": "..."}`
+- `POST /api/v1/admin/users/{userId}/reactivate` - no body required
+- `POST /api/v1/admin/users/{userId}/roles` - body: `{"role": "compliance_officer", "action": "grant"|"revoke"}`
+- `POST /api/v1/admin/rooms/{roomId}/archive` - body: `{"reason": "..."}`
 
 Compliance API at `gatewayURL`:
-- `GET  /api/v1/compliance/access-requests` — requires Bearer token; returns 403 if token lacks compliance_officer role
+- `GET  /api/v1/compliance/access-requests` - requires Bearer token; returns 403 if token lacks compliance_officer role
 
 Matrix CS API at `matrixURL` (port 8008):
-- `GET /_matrix/client/v3/sync` — use this to test 401 (deactivated) or 200 (active)
-- `PUT /_matrix/client/v3/rooms/{roomId}/send/m.room.message/{txnId}` — returns 403 M_ROOM_ARCHIVED when room archived
-- `GET /_matrix/client/v3/rooms/{roomId}/messages` — returns 200 even for archived rooms
+- `GET /_matrix/client/v3/sync` - use this to test 401 (deactivated) or 200 (active)
+- `PUT /_matrix/client/v3/rooms/{roomId}/send/m.room.message/{txnId}` - returns 403 M_ROOM_ARCHIVED when room archived
+- `GET /_matrix/client/v3/rooms/{roomId}/messages` - returns 200 even for archived rooms
 
 ### Response Format
 
@@ -163,23 +163,23 @@ The Admin API uses the standard envelope from Story 6.2 (`api/response.go`):
 - Archive 200: `{"data": {"room_id": "...", "status": "archived"}}`
 - 403 on archived room send: `{"errcode": "M_ROOM_ARCHIVED", "error": "..."}`
 
-Use `strings.Contains(lastBody, "deactivated")` style assertions — same pattern as all other steps in the suite.
+Use `strings.Contains(lastBody, "deactivated")` style assertions - same pattern as all other steps in the suite.
 
 ### Role Grant and Compliance Endpoint Behavior
 
-After `POST /api/v1/admin/users/{userId}/roles` with `action: "grant"`, the role_overrides table gains a row for the user. The `RequireRole` middleware reads role overrides from the DB (not just from the JWT). However, the **Matrix access token for alex** does not change — it still carries only the `user` group from Dex. The compliance endpoint check goes through a separate auth path.
+After `POST /api/v1/admin/users/{userId}/roles` with `action: "grant"`, the role_overrides table gains a row for the user. The `RequireRole` middleware reads role overrides from the DB (not just from the JWT). However, the **Matrix access token for alex** does not change - it still carries only the `user` group from Dex. The compliance endpoint check goes through a separate auth path.
 
 **Important:** The compliance GET endpoint (`GET /api/v1/compliance/access-requests`) requires the user's **JWT** to carry the `compliance_officer` group claim **or** a valid compliance session token. Role overrides in the DB affect the Admin API middleware (`/api/v1/admin/*`), but NOT the compliance handler's auth check which inspects the JWT groups claim directly (see `gateway/internal/compliance/handler.go`).
 
-**Design implication for the Scenario: "Role assignment"**: After granting `compliance_officer` via the Admin API, alex's existing Matrix token still has `groups: ["user"]` in the JWT. The compliance endpoint 200 assertion is therefore tricky — alex needs a fresh Matrix token after the role is granted. Re-authenticate alex after the role grant to get a new JWT that includes the `compliance_officer` group.
+**Design implication for the Scenario: "Role assignment"**: After granting `compliance_officer` via the Admin API, alex's existing Matrix token still has `groups: ["user"]` in the JWT. The compliance endpoint 200 assertion is therefore tricky - alex needs a fresh Matrix token after the role is granted. Re-authenticate alex after the role grant to get a new JWT that includes the `compliance_officer` group.
 
-Actually, re-check: the `role_overrides` table is checked by `RequireRole` middleware (see `middleware.go` in `gateway/internal/api/`). The compliance handler in `gateway/internal/compliance/handler.go` uses the OIDC JWT middleware, not RequireRole. So after a DB override, for the compliance endpoint specifically, alex still needs a fresh JWT from Dex after the role is added to their Dex groups — which the integration test cannot do dynamically.
+Actually, re-check: the `role_overrides` table is checked by `RequireRole` middleware (see `middleware.go` in `gateway/internal/api/`). The compliance handler in `gateway/internal/compliance/handler.go` uses the OIDC JWT middleware, not RequireRole. So after a DB override, for the compliance endpoint specifically, alex still needs a fresh JWT from Dex after the role is added to their Dex groups - which the integration test cannot do dynamically.
 
 **Alternative approach for the Role assignment scenario:** Use `compliance@example.com` (already has `compliance_officer` in Dex groups) as the user being "granted" the role at the Admin API level. The test then verifies the API response says `"granted"` and that `compliance@example.com` can access compliance endpoints (which they already can via JWT). Then verify that after a `revoke`, the Admin API returns `"revoked"`. For the 403 assertion after revoke, test a different compliance endpoint path or check the DB override is gone.
 
 Or more pragmatically: the scenario can use a Matrix user token (not requiring re-auth) and assert 200 only at the Admin API level for the role grant/revoke responses, and for the compliance endpoint test use the `compliance@example.com` token which always has access. The 403-after-revoke can be tested by revoking an override that wasn't in the DB (which returns 404 via `ErrRoleOverrideNotFound`).
 
-**Recommended approach:** Keep it simple and robust — test what the Admin API endpoints return, not the side-effects on the compliance endpoint (which involves JWT reissuance complexity outside this story's scope). The key assertions are:
+**Recommended approach:** Keep it simple and robust - test what the Admin API endpoints return, not the side-effects on the compliance endpoint (which involves JWT reissuance complexity outside this story's scope). The key assertions are:
 1. POST /roles grant → 200 `action: "granted"`
 2. POST /roles revoke → 200 `action: "revoked"` (after granting first)
 3. The compliance endpoint check with `compliance@example.com` token → 200 (proves compliance auth works)
@@ -198,10 +198,10 @@ var adminAPITxnCounter    int     // incrementing txn ID
 
 ### Existing Helpers to Reuse (same package)
 
-- `authenticateUser(email, password, *token, *userID)` — in `room_flow_steps_test.go`
-- `gatewayURL`, `matrixURL` — in `main_test.go`
-- `lastStatusCode`, `lastBody` — in `steps_test.go`
-- `captureResponse(resp)` — in `steps_test.go`
+- `authenticateUser(email, password, *token, *userID)` - in `room_flow_steps_test.go`
+- `gatewayURL`, `matrixURL` - in `main_test.go`
+- `lastStatusCode`, `lastBody` - in `steps_test.go`
+- `captureResponse(resp)` - in `steps_test.go`
 
 ### Feature File Location and Format
 
@@ -210,7 +210,7 @@ gateway/features/admin_api.feature
 ```
 
 Follow the same structure as existing feature files:
-- `Feature: Admin API — User management, role assignment, room archival`
+- `Feature: Admin API - User management, role assignment, room archival`
 - `Background:` with `Given the docker compose stack is started`
 - Three named Scenarios
 
@@ -226,7 +226,7 @@ initializeAdminAPISteps(sc)  // Admin API step definitions (Story 6-11)
 - New feature file: `gateway/features/admin_api.feature`
 - New step file: `gateway/test/integration/admin_api_steps_test.go`
 - Modified: `gateway/test/integration/steps_test.go` (add registration call)
-- No new Go dependencies required — all existing imports suffice
+- No new Go dependencies required - all existing imports suffice
 - No changes to production code
 
 ### References
@@ -253,10 +253,10 @@ claude-sonnet-4-6
 
 ### Review Findings
 
-- [x] [Review][Patch] MINOR-1: Gherkin keyword style — `And` after `Then` for action step changed to `When` [gateway/features/admin_api.feature:44] — fixed instantly
+- [x] [Review][Patch] MINOR-1: Gherkin keyword style - `And` after `Then` for action step changed to `When` [gateway/features/admin_api.feature:44] - fixed instantly
 - [x] [Review][Info] Build & vet pass: `go build -tags integration ./gateway/test/integration/` and `go vet -tags integration` both succeed
 - [x] [Review][Info] All 16 step regexes match feature file 1:1 (special chars `\{archivalRoomId\}` correctly escaped)
-- [x] [Review][Info] `sc.Before` resets all 8 package-level state variables — same pattern as `compliance_flow_steps_test.go`
-- [x] [Review][Info] No hardcoded production secrets — only standard test fixture `changeme` (Dex test users, matches `dev/dex/config.yaml`)
+- [x] [Review][Info] `sc.Before` resets all 8 package-level state variables - same pattern as `compliance_flow_steps_test.go`
+- [x] [Review][Info] No hardcoded production secrets - only standard test fixture `changeme` (Dex test users, matches `dev/dex/config.yaml`)
 - [x] [Review][Info] Test-Review MAJOR-1 (compliance 200 assertion) properly addressed via `theComplianceOfficerUserCallsGETComplianceAccessRequests` (compliance@example.com lazy auth, JWT-based positive path)
-- [x] [Review][Info] `security_review: not-needed` — pure test story (no production code touched)
+- [x] [Review][Info] `security_review: not-needed` - pure test story (no production code touched)

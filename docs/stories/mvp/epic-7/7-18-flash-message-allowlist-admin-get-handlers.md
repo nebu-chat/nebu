@@ -31,23 +31,23 @@ The Epic 7 security review (`epic-7-security-review-2026-04-30.md`) identified a
 
 **Why it matters:** `html/template` auto-escaping prevents classic XSS. However, any string can be injected into the flash banner via a URL like `/admin/users/alice?flash=System+Error:+Please+re-enter+your+password`. This enables social engineering attacks: a phishing link constructed to look like a legitimate admin URL can display a convincing fake error or prompt to a logged-in admin. The `AlertBannerData.Message` field is rendered visibly inside the admin UI.
 
-**Fix approach — allowlist with silent fallback:**
+**Fix approach - allowlist with silent fallback:**
 
 Define a package-level allowlist of known-safe flash values. On each GET handler, validate the query param against this list. Unknown values → empty string (no banner shown, no error). Values exceeding 80 characters → also rejected (belt-and-suspenders, prevents long strings even if added to allowlist by mistake in future).
 
 **Known-safe flash values** (produced by the corresponding POST handlers via PRG redirect):
 
-- `"Role updated"` — from `UpdateRoleHandler`
-- `"Display name updated"` — from `UpdateDisplayNameHandler`
-- `"User deactivated"` — from `DeactivateUserHandler`
-- `"User reactivated"` — from `ReactivateUserHandler`
-- `"Room name updated"` — from `UpdateRoomNameHandler`
-- `"Room archived"` — from `ArchiveRoomHandler`
-- `"Room unarchived"` — from `UnarchiveRoomHandler`
-- `"Config updated"` — from `UpdateConfigHandler`
-- `"Role mapping updated"` — from `RoleMappingHandler.UpdateHandler`
-- `"Approved"` — from `ComplianceHandler.ApproveHandler`
-- `"Rejected"` — from `ComplianceHandler.RejectHandler`
+- `"Role updated"` - from `UpdateRoleHandler`
+- `"Display name updated"` - from `UpdateDisplayNameHandler`
+- `"User deactivated"` - from `DeactivateUserHandler`
+- `"User reactivated"` - from `ReactivateUserHandler`
+- `"Room name updated"` - from `UpdateRoomNameHandler`
+- `"Room archived"` - from `ArchiveRoomHandler`
+- `"Room unarchived"` - from `UnarchiveRoomHandler`
+- `"Config updated"` - from `UpdateConfigHandler`
+- `"Role mapping updated"` - from `RoleMappingHandler.UpdateHandler`
+- `"Approved"` - from `ComplianceHandler.ApproveHandler`
+- `"Rejected"` - from `ComplianceHandler.RejectHandler`
 
 ## Acceptance Criteria
 
@@ -60,56 +60,56 @@ Define a package-level allowlist of known-safe flash values. On each GET handler
 
 3. All five GET handlers use `sanitizeFlash(r.URL.Query().Get("flash"))` instead of reading the query param directly.
 
-4. A flash value in the allowlist (e.g. `"Config updated"`) is rendered in the banner — no regression for the normal POST→redirect→GET happy path.
+4. A flash value in the allowlist (e.g. `"Config updated"`) is rendered in the banner - no regression for the normal POST→redirect→GET happy path.
 
 5. A flash value not in the allowlist (e.g. `"Please re-enter your credentials"`) results in no banner being shown (empty `AlertBannerData`).
 
 6. A flash value longer than 80 characters results in no banner, even if the truncated prefix matches an allowlist entry.
 
-7. An empty `?flash=` query param (or no `?flash=` at all) results in no banner — same behaviour as before.
+7. An empty `?flash=` query param (or no `?flash=` at all) results in no banner - same behaviour as before.
 
-8. All existing Playwright smoke tests continue to pass — the known flash values produced by the POST handlers are in the allowlist, so PRG redirects still display banners.
+8. All existing Playwright smoke tests continue to pass - the known flash values produced by the POST handlers are in the allowlist, so PRG redirects still display banners.
 
 ## Acceptance Tests
 
 ### Tests written FIRST (before implementation code):
 
-1. [Unit: sanitizeFlash — valid values pass through] — Go unit test (`gateway/internal/admin/flash_test.go`)
+1. [Unit: sanitizeFlash - valid values pass through] - Go unit test (`gateway/internal/admin/flash_test.go`)
    - Given: each of the 11 allowlist values
    - When: `sanitizeFlash(value)`
    - Then: returns the value unchanged
 
-2. [Unit: sanitizeFlash — unknown value is rejected] — Go unit test
+2. [Unit: sanitizeFlash - unknown value is rejected] - Go unit test
    - Given: `msg = "Please re-enter your credentials"`
    - When: `sanitizeFlash(msg)`
    - Then: returns `""`
 
-3. [Unit: sanitizeFlash — oversized value is rejected] — Go unit test
+3. [Unit: sanitizeFlash - oversized value is rejected] - Go unit test
    - Given: `msg = strings.Repeat("x", 81)`
    - When: `sanitizeFlash(msg)`
    - Then: returns `""`
 
-4. [Unit: sanitizeFlash — empty string is a no-op] — Go unit test
+4. [Unit: sanitizeFlash - empty string is a no-op] - Go unit test
    - Given: `msg = ""`
    - When: `sanitizeFlash(msg)`
    - Then: returns `""`
 
-5. [Handler integration: valid flash → banner rendered] — Go httptest
+5. [Handler integration: valid flash → banner rendered] - Go httptest
    - Given: authenticated admin session, GET /admin/config?flash=Config+updated
    - When: handler runs
    - Then: response body contains the flash message text "Config updated" inside an alert element
 
-6. [Handler integration: unknown flash → no banner] — Go httptest
+6. [Handler integration: unknown flash → no banner] - Go httptest
    - Given: authenticated admin session, GET /admin/config?flash=Hacked
    - When: handler runs
    - Then: response body does NOT contain "Hacked"; response is HTTP 200
 
-7. [Handler integration: oversized flash → no banner] — Go httptest
+7. [Handler integration: oversized flash → no banner] - Go httptest
    - Given: authenticated admin session, GET /admin/users/alice?flash= + 81 'a' characters
    - When: handler runs
    - Then: response body does NOT contain the injected string; response is HTTP 200
 
-8. [Handler integration: all five handlers reject unknown flash] — Go httptest
+8. [Handler integration: all five handlers reject unknown flash] - Go httptest
    - Given: authenticated admin session
    - When: GET /admin/users/{userId}?flash=BAD, GET /admin/rooms/{roomId}?flash=BAD, GET /admin/config?flash=BAD, GET /admin/config/role-mapping?flash=BAD, GET /admin/compliance?flash=BAD
    - Then: HTTP 200 for each, no "BAD" text in any response body
@@ -150,7 +150,7 @@ func sanitizeFlash(msg string) string {
 }
 ```
 
-**Files to update** — replace the verbatim `r.URL.Query().Get("flash")` call in the flash block of each handler with `sanitizeFlash(r.URL.Query().Get("flash"))`:
+**Files to update** - replace the verbatim `r.URL.Query().Get("flash")` call in the flash block of each handler with `sanitizeFlash(r.URL.Query().Get("flash"))`:
 
 - `gateway/internal/admin/users.go` line 94
 - `gateway/internal/admin/rooms.go` line 92
@@ -158,7 +158,7 @@ func sanitizeFlash(msg string) string {
 - `gateway/internal/admin/role_mapping.go` line 31
 - `gateway/internal/admin/compliance_handler.go` line 28
 
-**Test file:** `gateway/internal/admin/flash_test.go` — pure unit tests for `sanitizeFlash`, no HTTP server needed. Handler-level integration tests go in the respective `*_test.go` files (e.g. `users_test.go`, `config_test.go`).
+**Test file:** `gateway/internal/admin/flash_test.go` - pure unit tests for `sanitizeFlash`, no HTTP server needed. Handler-level integration tests go in the respective `*_test.go` files (e.g. `users_test.go`, `config_test.go`).
 
 **Verify POST handler redirect URLs** match the allowlist exactly. Search all POST handlers for `http.Redirect` calls and confirm the `?flash=` value is in the allowlist. If any POST handler uses a different string (e.g. `"name updated"` vs `"Display name updated"`), update the POST handler's redirect to use the canonical allowlist value and add the corresponding entry.
 

@@ -49,16 +49,16 @@ Security audit (2026-04-20) found two issues in one code path:
 
 ### Tests written FIRST (ATDD gate):
 
-1. `TestBootstrap_RejectsHTTPIssuer` — Go httptest, body `{"oidc_issuer":"http://evil.example","..."}`, expect 400
+1. `TestBootstrap_RejectsHTTPIssuer` - Go httptest, body `{"oidc_issuer":"http://evil.example","..."}`, expect 400
 
-2. `TestOIDCProviderCache_ReusesInstance` — call `loadProvider(issuer)` twice; assert underlying `oidc.NewProvider` is called only once
+2. `TestOIDCProviderCache_ReusesInstance` - call `loadProvider(issuer)` twice; assert underlying `oidc.NewProvider` is called only once
 
-3. `TestOIDCProviderCache_NegativeCacheOnFailure` — first call fails with network error; second call within 30s returns the cached error without re-calling
+3. `TestOIDCProviderCache_NegativeCacheOnFailure` - first call fails with network error; second call within 30s returns the cached error without re-calling
 
 ---
 
 ## Implementation Notes
 
-- `admin/oidc_cache.go` — new file, small cache with TTL + negative cache
+- `admin/oidc_cache.go` - new file, small cache with TTL + negative cache
 - Validation helper `validateIssuerURL(s string) error` in `admin/validation.go`; reused by bootstrap API and LoadOIDCConfig
-- Do not use `context7` MCP here — the go-oidc API has not changed; just wrap it
+- Do not use `context7` MCP here - the go-oidc API has not changed; just wrap it

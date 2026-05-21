@@ -2,31 +2,31 @@
 
 ## Status
 
-Accepted — 2026-05-12
+Accepted - 2026-05-12
 
 ## Context
 
 Epic 12 (Media Gateway Phase 2) requires a local-dev object storage backend for media upload,
 download, and future thumbnail generation (Story 12.5). Three options were evaluated:
 
-**Option A — Local Filesystem:**
+**Option A - Local Filesystem:**
 Store files directly on the gateway container's filesystem or a bind-mounted host directory.
 Simple to set up; no additional dependency. Loses data on container recreation; no S3 API
 compatibility; cannot scale horizontally; requires migration work if switched later.
 
-**Option B — AWS S3 (direct):**
+**Option B - AWS S3 (direct):**
 Use AWS S3 as the storage backend from day one. Eliminates local-dev complexity. Requires
 active AWS credentials for every developer; adds external dependency to CI; incurs cost even
 for development; no offline dev support.
 
-**Option C — MinIO (S3-compatible, local-first):**
+**Option C - MinIO (S3-compatible, local-first):**
 Run MinIO in Docker Compose for local development; the same S3-compatible API allows
 operators to substitute AWS S3, Google Cloud Storage, or any S3-compatible provider in
 production without code changes. MinIO is Apache 2.0 licensed.
 
 ## Decision
 
-**Option C — MinIO.**
+**Option C - MinIO.**
 
 MinIO provides an S3-compatible API (AWS S3 SDK-compatible) so the media gateway can use
 standard `aws-sdk-go-v2/service/s3` calls regardless of environment. Local dev runs MinIO
@@ -56,9 +56,9 @@ MinIO does not auto-create buckets. A one-shot `createbuckets` init container us
 
 The following decisions are scoped to later stories and are NOT part of this ADR:
 
-- **Pre-signed URL policy** — deferred to Story 12.4
-- **Thumbnail generation library** — deferred to Story 12.5
-- **Production S3 provider selection** — operator responsibility; any S3-compatible
+- **Pre-signed URL policy** - deferred to Story 12.4
+- **Thumbnail generation library** - deferred to Story 12.5
+- **Production S3 provider selection** - operator responsibility; any S3-compatible
   backend (AWS S3, Cloudflare R2, Hetzner Object Storage) works without code changes
 
 ### ADR-012 Alignment
@@ -71,7 +71,7 @@ their own credentials before first production start.
 
 **Positive:**
 - S3-compatible API enables zero-code storage backend swaps in production.
-- Apache 2.0 license — no AGPLv3, no BSL, no SSPL.
+- Apache 2.0 license - no AGPLv3, no BSL, no SSPL.
 - Offline-capable local development (no external cloud dependency).
 - Bucket + credential isolation via Docker Secrets prevents hardcoding.
 
@@ -80,4 +80,4 @@ their own credentials before first production start.
 - Operators unfamiliar with MinIO need to read the credentials warning before first deployment.
   Mitigated by: explicit warning in README and this ADR.
 
-_Authored as part of Epic 12 Story 12.1 — 2026-05-12._
+_Authored as part of Epic 12 Story 12.1 - 2026-05-12._

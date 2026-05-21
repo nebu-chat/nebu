@@ -22,7 +22,7 @@
 
 | Finding | Status | Reference |
 |---|---|---|
-| Token invalidation gap — short-lived tokens not revoked until OIDC expiry | Accepted risk (MVP) | Story 7-26 |
+| Token invalidation gap - short-lived tokens not revoked until OIDC expiry | Accepted risk (MVP) | Story 7-26 |
 | Compliance session revoke CSRF (fixed) | Resolved | Story 7-16b, Kassandra HIGH-1 |
 | Moderation caller_id from request body (fixed) | Resolved | Story 7-32, SEC Gate 2 HIGH |
 | Safari re-login lands on #/welcome (Dex cached id_token + Safari 302 cache) | Resolved | Story 11-7 |

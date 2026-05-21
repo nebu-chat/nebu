@@ -6,7 +6,7 @@ Epics 1–8 are complete (pre-alpha). Epic 9+ is planned.
 ## Current Status (2026-05-01)
 
 **Pre-alpha.** Core chat functionality is implemented and the codebase is in public open-source
-readiness. Not production-ready — see [Current Limitations](../README.md#current-limitations).
+readiness. Not production-ready - see [Current Limitations](../README.md#current-limitations).
 
 ---
 

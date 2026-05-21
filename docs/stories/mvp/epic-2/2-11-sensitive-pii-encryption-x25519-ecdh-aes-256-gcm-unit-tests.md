@@ -24,7 +24,7 @@ so that Tier 2 PII (Sensitive PII) becomes cryptographically irrecoverable when 
 
 4. **Given** a unit test `deletion_makes_irrecoverable`,
    **When** the private key is `nil` and decryption is attempted,
-   **Then** it returns `{:error, :no_private_key}` — the data is effectively deleted (NFR-S5, NFR-C1)
+   **Then** it returns `{:error, :no_private_key}` - the data is effectively deleted (NFR-S5, NFR-C1)
 
 5. **Given** `mix test --warnings-as-errors` in the `signature` app,
    **When** run,
@@ -36,7 +36,7 @@ so that Tier 2 PII (Sensitive PII) becomes cryptographically irrecoverable when 
   - [x] Add `@spec encrypt_sensitive_pii(binary(), binary()) :: {binary(), binary(), binary()}`
   - [x] Generate ephemeral X25519 keypair: `{ephemeral_pub, ephemeral_priv} = :crypto.generate_key(:ecdh, :x25519)`
   - [x] ECDH: `shared = :crypto.compute_key(:ecdh, recipient_public_key, ephemeral_priv, :x25519)`
-  - [x] Derive AES key: `aes_key = derive_aes_key(shared)` — reuse existing function, do NOT reimplement
+  - [x] Derive AES key: `aes_key = derive_aes_key(shared)` - reuse existing function, do NOT reimplement
   - [x] Generate 12-byte nonce: `nonce = :crypto.strong_rand_bytes(12)`
   - [x] Encrypt: `{ciphertext, tag} = :crypto.crypto_one_time_aead(:aes_256_gcm, aes_key, nonce, plaintext, <<>>, 16, true)`
   - [x] Return `{ciphertext <> tag, ephemeral_pub, nonce}`
@@ -47,29 +47,29 @@ so that Tier 2 PII (Sensitive PII) becomes cryptographically irrecoverable when 
   - [x] ECDH: `shared = :crypto.compute_key(:ecdh, ephemeral_public_key, recipient_private_key, :x25519)`
   - [x] Derive AES key: `aes_key = derive_aes_key(shared)`
   - [x] Split tag: `ct_size = byte_size(ciphertext_with_tag) - 16; <<ct::binary-size(ct_size), tag::binary-size(16)>> = ciphertext_with_tag`
-  - [x] Decrypt with OTP 28 compat pattern (case + rescue — same as `decrypt_operational_pii/3`)
+  - [x] Decrypt with OTP 28 compat pattern (case + rescue - same as `decrypt_operational_pii/3`)
   - [x] Return `{:ok, plaintext}` on success, `{:error, :decryption_failed}` on failure
 
 - [x] Add new `describe` block to `core/apps/signature/test/nebu_signature_test.exs` (AC: #3, #4, #5)
   - [x] Add `describe "encrypt_sensitive_pii/2 and decrypt_sensitive_pii/4"` block after the operational PII block
   - [x] Add `test "encrypt_decrypt_roundtrip: recovers plaintext with matching private key"`
   - [x] Add `test "deletion_makes_irrecoverable: nil private key returns {:error, :no_private_key}"`
-  - [x] Verify `mix test --warnings-as-errors` passes — prefix all unused vars with `_`
+  - [x] Verify `mix test --warnings-as-errors` passes - prefix all unused vars with `_`
   - [x] Confirm **11 tests, 0 failures** (9 existing + 2 new)
 
 ## Dev Notes
 
 ### Scope
 
-Adds asymmetric (ECDH-based) AES-256-GCM encryption for **Tier 2 (Sensitive) PII** — email and IdP subject — protected by the **user's X25519 public key**.
+Adds asymmetric (ECDH-based) AES-256-GCM encryption for **Tier 2 (Sensitive) PII** - email and IdP subject - protected by the **user's X25519 public key**.
 
 **This story only:** `encrypt_sensitive_pii/2` and `decrypt_sensitive_pii/4` + unit tests. No DB writes, no user provisioning (Story 2.13).
 
 **NOT in this story:**
 - DB write-on-login (Story 2.12)
 - User provisioning orchestration (Story 2.13)
-- No new env vars (no server key needed — keys are per-user X25519 keypairs)
-- No changes to `runtime.exs` or `test.exs` — do NOT touch config files
+- No new env vars (no server key needed - keys are per-user X25519 keypairs)
+- No changes to `runtime.exs` or `test.exs` - do NOT touch config files
 
 ### PII Tier Reference (from Story 2.10 Dev Notes)
 
@@ -84,11 +84,11 @@ Adds asymmetric (ECDH-based) AES-256-GCM encryption for **Tier 2 (Sensitive) PII
 
 Story 2-11 uses **ephemeral sender keys** (not the system sender's permanent key). This gives forward-secrecy properties:
 - Every encryption call generates a fresh ephemeral X25519 keypair
-- ECDH: `shared_secret = ECDH(ephemeral_priv, recipient_pub)` — same as `ECDH(recipient_priv, ephemeral_pub)`
+- ECDH: `shared_secret = ECDH(ephemeral_priv, recipient_pub)` - same as `ECDH(recipient_priv, ephemeral_pub)`
 - `ephemeral_pub` must be stored alongside the ciphertext so the recipient can recompute `shared_secret`
 - Deleting `recipient_priv` makes the shared secret permanently unrecoverable → DSGVO deletion
 
-### Reuse `derive_aes_key/1` — Do Not Reinvent
+### Reuse `derive_aes_key/1` - Do Not Reinvent
 
 `derive_aes_key/1` already exists in `Nebu.Signature` (added in Story 2.9):
 ```elixir
@@ -96,7 +96,7 @@ def derive_aes_key(shared_secret) do
   :crypto.hash(:sha256, shared_secret)
 end
 ```
-**ALWAYS call `derive_aes_key(shared_secret)` — do NOT inline the SHA-256 hash.**
+**ALWAYS call `derive_aes_key(shared_secret)` - do NOT inline the SHA-256 hash.**
 
 ### Exact OTP API Calls
 
@@ -106,7 +106,7 @@ end
 
 # Step 2: ECDH shared secret (ephemeral private + recipient public)
 shared = :crypto.compute_key(:ecdh, recipient_public_key, ephemeral_priv, :x25519)
-# NOTE: arg order is (public_key, private_key, curve) — NOT (priv, pub)
+# NOTE: arg order is (public_key, private_key, curve) - NOT (priv, pub)
 # Returns 32-byte binary
 
 # Step 3: Derive AES-256 key
@@ -180,7 +180,7 @@ end
 Decrypts Sensitive PII (Tier 2) encrypted by `encrypt_sensitive_pii/2`.
 
 Returns `{:ok, plaintext}` on success.
-Returns `{:error, :no_private_key}` when `recipient_private_key` is `nil` — DSGVO deletion case.
+Returns `{:error, :no_private_key}` when `recipient_private_key` is `nil` - DSGVO deletion case.
 Returns `{:error, :decryption_failed}` if AES-GCM authentication fails.
 
 `recipient_private_key` must match the public key used during encryption.
@@ -239,45 +239,45 @@ end
 
 ### Critical Anti-Patterns to Avoid
 
-**NEVER use `encrypt_operational_pii/2` for Sensitive PII** — Tier 2 uses ECDH, not a server key:
+**NEVER use `encrypt_operational_pii/2` for Sensitive PII** - Tier 2 uses ECDH, not a server key:
 ```elixir
-# ❌ WRONG — Sensitive PII does NOT use a server key
+# ❌ WRONG - Sensitive PII does NOT use a server key
 encrypt_operational_pii(email, server_key)
 
-# ✅ CORRECT — Sensitive PII uses recipient's X25519 public key
+# ✅ CORRECT - Sensitive PII uses recipient's X25519 public key
 encrypt_sensitive_pii(email, recipient_public_key)
 ```
 
-**NEVER skip the ephemeral keypair** — the ephemeral private key is discarded after ECDH; only the ephemeral public key is stored:
+**NEVER skip the ephemeral keypair** - the ephemeral private key is discarded after ECDH; only the ephemeral public key is stored:
 ```elixir
-# ❌ WRONG — using recipient public key for ECDH with a static sender key
+# ❌ WRONG - using recipient public key for ECDH with a static sender key
 {fixed_pub, fixed_priv} = Application.get_env(...)  # no such thing here
 
-# ✅ CORRECT — fresh ephemeral keypair every call
+# ✅ CORRECT - fresh ephemeral keypair every call
 {ephemeral_pub, ephemeral_priv} = :crypto.generate_key(:ecdh, :x25519)
 ```
 
-**NEVER inline SHA-256 — always call `derive_aes_key/1`:**
+**NEVER inline SHA-256 - always call `derive_aes_key/1`:**
 ```elixir
 # ❌ WRONG
 aes_key = :crypto.hash(:sha256, shared)
 
-# ✅ CORRECT — reuse existing function
+# ✅ CORRECT - reuse existing function
 aes_key = derive_aes_key(shared)
 ```
 
 **NEVER use the wrong `:crypto.compute_key/4` arg order:**
 ```elixir
-# ❌ WRONG — reversed args
+# ❌ WRONG - reversed args
 :crypto.compute_key(:ecdh, private_key, public_key, :x25519)
 
-# ✅ CORRECT — (public_key, private_key, curve)
+# ✅ CORRECT - (public_key, private_key, curve)
 :crypto.compute_key(:ecdh, public_key, private_key, :x25519)
 ```
 
 **Return tuple is 3-element for encryption (not 2-element like operational PII):**
 ```elixir
-# ❌ WRONG — missing ephemeral_pub
+# ❌ WRONG - missing ephemeral_pub
 {ciphertext <> tag, nonce}
 
 # ✅ CORRECT
@@ -286,16 +286,16 @@ aes_key = derive_aes_key(shared)
 
 ### OTP 28 Compatibility Note (from Story 2-10 Debug Log)
 
-`crypto_one_time_aead/7` in OTP 28 returns `:error` atom on authentication failure **instead of raising an exception**. The `decrypt_sensitive_pii/4` implementation above uses `case` inside `try/rescue` — identical to the battle-tested `decrypt_operational_pii/3` pattern. **Do NOT simplify to `rescue`-only.**
+`crypto_one_time_aead/7` in OTP 28 returns `:error` atom on authentication failure **instead of raising an exception**. The `decrypt_sensitive_pii/4` implementation above uses `case` inside `try/rescue` - identical to the battle-tested `decrypt_operational_pii/3` pattern. **Do NOT simplify to `rescue`-only.**
 
 ### Previous Story Intelligence (2.10)
 
-- **Test pattern:** `async: true` on `use ExUnit.Case` — already present at file top, do NOT add again
-- **Module alias:** `alias Nebu.Signature` — already present, do NOT add again
+- **Test pattern:** `async: true` on `use ExUnit.Case` - already present at file top, do NOT add again
+- **Module alias:** `alias Nebu.Signature` - already present, do NOT add again
 - **Unused variable discipline:** Prefix all unused vars with `_` or `mix test --warnings-as-errors` WILL fail
 - **Test order:** Describe block order = Ed25519 → X25519 keypair → derive_aes_key → operational PII → **sensitive PII (new)**
-- **No external deps:** `mix.exs` stays with `deps: []` — everything in OTP `:crypto`
-- **Do NOT touch `runtime.exs` or `test.exs`** — no new env vars, no config changes needed for this story
+- **No external deps:** `mix.exs` stays with `deps: []` - everything in OTP `:crypto`
+- **Do NOT touch `runtime.exs` or `test.exs`** - no new env vars, no config changes needed for this story
 
 ### Build & Test Commands
 
@@ -313,20 +313,20 @@ make test-unit-elixir
 
 ```
 core/apps/signature/
-  lib/nebu/signature.ex                        ← MODIFY — add 2 new functions
-  test/nebu_signature_test.exs                 ← MODIFY — add 1 new describe block (2 tests)
+  lib/nebu/signature.ex                        ← MODIFY - add 2 new functions
+  test/nebu_signature_test.exs                 ← MODIFY - add 1 new describe block (2 tests)
 ```
 
 **Do NOT touch:**
-- `core/apps/signature/mix.exs` — no new deps
-- `core/apps/signature/lib/nebu/signature/application.ex` — no changes
-- `core/config/runtime.exs` — no new env vars
-- `core/config/test.exs` — no new test config
+- `core/apps/signature/mix.exs` - no new deps
+- `core/apps/signature/lib/nebu/signature/application.ex` - no changes
+- `core/config/runtime.exs` - no new env vars
+- `core/config/test.exs` - no new test config
 - Any other file in the umbrella
 
 ### Project Structure Notes
 
-- All additions go into existing `Nebu.Signature` module — no new files, no new modules
+- All additions go into existing `Nebu.Signature` module - no new files, no new modules
 - `decrypt_sensitive_pii/4` has two clauses: nil-guard first, then the main implementation
 - Function ordering in module: `encrypt_sensitive_pii/2` then `decrypt_sensitive_pii/4` (keep encrypt/decrypt pairs together)
 
@@ -338,8 +338,8 @@ core/apps/signature/
 - [Source: architecture.md#AI-Constraints rule 6] `{:ok, result}` / `{:error, reason}` mandate for fallible ops
 - [Source: architecture.md#Anti-pattern #10] PII encryption exclusively via X25519 Encryption Key
 - [Source: implementation-artifacts/2-10-operational-pii-encryption-at-rest-unit-tests.md] OTP 28 compat pattern (`case` + `rescue`), test patterns, `--warnings-as-errors` discipline
-- [Source: core/apps/signature/lib/nebu/signature.ex] Current module — 5 functions; add 2 more here
-- [Source: core/apps/signature/test/nebu_signature_test.exs] Current test file — 9 tests in 4 describe blocks; add 1 more block
+- [Source: core/apps/signature/lib/nebu/signature.ex] Current module - 5 functions; add 2 more here
+- [Source: core/apps/signature/test/nebu_signature_test.exs] Current test file - 9 tests in 4 describe blocks; add 1 more block
 
 ## Dev Agent Record
 
@@ -349,7 +349,7 @@ claude-sonnet-4-6 (1M context)
 
 ### Debug Log References
 
-None — implementation matched story spec exactly on first attempt.
+None - implementation matched story spec exactly on first attempt.
 
 ### Completion Notes List
 
@@ -357,12 +357,12 @@ None — implementation matched story spec exactly on first attempt.
 - Implemented `decrypt_sensitive_pii/4`: nil-guard clause first (DSGVO deletion case → `{:error, :no_private_key}`), then ECDH reconstruct + AES-256-GCM decrypt using OTP 28 compat pattern (case + rescue)
 - Added 2 unit tests in new `describe` block: `encrypt_decrypt_roundtrip` and `deletion_makes_irrecoverable`
 - All 11 tests pass with `--warnings-as-errors` (3 Ed25519 + 2 X25519 keypair + 2 derive_aes_key + 2 operational PII + 2 sensitive PII)
-- No regressions — full umbrella test suite green
+- No regressions - full umbrella test suite green
 
 ### File List
 
-- `core/apps/signature/lib/nebu/signature.ex` — MODIFIED: added `encrypt_sensitive_pii/2` and `decrypt_sensitive_pii/4`
-- `core/apps/signature/test/nebu_signature_test.exs` — MODIFIED: added `describe "encrypt_sensitive_pii/2 and decrypt_sensitive_pii/4"` block with 2 tests
+- `core/apps/signature/lib/nebu/signature.ex` - MODIFIED: added `encrypt_sensitive_pii/2` and `decrypt_sensitive_pii/4`
+- `core/apps/signature/test/nebu_signature_test.exs` - MODIFIED: added `describe "encrypt_sensitive_pii/2 and decrypt_sensitive_pii/4"` block with 2 tests
 
 ### Change Log
 

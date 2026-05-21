@@ -22,13 +22,13 @@ so that the gateway knows the core is available and can begin routing requests.
 
 ## Tasks / Subtasks
 
-- [x] Task 1: Go — PSK Middleware (AC: #1, #2)
+- [x] Task 1: Go - PSK Middleware (AC: #1, #2)
   - [x] Create `gateway/internal/middleware/psk.go` with `PSKMiddleware(secret string) func(http.Handler) http.Handler`
   - [x] Read and compare `Authorization: Bearer <psk>` header using `strings.TrimSpace` and `subtle.ConstantTimeCompare`
-  - [x] Return 401 with empty body on mismatch — no error message in response body
+  - [x] Return 401 with empty body on mismatch - no error message in response body
   - [x] Create `gateway/internal/middleware/psk_test.go` with tests for valid PSK, missing header, wrong PSK
 
-- [x] Task 2: Go — Node Registry (AC: #1, #5)
+- [x] Task 2: Go - Node Registry (AC: #1, #5)
   - [x] Create `gateway/internal/registry/registry.go` with thread-safe `Registry` type (sync.RWMutex + map)
   - [x] `NodeEntry` struct: `Addr string`, `RegisteredAt time.Time`, JSON tags
   - [x] Methods: `Register(addr string)`, `List() []NodeEntry`
@@ -37,28 +37,28 @@ so that the gateway knows the core is available and can begin routing requests.
   - [x] `GET /internal/nodes` → call `reg.List()`, respond JSON array
   - [x] Create `gateway/internal/registry/registry_test.go` with unit tests for Register, List, handler responses
 
-- [x] Task 3: Go — Start HTTP Server in main.go (AC: #1, #2, #5)
+- [x] Task 3: Go - Start HTTP Server in main.go (AC: #1, #2, #5)
   - [x] Read PSK from file at startup: `os.ReadFile(cfg.InternalSecretFile)`, `strings.TrimSpace(string(psk))`
   - [x] Create `http.NewServeMux()` and register routes with PSK middleware applied to `/internal/` prefix
   - [x] Replace `select {}` with `http.ListenAndServe(":8008", mux)` and `slog.Error` + `os.Exit(1)` on failure
   - [x] Pass registry handler: `mux.Handle("/internal/nodes/", middleware.PSKMiddleware(secret)(registry.NewHandler(reg)))`
 
-- [x] Task 4: Elixir — Node Registration Module (AC: #3, #4)
-  - [x] Create `core/apps/event_dispatcher/lib/nebu/node_registration.ex` — module `Nebu.NodeRegistration`
-  - [x] `register_with_gateway(retries_left \\ 5)` — reads PSK from `NEBU_INTERNAL_SECRET_FILE`, POSTs to `NEBU_GATEWAY_INTERNAL_URL/internal/nodes/register`
-  - [x] Use `:httpc` (built-in `:inets`) — no new Hex dependencies
+- [x] Task 4: Elixir - Node Registration Module (AC: #3, #4)
+  - [x] Create `core/apps/event_dispatcher/lib/nebu/node_registration.ex` - module `Nebu.NodeRegistration`
+  - [x] `register_with_gateway(retries_left \\ 5)` - reads PSK from `NEBU_INTERNAL_SECRET_FILE`, POSTs to `NEBU_GATEWAY_INTERNAL_URL/internal/nodes/register`
+  - [x] Use `:httpc` (built-in `:inets`) - no new Hex dependencies
   - [x] On connection error: log warning, `Process.sleep(2_000)`, recurse with `retries_left - 1`
   - [x] On 0 retries left: `Logger.error("Gateway registration failed after retries: #{reason}")`
   - [x] On success (HTTP 200): `Logger.info("Registered with gateway")`
   - [x] Create `core/apps/event_dispatcher/test/nebu/node_registration_test.exs` with ExUnit tests
 
-- [x] Task 5: Elixir — Application Startup Hook (AC: #3)
+- [x] Task 5: Elixir - Application Startup Hook (AC: #3)
   - [x] Update `core/apps/event_dispatcher/lib/nebu/event/application.ex`: after `Supervisor.start_link`, add `Task.start(fn -> Nebu.NodeRegistration.register_with_gateway() end)`
   - [x] Add `:inets` to `extra_applications` in `core/apps/event_dispatcher/mix.exs`
   - [x] Add `NEBU_GATEWAY_INTERNAL_URL` env var to `core` service in `docker-compose.yml`
 
 - [x] Task 6: Validate (AC: all)
-  - [x] Run `make test-unit-go` — all tests pass
+  - [x] Run `make test-unit-go` - all tests pass
   - [x] Run `make dev` and confirm `docker compose ps` shows all 4 services running
   - [x] Verify `POST http://localhost:8008/internal/nodes/register` with correct PSK → 200
   - [x] Verify `POST http://localhost:8008/internal/nodes/register` with wrong PSK → 401
@@ -68,7 +68,7 @@ so that the gateway knows the core is available and can begin routing requests.
 
 ### Critical: This Story Starts the HTTP Server
 
-The `select {}` in `gateway/cmd/gateway/main.go` (line 49) is the placeholder for the HTTP server start. This story replaces it. The comment says "replaced by http.ListenAndServe in Story 1.11" — that was written before Story 1.10 was scoped. **Story 1.10 starts the HTTP server on `:8008`; Story 1.11 adds `/health` and `/ready` endpoints to the same mux.**
+The `select {}` in `gateway/cmd/gateway/main.go` (line 49) is the placeholder for the HTTP server start. This story replaces it. The comment says "replaced by http.ListenAndServe in Story 1.11" - that was written before Story 1.10 was scoped. **Story 1.10 starts the HTTP server on `:8008`; Story 1.11 adds `/health` and `/ready` endpoints to the same mux.**
 
 Replace `select {}` with:
 ```go
@@ -93,7 +93,7 @@ if err != nil {
 internalSecret := strings.TrimSpace(string(pskBytes))
 ```
 
-**`strings.TrimSpace` is mandatory** — `openssl rand -hex 32` produces a 32-byte hex string with a trailing newline. Comparison without trimming will always fail.
+**`strings.TrimSpace` is mandatory** - `openssl rand -hex 32` produces a 32-byte hex string with a trailing newline. Comparison without trimming will always fail.
 
 ### PSK Middleware: Constant-Time Comparison
 
@@ -123,7 +123,7 @@ func PSKMiddleware(secret string) func(http.Handler) http.Handler {
 }
 ```
 
-**NEVER** return an error message in the 401 body — AC #2 requires no leaking of internal details.
+**NEVER** return an error message in the 401 body - AC #2 requires no leaking of internal details.
 
 ### Go HTTP Routing: Go 1.22+ Pattern Matching
 
@@ -140,7 +140,7 @@ mux.Handle("POST /internal/nodes/register", pskHandler)
 mux.Handle("GET /internal/nodes", pskHandler)
 ```
 
-Do NOT use third-party routers (chi, gorilla/mux) — they are not in the project and not in the architecture for MVP.
+Do NOT use third-party routers (chi, gorilla/mux) - they are not in the project and not in the architecture for MVP.
 
 ### Node Registry: Thread-Safe In-Memory Store
 
@@ -278,7 +278,7 @@ def start(_type, _args) do
 end
 ```
 
-**Use `Task.start/1` (not `Task.start_link/1`)** — start_link would crash the supervisor if the task fails. Registration failure must not crash the core application (AC #4: "continuing startup").
+**Use `Task.start/1` (not `Task.start_link/1`)** - start_link would crash the supervisor if the task fails. Registration failure must not crash the core application (AC #4: "continuing startup").
 
 ### Docker Compose: Add Core Env Var
 
@@ -287,7 +287,7 @@ Add to `core` service `environment:` in `docker-compose.yml`:
 NEBU_GATEWAY_INTERNAL_URL: "http://gateway:8008"
 ```
 
-The `core` service already has `NEBU_INTERNAL_SECRET_FILE: "/run/secrets/internal_secret"` from Story 1.9 — do NOT change that.
+The `core` service already has `NEBU_INTERNAL_SECRET_FILE: "/run/secrets/internal_secret"` from Story 1.9 - do NOT change that.
 
 ### Go Testing Patterns (from existing tests)
 
@@ -296,7 +296,7 @@ Follow the patterns in `gateway/internal/grpc/client_test.go`:
 - Table-driven tests with `t.Run`
 - `t.Helper()` in setup helpers
 - `t.Fatalf` / `t.Errorf` for assertions
-- No mocks — test the actual struct behavior
+- No mocks - test the actual struct behavior
 
 Example for PSK middleware test:
 ```go
@@ -316,13 +316,13 @@ func TestPSKMiddleware_ValidToken(t *testing.T) {
 }
 ```
 
-### What Already Exists — Do NOT Change
+### What Already Exists - Do NOT Change
 
-- `gateway/internal/config/config.go` — `InternalSecretFile` field already defined — use it as-is
-- `core/apps/event_dispatcher/lib/nebu/event/application.ex` — modify ONLY to add `Task.start` after `Supervisor.start_link`
-- `core/apps/event_dispatcher/lib/nebu/event_dispatcher/endpoint.ex` — gRPC server — do NOT touch
-- `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` — gRPC handlers — do NOT touch
-- `docker-compose.yml` — add ONLY `NEBU_GATEWAY_INTERNAL_URL` to `core` environment — do NOT restructure
+- `gateway/internal/config/config.go` - `InternalSecretFile` field already defined - use it as-is
+- `core/apps/event_dispatcher/lib/nebu/event/application.ex` - modify ONLY to add `Task.start` after `Supervisor.start_link`
+- `core/apps/event_dispatcher/lib/nebu/event_dispatcher/endpoint.ex` - gRPC server - do NOT touch
+- `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` - gRPC handlers - do NOT touch
+- `docker-compose.yml` - add ONLY `NEBU_GATEWAY_INTERNAL_URL` to `core` environment - do NOT restructure
 
 ### Project Structure Notes
 
@@ -353,12 +353,12 @@ docker-compose.yml                                   ← add NEBU_GATEWAY_INTERN
 ```
 
 **Files NOT to touch:**
-- `gateway/internal/config/config.go` — complete as-is
-- `gateway/internal/grpc/` — gRPC client — not in scope
-- `gateway/internal/db/` — database layer — not in scope
-- `core/apps/event_dispatcher/lib/nebu/event_dispatcher/` — gRPC server — not in scope
+- `gateway/internal/config/config.go` - complete as-is
+- `gateway/internal/grpc/` - gRPC client - not in scope
+- `gateway/internal/db/` - database layer - not in scope
+- `core/apps/event_dispatcher/lib/nebu/event_dispatcher/` - gRPC server - not in scope
 - Any other Elixir app modules (room_manager, session_manager, etc.)
-- `Makefile` — no changes needed
+- `Makefile` - no changes needed
 
 ### Go Module Path
 
@@ -370,7 +370,7 @@ The Go module path is `github.com/nebu/nebu` (from `gateway/go.mod`). New packag
 
 ```bash
 make test-unit-go    # runs go test ./... in container
-make dev             # docker compose up — verifies Elixir registration on startup
+make dev             # docker compose up - verifies Elixir registration on startup
 ```
 
 Check gateway logs for: `"HTTP server starting" addr=:8008`
@@ -378,15 +378,15 @@ Check core logs for: `"Registered with gateway"` or `"Gateway registration faile
 
 ### References
 
-- PSK file loading pattern: [Source: architecture.md — Code Patterns: Secret Handling, lines 858-864]
-- Node registration security model: [Source: architecture.md — V3 — Elixir Node-Registrierung: Security-Modell]
-- Registry directory: [Source: architecture.md — Middleware and Directory Structure — `registry/registry.go`]
-- PSK never from env var: [Source: gateway/internal/config/config.go — comment on InternalSecretFile]
-- Go HTTP routing: [Source: Go 1.22+ stdlib — method-specific ServeMux patterns]
-- Story 1.9 learnings: [Source: 1-9-docker-compose-stack-make-setup-psk-node-security.md — Dev Notes]
-- `:inets` startup: [Source: Erlang/OTP documentation — `:httpc` module]
-- `Task.start` vs `Task.start_link`: [Source: Elixir docs — Task module]
-- NEBU_GATEWAY_INTERNAL_URL: [Source: epics.md — Story 1.10 AC #3]
+- PSK file loading pattern: [Source: architecture.md - Code Patterns: Secret Handling, lines 858-864]
+- Node registration security model: [Source: architecture.md - V3 - Elixir Node-Registrierung: Security-Modell]
+- Registry directory: [Source: architecture.md - Middleware and Directory Structure - `registry/registry.go`]
+- PSK never from env var: [Source: gateway/internal/config/config.go - comment on InternalSecretFile]
+- Go HTTP routing: [Source: Go 1.22+ stdlib - method-specific ServeMux patterns]
+- Story 1.9 learnings: [Source: 1-9-docker-compose-stack-make-setup-psk-node-security.md - Dev Notes]
+- `:inets` startup: [Source: Erlang/OTP documentation - `:httpc` module]
+- `Task.start` vs `Task.start_link`: [Source: Elixir docs - Task module]
+- NEBU_GATEWAY_INTERNAL_URL: [Source: epics.md - Story 1.10 AC #3]
 
 ## Dev Agent Record
 
@@ -396,7 +396,7 @@ claude-sonnet-4-6 (1M context)
 
 ### Debug Log References
 
-None — implementation followed Dev Notes exactly; no blockers encountered.
+None - implementation followed Dev Notes exactly; no blockers encountered.
 
 ### Completion Notes List
 
@@ -404,7 +404,7 @@ None — implementation followed Dev Notes exactly; no blockers encountered.
 - Node Registry is thread-safe via `sync.RWMutex`; `Register` upserts by addr key (deduplication)
 - HTTP server starts on `:8008` with method-specific Go 1.22+ `ServeMux` routing
 - `main.go` reads PSK once at startup with `strings.TrimSpace` to handle trailing newlines from `openssl rand`
-- Elixir `Nebu.NodeRegistration` uses `:httpc` (`:inets`) — zero new Hex deps
+- Elixir `Nebu.NodeRegistration` uses `:httpc` (`:inets`) - zero new Hex deps
 - `Task.start/1` (not `start_link`) ensures registration failure cannot crash the supervisor tree
 - Integration validated: gateway logs `HTTP server starting addr=:8008`; core logs `Registered with gateway`
 - All Go tests: 7 packages pass; all Elixir tests: 4 tests pass (0 failures)
@@ -425,5 +425,5 @@ docker-compose.yml
 
 ## Change Log
 
-- 2026-03-23: Implemented Story 1.10 — Go PSK middleware, node registry, HTTP server start; Elixir node registration with retry logic and application startup hook; docker-compose.yml env var addition. All ACs validated end-to-end.
-- 2026-03-23: Code Review (AI) — 0 HIGH, 1 MEDIUM, 3 LOW findings. Fixed MEDIUM (non-retriable errors no longer trigger retry loop in node_registration.ex) and LOW #1 (RemoteAddr port stripping in handler.go). Remaining LOW issues (double-mux routing, test assertion depth) accepted for MVP. Status → done.
+- 2026-03-23: Implemented Story 1.10 - Go PSK middleware, node registry, HTTP server start; Elixir node registration with retry logic and application startup hook; docker-compose.yml env var addition. All ACs validated end-to-end.
+- 2026-03-23: Code Review (AI) - 0 HIGH, 1 MEDIUM, 3 LOW findings. Fixed MEDIUM (non-retriable errors no longer trigger retry loop in node_registration.ex) and LOW #1 (RemoteAddr port stripping in handler.go). Remaining LOW issues (double-mux routing, test assertion depth) accepted for MVP. Status → done.

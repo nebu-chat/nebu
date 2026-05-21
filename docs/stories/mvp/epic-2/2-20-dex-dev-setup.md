@@ -19,7 +19,7 @@ So that all three user personas can authenticate against a real OIDC provider du
    **Then** it contains:
    - `issuer: http://dex:5556/dex`
    - `storage.type: sqlite3` with `config.file: /var/dex/dex.db`
-   - `staticClients`: one entry — `id: nebu-admin`, `secret: nebu-admin-secret`, `redirectURIs: ["http://localhost:8080/admin/callback"]`, `name: Nebu Admin UI`
+   - `staticClients`: one entry - `id: nebu-admin`, `secret: nebu-admin-secret`, `redirectURIs: ["http://localhost:8080/admin/callback"]`, `name: Nebu Admin UI`
    - `oauth2.responseTypes: [code]`, `oauth2.skipApprovalScreen: true`
    - `staticPasswords`: three entries with `nebu_role` claim:
      - `email: kai@example.com`, `username: kai`, `userID: 00000000-0000-0000-0000-000000000001` (role: `instance_admin`)
@@ -65,11 +65,11 @@ So that all three user personas can authenticate against a real OIDC provider du
 - [x] Task 4: Verify end-to-end (AC: 4, 5)
   - [x] 4.1 `docker compose up -d --wait` starts cleanly (config validated structurally)
   - [x] 4.2 `curl http://localhost:5556/dex/.well-known/openid-configuration` returns valid OIDC config (healthcheck verifies this)
-  - [x] 4.3 OIDC token obtainable for `kai@example.com` with role claim via `groups: [instance_admin]` — gateway handles array claim via `extractRoleClaim`
+  - [x] 4.3 OIDC token obtainable for `kai@example.com` with role claim via `groups: [instance_admin]` - gateway handles array claim via `extractRoleClaim`
 
 ## Dev Notes
 
-### Current State of `dev/dex/config.yaml` — Gaps vs AC
+### Current State of `dev/dex/config.yaml` - Gaps vs AC
 
 The file exists but has multiple deviations from the AC requirements:
 
@@ -83,7 +83,7 @@ The file exists but has multiple deviations from the AC requirements:
 | User IDs | `kai-id`, `compliance-id`, `alex-id` | proper UUIDs |
 | `nebu_role` per user | absent | required per AC |
 
-### Current State of `docker-compose.yml` — Gaps vs AC
+### Current State of `docker-compose.yml` - Gaps vs AC
 
 | Field | Current | Required by AC |
 |-------|---------|---------------|
@@ -96,14 +96,14 @@ The file exists but has multiple deviations from the AC requirements:
 
 ### Critical Technical Challenge: `nebu_role` Per-User Claim in Dex
 
-**The problem:** Dex's built-in `staticPasswords` does NOT support per-user custom claims by default. The gateway's `JWTMiddleware` reads `nebu_role` as a string claim (`allClaims[claimName].(string)` in `gateway/internal/middleware/auth.go:97`). If the claim is missing, `mapRole("")` returns `"user"` — so kai would NOT get `instance_admin`.
+**The problem:** Dex's built-in `staticPasswords` does NOT support per-user custom claims by default. The gateway's `JWTMiddleware` reads `nebu_role` as a string claim (`allClaims[claimName].(string)` in `gateway/internal/middleware/auth.go:97`). If the claim is missing, `mapRole("")` returns `"user"` - so kai would NOT get `instance_admin`.
 
 **Recommended Approach: `groups` field in staticPasswords + `claimMappings`**
 
 Dex v2.35+ supports a `groups` field per `staticPasswords` entry. Combined with `oauth2.claimMappings`, this allows mapping groups to a custom claim. However:
 - `groups` in Dex tokens is an array of strings, not a single string
 - `claimMappings` renames claims but does NOT convert array to string
-- Gateway reads `nebu_role` as `string`, not `[]string` — type assertion would fail
+- Gateway reads `nebu_role` as `string`, not `[]string` - type assertion would fail
 
 **If Dex supports group-to-string mapping in v2.41:** Use this approach:
 ```yaml
@@ -130,9 +130,9 @@ oauth2:
 
 Create a `connectors` entry with a connector that enriches claims. The `authproxy` connector type in Dex delegates authentication to an upstream HTTP endpoint. That endpoint can return the `nebu_role` claim. This requires adding a minimal auth sidecar service to Docker Compose.
 
-**Alternative Approach B: Pragmatic workaround — hardcode via client scopes**
+**Alternative Approach B: Pragmatic workaround - hardcode via client scopes**
 
-Add a custom scope per Dex `staticClient` that encodes the role. Only viable if each user has their own client — not ideal.
+Add a custom scope per Dex `staticClient` that encodes the role. Only viable if each user has their own client - not ideal.
 
 **Recommended resolution path for dev agent:**
 1. First, try the `groups` field approach in `staticPasswords` and check if Dex v2.41 includes it in the token as `nebu_role` (or if `claimMappings` can map it to a string)
@@ -254,7 +254,7 @@ setup:
 	@echo "  alex@example.com       / changeme  (user)"
 ```
 
-### Dex v2.41 — `nebu_role` via `groups` (Research Note)
+### Dex v2.41 - `nebu_role` via `groups` (Research Note)
 
 The `groups` field in Dex v2.41 `staticPasswords` is included in the `groups` claim of the ID token when the `groups` scope is requested. Dex does NOT automatically rename `groups` to `nebu_role`.
 
@@ -281,16 +281,16 @@ If Dex's `claimMappings` only renames without transformation, and groups come as
 
 If groups approach fails, use a Dex `connector` with `type: password` that supports per-user extra claims. This may require building a custom Dex image or using a `dev-auth` sidecar.
 
-**Gateway auth.go reference:** `gateway/internal/middleware/auth.go:97` — `rawRole, _ := allClaims[claimName].(string)` — this type assertion returns empty string if the claim is an array.
+**Gateway auth.go reference:** `gateway/internal/middleware/auth.go:97` - `rawRole, _ := allClaims[claimName].(string)` - this type assertion returns empty string if the claim is an array.
 
 ### Architecture Compliance
 
-1. **No Keycloak** — docker-compose.yml already has no `keycloak` service ✓
-2. **OIDC-only auth** — Dex is the dev OIDC provider, no local auth path ✓
-3. **`NEBU_OIDC_CLAIM_ROLE` default** = `nebu_role` (config.go:35) — the claim name in the token must match this
-4. **`docker compose up` in ≤10 minutes** (NFR-O1) — Dex starts in ≤3 seconds per AC
-5. **No local Go/Elixir required** — all run in Docker containers
-6. **`dev/dex/config.yaml` is dev-only** — only committed to repo for dev environment; production uses real OIDC provider
+1. **No Keycloak** - docker-compose.yml already has no `keycloak` service ✓
+2. **OIDC-only auth** - Dex is the dev OIDC provider, no local auth path ✓
+3. **`NEBU_OIDC_CLAIM_ROLE` default** = `nebu_role` (config.go:35) - the claim name in the token must match this
+4. **`docker compose up` in ≤10 minutes** (NFR-O1) - Dex starts in ≤3 seconds per AC
+5. **No local Go/Elixir required** - all run in Docker containers
+6. **`dev/dex/config.yaml` is dev-only** - only committed to repo for dev environment; production uses real OIDC provider
 
 ### NOT In Scope
 
@@ -305,20 +305,20 @@ If groups approach fails, use a Dex `connector` with `type: password` that suppo
 
 | File | Action |
 |------|--------|
-| `docker-compose.yml` | MODIFY — image version, healthcheck, OIDC_ISSUER, gateway depends_on |
-| `dev/dex/config.yaml` | MODIFY — issuer, storage, staticClients, oauth2, user IDs, nebu_role |
-| `Makefile` | MODIFY — add credential echo to setup target |
+| `docker-compose.yml` | MODIFY - image version, healthcheck, OIDC_ISSUER, gateway depends_on |
+| `dev/dex/config.yaml` | MODIFY - issuer, storage, staticClients, oauth2, user IDs, nebu_role |
+| `Makefile` | MODIFY - add credential echo to setup target |
 
 **No new Go files. No new Elixir files. No DB migrations. No proto changes.**
 
 ### References
 
-- [Source: _bmad-output/planning-artifacts/epics.md#Story 2.20 — full AC]
-- [Source: docker-compose.yml — current Dex service at line 69]
-- [Source: dev/dex/config.yaml — current config to be updated]
-- [Source: Makefile — setup target at line 24]
-- [Source: gateway/internal/config/config.go:35 — OIDCClaimRole default "nebu_role"]
-- [Source: gateway/internal/middleware/auth.go:97 — rawRole claim string assertion]
+- [Source: _bmad-output/planning-artifacts/epics.md#Story 2.20 - full AC]
+- [Source: docker-compose.yml - current Dex service at line 69]
+- [Source: dev/dex/config.yaml - current config to be updated]
+- [Source: Makefile - setup target at line 24]
+- [Source: gateway/internal/config/config.go:35 - OIDCClaimRole default "nebu_role"]
+- [Source: gateway/internal/middleware/auth.go:97 - rawRole claim string assertion]
 - [Source: _bmad-output/planning-artifacts/architecture.md#V4 OIDC Claims Mapping]
 
 ## Dev Agent Record
@@ -334,7 +334,7 @@ claude-sonnet-4-6[1m]
 - Updated `dev/dex/config.yaml`: issuer → `/dex` path, storage → sqlite3, added oauth2 section, added `nebu-admin` client, fixed user UUIDs, added `groups` per user for role assignment.
 - Updated `docker-compose.yml`: Dex image → v2.41.1 (Docker Hub), added healthcheck (wget OIDC discovery), updated `NEBU_OIDC_ISSUER` → `/dex` path, added `NEBU_OIDC_CLAIM_ROLE=groups`, added `depends_on: dex: service_healthy` to gateway, added `dex_data` volume for sqlite persistence.
 - Updated `Makefile`: added dev credential echo after secret generation.
-- Updated `gateway/internal/middleware/auth.go`: added `extractRoleClaim` helper that handles both `string` and `[]interface{}` (Dex groups claim) — replaces direct `.(string)` type assertion. Existing string-based tests unaffected.
+- Updated `gateway/internal/middleware/auth.go`: added `extractRoleClaim` helper that handles both `string` and `[]interface{}` (Dex groups claim) - replaces direct `.(string)` type assertion. Existing string-based tests unaffected.
 - Added `TestJWTMiddleware_ArrayRoleClaim` to `auth_test.go` verifying that `groups: ["instance_admin"]` array claim is correctly mapped to `instance_admin` system role. All 11 middleware tests pass.
 
 ### File List
@@ -347,5 +347,5 @@ claude-sonnet-4-6[1m]
 
 ## Change Log
 
-- 2026-03-30: Implemented story 2-20 — replaced Keycloak-era config with Dex v2.41.1 dev setup; issuer corrected to `/dex` path, sqlite3 storage, nebu-admin client added, proper UUIDs, role claims via Dex groups field; gateway updated to handle array role claims from Dex; Makefile prints dev credentials on setup.
+- 2026-03-30: Implemented story 2-20 - replaced Keycloak-era config with Dex v2.41.1 dev setup; issuer corrected to `/dex` path, sqlite3 storage, nebu-admin client added, proper UUIDs, role claims via Dex groups field; gateway updated to handle array role claims from Dex; Makefile prints dev credentials on setup.
 - 2026-03-30: Code review passed. 1 LOW fix: updated Makefile dev target comment from "keycloak" to "dex". All ACs verified, all tasks confirmed complete.

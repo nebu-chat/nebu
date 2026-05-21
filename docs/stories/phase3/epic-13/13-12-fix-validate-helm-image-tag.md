@@ -7,7 +7,7 @@ matrix: false
 ui: false
 ---
 
-# Story 13.12: Fix validate-helm CI — gateway.image.tag must be set
+# Story 13.12: Fix validate-helm CI - gateway.image.tag must be set
 
 Status: new
 
@@ -52,5 +52,5 @@ script:
 
 ## Acceptance Tests
 
-1. `helm lint deploy/helm/nebu/ --set gateway.image.tag=validate --set core.image.tag=validate` — returns exit code 0
-2. `helm template nebu deploy/helm/nebu/ --set gateway.image.tag=validate --set core.image.tag=validate > /dev/null` — renders without error
+1. `helm lint deploy/helm/nebu/ --set gateway.image.tag=validate --set core.image.tag=validate` - returns exit code 0
+2. `helm template nebu deploy/helm/nebu/ --set gateway.image.tag=validate --set core.image.tag=validate > /dev/null` - renders without error

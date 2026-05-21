@@ -9,7 +9,7 @@ matrix: false
 created: 2026-05-13
 ---
 
-# Story 12.14 — Media Gateway Full Graceful Shutdown (HTTP + DB Pool + Rate Limiter)
+# Story 12.14 - Media Gateway Full Graceful Shutdown (HTTP + DB Pool + Rate Limiter)
 
 ## User Story
 
@@ -21,9 +21,9 @@ so that rolling deployments and container restarts do not cause dropped requests
 
 Story 12.13 fixed SIGTERM handling in the OIDC startup retry loop. Three remaining SIGTERM gaps exist at runtime:
 
-1. `http.Server` has timeouts (12.7) but no `Shutdown()` call — Docker kills the process mid-request after 10s
-2. Rate limiter cleanup goroutine is explicitly marked "not stoppable" (`ratelimit.go:80-81`) — leaks on graceful exit
-3. `pgxpool.Pool` is never explicitly closed — pool.Close() is only registered via `defer`, which doesn't run before `os.Exit(1)` error paths
+1. `http.Server` has timeouts (12.7) but no `Shutdown()` call - Docker kills the process mid-request after 10s
+2. Rate limiter cleanup goroutine is explicitly marked "not stoppable" (`ratelimit.go:80-81`) - leaks on graceful exit
+3. `pgxpool.Pool` is never explicitly closed - pool.Close() is only registered via `defer`, which doesn't run before `os.Exit(1)` error paths
 
 **Critical observation about the existing code:** `main.go` currently has `defer pool.Close()` which only runs if `main()` returns normally. If `ListenAndServe` returns an error (non-`ErrServerClosed`), it calls `os.Exit(1)` which bypasses all defers. This story replaces that exit path with proper shutdown sequencing.
 
@@ -37,7 +37,7 @@ Then the gateway stops accepting new connections immediately and the in-flight r
 **[AC-2] Shutdown timeout:**
 Given in-flight requests do not complete within 30 seconds of SIGTERM,
 When the drain timeout expires,
-Then `srv.Shutdown` returns, the process logs a warning and exits — Docker SIGKILL is never needed for normal deployments
+Then `srv.Shutdown` returns, the process logs a warning and exits - Docker SIGKILL is never needed for normal deployments
 
 **[AC-3] Rate limiter goroutine stops:**
 Given the cleanup goroutine is running,
@@ -58,27 +58,27 @@ Then the exit code is 0 and the final log line is `"media gateway stopped"`
 
 ### Tests written FIRST (before implementation code):
 
-**AT-12-14-1** — HTTP drain: in-flight request completes after SIGTERM — Go test in `media/cmd/media/main_test.go`
+**AT-12-14-1** - HTTP drain: in-flight request completes after SIGTERM - Go test in `media/cmd/media/main_test.go`
 - Given: `http.Server` is running and processing an in-flight request (simulated with `httptest.Server` that holds a response for 200ms)
 - When: `srv.Shutdown(ctx)` is called with a 30s timeout context
 - Then: the in-flight request completes with 200 OK and `Shutdown` returns nil
 
-**AT-12-14-2** — Shutdown timeout: Shutdown returns after drain timeout — Go test in `media/cmd/media/main_test.go`
+**AT-12-14-2** - Shutdown timeout: Shutdown returns after drain timeout - Go test in `media/cmd/media/main_test.go`
 - Given: an in-flight request that never completes (holds open), 100ms drain timeout
 - When: `srv.Shutdown(shutdownCtx)` is called
 - Then: returns `context.DeadlineExceeded` within ~110ms (not blocked indefinitely)
 
-**AT-12-14-3** — Rate limiter goroutine stops on ctx cancellation — Go test in `media/internal/ratelimit/ratelimit_test.go` (or `ratelimit_internal_test.go`)
+**AT-12-14-3** - Rate limiter goroutine stops on ctx cancellation - Go test in `media/internal/ratelimit/ratelimit_test.go` (or `ratelimit_internal_test.go`)
 - Given: `newCore` is called with a cancellable context
 - When: the context is cancelled (simulating SIGTERM)
 - Then: `cleanupLoop` exits within 100ms (verified via goroutine count or channel signal)
 
-**AT-12-14-4** — DB pool close after drain — integration-style test in `media/cmd/media/main_test.go`
+**AT-12-14-4** - DB pool close after drain - integration-style test in `media/cmd/media/main_test.go`
 - Given: a `shutdownSequence` helper (testable extraction of the shutdown logic)
 - When: shutdown completes normally
 - Then: `pool.Close()` is called exactly once after `srv.Shutdown` returns (verified via mock/spy)
 
-**AT-12-14-5** — Exit code 0 on clean SIGTERM — subprocess test in `media/cmd/media/main_test.go`
+**AT-12-14-5** - Exit code 0 on clean SIGTERM - subprocess test in `media/cmd/media/main_test.go`
 - Given: the gateway is running and healthy
 - When: SIGTERM is sent to the process
 - Then: the process exits with code 0 and last log line contains "media gateway stopped"
@@ -98,12 +98,12 @@ Then the exit code is 0 and the final log line is `"media gateway stopped"`
   - [ ] 2.1 Remove `defer pool.Close()` (pool is now closed explicitly in shutdown sequence)
   - [ ] 2.2 Launch `srv.ListenAndServe()` in a goroutine, sending errors to `serverErr chan error`
   - [ ] 2.3 Add `select { case err := <-serverErr: ...; case <-ctx.Done(): }` to block until shutdown or error
-  - [ ] 2.4 Create `shutdownCtx` with `context.Background()` (30s timeout) — separate from cancelled parent ctx
+  - [ ] 2.4 Create `shutdownCtx` with `context.Background()` (30s timeout) - separate from cancelled parent ctx
   - [ ] 2.5 Call `srv.Shutdown(shutdownCtx)`; on error log warning; on success continue
   - [ ] 2.6 After `srv.Shutdown` returns, call `pool.Close()`
   - [ ] 2.7 Log `slog.Info("media gateway stopped")` and let `main()` return (exit code 0)
 
-- [ ] **Task 3: Write failing acceptance tests** (TDD — before implementation)
+- [ ] **Task 3: Write failing acceptance tests** (TDD - before implementation)
   - [ ] 3.1 Write AT-12-14-1 in `main_test.go` (HTTP drain with real httptest.Server)
   - [ ] 3.2 Write AT-12-14-2 in `main_test.go` (drain timeout with hanging handler)
   - [ ] 3.3 Write AT-12-14-3 in `ratelimit_internal_test.go` (goroutine exits on ctx cancel)
@@ -111,9 +111,9 @@ Then the exit code is 0 and the final log line is `"media gateway stopped"`
   - [ ] 3.5 Write AT-12-14-5 in `main_test.go` (subprocess: exit 0 + last log line)
 
 - [ ] **Task 4: Verify existing tests still pass** (no regressions)
-  - [ ] 4.1 `TestUploadRateLimit_BlocksAfterBurst` and friends — signature change only, logic unchanged
-  - [ ] 4.2 `TestIPRateLimiter_CleanupOnce_*` in `ratelimit_internal_test.go` — internal struct tests unchanged
-  - [ ] 4.3 `TestInitOIDCVerifierWith_*` in `main_test.go` — unaffected by shutdown changes
+  - [ ] 4.1 `TestUploadRateLimit_BlocksAfterBurst` and friends - signature change only, logic unchanged
+  - [ ] 4.2 `TestIPRateLimiter_CleanupOnce_*` in `ratelimit_internal_test.go` - internal struct tests unchanged
+  - [ ] 4.3 `TestInitOIDCVerifierWith_*` in `main_test.go` - unaffected by shutdown changes
 
 ## Dev Notes
 
@@ -132,7 +132,7 @@ Then the exit code is 0 and the final log line is `"media gateway stopped"`
 **Current `main.go` (lines to replace):**
 
 ```go
-// Current — BLOCKING, no drain:
+// Current - BLOCKING, no drain:
 slog.Info("Nebu Media Gateway listening", "addr", listenAddr)
 if err := srv.ListenAndServe(); err != nil {
     slog.Error("server error", "err", err)
@@ -170,12 +170,12 @@ slog.Info("media gateway stopped")
 // main() returns → exit code 0
 ```
 
-**Note:** Remove `defer pool.Close()` — it is replaced by explicit `pool.Close()` after `srv.Shutdown`. The `defer` form fails to run if `os.Exit(1)` is called; explicit sequencing is correct and required.
+**Note:** Remove `defer pool.Close()` - it is replaced by explicit `pool.Close()` after `srv.Shutdown`. The `defer` form fails to run if `os.Exit(1)` is called; explicit sequencing is correct and required.
 
 **Current `ratelimit.go` `newCore` (lines to change):**
 
 ```go
-// Current — goroutine not stoppable:
+// Current - goroutine not stoppable:
 func newCore(cfg Config, trustedProxy bool) *IPRateLimiter {
     rl := &IPRateLimiter{...}
     go rl.cleanupLoop(1*time.Minute, 5*time.Minute)
@@ -229,14 +229,14 @@ Pass `ctx` through to `newCore`.
 ### Shutdown Order (must be preserved)
 
 1. SIGTERM → `ctx` cancels (already wired via `signal.NotifyContext` in 12.13)
-2. `srv.Shutdown(shutdownCtx)` — stops new connections, drains in-flight HTTP requests (30s timeout)
-3. Rate limiter goroutine exits via `ctx.Done()` (concurrent with step 2 — ctx already cancelled)
-4. `pool.Close()` — after HTTP drain so in-flight DB queries can complete
+2. `srv.Shutdown(shutdownCtx)` - stops new connections, drains in-flight HTTP requests (30s timeout)
+3. Rate limiter goroutine exits via `ctx.Done()` (concurrent with step 2 - ctx already cancelled)
+4. `pool.Close()` - after HTTP drain so in-flight DB queries can complete
 5. `slog.Info("media gateway stopped")` + `main()` returns → exit code 0
 
 ### Testing Strategy
 
-**AT-12-14-1 and AT-12-14-2** can be written against `http.Server` directly using `httptest.NewServer` + `httptest.NewUnstartedServer`. No need to call `main()` — test the `Shutdown` pattern directly.
+**AT-12-14-1 and AT-12-14-2** can be written against `http.Server` directly using `httptest.NewServer` + `httptest.NewUnstartedServer`. No need to call `main()` - test the `Shutdown` pattern directly.
 
 **AT-12-14-3** test approach for goroutine exit:
 - Create `newCore` with a cancellable context and a short `cleanupInterval` (e.g. 10ms)
@@ -245,7 +245,7 @@ Pass `ctx` through to `newCore`.
 
 **AT-12-14-5** subprocess test:
 - Build the binary with `go build ./media/cmd/media/...`
-- Set `NEBU_RATE_LIMIT_DISABLED=true`, mock or skip OIDC/DB (the subprocess can exit via OIDC init if no real Dex — test only verifies SIGTERM path not blocked before OIDC)
+- Set `NEBU_RATE_LIMIT_DISABLED=true`, mock or skip OIDC/DB (the subprocess can exit via OIDC init if no real Dex - test only verifies SIGTERM path not blocked before OIDC)
 - Alternative: use a `TestMain` integration approach with `httptest.Server` injecting a dummy OIDC verifier
 
 **Note on AT-12-14-3 goroutine detection:** Since `newCore` is unexported, the test lives in `ratelimit_internal_test.go` (package `ratelimit`) to access the struct. Add a done channel to `cleanupLoop` during test, or use `runtime.NumGoroutine` delta approach.
@@ -266,7 +266,7 @@ Similarly for any `newCore` calls in `ratelimit_internal_test.go`:
 
 ```go
 // The internal tests construct IPRateLimiter directly (not via newCore),
-// so cleanupLoop is not called — no change needed for AT-12-12-3/4/5 tests.
+// so cleanupLoop is not called - no change needed for AT-12-12-3/4/5 tests.
 // But AT-12-14-3 must call newCore with ctx.
 ```
 
@@ -279,9 +279,9 @@ In `ratelimit.go`, add `"context"` to imports (not yet present).
 ### Previous Story Context (12.13)
 
 Story 12.13 added:
-- `signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)` — ctx is already signal-aware
+- `signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)` - ctx is already signal-aware
 - `defer stop()` for signal registration cleanup
-- `defer pool.Close()` — this defer will be removed in 12.14 and replaced with explicit close
+- `defer pool.Close()` - this defer will be removed in 12.14 and replaced with explicit close
 
 The ctx wiring is complete. Story 12.14 only needs to:
 1. Use the existing `ctx` in the server goroutine select
@@ -291,17 +291,17 @@ The ctx wiring is complete. Story 12.14 only needs to:
 ### Security Review Note
 
 `security_review: required` because this story modifies signal handling and process exit paths. Kassandra should check:
-- Shutdown timeout is bounded (30s) — no indefinite block
-- `pool.Close()` called before process exit — no connection leak
+- Shutdown timeout is bounded (30s) - no indefinite block
+- `pool.Close()` called before process exit - no connection leak
 - No new race conditions in goroutine stop (ctx.Done is safe)
 
 ### References
 
-- [Source: media/cmd/media/main.go] — current `ListenAndServe` call (line ~280) and `defer pool.Close()`
-- [Source: media/internal/ratelimit/ratelimit.go] — `newCore`, `cleanupLoop` (lines 68-88)
-- [Source: media/internal/ratelimit/ratelimit_test.go] — callers of `NewIPRateLimiter` (all must add ctx)
-- [Source: media/internal/ratelimit/ratelimit_internal_test.go] — white-box tests for `cleanupOnce`
-- [Source: docs/stories/phase2/epic-12/12-13-media-gateway-graceful-shutdown-signal-aware-oidc-retry.md] — signal.NotifyContext wiring (must not regress)
+- [Source: media/cmd/media/main.go] - current `ListenAndServe` call (line ~280) and `defer pool.Close()`
+- [Source: media/internal/ratelimit/ratelimit.go] - `newCore`, `cleanupLoop` (lines 68-88)
+- [Source: media/internal/ratelimit/ratelimit_test.go] - callers of `NewIPRateLimiter` (all must add ctx)
+- [Source: media/internal/ratelimit/ratelimit_internal_test.go] - white-box tests for `cleanupOnce`
+- [Source: docs/stories/phase2/epic-12/12-13-media-gateway-graceful-shutdown-signal-aware-oidc-retry.md] - signal.NotifyContext wiring (must not regress)
 
 ## Dev Agent Record
 

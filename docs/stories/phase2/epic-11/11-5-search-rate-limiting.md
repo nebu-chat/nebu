@@ -23,38 +23,38 @@ So that expensive PostgreSQL tsvector queries cannot be used to DoS the database
 
 ## Acceptance Criteria
 
-**AC1 — 429 on 11th request within one minute:**
+**AC1 - 429 on 11th request within one minute:**
 Given a user sends 10 search requests within a 60-second window,
 When the 11th request arrives within the same window,
 Then the server returns `429 M_LIMIT_EXCEEDED` with body `{"errcode":"M_LIMIT_EXCEEDED","error":"Search rate limit exceeded","retry_after_ms":60000}`
 
-**AC2 — retry_after_ms present and positive:**
+**AC2 - retry_after_ms present and positive:**
 Given the rate limiter blocks a request,
 When the 429 response is examined,
 Then the JSON body contains `"retry_after_ms"` set to a positive integer (≥1000 ms)
 
-**AC3 — per-user buckets are independent:**
+**AC3 - per-user buckets are independent:**
 Given user Alice and user Bob each send 10 requests per minute,
 When their requests are processed concurrently,
-Then neither user is blocked — their rate-limit buckets are independent (keyed by user_id, not by IP)
+Then neither user is blocked - their rate-limit buckets are independent (keyed by user_id, not by IP)
 
-**AC4 — under-limit requests pass through:**
+**AC4 - under-limit requests pass through:**
 Given a user sends fewer than 10 requests per minute,
 When each request is processed,
 Then all requests return the normal search response (200 OK)
 
-**AC5 — reuse existing RateLimitConfig / NewIPRateLimiter infrastructure:**
+**AC5 - reuse existing RateLimitConfig / NewIPRateLimiter infrastructure:**
 Given the rate limiter is implemented,
 When the implementation is inspected,
-Then it uses `middleware.NewUserRateLimiter` (a new per-user variant of the existing `NewIPRateLimiter`) with `middleware.RateLimitConfig{Rate: rate.Limit(10.0/60.0), Burst: 10}` — no new rate-limiter data structure from scratch
+Then it uses `middleware.NewUserRateLimiter` (a new per-user variant of the existing `NewIPRateLimiter`) with `middleware.RateLimitConfig{Rate: rate.Limit(10.0/60.0), Burst: 10}` - no new rate-limiter data structure from scratch
 
-**AC6 — rate limiter applies AFTER jwtWithStatusCheck:**
+**AC6 - rate limiter applies AFTER jwtWithStatusCheck:**
 Given the middleware chain for `POST /_matrix/client/v3/search` is inspected in main.go,
 When the chain is read left-to-right,
 Then the order is: `searchRL(bodyLimit1MiB(jwtWithStatusCheck(http.HandlerFunc(searchHandler.PostSearch))))`
 (rate limiter is outermost so unauthenticated requests are rejected by JWT middleware before consuming a rate-limit slot)
 
-**AC7 — NEBU_RATE_LIMIT_DISABLED=true disables the limiter (dev/test):**
+**AC7 - NEBU_RATE_LIMIT_DISABLED=true disables the limiter (dev/test):**
 Given `NEBU_RATE_LIMIT_DISABLED=true` is set,
 When more than 10 requests are sent in one minute,
 Then all requests pass through (no-op middleware, consistent with existing IP limiter behavior)
@@ -65,12 +65,12 @@ Then all requests pass through (no-op middleware, consistent with existing IP li
 
 ### Tests written FIRST (before implementation code):
 
-**Location:** `gateway/internal/middleware/ratelimit_test.go` — add new test functions to the existing file.
+**Location:** `gateway/internal/middleware/ratelimit_test.go` - add new test functions to the existing file.
 
 **1. `TestUserRateLimit_BlocksAfter10` (AC1 + AC4)**
 - Given: `NewUserRateLimiter` with `Rate: rate.Limit(10.0/60.0), Burst: 10`, tier `"search"`
 - Given: request context contains `userID = "@alice:test.local"` (set via `context.WithValue(r.Context(), ContextKeyUserID, "@alice:test.local")`)
-- When: 10 requests are sent with the same userID — all must return 200 OK
+- When: 10 requests are sent with the same userID - all must return 200 OK
 - When: the 11th request is sent with the same userID
 - Then: HTTP 429
 - Then: body contains `"errcode": "M_LIMIT_EXCEEDED"`
@@ -95,7 +95,7 @@ Then all requests pass through (no-op middleware, consistent with existing IP li
 **4. `TestUserRateLimit_NoUserID_FallsBackToIP` (defense-in-depth)**
 - Given: request context has NO `ContextKeyUserID` value (empty string or not set)
 - When: requests arrive from the same IP
-- Then: the limiter falls back to IP-based keying (same behavior as `NewIPRateLimiter`) — no panic, no bypass
+- Then: the limiter falls back to IP-based keying (same behavior as `NewIPRateLimiter`) - no panic, no bypass
 
 **5. `TestUserRateLimit_Disabled_NoOp` (AC7)**
 - Given: `NEBU_RATE_LIMIT_DISABLED=true` is set via `t.Setenv`
@@ -104,8 +104,8 @@ Then all requests pass through (no-op middleware, consistent with existing IP li
 - Then: all 5 return 200 OK (no-op middleware)
 
 **Test helpers available in `middleware` package tests:**
-- `okHandler` — already defined in `ratelimit_test.go` (`http.HandlerFunc` returning 200)
-- For user context injection: use `context.WithValue(r.Context(), middleware.ContextKeyUserID, userID)` — `ContextKeyUserID` is exported from `auth.go`
+- `okHandler` - already defined in `ratelimit_test.go` (`http.HandlerFunc` returning 200)
+- For user context injection: use `context.WithValue(r.Context(), middleware.ContextKeyUserID, userID)` - `ContextKeyUserID` is exported from `auth.go`
 
 ---
 
@@ -117,14 +117,14 @@ Then all requests pass through (no-op middleware, consistent with existing IP li
   - [ ] Add `TestUserRateLimit_RetryAfterMs_InBody`
   - [ ] Add `TestUserRateLimit_NoUserID_FallsBackToIP`
   - [ ] Add `TestUserRateLimit_Disabled_NoOp`
-  - [ ] Verify tests FAIL (red phase — `NewUserRateLimiter` doesn't exist yet)
+  - [ ] Verify tests FAIL (red phase - `NewUserRateLimiter` doesn't exist yet)
 
 - [ ] Task 2: Implement `NewUserRateLimiter` in `gateway/internal/middleware/ratelimit.go` (AC1–AC7)
   - [ ] Add `NewUserRateLimiter(cfg RateLimitConfig, trustedProxy bool, tier string) func(http.Handler) http.Handler`
-  - [ ] Key: `userID` from `r.Context().Value(ContextKeyUserID).(string)` — fall back to `extractClientIP(r, trustedProxy)` if empty
+  - [ ] Key: `userID` from `r.Context().Value(ContextKeyUserID).(string)` - fall back to `extractClientIP(r, trustedProxy)` if empty
   - [ ] Return `retry_after_ms` (milliseconds) in the JSON body: `int(math.Ceil(delay.Seconds())) * 1000`
   - [ ] Keep `Retry-After` header (seconds) consistent with existing `writeTooManyRequests`
-  - [ ] Re-use existing `lruCapacity`, `rateLimitTotal`, `writeTooManyRequests` helpers — do NOT redefine
+  - [ ] Re-use existing `lruCapacity`, `rateLimitTotal`, `writeTooManyRequests` helpers - do NOT redefine
   - [ ] `NEBU_RATE_LIMIT_DISABLED=true` → return no-op (same as `NewIPRateLimiter`)
 
 - [ ] Task 3: Wire `searchRL` in `gateway/cmd/gateway/main.go` (AC6)
@@ -145,8 +145,8 @@ Then all requests pass through (no-op middleware, consistent with existing IP li
 The existing `NewIPRateLimiter` keys on the client IP address. For `POST /search`, which is always authenticated, per-user fairness is required: user A should not be blocked because user B is on the same corporate NAT IP. The new function is identical to `NewIPRateLimiter` except:
 
 1. The cache key is `userID` (from `ContextKeyUserID` context value) instead of the extracted client IP.
-2. The 429 response body includes `retry_after_ms` (milliseconds) in addition to the existing `Retry-After` header (seconds) — the Matrix CS API §11.14 expects `retry_after_ms` in the body.
-3. Fallback to IP if `userID` is empty (defense-in-depth — JWT middleware should have rejected the request before this runs, but belt-and-suspenders).
+2. The 429 response body includes `retry_after_ms` (milliseconds) in addition to the existing `Retry-After` header (seconds) - the Matrix CS API §11.14 expects `retry_after_ms` in the body.
+3. Fallback to IP if `userID` is empty (defense-in-depth - JWT middleware should have rejected the request before this runs, but belt-and-suspenders).
 
 ### `NewUserRateLimiter` implementation sketch
 
@@ -157,7 +157,7 @@ The existing `NewIPRateLimiter` keys on the client IP address. For `POST /search
 // if the user_id is absent (e.g. middleware bypass in tests).
 //
 // The 429 body includes "retry_after_ms" (milliseconds) in addition to
-// the Retry-After header (seconds) — required by Matrix CS API §11.14.
+// the Retry-After header (seconds) - required by Matrix CS API §11.14.
 //
 // Dev/test escape: NEBU_RATE_LIMIT_DISABLED=true → no-op (same as NewIPRateLimiter).
 func NewUserRateLimiter(cfg RateLimitConfig, trustedProxy bool, tier string) func(http.Handler) http.Handler {
@@ -227,17 +227,17 @@ func writeUserTooManyRequests(w http.ResponseWriter, retryAfterSeconds int) {
 }
 ```
 
-### middleware chain order — CRITICAL
+### middleware chain order - CRITICAL
 
 ```
 searchRL(bodyLimit1MiB(jwtWithStatusCheck(http.HandlerFunc(searchHandler.PostSearch))))
 ```
 
 Execution order (outermost first):
-1. `searchRL` — rate limiter (outermost — reads userID from context set by JWT middleware… BUT JWT middleware is inner. See note below.)
-2. `bodyLimit1MiB` — body size cap
-3. `jwtWithStatusCheck` — sets `ContextKeyUserID` in context, rejects unauthenticated
-4. `searchHandler.PostSearch` — handler
+1. `searchRL` - rate limiter (outermost - reads userID from context set by JWT middleware… BUT JWT middleware is inner. See note below.)
+2. `bodyLimit1MiB` - body size cap
+3. `jwtWithStatusCheck` - sets `ContextKeyUserID` in context, rejects unauthenticated
+4. `searchHandler.PostSearch` - handler
 
 **IMPORTANT ORDERING NOTE:** Because `searchRL` is outermost, it runs BEFORE `jwtWithStatusCheck`. The `userID` context value is NOT yet set when `searchRL` executes. This means unauthenticated requests will fall back to IP-based keying in the rate limiter. Since `jwtWithStatusCheck` rejects them with 401 before `searchHandler.PostSearch` is called, this is safe:
 - Unauthenticated requests: rate-limited by IP (correct behavior, prevents DoS on the JWT validator)
@@ -246,7 +246,7 @@ Execution order (outermost first):
 **RESOLUTION:** To correctly key on `userID`, place `searchRL` INSIDE `jwtWithStatusCheck`:
 
 ```go
-// Correct chain — searchRL inside JWT so userID is in context:
+// Correct chain - searchRL inside JWT so userID is in context:
 mux.Handle("POST /_matrix/client/v3/search",
     bodyLimit1MiB(jwtWithStatusCheck(searchRL(http.HandlerFunc(searchHandler.PostSearch)))))
 ```
@@ -258,23 +258,23 @@ This is the correct ordering. The JWT middleware runs first, sets `ContextKeyUse
 
 ### Rate: 10 req/min, Burst: 10
 
-- `Rate: rate.Limit(10.0 / 60.0)` — 10 requests per 60 seconds steady-state refill
-- `Burst: 10` — allows up to 10 back-to-back requests before blocking; bucket starts full
-- This means the 11th consecutive request (with no delay) is blocked — consistent with AC1
+- `Rate: rate.Limit(10.0 / 60.0)` - 10 requests per 60 seconds steady-state refill
+- `Burst: 10` - allows up to 10 back-to-back requests before blocking; bucket starts full
+- This means the 11th consecutive request (with no delay) is blocked - consistent with AC1
 
 ### `retry_after_ms` calculation
 
-The existing `writeTooManyRequests` only writes `Retry-After` in seconds. The new `writeUserTooManyRequests` also writes `retry_after_ms` in the body. For the `Burst: 10, Rate: 10/60` config, the typical delay for the 11th request is ~6 seconds, so `retry_after_ms = 6000`. The 429 body from Story 11.4 (gRPC ResourceExhausted path) hardcodes `"retry_after_ms": 60000` — the new middleware path returns the actual wait duration converted to milliseconds, which is more accurate.
+The existing `writeTooManyRequests` only writes `Retry-After` in seconds. The new `writeUserTooManyRequests` also writes `retry_after_ms` in the body. For the `Burst: 10, Rate: 10/60` config, the typical delay for the 11th request is ~6 seconds, so `retry_after_ms = 6000`. The 429 body from Story 11.4 (gRPC ResourceExhausted path) hardcodes `"retry_after_ms": 60000` - the new middleware path returns the actual wait duration converted to milliseconds, which is more accurate.
 
 ### What NOT to do
 
-- Do NOT touch `NewIPRateLimiter` — it is used by existing routes (login, SSO, public endpoints). Only add `NewUserRateLimiter`.
-- Do NOT create a new `writeTooManyRequests` — the existing one handles IP-based 429 responses. Add a separate `writeUserTooManyRequests` for the body format required by Matrix (with `retry_after_ms`).
-- Do NOT add `retry_after_ms` to the existing `writeTooManyRequests` — that would change the response format for all existing rate-limited routes (REGRESSION).
-- Do NOT register the route without `jwtWithStatusCheck` — search is always authenticated.
-- Do NOT use `sync.Map` for the LRU cache — the existing `lru.New` + `sync.Mutex` pattern is established (avoids the >32-key test gap found in Epic 4 retro).
-- Do NOT add Godog scenarios in this story — Story 11.6 handles E2E tests (including the rate-limit scenario).
-- Do NOT remove the gRPC `ResourceExhausted → 429` mapping in `search.go` — that handles Core-side rate limiting. This story adds a Gateway-side HTTP middleware BEFORE the gRPC call.
+- Do NOT touch `NewIPRateLimiter` - it is used by existing routes (login, SSO, public endpoints). Only add `NewUserRateLimiter`.
+- Do NOT create a new `writeTooManyRequests` - the existing one handles IP-based 429 responses. Add a separate `writeUserTooManyRequests` for the body format required by Matrix (with `retry_after_ms`).
+- Do NOT add `retry_after_ms` to the existing `writeTooManyRequests` - that would change the response format for all existing rate-limited routes (REGRESSION).
+- Do NOT register the route without `jwtWithStatusCheck` - search is always authenticated.
+- Do NOT use `sync.Map` for the LRU cache - the existing `lru.New` + `sync.Mutex` pattern is established (avoids the >32-key test gap found in Epic 4 retro).
+- Do NOT add Godog scenarios in this story - Story 11.6 handles E2E tests (including the rate-limit scenario).
+- Do NOT remove the gRPC `ResourceExhausted → 429` mapping in `search.go` - that handles Core-side rate limiting. This story adds a Gateway-side HTTP middleware BEFORE the gRPC call.
 
 ---
 
@@ -283,7 +283,7 @@ The existing `writeTooManyRequests` only writes `Retry-After` in seconds. The ne
 | File | Action | Notes |
 |---|---|---|
 | `gateway/internal/middleware/ratelimit.go` | MODIFY | Add `NewUserRateLimiter` + `writeUserTooManyRequests` |
-| `gateway/internal/middleware/ratelimit_test.go` | MODIFY | Add 5 acceptance tests — written FIRST (red phase) |
+| `gateway/internal/middleware/ratelimit_test.go` | MODIFY | Add 5 acceptance tests - written FIRST (red phase) |
 | `gateway/cmd/gateway/main.go` | MODIFY | Add `searchRL`, update `/search` route chain |
 
 No new files. No Elixir changes. No proto changes. No migrations. No Playwright tests (ui: false).
@@ -312,12 +312,12 @@ Story 11.4 already maps `codes.ResourceExhausted → 429 M_LIMIT_EXCEEDED` (with
 
 ## Architecture References
 
-- [Source: gateway/internal/middleware/ratelimit.go] — `NewIPRateLimiter`, `RateLimitConfig`, `writeTooManyRequests`, `lruCapacity`, `rateLimitTotal` — all must be reused, not duplicated
-- [Source: gateway/internal/middleware/ratelimit_test.go] — test structure for `TestRateLimit_*` — new tests follow same pattern
-- [Source: gateway/internal/middleware/auth.go:142] — `ContextKeyUserID contextKey = "user_id"` — the context key for per-user keying
-- [Source: gateway/cmd/gateway/main.go:210-223] — existing RL tier definitions (strictRL, complianceRL, adminRL, mediumRL, looseRL) — add `searchRL` in the same block
-- [Source: gateway/cmd/gateway/main.go:726-733] — current Story 11.4 `/search` route registration — update chain to include `searchRL`
-- [Source: docs/architecture/adr/ADR-010-fts-strategy.md] — FTS architecture context
+- [Source: gateway/internal/middleware/ratelimit.go] - `NewIPRateLimiter`, `RateLimitConfig`, `writeTooManyRequests`, `lruCapacity`, `rateLimitTotal` - all must be reused, not duplicated
+- [Source: gateway/internal/middleware/ratelimit_test.go] - test structure for `TestRateLimit_*` - new tests follow same pattern
+- [Source: gateway/internal/middleware/auth.go:142] - `ContextKeyUserID contextKey = "user_id"` - the context key for per-user keying
+- [Source: gateway/cmd/gateway/main.go:210-223] - existing RL tier definitions (strictRL, complianceRL, adminRL, mediumRL, looseRL) - add `searchRL` in the same block
+- [Source: gateway/cmd/gateway/main.go:726-733] - current Story 11.4 `/search` route registration - update chain to include `searchRL`
+- [Source: docs/architecture/adr/ADR-010-fts-strategy.md] - FTS architecture context
 
 ---
 

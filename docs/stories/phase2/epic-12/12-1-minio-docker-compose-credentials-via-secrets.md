@@ -23,27 +23,27 @@ so that object storage is available locally and no credentials are committed to 
 
 ## Acceptance Criteria
 
-**AC1 — MinIO service starts and is healthy:**
+**AC1 - MinIO service starts and is healthy:**
 Given `docker-compose.yml` is updated,
 When `make dev` runs,
 Then a MinIO service starts, is healthy, and a bucket `nebu-media` is initialized automatically via a MinIO `mc` init container (or mc commands in the MinIO startup).
 
-**AC2 — Credentials via Docker Secrets (not hardcoded):**
+**AC2 - Credentials via Docker Secrets (not hardcoded):**
 Given `make setup` is run,
 When it completes,
 Then `MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD` are generated and stored in `.secrets/minio_root_user` and `.secrets/minio_root_password` (not hardcoded in docker-compose.yml); values are referenced via Docker Secrets (`secrets:` block in docker-compose.yml).
 
-**AC3 — `.gitignore` excludes `.secrets/`:**
+**AC3 - `.gitignore` excludes `.secrets/`:**
 Given `.gitignore` is inspected,
 When `.secrets/` is listed,
-Then it is excluded from Git tracking (already present — verify no regression).
+Then it is excluded from Git tracking (already present - verify no regression).
 
-**AC4 — README and ADR-013 carry credentials warning:**
+**AC4 - README and ADR-013 carry credentials warning:**
 Given the README and ADR-013 are inspected,
 When the credentials section is read,
 Then an explicit warning is present: "These are example credentials. Replace before first production start."
 
-**AC5 — No `.secrets/` files in git history:**
+**AC5 - No `.secrets/` files in git history:**
 Given `git log -- .secrets/` is run,
 When the output is inspected,
 Then no `.secrets/` files have ever been committed (verified via gitleaks scan passing).
@@ -100,8 +100,8 @@ Then no `.secrets/` files have ever been committed (verified via gitleaks scan p
   - [ ] Include credentials warning: "These are example credentials. Replace before first production start."
 
 - [ ] **T2: Update `make setup`** (AC2)
-  - [ ] Add generation of `.secrets/minio_root_user` (idempotent — skip if exists)
-  - [ ] Add generation of `.secrets/minio_root_password` (idempotent — skip if exists)
+  - [ ] Add generation of `.secrets/minio_root_user` (idempotent - skip if exists)
+  - [ ] Add generation of `.secrets/minio_root_password` (idempotent - skip if exists)
   - [ ] Values: `openssl rand -hex 16` (32-char hex string; MinIO requires ≥8 chars for root password)
   - [ ] Print credentials warning after generation
 
@@ -119,10 +119,10 @@ Then no `.secrets/` files have ever been committed (verified via gitleaks scan p
   - [ ] Add credentials warning: "These are example credentials. Replace before first production start."
 
 - [ ] **T5: Verify `.gitignore`** (AC3)
-  - [ ] Confirm `.secrets/` pattern is present (already in `.gitignore` — no change needed; explicitly verify)
+  - [ ] Confirm `.secrets/` pattern is present (already in `.gitignore` - no change needed; explicitly verify)
 
 - [ ] **T6: Update `.gitleaks.toml`** (AC5)
-  - [ ] Verify gitleaks allowlist covers any new patterns introduced (MinIO placeholder values in docker-compose.yml use secrets, not hardcoded strings — should be clean; document if any false-positives arise)
+  - [ ] Verify gitleaks allowlist covers any new patterns introduced (MinIO placeholder values in docker-compose.yml use secrets, not hardcoded strings - should be clean; document if any false-positives arise)
 
 - [ ] **T7: Write / verify tests** (all ATs)
   - [ ] Add shell-level smoke tests as a Makefile target `test-compose-minio` (mirrors `test-compose-ports` pattern)
@@ -134,7 +134,7 @@ Then no `.secrets/` files have ever been committed (verified via gitleaks scan p
 
 ### Project Context
 
-This is Story **12.1**, the first story of Epic 12 (Media Gateway Phase 2). No MinIO service exists yet in the stack. The epic's Pre-Epic-TODO requires ADR-013 to be finalized before implementation — this story delivers that ADR.
+This is Story **12.1**, the first story of Epic 12 (Media Gateway Phase 2). No MinIO service exists yet in the stack. The epic's Pre-Epic-TODO requires ADR-013 to be finalized before implementation - this story delivers that ADR.
 
 ### Critical Architecture Patterns to Follow
 
@@ -155,11 +155,11 @@ MinIO supports reading credentials from files via:
 - `MINIO_ROOT_USER_FILE=/run/secrets/minio_root_user`
 - `MINIO_ROOT_PASSWORD_FILE=/run/secrets/minio_root_password`
 
-**MinIO image tag:** Use `minio/minio:RELEASE.2024-01-18T22-51-28Z` or a similarly pinned stable release. Avoid `latest` in production-facing configs — for this story, a pinned tag is strongly preferred.
+**MinIO image tag:** Use `minio/minio:RELEASE.2024-01-18T22-51-28Z` or a similarly pinned stable release. Avoid `latest` in production-facing configs - for this story, a pinned tag is strongly preferred.
 
 **Bucket init pattern:** MinIO does not auto-create buckets on startup. Two approaches:
-1. **mc init container** — a one-shot container using `minio/mc:latest` that waits for MinIO to be healthy, then runs `mc mb minio/nebu-media`. This is the cleanest pattern.
-2. **MINIO_VOLUMES + mc in entrypoint** — more complex. Avoid.
+1. **mc init container** - a one-shot container using `minio/mc:latest` that waits for MinIO to be healthy, then runs `mc mb minio/nebu-media`. This is the cleanest pattern.
+2. **MINIO_VOLUMES + mc in entrypoint** - more complex. Avoid.
 
 Recommended init container pattern:
 ```yaml
@@ -204,7 +204,7 @@ Mirror the `internal_secret` generation block exactly. Use `openssl rand -hex 16
 | MODIFY | `docker-compose.yml` | Add minio + createbuckets services, secrets block |
 | MODIFY | `Makefile` | Extend `setup` target with minio credential generation |
 | MODIFY | `README.md` | Add MinIO to Quick Start table + credentials warning |
-| VERIFY | `.gitignore` | `.secrets/` already present — no change; assert in test |
+| VERIFY | `.gitignore` | `.secrets/` already present - no change; assert in test |
 
 ### ADR-012 Consistency
 
@@ -241,19 +241,19 @@ If gitleaks flags any pattern, add a targeted path-scoped allowlist entry in `.g
 
 - New Docker secret handling for MinIO credentials
 - MinIO API port exposed to host (9000)
-- Bucket `nebu-media` initialized with no public access policy — verify this is enforced in Story 12.3
+- Bucket `nebu-media` initialized with no public access policy - verify this is enforced in Story 12.3
 
 For this story, the main risk is credential exposure. The Docker Secrets pattern prevents hardcoded values; `.gitignore` prevents file commits. Kassandra will verify both.
 
 ### No Matrix, No ATDD skip
 
-This story is `matrix: false`. The Oracle Gate (Step 1b) is skipped. ATDD will generate shell-level / file-assertion tests (not Godog/Playwright) — these are infrastructure tests, but not "pure Dockerfile" infra (the Makefile setup logic and ADR content are observable and testable). Do NOT skip ATDD.
+This story is `matrix: false`. The Oracle Gate (Step 1b) is skipped. ATDD will generate shell-level / file-assertion tests (not Godog/Playwright) - these are infrastructure tests, but not "pure Dockerfile" infra (the Makefile setup logic and ADR content are observable and testable). Do NOT skip ATDD.
 
 ---
 
 ### ATDD Artifacts
 
-- Test file: `gateway/test/integration/minio_compose_test.go` (6 tests — 4 failing, 2 regression guards)
+- Test file: `gateway/test/integration/minio_compose_test.go` (6 tests - 4 failing, 2 regression guards)
 - Run: `go test -tags=integration ./test/integration/ -v -run 'TestMinIO_'`
 - Red phase verified: AC1, AC2, AC4 tests fail; AC3, AC5 guards pass
 
@@ -275,8 +275,8 @@ claude-sonnet-4-6
 ### File List
 
 - `docs/architecture/adr/ADR-013-minio-object-storage.md` (CREATE)
-- `docker-compose.yml` (MODIFY — minio + createbuckets services + secrets block)
-- `Makefile` (MODIFY — setup target + test-compose-minio target)
-- `README.md` (MODIFY — MinIO rows + credentials warning)
-- `docs/architecture/07-deployment.md` (MODIFY — MinIO in topology + port map + setup docs)
-- `docs/architecture/12-glossary.md` (MODIFY — MinIO + nebu-media terms)
+- `docker-compose.yml` (MODIFY - minio + createbuckets services + secrets block)
+- `Makefile` (MODIFY - setup target + test-compose-minio target)
+- `README.md` (MODIFY - MinIO rows + credentials warning)
+- `docs/architecture/07-deployment.md` (MODIFY - MinIO in topology + port map + setup docs)
+- `docs/architecture/12-glossary.md` (MODIFY - MinIO + nebu-media terms)

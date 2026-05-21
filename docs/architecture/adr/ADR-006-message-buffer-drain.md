@@ -2,12 +2,12 @@
 
 ## Status
 
-Accepted — 2026-03-18
+Accepted - 2026-03-18
 
 ## Context
 
 When the Elixir Core is temporarily unavailable (ROT status), the Go Gateway must not fail Matrix
-client write requests. Matrix clients expect `200 OK` with an `event_id` — they don't know or
+client write requests. Matrix clients expect `200 OK` with an `event_id` - they don't know or
 care that the server is temporarily degraded. The Gateway must buffer writes and deliver them
 when the Core recovers.
 

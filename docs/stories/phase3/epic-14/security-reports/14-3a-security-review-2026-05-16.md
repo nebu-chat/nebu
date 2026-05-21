@@ -1,4 +1,4 @@
-# Security Review — Story 14-3a: BulkImportUsers gRPC RPC + Core Provisioning
+# Security Review - Story 14-3a: BulkImportUsers gRPC RPC + Core Provisioning
 
 **Date:** 2026-05-16
 **Reviewer:** Kassandra (nebu-agent-kassandra)
@@ -31,7 +31,7 @@ The `system_role` field from `OIDCUserClaims` is passed directly to `UserStore.u
 
 ---
 
-### INFO-1: PII flow — correct encryption verified
+### INFO-1: PII flow - correct encryption verified
 
 **Severity:** INFO
 
@@ -56,7 +56,7 @@ Neither field appears in any log output.
 | CRITICAL | 0 |
 | HIGH | 0 |
 | MEDIUM | 0 |
-| LOW | 1 (deferred — known ADR G2 trade-off) |
+| LOW | 1 (deferred - known ADR G2 trade-off) |
 | INFO | 2 |
 
-**Result: CLEAN — story can be committed.**
+**Result: CLEAN - story can be committed.**

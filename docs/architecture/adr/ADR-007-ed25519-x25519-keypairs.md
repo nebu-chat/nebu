@@ -1,8 +1,8 @@
-# ADR-007: Ed25519 (Signing) + X25519 (Encryption) — Two Key Pairs per User
+# ADR-007: Ed25519 (Signing) + X25519 (Encryption) - Two Key Pairs per User
 
 ## Status
 
-Accepted — 2026-03-18
+Accepted - 2026-03-18
 
 ## Context
 
@@ -19,10 +19,10 @@ Diffie-Hellman key agreement, which is required for asymmetric encryption.
 For encryption, the correct algorithm is **X25519 (Curve25519 Diffie-Hellman)**: two parties
 exchange public keys, compute a shared secret, and use that secret to derive an AES-256-GCM key.
 
-Both Ed25519 and X25519 are natively supported in Erlang/OTP 27 via `:crypto` — no external
+Both Ed25519 and X25519 are natively supported in Erlang/OTP 27 via `:crypto` - no external
 Hex packages are required.
 
-Reference models: Signal Protocol, Age Encryption, WireGuard — all use separate Ed25519/X25519 pairs.
+Reference models: Signal Protocol, Age Encryption, WireGuard - all use separate Ed25519/X25519 pairs.
 
 ## Decision
 
@@ -47,7 +47,7 @@ audit log integrity preserved (event signatures remain verifiable via the perman
 **Positive:**
 - Cryptographically correct: right algorithm for each purpose
 - GDPR deletion is irreversible and verifiable (audit trail entry `deletion_succeeded`)
-- Both algorithms natively in OTP 27 — no supply chain risk from external crypto packages
+- Both algorithms natively in OTP 27 - no supply chain risk from external crypto packages
 - Message non-repudiation survives GDPR deletion (public signing key is permanent)
 
 **Negative:**
@@ -55,7 +55,7 @@ audit log integrity preserved (event signatures remain verifiable via the perman
 - Developers must not confuse signing key with encryption key (enforced by code review rule #10)
 - X25519 ECDH requires understanding of key agreement protocols
 
-**Enforcement rule:** "PII encryption exclusively via X25519 (Encryption Key) — never via Ed25519
+**Enforcement rule:** "PII encryption exclusively via X25519 (Encryption Key) - never via Ed25519
 (Signing Key)." This is explicitly listed as an anti-pattern in `_bmad-output/planning-artifacts/architecture.md`.
 
 _Source: `_bmad-output/planning-artifacts/architecture.md`, §Core Architectural Decisions (V1); `_bmad-output/planning-artifacts/prd.md`, §Cryptographic Identity Architecture; `CLAUDE.md`, §ADR Table_

@@ -9,7 +9,7 @@ matrix: false
 created: 2026-05-13
 ---
 
-# Story 12.11 — Media Gateway Rate Limit + Audit Trail SEC Fixes
+# Story 12.11 - Media Gateway Rate Limit + Audit Trail SEC Fixes
 
 ## User Story
 
@@ -19,37 +19,37 @@ So that the rate limiter cannot be bypassed via header spoofing and audit record
 
 ## Acceptance Criteria
 
-**AC-F2-1** — XFF ignored when `NEBU_TRUSTED_PROXY=false` (default):
+**AC-F2-1** - XFF ignored when `NEBU_TRUSTED_PROXY=false` (default):
 - Given `NEBU_TRUSTED_PROXY=false` (or env var absent)
 - When a request has `X-Forwarded-For: 1.2.3.4`
 - Then rate limiting keys on `RemoteAddr` (ignores XFF completely)
 
-**AC-F2-2** — XFF used when `NEBU_TRUSTED_PROXY=true`:
+**AC-F2-2** - XFF used when `NEBU_TRUSTED_PROXY=true`:
 - Given `NEBU_TRUSTED_PROXY=true`
 - When a request has `X-Forwarded-For: 1.2.3.4, 10.0.0.1`
-- Then rate limiting keys on `1.2.3.4` (rightmost-minus-1 — the proxy-appended entry)
+- Then rate limiting keys on `1.2.3.4` (rightmost-minus-1 - the proxy-appended entry)
 
-**AC-F2-3** — Bypass protection: attacker cannot spoof with different XFF headers when `NEBU_TRUSTED_PROXY=false`:
+**AC-F2-3** - Bypass protection: attacker cannot spoof with different XFF headers when `NEBU_TRUSTED_PROXY=false`:
 - Given `NEBU_TRUSTED_PROXY=false` and an attacker sends 11 requests from `RemoteAddr=5.6.7.8`, each with a different `X-Forwarded-For` value
 - When all 11 requests arrive
 - Then all 11 are counted against `5.6.7.8` and the 11th is rate-limited (bypass not possible)
 
-**AC-F1-1** — Upload uses configured OIDC claim (`sub`):
+**AC-F1-1** - Upload uses configured OIDC claim (`sub`):
 - Given `NEBU_OIDC_USER_ID_CLAIM=sub` and token with `sub=alice-uuid`
 - When upload succeeds
 - Then `uploader_user_id = @alice-uuid:server`
 
-**AC-F1-2** — Upload uses configured OIDC claim (`name`):
+**AC-F1-2** - Upload uses configured OIDC claim (`name`):
 - Given `NEBU_OIDC_USER_ID_CLAIM=name` (default, matching migration 000044 default) and token with `name=alice`
 - When upload succeeds
 - Then `uploader_user_id = @alice:server`
 
-**AC-F1-3** — Default claim is `name` when env var unset:
+**AC-F1-3** - Default claim is `name` when env var unset:
 - Given `NEBU_OIDC_USER_ID_CLAIM` is unset
 - When the media gateway starts
 - Then it defaults to `name` (matching the gateway's DB default)
 
-**AC-F1-4** — Fall back to `sub` when configured claim missing:
+**AC-F1-4** - Fall back to `sub` when configured claim missing:
 - Given `NEBU_OIDC_USER_ID_CLAIM=email` and token has no `email` claim but has `sub=alice-uuid`
 - When upload is attempted
 - Then a warning is logged and `uploader_user_id = @alice-uuid:server` (sub fallback)
@@ -62,20 +62,20 @@ Story 12.10 introduced per-IP rate limiting for the media gateway. The security 
 (`docs/stories/phase2/epic-12/security-reports/12-10-security-review-2026-05-13.md`)
 identified two findings to address:
 
-**F-2 [HIGH]** — `extractClientIP` in `media/internal/ratelimit/ratelimit.go` always
+**F-2 [HIGH]** - `extractClientIP` in `media/internal/ratelimit/ratelimit.go` always
 reads `X-Forwarded-For` without checking whether the gateway is behind a trusted proxy.
 An attacker behind `RemoteAddr=5.6.7.8` can bypass the rate limit by sending 11 requests
-each with a different `X-Forwarded-For` value — each gets a fresh bucket keyed to a
+each with a different `X-Forwarded-For` value - each gets a fresh bucket keyed to a
 different spoofed IP.
 
-**F-1 [MEDIUM]** — `OIDCTokenVerifier.VerifyToken` in `media/internal/upload/upload.go`
+**F-1 [MEDIUM]** - `OIDCTokenVerifier.VerifyToken` in `media/internal/upload/upload.go`
 has a hardcoded `sub → name` claim priority. The operator cannot configure which OIDC
 claim is used as the user identity in the audit trail. This can cause mismatches with
 room events if the gateway uses a different claim (e.g. `email`, `preferred_username`).
 Migration 000044 establishes `name` as the default claim via a DB comment, but the code
 ignores the operator's `NEBU_OIDC_USER_ID_CLAIM` setting.
 
-### F-2 Fix — `media/internal/ratelimit/ratelimit.go`
+### F-2 Fix - `media/internal/ratelimit/ratelimit.go`
 
 **Current problem:** `extractClientIP(r)` always reads `X-Forwarded-For`. The function
 must be gated behind a `trustedProxy bool` field, mirroring the gateway pattern in
@@ -110,7 +110,7 @@ must be gated behind a `trustedProxy bool` field, mirroring the gateway pattern 
    method on `IPRateLimiter`). When `trustedProxy=false`: always use `RemoteAddr`,
    never read XFF. When `trustedProxy=true`: apply rightmost-minus-1 (existing logic).
 
-   Simplest approach — make it a method:
+   Simplest approach - make it a method:
    ```go
    func (rl *IPRateLimiter) clientIP(r *http.Request) string {
        if rl.trustedProxy {
@@ -140,7 +140,7 @@ must be gated behind a `trustedProxy bool` field, mirroring the gateway pattern 
 **In `docker-compose.yml` media service env:**
 - Add explicit default: `NEBU_TRUSTED_PROXY: "false"` (documents the choice)
 
-### F-1 Fix — `media/internal/upload/upload.go` + `media/cmd/media/main.go`
+### F-1 Fix - `media/internal/upload/upload.go` + `media/cmd/media/main.go`
 
 **Current problem:** `OIDCTokenVerifier.VerifyToken` hardcodes `sub → name` priority.
 The operator cannot configure which claim becomes the audit trail user ID.
@@ -155,7 +155,7 @@ The operator cannot configure which claim becomes the audit trail user ID.
        ServerName   string
        MaxBytes     int64
        OIDCVerifier TokenVerifier
-       ClaimName    string  // NEW — OIDC claim used as user identity (default: "name")
+       ClaimName    string  // NEW - OIDC claim used as user identity (default: "name")
    }
    ```
 
@@ -170,14 +170,14 @@ The operator cannot configure which claim becomes the audit trail user ID.
 
 3. Replace the hardcoded `OIDCTokenVerifier.VerifyToken` with a configurable approach.
 
-   **Option A (preferred — keeps TokenVerifier interface unchanged):** Extract the claim
+   **Option A (preferred - keeps TokenVerifier interface unchanged):** Extract the claim
    from the raw token in `Handler.ServeHTTP` after `VerifyToken` returns the subject.
    Add a second method or change the interface to return raw claims.
 
-   **Option B (simpler — pass claim name into OIDCTokenVerifier):** Add `claimName` to
+   **Option B (simpler - pass claim name into OIDCTokenVerifier):** Add `claimName` to
    `OIDCTokenVerifier` and have it read the configured claim.
 
-   **Recommended: Option B** — it keeps all OIDC logic inside `OIDCTokenVerifier`:
+   **Recommended: Option B** - it keeps all OIDC logic inside `OIDCTokenVerifier`:
 
    ```go
    type OIDCTokenVerifier struct {
@@ -206,7 +206,7 @@ The operator cannot configure which claim becomes the audit trail user ID.
                return s, nil
            }
        }
-       // Configured claim missing — fall back to sub, log warning.
+       // Configured claim missing - fall back to sub, log warning.
        if sub, ok := rawClaims["sub"].(string); ok && sub != "" {
            slog.Warn("media upload: configured OIDC claim not found, falling back to sub",
                "configured_claim", claimName)
@@ -233,7 +233,7 @@ The operator cannot configure which claim becomes the audit trail user ID.
    - Pass to `HandlerConfig.ClaimName` (for informational use / future extension)
 
 **Note:** `HandlerConfig.ClaimName` may be redundant if the claim is baked into the
-verifier — keep it for documentation/configurability, or omit it if it adds no value.
+verifier - keep it for documentation/configurability, or omit it if it adds no value.
 The `OIDCTokenVerifier` approach (Option B) is self-contained.
 
 ### Files to Create / Modify
@@ -249,25 +249,25 @@ The `OIDCTokenVerifier` approach (Option B) is self-contained.
 
 ### Related Files (read only)
 
-- `gateway/internal/middleware/ratelimit.go` — reference for `trustedProxy` gate pattern (lines 85-99)
-- `docs/stories/phase2/epic-12/security-reports/12-10-security-review-2026-05-13.md` — original security findings
+- `gateway/internal/middleware/ratelimit.go` - reference for `trustedProxy` gate pattern (lines 85-99)
+- `docs/stories/phase2/epic-12/security-reports/12-10-security-review-2026-05-13.md` - original security findings
 
 ## Acceptance Tests
 
 ### Tests written FIRST (before implementation code):
 
-1. **AT-12-11-1** — Rate limiter ignores XFF when `trustedProxy=false` — [Go unit test in `media/internal/ratelimit/ratelimit_test.go`]
+1. **AT-12-11-1** - Rate limiter ignores XFF when `trustedProxy=false` - [Go unit test in `media/internal/ratelimit/ratelimit_test.go`]
    - Given: `NewIPRateLimiter(Config{Rate: 10, Burst: 5}, false)` (trustedProxy=false)
    - When: Request with `X-Forwarded-For: 1.2.3.4` and `RemoteAddr: 5.6.7.8:1234`
    - Then: Rate limiting keys on `5.6.7.8` (RemoteAddr), NOT on `1.2.3.4`
 
-2. **AT-12-11-2** — Rate limiter uses XFF rightmost-minus-1 when `trustedProxy=true` — [Go unit test]
+2. **AT-12-11-2** - Rate limiter uses XFF rightmost-minus-1 when `trustedProxy=true` - [Go unit test]
    - Given: `NewIPRateLimiter(Config{Rate: 10, Burst: 1}, true)` (trustedProxy=true)
    - When: Requests from `RemoteAddr=10.0.0.1:1234` with `X-Forwarded-For: 1.2.3.4, 10.0.0.1`
    - Then: Rate limiting keys on `1.2.3.4` (leftmost of the 2-entry XFF, which is the proxy-appended real client IP)
 
    **Note on rightmost-minus-1 semantics for 2-entry XFF:**
-   `X-Forwarded-For: 1.2.3.4, 10.0.0.1` — the proxy appended `10.0.0.1` as the
+   `X-Forwarded-For: 1.2.3.4, 10.0.0.1` - the proxy appended `10.0.0.1` as the
    directly-connected client. The "rightmost-minus-1" means "the last entry the
    proxy appended", which is `ips[len-1]`. For a 2-entry list `[1.2.3.4, 10.0.0.1]`,
    `ips[1] = 10.0.0.1` is the proxy-appended entry. However per the existing implementation
@@ -276,22 +276,22 @@ The `OIDCTokenVerifier` approach (Option B) is self-contained.
    Align test assertions with the existing `extractClientIP` behavior (which returns
    `ips[len(ips)-1]` for multi-entry XFF).
 
-3. **AT-12-11-3** — Bypass protection: different XFF, same RemoteAddr, trustedProxy=false — [Go unit test]
+3. **AT-12-11-3** - Bypass protection: different XFF, same RemoteAddr, trustedProxy=false - [Go unit test]
    - Given: `NewIPRateLimiter(Config{Rate: rate.Limit(10), Burst: 10}, false)` (trustedProxy=false)
    - When: 11 requests from `RemoteAddr=5.6.7.8`, each with a different `X-Forwarded-For` (spoofed IPs)
    - Then: All 11 requests are counted against `5.6.7.8`; the 11th returns 429
 
-4. **AT-12-11-4** — Upload uses configured `sub` claim — [Go unit test in `media/internal/upload/upload_test.go`]
+4. **AT-12-11-4** - Upload uses configured `sub` claim - [Go unit test in `media/internal/upload/upload_test.go`]
    - Given: `OIDCTokenVerifier` configured with `claimName="sub"` and token `{sub: "alice-uuid", name: "alice"}`
    - When: `VerifyToken` is called
    - Then: Returns `"alice-uuid"` (the `sub` claim value)
 
-5. **AT-12-11-5** — Upload uses configured `name` claim — [Go unit test]
+5. **AT-12-11-5** - Upload uses configured `name` claim - [Go unit test]
    - Given: `OIDCTokenVerifier` configured with `claimName="name"` and token `{sub: "uuid-123", name: "alice"}`
    - When: `VerifyToken` is called
    - Then: Returns `"alice"` (the `name` claim value)
 
-6. **AT-12-11-6** — Falls back to `sub` when configured claim is missing — [Go unit test]
+6. **AT-12-11-6** - Falls back to `sub` when configured claim is missing - [Go unit test]
    - Given: `OIDCTokenVerifier` configured with `claimName="email"` and token `{sub: "uuid-123", name: "alice"}` (no `email` claim)
    - When: `VerifyToken` is called
    - Then: Returns `"uuid-123"` (sub fallback) and a warning is logged
@@ -324,7 +324,7 @@ extraction logic, create a separate unit test that tests `extractClaim` directly
 as a pure function (it only needs a `map[string]interface{}`).
 
 **Refactor suggestion:** Extract claim resolution to a pure function that takes
-`rawClaims map[string]interface{}` and `claimName string` — no `*oidc.IDToken`
+`rawClaims map[string]interface{}` and `claimName string` - no `*oidc.IDToken`
 dependency. This makes it trivially testable without mock OIDC infrastructure.
 
 ```go
@@ -349,7 +349,7 @@ Tests for `extractClaimFromMap` are pure unit tests with no external deps.
 in a `upload_oidc_test.go` or appended to `upload_test.go`. Either is fine.
 
 The existing tests for `Handler.ServeHTTP` use `mockTokenVerifier` and remain
-unchanged — they are not affected by the claim extraction refactor.
+unchanged - they are not affected by the claim extraction refactor.
 
 ### NEBU_OIDC_USER_ID_CLAIM default
 

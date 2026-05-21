@@ -1,4 +1,4 @@
-## Security Review — Story 12.8: OIDC Fail-Open Hardening
+## Security Review - Story 12.8: OIDC Fail-Open Hardening
 
 **Diff scope:** media/cmd/media/main.go (startup hardening), media/internal/upload/upload.go (TokenVerifier interface refactor + nil-verifier 503), test files
 **Date:** 2026-05-13
@@ -30,8 +30,8 @@ No security issues found.
 
 ### Summary
 
-CRITICAL: 0 — no blocking issues
-HIGH: 0 — no blocking issues
+CRITICAL: 0 - no blocking issues
+HIGH: 0 - no blocking issues
 MEDIUM: 0
 LOW: 0
 

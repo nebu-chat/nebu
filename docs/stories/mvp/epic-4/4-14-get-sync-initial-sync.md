@@ -1,7 +1,7 @@
-# Story 4.14: GET /sync — Initial Sync
+# Story 4.14: GET /sync - Initial Sync
 
 **Status:** review
-**Epic:** 4 — End-Users Can Chat in Rooms Using Any Standard Matrix Client
+**Epic:** 4 - End-Users Can Chat in Rooms Using Any Standard Matrix Client
 **Story Key:** 4-14-get-sync-initial-sync
 **Created:** 2026-04-07
 
@@ -41,7 +41,7 @@ so that my Matrix client can build its initial state on first connection.
 4. `next_batch` is generated via `Nebu.Session.PgStore.persist_since_token/3` and stored in `sync_tokens`; the `last_event_id` used is the highest `origin_server_ts` event_id across all the user's rooms (or `nil` if no events).
 5. If the user has no rooms, returns `200` with `"rooms": {"join": {}, "invite": {}, "leave": {}}` and a valid `next_batch`.
 6. Handler timeout: 5 seconds. If Core is unreachable (gRPC `UNAVAILABLE`), return `503` with `{"errcode": "M_UNAVAILABLE", "error": "Core is temporarily unavailable"}`.
-7. `GET /_matrix/client/v3/sync?since=<token>` with a `since` parameter is **NOT handled by this story** — the handler returns the initial sync response whenever `since` is absent, and defers incremental sync to Story 4-15. For the MVP, if `since` is present but Story 4-15 is not yet implemented, the handler may fall back to initial sync (AC deferred to 4-15).
+7. `GET /_matrix/client/v3/sync?since=<token>` with a `since` parameter is **NOT handled by this story** - the handler returns the initial sync response whenever `since` is absent, and defers incremental sync to Story 4-15. For the MVP, if `since` is present but Story 4-15 is not yet implemented, the handler may fall back to initial sync (AC deferred to 4-15).
 8. `proto/core.proto` is extended with `rpc GetInitialSync(GetInitialSyncRequest) returns (GetInitialSyncResponse)`.
 9. Unit tests (Go `httptest`):
    - Authenticated user → `200` with `next_batch` and `rooms.join` containing correct room IDs
@@ -60,32 +60,32 @@ so that my Matrix client can build its initial state on first connection.
 
 ### Tests written FIRST (before implementation code):
 
-**1. Go: initial sync — user with 2 rooms — Go httptest**
+**1. Go: initial sync - user with 2 rooms - Go httptest**
 - Given: valid JWT for `@alice:test.local`; mock core client returns `GetInitialSyncResponse` with 2 room entries
 - When: `GET /_matrix/client/v3/sync` (no `since` param)
 - Then: `200`; body has `next_batch` (non-empty string); `rooms.join` contains both room IDs with `state.events` and `timeline.events`
 
-**2. Go: initial sync — user with no rooms — Go httptest**
+**2. Go: initial sync - user with no rooms - Go httptest**
 - Given: valid JWT for `@alice:test.local`; mock core client returns `GetInitialSyncResponse` with empty rooms list
 - When: `GET /_matrix/client/v3/sync`
 - Then: `200`; `rooms.join` is `{}`; `next_batch` is non-empty
 
-**3. Go: initial sync — core unavailable — Go httptest**
+**3. Go: initial sync - core unavailable - Go httptest**
 - Given: valid JWT; mock core client returns gRPC `UNAVAILABLE` error
 - When: `GET /_matrix/client/v3/sync`
 - Then: `503` with `{"errcode": "M_UNAVAILABLE"}`
 
-**4. Elixir: GetInitialSync — user in 2 rooms — ExUnit**
+**4. Elixir: GetInitialSync - user in 2 rooms - ExUnit**
 - Given: `@alice:test.local` is a member of `!room1:test.local` and `!room2:test.local`; each room has 3 events; `FakePgStore` accepts `persist_since_token/3`
 - When: `Nebu.EventDispatcher.Server.get_initial_sync/2` called with `user_id: "@alice:test.local"`
 - Then: response contains both room IDs in `rooms`; each room has `state_events` (membership) and ≤ 20 `timeline_events`; `since_token` is non-empty
 
-**5. Elixir: GetInitialSync — user with no rooms — ExUnit**
+**5. Elixir: GetInitialSync - user with no rooms - ExUnit**
 - Given: `@bob:test.local` has no room memberships
 - When: `Nebu.EventDispatcher.Server.get_initial_sync/2` called with `user_id: "@bob:test.local"`
 - Then: response `rooms` list is empty; `since_token` is still generated and persisted
 
-**6. Elixir: since_token persisted in sync_tokens — ExUnit**
+**6. Elixir: since_token persisted in sync_tokens - ExUnit**
 - Given: `@alice:test.local` is in 1 room; `FakePgStore` tracks calls to `persist_since_token/3`
 - When: `get_initial_sync/2` is called
 - Then: `Nebu.Session.PgStore.persist_since_token/3` is called once with `user_id = "@alice:test.local"` and a non-empty `since_token`
@@ -94,7 +94,7 @@ so that my Matrix client can build its initial state on first connection.
 
 ## Technical Requirements
 
-### Proto Changes — `proto/core.proto`
+### Proto Changes - `proto/core.proto`
 
 Add to `CoreService`:
 ```protobuf
@@ -103,13 +103,13 @@ rpc GetInitialSync(GetInitialSyncRequest) returns (GetInitialSyncResponse);
 
 Add message definitions:
 ```protobuf
-// GetInitialSync — returns full state snapshot for all of a user's joined rooms
+// GetInitialSync - returns full state snapshot for all of a user's joined rooms
 message GetInitialSyncRequest {
   string user_id = 1;
 }
 
 message GetInitialSyncResponse {
-  string               since_token = 1;  // opaque token — becomes next_batch in HTTP response
+  string               since_token = 1;  // opaque token - becomes next_batch in HTTP response
   repeated SyncRoom    rooms       = 2;
 }
 
@@ -132,7 +132,7 @@ message SyncRoom {
 
 **IMPORTANT:** Run `make proto` after editing to regenerate `gateway/internal/grpc/pb/` and `core/apps/event_dispatcher/lib/pb/`.
 
-The `Event` message already exists in `core.proto` — reuse it for timeline events. `SyncRoomStateEvent` is new (state events need a `state_key` field that `Event` lacks).
+The `Event` message already exists in `core.proto` - reuse it for timeline events. `SyncRoomStateEvent` is new (state events need a `state_key` field that `Event` lacks).
 
 ### Elixir: New Handler `get_initial_sync/2` in `Nebu.EventDispatcher.Server`
 
@@ -144,7 +144,7 @@ Flow:
 3. For each room_id:
    a. Get room state: `Nebu.Room.Server.get_state(room_id)` → members + power_levels
    b. Build state events (membership events for each member + power levels event)
-   c. Fetch last 20 timeline events: `Nebu.Room.DB.fetch_events(room_id, "b", 20, "")` — direction `"b"` returns newest first; reverse for response
+   c. Fetch last 20 timeline events: `Nebu.Room.DB.fetch_events(room_id, "b", 20, "")` - direction `"b"` returns newest first; reverse for response
 4. Compute `last_event_id` = the event_id of the newest event across all rooms (or `nil` if no events)
 5. Call `Nebu.Session.PgStore.persist_since_token(user_id, generated_token, last_event_id)` to persist
 6. Return `%Core.GetInitialSyncResponse{since_token: generated_token, rooms: [...]}`
@@ -177,7 +177,7 @@ WHERE user_id = $1 AND left_at IS NULL
 
 @doc """
 Returns all room IDs where `user_id` is currently an active member.
-Returns `{:ok, [room_id]}` — empty list if user has no rooms.
+Returns `{:ok, [room_id]}` - empty list if user has no rooms.
 """
 @spec get_rooms_for_user(String.t()) :: {:ok, [String.t()]} | {:error, term()}
 def get_rooms_for_user(user_id) do
@@ -188,7 +188,7 @@ def get_rooms_for_user(user_id) do
 end
 ```
 
-**FakeDB extension for tests** — the `FakeDB` in `nebu_room_test.exs` (and any event_dispatcher fake) must add:
+**FakeDB extension for tests** - the `FakeDB` in `nebu_room_test.exs` (and any event_dispatcher fake) must add:
 ```elixir
 def get_rooms_for_user(user_id) do
   rooms = :ets.match(:fake_room_db, {{:member, :"$1", user_id}, :active})
@@ -199,8 +199,8 @@ end
 ### State Event Construction (Elixir)
 
 The `state` section of each SyncRoom must include:
-1. **One `m.room.member` event per active member** — `state_key` = member's `user_id`, content = `{"membership": "join", "displayname": ""}` (displayname lookup is out of scope for this story)
-2. **One `m.room.power_levels` event** — `state_key` = `""`, content = the room's `power_levels` map (encoded via `Jason.encode!/1`)
+1. **One `m.room.member` event per active member** - `state_key` = member's `user_id`, content = `{"membership": "join", "displayname": ""}` (displayname lookup is out of scope for this story)
+2. **One `m.room.power_levels` event** - `state_key` = `""`, content = the room's `power_levels` map (encoded via `Jason.encode!/1`)
 
 Helper to build state events:
 ```elixir
@@ -343,7 +343,7 @@ default:
 
 **Content field handling:** Proto `SyncRoomStateEvent.content` is `bytes` (JSON-encoded). In Go, decode as `json.RawMessage` to avoid double-encoding.
 
-### Go gRPC Client — `gateway/internal/grpc/client.go` (EXTEND)
+### Go gRPC Client - `gateway/internal/grpc/client.go` (EXTEND)
 
 Add `GetInitialSync` method following the exact pattern of all other methods:
 ```go
@@ -353,7 +353,7 @@ func (c *Client) GetInitialSync(ctx context.Context, req *pb.GetInitialSyncReque
 }
 ```
 
-### Router Registration — `gateway/cmd/gateway/main.go` (EXTEND)
+### Router Registration - `gateway/cmd/gateway/main.go` (EXTEND)
 
 After the existing `setRoomStateHandler` registration block, add:
 ```go
@@ -370,19 +370,19 @@ mux.Handle("GET /_matrix/client/v3/sync",
 ## File Structure
 
 ### New Files
-- `gateway/internal/matrix/sync.go` — `GetSyncHandler` + response structs
-- `gateway/internal/matrix/sync_test.go` — Go httptest unit tests
+- `gateway/internal/matrix/sync.go` - `GetSyncHandler` + response structs
+- `gateway/internal/matrix/sync_test.go` - Go httptest unit tests
 
 ### Modified Files
-- `proto/core.proto` — add `GetInitialSync` RPC + `GetInitialSyncRequest`, `GetInitialSyncResponse`, `SyncRoom`, `SyncRoomStateEvent` messages
-- `core/apps/event_dispatcher/lib/pb/core.pb.ex` — regenerated by `make proto`
-- `core/apps/event_dispatcher/lib/pb/core_grpc.pb.ex` — regenerated by `make proto`
-- `gateway/internal/grpc/pb/` — regenerated by `make proto`
-- `core/apps/room_manager/lib/nebu/room/db.ex` — add `get_rooms_for_user/1`
-- `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` — add `get_initial_sync/2` handler
-- `core/apps/event_dispatcher/test/nebu_event_dispatcher_test.exs` — add ExUnit tests for `get_initial_sync`
-- `gateway/internal/grpc/client.go` — add `GetInitialSync` method
-- `gateway/cmd/gateway/main.go` — register `GetSyncHandler` for `GET /_matrix/client/v3/sync`
+- `proto/core.proto` - add `GetInitialSync` RPC + `GetInitialSyncRequest`, `GetInitialSyncResponse`, `SyncRoom`, `SyncRoomStateEvent` messages
+- `core/apps/event_dispatcher/lib/pb/core.pb.ex` - regenerated by `make proto`
+- `core/apps/event_dispatcher/lib/pb/core_grpc.pb.ex` - regenerated by `make proto`
+- `gateway/internal/grpc/pb/` - regenerated by `make proto`
+- `core/apps/room_manager/lib/nebu/room/db.ex` - add `get_rooms_for_user/1`
+- `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` - add `get_initial_sync/2` handler
+- `core/apps/event_dispatcher/test/nebu_event_dispatcher_test.exs` - add ExUnit tests for `get_initial_sync`
+- `gateway/internal/grpc/client.go` - add `GetInitialSync` method
+- `gateway/cmd/gateway/main.go` - register `GetSyncHandler` for `GET /_matrix/client/v3/sync`
 
 ---
 
@@ -391,7 +391,7 @@ mux.Handle("GET /_matrix/client/v3/sync",
 ### Module and File Naming Conventions (Critical)
 
 From prior stories:
-- Elixir module names: `Nebu.{Domain}.{Name}` — `Nebu.Room.DB`, `Nebu.Session.PgStore`, `Nebu.EventDispatcher.Server`
+- Elixir module names: `Nebu.{Domain}.{Name}` - `Nebu.Room.DB`, `Nebu.Session.PgStore`, `Nebu.EventDispatcher.Server`
 - Go handler files: per-feature, e.g., `login.go`, `rooms.go`, `messages.go` → use `sync.go`
 - Consumer-defined Go interfaces: minimal, local to the handler file (ADR-009)
 
@@ -405,7 +405,7 @@ All maps from DB or proto → Elixir must use **string keys**. When building sta
 ```elixir
 timeline_events = events |> Enum.reverse() |> Enum.map(&event_map_to_proto/1)
 ```
-The `event_map_to_proto/1` helper already exists in `Nebu.EventDispatcher.Server` — reuse it.
+The `event_map_to_proto/1` helper already exists in `Nebu.EventDispatcher.Server` - reuse it.
 
 ### `event_map_to_proto/1` Reuse
 
@@ -427,7 +427,7 @@ Reuse for timeline events. Do NOT duplicate.
 
 ### Session PgStore Injection in EventDispatcher
 
-The Session Manager is a separate OTP app. To call `Nebu.Session.PgStore` from `Nebu.EventDispatcher.Server`, the `:event_dispatcher` app must have `:session_manager` as a dependency. Check `core/apps/event_dispatcher/mix.exs` — if `:session_manager` is not already a dep, add it. (It likely already is since Story 4-8 and earlier stories wired the apps together via umbrella `deps`.)
+The Session Manager is a separate OTP app. To call `Nebu.Session.PgStore` from `Nebu.EventDispatcher.Server`, the `:event_dispatcher` app must have `:session_manager` as a dependency. Check `core/apps/event_dispatcher/mix.exs` - if `:session_manager` is not already a dep, add it. (It likely already is since Story 4-8 and earlier stories wired the apps together via umbrella `deps`.)
 
 Injection pattern for tests (follow the established pattern from all EventDispatcher tests):
 ```elixir
@@ -438,7 +438,7 @@ Application.put_env(:event_dispatcher, :pg_store_module, FakePgStore)
 
 ### go test Pattern for Sync Handler
 
-Follow the exact pattern of `rooms_test.go` — use `httptest.NewRecorder()` + `httptest.NewRequest()`, inject a `mockCoreClient` struct that implements `GetSyncCoreClient`. Decode the response body into the `syncResponse` struct (exported in tests via unexported struct access or local redeclaration).
+Follow the exact pattern of `rooms_test.go` - use `httptest.NewRecorder()` + `httptest.NewRequest()`, inject a `mockCoreClient` struct that implements `GetSyncCoreClient`. Decode the response body into the `syncResponse` struct (exported in tests via unexported struct access or local redeclaration).
 
 Example mock interface:
 ```go
@@ -456,11 +456,11 @@ func (m *mockSyncCoreClient) GetInitialSync(_ context.Context, _ *pb.GetInitialS
 
 `SyncRoomStateEvent.content` is `bytes` in proto → arrives in Go as `[]byte`. Use `json.RawMessage(stateEvt.Content)` to embed it directly in the JSON response without double-encoding.
 
-Same for `SyncRoom.timeline_events` — the `Event.content` field is `bytes`, use `json.RawMessage(evt.Content)`.
+Same for `SyncRoom.timeline_events` - the `Event.content` field is `bytes`, use `json.RawMessage(evt.Content)`.
 
 ### No Crash/Restart Test Required for This Story
 
-This story introduces no new GenServer state. The `get_initial_sync` handler reads from DB + in-memory GenServer state but does not mutate persistent state (only `persist_since_token` writes, which is tested via FakePgStore). No crash/restart test needed per CLAUDE.md (Stateless: no restart test needed — Option C).
+This story introduces no new GenServer state. The `get_initial_sync` handler reads from DB + in-memory GenServer state but does not mutate persistent state (only `persist_since_token` writes, which is tested via FakePgStore). No crash/restart test needed per CLAUDE.md (Stateless: no restart test needed - Option C).
 
 ### Proto Field Numbers
 
@@ -468,7 +468,7 @@ When adding new messages to `core.proto`, use field numbers starting from 1. Sin
 
 ### 5-Second Timeout Context
 
-The Go handler must wrap `r.Context()` with a 5-second deadline via `context.WithTimeout`. Use the standard library `context` package — no external dependencies needed.
+The Go handler must wrap `r.Context()` with a 5-second deadline via `context.WithTimeout`. Use the standard library `context` package - no external dependencies needed.
 
 ```go
 ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
@@ -488,28 +488,28 @@ This regenerates `gateway/internal/grpc/pb/` (Go stubs) and `core/apps/event_dis
 ### Story 4-15 Handoff
 
 This story handles `since` absent → initial sync only. When `since` is present in Story 4-15, the handler will delegate to a `GetSyncDelta` gRPC call. For clean handoff:
-- The Go handler should check `r.URL.Query().Get("since")` — if present, return a `501 Not Implemented` stub in this story (Story 4-15 will implement it). This avoids breaking Story 4-15 implementation.
+- The Go handler should check `r.URL.Query().Get("since")` - if present, return a `501 Not Implemented` stub in this story (Story 4-15 will implement it). This avoids breaking Story 4-15 implementation.
 - The `next_batch` from this story becomes the `since` token for Story 4-15. Format must be stable.
 
 ### FakeDB for Room Tests
 
 The `FakeDB` in `core/apps/room_manager/test/nebu_room_test.exs` needs the new `get_rooms_for_user/1` function. Since the EventDispatcher test is separate, it will need its own fake/stub for the DB module. Follow the established pattern of using Application.put_env to inject the fake.
 
-### `writeMatrixError` is Defined in `gateway/internal/matrix/` — Shared Across All Handler Files
+### `writeMatrixError` is Defined in `gateway/internal/matrix/` - Shared Across All Handler Files
 
-The `writeMatrixError` helper is defined in one of the matrix handler files (likely `rooms.go` or a shared helper). Import by being in the same `matrix` package — no additional imports needed.
+The `writeMatrixError` helper is defined in one of the matrix handler files (likely `rooms.go` or a shared helper). Import by being in the same `matrix` package - no additional imports needed.
 
 ---
 
 ## Dependencies
 
-- Story 4-5 (done): `Nebu.Session.EtsStore` — not directly used here but EtsStore is part of the session app
-- Story 4-6 (done): `Nebu.Session.PgStore.persist_since_token/3` — directly called; `sync_tokens` table exists (migration `000011`)
-- Story 4-2 (done): `Nebu.Room.Server.get_state/1` — returns `%{room_id, members, power_levels, created_at}`
-- Story 4-4 (done): `Nebu.Room.DB.fetch_events/4` — used for timeline events; already implemented
-- Story 4-8 (done): `GetRoomState` pattern in EventDispatcher — follow same code patterns
+- Story 4-5 (done): `Nebu.Session.EtsStore` - not directly used here but EtsStore is part of the session app
+- Story 4-6 (done): `Nebu.Session.PgStore.persist_since_token/3` - directly called; `sync_tokens` table exists (migration `000011`)
+- Story 4-2 (done): `Nebu.Room.Server.get_state/1` - returns `%{room_id, members, power_levels, created_at}`
+- Story 4-4 (done): `Nebu.Room.DB.fetch_events/4` - used for timeline events; already implemented
+- Story 4-8 (done): `GetRoomState` pattern in EventDispatcher - follow same code patterns
 - Story 4-13 (review): `power_levels` in Room.Server state; `Jason.encode!(state.power_levels)` works correctly
-- Story 4-15 (backlog): incremental sync — depends on the `next_batch` token format established here
+- Story 4-15 (backlog): incremental sync - depends on the `next_batch` token format established here
 
 ---
 
@@ -522,7 +522,7 @@ Story 4-14 implemented in 5 parts following the ATDD-first story spec:
 **A) Proto additions (`proto/core.proto`)**
 - Added `rpc GetInitialSync(GetInitialSyncRequest) returns (GetInitialSyncResponse)` to `CoreService`
 - Added `GetInitialSyncRequest{user_id}`, `GetInitialSyncResponse{since_token, rooms}`, `SyncRoom{room_id, state_events, timeline_events, limited, prev_batch}`, `SyncRoomStateEvent{type, state_key, content, sender}` messages
-- Ran `make proto` — regenerated `gateway/internal/grpc/pb/` and `core/apps/event_dispatcher/lib/pb/`
+- Ran `make proto` - regenerated `gateway/internal/grpc/pb/` and `core/apps/event_dispatcher/lib/pb/`
 
 **B) `Nebu.Room.DB.get_rooms_for_user/1`**
 - Added to `core/apps/room_manager/lib/nebu/room/db.ex`
@@ -563,25 +563,25 @@ Story 4-14 implemented in 5 parts following the ATDD-first story spec:
 
 ### File List
 
-- `proto/core.proto` — added GetInitialSync RPC + 4 new message types
-- `gateway/internal/grpc/pb/core.pb.go` — regenerated
-- `gateway/internal/grpc/pb/core_grpc.pb.go` — regenerated
-- `core/apps/event_dispatcher/lib/pb/core.pb.ex` — regenerated
-- `core/apps/event_dispatcher/lib/pb/core_grpc.pb.ex` — regenerated
-- `core/apps/room_manager/lib/nebu/room/db.ex` — added `get_rooms_for_user/1`
-- `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` — added `get_initial_sync/2`, `rooms_db_module/0`, `pg_store_module/0`, `build_state_events/1`
-- `gateway/internal/matrix/sync.go` — NEW: GetSyncHandler, response structs
-- `gateway/internal/grpc/client.go` — added `GetInitialSync`
-- `gateway/cmd/gateway/main.go` — registered sync route
-- `gateway/internal/grpc/client_test.go` — added GetInitialSync test case
-- `gateway/internal/grpc/stream_test.go` — added GetInitialSync stub to mockCoreClient
+- `proto/core.proto` - added GetInitialSync RPC + 4 new message types
+- `gateway/internal/grpc/pb/core.pb.go` - regenerated
+- `gateway/internal/grpc/pb/core_grpc.pb.go` - regenerated
+- `core/apps/event_dispatcher/lib/pb/core.pb.ex` - regenerated
+- `core/apps/event_dispatcher/lib/pb/core_grpc.pb.ex` - regenerated
+- `core/apps/room_manager/lib/nebu/room/db.ex` - added `get_rooms_for_user/1`
+- `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` - added `get_initial_sync/2`, `rooms_db_module/0`, `pg_store_module/0`, `build_state_events/1`
+- `gateway/internal/matrix/sync.go` - NEW: GetSyncHandler, response structs
+- `gateway/internal/grpc/client.go` - added `GetInitialSync`
+- `gateway/cmd/gateway/main.go` - registered sync route
+- `gateway/internal/grpc/client_test.go` - added GetInitialSync test case
+- `gateway/internal/grpc/stream_test.go` - added GetInitialSync stub to mockCoreClient
 
 ### Change Log
 
-- 2026-04-03: Story 4-14 implemented — GET /sync initial sync. Proto extended with GetInitialSync RPC. Elixir handler added with injectable fakes. Go handler with 501 stub for ?since. All acceptance tests pass.
+- 2026-04-03: Story 4-14 implemented - GET /sync initial sync. Proto extended with GetInitialSync RPC. Elixir handler added with injectable fakes. Go handler with 501 stub for ?since. All acceptance tests pass.
 
 ---
 
 ## Story Completion Status
 
-Ultimate context engine analysis completed — comprehensive developer guide created.
+Ultimate context engine analysis completed - comprehensive developer guide created.

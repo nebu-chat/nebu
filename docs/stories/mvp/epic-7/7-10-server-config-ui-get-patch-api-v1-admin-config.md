@@ -15,11 +15,11 @@ so that I can manage server-wide settings directly from the Admin UI without tou
 
 ## Acceptance Criteria
 
-1. **`GET /admin/config` page renders** — `gateway/internal/admin/config.go`: A `ConfigHandler` (struct with template dependency) serves `GET /admin/config`. It renders `config.html` with `ConfigPageData` populated from `stubConfig`. The response is HTTP 200 and the body contains `<main>`, `<h1>Server Configuration</h1>`, and the current `InstanceName` value ("Nebu Dev").
+1. **`GET /admin/config` page renders** - `gateway/internal/admin/config.go`: A `ConfigHandler` (struct with template dependency) serves `GET /admin/config`. It renders `config.html` with `ConfigPageData` populated from `stubConfig`. The response is HTTP 200 and the body contains `<main>`, `<h1>Server Configuration</h1>`, and the current `InstanceName` value ("Nebu Dev").
 
-2. **Flash message renders** — `GET /admin/config?flash=Configuration+saved` populates `ConfigPageData.Flash` with `AlertBannerData{Severity: "success", Message: "Configuration saved", Dismissible: true}` and the page body contains "Configuration saved".
+2. **Flash message renders** - `GET /admin/config?flash=Configuration+saved` populates `ConfigPageData.Flash` with `AlertBannerData{Severity: "success", Message: "Configuration saved", Dismissible: true}` and the page body contains "Configuration saved".
 
-3. **`StubConfig` struct and `stubConfig` var added to `stubs.go`** — A new `StubConfig` struct and a package-level `stubConfig` variable are defined in `gateway/internal/admin/stubs.go`:
+3. **`StubConfig` struct and `stubConfig` var added to `stubs.go`** - A new `StubConfig` struct and a package-level `stubConfig` variable are defined in `gateway/internal/admin/stubs.go`:
    ```go
    type StubConfig struct {
        InstanceName        string
@@ -35,7 +35,7 @@ so that I can manage server-wide settings directly from the Admin UI without tou
    }
    ```
 
-4. **`ConfigPageData` added to `page_data.go`** — A new `ConfigPageData` struct is defined:
+4. **`ConfigPageData` added to `page_data.go`** - A new `ConfigPageData` struct is defined:
    ```go
    type ConfigPageData struct {
        PageData
@@ -44,7 +44,7 @@ so that I can manage server-wide settings directly from the Admin UI without tou
    }
    ```
 
-5. **`config.html` template** — `gateway/internal/admin/templates/config.html` renders a settings page with:
+5. **`config.html` template** - `gateway/internal/admin/templates/config.html` renders a settings page with:
    - A `<main>` landmark element (for WCAG)
    - `<h1>Server Configuration</h1>`
    - `{{ if .Flash.Message }}{{ template "alert_banner" .Flash }}{{ end }}`
@@ -56,72 +56,72 @@ so that I can manage server-wide settings directly from the Admin UI without tou
      - Hidden CSRF input: `<input type="hidden" name="_csrf" value="{{ .CSRFToken }}">`
      - Submit button: `<button type="submit" class="btn btn-primary">Save</button>`
 
-6. **`POST /admin/config` handler** — `gateway/internal/admin/config.go`: A `UpdateConfigHandler` method on `ConfigHandler`:
+6. **`POST /admin/config` handler** - `gateway/internal/admin/config.go`: A `UpdateConfigHandler` method on `ConfigHandler`:
    - Parses the form body (`r.ParseForm()`)
    - Validates: `instance_name` non-empty after `strings.TrimSpace`; `max_rooms_per_user` between 1 and 100 (inclusive); `retention_days` between 1 and 3650 (inclusive). Returns HTTP 400 on any validation failure.
    - On validation pass: updates `stubConfig` in-memory (`stubConfig.InstanceName`, `stubConfig.AllowRegistration`, `stubConfig.MaxRoomsPerUser`, `stubConfig.RetentionDays`). `AllowRegistration` is true when `r.FormValue("allow_registration") == "on"`.
    - PRG redirect: HTTP 302 to `/admin/config?flash=Configuration+saved`.
    - Add `// TODO(epic-6): replace stub mutation with Admin API call (PATCH /api/v1/admin/config)` comment.
 
-7. **Routing** — `gateway/cmd/gateway/main.go`:
+7. **Routing** - `gateway/cmd/gateway/main.go`:
    - `GET /admin/config`: `csrf(sessionGuard(http.HandlerFunc(configHandler.Handler)))` (same csrf+sessionGuard pattern as users/rooms GET routes)
-   - `POST /admin/config`: `sessionGuard(http.HandlerFunc(configHandler.UpdateConfigHandler))` (no csrf() wrapper on POST — same pattern as POST user/room mutation routes; see TODO comment in handler)
+   - `POST /admin/config`: `sessionGuard(http.HandlerFunc(configHandler.UpdateConfigHandler))` (no csrf() wrapper on POST - same pattern as POST user/room mutation routes; see TODO comment in handler)
    - Both use a `configHandler` variable of type `*admin.ConfigHandler`, initialised analogously to `usersHandler` and `roomsHandler`.
 
-8. **Go unit tests** — `gateway/internal/admin/config_test.go` (`package admin`):
-   - `TestConfigPageRenders` — `GET /admin/config` → HTTP 200, body contains `<h1`, body contains `<main`, body contains "Nebu Dev"
-   - `TestConfigPageFlashMessage` — `GET /admin/config?flash=Configuration+saved` → HTTP 200, body contains "Configuration saved"
-   - `TestUpdateConfig` — `POST /admin/config` with valid form → HTTP 302, `Location` header contains `/admin/config` and `flash=`
-   - `TestUpdateConfigEmptyName` — `POST /admin/config` with `instance_name=` → HTTP 400
-   - `TestUpdateConfigInvalidMaxRooms` — `POST /admin/config` with `max_rooms_per_user=0` → HTTP 400
+8. **Go unit tests** - `gateway/internal/admin/config_test.go` (`package admin`):
+   - `TestConfigPageRenders` - `GET /admin/config` → HTTP 200, body contains `<h1`, body contains `<main`, body contains "Nebu Dev"
+   - `TestConfigPageFlashMessage` - `GET /admin/config?flash=Configuration+saved` → HTTP 200, body contains "Configuration saved"
+   - `TestUpdateConfig` - `POST /admin/config` with valid form → HTTP 302, `Location` header contains `/admin/config` and `flash=`
+   - `TestUpdateConfigEmptyName` - `POST /admin/config` with `instance_name=` → HTTP 400
+   - `TestUpdateConfigInvalidMaxRooms` - `POST /admin/config` with `max_rooms_per_user=0` → HTTP 400
 
-9. **Playwright E2E tests** — `e2e/tests/features/admin/config.spec.ts` — **REAL tests (not `test.skip`)**:
-   - `config page renders with current settings` — navigate to `/admin/config`, expect `<h1>` containing "Server Configuration", expect input with name `instance_name` to have value "Nebu Dev"
-   - `save configuration shows flash message` — navigate to `/admin/config`, fill `instance_name` with "Test Instance", click Save → `div[role="alert"]` containing "Configuration saved" is visible
+9. **Playwright E2E tests** - `e2e/tests/features/admin/config.spec.ts` - **REAL tests (not `test.skip`)**:
+   - `config page renders with current settings` - navigate to `/admin/config`, expect `<h1>` containing "Server Configuration", expect input with name `instance_name` to have value "Nebu Dev"
+   - `save configuration shows flash message` - navigate to `/admin/config`, fill `instance_name` with "Test Instance", click Save → `div[role="alert"]` containing "Configuration saved" is visible
 
 ## Acceptance Tests
 
 ### Tests written FIRST (before implementation code):
 
-1. **TestConfigPageRenders — GET /admin/config returns 200 with landmark and heading** — Go `net/http/httptest` (`gateway/internal/admin/config_test.go`)
+1. **TestConfigPageRenders - GET /admin/config returns 200 with landmark and heading** - Go `net/http/httptest` (`gateway/internal/admin/config_test.go`)
    - Given: `ConfigHandler` wired to a test HTTP mux; `stubConfig.InstanceName` is "Nebu Dev"
    - When: `GET /admin/config`
    - Then: HTTP 200, body contains `<h1`, body contains `<main`, body contains "Nebu Dev"
 
-2. **TestConfigPageFlashMessage — flash query param renders AlertBanner** — Go `net/http/httptest`
+2. **TestConfigPageFlashMessage - flash query param renders AlertBanner** - Go `net/http/httptest`
    - Given: `ConfigHandler` wired to a test HTTP mux
    - When: `GET /admin/config?flash=Configuration+saved`
    - Then: HTTP 200, body contains "Configuration saved"
 
-3. **TestUpdateConfig — valid POST redirects with flash** — Go `net/http/httptest`
+3. **TestUpdateConfig - valid POST redirects with flash** - Go `net/http/httptest`
    - Given: `ConfigHandler.UpdateConfigHandler` wired; valid form values
    - When: `POST /admin/config` with `instance_name=My+Server&allow_registration=on&max_rooms_per_user=20&retention_days=365`
    - Then: HTTP 302, `Location` header contains `/admin/config` and `flash=`
    - Cleanup: `t.Cleanup` restores `stubConfig` to original values
 
-4. **TestUpdateConfigEmptyName — empty instance_name returns 400** — Go `net/http/httptest`
+4. **TestUpdateConfigEmptyName - empty instance_name returns 400** - Go `net/http/httptest`
    - Given: `ConfigHandler.UpdateConfigHandler` wired
    - When: `POST /admin/config` with `instance_name=` (empty)
    - Then: HTTP 400
 
-5. **TestUpdateConfigInvalidMaxRooms — max_rooms_per_user=0 returns 400** — Go `net/http/httptest`
+5. **TestUpdateConfigInvalidMaxRooms - max_rooms_per_user=0 returns 400** - Go `net/http/httptest`
    - Given: `ConfigHandler.UpdateConfigHandler` wired
    - When: `POST /admin/config` with `instance_name=Test&max_rooms_per_user=0&retention_days=90`
    - Then: HTTP 400
 
-6. **Playwright: config page renders with current settings** — Playwright (`e2e/tests/features/admin/config.spec.ts`)
+6. **Playwright: config page renders with current settings** - Playwright (`e2e/tests/features/admin/config.spec.ts`)
    - Given: full dev stack running, admin logged in
    - When: navigate to `/admin/config`
    - Then: `h1` contains "Server Configuration"; `input[name="instance_name"]` has value "Nebu Dev"
 
-7. **Playwright: save configuration shows flash message** — Playwright
+7. **Playwright: save configuration shows flash message** - Playwright
    - Given: full dev stack running, admin logged in, at `/admin/config`
    - When: clear and fill `input[name="instance_name"]` with "Test Instance", click `button[type="submit"]`
    - Then: `div[role="alert"]` containing "Configuration saved" is visible
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Write failing Go unit tests FIRST — AC: 8
+- [ ] Task 1: Write failing Go unit tests FIRST - AC: 8
   - [ ] 1.1 Create `gateway/internal/admin/config_test.go` in `package admin`
   - [ ] 1.2 Write `TestConfigPageRenders`:
     - Setup: `NewTemplateHandler()` + `NewConfigHandler(tmpl)`; `http.NewServeMux()` wired with `GET /admin/config` → `ConfigHandler.Handler`
@@ -140,12 +140,12 @@ so that I can manage server-wide settings directly from the Admin UI without tou
   - [ ] 1.6 Write `TestUpdateConfigInvalidMaxRooms`:
     - Request: `POST /admin/config` with `instance_name=Test&max_rooms_per_user=0&retention_days=90`
     - Assert: `w.Code == 400`
-  - [ ] 1.7 Confirm RED: `go test ./internal/admin/...` fails — `ConfigHandler`, `NewConfigHandler`, `ConfigPageData`, `StubConfig`, `stubConfig` do not exist yet
+  - [ ] 1.7 Confirm RED: `go test ./internal/admin/...` fails - `ConfigHandler`, `NewConfigHandler`, `ConfigPageData`, `StubConfig`, `stubConfig` do not exist yet
 
-- [ ] Task 2: Write Playwright E2E tests FIRST — AC: 9
+- [ ] Task 2: Write Playwright E2E tests FIRST - AC: 9
   - [ ] 2.1 Create `e2e/tests/features/admin/config.spec.ts`
   - [ ] 2.2 Copy `loginAsAdmin` helper from `rooms-page.spec.ts` (identical OIDC Authorization Code + PKCE pattern)
-  - [ ] 2.3 Write `test('config page renders with current settings')` — NOT `test.skip`:
+  - [ ] 2.3 Write `test('config page renders with current settings')` - NOT `test.skip`:
     - `loginAsAdmin(page)`, `await page.goto('/admin/config')`
     - `await expect(page.locator('h1')).toContainText('Server Configuration')`
     - `await expect(page.locator('input[name="instance_name"]')).toHaveValue('Nebu Dev')`
@@ -154,9 +154,9 @@ so that I can manage server-wide settings directly from the Admin UI without tou
     - `await page.locator('input[name="instance_name"]').fill('Test Instance')`
     - `await page.locator('button[type="submit"]').click()`
     - `await expect(page.locator('div[role="alert"]')).toContainText('Configuration saved')`
-  - [ ] 2.5 Confirm RED: Playwright tests fail — `/admin/config` route does not exist yet (404)
+  - [ ] 2.5 Confirm RED: Playwright tests fail - `/admin/config` route does not exist yet (404)
 
-- [ ] Task 3: Add `StubConfig` and `stubConfig` to `stubs.go` — AC: 3
+- [ ] Task 3: Add `StubConfig` and `stubConfig` to `stubs.go` - AC: 3
   - [ ] 3.1 In `gateway/internal/admin/stubs.go`, append after the existing `findStubRoom` function:
     ```go
     // StubConfig holds server-wide configuration settings for the Config page (Story 7.10).
@@ -169,7 +169,7 @@ so that I can manage server-wide settings directly from the Admin UI without tou
     }
 
     // stubConfig is the in-memory server config, mutated by UpdateConfigHandler (Story 7.10).
-    // Changes are lost on gateway restart — acceptable for stub phase.
+    // Changes are lost on gateway restart - acceptable for stub phase.
     var stubConfig = StubConfig{
         InstanceName:      "Nebu Dev",
         AllowRegistration: true,
@@ -178,7 +178,7 @@ so that I can manage server-wide settings directly from the Admin UI without tou
     }
     ```
 
-- [ ] Task 4: Add `ConfigPageData` to `page_data.go` — AC: 4
+- [ ] Task 4: Add `ConfigPageData` to `page_data.go` - AC: 4
   - [ ] 4.1 In `gateway/internal/admin/page_data.go`, append after the `RoomsPageData` block:
     ```go
     // ConfigPageData holds data for the Server Configuration page (Story 7.10).
@@ -192,7 +192,7 @@ so that I can manage server-wide settings directly from the Admin UI without tou
     }
     ```
 
-- [ ] Task 5: Create `config.go` handler — AC: 1, 2, 6
+- [ ] Task 5: Create `config.go` handler - AC: 1, 2, 6
   - [ ] 5.1 Create `gateway/internal/admin/config.go` in `package admin`:
     ```go
     package admin
@@ -265,11 +265,11 @@ so that I can manage server-wide settings directly from the Admin UI without tou
     }
     ```
 
-- [ ] Task 6: Create `config.html` template — AC: 5
+- [ ] Task 6: Create `config.html` template - AC: 5
   - [ ] 6.1 Create `gateway/internal/admin/templates/config.html`:
     ```html
     {{ template "base" . }}
-    {{ define "title" }}Server Configuration — Nebu Admin{{ end }}
+    {{ define "title" }}Server Configuration - Nebu Admin{{ end }}
     {{ define "content" }}
     <main>
       <div class="max-w-2xl mx-auto">
@@ -332,7 +332,7 @@ so that I can manage server-wide settings directly from the Admin UI without tou
     {{ end }}
     ```
 
-- [ ] Task 7: Add routes in `main.go` — AC: 7
+- [ ] Task 7: Add routes in `main.go` - AC: 7
   - [ ] 7.1 Initialise `configHandler` alongside `usersHandler` and `roomsHandler`:
     ```go
     configHandler := admin.NewConfigHandler(tmpl)
@@ -341,14 +341,14 @@ so that I can manage server-wide settings directly from the Admin UI without tou
     ```go
     // Story 7.10: Server Configuration page.
     mux.Handle("GET /admin/config", csrf(sessionGuard(http.HandlerFunc(configHandler.Handler))))
-    // POST /admin/config — no csrf() wrapper (stub phase; see TODO in handler); sessionGuard still applies.
+    // POST /admin/config - no csrf() wrapper (stub phase; see TODO in handler); sessionGuard still applies.
     mux.Handle("POST /admin/config", sessionGuard(http.HandlerFunc(configHandler.UpdateConfigHandler)))
     ```
 
-- [ ] Task 8: Verify no regressions — AC: all
-  - [ ] 8.1 Run `make test-unit-go` — all existing tests pass; 5 new config tests pass
+- [ ] Task 8: Verify no regressions - AC: all
+  - [ ] 8.1 Run `make test-unit-go` - all existing tests pass; 5 new config tests pass
   - [ ] 8.2 Verify `make build-gateway` exits 0
-  - [ ] 8.3 Run Playwright: `npx playwright test config.spec.ts` — both tests green against running dev stack
+  - [ ] 8.3 Run Playwright: `npx playwright test config.spec.ts` - both tests green against running dev stack
 
 ## Dev Notes
 
@@ -381,7 +381,7 @@ HTML form checkboxes send `"on"` when checked and omit the field entirely when u
 
 ### Nav Active State
 
-The `PageData.ActiveNav` value `"config"` must correspond to a nav link in `base.html` (or `sidebar.html`). Check whether a "Config" nav item exists; if not, add one alongside the existing "Users" and "Rooms" items. The WCAG story (7.13) will scan this page — ensure the nav item has `aria-current="page"` when active.
+The `PageData.ActiveNav` value `"config"` must correspond to a nav link in `base.html` (or `sidebar.html`). Check whether a "Config" nav item exists; if not, add one alongside the existing "Users" and "Rooms" items. The WCAG story (7.13) will scan this page - ensure the nav item has `aria-current="page"` when active.
 
 ### Template `<main>` Landmark
 
@@ -389,23 +389,23 @@ The `<main>` landmark in `config.html` is required for WCAG 2.1 SC 1.3.6 (identi
 
 ### CSRFTokenFromContext
 
-`ConfigHandler.Handler` calls `CSRFTokenFromContext(r.Context())` — the same function used by `DashboardHandler`, `UsersHandler`, and `RoomsHandler`. No additional import needed; it is defined in `middleware.go`.
+`ConfigHandler.Handler` calls `CSRFTokenFromContext(r.Context())` - the same function used by `DashboardHandler`, `UsersHandler`, and `RoomsHandler`. No additional import needed; it is defined in `middleware.go`.
 
 ### Playwright `loginAsAdmin` Helper
 
-Copy the `loginAsAdmin` helper from `rooms-page.spec.ts` or `users-page.spec.ts` verbatim. This uses Authorization Code + PKCE via Dex — no ROPC shortcuts (per project OIDC standard).
+Copy the `loginAsAdmin` helper from `rooms-page.spec.ts` or `users-page.spec.ts` verbatim. This uses Authorization Code + PKCE via Dex - no ROPC shortcuts (per project OIDC standard).
 
 ### File Locations
 
 | File | Action |
 |---|---|
-| `gateway/internal/admin/stubs.go` | Modify — append `StubConfig` struct and `stubConfig` var |
-| `gateway/internal/admin/page_data.go` | Modify — append `ConfigPageData` struct |
-| `gateway/internal/admin/config.go` | NEW — `ConfigHandler`, `NewConfigHandler`, `Handler`, `UpdateConfigHandler` |
-| `gateway/internal/admin/templates/config.html` | NEW — settings form template |
-| `gateway/internal/admin/config_test.go` | NEW — 5 Go unit tests |
-| `gateway/cmd/gateway/main.go` | Modify — initialise `configHandler`, add `GET` and `POST` routes |
-| `e2e/tests/features/admin/config.spec.ts` | NEW — 2 Playwright E2E tests (REAL, no skip) |
+| `gateway/internal/admin/stubs.go` | Modify - append `StubConfig` struct and `stubConfig` var |
+| `gateway/internal/admin/page_data.go` | Modify - append `ConfigPageData` struct |
+| `gateway/internal/admin/config.go` | NEW - `ConfigHandler`, `NewConfigHandler`, `Handler`, `UpdateConfigHandler` |
+| `gateway/internal/admin/templates/config.html` | NEW - settings form template |
+| `gateway/internal/admin/config_test.go` | NEW - 5 Go unit tests |
+| `gateway/cmd/gateway/main.go` | Modify - initialise `configHandler`, add `GET` and `POST` routes |
+| `e2e/tests/features/admin/config.spec.ts` | NEW - 2 Playwright E2E tests (REAL, no skip) |
 
 ### Upcoming Stories That Depend on This Story
 
@@ -414,4 +414,4 @@ Copy the `loginAsAdmin` helper from `rooms-page.spec.ts` or `users-page.spec.ts`
 
 ## Status Notes
 
-Created: 2026-04-29. Stories 7.1 through 7.9 are done. This is a standalone single-panel settings page — no master-detail layout. The page uses the same PRG + flash pattern established in Stories 7.6 (User Detail Panel) and 7.9 (Room Detail Panel). For MVP, all data is in-memory via `stubConfig`; Epic 6 will wire in the real `PATCH /api/v1/admin/config` endpoint. ATDD required: write failing tests in `config_test.go` and `config.spec.ts` before writing any implementation code.
+Created: 2026-04-29. Stories 7.1 through 7.9 are done. This is a standalone single-panel settings page - no master-detail layout. The page uses the same PRG + flash pattern established in Stories 7.6 (User Detail Panel) and 7.9 (Room Detail Panel). For MVP, all data is in-memory via `stubConfig`; Epic 6 will wire in the real `PATCH /api/v1/admin/config` endpoint. ATDD required: write failing tests in `config_test.go` and `config.spec.ts` before writing any implementation code.

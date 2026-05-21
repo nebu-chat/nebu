@@ -1,7 +1,7 @@
-# Story 4.23: Load Test — Silber-Tier ≥500 Concurrent (k6 Setup + Run)
+# Story 4.23: Load Test - Silber-Tier ≥500 Concurrent (k6 Setup + Run)
 
 **Status:** review
-**Epic:** 4 — End-Users Can Chat in Rooms Using Any Standard Matrix Client
+**Epic:** 4 - End-Users Can Chat in Rooms Using Any Standard Matrix Client
 **Story Key:** 4-23-load-test-silber-tier-500-concurrent-k6-setup-run
 **Created:** 2026-04-03
 
@@ -44,9 +44,9 @@ so that performance regressions are caught before they reach production.
 
 4. After a successful run at 500 VUs against the live stack, all thresholds pass green and k6 exits with code `0`.
 
-5. The load test ONLY uses standard Matrix Client-Server API endpoints (`/_matrix/client/v3/...`) and Dex OIDC endpoints — no Nebu-internal APIs.
+5. The load test ONLY uses standard Matrix Client-Server API endpoints (`/_matrix/client/v3/...`) and Dex OIDC endpoints - no Nebu-internal APIs.
 
-6. k6 script is pure JavaScript compatible with the k6 Goja JS runtime — no Node.js APIs, no `npm` modules, no ESM `import` syntax (use `import` only for built-in k6 modules via `k6/http`, `k6`, etc.).
+6. k6 script is pure JavaScript compatible with the k6 Goja JS runtime - no Node.js APIs, no `npm` modules, no ESM `import` syntax (use `import` only for built-in k6 modules via `k6/http`, `k6`, etc.).
 
 ---
 
@@ -54,7 +54,7 @@ so that performance regressions are caught before they reach production.
 
 ### Tests written FIRST (before implementation code):
 
-**1. Happy path: 500 VUs ramp-up, hold, ramp-down — all thresholds green**
+**1. Happy path: 500 VUs ramp-up, hold, ramp-down - all thresholds green**
 - Given: The dev stack is running (`docker compose up -d --wait`)
 - When: `make test-load-silber` is executed
 - Then: k6 ramps up to 500 VUs over 120s, holds 300s, ramps down 60s
@@ -69,7 +69,7 @@ so that performance regressions are caught before they reach production.
 - Then: k6 exits with non-zero code (exit 99 by default for threshold failures)
 - Then: The summary output shows `✗` for the violated threshold
 
-**3. `make test-load-silber` target exists and is wired correctly — manual verification**
+**3. `make test-load-silber` target exists and is wired correctly - manual verification**
 - Given: The Makefile is reviewed
 - When: `make -n test-load-silber` is run (dry-run)
 - Then: Output shows `docker compose up -d --wait` followed by `docker run ... grafana/k6:0.50.0 run ...`
@@ -113,12 +113,12 @@ so that performance regressions are caught before they reach production.
 
 ## Dev Notes
 
-### Critical: k6 JavaScript Runtime — NOT Node.js
+### Critical: k6 JavaScript Runtime - NOT Node.js
 
-k6 uses the **Goja JS runtime** — a Go-based ES2015+ interpreter. This means:
+k6 uses the **Goja JS runtime** - a Go-based ES2015+ interpreter. This means:
 - **No Node.js built-ins**: no `require()`, no `fs`, no `http`/`https` node modules, no `process.env`
 - **No npm modules**: cannot `import` from `node_modules`; only k6 built-in modules are available
-- **No ESM `import` for your own code**: `export default function` and `export const options` are k6 conventions, but you cannot `import './mymodule.js'` — all code must be in a single file
+- **No ESM `import` for your own code**: `export default function` and `export const options` are k6 conventions, but you cannot `import './mymodule.js'` - all code must be in a single file
 - **Use `__ENV`** (not `process.env`) to read environment variables
 - **Use `k6/http`** (not `fetch` or node `http`) for HTTP requests
 - **Use `sleep` from `k6`** (not `setTimeout`)
@@ -129,7 +129,7 @@ k6 uses the **Goja JS runtime** — a Go-based ES2015+ interpreter. This means:
 import http from 'k6/http';
 import { sleep, check } from 'k6';
 
-// WRONG — these do not exist in k6
+// WRONG - these do not exist in k6
 // import fetch from 'node-fetch';
 // const http = require('http');
 // process.env.MY_VAR
@@ -141,7 +141,7 @@ k6's `http` module handles cookies automatically in a `cookieJar`. Use a shared 
 
 **Recommended pattern: single auth in `setup()`, shared token passed to all VUs.**
 
-The `setup()` function runs **once before VU ramp-up** — its return value is passed as the `data` argument to `default(data)`. This avoids 500 concurrent Dex auth flows at test start.
+The `setup()` function runs **once before VU ramp-up** - its return value is passed as the `data` argument to `default(data)`. This avoids 500 concurrent Dex auth flows at test start.
 
 ```javascript
 export function setup() {
@@ -158,13 +158,13 @@ export function setup() {
   // Extract form action from HTML body
   const formAction = authRes.body.match(/action="([^"]+)"/)[1].replace(/&amp;/g, '&');
 
-  // Step 2: POST credentials — capture redirect, extract code
+  // Step 2: POST credentials - capture redirect, extract code
   const loginRes = http.post(
     formAction,
     'login=kai%40example.com&password=changeme',
     {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      redirects: 0,  // do NOT follow redirect — capture Location header
+      redirects: 0,  // do NOT follow redirect - capture Location header
     }
   );
   const location = loginRes.headers['Location'];
@@ -279,14 +279,14 @@ export default function (data) {
 }
 ```
 
-**Note on shared access_token**: All VUs share the same access token from `setup()`. Room creation will succeed for `kai` (instance_admin) but all VUs creating rooms as the same user will create rooms that all belong to `kai`. This is acceptable for a performance test — we are measuring server-side throughput, not per-user isolation. If you see `400 M_FORBIDDEN` on room creation after the first few VUs, it means the server is limiting room creation per user. In that case, fall back to a single shared room created once in `setup()`.
+**Note on shared access_token**: All VUs share the same access token from `setup()`. Room creation will succeed for `kai` (instance_admin) but all VUs creating rooms as the same user will create rooms that all belong to `kai`. This is acceptable for a performance test - we are measuring server-side throughput, not per-user isolation. If you see `400 M_FORBIDDEN` on room creation after the first few VUs, it means the server is limiting room creation per user. In that case, fall back to a single shared room created once in `setup()`.
 
 ### Critical: Makefile Pattern
 
 Follow the pattern already established by `test-matrix-compat` in the Makefile. The new target `test-load-silber` uses `grafana/k6:0.50.0`:
 
 ```makefile
-## test-load-silber: Silber-Tier load test — 500 concurrent VUs via k6 (optional gate — not part of test-integration)
+## test-load-silber: Silber-Tier load test - 500 concurrent VUs via k6 (optional gate - not part of test-integration)
 ## Requires: running stack (docker compose up -d --wait called automatically)
 ## Override: NEBU_LOAD_TARGET_URL=http://my-host:8008 make test-load-silber
 test-load-silber:
@@ -299,10 +299,10 @@ test-load-silber:
 ```
 
 Key points:
-- Mount `tests/load/` (not the entire workspace) to `/scripts` — k6 image expects the script path relative to the container
+- Mount `tests/load/` (not the entire workspace) to `/scripts` - k6 image expects the script path relative to the container
 - Use `$${VAR:-default}` (double `$$` in Makefile for shell escaping)
 - Network: `nebu_default` (the Compose project name is `nebu`, so the network is `nebu_default`)
-- Do NOT add `docker compose down` — same policy as `test-matrix-compat`
+- Do NOT add `docker compose down` - same policy as `test-matrix-compat`
 - Add `test-load-silber` to the `.PHONY` line at the top of the Makefile
 
 ### Critical: Dex Credentials and Redirect URI
@@ -313,7 +313,7 @@ From `dev/dex/config.yaml` and `make setup`:
 |------|-------|----------|--------|
 | kai | kai@example.com | changeme | instance_admin |
 
-Use `kai` — `instance_admin` has full permissions to create rooms and send events.
+Use `kai` - `instance_admin` has full permissions to create rooms and send events.
 
 The `redirect_uri` MUST be:
 ```
@@ -336,7 +336,7 @@ This must match exactly what is registered in `dev/dex/config.yaml` `staticClien
 Dex's login flow involves multiple redirects. The `http.get()` in k6 follows redirects by default (up to 10). For the credential POST step, you must use `redirects: 0` to capture the `Location` header containing the auth `code`. If k6 follows the redirect, you lose access to the `code` parameter.
 
 ```javascript
-// This will redirect back to the Matrix redirect_uri — capture before following
+// This will redirect back to the Matrix redirect_uri - capture before following
 const loginRes = http.post(formAction, credentials, {
   headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
   redirects: 0,  // CRITICAL: do not follow
@@ -376,12 +376,12 @@ Traffic-Mix:
 Referenz-Topologie:
   10 aktive Rooms × 50 Mitglieder = 500 concurrent users
   Infrastruktur: 2× AWS EC2 m5.large
-  Ohne Redis, NATS, Kafka — Elixir/OTP + PostgreSQL only
+  Ohne Redis, NATS, Kafka - Elixir/OTP + PostgreSQL only
 ```
 
 For the MVP load test, a simplified pattern (send + sync per iteration) is acceptable. A full traffic-mix implementation is out of scope for this story.
 
-### k6 `options` Object — Complete Structure
+### k6 `options` Object - Complete Structure
 
 ```javascript
 export const options = {
@@ -409,7 +409,7 @@ export const options = {
 
 | File | Action | Notes |
 |------|--------|-------|
-| `tests/load/k6_chat.js` | CREATE | k6 script — Goja JS, no Node.js |
+| `tests/load/k6_chat.js` | CREATE | k6 script - Goja JS, no Node.js |
 | `tests/load/README.md` | CREATE | Silber-Tier documentation |
 | `Makefile` | UPDATE | Add `test-load-silber` + `.PHONY` entry |
 | `tests/matrix_compat/` | DO NOT MODIFY | Previous story's Node.js smoke test |
@@ -419,13 +419,13 @@ export const options = {
 ### Previous Story Learnings (from Story 4-22)
 
 - The `tests/` directory at project root already exists (created by Story 4-22 for `tests/matrix_compat/`)
-- Create `tests/load/` as a new subdirectory — it does not exist yet
+- Create `tests/load/` as a new subdirectory - it does not exist yet
 - The Docker network is `nebu_default` (Compose `name: nebu` + suffix `_default`)
 - Makefile pattern: `docker compose up -d --wait &&` before the test runner; no `docker compose down` after
-- Do NOT modify `.gitlab-ci.yml` — load tests are optional manual pre-release gates
+- Do NOT modify `.gitlab-ci.yml` - load tests are optional manual pre-release gates
 - Dex redirect_uri must match exactly: `http://localhost:8008/_matrix/client/v3/login/sso/redirect/oidc`
 - Matrix API port is **8008**, not 8080
-- `user_id` returned by `/login` is protobuf-encoded: `@CiQ...:localhost` — always parse from response, never hardcode
+- `user_id` returned by `/login` is protobuf-encoded: `@CiQ...:localhost` - always parse from response, never hardcode
 
 ### What the k6 Run Output Should Show
 
@@ -453,7 +453,7 @@ k6 exits with code `0` when all thresholds pass. Exits with code `99` when any t
 ### How `test-matrix-compat` is structured in Makefile (mirror this):
 
 ```makefile
-## test-matrix-compat: Matrix SDK compatibility smoke test (optional CI gate — not part of test-integration)
+## test-matrix-compat: Matrix SDK compatibility smoke test (optional CI gate - not part of test-integration)
 test-matrix-compat:
 	docker compose up -d --wait && \
 	docker run --rm -v $(PWD):/workspace -w /workspace/tests/matrix_compat \
@@ -508,7 +508,7 @@ Before marking story `review`:
 All three deliverables (`tests/load/k6_chat.js`, `tests/load/README.md`, Makefile target) were produced during the ATDD phase and verified to be complete and correct during this implementation pass. No additional code changes were required.
 
 **Verification performed:**
-- Scanned `k6_chat.js` for all required k6 patterns (options, scenarios, thresholds, setup, default function, named tags, txnId, sleep, check, fail, __ENV) — all present.
+- Scanned `k6_chat.js` for all required k6 patterns (options, scenarios, thresholds, setup, default function, named tags, txnId, sleep, check, fail, __ENV) - all present.
 - Confirmed forbidden Node.js APIs (`process.env`, `require`, `setTimeout`, `Buffer`, `fs`) appear only in JSDoc comment lines (documentation), not in executable code.
 - Confirmed `ramping-vus` executor with correct 3-stage timing: 2m ramp-up to 500 VUs, 5m hold at 500, 1m ramp-down.
 - Confirmed `redirects: 0` on Dex credential POST to capture auth code from Location header.
@@ -527,9 +527,9 @@ Story 4-23 implementation was already complete from the ATDD phase. The dev pass
 
 ## File List
 
-- `tests/load/k6_chat.js` — k6 Silber-Tier load test script (Goja JS, no Node.js)
-- `tests/load/README.md` — Silber-Tier documentation (definition, run instructions, threshold interpretation)
-- `Makefile` — added `test-load-silber` target and `.PHONY` entry
+- `tests/load/k6_chat.js` - k6 Silber-Tier load test script (Goja JS, no Node.js)
+- `tests/load/README.md` - Silber-Tier documentation (definition, run instructions, threshold interpretation)
+- `Makefile` - added `test-load-silber` target and `.PHONY` entry
 
 ---
 

@@ -2,11 +2,11 @@
 
 ## Status
 
-Accepted — 2026-03-18
+Accepted - 2026-03-18
 
 ## Context
 
-Nebu's architecture assigns one Elixir GenServer per Matrix room — the Room GenServer is the
+Nebu's architecture assigns one Elixir GenServer per Matrix room - the Room GenServer is the
 authoritative source for room membership, power levels, event ordering, and presence within a room.
 
 On a single node, a local `Registry` and `DynamicSupervisor` work fine. But for horizontal
@@ -27,7 +27,7 @@ Alternatives:
 We use **`Horde.Registry` and `Horde.DynamicSupervisor`** for all Room GenServers and
 the Presence GenServer from MVP onwards.
 
-Configuration: `members: :auto` with `libcluster` — the Horde cluster auto-discovers nodes
+Configuration: `members: :auto` with `libcluster` - the Horde cluster auto-discovers nodes
 as libcluster connects them. Single-node MVP and multi-node Phase 2 use identical code;
 the difference is only in the libcluster topology configuration.
 
@@ -37,7 +37,7 @@ the difference is only in the libcluster topology configuration.
 - CRDT-based: netsplit-safe; no split-brain for Room processes
 - `members: :auto`: zero code change for Phase 2 clustering
 - Proven in production (many Elixir services use Horde at scale)
-- OTP supervision semantics preserved — GenServer crashes are supervised as usual
+- OTP supervision semantics preserved - GenServer crashes are supervised as usual
 
 **Negative:**
 - CRDT state propagation adds slight latency for cluster membership changes (~100ms order)

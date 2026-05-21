@@ -12,7 +12,7 @@ so that user provisioning and cryptographic key storage have a schema foundation
 
 1. **Given** migration `000004_users.up.sql`, **When** it runs, **Then** `users` table exists with columns: `user_id TEXT PRIMARY KEY`, `display_name_encrypted BYTEA`, `display_name_nonce BYTEA`, `avatar_url_encrypted BYTEA`, `avatar_url_nonce BYTEA`, `system_role TEXT NOT NULL DEFAULT 'user'`, `is_active BOOLEAN NOT NULL DEFAULT true`, `signing_key_id TEXT`, `encryption_key_id TEXT`, `created_at BIGINT NOT NULL`, `last_seen_at BIGINT`
 
-2. **Given** the same migration, **When** it runs, **Then** `user_keys` table exists with columns: `key_id TEXT PRIMARY KEY`, `user_id TEXT NOT NULL REFERENCES users(user_id)`, `key_type TEXT NOT NULL`, `algorithm TEXT NOT NULL`, `public_key BYTEA NOT NULL`, `private_key BYTEA` (nullable — NULL after DSGVO deletion), `created_at BIGINT NOT NULL`, `deleted_at BIGINT`
+2. **Given** the same migration, **When** it runs, **Then** `user_keys` table exists with columns: `key_id TEXT PRIMARY KEY`, `user_id TEXT NOT NULL REFERENCES users(user_id)`, `key_type TEXT NOT NULL`, `algorithm TEXT NOT NULL`, `public_key BYTEA NOT NULL`, `private_key BYTEA` (nullable - NULL after DSGVO deletion), `created_at BIGINT NOT NULL`, `deleted_at BIGINT`
 
 3. **Given** the `system_role` column, **When** a value other than `'user'`, `'instance_admin'`, or `'compliance_officer'` is inserted, **Then** the database rejects it with a CHECK constraint violation
 
@@ -29,7 +29,7 @@ so that user provisioning and cryptographic key storage have a schema foundation
   - [x] ALTER TABLE user_keys ADD CONSTRAINT user_keys_key_type_check CHECK (key_type IN ('signing', 'encryption'))
 
 - [x] Create `gateway/migrations/000004_users.down.sql` (AC: #5)
-  - [x] DROP TABLE IF EXISTS user_keys (must precede users — FK constraint)
+  - [x] DROP TABLE IF EXISTS user_keys (must precede users - FK constraint)
   - [x] DROP TABLE IF EXISTS users
 
 - [x] Update `gateway/migrations/migrations_test.go` (testing standard)
@@ -104,11 +104,11 @@ gateway/migrations/
 
 ### Critical Design Constraints
 
-**No circular FK — `signing_key_id` and `encryption_key_id` are plain TEXT:**
+**No circular FK - `signing_key_id` and `encryption_key_id` are plain TEXT:**
 `users.signing_key_id` and `users.encryption_key_id` intentionally have no `REFERENCES user_keys`. Reason: at user creation time (Story 2.12), the user row is inserted first; keypairs are generated and back-filled in Story 2.13. A circular FK (`users → user_keys → users`) would deadlock the initial INSERT.
 
 **`private_key` nullable by design:**
-DSGVO/GDPR cryptographic deletion (Story 5.7) sets `private_key = NULL` for both signing and encryption keys. Public keys are retained permanently — required for signature verification and audit trail integrity.
+DSGVO/GDPR cryptographic deletion (Story 5.7) sets `private_key = NULL` for both signing and encryption keys. Public keys are retained permanently - required for signature verification and audit trail integrity.
 
 **`system_role` CHECK is exhaustive:**
 Only `'user'`, `'instance_admin'`, `'compliance_officer'` are valid. Adding a new role in the future requires a new migration to ALTER the CHECK constraint.
@@ -125,15 +125,15 @@ golang-migrate tracks versions via the `schema_migrations` table and never re-ru
 ### Migration Naming Pattern
 
 6-digit zero-padded sequence: `000004` is next after `000003_server_config`.
-The pattern `gateway/migrations/migrations.go` uses `//go:embed *.sql` — new files are automatically embedded at compile time, no changes to `migrations.go` required.
+The pattern `gateway/migrations/migrations.go` uses `//go:embed *.sql` - new files are automatically embedded at compile time, no changes to `migrations.go` required.
 
 ### References
 
-- [Source: epics.md#Story-2.1] Authoritative AC — exact column names, types, nullability, CHECK constraints
+- [Source: epics.md#Story-2.1] Authoritative AC - exact column names, types, nullability, CHECK constraints
 - [Source: gateway/migrations/000003_server_config.up.sql] Pattern: file header comment, ALTER TABLE for CHECK constraints, no IF NOT EXISTS
 - [Source: gateway/migrations/000003_server_config.down.sql] Pattern: `DROP TABLE IF EXISTS table_name;`
-- [Source: gateway/migrations/migrations.go] `//go:embed *.sql` — no code change needed
-- [Source: gateway/migrations/migrations_test.go] `TestFS_ContainsExpectedMigrationFiles` — add 000004 files to slice
+- [Source: gateway/migrations/migrations.go] `//go:embed *.sql` - no code change needed
+- [Source: gateway/migrations/migrations_test.go] `TestFS_ContainsExpectedMigrationFiles` - add 000004 files to slice
 - [Source: architecture.md#Migration-Patterns] golang-migrate pgx/v5 driver, embed pattern, Go Gateway as sole schema owner
 
 ## Dev Agent Record
@@ -151,7 +151,7 @@ _none_
 - Created `000004_users.up.sql`: `users` table (11 columns, BIGINT timestamps, no RLS) + `user_keys` table (8 columns, FK to users, nullable private_key for GDPR deletion) with CHECK constraints on `system_role` and `key_type`.
 - Created `000004_users.down.sql`: drops `user_keys` first (FK dependency), then `users`.
 - Updated `migrations_test.go`: added both 000004 files to `TestFS_ContainsExpectedMigrationFiles`. All Go unit tests pass (`ok github.com/nebu/nebu/migrations`).
-- `migrations.go` untouched — `//go:embed *.sql` auto-picks up new files.
+- `migrations.go` untouched - `//go:embed *.sql` auto-picks up new files.
 - [Code Review] Added missing 000002 and 000003 migration files to `TestFS_ContainsExpectedMigrationFiles` (pre-existing gap). All tests pass.
 
 ### File List

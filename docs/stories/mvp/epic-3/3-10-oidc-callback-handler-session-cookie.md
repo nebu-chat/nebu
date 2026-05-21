@@ -74,13 +74,13 @@ so that only authenticated and authorized operators can access the Admin UI.
 ### Critical: What Already Exists vs. What Changes
 
 Story 3.9 fully implemented `CallbackHandler` at `GET /admin/callback` with the following behavior:
-- State cookie validation, PKCE token exchange, ID token verification, claims extraction — ALL implemented
+- State cookie validation, PKCE token exchange, ID token verification, claims extraction - ALL implemented
 - Sets `admin_session` cookie (`HttpOnly`, `Secure: r.TLS != nil`, `SameSite=Strict`, `MaxAge=28800`, `Path=/admin`)
 - **CURRENT BEHAVIOR (wrong for 3.10):** Redirects to `/admin/` (trailing slash)
 - **CURRENT BEHAVIOR (wrong for 3.10):** On failure, redirects to `/admin/auth/login?error=auth_failed`
 - **MISSING:** Role check (currently sets `admin_session` even for non-`instance_admin` users)
 
-This story is primarily a targeted refactor of `CallbackHandler` + adding `LogoutHandler`. DO NOT rewrite `CallbackHandler` from scratch — it is already well-tested.
+This story is primarily a targeted refactor of `CallbackHandler` + adding `LogoutHandler`. DO NOT rewrite `CallbackHandler` from scratch - it is already well-tested.
 
 ### File: `gateway/internal/admin/auth.go`
 
@@ -101,14 +101,14 @@ if systemRole != "instance_admin" {
 
 Line 343 asserts: `if !strings.Contains(location, "/admin/auth/login?error=auth_failed")`. Must change to `/admin/login?error=auth_failed` after Task 1 changes.
 
-The existing `TestAdminCallbackHandler_MissingCookie_Returns400`, `TestAdminCallbackHandler_StateMismatch_Returns400`, and `TestAdminCallbackHandler_ExpiredCookie_Returns400` tests remain valid — no changes needed to those assertions.
+The existing `TestAdminCallbackHandler_MissingCookie_Returns400`, `TestAdminCallbackHandler_StateMismatch_Returns400`, and `TestAdminCallbackHandler_ExpiredCookie_Returns400` tests remain valid - no changes needed to those assertions.
 
 ### New Tests: Use Existing Helpers from `auth_test.go`
 
 The new `callback_test.go` can reuse helpers from `auth_test.go` (same package `admin`):
-- `setupAdminOIDCServer(t)` — creates a test OIDC server that signs JWTs with `nebu_role: "instance_admin"` and `email: "admin@example.com"`
-- `signAdminJWT(t, issuer, key, expiry, claimName, claimValue)` — use to build custom JWTs with different role values
-- `newTestAdminAuth(t, provider)` — creates `AdminAuth` with `provider`, `nil` db and tmpl; for callback tests, the full `CallbackHandler` uses `a.provider.Inner()` for token verification
+- `setupAdminOIDCServer(t)` - creates a test OIDC server that signs JWTs with `nebu_role: "instance_admin"` and `email: "admin@example.com"`
+- `signAdminJWT(t, issuer, key, expiry, claimName, claimValue)` - use to build custom JWTs with different role values
+- `newTestAdminAuth(t, provider)` - creates `AdminAuth` with `provider`, `nil` db and tmpl; for callback tests, the full `CallbackHandler` uses `a.provider.Inner()` for token verification
 
 For `TestCallbackHandler_RoleCheckFails_Returns403`, use a modified OIDC server where `/token` returns a JWT signed with `nebu_role: "user"` (not `instance_admin`). Pattern:
 
@@ -133,20 +133,20 @@ type adminSessionCookie struct {
 ```
 No struct changes needed. The `Role` field is already populated in `CallbackHandler` with `auth.MapSystemRole(rawRole)`.
 
-### Cookie Contract (Established in Story 3.9 — Must Match)
+### Cookie Contract (Established in Story 3.9 - Must Match)
 
 | Cookie | Name | Path | MaxAge | HttpOnly | Secure | SameSite |
 |--------|------|------|--------|----------|--------|----------|
 | OIDC state | `admin_oidc_state` | `/admin` | 600 (10min) | yes | `r.TLS != nil` | Lax |
 | Admin session | `admin_session` | `/admin` | 28800 (8h) | yes | `r.TLS != nil` | Strict |
 
-Deletion: set `MaxAge: -1` (not `MaxAge: 0` — use `-1` for explicit deletion in Go's `http.SetCookie`).
+Deletion: set `MaxAge: -1` (not `MaxAge: 0` - use `-1` for explicit deletion in Go's `http.SetCookie`).
 
 ### Route Registration in `main.go`
 
 Current routes in main.go (lines 131–137):
 ```go
-// Legacy routes (backward compatibility — Story 3.10 will supersede)
+// Legacy routes (backward compatibility - Story 3.10 will supersede)
 mux.HandleFunc("GET /admin/auth/login", adminAuth.LoginHandler)
 mux.HandleFunc("GET /admin/auth/callback", adminAuth.CallbackHandler)
 
@@ -161,7 +161,7 @@ Add after the canonical routes block:
 mux.HandleFunc("GET /admin/logout", adminAuth.LogoutHandler)
 ```
 
-Do NOT remove `GET /admin/callback` registration — it is already there from Story 3.9. The `CallbackHandler` is the same function, just modified.
+Do NOT remove `GET /admin/callback` registration - it is already there from Story 3.9. The `CallbackHandler` is the same function, just modified.
 
 ### Session Cookie and Story 3.11 Context
 
@@ -171,7 +171,7 @@ Story 3.11 will apply `SessionGuard` to all `/admin/*` routes except `/admin/log
 
 ### `GET /admin/dashboard` Redirect Target
 
-Story 3.13 creates `GET /admin/dashboard`. In this story, redirecting `303` to `/admin/dashboard` is correct even though the page doesn't exist yet — the 303 redirect is the desired behavior; the browser will get a 404 until Story 3.13 is done. Do NOT redirect to `/admin/` as a temporary placeholder.
+Story 3.13 creates `GET /admin/dashboard`. In this story, redirecting `303` to `/admin/dashboard` is correct even though the page doesn't exist yet - the 303 redirect is the desired behavior; the browser will get a 404 until Story 3.13 is done. Do NOT redirect to `/admin/` as a temporary placeholder.
 
 ### No New Dependencies
 
@@ -187,18 +187,18 @@ All required packages are already in `go.mod` and already imported in `auth.go`:
 
 | File | Action |
 |------|--------|
-| `gateway/internal/admin/auth.go` | MODIFY — change 3 redirect URLs in `CallbackHandler` + add role check + change final redirect destination + add `LogoutHandler` method |
-| `gateway/internal/admin/auth_test.go` | MODIFY — update 1 assertion in `TestAdminCallbackHandler_TokenExchangeFailure_Redirects` |
-| `gateway/internal/admin/callback_test.go` | CREATE — 5 unit tests for updated `CallbackHandler` and new `LogoutHandler` |
-| `gateway/cmd/gateway/main.go` | MODIFY — add `GET /admin/logout` route |
+| `gateway/internal/admin/auth.go` | MODIFY - change 3 redirect URLs in `CallbackHandler` + add role check + change final redirect destination + add `LogoutHandler` method |
+| `gateway/internal/admin/auth_test.go` | MODIFY - update 1 assertion in `TestAdminCallbackHandler_TokenExchangeFailure_Redirects` |
+| `gateway/internal/admin/callback_test.go` | CREATE - 5 unit tests for updated `CallbackHandler` and new `LogoutHandler` |
+| `gateway/cmd/gateway/main.go` | MODIFY - add `GET /admin/logout` route |
 
 **Do NOT modify:**
-- `gateway/internal/admin/crypto.go` — no changes
-- `gateway/internal/admin/page_data.go` — no changes (Story 3.12 adds `ErrorPageData`)
-- `gateway/internal/admin/middleware.go` — no changes (Story 3.11 adds `SessionGuard`)
-- `gateway/internal/admin/handler.go` — no changes
-- `gateway/internal/admin/login_test.go` — no changes (tests for `LoginPageHandler` and `LoginStartHandler` are unaffected)
-- `gateway/internal/admin/templates/` — no new templates (error page templates are Story 3.12 scope)
+- `gateway/internal/admin/crypto.go` - no changes
+- `gateway/internal/admin/page_data.go` - no changes (Story 3.12 adds `ErrorPageData`)
+- `gateway/internal/admin/middleware.go` - no changes (Story 3.11 adds `SessionGuard`)
+- `gateway/internal/admin/handler.go` - no changes
+- `gateway/internal/admin/login_test.go` - no changes (tests for `LoginPageHandler` and `LoginStartHandler` are unaffected)
+- `gateway/internal/admin/templates/` - no new templates (error page templates are Story 3.12 scope)
 
 ### Test File Placement
 
@@ -206,20 +206,20 @@ New test file is `callback_test.go` (not adding to `auth_test.go`) to keep test 
 
 ### Anti-Pattern: Do Not Create a New `CallbackHandler` Method
 
-Story 3.9 already created `CallbackHandler`. This story modifies it — do NOT create a new method or rename the existing one. The route `GET /admin/callback` remains registered to `adminAuth.CallbackHandler`.
+Story 3.9 already created `CallbackHandler`. This story modifies it - do NOT create a new method or rename the existing one. The route `GET /admin/callback` remains registered to `adminAuth.CallbackHandler`.
 
 ### References
 
-- [Source: gateway/internal/admin/auth.go, line 282–382] `CallbackHandler` — modify in place
-- [Source: gateway/internal/admin/auth.go, line 107–113] `adminSessionCookie` struct — already has `Role` field
-- [Source: gateway/internal/admin/auth.go, line 340–349] Role mapping — `auth.MapSystemRole(rawRole)` call already present; add `if systemRole != "instance_admin"` check immediately after
+- [Source: gateway/internal/admin/auth.go, line 282–382] `CallbackHandler` - modify in place
+- [Source: gateway/internal/admin/auth.go, line 107–113] `adminSessionCookie` struct - already has `Role` field
+- [Source: gateway/internal/admin/auth.go, line 340–349] Role mapping - `auth.MapSystemRole(rawRole)` call already present; add `if systemRole != "instance_admin"` check immediately after
 - [Source: gateway/internal/admin/auth_test.go, line 343] Assertion to update: `"/admin/auth/login?error=auth_failed"` → `"/admin/login?error=auth_failed"`
-- [Source: gateway/internal/admin/auth_test.go, line 19–66] `setupAdminOIDCServer` + `signAdminJWT` helpers — reuse in `callback_test.go`
-- [Source: gateway/internal/admin/auth_test.go, line 96–98] `newTestAdminAuth` — reuse in `callback_test.go`
-- [Source: gateway/cmd/gateway/main.go, line 131–137] Route registration — add logout route
+- [Source: gateway/internal/admin/auth_test.go, line 19–66] `setupAdminOIDCServer` + `signAdminJWT` helpers - reuse in `callback_test.go`
+- [Source: gateway/internal/admin/auth_test.go, line 96–98] `newTestAdminAuth` - reuse in `callback_test.go`
+- [Source: gateway/cmd/gateway/main.go, line 131–137] Route registration - add logout route
 - [Source: _bmad-output/planning-artifacts/epics.md#Story-3.10, lines 1662–1688] Authoritative ACs
-- [Source: _bmad-output/planning-artifacts/epics.md#Story-3.11, lines 1700–1706] SessionGuard exclusion list — confirms `/admin/logout` will be protected
-- [Source: _bmad-output/planning-artifacts/epics.md#Story-3.13, line 1742] `GET /admin/dashboard` — final redirect target
+- [Source: _bmad-output/planning-artifacts/epics.md#Story-3.11, lines 1700–1706] SessionGuard exclusion list - confirms `/admin/logout` will be protected
+- [Source: _bmad-output/planning-artifacts/epics.md#Story-3.13, line 1742] `GET /admin/dashboard` - final redirect target
 
 ## Dev Agent Record
 
@@ -234,33 +234,33 @@ No debug issues encountered. All tests passed on first run.
 ### Completion Notes List
 
 - Task 1: Refactored `CallbackHandler` in `gateway/internal/admin/auth.go`. Changed 3 error-path redirects from `/admin/auth/login?error=auth_failed` to `/admin/login?error=auth_failed`. Added role check block (`if systemRole != "instance_admin" → 403`). Changed final redirect from `/admin/` with 302 to `/admin/dashboard` with 303. Cookie deletion for `admin_oidc_state` confirmed correct (Path=/admin, MaxAge=-1).
-- Task 2: Added `LogoutHandler` method to `AdminAuth` — deletes `admin_session` cookie (MaxAge=-1, Path=/admin, HttpOnly=true, Secure=r.TLS!=nil, SameSite=Strict), redirects 303 to `/admin/login`.
+- Task 2: Added `LogoutHandler` method to `AdminAuth` - deletes `admin_session` cookie (MaxAge=-1, Path=/admin, HttpOnly=true, Secure=r.TLS!=nil, SameSite=Strict), redirects 303 to `/admin/login`.
 - Task 3: Registered `GET /admin/logout` route in `main.go` after the canonical routes block.
 - Task 4: Created `gateway/internal/admin/callback_test.go` with 5 unit tests covering: state mismatch (400), role check failure (403), valid flow cookie attributes (303 + session cookie + state cookie deletion), TLS Secure flag, logout cookie deletion.
-- Task 5: Fixed regression in `auth_test.go` — `TestAdminCallbackHandler_TokenExchangeFailure_Redirects` assertion updated to `/admin/login?error=auth_failed`.
-- All tests pass: `make test-unit-go` — 0 regressions, all 11 packages pass.
+- Task 5: Fixed regression in `auth_test.go` - `TestAdminCallbackHandler_TokenExchangeFailure_Redirects` assertion updated to `/admin/login?error=auth_failed`.
+- All tests pass: `make test-unit-go` - 0 regressions, all 11 packages pass.
 
 ### File List
 
-- `gateway/internal/admin/auth.go` — MODIFIED: 3 redirect URLs changed, role check added, final redirect changed, `LogoutHandler` method added
-- `gateway/internal/admin/auth_test.go` — MODIFIED: 1 assertion updated in `TestAdminCallbackHandler_TokenExchangeFailure_Redirects`
-- `gateway/internal/admin/callback_test.go` — CREATED: 5 unit tests for updated `CallbackHandler` and new `LogoutHandler`
-- `gateway/cmd/gateway/main.go` — MODIFIED: `GET /admin/logout` route registered
+- `gateway/internal/admin/auth.go` - MODIFIED: 3 redirect URLs changed, role check added, final redirect changed, `LogoutHandler` method added
+- `gateway/internal/admin/auth_test.go` - MODIFIED: 1 assertion updated in `TestAdminCallbackHandler_TokenExchangeFailure_Redirects`
+- `gateway/internal/admin/callback_test.go` - CREATED: 5 unit tests for updated `CallbackHandler` and new `LogoutHandler`
+- `gateway/cmd/gateway/main.go` - MODIFIED: `GET /admin/logout` route registered
 
 ### Review Findings
 
-- [x] [Review][Patch][MINOR] Stale doc-comment on CallbackHandler — said "GET /admin/auth/callback", updated to reflect canonical route [gateway/internal/admin/auth.go:282] — FIXED
-- [x] [Review][Patch][MINOR] admin_oidc_state deletion cookie missing Secure flag — added `Secure: r.TLS != nil` to match original set-cookie [gateway/internal/admin/auth.go:378] — FIXED
-- [x] [Review][Defer][INFO] No logging on role-check 403 denial — denied user sub/email not logged; operational audit gap but not a code bug; defer to observability story
-- [x] [Review][Defer][INFO] Legacy LoginHandler sets cookie Path="/admin/auth" which won't reach /admin/callback — pre-existing from Story 3.9 legacy route; legacy routes are scheduled for removal
+- [x] [Review][Patch][MINOR] Stale doc-comment on CallbackHandler - said "GET /admin/auth/callback", updated to reflect canonical route [gateway/internal/admin/auth.go:282] - FIXED
+- [x] [Review][Patch][MINOR] admin_oidc_state deletion cookie missing Secure flag - added `Secure: r.TLS != nil` to match original set-cookie [gateway/internal/admin/auth.go:378] - FIXED
+- [x] [Review][Defer][INFO] No logging on role-check 403 denial - denied user sub/email not logged; operational audit gap but not a code bug; defer to observability story
+- [x] [Review][Defer][INFO] Legacy LoginHandler sets cookie Path="/admin/auth" which won't reach /admin/callback - pre-existing from Story 3.9 legacy route; legacy routes are scheduled for removal
 
 **Round 2 (2026-04-01):**
-- [x] [Review][Patch][MINOR] admin_oidc_state deletion cookie missing SameSite attribute — original set used SameSite=Lax; deletion omitted it; added `SameSite: http.SameSiteLaxMode` [gateway/internal/admin/auth.go:378] — FIXED
-- [x] [Review][Patch][MINOR] Missing guard on empty `sub` claim — token with no `sub` claim would create session with empty sub, breaking Story 3.11 SessionGuard; added `if sub == ""` guard returning 400 [gateway/internal/admin/auth.go:345] — FIXED
-- [x] [Review][Defer][INFO] GET /admin/logout has no CSRF protection — spec mandates GET; SameSite=Strict on session cookie provides reasonable protection; defer formal CSRF hardening to security review story
-- [x] [Review][Defer][INFO] Legacy-route Cookie-Path-Mismatch (LoginHandler Path=/admin/auth vs CallbackHandler deletion Path=/admin) — pre-existing from Story 3.9; scheduled for removal with legacy routes
+- [x] [Review][Patch][MINOR] admin_oidc_state deletion cookie missing SameSite attribute - original set used SameSite=Lax; deletion omitted it; added `SameSite: http.SameSiteLaxMode` [gateway/internal/admin/auth.go:378] - FIXED
+- [x] [Review][Patch][MINOR] Missing guard on empty `sub` claim - token with no `sub` claim would create session with empty sub, breaking Story 3.11 SessionGuard; added `if sub == ""` guard returning 400 [gateway/internal/admin/auth.go:345] - FIXED
+- [x] [Review][Defer][INFO] GET /admin/logout has no CSRF protection - spec mandates GET; SameSite=Strict on session cookie provides reasonable protection; defer formal CSRF hardening to security review story
+- [x] [Review][Defer][INFO] Legacy-route Cookie-Path-Mismatch (LoginHandler Path=/admin/auth vs CallbackHandler deletion Path=/admin) - pre-existing from Story 3.9; scheduled for removal with legacy routes
 
 ## Change Log
 
-- 2026-04-01: Story 3.10 created — OIDC Callback Handler + Session Cookie. Targeted refactor of existing CallbackHandler (role check + redirect URL fixes) + new LogoutHandler + route registration. Status: ready-for-dev.
-- 2026-04-01: Story 3.10 implemented — CallbackHandler refactored (3 redirect URLs fixed, role check added, final redirect to /admin/dashboard with 303), LogoutHandler added, route registered, 5 new unit tests, regression fix in auth_test.go. All tests pass. Status: review.
+- 2026-04-01: Story 3.10 created - OIDC Callback Handler + Session Cookie. Targeted refactor of existing CallbackHandler (role check + redirect URL fixes) + new LogoutHandler + route registration. Status: ready-for-dev.
+- 2026-04-01: Story 3.10 implemented - CallbackHandler refactored (3 redirect URLs fixed, role check added, final redirect to /admin/dashboard with 303), LogoutHandler added, route registered, 5 new unit tests, regression fix in auth_test.go. All tests pass. Status: review.

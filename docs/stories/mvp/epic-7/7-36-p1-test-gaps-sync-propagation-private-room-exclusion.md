@@ -5,7 +5,7 @@ security_review: not-needed
 created: 2026-04-30
 ---
 
-# Story 7.36: P1 Test Gaps — Sync Propagation & Private Room Exclusion
+# Story 7.36: P1 Test Gaps - Sync Propagation & Private Room Exclusion
 
 Status: ready-for-dev
 
@@ -19,9 +19,9 @@ so that the system's sync propagation for account_data/tags and the public room 
 
 The Epic 7 final traceability matrix (`_bmad-output/implementation-artifacts/epic-7-final-traceability-2026-04-30.md`) identified three P1 coverage gaps that blocked epic closure:
 
-1. **7-24-AC4** — No Godog scenario verifying that `PUT /account_data` is reflected in the next `/sync` response.
-2. **7-25-AC5** — No Godog scenario verifying that `PUT /tags` triggers an `m.tag` event in the next `/sync` response.
-3. **7-27-AC5** — No Godog scenario verifying that a private room (non-public join_rule) is excluded from `GET /publicRooms`.
+1. **7-24-AC4** - No Godog scenario verifying that `PUT /account_data` is reflected in the next `/sync` response.
+2. **7-25-AC5** - No Godog scenario verifying that `PUT /tags` triggers an `m.tag` event in the next `/sync` response.
+3. **7-27-AC5** - No Godog scenario verifying that a private room (non-public join_rule) is excluded from `GET /publicRooms`.
 
 The implementation for all three is already in place:
 - Account data is stored in the `room_account_data` table (migration 000029) and surfaced in sync via `sync.go` (Story 7-24).
@@ -49,21 +49,21 @@ The implementation for all three is already in place:
 
 ### Tests written FIRST (before implementation code):
 
-1. [AccountDataSync_AfterPut_AppearsinSync] — Godog (`gateway/features/account_data.feature`)
+1. [AccountDataSync_AfterPut_AppearsinSync] - Godog (`gateway/features/account_data.feature`)
    - Given: kai is authenticated via OIDC and has created a room
    - And: kai captures a sync token before writing account data
    - When: kai puts room account data type `m.fully_read` with body `{"event_id":"$test123"}` for the created room
    - And: kai calls incremental sync with the captured token
    - Then: the incremental sync contains account_data event of type `m.fully_read` for the room
 
-2. [TagSync_AfterPut_AppearsinSync] — Godog (`gateway/features/tags.feature`)
+2. [TagSync_AfterPut_AppearsinSync] - Godog (`gateway/features/tags.feature`)
    - Given: kai is authenticated via OIDC and has created a room
    - And: kai captures a sync token before the tag change
    - When: kai calls PUT /user/{userId}/rooms/{roomId}/tags/m.favourite with body `{"order":0.5}`
    - And: kai calls incremental sync with the captured token
    - Then: the incremental sync contains account_data event of type `m.tag` for the room
 
-3. [GetPublicRooms_PrivateRoom_ExcludedFromDirectory] — Godog (`gateway/features/public_rooms.feature`)
+3. [GetPublicRooms_PrivateRoom_ExcludedFromDirectory] - Godog (`gateway/features/public_rooms.feature`)
    - Given: kai is authenticated via OIDC
    - And: kai creates a room named `"private-room-test"` (default join_rule = invite, not public)
    - When: an unauthenticated client calls `GET /_matrix/client/v3/publicRooms`
@@ -71,13 +71,13 @@ The implementation for all three is already in place:
 
 ## Dev Notes
 
-### Scope — Test-Only
+### Scope - Test-Only
 
 **No handler code is needed.** The three scenarios exercise existing endpoints only:
-- `PUT /_matrix/client/v3/user/{userId}/rooms/{roomId}/account_data/{type}` — implemented in Story 7-24
-- `PUT /_matrix/client/v3/user/{userId}/rooms/{roomId}/tags/{tag}` — implemented in Story 7-25
-- `GET /_matrix/client/v3/sync` — implemented in earlier stories
-- `GET /_matrix/client/v3/publicRooms` — implemented in Story 7-27
+- `PUT /_matrix/client/v3/user/{userId}/rooms/{roomId}/account_data/{type}` - implemented in Story 7-24
+- `PUT /_matrix/client/v3/user/{userId}/rooms/{roomId}/tags/{tag}` - implemented in Story 7-25
+- `GET /_matrix/client/v3/sync` - implemented in earlier stories
+- `GET /_matrix/client/v3/publicRooms` - implemented in Story 7-27
 
 ### Files to Modify
 
@@ -94,7 +94,7 @@ The implementation for all three is already in place:
 
 ### Sync Propagation Pattern (Gaps 1 & 2)
 
-The existing incremental sync infrastructure in `room_flow_steps_test.go` uses **marie** as the actor (see `marieCapturesSyncToken`, `marieCallsIncrementalSyncWithCapturedToken`). For account_data and tags scenarios, **kai** is the actor throughout — you need kai-specific equivalents.
+The existing incremental sync infrastructure in `room_flow_steps_test.go` uses **marie** as the actor (see `marieCapturesSyncToken`, `marieCallsIncrementalSyncWithCapturedToken`). For account_data and tags scenarios, **kai** is the actor throughout - you need kai-specific equivalents.
 
 Pattern to follow (from `room_flow_steps_test.go`):
 
@@ -138,16 +138,16 @@ func theIncrementalSyncContainsAccountDataEventOfType(eventType string) error {
 **Key points:**
 - New package-level vars needed: `kaiCapturedSyncToken string` and `kaiIncrementalSyncBody string`.
 - Add these to the `sc.Before` reset block in `initializeRoomFlowSteps` (same file, line ~504) so they are cleared between scenarios.
-- Use retry logic (up to 3×, 500ms between) — sync processing is async and may have slight lag.
-- The step for tags (Gap 2) asserts `"type":"m.tag"` — same assertion function works for both gaps, parameterized by event type.
-- Both gaps can share the same `kaiCapturesSyncToken*` and `kaiCallsIncrementalSync*` step functions — avoid duplication.
+- Use retry logic (up to 3×, 500ms between) - sync processing is async and may have slight lag.
+- The step for tags (Gap 2) asserts `"type":"m.tag"` - same assertion function works for both gaps, parameterized by event type.
+- Both gaps can share the same `kaiCapturesSyncToken*` and `kaiCallsIncrementalSync*` step functions - avoid duplication.
 - Register these shared sync steps in `account_data_steps_test.go` (or a new shared file) and use the same step patterns in both `account_data.feature` and `tags.feature`.
 
-**IMPORTANT — Avoid step registration collisions:** Check that no step pattern you add duplicates an existing pattern. The `theResponseBodyIs` function is defined in BOTH `account_data_steps_test.go` AND `tags_steps_test.go` — this is a known existing duplicate in the codebase (Godog tolerates duplicate step registrations from different initializeX functions; only one will match). Do not add more duplicates. If new step patterns can serve both files, define them once and register from a single `initializeX` call.
+**IMPORTANT - Avoid step registration collisions:** Check that no step pattern you add duplicates an existing pattern. The `theResponseBodyIs` function is defined in BOTH `account_data_steps_test.go` AND `tags_steps_test.go` - this is a known existing duplicate in the codebase (Godog tolerates duplicate step registrations from different initializeX functions; only one will match). Do not add more duplicates. If new step patterns can serve both files, define them once and register from a single `initializeX` call.
 
 ### Private Room Exclusion Pattern (Gap 3)
 
-`kaiCreatesARoom` in `room_flow_steps_test.go` calls `POST /createRoom` with `{"name":"..."}` — no `initial_state` setting a join_rule. By default, Nebu rooms are created with `join_rule = invite` (not `public`). This means the room kai creates in the Background step is already a private room. No special creation logic is needed.
+`kaiCreatesARoom` in `room_flow_steps_test.go` calls `POST /createRoom` with `{"name":"..."}` - no `initial_state` setting a join_rule. By default, Nebu rooms are created with `join_rule = invite` (not `public`). This means the room kai creates in the Background step is already a private room. No special creation logic is needed.
 
 The assertion must check that the room is not present. Use the room name as a discriminator since room IDs are dynamic:
 
@@ -174,37 +174,37 @@ Then the public rooms chunk does not contain a room named "private-room-test"
 ### Step Naming Consistency
 
 Follow the existing step-text patterns in the feature files:
-- Background steps use `kai is authenticated via OIDC` and `kai creates a room named "..."` — both already registered.
+- Background steps use `kai is authenticated via OIDC` and `kai creates a room named "..."` - both already registered.
 - Sync token capture: model on marie's steps but use `kai captures a sync token before account data change`.
-- Sync call: `kai calls incremental sync with the captured token` — reuse if you define it generically, or use a variant `kai calls incremental sync with the captured account data token` if marie's token must remain separate.
+- Sync call: `kai calls incremental sync with the captured token` - reuse if you define it generically, or use a variant `kai calls incremental sync with the captured account data token` if marie's token must remain separate.
 - Assert: `the incremental sync contains account_data event of type "m.fully_read" for the room`.
 
-**Preferred approach:** Add `kaiCapturedSyncToken` and `kaiIncrementalSyncBody` as new package-level vars alongside the existing `marieCapturedSyncToken` / `marieIncrementalSyncBody` (in `room_flow_steps_test.go` at the top). Reset them in the existing `sc.Before` block. Define the kai sync step functions in `account_data_steps_test.go`, and register the kai-specific sync steps in `initializeAccountDataSteps`. Import nothing new — all helpers are same-package.
+**Preferred approach:** Add `kaiCapturedSyncToken` and `kaiIncrementalSyncBody` as new package-level vars alongside the existing `marieCapturedSyncToken` / `marieIncrementalSyncBody` (in `room_flow_steps_test.go` at the top). Reset them in the existing `sc.Before` block. Define the kai sync step functions in `account_data_steps_test.go`, and register the kai-specific sync steps in `initializeAccountDataSteps`. Import nothing new - all helpers are same-package.
 
 ### Do Not Break Existing Scenarios
 
-All existing scenarios in these three feature files must continue to pass. Only add new `Scenario:` blocks — do not modify existing ones. Confirm that new step definitions do not shadow or conflict with existing registered steps.
+All existing scenarios in these three feature files must continue to pass. Only add new `Scenario:` blocks - do not modify existing ones. Confirm that new step definitions do not shadow or conflict with existing registered steps.
 
 ### Feature File Placement
 
 Add each new scenario AFTER the last existing scenario in its respective feature file, with a comment line referencing the story and the gap:
 
 ```gherkin
-  # Story 7-36: P1 gap closure — 7-24-AC4 sync propagation
-  Scenario: AccountDataSync_AfterPut_AppearsinSync — ...
+  # Story 7-36: P1 gap closure - 7-24-AC4 sync propagation
+  Scenario: AccountDataSync_AfterPut_AppearsinSync - ...
 ```
 
 ### Previous Story Intelligence
 
 - **Story 7-24** (account data): Handler complete; sync integration in `sync.go`; RLS fixed by Story 7-35. The round-trip `PUT → GET` works (green in existing `PutGet_RoomAccountData` scenario). The sync path is the untested leg.
-- **Story 7-25** (tags): Handler complete; tags stored as `m.tag` in `room_account_data` via `SetRoomAccountData` gRPC call. Sync propagation piggybacks on the same account_data sync path — no separate propagation mechanism.
+- **Story 7-25** (tags): Handler complete; tags stored as `m.tag` in `room_account_data` via `SetRoomAccountData` gRPC call. Sync propagation piggybacks on the same account_data sync path - no separate propagation mechanism.
 - **Story 7-27** (public rooms): Handler complete; `join_rule = 'public'` filter in Elixir DB query confirmed by code review. No integration test for the negative case.
 - **Story 7-35** (RLS GUC wiring): Fixed `withUserDB` so `SET LOCAL app.user_id` is set before every DB read. Without this, the `room_account_data` RLS policy would have blocked all reads. This story makes the sync propagation scenarios viable.
-- **Story 7-33** (system role bypass): Fixed `get_room_state/2` to accept system-role callers — relevant context but does not affect this story.
+- **Story 7-33** (system role bypass): Fixed `get_room_state/2` to accept system-role callers - relevant context but does not affect this story.
 
 ### Git Intelligence
 
-Recent commits confirm all three implementation paths are merged. The `withUserDB` helper (`gateway/internal/db/user_tx.go`) wraps `account_data_store.go` — confirmed in Story 7-35. Step infrastructure follows patterns established across `room_flow_steps_test.go`, `profile_subfields_steps_test.go`, and the per-story `*_steps_test.go` files.
+Recent commits confirm all three implementation paths are merged. The `withUserDB` helper (`gateway/internal/db/user_tx.go`) wraps `account_data_store.go` - confirmed in Story 7-35. Step infrastructure follows patterns established across `room_flow_steps_test.go`, `profile_subfields_steps_test.go`, and the per-story `*_steps_test.go` files.
 
 ## Tasks
 
@@ -215,7 +215,7 @@ Recent commits confirm all three implementation paths are merged. The `withUserD
 - [ ] Add `Scenario: TagSync_AfterPut_AppearsinSync` to `gateway/features/tags.feature` (AC: #2)
 - [ ] Add `theRoomIsNotListedInPublicRooms` function + registration to `public_rooms_steps_test.go` (AC: #3, #5)
 - [ ] Add `Scenario: GetPublicRooms_PrivateRoom_ExcludedFromDirectory` to `gateway/features/public_rooms.feature` (AC: #3)
-- [ ] Run `make test-integration` — all three new scenarios green (AC: #6)
+- [ ] Run `make test-integration` - all three new scenarios green (AC: #6)
 
 ## Dev Agent Record
 

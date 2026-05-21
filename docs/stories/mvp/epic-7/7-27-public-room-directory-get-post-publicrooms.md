@@ -5,7 +5,7 @@ security_review: not-needed
 created: 2026-04-30
 ---
 
-# Story 7.27: Public Room Directory — GET/POST /publicRooms
+# Story 7.27: Public Room Directory - GET/POST /publicRooms
 
 Status: ready-for-dev
 
@@ -41,32 +41,32 @@ Only rooms where `join_rule = public` are included. Pagination uses an opaque cu
 
 ### Tests written FIRST (before implementation code):
 
-1. [GET returns public rooms paginated] — Godog (`gateway/features/public_rooms.feature`)
+1. [GET returns public rooms paginated] - Godog (`gateway/features/public_rooms.feature`)
    - Given: 3 public rooms (`!pub1`, `!pub2`, `!pub3`) and 1 private room (`!priv1`) exist
    - When: GET `/_matrix/client/v3/publicRooms?limit=2` (unauthenticated)
    - Then: HTTP 200, `chunk` has 2 entries, both are public rooms, `next_batch` is present
 
-2. [GET page 2 via next_batch cursor] — Godog
+2. [GET page 2 via next_batch cursor] - Godog
    - Given: 3 public rooms; page 1 returned 2 rooms with `next_batch`
    - When: GET `/_matrix/client/v3/publicRooms?limit=2&since=<next_batch>`
    - Then: `chunk` has 1 remaining room, `next_batch` is absent
 
-3. [POST with filter narrows results] — Godog
+3. [POST with filter narrows results] - Godog
    - Given: public rooms named "General", "Engineering", "Random"
    - When: POST `/_matrix/client/v3/publicRooms` with `{"filter":{"generic_search_term":"engi"}}` and valid JWT
    - Then: `chunk` contains "Engineering" only
 
-4. [Private room excluded from directory] — Godog
+4. [Private room excluded from directory] - Godog
    - Given: private room `!priv1` exists
    - When: GET `/_matrix/client/v3/publicRooms` (unauthenticated)
    - Then: `!priv1` is not present in any `chunk` entry across all pages
 
-5. [num_joined_members is accurate] — Go httptest (`gateway/internal/matrix/public_rooms_test.go`)
+5. [num_joined_members is accurate] - Go httptest (`gateway/internal/matrix/public_rooms_test.go`)
    - Given: public room with 5 members tracked in Room GenServer
    - When: GET `/publicRooms`
    - Then: the matching chunk entry has `num_joined_members` = 5
 
-6. [POST requires JWT] — Go httptest
+6. [POST requires JWT] - Go httptest
    - Given: no Authorization header
    - When: POST `/_matrix/client/v3/publicRooms` with valid body
    - Then: HTTP 401, `errcode` = `M_MISSING_TOKEN`
@@ -74,7 +74,7 @@ Only rooms where `join_rule = public` are included. Pagination uses an opaque cu
 ## Implementation Notes
 
 **New handler file:** `gateway/internal/matrix/public_rooms.go`
-- `GetPublicRoomsHandler` (unauthenticated) and `PostPublicRoomsHandler` (JWT required) — share a common `listPublicRooms(ctx, limit, since, filterTerm string)` function.
+- `GetPublicRoomsHandler` (unauthenticated) and `PostPublicRoomsHandler` (JWT required) - share a common `listPublicRooms(ctx, limit, since, filterTerm string)` function.
 - Cursor: `since` is the `room_id` of the last item on the previous page. SQL: `WHERE join_rule = 'public' AND room_id > $since ORDER BY room_id LIMIT $limit+1` (fetch one extra to detect next page).
 - `total_room_count_estimate`: a fast `SELECT COUNT(*)` from the rooms table where `join_rule = 'public'` (approximate, ignores filter).
 
@@ -93,7 +93,7 @@ GET  /_matrix/client/v3/publicRooms  → looseRL(GetPublicRoomsHandler)
 POST /_matrix/client/v3/publicRooms  → jwtMiddleware(bodyLimit1MiB(PostPublicRoomsHandler))
 ```
 
-**Filter implementation** — `generic_search_term` is passed through to the Elixir gRPC handler which executes `ILIKE '%term%'` on `room_name` and `room_topic` columns.
+**Filter implementation** - `generic_search_term` is passed through to the Elixir gRPC handler which executes `ILIKE '%term%'` on `room_name` and `room_topic` columns.
 
 ## Tasks
 
@@ -103,5 +103,5 @@ POST /_matrix/client/v3/publicRooms  → jwtMiddleware(bodyLimit1MiB(PostPublicR
 - [ ] Implement Elixir gRPC handler (DB query + live member count resolution)
 - [ ] Implement `gateway/internal/matrix/public_rooms.go`
 - [ ] Register routes in `main.go`
-- [ ] Run `make test-unit-go` + `make test-unit-elixir` — all pass
-- [ ] Run `make test-integration` — Godog scenarios green
+- [ ] Run `make test-unit-go` + `make test-unit-elixir` - all pass
+- [ ] Run `make test-integration` - Godog scenarios green

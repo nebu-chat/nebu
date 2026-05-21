@@ -14,9 +14,9 @@ so that I can enforce limits and consistent defaults across all rooms on the ins
 
 ## Acceptance Criteria
 
-1. `PATCH /api/v1/admin/rooms/{roomId}` — `instance_admin` role required; body (all fields optional):
-   - `max_members: integer` (min 2, max 100000) — stored in `rooms.max_members`; the Room GenServer enforces this limit on join: if `member_count >= max_members`, join returns `{:error, :room_full}` and the gateway returns `403 M_FORBIDDEN` with `errcode: "M_ROOM_FULL"`
-   - `visibility: "public"|"private"` — updates room visibility
+1. `PATCH /api/v1/admin/rooms/{roomId}` - `instance_admin` role required; body (all fields optional):
+   - `max_members: integer` (min 2, max 100000) - stored in `rooms.max_members`; the Room GenServer enforces this limit on join: if `member_count >= max_members`, join returns `{:error, :room_full}` and the gateway returns `403 M_FORBIDDEN` with `errcode: "M_ROOM_FULL"`
+   - `visibility: "public"|"private"` - updates room visibility
    - `name: string` (1–255 chars)
    - `topic: string` (0–1000 chars)
    - Calls `gRPC CoreService.UpdateRoomSettings` to notify the Room GenServer of the updated `max_members` in real time (no restart required)
@@ -24,7 +24,7 @@ so that I can enforce limits and consistent defaults across all rooms on the ins
    - Returns `200` with the updated room object (`AdminRoomDetail` shape)
    - Returns `404` if room not found; `400` if validation fails
 
-2. `PUT /api/v1/admin/config/room-defaults` — `instance_admin` role required; body: `{"default_max_members": integer, "default_visibility": "public"|"private"}`:
+2. `PUT /api/v1/admin/config/room-defaults` - `instance_admin` role required; body: `{"default_max_members": integer, "default_visibility": "public"|"private"}`:
    - Upserts into `server_config` table: `room_default_max_members` and `room_default_visibility`
    - These defaults are applied when `POST /_matrix/client/v3/createRoom` is called without explicit overrides
    - Returns `200 {"data": {"default_max_members": N, "default_visibility": "..."}}`
@@ -45,69 +45,69 @@ so that I can enforce limits and consistent defaults across all rooms on the ins
 
 ### Tests written FIRST (before implementation code):
 
-1. **PATCH room updates max_members — 200 with updated object** — Go unit test (mock `RoomRepository` + mock gRPC)
+1. **PATCH room updates max_members - 200 with updated object** - Go unit test (mock `RoomRepository` + mock gRPC)
    - Given: room `!roomA:server` exists with `max_members=0`
    - When: `PATCH /api/v1/admin/rooms/!roomA:server` with body `{"max_members": 50}`
    - Then: status 200, response body `data.max_members = 50`; mock `UpdateRoomSettings` gRPC called once; `UpdateRoom` repository called once
 
-2. **PATCH room not found → 404** — Go unit test
+2. **PATCH room not found → 404** - Go unit test
    - Given: `RoomRepository.GetRoom` returns `(nil, nil)`
    - When: `PATCH /api/v1/admin/rooms/!unknown:server` with body `{"max_members": 10}`
    - Then: status 404, body `{"error":{"code":"M_NOT_FOUND","message":"Room not found"}}`
 
-3. **PATCH with max_members=1 (below min) → 400** — Go unit test
+3. **PATCH with max_members=1 (below min) → 400** - Go unit test
    - Given: any room
    - When: `PATCH /api/v1/admin/rooms/!roomA:server` with body `{"max_members": 1}`
    - Then: status 400, body `{"error":{"code":"M_BAD_JSON","message":"..."}}`
 
-4. **PATCH with max_members=100001 (above max) → 400** — Go unit test
+4. **PATCH with max_members=100001 (above max) → 400** - Go unit test
    - Given: any room
    - When: `PATCH /api/v1/admin/rooms/!roomA:server` with body `{"max_members": 100001}`
    - Then: status 400, `errcode: "M_BAD_JSON"`
 
-5. **PATCH with visibility=invalid → 400** — Go unit test
+5. **PATCH with visibility=invalid → 400** - Go unit test
    - Given: any room
    - When: `PATCH /api/v1/admin/rooms/!roomA:server` with body `{"visibility": "secret"}`
    - Then: status 400, `errcode: "M_BAD_JSON"`
 
-6. **PATCH updates visibility — reflected in GET** — Go unit test (mock repo)
+6. **PATCH updates visibility - reflected in GET** - Go unit test (mock repo)
    - Given: mock `UpdateRoom` succeeds; mock `GetRoom` returns updated object with `visibility="public"`
    - When: `PATCH /api/v1/admin/rooms/!roomA:server` with body `{"visibility": "public"}`
    - Then: status 200, `data.visibility = "public"`
 
-7. **PATCH empty body (no fields) → 200 with unchanged room** — Go unit test
+7. **PATCH empty body (no fields) → 200 with unchanged room** - Go unit test
    - Given: room exists
    - When: `PATCH /api/v1/admin/rooms/!roomA:server` with body `{}`
    - Then: status 200 (no-op is valid); `UpdateRoom` called with no changes; `UpdateRoomSettings` gRPC NOT called (no max_members in body)
 
-8. **PUT room-defaults upserts server_config → 200** — Go unit test (mock `RoomDefaultsRepository`)
+8. **PUT room-defaults upserts server_config → 200** - Go unit test (mock `RoomDefaultsRepository`)
    - Given: mock `UpsertRoomDefaults` succeeds
    - When: `PUT /api/v1/admin/config/room-defaults` with body `{"default_max_members": 100, "default_visibility": "public"}`
    - Then: status 200, `data.default_max_members = 100`, `data.default_visibility = "public"`
 
-9. **PUT room-defaults with invalid visibility → 400** — Go unit test
+9. **PUT room-defaults with invalid visibility → 400** - Go unit test
    - Given: any
    - When: `PUT /api/v1/admin/config/room-defaults` with body `{"default_max_members": 10, "default_visibility": "secret"}`
    - Then: status 400, `errcode: "M_BAD_JSON"`
 
-10. **Audit log called on PATCH** — Go unit test
+10. **Audit log called on PATCH** - Go unit test
     - Given: mock `CoreClient` that captures `WriteAuditLog` calls
     - When: `PATCH /api/v1/admin/rooms/!roomA:server` with body `{"name": "New Name"}`
     - Then: `audit.LogEvent` called with `action="room_settings_updated"`, `target_type="room"`, `target_id="!roomA:server"`, metadata contains changed field `name`
 
-11. **Router test: PATCH /admin/rooms/{roomId} registered → 501 when Rooms=nil** — Go unit test
+11. **Router test: PATCH /admin/rooms/{roomId} registered → 501 when Rooms=nil** - Go unit test
     - Given: `AdminServer{}` with no repositories
     - When: `PATCH /api/v1/admin/rooms/someRoom`
     - Then: status 501
 
-12. **Router test: PUT /admin/config/room-defaults registered → 501 when no repo** — Go unit test
+12. **Router test: PUT /admin/config/room-defaults registered → 501 when no repo** - Go unit test
     - Given: `AdminServer{}` with no repositories
     - When: `PUT /api/v1/admin/config/room-defaults`
     - Then: status 501
 
 ## Tasks / Subtasks
 
-- [x] Write FAILING tests first — `gateway/internal/api/rooms_patch_handler_test.go` + `gateway/internal/api/room_defaults_handler_test.go` (AC: #1–#12)
+- [x] Write FAILING tests first - `gateway/internal/api/rooms_patch_handler_test.go` + `gateway/internal/api/room_defaults_handler_test.go` (AC: #1–#12)
   - [x] All 12 test cases written as RED phase (may use `t.Skip` if compile errors exist before gen-api)
   - [x] Define mock `RoomRepository` extension or new `RoomDefaultsRepository` mock
 
@@ -139,13 +139,13 @@ so that I can enforce limits and consistent defaults across all rooms on the ins
   - [x] Go gateway maps `codes.ResourceExhausted` → `403 M_ROOM_FULL` in `gateway/internal/matrix/rooms.go`
 
 - [x] Add `UpdateRoom` method to `RoomRepository` interface and `dbRoomRepo` implementation in `gateway/internal/api/rooms_repo.go` (AC: #1)
-  - [x] `UpdateRoom(ctx, roomID string, patch RoomPatch) (*AdminRoomDetail, error)` — returns the updated room; returns `(nil, nil)` if room not found
+  - [x] `UpdateRoom(ctx, roomID string, patch RoomPatch) (*AdminRoomDetail, error)` - returns the updated room; returns `(nil, nil)` if room not found
   - [x] `RoomPatch` struct: `MaxMembers *int`, `Visibility *string`, `Name *string`, `Topic *string` (all optional pointer fields)
   - [x] SQL: dynamic `UPDATE rooms SET ... WHERE room_id = $1` from non-nil fields; after UPDATE call `GetRoom`; 0 rows affected → `(nil, nil)`
 
 - [x] Add `RoomDefaultsRepository` interface and `dbRoomDefaultsRepo` implementation in new file `gateway/internal/api/room_defaults_repo.go` (AC: #2)
   - [x] `RoomDefaultsRepository` interface: `UpsertRoomDefaults(ctx, maxMembers int, visibility string) error`; `GetRoomDefaults(ctx) (int, string, error)`
-  - [x] Uses new `room_defaults` table (migration 000037) — separate from INSERT-only `server_config`
+  - [x] Uses new `room_defaults` table (migration 000037) - separate from INSERT-only `server_config`
 
 - [x] Implement `PatchAdminRoom` and `PutAdminRoomDefaults` handlers in `gateway/internal/api/server.go` (AC: #1, #2)
   - [x] Add `RoomDefaults RoomDefaultsRepository` field to `AdminServer`
@@ -165,11 +165,11 @@ so that I can enforce limits and consistent defaults across all rooms on the ins
 - [x] Handle `room_full` gRPC error in `joinRoomHandler` in matrix handler (AC: #1)
   - [x] Map `codes.ResourceExhausted` → HTTP 403 with `{"errcode":"M_ROOM_FULL","error":"Room is full"}`
 
-- [x] Update `router_test.go` — add 501 tests for new routes when repos are nil (AC: #11, #12)
+- [x] Update `router_test.go` - add 501 tests for new routes when repos are nil (AC: #11, #12)
 
-- [x] Remove `t.Skip` from test files — GREEN phase
-  - [x] Run `make test-unit-go` — zero failures (all 16 packages pass)
-  - [x] Run `make test-unit-elixir` — zero failures (284 tests across 6 suites)
+- [x] Remove `t.Skip` from test files - GREEN phase
+  - [x] Run `make test-unit-go` - zero failures (all 16 packages pass)
+  - [x] Run `make test-unit-elixir` - zero failures (284 tests across 6 suites)
 
 - [x] Add `load_room_settings/1` to `Nebu.Room.DBBehaviour` + `Nebu.Room.DB` + all FakeDB modules in tests
   - [x] `db_behaviour.ex`: new `@callback load_room_settings/1` added
@@ -180,7 +180,7 @@ so that I can enforce limits and consistent defaults across all rooms on the ins
 
 ### Critical: server_config INSERT-ONLY Constraint
 
-`server_config` has **FORCE RLS** with only INSERT and SELECT policies (migration 000003). The app role (`nebu_app`) **cannot UPDATE existing rows** — attempts will be silently denied by RLS.
+`server_config` has **FORCE RLS** with only INSERT and SELECT policies (migration 000003). The app role (`nebu_app`) **cannot UPDATE existing rows** - attempts will be silently denied by RLS.
 
 The "latest wins" strategy used for other config keys (`audit_log_retention_days`, etc.) is:
 ```sql
@@ -198,13 +198,13 @@ ON CONFLICT (key) DO NOTHING  -- WRONG: this skips if key already exists!
 -- The only option: use a separate time-series pattern with a composite PK.
 ```
 
-Wait — looking at migration 000003 more carefully: `server_config` has `key TEXT PRIMARY KEY` (single-valued). The RLS policy allows INSERT but not UPDATE. The `DO NOTHING` approach means the FIRST inserted value wins (idempotent after first insert).
+Wait - looking at migration 000003 more carefully: `server_config` has `key TEXT PRIMARY KEY` (single-valued). The RLS policy allows INSERT but not UPDATE. The `DO NOTHING` approach means the FIRST inserted value wins (idempotent after first insert).
 
-**This is the ACTUAL design:** `server_config` is truly immutable per key after first insert. The `loadAuditRetentionDays` function in `main.go` confirms this — it reads the single row per key.
+**This is the ACTUAL design:** `server_config` is truly immutable per key after first insert. The `loadAuditRetentionDays` function in `main.go` confirms this - it reads the single row per key.
 
 **For room defaults, this means:** Once `room_default_max_members` is set, it cannot be changed via the nebu_app role. To allow updates via the Admin API, there are two options:
 - **Option A:** Use a different mechanism (e.g., a separate `room_defaults` table that allows UPDATE)
-- **Option B:** Use the nebu_migrate role (which has BYPASSRLS) for updates — not available at runtime
+- **Option B:** Use the nebu_migrate role (which has BYPASSRLS) for updates - not available at runtime
 - **Option C:** Accept that `server_config` is immutable per key and use a time-series pattern with a composite PK
 
 **Decision (to implement):** Create a new migration `000037_room_defaults.up.sql` that adds a `room_defaults` table (separate from `server_config`) with mutable columns:
@@ -227,7 +227,7 @@ This avoids the RLS constraint and is simpler than a time-series pattern.
 
 **Alternative simpler approach:** Since the user says "Upserts into `server_config` table", check if migration 000003 allows an alternative path. Looking at the bootstrap code, `compliance_signing_key_priv` uses `ON CONFLICT (key) DO NOTHING` and re-reads the winner. This confirms `server_config` is truly immutable per key.
 
-**Final decision:** Use the `room_defaults` table approach (migration 000037). This is the cleanest architecture — room defaults are mutable configuration, not immutable bootstrap config.
+**Final decision:** Use the `room_defaults` table approach (migration 000037). This is the cleanest architecture - room defaults are mutable configuration, not immutable bootstrap config.
 
 **Note to dev agent:** If you prefer to use `server_config` for room defaults with a read-of-latest-row-by-set_at approach, you need to change the table to have a composite key (`key, set_at`) and SELECT MAX(set_at). However, migration 000003 has `key TEXT PRIMARY KEY` which prevents multiple rows per key. A separate `room_defaults` table is the right call.
 
@@ -235,19 +235,19 @@ This avoids the RLS constraint and is simpler than a time-series pattern.
 
 Migration 000036 was created in Story 6.7. **Next migration: `000037`.**
 
-### Critical: proto/core.proto — UpdateRoomSettings Message Fields
+### Critical: proto/core.proto - UpdateRoomSettings Message Fields
 
-The field number sequence must not conflict with existing fields. This is a new RPC — add at the end of the `CoreService` service block and use new message types:
+The field number sequence must not conflict with existing fields. This is a new RPC - add at the end of the `CoreService` service block and use new message types:
 
 ```protobuf
-// UpdateRoomSettings — Story 6.8: Admin API notifies Room GenServer of settings change.
+// UpdateRoomSettings - Story 6.8: Admin API notifies Room GenServer of settings change.
 // max_members = 0 means "no limit". Go gateway sends this after updating rooms table.
 // Elixir Core updates in-memory GenServer state; no-op if GenServer not running (will load from DB on next start).
 rpc UpdateRoomSettings(UpdateRoomSettingsRequest) returns (UpdateRoomSettingsResponse);
 ```
 
 ```protobuf
-// UpdateRoomSettings — Story 6.8
+// UpdateRoomSettings - Story 6.8
 message UpdateRoomSettingsRequest {
   string room_id     = 1;
   int32  max_members = 2;  // 0 = no limit; always sent (even if unchanged) for simplicity
@@ -317,7 +317,7 @@ def load_room_settings(room_id) do
 end
 ```
 
-In `Nebu.Room.Server.init/1`, call `db_module().load_room_settings(room_id)` after loading members and include the result in the state. If the call fails, default to `max_members: 0` (fail-open — the limit will be enforced once the GenServer catches up).
+In `Nebu.Room.Server.init/1`, call `db_module().load_room_settings(room_id)` after loading members and include the result in the state. If the call fails, default to `max_members: 0` (fail-open - the limit will be enforced once the GenServer catches up).
 
 **All FakeDB modules in test files** (in `join_room_test.exs`, `create_room_test.exs`, `sync_test.exs`, etc.) must implement the new callback. The easiest approach is to add a default fallback in the behaviour using `@optional_callbacks` OR add `def load_room_settings(_), do: {:ok, 0}` to each FakeDB. **Check carefully** before committing that all FakeDB modules compile.
 
@@ -355,9 +355,9 @@ case codes.ResourceExhausted:
     fmt.Fprintf(w, `{"errcode":"M_ROOM_FULL","error":"Room is full"}`)
 ```
 
-Find this file: `gateway/internal/matrix/join_room.go` (or similar). The existing switch has `codes.NotFound` and `codes.PermissionDenied` — add `codes.ResourceExhausted`.
+Find this file: `gateway/internal/matrix/join_room.go` (or similar). The existing switch has `codes.NotFound` and `codes.PermissionDenied` - add `codes.ResourceExhausted`.
 
-### Critical: openapi.yaml — New Schemas and Paths
+### Critical: openapi.yaml - New Schemas and Paths
 
 **Add to `components.schemas`:**
 
@@ -558,14 +558,14 @@ func (r *dbRoomRepo) UpdateRoom(ctx context.Context, roomID string, patch RoomPa
 }
 ```
 
-**Note:** For the empty-patch case (no SET clauses), calling `GetRoom` is correct — it returns nil if the room doesn't exist, which gives a correct 404.
+**Note:** For the empty-patch case (no SET clauses), calling `GetRoom` is correct - it returns nil if the room doesn't exist, which gives a correct 404.
 
 ### Critical: room_defaults Table (Migration 000037)
 
 ```sql
 -- 000037_room_defaults.up.sql
 -- Story 6.8: Mutable server-wide room defaults (separate from immutable server_config).
--- server_config uses INSERT-only RLS policy (cannot UPDATE) — room defaults need to be mutable.
+-- server_config uses INSERT-only RLS policy (cannot UPDATE) - room defaults need to be mutable.
 
 CREATE TABLE room_defaults (
     id                    SERIAL  PRIMARY KEY,
@@ -675,7 +675,7 @@ func (s *AdminServer) PatchAdminRoom(ctx context.Context, req PatchAdminRoomRequ
             MaxMembers: int32(*patch.MaxMembers),
         })
         if grpcErr != nil {
-            slog.Warn("UpdateRoomSettings gRPC failed — GenServer state not updated in real time",
+            slog.Warn("UpdateRoomSettings gRPC failed - GenServer state not updated in real time",
                 "room_id", roomID, "err", grpcErr)
             // Best-effort: continue (DB is already updated; GenServer will load from DB on next start)
         }
@@ -687,7 +687,7 @@ func (s *AdminServer) PatchAdminRoom(ctx context.Context, req PatchAdminRoomRequ
         _ = audit.LogEvent(ctx, s.CoreClient, actorID, "room_settings_updated", "room", roomID,
             map[string]any{"changes": changedFields}, "success", "")
     } else {
-        slog.Warn("PatchAdminRoom audit skipped — CoreClient is nil", "room_id", roomID)
+        slog.Warn("PatchAdminRoom audit skipped - CoreClient is nil", "room_id", roomID)
     }
 
     return &patchRoom200Resp{detail: updated}, nil
@@ -697,7 +697,7 @@ func (s *AdminServer) PatchAdminRoom(ctx context.Context, req PatchAdminRoomRequ
 ### Critical: Response Types for New Handlers
 
 ```go
-// patchRoom200Resp — 200 OK with updated AdminRoomDetail
+// patchRoom200Resp - 200 OK with updated AdminRoomDetail
 type patchRoom200Resp struct{ detail *AdminRoomDetail }
 
 func (r *patchRoom200Resp) VisitPatchAdminRoomResponse(w http.ResponseWriter) error {
@@ -727,7 +727,7 @@ func (r *patchRoom404Resp) VisitPatchAdminRoomResponse(w http.ResponseWriter) er
     })
 }
 
-// putRoomDefaults200Resp — 200 OK with room defaults
+// putRoomDefaults200Resp - 200 OK with room defaults
 type putRoomDefaults200Resp struct {
     maxMembers int
     visibility string
@@ -800,14 +800,14 @@ mux.Handle("PUT /api/v1/admin/config/room-defaults",
     jwtMW(RequireRole("instance_admin", checker)(bodyLimit64KiB(putAdminRoomDefaultsHandler(sh)))))
 ```
 
-**Note:** `bodyLimit64KiB` must be passed from `RegisterAdminRoutes` OR defined inside router.go (check how the existing PATCH deactivate/reactivate routes handle it). Looking at `router.go`: `RegisterAdminRoutes` does not currently accept a `bodyLimit` parameter — the body limit is applied in `main.go` wrapping. For the admin API routes registered via `RegisterAdminRoutes`, the body limit middleware is NOT currently applied (the existing POST routes in RegisterAdminRoutes have NO bodyLimit). **This is a pre-existing gap.** For Story 6.8, follow the existing pattern: do NOT add `bodyLimit64KiB` inside `RegisterAdminRoutes`. The main.go chain already has `bodyLimit64KiB` wrapping for admin POST/PATCH endpoints where appropriate. Alternatively, wire it in main.go when registering the mux (after `RegisterAdminRoutes`). **Recommendation:** Skip body limit for now (consistent with all other `/api/v1/admin/*` routes registered via `RegisterAdminRoutes`). The JSON decode error from a too-large body will return a 400, which is acceptable.
+**Note:** `bodyLimit64KiB` must be passed from `RegisterAdminRoutes` OR defined inside router.go (check how the existing PATCH deactivate/reactivate routes handle it). Looking at `router.go`: `RegisterAdminRoutes` does not currently accept a `bodyLimit` parameter - the body limit is applied in `main.go` wrapping. For the admin API routes registered via `RegisterAdminRoutes`, the body limit middleware is NOT currently applied (the existing POST routes in RegisterAdminRoutes have NO bodyLimit). **This is a pre-existing gap.** For Story 6.8, follow the existing pattern: do NOT add `bodyLimit64KiB` inside `RegisterAdminRoutes`. The main.go chain already has `bodyLimit64KiB` wrapping for admin POST/PATCH endpoints where appropriate. Alternatively, wire it in main.go when registering the mux (after `RegisterAdminRoutes`). **Recommendation:** Skip body limit for now (consistent with all other `/api/v1/admin/*` routes registered via `RegisterAdminRoutes`). The JSON decode error from a too-large body will return a 400, which is acceptable.
 
 ### Critical: Elixir update_room_settings gRPC Handler
 
 Add to `event_dispatcher/server.ex` at the end of the module:
 
 ```elixir
-# ─── UpdateRoomSettings — Story 6.8: Admin API notifies Room GenServer ───────
+# ─── UpdateRoomSettings - Story 6.8: Admin API notifies Room GenServer ───────
 #
 # Best-effort: if the Room GenServer is not running, the settings will be
 # loaded from DB when the GenServer next starts. Returns ok=true in all cases
@@ -820,7 +820,7 @@ def update_room_settings(%Core.UpdateRoomSettingsRequest{} = req, _stream) do
       Logger.info("UpdateRoomSettings applied to running GenServer",
         room_id: req.room_id, max_members: req.max_members)
     {:error, :not_found} ->
-      Logger.info("UpdateRoomSettings: Room GenServer not running — will load from DB on next start",
+      Logger.info("UpdateRoomSettings: Room GenServer not running - will load from DB on next start",
         room_id: req.room_id)
   end
   %Core.UpdateRoomSettingsResponse{ok: true}
@@ -846,7 +846,7 @@ def handle_cast({:update_settings, settings}, state) do
 end
 ```
 
-### Critical: Elixir DBBehaviour — load_room_settings
+### Critical: Elixir DBBehaviour - load_room_settings
 
 All FakeDB modules in the test suite that `@behaviour Nebu.Room.DBBehaviour` must implement `load_room_settings/1`. The easiest fix is to add `@optional_callbacks load_room_settings: 1` to the behaviour **or** add a default `def load_room_settings(_), do: {:ok, 0}` to each FakeDB.
 
@@ -860,31 +860,31 @@ These files need to be updated.
 ### Critical: File Inventory
 
 **Files to CREATE (new):**
-- `gateway/migrations/000037_room_defaults.up.sql` — new mutable room_defaults table
+- `gateway/migrations/000037_room_defaults.up.sql` - new mutable room_defaults table
 - `gateway/migrations/000037_room_defaults.down.sql`
-- `gateway/internal/api/room_defaults_repo.go` — `RoomDefaultsRepository` interface + `dbRoomDefaultsRepo` implementation
-- `gateway/internal/api/rooms_patch_handler_test.go` — ATDD tests for PATCH endpoint (written first, RED phase)
-- `gateway/internal/api/room_defaults_handler_test.go` — ATDD tests for PUT room-defaults (written first, RED phase)
+- `gateway/internal/api/room_defaults_repo.go` - `RoomDefaultsRepository` interface + `dbRoomDefaultsRepo` implementation
+- `gateway/internal/api/rooms_patch_handler_test.go` - ATDD tests for PATCH endpoint (written first, RED phase)
+- `gateway/internal/api/room_defaults_handler_test.go` - ATDD tests for PUT room-defaults (written first, RED phase)
 
 **Files to UPDATE:**
-- `proto/core.proto` — add `rpc UpdateRoomSettings` + messages
-- `gateway/api/openapi.yaml` — add `PatchAdminRoomRequest`, `PutRoomDefaultsRequest`, `RoomDefaultsResponse` schemas + PATCH + PUT paths
-- `gateway/api/api_gen.go` — regenerated via `make gen-api` (do not edit manually)
-- `gateway/internal/api/rooms_repo.go` — add `UpdateRoom` to `RoomRepository` interface + `RoomPatch` struct + `dbRoomRepo.UpdateRoom` implementation
-- `gateway/internal/api/server.go` — add `RoomDefaults RoomDefaultsRepository` field; implement `PatchAdminRoom` + `PutAdminRoomDefaults` + response types
-- `gateway/internal/api/router.go` — add `PATCH /api/v1/admin/rooms/{roomId}` + `PUT /api/v1/admin/config/room-defaults` routes; add `patchAdminRoomHandler` + `putAdminRoomDefaultsHandler` functions
-- `gateway/internal/api/router_test.go` — add 501 tests for the two new routes
-- `gateway/cmd/gateway/main.go` — wire `RoomDefaults: apihandler.NewRoomDefaultsRepo(bootstrapDB)`; update comment
-- `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` — add `def update_room_settings/2` handler
-- `core/apps/room_manager/lib/nebu/room/server.ex` — add `max_members` to state; add `update_settings/2`; add `handle_cast({:update_settings, ...})`; add `max_members` enforcement in `handle_call({:join, ...})`
-- `core/apps/room_manager/lib/nebu/room/db.ex` — add `load_room_settings/1`
-- `core/apps/room_manager/lib/nebu/room/db_behaviour.ex` — add `load_room_settings/1` callback
-- `core/apps/event_dispatcher/lib/pb/core_grpc.pb.ex` — regenerated via `make proto`
-- `core/apps/event_dispatcher/lib/pb/core.pb.ex` — regenerated via `make proto`
-- `gateway/internal/grpc/pb/core.pb.go` — regenerated via `make proto`
-- `gateway/internal/grpc/pb/core_grpc.pb.go` — regenerated via `make proto`
-- `gateway/internal/matrix/join_room.go` (or wherever JoinRoom gRPC error is mapped) — add `codes.ResourceExhausted` → 403 M_ROOM_FULL
-- All FakeDB modules in Elixir tests that implement `Nebu.Room.DBBehaviour` — add `load_room_settings/1` stub
+- `proto/core.proto` - add `rpc UpdateRoomSettings` + messages
+- `gateway/api/openapi.yaml` - add `PatchAdminRoomRequest`, `PutRoomDefaultsRequest`, `RoomDefaultsResponse` schemas + PATCH + PUT paths
+- `gateway/api/api_gen.go` - regenerated via `make gen-api` (do not edit manually)
+- `gateway/internal/api/rooms_repo.go` - add `UpdateRoom` to `RoomRepository` interface + `RoomPatch` struct + `dbRoomRepo.UpdateRoom` implementation
+- `gateway/internal/api/server.go` - add `RoomDefaults RoomDefaultsRepository` field; implement `PatchAdminRoom` + `PutAdminRoomDefaults` + response types
+- `gateway/internal/api/router.go` - add `PATCH /api/v1/admin/rooms/{roomId}` + `PUT /api/v1/admin/config/room-defaults` routes; add `patchAdminRoomHandler` + `putAdminRoomDefaultsHandler` functions
+- `gateway/internal/api/router_test.go` - add 501 tests for the two new routes
+- `gateway/cmd/gateway/main.go` - wire `RoomDefaults: apihandler.NewRoomDefaultsRepo(bootstrapDB)`; update comment
+- `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` - add `def update_room_settings/2` handler
+- `core/apps/room_manager/lib/nebu/room/server.ex` - add `max_members` to state; add `update_settings/2`; add `handle_cast({:update_settings, ...})`; add `max_members` enforcement in `handle_call({:join, ...})`
+- `core/apps/room_manager/lib/nebu/room/db.ex` - add `load_room_settings/1`
+- `core/apps/room_manager/lib/nebu/room/db_behaviour.ex` - add `load_room_settings/1` callback
+- `core/apps/event_dispatcher/lib/pb/core_grpc.pb.ex` - regenerated via `make proto`
+- `core/apps/event_dispatcher/lib/pb/core.pb.ex` - regenerated via `make proto`
+- `gateway/internal/grpc/pb/core.pb.go` - regenerated via `make proto`
+- `gateway/internal/grpc/pb/core_grpc.pb.go` - regenerated via `make proto`
+- `gateway/internal/matrix/join_room.go` (or wherever JoinRoom gRPC error is mapped) - add `codes.ResourceExhausted` → 403 M_ROOM_FULL
+- All FakeDB modules in Elixir tests that implement `Nebu.Room.DBBehaviour` - add `load_room_settings/1` stub
 
 ### Previous Story Learnings (from 6.7)
 
@@ -894,13 +894,13 @@ These files need to be updated.
 
 3. **make gen-api before implementing handlers**: StrictServerInterface compile check blocks build. Add 501 stubs FIRST, then implement.
 
-4. **Body pre-check in router wrapper**: replicate the `deactivateAdminUserHandler` pattern — check `r.Body == nil || r.ContentLength == 0` before delegating, to return the Matrix envelope rather than the strict-handler default error.
+4. **Body pre-check in router wrapper**: replicate the `deactivateAdminUserHandler` pattern - check `r.Body == nil || r.ContentLength == 0` before delegating, to return the Matrix envelope rather than the strict-handler default error.
 
 5. **FakeDB modules must implement all DBBehaviour callbacks**: this is the trickiest part of the Elixir changes. Search all test files before adding a new callback.
 
-6. **audit.LogEvent signature**: `(ctx, coreClient, actorID, action, targetType, targetID, metadata, outcome, errorDetail)` — see existing usages in server.go.
+6. **audit.LogEvent signature**: `(ctx, coreClient, actorID, action, targetType, targetID, metadata, outcome, errorDetail)` - see existing usages in server.go.
 
-7. **epochMsToISO8601 / parseISO8601ToEpochMs**: private helpers in `users_repo.go` — accessible from `rooms_repo.go` since both are in `package api`. Do NOT copy.
+7. **epochMsToISO8601 / parseISO8601ToEpochMs**: private helpers in `users_repo.go` - accessible from `rooms_repo.go` since both are in `package api`. Do NOT copy.
 
 ### Git Context (Recent Commits)
 
@@ -908,24 +908,24 @@ These files need to be updated.
 8eeaee1 refactor: replace `git` commands with `rtk` for improved context management
 6520117 feat(6-6): role_overrides migration, POST /roles grant/revoke, RequireRole DB-override
 012bce0 feat(6-5): User Deactivation + Reactivation + Session Invalidierung
-ed4f383 feat(6-4): User List + Get API — GET /admin/users + GET /admin/users/{userId}
-e46b90d feat(6-3): Admin API Router + RequireRole middleware — role-auth gate for instance_admin/compliance_officer
+ed4f383 feat(6-4): User List + Get API - GET /admin/users + GET /admin/users/{userId}
+e46b90d feat(6-3): Admin API Router + RequireRole middleware - role-auth gate for instance_admin/compliance_officer
 ```
 
-Story 6.7 is currently in `review` status (see sprint-status.yaml). Its files are the direct base for this story — `rooms_repo.go`, `server.go` (all 7.x handlers), `router.go` (room routes).
+Story 6.7 is currently in `review` status (see sprint-status.yaml). Its files are the direct base for this story - `rooms_repo.go`, `server.go` (all 7.x handlers), `router.go` (room routes).
 
 ### References
 
-- `proto/core.proto` — gRPC service definition (add UpdateRoomSettings at end)
-- `gateway/internal/api/server.go` — AdminServer struct, handler pattern, audit log pattern
-- `gateway/internal/api/router.go` — RegisterAdminRoutes, wrapper function pattern
-- `gateway/internal/api/rooms_repo.go` — RoomRepository interface, AdminRoom/AdminRoomDetail types, UpdateRoom to be added
-- `gateway/internal/api/rooms_handler_test.go` — reference test pattern (mock RoomRepository)
-- `gateway/migrations/000003_server_config.up.sql` — INSERT-only RLS (explains why room_defaults needs its own table)
-- `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` — gRPC handler pattern (invalidate_user_sessions reference)
-- `core/apps/room_manager/lib/nebu/room/server.ex` — Room GenServer state, join handler, handle_cast pattern
-- `core/apps/room_manager/lib/nebu/room/db_behaviour.ex` — DBBehaviour callbacks list
-- `_bmad-output/planning-artifacts/epics.md:2823–2848` — Canonical Story 6.8 AC definition
+- `proto/core.proto` - gRPC service definition (add UpdateRoomSettings at end)
+- `gateway/internal/api/server.go` - AdminServer struct, handler pattern, audit log pattern
+- `gateway/internal/api/router.go` - RegisterAdminRoutes, wrapper function pattern
+- `gateway/internal/api/rooms_repo.go` - RoomRepository interface, AdminRoom/AdminRoomDetail types, UpdateRoom to be added
+- `gateway/internal/api/rooms_handler_test.go` - reference test pattern (mock RoomRepository)
+- `gateway/migrations/000003_server_config.up.sql` - INSERT-only RLS (explains why room_defaults needs its own table)
+- `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` - gRPC handler pattern (invalidate_user_sessions reference)
+- `core/apps/room_manager/lib/nebu/room/server.ex` - Room GenServer state, join handler, handle_cast pattern
+- `core/apps/room_manager/lib/nebu/room/db_behaviour.ex` - DBBehaviour callbacks list
+- `_bmad-output/planning-artifacts/epics.md:2823–2848` - Canonical Story 6.8 AC definition
 
 ## Dev Agent Record
 

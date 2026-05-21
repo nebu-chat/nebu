@@ -9,7 +9,7 @@ matrix: false
 created: 2026-05-13
 ---
 
-# Story 12.10 — Per-IP Rate Limiting on Media Gateway
+# Story 12.10 - Per-IP Rate Limiting on Media Gateway
 
 ## User Story
 
@@ -19,22 +19,22 @@ So that a single client cannot exhaust server resources through concurrent or hi
 
 ## Acceptance Criteria
 
-**AC-1** — Upload rate limit (10 req/s per IP):
+**AC-1** - Upload rate limit (10 req/s per IP):
 - Given a single IP sends more than 10 upload requests per second
 - When the 11th request arrives within the same second
 - Then the gateway returns 429 with `Retry-After` header and `M_LIMIT_EXCEEDED` JSON body
 
-**AC-2** — Download/thumbnail rate limit (100 req/s per IP):
+**AC-2** - Download/thumbnail rate limit (100 req/s per IP):
 - Given a single IP sends more than 100 download/thumbnail requests per second
 - When the 101st request arrives within the same second
 - Then the gateway returns 429 with `Retry-After` header and `M_LIMIT_EXCEEDED` JSON body
 
-**AC-3** — Per-IP isolation:
+**AC-3** - Per-IP isolation:
 - Given two different IPs each send 10 upload requests per second
 - When both are within their individual limits
 - Then both receive 200 responses (limits are per-IP, not global)
 
-**AC-4** — Token bucket refill:
+**AC-4** - Token bucket refill:
 - Given a rate-limited IP waits 1 second
 - When it sends a new request
 - Then it receives 200 (token bucket refills)
@@ -48,7 +48,7 @@ The API gateway already implements per-IP token-bucket rate limiting using `gola
 **Key differences from gateway implementation:**
 - The gateway uses `github.com/hashicorp/golang-lru` for LRU eviction; the story spec calls for `sync.Map` + background cleanup goroutine (simpler, no extra dep needed for media).
 - The story spec explicitly calls out a background cleanup goroutine for stale entries (IPs not seen for >5 minutes).
-- The media gateway does NOT have Prometheus yet — no need to register metrics counters (keep it simple).
+- The media gateway does NOT have Prometheus yet - no need to register metrics counters (keep it simple).
 - Two tiers: upload (10 req/s, burst 5) and download/thumbnail (100 req/s, burst 20).
 
 ### Rate limits (from story spec)
@@ -61,7 +61,7 @@ The API gateway already implements per-IP token-bucket rate limiting using `gola
 ### IP extraction
 Extract client IP from `X-Forwarded-For` header with fallback to `RemoteAddr` (same as gateway middleware `extractClientIP`).
 
-For the media gateway: use a simple approach — take the first (leftmost) non-empty value from `X-Forwarded-For`, fall back to stripping port from `RemoteAddr`. This is consistent with the story spec which says "extract client IP from X-Forwarded-For with fallback to RemoteAddr".
+For the media gateway: use a simple approach - take the first (leftmost) non-empty value from `X-Forwarded-For`, fall back to stripping port from `RemoteAddr`. This is consistent with the story spec which says "extract client IP from X-Forwarded-For with fallback to RemoteAddr".
 
 ### Response format on 429
 ```json
@@ -72,10 +72,10 @@ Header: `Retry-After: 1`
 Note: The gateway uses `"error": "Rate limit exceeded"` but the story spec explicitly requires `"error": "Too many requests"` for the media gateway.
 
 ### Implementation location
-- **New file:** `media/internal/ratelimit/ratelimit.go` — contains the rate limiter middleware + IP extraction + cleanup goroutine
-- **New file:** `media/internal/ratelimit/ratelimit_test.go` — unit tests (ATDD tests go here)
-- **Modified:** `media/cmd/media/main.go` — wire the middleware, wrap the mux before `http.Server`
-- **Modified:** `media/go.mod` + `media/go.sum` — add `golang.org/x/time` dependency
+- **New file:** `media/internal/ratelimit/ratelimit.go` - contains the rate limiter middleware + IP extraction + cleanup goroutine
+- **New file:** `media/internal/ratelimit/ratelimit_test.go` - unit tests (ATDD tests go here)
+- **Modified:** `media/cmd/media/main.go` - wire the middleware, wrap the mux before `http.Server`
+- **Modified:** `media/go.mod` + `media/go.sum` - add `golang.org/x/time` dependency
 
 ### Wiring in main.go
 The middleware wraps the mux before passing to `http.Server`:
@@ -129,27 +129,27 @@ golang.org/x/time v0.12.0
 
 ### Tests written FIRST (before implementation code):
 
-1. **AT-12-10-1** — Upload rate limit blocks 11th request — [Go unit test in `media/internal/ratelimit/ratelimit_test.go`]
+1. **AT-12-10-1** - Upload rate limit blocks 11th request - [Go unit test in `media/internal/ratelimit/ratelimit_test.go`]
    - Given: IPRateLimiter configured for upload (10 req/s, burst 10 for test clarity)
    - When: 11 requests from the same IP arrive immediately
    - Then: First 10 return 200, 11th returns 429 with `Retry-After` header and `{"errcode":"M_LIMIT_EXCEEDED","error":"Too many requests"}` body
 
-2. **AT-12-10-2** — Download/thumbnail rate limit blocks 101st request — [Go unit test]
+2. **AT-12-10-2** - Download/thumbnail rate limit blocks 101st request - [Go unit test]
    - Given: IPRateLimiter configured for download (100 req/s, burst 100 for test)
    - When: 101 requests from the same IP arrive immediately
    - Then: First 100 return 200, 101st returns 429
 
-3. **AT-12-10-3** — Per-IP isolation: two IPs do not share buckets — [Go unit test]
+3. **AT-12-10-3** - Per-IP isolation: two IPs do not share buckets - [Go unit test]
    - Given: IPRateLimiter with burst=5
    - When: IP A makes 5 requests AND IP B makes 5 requests
    - Then: All 10 requests return 200 (each IP has its own bucket)
 
-4. **AT-12-10-4** — 429 response format: correct JSON body and Retry-After header — [Go unit test]
+4. **AT-12-10-4** - 429 response format: correct JSON body and Retry-After header - [Go unit test]
    - Given: Rate limiter with burst=1
    - When: IP exhausts burst (1 request), then makes 2nd request
    - Then: 429 response has `Content-Type: application/json`, `Retry-After` header with integer >= 1, body `{"errcode":"M_LIMIT_EXCEEDED","error":"Too many requests"}`
 
-5. **AT-12-10-5** — NEBU_RATE_LIMIT_DISABLED=true makes middleware a no-op — [Go unit test]
+5. **AT-12-10-5** - NEBU_RATE_LIMIT_DISABLED=true makes middleware a no-op - [Go unit test]
    - Given: NEBU_RATE_LIMIT_DISABLED=true environment variable
    - When: IPRateLimiter is constructed and 20 requests are sent from same IP (burst=1)
    - Then: All 20 requests return 200 (limiter is disabled)
@@ -198,7 +198,7 @@ Story 12.8 (OIDC fail-open hardening) established:
 - `initOIDCVerifier` + `initOIDCVerifierWith` pattern for testable startup code
 - Subprocess pattern for fatal-exit tests in `main_test.go`
 
-Story 5.21 (per-IP rate limiting for gateway) established the exact LRU-based pattern in `gateway/internal/middleware/ratelimit.go` — use it as the reference implementation, but adapt for the media module (no LRU dep, use sync.Map + cleanup goroutine as spec'd).
+Story 5.21 (per-IP rate limiting for gateway) established the exact LRU-based pattern in `gateway/internal/middleware/ratelimit.go` - use it as the reference implementation, but adapt for the media module (no LRU dep, use sync.Map + cleanup goroutine as spec'd).
 
 ## Definition of Done
 

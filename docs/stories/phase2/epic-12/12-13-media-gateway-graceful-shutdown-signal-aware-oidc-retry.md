@@ -9,7 +9,7 @@ matrix: false
 created: 2026-05-13
 ---
 
-# Story 12.13 — Media Gateway Graceful Shutdown: Signal-Aware OIDC Retry Loop
+# Story 12.13 - Media Gateway Graceful Shutdown: Signal-Aware OIDC Retry Loop
 
 ## User Story
 
@@ -19,42 +19,42 @@ So that `docker compose stop` completes within Docker's 10-second grace window i
 
 ## Acceptance Criteria
 
-**AC-1** — Given the media gateway is in the OIDC retry loop (Dex unreachable),
+**AC-1** - Given the media gateway is in the OIDC retry loop (Dex unreachable),
 when SIGTERM is received,
 then the retry loop exits within 100ms and the process terminates with a non-zero exit code and a log message indicating shutdown.
 
-**AC-2** — Given the media gateway is sleeping between OIDC retries (2s backoff),
+**AC-2** - Given the media gateway is sleeping between OIDC retries (2s backoff),
 when SIGTERM is received during the sleep,
 then the sleep is interrupted immediately (not after 2s) and the process exits.
 
-**AC-3** — Given SIGTERM is NOT received and Dex remains unreachable,
+**AC-3** - Given SIGTERM is NOT received and Dex remains unreachable,
 when all 5 retries are exhausted,
 then behaviour is unchanged from 12.12 (exits with fatal log after ~60s).
 
-**AC-4** — Given the media gateway starts successfully (Dex reachable),
+**AC-4** - Given the media gateway starts successfully (Dex reachable),
 when SIGTERM is received after startup,
-then the http.Server performs graceful shutdown (existing behaviour — not in scope of this story, but must not regress).
+then the http.Server performs graceful shutdown (existing behaviour - not in scope of this story, but must not regress).
 
 ## Acceptance Tests
 
 ### Tests written FIRST (before implementation code):
 
-**AT-12-13-1** — SIGTERM received during OIDC retry loop exits immediately — Go unit test `TestInitOIDCVerifierWith_SleepInterrupted_OnCtxCancel` in `media/cmd/media/main_test.go`
+**AT-12-13-1** - SIGTERM received during OIDC retry loop exits immediately - Go unit test `TestInitOIDCVerifierWith_SleepInterrupted_OnCtxCancel` in `media/cmd/media/main_test.go`
 - Given: parent context is cancelled (simulating SIGTERM) while `initOIDCVerifierWith` is sleeping between retries
 - When: the sleep select fires the `ctx.Done()` branch
 - Then: the function returns immediately (within 200ms) with a non-nil context-cancellation error
 
-**AT-12-13-2** — SIGTERM received when ctx is signalled — Go unit test `TestInitOIDCVerifier_SigtermContext_ExitsImmediately` in `media/cmd/media/main_test.go`
+**AT-12-13-2** - SIGTERM received when ctx is signalled - Go unit test `TestInitOIDCVerifier_SigtermContext_ExitsImmediately` in `media/cmd/media/main_test.go`
 - Given: `initOIDCVerifierWith` is called with a context created via `signal.NotifyContext` and we send SIGTERM to the process
 - When: SIGTERM arrives
 - Then: the context is cancelled and the function returns error within 500ms (subprocess test pattern using `exec.Command`)
 
-**AT-12-13-3** — Behaviour unchanged when SIGTERM is NOT received — Go unit test `TestInitOIDCVerifierWith_NoSignal_ExhaustsAllRetries` in `media/cmd/media/main_test.go`
+**AT-12-13-3** - Behaviour unchanged when SIGTERM is NOT received - Go unit test `TestInitOIDCVerifierWith_NoSignal_ExhaustsAllRetries` in `media/cmd/media/main_test.go`
 - Given: all retries fail (mock always returns error), no context cancellation
 - When: `initOIDCVerifierWith` runs with maxAttempts=3, zero retryDelay, zero-duration sleep select
 - Then: all 3 attempts are made, error is returned, process does not terminate early
 
-**AT-12-13-4** — ctx-aware sleep does not block when context is already cancelled — Go unit test `TestInitOIDCVerifierWith_CancelledCtxDuringSleep_NoBlockOnSleep` in `media/cmd/media/main_test.go`
+**AT-12-13-4** - ctx-aware sleep does not block when context is already cancelled - Go unit test `TestInitOIDCVerifierWith_CancelledCtxDuringSleep_NoBlockOnSleep` in `media/cmd/media/main_test.go`
 - Given: context is cancelled after the first provider attempt fails (before the sleep fires)
 - When: the select fires the `ctx.Done()` branch instead of `time.After`
 - Then: the function returns within 200ms without waiting for the full retryDelay
@@ -63,9 +63,9 @@ then the http.Server performs graceful shutdown (existing behaviour — not in s
 
 ### Background
 
-Story 12.12 added `ctx.Err()` guard at the top of the retry loop in `initOIDCVerifierWith`. That check runs **before each attempt** — but after a failed attempt, the code calls `time.Sleep(retryDelay)` (2 seconds) before the next `ctx.Err()` check. If SIGTERM arrives during this sleep, the process stays alive for up to 2s before noticing the cancellation.
+Story 12.12 added `ctx.Err()` guard at the top of the retry loop in `initOIDCVerifierWith`. That check runs **before each attempt** - but after a failed attempt, the code calls `time.Sleep(retryDelay)` (2 seconds) before the next `ctx.Err()` check. If SIGTERM arrives during this sleep, the process stays alive for up to 2s before noticing the cancellation.
 
-Additionally, `main()` currently passes `context.Background()` to `initOIDCVerifier` — a context that is never cancelled. Even though the per-attempt timeout and ctx.Err() guard exist, they are dead code for SIGTERM during the retry loop because the parent context never signals.
+Additionally, `main()` currently passes `context.Background()` to `initOIDCVerifier` - a context that is never cancelled. Even though the per-attempt timeout and ctx.Err() guard exist, they are dead code for SIGTERM during the retry loop because the parent context never signals.
 
 This story makes both paths live:
 
@@ -74,7 +74,7 @@ This story makes both paths live:
 
 ### Two Changes in `media/cmd/media/main.go`
 
-**Change 1 — Signal-aware context in `main()`:**
+**Change 1 - Signal-aware context in `main()`:**
 
 ```go
 import "os/signal"
@@ -90,7 +90,7 @@ Replace the `ctx := context.Background()` declaration (line ~191) and update the
 
 **NOTE:** `ctx` is already used for `pgxpool.New(ctx, dbURL)` at line ~194. After this change, both the pool creation and the OIDC verifier initialization share the same SIGTERM-aware context. This is intentional: a SIGTERM before startup completes should abort both.
 
-**Change 2 — ctx-aware sleep in `initOIDCVerifierWith`:**
+**Change 2 - ctx-aware sleep in `initOIDCVerifierWith`:**
 
 Replace:
 ```go
@@ -144,9 +144,9 @@ func initOIDCVerifierWith(
 ### What NOT to Change
 
 - The `http.Server.ListenAndServe` path and graceful shutdown wiring (AC-4 is a non-regression requirement, not a new implementation task). The `srv` is unchanged.
-- The 5-retry, 2s backoff, 10s per-attempt timeout values — only the sleep becomes ctx-aware.
+- The 5-retry, 2s backoff, 10s per-attempt timeout values - only the sleep becomes ctx-aware.
 - The `initOIDCVerifier` public signature (it already accepts `ctx context.Context`).
-- No new imports are required for `initOIDCVerifierWith` — `fmt`, `context`, and `time` are already imported.
+- No new imports are required for `initOIDCVerifierWith` - `fmt`, `context`, and `time` are already imported.
 
 For `main()`, two new imports are required:
 - `"os/signal"` (standard library)
@@ -154,11 +154,11 @@ For `main()`, two new imports are required:
 
 ### Existing Tests That Must Remain Green
 
-- `TestInitOIDCVerifierWith_CancelledCtx_ExitsImmediately` (AT-12-12-1) — already tests ctx cancellation at loop top; still passes
-- `TestInitOIDCVerifierWith_PerAttemptTimeout` (AT-12-12-2) — per-attempt timeout; still passes (sleep is only reached if `attempt < maxAttempts`)
-- `TestInitOIDCVerifier_EmptyIssuer_FatalExit` (AT-12-8-1) — empty issuer; still passes
-- `TestInitOIDCVerifier_AllRetriesFail_FatalExit` (AT-12-8-2) — unreachable Dex; still passes
-- `TestInitOIDCVerifier_RetryCountOnFailure` (AT-12-8-3) — uses `context.Background()`, `retryDelay=0` → sleep select fires `time.After(0)` immediately, all 3 attempts run; still passes
+- `TestInitOIDCVerifierWith_CancelledCtx_ExitsImmediately` (AT-12-12-1) - already tests ctx cancellation at loop top; still passes
+- `TestInitOIDCVerifierWith_PerAttemptTimeout` (AT-12-12-2) - per-attempt timeout; still passes (sleep is only reached if `attempt < maxAttempts`)
+- `TestInitOIDCVerifier_EmptyIssuer_FatalExit` (AT-12-8-1) - empty issuer; still passes
+- `TestInitOIDCVerifier_AllRetriesFail_FatalExit` (AT-12-8-2) - unreachable Dex; still passes
+- `TestInitOIDCVerifier_RetryCountOnFailure` (AT-12-8-3) - uses `context.Background()`, `retryDelay=0` → sleep select fires `time.After(0)` immediately, all 3 attempts run; still passes
 
 ### File Locations
 
@@ -175,14 +175,14 @@ The `stop()` deferred call ensures the OS signal registration is cleaned up when
 
 ### Previous Story Learnings (from 12.12)
 
-- `initOIDCVerifierWith` accepts an injected `newProvider` func — keep this for testability in new tests.
+- `initOIDCVerifierWith` accepts an injected `newProvider` func - keep this for testability in new tests.
 - Tests use `context.Background()` with `retryDelay=0` where timing is not the concern.
 - The subprocess pattern (`exec.Command` + `NEBU_TEST_CRASH_*` env var) is used for tests that exercise `os.Exit`. New tests for SIGTERM behaviour should use `signal.NotifyContext` directly without subprocess (no os.Exit involved).
 - `t.Parallel()` is used on all non-env-mutating tests.
 
 ## Dev Notes
 
-Implementation is mechanical — two changes totalling ~10 lines of modified code:
+Implementation is mechanical - two changes totalling ~10 lines of modified code:
 
 1. In `main()`: add `os/signal` + `syscall` imports, replace `ctx := context.Background()` with `ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)` + `defer stop()`.
 2. In `initOIDCVerifierWith`: replace `time.Sleep(retryDelay)` with the `select { case <-time.After(retryDelay): case <-ctx.Done(): return nil, 0, ... }` block.

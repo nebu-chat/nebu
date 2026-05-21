@@ -2,7 +2,7 @@
 
 ## Docker Compose Stack (Development + Production)
 
-All builds run via Docker containers — no local Go, Elixir, or buf installation required.
+All builds run via Docker containers - no local Go, Elixir, or buf installation required.
 
 ```yaml
 # Simplified docker-compose.yml topology
@@ -11,9 +11,9 @@ services:
   core:           # Elixir OTP release (port 4000: health; port 9000: gRPC)
   postgres:       # PostgreSQL 16 (port 5432)
   dex:            # OIDC provider for development (port 5556)
-  minio:          # MinIO S3-compatible object store (port 9000: API; port 9001: console) — Story 12.1
-  createbuckets:  # Init container: creates nebu-media bucket + nebu-app IAM user+policy — Story 12.1/12.3
-  media:          # Go Media Gateway (port 8009: upload/download) — Story 12.3
+  minio:          # MinIO S3-compatible object store (port 9000: API; port 9001: console) - Story 12.1
+  createbuckets:  # Init container: creates nebu-media bucket + nebu-app IAM user+policy - Story 12.1/12.3
+  media:          # Go Media Gateway (port 8009: upload/download) - Story 12.3
 ```
 
 **Port map:**
@@ -27,8 +27,8 @@ services:
 | Elixir Core | 9000 | gRPC CoreService (internal Docker network only) |
 | PostgreSQL | 5432 | Database (internal Docker network only) |
 | Dex (dev) | 5556 | OIDC provider (development only) |
-| MinIO S3 API | 9000 | Object storage API (S3-compatible) — local dev only |
-| MinIO Console | 9001 | Object storage management UI — local dev only |
+| MinIO S3 API | 9000 | Object storage API (S3-compatible) - local dev only |
+| MinIO Console | 9001 | Object storage management UI - local dev only |
 
 ## Network Boundaries
 
@@ -74,10 +74,10 @@ The gateway ships a **single seed migration** (`gateway/migrations/000001_init.u
 - Contains all 26+ tables, indexes, triggers, functions, and RLS policies in final state
 - No references to `nebu_migrate` in ownership transfers or function grants
 - No `GRANT EXECUTE … TO nebu` (legacy backward-compat grants removed)
-- Uses `CREATE INDEX IF NOT EXISTS` instead of `CREATE INDEX CONCURRENTLY` — golang-migrate wraps each file in a transaction, and `CONCURRENTLY` cannot run inside a transaction block
+- Uses `CREATE INDEX IF NOT EXISTS` instead of `CREATE INDEX CONCURRENTLY` - golang-migrate wraps each file in a transaction, and `CONCURRENTLY` cannot run inside a transaction block
 - `NEBU_DB_URL_MIGRATE` is still accepted for backward compatibility but is no longer required; `NEBU_DB_URL` (pointing to `nebu_app`) is used for both migrations and runtime on fresh deployments
 
-**`000001_init.down.sql`** drops all tables and functions in reverse dependency order. Extensions (`pgcrypto`, `uuid-ossp`) are intentionally NOT dropped — they may be shared at the PostgreSQL server level.
+**`000001_init.down.sql`** drops all tables and functions in reverse dependency order. Extensions (`pgcrypto`, `uuid-ossp`) are intentionally NOT dropped - they may be shared at the PostgreSQL server level.
 
 **Local dev reset:**
 
@@ -181,7 +181,7 @@ _Source: `_bmad-output/planning-artifacts/architecture.md`, §Infrastructure & D
 
 ## Production Deployment (OpenTofu IaC)
 
-Story 13-1 introduces a production-grade Infrastructure-as-Code layer under `deploy/`. Three target platforms are supported — see [ADR-014](adr/ADR-014-deployment-strategy-iac.md) for the full decision rationale.
+Story 13-1 introduces a production-grade Infrastructure-as-Code layer under `deploy/`. Three target platforms are supported - see [ADR-014](adr/ADR-014-deployment-strategy-iac.md) for the full decision rationale.
 
 ### deploy/ Directory Structure
 
@@ -225,36 +225,36 @@ Equivalent CI gate: `validate-iac` job in `.gitlab-ci.yml` (runs on every push t
 
 `deploy/tofu/modules/nebu-aws/network.tf` provisions the AWS network foundation: one VPC, two public and two private subnets across two AZs, a single NAT Gateway (cost-optimized; one per AZ for HA production), and scoped security groups for ALB (80/443 from internet), ECS (ports 8008 + 9000 from ALB SG), and RDS (5432 from ECS SG only, egress limited to VPC CIDR). Resource names incorporate the `environment` variable (e.g. `nebu-prod-alb-sg`) for multi-environment deployments.
 
-### AWS Database Module (nebu-aws — database.tf)
+### AWS Database Module (nebu-aws - database.tf)
 
-`deploy/tofu/modules/nebu-aws/database.tf` provisions the Aurora Serverless v2 layer (Story 13-8 — replaces the previous RDS Multi-AZ `aws_db_instance`):
+`deploy/tofu/modules/nebu-aws/database.tf` provisions the Aurora Serverless v2 layer (Story 13-8 - replaces the previous RDS Multi-AZ `aws_db_instance`):
 
-- `aws_db_subnet_group` — uses private subnets from network.tf (no public access); retained as Aurora clusters also require DB subnet groups
-- `aws_rds_cluster` — Aurora PostgreSQL 16.6, `engine_mode = "provisioned"` (Serverless v2 requirement — NOT `"serverless"`), storage encrypted, 7-day automated backups. Serverless v2 scaling is controlled by the `serverlessv2_scaling_configuration` block:
-  - `min_capacity = 0` (default dev) — scales to zero and auto-pauses after 1 hour idle (`seconds_until_auto_pause = 3600`). Set `min_capacity = 0.5` for production to avoid cold-start latency.
-  - `max_capacity = 4` (default) — sufficient for expected Nebu MVP load (approx. 2 vCPU equivalent). Increase for high-traffic production.
-- `aws_rds_cluster_instance` — one instance per cluster, `instance_class = "db.serverless"` (required for Serverless v2); Performance Insights enabled explicitly (7-day retention).
+- `aws_db_subnet_group` - uses private subnets from network.tf (no public access); retained as Aurora clusters also require DB subnet groups
+- `aws_rds_cluster` - Aurora PostgreSQL 16.6, `engine_mode = "provisioned"` (Serverless v2 requirement - NOT `"serverless"`), storage encrypted, 7-day automated backups. Serverless v2 scaling is controlled by the `serverlessv2_scaling_configuration` block:
+  - `min_capacity = 0` (default dev) - scales to zero and auto-pauses after 1 hour idle (`seconds_until_auto_pause = 3600`). Set `min_capacity = 0.5` for production to avoid cold-start latency.
+  - `max_capacity = 4` (default) - sufficient for expected Nebu MVP load (approx. 2 vCPU equivalent). Increase for high-traffic production.
+- `aws_rds_cluster_instance` - one instance per cluster, `instance_class = "db.serverless"` (required for Serverless v2); Performance Insights enabled explicitly (7-day retention).
 - DB master password: `var.db_password` (sensitive, minimum 8 chars). Secrets Manager integration is provided via `secrets.tf`.
-- `db_endpoint` output references `aws_rds_cluster.this.endpoint` (writer endpoint) — Aurora clusters expose a dedicated writer endpoint; the reader endpoint is separate and not used for Nebu's primary DB connection.
+- `db_endpoint` output references `aws_rds_cluster.this.endpoint` (writer endpoint) - Aurora clusters expose a dedicated writer endpoint; the reader endpoint is separate and not used for Nebu's primary DB connection.
 
-Key variables: `aurora_min_capacity` (default `0`), `aurora_max_capacity` (default `4`), `db_password`, `skip_final_snapshot` (default `true` for dev). The former `db_instance_class` and `enable_performance_insights` variables have been removed — Aurora Serverless v2 uses a fixed `db.serverless` class and enables Performance Insights by default.
+Key variables: `aurora_min_capacity` (default `0`), `aurora_max_capacity` (default `4`), `db_password`, `skip_final_snapshot` (default `true` for dev). The former `db_instance_class` and `enable_performance_insights` variables have been removed - Aurora Serverless v2 uses a fixed `db.serverless` class and enables Performance Insights by default.
 
 **Cost model:** Aurora Serverless v2 charges per ACU-second consumed. At `min_capacity = 0`, a completely idle cluster costs near zero (vs. ~$50–100/month for the previous always-on `db.t3.medium` Multi-AZ instance).
 
-### AWS ALB Module (nebu-aws — alb.tf)
+### AWS ALB Module (nebu-aws - alb.tf)
 
 `deploy/tofu/modules/nebu-aws/alb.tf` provisions the internet-facing Application Load Balancer:
 
-- `aws_lb` — internet-facing ALB, placed in public subnets, `drop_invalid_header_fields = true` (header injection protection)
-- `aws_lb_target_group.gateway` — target type `ip` (required for Fargate awsvpc networking), port 8008, health check on `GET /_matrix/client/v3/versions` (HTTP 200)
-- `aws_lb_listener.https` — port 443, TLS policy `ELBSecurityPolicy-TLS13-1-2-2021-06` (TLS 1.3 minimum), ACM certificate via `var.acm_certificate_arn`, forwards to gateway target group
-- `aws_lb_listener.http_redirect` — port 80, permanent `HTTP_301` redirect to HTTPS/443; no plaintext traffic ever reaches the gateway
+- `aws_lb` - internet-facing ALB, placed in public subnets, `drop_invalid_header_fields = true` (header injection protection)
+- `aws_lb_target_group.gateway` - target type `ip` (required for Fargate awsvpc networking), port 8008, health check on `GET /_matrix/client/v3/versions` (HTTP 200)
+- `aws_lb_listener.https` - port 443, TLS policy `ELBSecurityPolicy-TLS13-1-2-2021-06` (TLS 1.3 minimum), ACM certificate via `var.acm_certificate_arn`, forwards to gateway target group
+- `aws_lb_listener.http_redirect` - port 80, permanent `HTTP_301` redirect to HTTPS/443; no plaintext traffic ever reaches the gateway
 
 Module outputs added: `alb_dns_name`, `alb_zone_id` (for Route 53 ALIAS records).
 
-Key variable: `acm_certificate_arn` — required for `tofu apply`; empty string is accepted for `tofu validate` only.
+Key variable: `acm_certificate_arn` - required for `tofu apply`; empty string is accepted for `tofu validate` only.
 
-### AWS Secrets Manager Module (nebu-aws — secrets.tf)
+### AWS Secrets Manager Module (nebu-aws - secrets.tf)
 
 `deploy/tofu/modules/nebu-aws/secrets.tf` provisions all Nebu runtime credentials as individual Secrets Manager secrets under the `nebu/${environment}/` namespace:
 
@@ -267,21 +267,21 @@ Key variable: `acm_certificate_arn` — required for `tofu apply`; empty string 
 | `nebu/{env}/oidc_issuer` | OIDC issuer URL |
 | `nebu/{env}/release_cookie` | Erlang distribution cookie for OTP cluster authentication |
 
-All `aws_secretsmanager_secret_version` resources are provisioned with `PLACEHOLDER_*` initial values and `lifecycle { ignore_changes = [secret_string] }` — preventing `tofu apply` from overwriting operator-rotated values. Operators must set real values before go-live (see RUNBOOK.md).
+All `aws_secretsmanager_secret_version` resources are provisioned with `PLACEHOLDER_*` initial values and `lifecycle { ignore_changes = [secret_string] }` - preventing `tofu apply` from overwriting operator-rotated values. Operators must set real values before go-live (see RUNBOOK.md).
 
-### AWS Compute Module (nebu-aws — compute.tf)
+### AWS Compute Module (nebu-aws - compute.tf)
 
 `deploy/tofu/modules/nebu-aws/compute.tf` provisions the full ECS Fargate compute layer:
 
-- `aws_ecs_cluster` — Fargate cluster with Container Insights enabled (`"nebu-${environment}"`)
-- `aws_iam_role.ecs_task_execution` — Task execution role with `AmazonECSTaskExecutionRolePolicy` + inline policy for `secretsmanager:GetSecretValue` scoped to `arn:aws:secretsmanager:*:*:secret:nebu/${environment}/*` (least-privilege; no wildcard resource)
-- `aws_cloudwatch_log_group` — `/ecs/nebu-{env}-gateway` and `/ecs/nebu-{env}-core`, 30-day retention
-- `aws_ecs_task_definition.gateway` — image `{registry}/nebu-gateway:{version}`, CPU 256 / Memory 512, port 8008, health check `GET /_matrix/client/v3/versions`, `secrets` field references individual Secrets Manager ARNs for `NEBU_DB_URL`, `NEBU_OIDC_ISSUER`, `NEBU_OIDC_CLIENT_SECRET`, `NEBU_INTERNAL_SECRET`
-- `aws_ecs_task_definition.core` — image `{registry}/nebu-core:{version}`, CPU 256 / Memory 512, port 9000, health check `GET /health`, `secrets` field references for `DATABASE_URL`, `RELEASE_COOKIE`, `NEBU_INTERNAL_SECRET`
-- `aws_ecs_service.gateway` — Fargate service in private subnets, attached to the ALB target group (port 8008), `lifecycle { ignore_changes = [task_definition, desired_count] }` for GitOps rolling deployments
-- `aws_ecs_service.core` — Fargate service in private subnets (no ALB attachment; accessed by gateway via gRPC on port 9000 within the VPC)
+- `aws_ecs_cluster` - Fargate cluster with Container Insights enabled (`"nebu-${environment}"`)
+- `aws_iam_role.ecs_task_execution` - Task execution role with `AmazonECSTaskExecutionRolePolicy` + inline policy for `secretsmanager:GetSecretValue` scoped to `arn:aws:secretsmanager:*:*:secret:nebu/${environment}/*` (least-privilege; no wildcard resource)
+- `aws_cloudwatch_log_group` - `/ecs/nebu-{env}-gateway` and `/ecs/nebu-{env}-core`, 30-day retention
+- `aws_ecs_task_definition.gateway` - image `{registry}/nebu-gateway:{version}`, CPU 256 / Memory 512, port 8008, health check `GET /_matrix/client/v3/versions`, `secrets` field references individual Secrets Manager ARNs for `NEBU_DB_URL`, `NEBU_OIDC_ISSUER`, `NEBU_OIDC_CLIENT_SECRET`, `NEBU_INTERNAL_SECRET`
+- `aws_ecs_task_definition.core` - image `{registry}/nebu-core:{version}`, CPU 256 / Memory 512, port 9000, health check `GET /health`, `secrets` field references for `DATABASE_URL`, `RELEASE_COOKIE`, `NEBU_INTERNAL_SECRET`
+- `aws_ecs_service.gateway` - Fargate service in private subnets, attached to the ALB target group (port 8008), `lifecycle { ignore_changes = [task_definition, desired_count] }` for GitOps rolling deployments
+- `aws_ecs_service.core` - Fargate service in private subnets (no ALB attachment; accessed by gateway via gRPC on port 9000 within the VPC)
 
-**Security invariants:** No `environment` field used for secrets in any task definition — all sensitive values are injected exclusively via the `secrets` field with Secrets Manager ARNs. IAM permissions are scoped to the namespace `nebu/${environment}/*` only.
+**Security invariants:** No `environment` field used for secrets in any task definition - all sensitive values are injected exclusively via the `secrets` field with Secrets Manager ARNs. IAM permissions are scoped to the namespace `nebu/${environment}/*` only.
 
 Key variables: `aws_region` (CloudWatch Logs), `image_registry`, `nebu_version`, `acm_certificate_arn`, `ecs_desired_count` (default 1).
 
@@ -304,7 +304,7 @@ aws_ecs_service.core (private subnets, ECS Fargate, no public IP)
   │ port 5432 (private subnets, RDS SG)
   ▼
 aws_rds_cluster (Aurora PostgreSQL 16, Serverless v2, private subnets)
-  ├── aws_rds_cluster_instance (db.serverless — scales 0–4 ACUs)
+  ├── aws_rds_cluster_instance (db.serverless - scales 0–4 ACUs)
   └── writer endpoint: aws_rds_cluster.this.endpoint (port 5432)
 
 Secrets Manager (nebu/{env}/*) ──► ECS task execution role (secretsmanager:GetSecretValue)
@@ -315,17 +315,17 @@ Secrets Manager (nebu/{env}/*) ──► ECS task execution role (secretsmanager
 
 Day-2 operations (rolling updates, secret rotation, teardown) are documented in `deploy/tofu/examples/aws/RUNBOOK.md`.
 
-### Stackit VM + Networking Module (nebu-stackit — 13-3a)
+### Stackit VM + Networking Module (nebu-stackit - 13-3a)
 
 `deploy/tofu/examples/stackit/main.tf` provisions the STACKIT compute and network foundation:
 
-- `stackit_network` — private routed network with configurable CIDR (`var.network_cidr`, default `10.0.0.0/24`)
-- `stackit_security_group` + rules — stateful SG with inbound rules for 443 (HTTPS), 8008 (Matrix API), 22 (SSH); egress unrestricted
-- `stackit_network_interface` — VM NIC attached to the network and SG
-- `stackit_key_pair` — account-level SSH key pair (global resource; no `project_id`)
-- `stackit_server` — Ubuntu 24.04 LTS VM; machine type via `var.vm_plan_id` (default `g2i.2`); AZ via `var.availability_zone` (default `eu01-1`)
-- `stackit_public_ip` — Floating IP associated to the VM NIC. If the VM is recreated, re-attach manually via STACKIT portal or `stackit beta network-interface public-ip attach`
-- `stackit_loadbalancer` — ALB with `PROTOCOL_TCP` listener on port 443 → target pool on VM port 8008; health check is TCP-only (no HTTP path checks); plan via `var.alb_plan_id` (default `p10`)
+- `stackit_network` - private routed network with configurable CIDR (`var.network_cidr`, default `10.0.0.0/24`)
+- `stackit_security_group` + rules - stateful SG with inbound rules for 443 (HTTPS), 8008 (Matrix API), 22 (SSH); egress unrestricted
+- `stackit_network_interface` - VM NIC attached to the network and SG
+- `stackit_key_pair` - account-level SSH key pair (global resource; no `project_id`)
+- `stackit_server` - Ubuntu 24.04 LTS VM; machine type via `var.vm_plan_id` (default `g2i.2`); AZ via `var.availability_zone` (default `eu01-1`)
+- `stackit_public_ip` - Floating IP associated to the VM NIC. If the VM is recreated, re-attach manually via STACKIT portal or `stackit beta network-interface public-ip attach`
+- `stackit_loadbalancer` - ALB with `PROTOCOL_TCP` listener on port 443 → target pool on VM port 8008; health check is TCP-only (no HTTP path checks); plan via `var.alb_plan_id` (default `p10`)
 
 **HTTPS at ALB (upgrade path):** `enable_beta_resources = true` is already set in the provider block. Once `stackit` provider >= 0.96 exposes `PROTOCOL_HTTPS` in its stable schema, change the listener protocol to `PROTOCOL_HTTPS` and set `certificate_reference.name = var.stackit_tls_certificate_arn` (Stackit-managed certificate ARN). Until then, TLS is terminated at the gateway on port 8008.
 
@@ -333,19 +333,19 @@ Day-2 operations (rolling updates, secret rotation, teardown) are documented in 
 
 Key variables: `stackit_project_id`, `stackit_key_path`, `ssh_public_key`, `ubuntu_image_id`, `network_cidr`, `availability_zone`, `vm_plan_id`, `alb_plan_id`, `stackit_tls_certificate_arn`.
 
-### Stackit Managed Database (nebu-stackit — Story 13-8)
+### Stackit Managed Database (nebu-stackit - Story 13-8)
 
 `deploy/tofu/examples/stackit/main.tf` provisions a dedicated STACKIT PostgresFlex instance alongside the application VM. This replaces the previous `postgres:16-alpine` container bundled in docker-compose.
 
 **Resources provisioned:**
 
-- `stackit_postgresflex_instance.nebu` — managed PostgreSQL 16 cluster with daily automated backups (`0 2 * * *` UTC), configurable replicas (`var.postgres_replicas`, default `1`; use `3` for production HA), and ACL locked to the VM's private network CIDR (`var.network_cidr`) — no public exposure
-- `stackit_postgresflex_user.nebu` (`nebu_app`) — application user with `["login"]` role; owns the `nebu` database
-- `stackit_postgresflex_user.keycloak` (`keycloak_app`) — dedicated Keycloak user with `["login"]` role; owns the `keycloak` database. Using separate DB users per application is a defence-in-depth measure: a compromise of the Nebu application user does not grant access to Keycloak data.
-- `stackit_postgresflex_database.nebu` — `nebu` database, owner `nebu_app`
-- `stackit_postgresflex_database.keycloak` — `keycloak` database, owner `keycloak_app`
+- `stackit_postgresflex_instance.nebu` - managed PostgreSQL 16 cluster with daily automated backups (`0 2 * * *` UTC), configurable replicas (`var.postgres_replicas`, default `1`; use `3` for production HA), and ACL locked to the VM's private network CIDR (`var.network_cidr`) - no public exposure
+- `stackit_postgresflex_user.nebu` (`nebu_app`) - application user with `["login"]` role; owns the `nebu` database
+- `stackit_postgresflex_user.keycloak` (`keycloak_app`) - dedicated Keycloak user with `["login"]` role; owns the `keycloak` database. Using separate DB users per application is a defence-in-depth measure: a compromise of the Nebu application user does not grant access to Keycloak data.
+- `stackit_postgresflex_database.nebu` - `nebu` database, owner `nebu_app`
+- `stackit_postgresflex_database.keycloak` - `keycloak` database, owner `keycloak_app`
 
-PostgresFlex connection details (`host`, `port`, `username`, `password`) are computed by the provider after instance creation and passed directly into the cloud-init template as `pg_*` / `kc_*` variables. The password is **not** exposed as a Tofu output — operators retrieve it from Terraform state or via the STACKIT portal.
+PostgresFlex connection details (`host`, `port`, `username`, `password`) are computed by the provider after instance creation and passed directly into the cloud-init template as `pg_*` / `kc_*` variables. The password is **not** exposed as a Tofu output - operators retrieve it from Terraform state or via the STACKIT portal.
 
 **Stackit Sizing Variables:**
 
@@ -356,19 +356,19 @@ PostgresFlex connection details (`host`, `port`, `username`, `password`) are com
 | `postgres_ram` | `4` GB | 8+ GB |
 | `postgres_storage_size` | `20` GB | 50+ GB |
 
-### Stackit OIDC Deployment Profiles (nebu-stackit — Story 13-9)
+### Stackit OIDC Deployment Profiles (nebu-stackit - Story 13-9)
 
 The Stackit deployment supports two OIDC profiles selected via `var.oidc_mode`:
 
 | `oidc_mode` | Bundled IdP | Use case |
 |---|---|---|
 | `"dex"` | Dex IdP sidecar (`dexidp/dex:v2.45.1`) | Test, demo, integration environments |
-| `"external"` _(default)_ | None | Production — operator provides an external OIDC provider |
+| `"external"` _(default)_ | None | Production - operator provides an external OIDC provider |
 
 **`"dex"` profile:**
 - Dex runs as a Docker Compose sidecar on port 5556 with a static in-memory config (no database).
 - `/opt/nebu/dex/config.yaml` is written at boot (mode `0600`) with a static client (`nebu-gateway`) and a static password user (`operator@example.com`).
-- `effective_oidc_issuer` is auto-derived as `http://<server_name>:5556/dex`; the gateway resolves Dex via Docker hairpin NAT (Linux SNAT/masquerade — no extra routing required).
+- `effective_oidc_issuer` is auto-derived as `http://<server_name>:5556/dex`; the gateway resolves Dex via Docker hairpin NAT (Linux SNAT/masquerade - no extra routing required).
 - A conditional SG rule `inbound_dex` opens port 5556 to `var.dex_allowed_cidr` (default `0.0.0.0/0` for demos; restrict to VPN/developer CIDR in shared environments).
 - `var.dex_static_password_hash` (required when `oidc_mode = "dex"`) must be a bcrypt hash (`$2a$`/`$2b$`/`$2y$` prefix). Generate with: `htpasswd -bnBC 12 '' 'yourpassword' | tr -d ':' | sed 's/$2y/$2a/'`.
 - Expected `docker compose ps` output: `dex` (healthy), `core` (healthy), `gateway` (healthy).
@@ -391,7 +391,7 @@ The Stackit deployment supports two OIDC profiles selected via `var.oidc_mode`:
 
 A `lifecycle { precondition }` block on `stackit_server.nebu` enforces: `oidc_mode == "dex" → dex_static_password_hash != null` and `oidc_mode == "external" → length(oidc_issuer) > 0`.
 
-### DNS Mode — `dns_mode` variable (nebu-aws + nebu-stackit — Story 13-10)
+### DNS Mode - `dns_mode` variable (nebu-aws + nebu-stackit - Story 13-10)
 
 Both the AWS and Stackit deployment examples support a `dns_mode` variable that controls whether OpenTofu creates DNS records automatically or leaves DNS registration to the operator.
 
@@ -404,7 +404,7 @@ Default is `"external"` to prevent accidental DNS changes on existing deployment
 
 **Stackit-only: `dex_subdomain_enabled`**
 
-When `dns_mode = "default"` and `dex_subdomain_enabled = true`, an additional `stackit_dns_record_set.dex` resource creates a `dex.<server_name>` A-record pointing to the same floating IP. This lays groundwork for future host-based Dex routing (see story 13-9 dev notes). The variable is validated — setting it to `true` when `dns_mode = "external"` raises a validation error at plan time.
+When `dns_mode = "default"` and `dex_subdomain_enabled = true`, an additional `stackit_dns_record_set.dex` resource creates a `dex.<server_name>` A-record pointing to the same floating IP. This lays groundwork for future host-based Dex routing (see story 13-9 dev notes). The variable is validated - setting it to `true` when `dns_mode = "external"` raises a validation error at plan time.
 
 **Stackit-only: `dns_contact_email`**
 
@@ -412,7 +412,7 @@ An optional `dns_contact_email` variable (default `""`) sets the `contact_email`
 
 **AWS: `dns_name` output**
 
-A new `deploy/tofu/examples/aws/outputs.tf` exports `dns_name = module.nebu_aws.alb_dns_name`. Operators using `dns_mode = "external"` run `tofu output dns_name` to retrieve the ALB hostname to register as a CNAME. Note: CNAME is not supported at the zone apex — use Route 53 ALIAS or an ALIAS/ANAME record at your DNS provider for apex domains.
+A new `deploy/tofu/examples/aws/outputs.tf` exports `dns_name = module.nebu_aws.alb_dns_name`. Operators using `dns_mode = "external"` run `tofu output dns_name` to retrieve the ALB hostname to register as a CNAME. Note: CNAME is not supported at the zone apex - use Route 53 ALIAS or an ALIAS/ANAME record at your DNS provider for apex domains.
 
 **RUNBOOK coverage:** Both `deploy/tofu/examples/aws/RUNBOOK.md` and `deploy/tofu/examples/stackit/RUNBOOK.md` include a "DNS Configuration" section describing both modes, manual registration steps for `external` mode, and import instructions for existing Stackit DNS zones.
 
@@ -424,26 +424,26 @@ A new `deploy/tofu/examples/aws/outputs.tf` exports `dns_name = module.nebu_aws.
 | `dex_subdomain_enabled` | Stackit only | bool | `false` | Create `dex.<server_name>` DNS record when `dns_mode = "default"` |
 | `dns_contact_email` | Stackit only | string | `""` | Contact email for Stackit DNS zone (omitted when empty) |
 
-### Stackit cloud-init Bootstrap (nebu-stackit — 13-3b, updated 13-8, 13-9)
+### Stackit cloud-init Bootstrap (nebu-stackit - 13-3b, updated 13-8, 13-9)
 
 `deploy/tofu/examples/stackit/cloud-init.tftpl` is rendered by `templatefile()` in `main.tf` and injected as `user_data` (base64-encoded) into the VM at provision time. On first boot, the VM:
 
 1. Applies OS security patches (`package_upgrade: true`)
 2. Installs Docker CE + Docker Compose plugin via the official Docker apt repository
 3. Writes `/opt/nebu/` directory tree (permissions `0700`) with:
-   - `.secrets/internal_secret` (mode `0600`, quoted scalar — no trailing newline)
-   - `.env` (mode `0600`) — all runtime secrets injected from OpenTofu variables, including `NEBU_DB_URL` and `NEBU_DB_URL_MIGRATE` pointing to the PostgresFlex managed instance
-   - `/opt/nebu/dex/config.yaml` (mode `0600`, `oidc_mode = "dex"` only) — Dex static configuration
-   - `docker-compose.yml` (mode `0640`) — two or three services: `core`, `gateway`, and conditionally `dex` (when `oidc_mode = "dex"`). No `postgres` service (managed PostgresFlex); no `keycloak` service.
-4. Installs `/etc/systemd/system/nebu.service` — `Type=simple`, no `-d` flag; systemd owns the process lifecycle with `Restart=on-failure RestartSec=10`
+   - `.secrets/internal_secret` (mode `0600`, quoted scalar - no trailing newline)
+   - `.env` (mode `0600`) - all runtime secrets injected from OpenTofu variables, including `NEBU_DB_URL` and `NEBU_DB_URL_MIGRATE` pointing to the PostgresFlex managed instance
+   - `/opt/nebu/dex/config.yaml` (mode `0600`, `oidc_mode = "dex"` only) - Dex static configuration
+   - `docker-compose.yml` (mode `0640`) - two or three services: `core`, `gateway`, and conditionally `dex` (when `oidc_mode = "dex"`). No `postgres` service (managed PostgresFlex); no `keycloak` service.
+4. Installs `/etc/systemd/system/nebu.service` - `Type=simple`, no `-d` flag; systemd owns the process lifecycle with `Restart=on-failure RestartSec=10`
 5. Starts Docker (`systemctl start docker.service && sleep 2`) before starting `nebu.service`
 
 **Changes in Story 13-9:**
-- `keycloak` docker-compose service removed in both profiles — Keycloak is no longer deployed
-- `KC_DB_PASSWORD` removed from `.env` — no Keycloak credentials
+- `keycloak` docker-compose service removed in both profiles - Keycloak is no longer deployed
+- `KC_DB_PASSWORD` removed from `.env` - no Keycloak credentials
 - Conditional Dex `write_files` entry and `dex:` service block added (guarded by `%{ if oidc_mode == "dex" ~}` template directive)
 - `templatefile()` call no longer passes `kc_user`/`kc_password`; now passes `oidc_mode` and `dex_static_password_hash`
-- `local.effective_oidc_issuer` computed in `main.tf` — auto-set to `http://<server_name>:5556/dex` for dex mode; uses `var.oidc_issuer` for external mode
+- `local.effective_oidc_issuer` computed in `main.tf` - auto-set to `http://<server_name>:5556/dex` for dex mode; uses `var.oidc_issuer` for external mode
 
 **Changes in Story 13-15:**
 - Conditional `element` Docker service added (guarded by `%{ if enable_element_web ~}` template directive); see below for full details
@@ -453,15 +453,15 @@ A new `deploy/tofu/examples/aws/outputs.tf` exports `dns_name = module.nebu_aws.
 **Security invariants:**
 - `pg_password` appears only inside `.env` (mode `0600`), never in plain environment variables or log output
 - `dex_static_password_hash` is written only to `/opt/nebu/dex/config.yaml` (mode `0600`)
-- ACL on PostgresFlex is set to `[var.network_cidr]` — never `0.0.0.0/0`
-- `stackit_postgresflex_user.nebu.password` is stored in Terraform state — operators MUST use encrypted Stackit Object Storage backend (see `RUNBOOK.md`)
+- ACL on PostgresFlex is set to `[var.network_cidr]` - never `0.0.0.0/0`
+- `stackit_postgresflex_user.nebu.password` is stored in Terraform state - operators MUST use encrypted Stackit Object Storage backend (see `RUNBOOK.md`)
 - `/opt/nebu/` is `0700` (root-only); `docker-compose.yml` is `0640`
-- `nebu_version` variable rejects `"latest"` — a specific semver tag is required
+- `nebu_version` variable rejects `"latest"` - a specific semver tag is required
 - `oidc_client_secret` must not contain `"` or `\` characters (YAML interpolation constraint, enforced by variable validation)
 
 Day-2 operations (updates, OIDC profile switching, backup, teardown) are documented in `deploy/tofu/examples/stackit/RUNBOOK.md`.
 
-### Element Web Client (nebu-stackit — Story 13-15)
+### Element Web Client (nebu-stackit - Story 13-15)
 
 `deploy/tofu/examples/stackit/` supports an optional Element Web Matrix client deployment controlled by the `enable_element_web` variable. This allows end-users to access Nebu via a browser without installing a separate client.
 
@@ -471,9 +471,9 @@ Day-2 operations (updates, OIDC profile switching, backup, teardown) are documen
 |---|---|---|---|
 | `enable_element_web` | bool | `false` | Deploy `vectorim/element-web:v1.12.15` as a Docker Compose service and configure nginx routing |
 
-**CORS constraint — `enable_tls = true` is required:**
+**CORS constraint - `enable_tls = true` is required:**
 
-When `enable_element_web = true` but `enable_tls = false`, Element Web runs on port 7070 and the gateway runs on port 8008 — different ports mean different origins. Browsers enforce the Same-Origin Policy: every Matrix API call from Element triggers a CORS preflight that fails because the gateway does not emit `Access-Control-Allow-Origin` for the Element origin. **All Matrix API calls from Element silently fail.**
+When `enable_element_web = true` but `enable_tls = false`, Element Web runs on port 7070 and the gateway runs on port 8008 - different ports mean different origins. Browsers enforce the Same-Origin Policy: every Matrix API call from Element triggers a CORS preflight that fails because the gateway does not emit `Access-Control-Allow-Origin` for the Element origin. **All Matrix API calls from Element silently fail.**
 
 When `enable_tls = true`, nginx terminates TLS and serves both services under a single origin (`https://<server_name>`), eliminating the CORS problem entirely.
 
@@ -491,13 +491,13 @@ error_message = "enable_element_web requires enable_tls = true ..."
 ```
 vectorim/element-web:v1.12.15
   image:    vectorim/element-web:v1.12.15
-  ports:    127.0.0.1:7070:80  (loopback only — nginx is the public entry point)
+  ports:    127.0.0.1:7070:80  (loopback only - nginx is the public entry point)
   volumes:  /opt/nebu/element-config.json:/app/config.json:ro
   depends_on: gateway (service_healthy)
   healthcheck: wget -qO- http://localhost/
 ```
 
-Element binds to loopback only (`127.0.0.1:7070`) — it is never reachable directly from the internet. Port 7070 is intentionally absent from the Stackit security group rules. Only nginx (port 443) is the public entry point.
+Element binds to loopback only (`127.0.0.1:7070`) - it is never reachable directly from the internet. Port 7070 is intentionally absent from the Stackit security group rules. Only nginx (port 443) is the public entry point.
 
 **nginx routing table (when `enable_tls = true` AND `enable_element_web = true`):**
 
@@ -510,11 +510,11 @@ Element binds to loopback only (`127.0.0.1:7070`) — it is never reachable dire
 | `/dex/` | `http://127.0.0.1:5556` | Dex IdP (only when `oidc_mode = "dex"`) |
 | `/` | `http://127.0.0.1:7070` | Element Web client (catch-all) |
 
-The `location /` block for Element is always listed last — nginx evaluates prefix locations in longest-match order, ensuring Matrix API paths are never accidentally routed to Element.
+The `location /` block for Element is always listed last - nginx evaluates prefix locations in longest-match order, ensuring Matrix API paths are never accidentally routed to Element.
 
 The Element location includes WebSocket upgrade headers (`Upgrade`, `Connection`) to support future Matrix `/sync` long-polling and WebSocket transports.
 
-**`element-config.json` — Security hardening:**
+**`element-config.json` - Security hardening:**
 
 `/opt/nebu/element-config.json` is written by cloud-init at boot time with values interpolated from OpenTofu variables:
 
@@ -552,9 +552,9 @@ The Element location includes WebSocket upgrade headers (`Upgrade`, `Connection`
 
 ```hcl
 # ── Element Web client ──────────────────────────────────────────────────────
-# REQUIRES enable_tls = true — a lifecycle precondition blocks `tofu apply` if
+# REQUIRES enable_tls = true - a lifecycle precondition blocks `tofu apply` if
 # this constraint is violated. Without nginx (TLS), Element runs on port 7070
-# while the gateway is on port 8008 — different origins cause CORS preflight
+# while the gateway is on port 8008 - different origins cause CORS preflight
 # failures for all Matrix API requests from Element.
 #
 # When enable_tls = true (required): nginx serves Element at / and proxies
@@ -580,7 +580,7 @@ The Element location includes WebSocket upgrade headers (`Upgrade`, `Connection`
 | PersistentVolumeClaim | `{release}-nebu-postgres` | `postgres.external: false` | Postgres storage when running in-cluster |
 | HorizontalPodAutoscaler | `{release}-nebu-gateway` | `autoscaling.gateway.enabled: true` | CPU-based HPA for gateway Deployment |
 
-`NEBU_CORE_GRPC_ADDR` is derived deterministically from the release name as `{release}-nebu-core:9000` — rendered by the ConfigMap template, not a values entry.
+`NEBU_CORE_GRPC_ADDR` is derived deterministically from the release name as `{release}-nebu-core:9000` - rendered by the ConfigMap template, not a values entry.
 
 **Secret management (ExistingSecret pattern):**
 
@@ -593,9 +593,9 @@ kubectl create secret generic nebu-sensitive \
   --from-literal=NEBU_OIDC_CLIENT_SECRET='<secret>'
 ```
 
-The Secret name is referenced in `values.yaml` as `existingSecret.name`. When set, the gateway Deployment loads it via `envFrom.secretRef`. If the name is empty, no Secret is mounted and the gateway will fail to start — this is intentional (GitOps pre-deploy pattern) and documented in NOTES.txt.
+The Secret name is referenced in `values.yaml` as `existingSecret.name`. When set, the gateway Deployment loads it via `envFrom.secretRef`. If the name is empty, no Secret is mounted and the gateway will fail to start - this is intentional (GitOps pre-deploy pattern) and documented in NOTES.txt.
 
-Image tags must be set independently per component. Omitting either tag causes `helm install` to fail with an explicit error — preventing silent deployment of unversioned images.
+Image tags must be set independently per component. Omitting either tag causes `helm install` to fail with an explicit error - preventing silent deployment of unversioned images.
 
 ```bash
 # Minimal production install:
@@ -617,7 +617,7 @@ helm install nebu deploy/helm/nebu/ \
   --set autoscaling.gateway.enabled=true
 ```
 
-### OpenTofu Kubernetes Wrapper (nebu-k8s — Story 13-4c)
+### OpenTofu Kubernetes Wrapper (nebu-k8s - Story 13-4c)
 
 `deploy/tofu/modules/nebu-k8s/` is a thin OpenTofu wrapper around a single `helm_release` resource. It manages the Nebu Helm release on any Kubernetes cluster. The Kubernetes and Helm providers must be configured in the calling root module.
 
@@ -634,9 +634,9 @@ helm install nebu deploy/helm/nebu/ \
 | `helm_timeout` | number | `300` | Seconds to wait for all pods to reach Ready state |
 | `values_files` | list(string) | `[]` | Extra values files; must be non-empty absolute paths |
 
-`wait = true` is set explicitly — `tofu apply` blocks until all pods are Ready or `helm_timeout` seconds elapse. This prevents silent partial deployments.
+`wait = true` is set explicitly - `tofu apply` blocks until all pods are Ready or `helm_timeout` seconds elapse. This prevents silent partial deployments.
 
-`values_files` paths must be absolute (use `"${path.module}/..."` in the calling root module) — relative paths are resolved from the `tofu apply` working directory, not the module directory.
+`values_files` paths must be absolute (use `"${path.module}/..."` in the calling root module) - relative paths are resolved from the `tofu apply` working directory, not the module directory.
 
 **Quick-start example (`deploy/tofu/examples/k8s/`):**
 
@@ -771,7 +771,7 @@ When `core.replicaCount > 1` in `values.yaml`, the Helm chart automatically inje
 
 A headless Service (`core-deployment-headless`) is automatically provisioned alongside the standard ClusterIP Service when `replicaCount > 1`. The headless Service returns A records for each pod, enabling libcluster to discover peers via DNS.
 
-### Health Endpoint — Cluster Status
+### Health Endpoint - Cluster Status
 
 `GET http://core:4000/health` now includes `cluster_nodes` in its JSON response:
 
@@ -839,9 +839,9 @@ release-core-image:      # → <CI_REGISTRY_IMAGE>/nebu-core:<semver>
 ```
 
 Both jobs:
-- Are gated by `if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'` — stable SemVer only; RC/beta tags (`v1.0.0-rc1`) are excluded
-- Set `interruptible: false` and `needs: []` — run independently of branch-only build/integration jobs
-- Use `--cache=false` — no reuse of branch-build Kaniko cache layers, ensuring deterministic and reproducible production images
+- Are gated by `if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'` - stable SemVer only; RC/beta tags (`v1.0.0-rc1`) are excluded
+- Set `interruptible: false` and `needs: []` - run independently of branch-only build/integration jobs
+- Use `--cache=false` - no reuse of branch-build Kaniko cache layers, ensuring deterministic and reproducible production images
 - Pass `GIT_COMMIT`, `BUILD_TIME`, and `RELEASE_VERSION` as `--build-arg` to the Dockerfile
 
 The `workflow:` block in `.gitlab-ci.yml` has been extended to allow tag pipelines:
@@ -886,6 +886,6 @@ helm install nebu deploy/helm/nebu/ \
   --set existingSecret.name=nebu-sensitive
 ```
 
-The `nebu_version` variable in the `nebu-core` shared module already enforces a semver regex and rejects `"latest"` — this constraint remains in force for all release images.
+The `nebu_version` variable in the `nebu-core` shared module already enforces a semver regex and rejects `"latest"` - this constraint remains in force for all release images.
 
-_Source: Story 13-11 staged changes — `.gitlab-ci.yml`, `Makefile`, `deploy/helm/nebu/values.yaml`, `deploy/tofu/examples/*/terraform.tfvars.example`; Story 13-14 (squashed seed migration — single `000001_init.up.sql`, `make dev-reset-db` target, Stackit `nebu_migrate`/`nebu_legacy` backward-compat users)_
+_Source: Story 13-11 staged changes - `.gitlab-ci.yml`, `Makefile`, `deploy/helm/nebu/values.yaml`, `deploy/tofu/examples/*/terraform.tfvars.example`; Story 13-14 (squashed seed migration - single `000001_init.up.sql`, `make dev-reset-db` target, Stackit `nebu_migrate`/`nebu_legacy` backward-compat users)_

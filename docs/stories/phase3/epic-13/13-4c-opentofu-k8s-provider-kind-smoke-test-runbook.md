@@ -23,30 +23,30 @@ So that operators can provision Nebu on any Kubernetes cluster via `tofu apply`.
 
 ## Acceptance Criteria
 
-**AC1 — tofu plan shows helm_release:**
+**AC1 - tofu plan shows helm_release:**
 Given `deploy/tofu/examples/k8s/main.tf` with a configured Kubernetes provider,
 When `tofu plan` runs against a local `kind` cluster (or with `tofu validate` for syntax-only check),
-Then the plan shows a `helm_release` resource for Nebu — no errors
+Then the plan shows a `helm_release` resource for Nebu - no errors
 
-**AC2 — helm install on kind succeeds:**
+**AC2 - helm install on kind succeeds:**
 Given a local `kind` cluster,
 When `helm install nebu deploy/helm/nebu/ -f deploy/helm/nebu/values-dev.yaml` runs,
 Then all Nebu pods reach `Running` state within 3 minutes (documented in RUNBOOK.md as the smoke test procedure)
 
-**AC3 — tofu validate passes:**
+**AC3 - tofu validate passes:**
 Given `deploy/tofu/examples/k8s/main.tf`,
 When `tofu validate` runs,
 Then exit code 0
 
-**AC4 — RUNBOOK.md covers K8s operations:**
+**AC4 - RUNBOOK.md covers K8s operations:**
 Given `deploy/tofu/examples/k8s/RUNBOOK.md`,
 When it is read,
 Then it covers: prerequisites (kind/kubectl/helm), `helm upgrade` procedure, rollback (`helm rollback`), and HPA configuration
 
-**AC5 — nebu-k8s module is a thin wrapper:**
+**AC5 - nebu-k8s module is a thin wrapper:**
 Given `deploy/tofu/modules/nebu-k8s/main.tf`,
 When it is inspected,
-Then it contains only a `helm_release` resource block — no provider-specific infrastructure resources (those are external dependencies the operator provides)
+Then it contains only a `helm_release` resource block - no provider-specific infrastructure resources (those are external dependencies the operator provides)
 
 ---
 
@@ -54,9 +54,9 @@ Then it contains only a `helm_release` resource block — no provider-specific i
 
 ### Tests written FIRST (before implementation code):
 
-Infrastructure story — ATDD skipped (Helm/OpenTofu static validation).
+Infrastructure story - ATDD skipped (Helm/OpenTofu static validation).
 
-**1. `tofu validate` for k8s example — Syntax gate**
+**1. `tofu validate` for k8s example - Syntax gate**
 - Given: `deploy/tofu/examples/k8s/main.tf` does not exist
 - When: `make test-iac-validate` runs (extended for k8s example)
 - Then: exit non-zero

@@ -14,7 +14,7 @@ so that I can immediately revoke access for a user without permanently deleting 
 
 ## Acceptance Criteria
 
-1. `POST /api/v1/admin/users/{userId}/deactivate` — `instance_admin` role required; body: `{"reason": "..."}` (required, min 10 chars):
+1. `POST /api/v1/admin/users/{userId}/deactivate` - `instance_admin` role required; body: `{"reason": "..."}` (required, min 10 chars):
    - Sets `users.is_active = false`, `users.deactivated_at = <now_ms>`, `users.deactivation_reason = reason` in a single DB transaction
    - Calls `gRPC CoreService.InvalidateUserSessions(user_id)` → Core invalidates all active ETS sessions for the user and deletes from `sync_tokens` + `sessions` tables
    - Returns `200 {"data": {"user_id": "...", "status": "deactivated"}}`
@@ -23,11 +23,11 @@ so that I can immediately revoke access for a user without permanently deleting 
    - Returns `400 M_BAD_JSON` if body is missing or `reason` is shorter than 10 chars
    - Calls `audit.LogEvent` with `action="user_deactivated"`, `target_type="user"`, `target_id=userId`, `metadata={"reason": reason}`, `outcome="success"`
 
-2. `POST /api/v1/admin/users/{userId}/reactivate` — `instance_admin` role required; no body required:
+2. `POST /api/v1/admin/users/{userId}/reactivate` - `instance_admin` role required; no body required:
    - Sets `users.is_active = true`, `users.deactivated_at = NULL`, `users.deactivation_reason = NULL` in a single DB transaction
    - Returns `200 {"data": {"user_id": "...", "status": "active"}}`
    - Returns `404 M_NOT_FOUND` if user does not exist
-   - Returns `409 M_CONFLICT` if user is in `keys_deleted` or `anonymized` state (irreversible DSGVO states — cannot reactivate)
+   - Returns `409 M_CONFLICT` if user is in `keys_deleted` or `anonymized` state (irreversible DSGVO states - cannot reactivate)
    - Returns `409 M_CONFLICT` if user is already active (`is_active = true`)
    - Calls `audit.LogEvent` with `action="user_reactivated"`, `target_type="user"`, `target_id=userId`, `outcome="success"`
 
@@ -63,47 +63,47 @@ so that I can immediately revoke access for a user without permanently deleting 
 
 ### Tests written FIRST (before implementation code):
 
-1. **Deactivate active user → 200** — Go unit test (mock `UserRepository`)
+1. **Deactivate active user → 200** - Go unit test (mock `UserRepository`)
    - Given: user `@alice:example.com` with `is_active=true` exists
    - When: `POST /api/v1/admin/users/@alice:example.com/deactivate` with `{"reason": "Security incident"}`
    - Then: status 200, body `{"data": {"user_id": "@alice:example.com", "status": "deactivated"}}`
 
-2. **Deactivate already-deactivated → 409** — Go unit test
+2. **Deactivate already-deactivated → 409** - Go unit test
    - Given: user exists with `is_active=false`
    - When: `POST /api/v1/admin/users/@alice:example.com/deactivate`
    - Then: status 409, body `{"error": {"code": "M_CONFLICT", "message": "User is already deactivated"}}`
 
-3. **Deactivate non-existent user → 404** — Go unit test
+3. **Deactivate non-existent user → 404** - Go unit test
    - Given: `@ghost:example.com` does not exist
    - When: `POST /api/v1/admin/users/@ghost:example.com/deactivate`
    - Then: status 404, body `{"error": {"code": "M_NOT_FOUND", "message": "User not found"}}`
 
-4. **Deactivate with short reason → 400** — Go unit test
+4. **Deactivate with short reason → 400** - Go unit test
    - Given: body `{"reason": "too short"}`
    - When: `POST /api/v1/admin/users/@alice:example.com/deactivate`
    - Then: status 400, body `{"error": {"code": "M_BAD_JSON", "message": "reason must be at least 10 characters"}}`
 
-5. **Reactivate deactivated user → 200** — Go unit test
+5. **Reactivate deactivated user → 200** - Go unit test
    - Given: user exists with `is_active=false`
    - When: `POST /api/v1/admin/users/@alice:example.com/reactivate`
    - Then: status 200, body `{"data": {"user_id": "@alice:example.com", "status": "active"}}`
 
-6. **Reactivate anonymized user → 409** — Go unit test
+6. **Reactivate anonymized user → 409** - Go unit test
    - Given: user exists with `anonymized_at IS NOT NULL`
    - When: `POST /api/v1/admin/users/@alice:example.com/reactivate`
    - Then: status 409, body `{"error": {"code": "M_CONFLICT", "message": "Cannot reactivate: user is in anonymized state"}}`
 
-7. **Reactivate keys_deleted user → 409** — Go unit test
+7. **Reactivate keys_deleted user → 409** - Go unit test
    - Given: user exists with `deletion_status='keys_deleted'`
    - When: `POST /api/v1/admin/users/@alice:example.com/reactivate`
    - Then: status 409, body `{"error": {"code": "M_CONFLICT", "message": "Cannot reactivate: user is in keys_deleted state"}}`
 
-8. **JWT middleware rejects deactivated user → 401** — Go unit test (auth middleware test)
+8. **JWT middleware rejects deactivated user → 401** - Go unit test (auth middleware test)
    - Given: valid JWT for `@alice:example.com` (passes signature check + denylist), but DB lookup returns `is_active=false`
    - When: any request with that JWT
    - Then: status 401, body `{"errcode": "M_UNKNOWN_TOKEN", "error": "Account deactivated"}`
 
-9. **Session invalidation after deactivation** — ExUnit test
+9. **Session invalidation after deactivation** - ExUnit test
    - Given: ETS contains a session for `@alice:example.com`; `sessions` and `sync_tokens` rows exist
    - When: `InvalidateUserSessions` gRPC handler is called with `user_id="@alice:example.com"`
    - Then: ETS entry removed, `sessions` row deleted, `sync_tokens` row deleted
@@ -122,14 +122,14 @@ so that I can immediately revoke access for a user without permanently deleting 
 
 - [x] Implement Elixir `invalidate_user_sessions/2` handler in `Nebu.EventDispatcher.Server` (AC: #5)
   - [x] Follow existing pattern for `session_supervisor_module` configurable dependency injection
-  - [x] Call `Nebu.Session.SessionSupervisor.destroy_session(user_id)` — already handles ETS + DB
+  - [x] Call `Nebu.Session.SessionSupervisor.destroy_session(user_id)` - already handles ETS + DB
   - [x] Write ExUnit test (AC: #11, Acceptance Test #9)
 
 - [x] Add `is_active` check to Go JWT middleware (AC: #6)
   - [x] Add `UserStatusChecker` interface to `gateway/internal/middleware/` (DB query: `SELECT is_active FROM users WHERE user_id = $1`)
   - [x] Add per-middleware-instance `sync.Map` cache with 60-second TTL (closure variable, not package-level, for test isolation)
   - [x] Implement as `WithUserStatusCheck` wrapper (not modifying JWTMiddleware signature)
-  - [x] Check runs AFTER denylist check — only for cryptographically verified tokens
+  - [x] Check runs AFTER denylist check - only for cryptographically verified tokens
   - [x] If `is_active = false` → `401 M_UNKNOWN_TOKEN "Account deactivated"`
   - [x] Wire real `DBUserStatusChecker` (DB-backed) in `main.go`
   - [x] Write unit test (AC: #10, Acceptance Test #8)
@@ -149,14 +149,14 @@ so that I can immediately revoke access for a user without permanently deleting 
   - [x] Wire in `main.go`
 
 - [x] Register new routes in `gateway/internal/api/router.go` (AC: #8)
-  - [x] `POST /api/v1/admin/users/{userId}/deactivate` — `instance_admin` required
-  - [x] `POST /api/v1/admin/users/{userId}/reactivate` — `instance_admin` required
+  - [x] `POST /api/v1/admin/users/{userId}/deactivate` - `instance_admin` required
+  - [x] `POST /api/v1/admin/users/{userId}/reactivate` - `instance_admin` required
 
 - [x] Write Go unit tests `gateway/internal/api/deactivation_handler_test.go` (AC: #9)
   - [x] All 7 handler-level acceptance tests (#1–#7)
   - [x] Audit log verified on success cases
 
-- [x] Run `make test-unit-go` and `make test-unit-elixir` — zero failures (AC: #12)
+- [x] Run `make test-unit-go` and `make test-unit-elixir` - zero failures (AC: #12)
 
 ## Dev Notes
 
@@ -208,7 +208,7 @@ Blocked transitions (return 409 M_CONFLICT):
 
 Add to `proto/core.proto` after the existing `ForgetRoom` messages:
 ```proto
-// InvalidateUserSessions — Story 6.5: Admin deactivation revokes all active sessions.
+// InvalidateUserSessions - Story 6.5: Admin deactivation revokes all active sessions.
 // Calls SessionManager.destroy_session/1 for the target user.
 // Returns ok=true on success; gRPC error on DB failure.
 message InvalidateUserSessionsRequest {
@@ -222,7 +222,7 @@ message InvalidateUserSessionsResponse {
 
 And in the `service CoreService` block:
 ```proto
-// InvalidateUserSessions — Story 6.5: revoke all sessions for a user (admin deactivation)
+// InvalidateUserSessions - Story 6.5: revoke all sessions for a user (admin deactivation)
 rpc InvalidateUserSessions(InvalidateUserSessionsRequest) returns (InvalidateUserSessionsResponse);
 ```
 
@@ -298,7 +298,7 @@ func checkUserActive(ctx context.Context, checker UserStatusChecker, userID stri
         if time.Now().Before(entry.expiresAt) {
             return entry.isActive, nil
         }
-        statusCache.Delete(userID)  // expired — remove and re-fetch
+        statusCache.Delete(userID)  // expired - remove and re-fetch
     }
     isActive, err := checker.IsUserActive(ctx, userID)
     if err != nil {
@@ -312,7 +312,7 @@ func checkUserActive(ctx context.Context, checker UserStatusChecker, userID stri
 }
 ```
 
-**Important: fail-open on DB error** — if the `users` DB lookup fails, allow the request through (log warning). This prevents a DB outage from locking out all users. The story AC requires 401 for deactivated users specifically, not for DB errors.
+**Important: fail-open on DB error** - if the `users` DB lookup fails, allow the request through (log warning). This prevents a DB outage from locking out all users. The story AC requires 401 for deactivated users specifically, not for DB errors.
 
 **Injection into `JWTMiddleware`**: Add optional final parameter:
 ```go
@@ -321,7 +321,7 @@ func JWTMiddleware(provider *auth.Provider, clientID, claimName string, store To
 func JWTMiddleware(provider *auth.Provider, clientID, claimName string, store TokenStore, statusChecker UserStatusChecker, serverName ...string) func(http.Handler) http.Handler
 ```
 
-OR (preferred — avoids breaking existing callers): use a separate functional-options pattern:
+OR (preferred - avoids breaking existing callers): use a separate functional-options pattern:
 
 **Preferred approach: separate `WithUserStatusCheck` wrapper** that wraps around the existing `JWTMiddleware` result:
 ```go
@@ -335,7 +335,7 @@ func WithUserStatusCheck(next func(http.Handler) http.Handler, checker UserStatu
             if checker != nil && userID != "" {
                 active, err := checkUserActive(r.Context(), checker, userID)
                 if err != nil {
-                    slog.Warn("user status check failed — failing open", "user_id", userID, "err", err)
+                    slog.Warn("user status check failed - failing open", "user_id", userID, "err", err)
                 } else if !active {
                     writeMatrixError(w, http.StatusUnauthorized, "M_UNKNOWN_TOKEN", "Account deactivated")
                     return
@@ -448,7 +448,7 @@ func (s *AdminServer) DeactivateAdminUser(ctx context.Context, req DeactivateAdm
         return nil, err
     }
 
-    // 4. gRPC: invalidate sessions (best-effort — log on failure, do not block)
+    // 4. gRPC: invalidate sessions (best-effort - log on failure, do not block)
     if s.CoreClient != nil {
         _, grpcErr := s.CoreClient.InvalidateUserSessions(ctx, &pb.InvalidateUserSessionsRequest{UserId: userID})
         if grpcErr != nil {
@@ -467,7 +467,7 @@ func (s *AdminServer) DeactivateAdminUser(ctx context.Context, req DeactivateAdm
 }
 ```
 
-`ReactivateAdminUser` follows the same pattern — checks `anonymized_at IS NOT NULL`, `deletion_status='keys_deleted'`, `is_active=true` (all → 409), then updates DB and logs.
+`ReactivateAdminUser` follows the same pattern - checks `anonymized_at IS NOT NULL`, `deletion_status='keys_deleted'`, `is_active=true` (all → 409), then updates DB and logs.
 
 ### Critical: OpenAPI Spec Changes
 
@@ -625,7 +625,7 @@ if s.Deactivation == nil {
 }
 ```
 
-The `router_test.go` tests **will fail at compile time** if the `StrictServerInterface` is not satisfied — adding these two new operations to the spec means implementing them in `server.go` is mandatory before `go build` passes.
+The `router_test.go` tests **will fail at compile time** if the `StrictServerInterface` is not satisfied - adding these two new operations to the spec means implementing them in `server.go` is mandatory before `go build` passes.
 
 ### Critical: Spec-First Workflow
 
@@ -640,14 +640,14 @@ The `router_test.go` tests **will fail at compile time** if the `StrictServerInt
 
 ### Critical: gRPC CoreClient Interface
 
-The `AdminServer` uses `pb.CoreServiceClient` (the generated protobuf interface). After `make proto`, this interface gains `InvalidateUserSessions`. No additional wrapper needed — call directly:
+The `AdminServer` uses `pb.CoreServiceClient` (the generated protobuf interface). After `make proto`, this interface gains `InvalidateUserSessions`. No additional wrapper needed - call directly:
 ```go
 s.CoreClient.InvalidateUserSessions(ctx, &pb.InvalidateUserSessionsRequest{UserId: userID})
 ```
 
 ### Critical: Admin UI Stub (Story 7.x)
 
-`gateway/internal/admin/users.go` contains stub `DeactivateUserHandler` and `ReactivateUserHandler` for the Admin UI routes (`POST /admin/users/{userId}/deactivate`). These routes use a different namespace (`/admin/` not `/api/v1/admin/`) and are registered separately in `main.go` lines 319–320. Do NOT touch those handlers — they are the UI stub, not the API implementation.
+`gateway/internal/admin/users.go` contains stub `DeactivateUserHandler` and `ReactivateUserHandler` for the Admin UI routes (`POST /admin/users/{userId}/deactivate`). These routes use a different namespace (`/admin/` not `/api/v1/admin/`) and are registered separately in `main.go` lines 319–320. Do NOT touch those handlers - they are the UI stub, not the API implementation.
 
 Story 7.x (Epic 7 Admin UI) will replace the stub with real API calls. For now, the two systems coexist: UI stub (`/admin/...`) and API (`/api/v1/admin/...`).
 
@@ -655,7 +655,7 @@ Story 7.x (Epic 7 Admin UI) will replace the stub with real API calls. For now, 
 
 The 60-second TTL cache means a deactivated user could still make requests for up to 60 seconds after deactivation before the cache expires. This is an explicit design trade-off (from the Epic 6 epics spec: "cached in ETS with 60s TTL to avoid per-request DB hits"). The InvalidateUserSessions gRPC call revokes the ETS-side session immediately; the 60s window only applies to subsequent JWT-based requests from clients that still hold valid tokens.
 
-The `statusCache` is a closure-local `sync.Map` — one per Go process (not shared across instances). This is acceptable for MVP; future distributed caching is a Phase 2 concern.
+The `statusCache` is a closure-local `sync.Map` - one per Go process (not shared across instances). This is acceptable for MVP; future distributed caching is a Phase 2 concern.
 
 ### Build and Package Constraints
 
@@ -663,70 +663,70 @@ The `statusCache` is a closure-local `sync.Map` — one per Go process (not shar
 - Package declaration: `package api` (api files), `package middleware` (middleware files)
 - Module: `github.com/nebu/nebu` (from `gateway/go.mod`)
 - Test packages: `package api_test` and `package middleware_test` (external test packages, consistent with existing test files)
-- Migration numbering: next available is `000034` (check `ls gateway/migrations/` — highest is `000033`)
+- Migration numbering: next available is `000034` (check `ls gateway/migrations/` - highest is `000033`)
 - Elixir: new test file under `core/apps/event_dispatcher/test/` following existing pattern
 
 ### Project Structure Notes
 
 **Files to CREATE:**
-- `gateway/migrations/000034_users_deactivation.up.sql` — new columns
-- `gateway/migrations/000034_users_deactivation.down.sql` — rollback
-- `gateway/internal/api/deactivation_repo.go` — `DeactivationRepository` interface + implementation
-- `gateway/internal/api/deactivation_handler_test.go` — all 7 handler acceptance tests
-- `gateway/internal/middleware/auth_deactivated_test.go` — middleware rejection test
+- `gateway/migrations/000034_users_deactivation.up.sql` - new columns
+- `gateway/migrations/000034_users_deactivation.down.sql` - rollback
+- `gateway/internal/api/deactivation_repo.go` - `DeactivationRepository` interface + implementation
+- `gateway/internal/api/deactivation_handler_test.go` - all 7 handler acceptance tests
+- `gateway/internal/middleware/auth_deactivated_test.go` - middleware rejection test
 
 **Files to MODIFY:**
-- `proto/core.proto` — add `InvalidateUserSessions` RPC + message types
-- `gateway/internal/grpc/pb/core.pb.go` — REGENERATED by `make proto` (do NOT hand-edit)
-- `gateway/internal/grpc/pb/core_grpc.pb.go` — REGENERATED by `make proto`
-- `core/apps/event_dispatcher/lib/pb/core.pb.ex` — REGENERATED by `make proto`
-- `core/apps/event_dispatcher/lib/pb/core_grpc.pb.ex` — REGENERATED by `make proto`
-- `gateway/api/openapi.yaml` — add two new paths + two new schemas
-- `gateway/internal/api/api_gen.go` — REGENERATED by `make gen-api`
-- `gateway/internal/api/server.go` — add `Deactivation` field; implement `DeactivateAdminUser`, `ReactivateAdminUser`; add response types
-- `gateway/internal/api/router.go` — register two new POST routes + two new wrapper handlers
-- `gateway/internal/middleware/auth.go` — add `UserStatusChecker` interface, `WithUserStatusCheck` wrapper, `DBUserStatusChecker`
-- `gateway/internal/api/users_repo.go` — no changes needed (status derivation already handles `is_active`)
-- `gateway/cmd/gateway/main.go` — wire `Deactivation` into `AdminServer`; wrap `jwtMiddleware` with `WithUserStatusCheck`
-- `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` — add `invalidate_user_sessions/2` + configurable module
+- `proto/core.proto` - add `InvalidateUserSessions` RPC + message types
+- `gateway/internal/grpc/pb/core.pb.go` - REGENERATED by `make proto` (do NOT hand-edit)
+- `gateway/internal/grpc/pb/core_grpc.pb.go` - REGENERATED by `make proto`
+- `core/apps/event_dispatcher/lib/pb/core.pb.ex` - REGENERATED by `make proto`
+- `core/apps/event_dispatcher/lib/pb/core_grpc.pb.ex` - REGENERATED by `make proto`
+- `gateway/api/openapi.yaml` - add two new paths + two new schemas
+- `gateway/internal/api/api_gen.go` - REGENERATED by `make gen-api`
+- `gateway/internal/api/server.go` - add `Deactivation` field; implement `DeactivateAdminUser`, `ReactivateAdminUser`; add response types
+- `gateway/internal/api/router.go` - register two new POST routes + two new wrapper handlers
+- `gateway/internal/middleware/auth.go` - add `UserStatusChecker` interface, `WithUserStatusCheck` wrapper, `DBUserStatusChecker`
+- `gateway/internal/api/users_repo.go` - no changes needed (status derivation already handles `is_active`)
+- `gateway/cmd/gateway/main.go` - wire `Deactivation` into `AdminServer`; wrap `jwtMiddleware` with `WithUserStatusCheck`
+- `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` - add `invalidate_user_sessions/2` + configurable module
 
 **Files to ADD Elixir tests:**
-- `core/apps/event_dispatcher/test/nebu/event_dispatcher/invalidate_user_sessions_test.exs` — new ExUnit test
+- `core/apps/event_dispatcher/test/nebu/event_dispatcher/invalidate_user_sessions_test.exs` - new ExUnit test
 
 **Files NOT to touch:**
-- `gateway/internal/admin/users.go` — UI stub, separate namespace (`/admin/` not `/api/v1/`)
-- `gateway/internal/api/users_repo.go` — no schema changes needed
-- `gateway/internal/api/pagination.go` — unchanged
-- `gateway/internal/api/response.go` — unchanged
-- `gateway/internal/api/middleware.go` — unchanged (this is `RequireRole`, not JWT)
+- `gateway/internal/admin/users.go` - UI stub, separate namespace (`/admin/` not `/api/v1/`)
+- `gateway/internal/api/users_repo.go` - no schema changes needed
+- `gateway/internal/api/pagination.go` - unchanged
+- `gateway/internal/api/response.go` - unchanged
+- `gateway/internal/api/middleware.go` - unchanged (this is `RequireRole`, not JWT)
 
 ### Cross-Story Dependencies
 
-- **Story 6.4 (done):** `AdminServer` struct, `UserRepository`, `audit.LogEvent` pattern established — follow exactly
-- **Story 6.6 (future):** Will add `role_overrides` table — no conflict with this story
+- **Story 6.4 (done):** `AdminServer` struct, `UserRepository`, `audit.LogEvent` pattern established - follow exactly
+- **Story 6.6 (future):** Will add `role_overrides` table - no conflict with this story
 - **Story 7.x (future):** Admin UI stub handlers in `admin/users.go` will be replaced with real API calls
-- **Stories 5.7/5.8 (done):** `deletion_status` and `anonymized_at` columns already exist — reactivation must check both
-- **Story 4.6 (done):** `Nebu.Session.PgStore.invalidate_session/1` already implemented — the Elixir handler just calls it
-- **Story 2.19 (done):** Logout flow also calls `destroy_session` — consistent pattern
+- **Stories 5.7/5.8 (done):** `deletion_status` and `anonymized_at` columns already exist - reactivation must check both
+- **Story 4.6 (done):** `Nebu.Session.PgStore.invalidate_session/1` already implemented - the Elixir handler just calls it
+- **Story 2.19 (done):** Logout flow also calls `destroy_session` - consistent pattern
 
 ### References
 
-- [Source: epics.md#Story-6.5] Lines 2745–2768 — full acceptance criteria
-- [Source: epics.md#Story-6.11] Lines 2907–2927 — Gherkin scenario includes deactivate/reactivate flow (Story 6.11 test)
+- [Source: epics.md#Story-6.5] Lines 2745–2768 - full acceptance criteria
+- [Source: epics.md#Story-6.11] Lines 2907–2927 - Gherkin scenario includes deactivate/reactivate flow (Story 6.11 test)
 - [Source: gateway/internal/api/server.go] `AdminServer` struct + audit pattern (nil-guard, never-raise)
 - [Source: gateway/internal/api/router.go] Route registration wrapper pattern
-- [Source: gateway/internal/api/users_repo.go] `deriveStatus` function — already handles `is_active=false`
+- [Source: gateway/internal/api/users_repo.go] `deriveStatus` function - already handles `is_active=false`
 - [Source: gateway/internal/middleware/auth.go] `JWTMiddleware` chain: verify → denylist → (new) status check
 - [Source: gateway/internal/middleware/denylist.go] TokenStore pattern (basis for `UserStatusChecker`)
-- [Source: proto/core.proto] Existing RPC definitions — follow exact naming/style
+- [Source: proto/core.proto] Existing RPC definitions - follow exact naming/style
 - [Source: core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex] Configurable-module pattern for testability
-- [Source: core/apps/session_manager/lib/nebu/session/session_supervisor.ex] `destroy_session/1` — already handles ETS + DB
+- [Source: core/apps/session_manager/lib/nebu/session/session_supervisor.ex] `destroy_session/1` - already handles ETS + DB
 - [Source: core/apps/session_manager/lib/nebu/session/pg_store.ex] `invalidate_session/1` atomicity contract
 - [Source: core/apps/session_manager/lib/nebu/session/token_validator/postgres.ex] Existing `is_active=false` → `{:error, :deactivated}` pattern (confirms DB column semantics)
 - [Source: gateway/migrations/000021_users_deletion_status.up.sql] `deletion_status` column
 - [Source: gateway/migrations/000022_users_anonymized.up.sql] `anonymized_at` column
-- [Source: gateway/migrations/000033_rls_enable_user_tables.up.sql] Latest migration — new migration is `000034`
-- [Source: gateway/internal/admin/users.go#181] UI stub handler — do NOT replace with this story
+- [Source: gateway/migrations/000033_rls_enable_user_tables.up.sql] Latest migration - new migration is `000034`
+- [Source: gateway/internal/admin/users.go#181] UI stub handler - do NOT replace with this story
 - [Source: gateway/cmd/gateway/main.go#319] Existing UI stub routes (`/admin/...` namespace)
 - [Source: gateway/cmd/gateway/main.go#1058] Pattern for wiring handlers with CoreClient
 - [Source: gateway/internal/audit/writer.go] `LogEvent` signature and never-raise contract
@@ -740,7 +740,7 @@ claude-sonnet-4-6
 
 ### Debug Log References
 
-1. Hand-written proto shim files (`event_context.go`, `public_rooms.go` in `gateway/internal/grpc/pb/`) redeclared types now generated by `make proto`. Resolved by emptying those files — they were already marked "to be replaced once make proto runs".
+1. Hand-written proto shim files (`event_context.go`, `public_rooms.go` in `gateway/internal/grpc/pb/`) redeclared types now generated by `make proto`. Resolved by emptying those files - they were already marked "to be replaced once make proto runs".
 2. `event_context_test.go` and `event_context.go` used `SyncRoomStateEvent` for the `GetEventContextResponse.State` field, but the generated struct uses `ContextStateEvent`. Fixed field type references and `.Type` → `.EventType` accessor.
 3. Existing mock clients in `stream_test.go`, `writer_test.go`, `auth_audit_test.go`, and `handler_test.go` did not implement the new `InvalidateUserSessions` method. Added stub implementations.
 4. Package-level `sync.Map` cache caused test isolation failures (cached `isActive=false` leaked between tests). Resolved by making the cache a per-middleware-instance closure variable.
@@ -766,32 +766,32 @@ claude-sonnet-4-6
 - `gateway/internal/api/deactivation_repo.go`
 
 **Modified:**
-- `proto/core.proto` — added `InvalidateUserSessions` RPC + message types
-- `gateway/internal/grpc/pb/core.pb.go` — REGENERATED by `make proto`
-- `gateway/internal/grpc/pb/core_grpc.pb.go` — REGENERATED by `make proto`
-- `gateway/internal/grpc/pb/event_context.go` — emptied (types now generated by proto)
-- `gateway/internal/grpc/pb/public_rooms.go` — emptied (types now generated by proto)
-- `core/apps/event_dispatcher/lib/pb/core.pb.ex` — REGENERATED by `make proto`
-- `core/apps/event_dispatcher/lib/pb/core_grpc.pb.ex` — REGENERATED by `make proto`
-- `gateway/api/openapi.yaml` — added 2 schemas + 2 paths
-- `gateway/internal/api/api_gen.go` — REGENERATED by `make gen-api`
-- `gateway/internal/api/server.go` — Deactivation field + DeactivateAdminUser/ReactivateAdminUser handlers + response types
-- `gateway/internal/api/router.go` — 2 new POST routes + wrapper functions
-- `gateway/internal/middleware/auth.go` — UserStatusChecker interface + DBUserStatusChecker + WithUserStatusCheck
-- `gateway/cmd/gateway/main.go` — Deactivation wiring + jwtWithStatusCheck
-- `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` — session_supervisor_module + invalidate_user_sessions/2
-- `gateway/internal/matrix/event_context.go` — `.Type` → `.EventType` fix for generated ContextStateEvent
-- `gateway/internal/matrix/event_context_test.go` — SyncRoomStateEvent → ContextStateEvent type fix
-- `gateway/internal/grpc/stream_test.go` — InvalidateUserSessions stub added to mockCoreClient
-- `gateway/internal/audit/writer_test.go` — InvalidateUserSessions stub added to mockCoreClient
-- `gateway/internal/admin/auth_audit_test.go` — InvalidateUserSessions stub added to mockCoreClient
-- `gateway/internal/compliance/handler_test.go` — InvalidateUserSessions stub added to mockCoreClient
+- `proto/core.proto` - added `InvalidateUserSessions` RPC + message types
+- `gateway/internal/grpc/pb/core.pb.go` - REGENERATED by `make proto`
+- `gateway/internal/grpc/pb/core_grpc.pb.go` - REGENERATED by `make proto`
+- `gateway/internal/grpc/pb/event_context.go` - emptied (types now generated by proto)
+- `gateway/internal/grpc/pb/public_rooms.go` - emptied (types now generated by proto)
+- `core/apps/event_dispatcher/lib/pb/core.pb.ex` - REGENERATED by `make proto`
+- `core/apps/event_dispatcher/lib/pb/core_grpc.pb.ex` - REGENERATED by `make proto`
+- `gateway/api/openapi.yaml` - added 2 schemas + 2 paths
+- `gateway/internal/api/api_gen.go` - REGENERATED by `make gen-api`
+- `gateway/internal/api/server.go` - Deactivation field + DeactivateAdminUser/ReactivateAdminUser handlers + response types
+- `gateway/internal/api/router.go` - 2 new POST routes + wrapper functions
+- `gateway/internal/middleware/auth.go` - UserStatusChecker interface + DBUserStatusChecker + WithUserStatusCheck
+- `gateway/cmd/gateway/main.go` - Deactivation wiring + jwtWithStatusCheck
+- `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` - session_supervisor_module + invalidate_user_sessions/2
+- `gateway/internal/matrix/event_context.go` - `.Type` → `.EventType` fix for generated ContextStateEvent
+- `gateway/internal/matrix/event_context_test.go` - SyncRoomStateEvent → ContextStateEvent type fix
+- `gateway/internal/grpc/stream_test.go` - InvalidateUserSessions stub added to mockCoreClient
+- `gateway/internal/audit/writer_test.go` - InvalidateUserSessions stub added to mockCoreClient
+- `gateway/internal/admin/auth_audit_test.go` - InvalidateUserSessions stub added to mockCoreClient
+- `gateway/internal/compliance/handler_test.go` - InvalidateUserSessions stub added to mockCoreClient
 
-**Pre-existing (unchanged — these were the failing tests):**
-- `gateway/internal/api/deactivation_handler_test.go` — 13 acceptance tests (RED phase, now GREEN)
-- `gateway/internal/middleware/auth_deactivated_test.go` — 5 acceptance tests (RED phase, now GREEN)
-- `core/apps/event_dispatcher/test/nebu/event_dispatcher/invalidate_user_sessions_test.exs` — 5 ExUnit tests (RED phase, now GREEN)
+**Pre-existing (unchanged - these were the failing tests):**
+- `gateway/internal/api/deactivation_handler_test.go` - 13 acceptance tests (RED phase, now GREEN)
+- `gateway/internal/middleware/auth_deactivated_test.go` - 5 acceptance tests (RED phase, now GREEN)
+- `core/apps/event_dispatcher/test/nebu/event_dispatcher/invalidate_user_sessions_test.exs` - 5 ExUnit tests (RED phase, now GREEN)
 
 ### Change Log
 
-- 2026-05-01: Story 6.5 implemented — user deactivation/reactivation endpoints, session invalidation via gRPC, JWT middleware status check with 60s TTL cache. All 23 acceptance tests (13 Go handler + 5 middleware + 5 Elixir) pass. Full test suites green. Side-effect: removed hand-written proto shims for Stories 7-27/7-28 (types now generated by proto); fixed ContextStateEvent field references in matrix/event_context.go.
+- 2026-05-01: Story 6.5 implemented - user deactivation/reactivation endpoints, session invalidation via gRPC, JWT middleware status check with 60s TTL cache. All 23 acceptance tests (13 Go handler + 5 middleware + 5 Elixir) pass. Full test suites green. Side-effect: removed hand-written proto shims for Stories 7-27/7-28 (types now generated by proto); fixed ContextStateEvent field references in matrix/event_context.go.

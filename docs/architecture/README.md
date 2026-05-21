@@ -1,7 +1,7 @@
 # 1 Introduction and Goals
 
 Nebu is an enterprise-grade, Matrix Client-Server API compatible chat server built for organizations
-that require full data sovereignty — on-premise deployment, no vendor lock-in, no telemetry, no
+that require full data sovereignty - on-premise deployment, no vendor lock-in, no telemetry, no
 federation overhead. It is licensed under Apache 2.0, enabling commercial use and hosted services
 without copyleft restrictions.
 

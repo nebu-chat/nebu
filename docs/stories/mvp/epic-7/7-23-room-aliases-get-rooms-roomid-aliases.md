@@ -5,7 +5,7 @@ security_review: not-needed
 created: 2026-04-30
 ---
 
-# Story 7.23: Room Aliases — GET /rooms/{roomId}/aliases
+# Story 7.23: Room Aliases - GET /rooms/{roomId}/aliases
 
 Status: review
 
@@ -46,7 +46,7 @@ Handler goes in `gateway/internal/matrix/rooms.go`. Route registration with `jwt
 
 3. Returns `404 M_NOT_FOUND` when the room does not exist.
 
-4. JWT is required — requests without a valid token are rejected by `jwtMiddleware` before the
+4. JWT is required - requests without a valid token are rejected by `jwtMiddleware` before the
    handler is reached.
 
 5. The response always contains the `aliases` key, even when the array is empty (never omit the
@@ -59,22 +59,22 @@ Handler goes in `gateway/internal/matrix/rooms.go`. Route registration with `jwt
 
 ### Tests written FIRST (before implementation code):
 
-1. [GetRoomAliases_EmptyArray_ForMember] — Godog
+1. [GetRoomAliases_EmptyArray_ForMember] - Godog
    - Given: authenticated user `@alice:server` who is a member of `!test:server`
    - When: `GET /_matrix/client/v3/rooms/!test:server/aliases`
    - Then: HTTP 200; body `{"aliases":[]}`
 
-2. [GetRoomAliases_Forbidden_NonMember] — Godog
+2. [GetRoomAliases_Forbidden_NonMember] - Godog
    - Given: authenticated user `@carol:server` who is NOT a member of `!private:server`
    - When: `GET /_matrix/client/v3/rooms/!private:server/aliases`
    - Then: HTTP 403 `{"errcode":"M_FORBIDDEN",...}`
 
-3. [GetRoomAliases_NotFound_UnknownRoom] — Godog
+3. [GetRoomAliases_NotFound_UnknownRoom] - Godog
    - Given: authenticated user with valid JWT
    - When: `GET /_matrix/client/v3/rooms/!doesnotexist:server/aliases`
    - Then: HTTP 404 `{"errcode":"M_NOT_FOUND",...}`
 
-4. [GetRoomAliases_Unauthenticated] — Go unit test (httptest)
+4. [GetRoomAliases_Unauthenticated] - Go unit test (httptest)
    - Given: request with no `Authorization` header (jwtMiddleware not bypassed)
    - When: `GET /rooms/!test:server/aliases`
    - Then: HTTP 401 (handled by jwtMiddleware, handler never reached)
@@ -83,7 +83,7 @@ Handler goes in `gateway/internal/matrix/rooms.go`. Route registration with `jwt
 
 **Files to modify:**
 
-- `gateway/internal/matrix/rooms.go` — Add `GetRoomAliasesHandler` struct:
+- `gateway/internal/matrix/rooms.go` - Add `GetRoomAliasesHandler` struct:
   ```go
   type GetRoomAliasesCoreClient interface {
       GetRoomState(ctx context.Context, req *pb.GetRoomStateRequest) (*pb.GetRoomStateResponse, error)
@@ -96,7 +96,7 @@ Handler goes in `gateway/internal/matrix/rooms.go`. Route registration with `jwt
   ```
   `GetRoomAliases` method:
   1. Extract `roomId` from `r.PathValue("roomId")`.
-  2. Call `GetRoomState` with no event_type filter — solely to verify membership and room
+  2. Call `GetRoomState` with no event_type filter - solely to verify membership and room
      existence (reuse the gRPC call already used by `/members`).
   3. On success: return `{"aliases":[]}`.
   4. On gRPC error: map to Matrix error (same pattern as other room handlers).
@@ -108,16 +108,16 @@ Handler goes in `gateway/internal/matrix/rooms.go`. Route registration with `jwt
   aliases := []string{}
   ```
 
-- `gateway/cmd/gateway/main.go` (~line 404+) — Register:
+- `gateway/cmd/gateway/main.go` (~line 404+) - Register:
   ```
   GET /_matrix/client/v3/rooms/{roomId}/aliases
   ```
   wrapped in `jwtMiddleware`.
 
-- `gateway/internal/matrix/rooms_test.go` — Unit tests for `GetRoomAliases` using `httptest` and
+- `gateway/internal/matrix/rooms_test.go` - Unit tests for `GetRoomAliases` using `httptest` and
   a mock `GetRoomAliasesCoreClient`.
 
-- `gateway/features/room_aliases.feature` — Godog feature file (written first, red phase).
+- `gateway/features/room_aliases.feature` - Godog feature file (written first, red phase).
 
 **No proto changes needed.** The existing `GetRoomStateRequest/Response` is sufficient for
 membership verification. No new gRPC RPCs required for the MVP.

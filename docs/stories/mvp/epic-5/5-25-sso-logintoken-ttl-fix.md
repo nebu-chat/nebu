@@ -16,7 +16,7 @@ so that a harvested token (browser history, referrer, proxy log) expires before 
 
 ## Background / Motivation
 
-Security audit (2026-04-20): `matrix/sso.go:258–266` calls `globalLoginTokens.save(opaqueToken, rawIDToken, 5*time.Minute)`. Adjacent code comments (and Story 2.17/2.18 AC) specify 30 seconds. This is a silent drift — tests for the value never existed, so the longer window went unnoticed.
+Security audit (2026-04-20): `matrix/sso.go:258–266` calls `globalLoginTokens.save(opaqueToken, rawIDToken, 5*time.Minute)`. Adjacent code comments (and Story 2.17/2.18 AC) specify 30 seconds. This is a silent drift - tests for the value never existed, so the longer window went unnoticed.
 
 A 5-minute window is an unnecessarily generous replay budget for a single-use bearer token passed in a URL.
 
@@ -40,11 +40,11 @@ A 5-minute window is an unnecessarily generous replay budget for a single-use be
 
 ### Tests written FIRST (ATDD gate):
 
-1. `TestLoginToken_ExpiresAfter30s` — inject fake clock, save token, advance by 31s, pop → not found
+1. `TestLoginToken_ExpiresAfter30s` - inject fake clock, save token, advance by 31s, pop → not found
 
-2. `TestLoginToken_ValidWithin30s` — pop within 29s → returns stored ID token, entry removed
+2. `TestLoginToken_ValidWithin30s` - pop within 29s → returns stored ID token, entry removed
 
-3. `TestLoginToken_TTLConstantIs30s` — compile-time assertion
+3. `TestLoginToken_TTLConstantIs30s` - compile-time assertion
 
 ---
 

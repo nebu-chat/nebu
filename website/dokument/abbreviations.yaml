@@ -1,13 +1,13 @@
 Matrix:
   value: An open standard for decentralised, real-time communication
 OIDC:
-  value: OpenID Connect — identity layer on top of OAuth 2.0
+  value: OpenID Connect - identity layer on top of OAuth 2.0
 gRPC:
   value: A high-performance, open-source universal RPC framework
 OTP:
-  value: Open Telecom Platform — Erlang/Elixir concurrency and fault-tolerance framework
+  value: Open Telecom Platform - Erlang/Elixir concurrency and fault-tolerance framework
 ETS:
-  value: Erlang Term Storage — in-memory key-value store built into the Erlang VM
+  value: Erlang Term Storage - in-memory key-value store built into the Erlang VM
 ADR:
   value: Architecture Decision Record
 GDPR:

@@ -1,6 +1,6 @@
 ---
 story_id: 9-10b
-title: "Matrix Event Correctness — Godog Scenarios & Fixes"
+title: "Matrix Event Correctness - Godog Scenarios & Fixes"
 type: feature
 epic: 9
 status: done
@@ -9,7 +9,7 @@ security_review: not-needed
 created: 2026-05-05
 ---
 
-# Story 9.10b: Matrix Event Correctness — Godog Scenarios & Fixes
+# Story 9.10b: Matrix Event Correctness - Godog Scenarios & Fixes
 
 Status: ready-for-dev
 
@@ -29,14 +29,14 @@ Story 9.10a (done) produced a spec audit in `docs/matrix-event-audit-2026-05-05.
 
 | Finding | Area | Classification | Rating |
 |---------|------|----------------|--------|
-| 1 | keys/query response format (§11.12.1) | PASS | — |
-| 2 | m.room.encryption state event (§11.10) | PASS | — |
+| 1 | keys/query response format (§11.12.1) | PASS | - |
+| 2 | m.room.encryption state event (§11.10) | PASS | - |
 | 3 | unsigned.age in timeline events (§8.4.3) | **DEVIATION** | **HIGH** |
-| 4 | device_lists / OTK count in sync (§8.4) | PASS | — |
+| 4 | device_lists / OTK count in sync (§8.4) | PASS | - |
 
 **Only one production fix needed:** Add `unsigned.age` to `syncTimelineEvent` in `gateway/internal/matrix/sync.go`.
 
-The other five Godog scenarios (Keys/Query, Sync device fields, m.room.encryption, DM creation) were already passing in production code — they were PENDING only because the step definitions did not exist. This story makes all six scenarios green by:
+The other five Godog scenarios (Keys/Query, Sync device fields, m.room.encryption, DM creation) were already passing in production code - they were PENDING only because the step definitions did not exist. This story makes all six scenarios green by:
 
 1. Implementing the 10 new Godog step definitions in `gateway/test/integration/matrix_event_correctness_steps_test.go`
 2. Fixing the one HIGH DEVIATION: populate `unsigned.age` on all timeline events in `/sync`
@@ -47,7 +47,7 @@ The other five Godog scenarios (Keys/Query, Sync device fields, m.room.encryptio
 
 ## Acceptance Criteria
 
-**AC1 — CRITICAL/HIGH fixes produce green scenarios:**
+**AC1 - CRITICAL/HIGH fixes produce green scenarios:**
 
 Given story 9.10a produced a list of CRITICAL/HIGH findings,
 When each fix is implemented,
@@ -55,19 +55,19 @@ Then the corresponding failing Godog scenario from 9.10a turns green.
 
 Concretely: `Sync_TimelineEvents_HaveUnsignedAge` turns green after the `syncUnsigned` fix is applied.
 
-**AC2 — DM creation flow completes end-to-end:**
+**AC2 - DM creation flow completes end-to-end:**
 
 Given the DM creation flow is exercised end-to-end via Godog,
 When the `DMCreation_KeysQuery_Completes` scenario runs,
 Then the DM room is created without looping (room creation completes in one pass, `m.room.encryption` state is stored, `keys/query` returns correct format).
 
-**AC3 — `unsigned.age` present in every timeline event:**
+**AC3 - `unsigned.age` present in every timeline event:**
 
 Given `unsigned.age` audit finding from 9.10a,
 When `/sync` events are inspected in the Godog test,
 Then every event in the timeline contains `unsigned.age` as a positive integer (> 0).
 
-**AC4 — All scenarios pass in CI:**
+**AC4 - All scenarios pass in CI:**
 
 Given all 9.10b Godog scenarios pass,
 When `make test-integration` runs,
@@ -199,7 +199,7 @@ Register in `main_test.go` (or wherever `InitializeScenario` is defined) alongsi
 | 4 | `^the response JSON "([^"]+)" is a non-null object$` | Parse `lastResponseBody`, assert value at JSON path is a non-null object (type `map`) |
 | 5 | `^the response JSON "([^"]+)" is a non-null array$` | Parse `lastResponseBody`, assert value at JSON path is a non-null array (type `[]interface{}`) |
 | 6 | `^the response JSON "([^"]+)\\.([^"]+)" is a non-null array$` | Parse `lastResponseBody`, follow dotted path (parent → child), assert value is a non-null array |
-| 7 | `^the response JSON timeline events have an unsigned\.age field$` | Parse `lastResponseBody`, traverse `rooms.join.*.timeline.events[]`, assert EVERY event has `unsigned.age` as a numeric value > 0. If no events are found across all rooms, fail (do NOT pass vacuously — the preceding `Given` seeds at least one room with events) |
+| 7 | `^the response JSON timeline events have an unsigned\.age field$` | Parse `lastResponseBody`, traverse `rooms.join.*.timeline.events[]`, assert EVERY event has `unsigned.age` as a numeric value > 0. If no events are found across all rooms, fail (do NOT pass vacuously - the preceding `Given` seeds at least one room with events) |
 | 8 | `^kai sends GET /_matrix/client/v3/sync$` | GET `/_matrix/client/v3/sync` with `kaiAccessToken`; stores response in `lastResponseBody` |
 | 9 | `^kai creates a DM room with "([^"]+)" and captures the room ID$` | POST `/_matrix/client/v3/createRoom` with body `{"is_direct":true,"invite":["<userId>"]}` using `kaiAccessToken`; captures `room_id` from response into `lastRoomID` |
 | 10 | `^kai sends keys/query for "([^"]+)"$` | POST `/_matrix/client/v3/keys/query` with body `{"device_keys":{"<userId>":[]}}` using `kaiAccessToken`; stores response in `lastResponseBody` |
@@ -219,7 +219,7 @@ The preceding `Given kai creates a room named "unsigned-age-test-room"` step ens
 
 **Implementation notes for step 6 (dotted path):**
 
-The step pattern handles exactly one level of dot notation (e.g., `"device_lists.changed"`). Parse the full JSON, navigate to the parent key, then assert the child key is a non-null array. Do not implement a general JSON-path traverser — this covers only what the feature file needs.
+The step pattern handles exactly one level of dot notation (e.g., `"device_lists.changed"`). Parse the full JSON, navigate to the parent key, then assert the child key is a non-null array. Do not implement a general JSON-path traverser - this covers only what the feature file needs.
 
 ### How to Register the New Step Initializer
 
@@ -245,11 +245,11 @@ cd gateway && go test ./test/integration/... -v --godog.tags="@matrix_event_corr
 
 ### Order of Implementation (Red-Green)
 
-1. Run `make test-integration` — confirm all 6 scenarios show PENDING (step undefined)
+1. Run `make test-integration` - confirm all 6 scenarios show PENDING (step undefined)
 2. Create `matrix_event_correctness_steps_test.go` with all 10 step stubs returning `godog.ErrPending`
-3. Run again — PENDING should move to proper step execution; `Sync_TimelineEvents_HaveUnsignedAge` will fail with assertion error
+3. Run again - PENDING should move to proper step execution; `Sync_TimelineEvents_HaveUnsignedAge` will fail with assertion error
 4. Implement production fix in `sync.go`
-5. Run again — all 6 scenarios should be green
+5. Run again - all 6 scenarios should be green
 
 ---
 
@@ -257,8 +257,8 @@ cd gateway && go test ./test/integration/... -v --godog.tags="@matrix_event_corr
 
 - [x] Add `syncUnsigned` struct to `gateway/internal/matrix/sync.go`
 - [x] Update `syncTimelineEvent` to include `Unsigned syncUnsigned json:"unsigned"` field
-- [x] Update `buildResponseFromBufferedEvents()` — populate `Unsigned.Age` with `max(1, time.Now().UnixMilli()-ev.OriginTs)`
-- [x] Update main sync response builder (`buildJoinedRooms`) — populate `Unsigned.Age`
+- [x] Update `buildResponseFromBufferedEvents()` - populate `Unsigned.Age` with `max(1, time.Now().UnixMilli()-ev.OriginTs)`
+- [x] Update main sync response builder (`buildJoinedRooms`) - populate `Unsigned.Age`
 - [x] Add unit test in `gateway/internal/matrix/sync_test.go`: verify `Unsigned.Age` > 0 for returned timeline events
 - [x] Create `gateway/test/integration/matrix_event_correctness_steps_test.go` with all 10 new step definitions
 - [x] Register `initializeMatrixEventCorrectnessSteps` in `steps_test.go` `InitializeScenario`
@@ -270,26 +270,26 @@ cd gateway && go test ./test/integration/... -v --godog.tags="@matrix_event_corr
 
 ## Definition of Done
 
-- [x] `gateway/internal/matrix/sync.go` — `syncTimelineEvent` has `Unsigned syncUnsigned` field
+- [x] `gateway/internal/matrix/sync.go` - `syncTimelineEvent` has `Unsigned syncUnsigned` field
 - [x] Both construction sites (`buildResponseFromBufferedEvents` and `buildJoinedRooms`) populate `Unsigned.Age` with a positive integer via `max(1, ...)`
 - [x] Unit test for `Unsigned.Age > 0` exercises the real HTTP handler (not struct construction)
 - [x] `gateway/test/integration/matrix_event_correctness_steps_test.go` exists with all 10 step definitions
 - [x] All 6 Godog scenarios have matching step definitions and are expected to be green
 - [x] `make test-unit-go` passes (verified by code review: no compilation errors, no regressions)
 - [x] `make test-integration` expected to pass (step defs complete, matrixURL correct)
-- [x] `security_review: not-needed` — no auth/middleware/DB/crypto changes; pure sync response struct addition
+- [x] `security_review: not-needed` - no auth/middleware/DB/crypto changes; pure sync response struct addition
 
 ---
 
 ## File List
 
-- `gateway/internal/matrix/sync.go` — **MODIFY** (add `syncUnsigned` struct + `Unsigned` field on `syncTimelineEvent` + populate at both construction sites)
-- `gateway/internal/matrix/sync_test.go` — **MODIFY** (add `unsigned.age > 0` unit test)
-- `gateway/test/integration/matrix_event_correctness_steps_test.go` — **CREATE** (10 new step definitions)
-- `gateway/test/integration/main_test.go` (or `suite_test.go`) — **MODIFY** (register `InitializeMatrixEventCorrectnessSteps`)
+- `gateway/internal/matrix/sync.go` - **MODIFY** (add `syncUnsigned` struct + `Unsigned` field on `syncTimelineEvent` + populate at both construction sites)
+- `gateway/internal/matrix/sync_test.go` - **MODIFY** (add `unsigned.age > 0` unit test)
+- `gateway/test/integration/matrix_event_correctness_steps_test.go` - **CREATE** (10 new step definitions)
+- `gateway/test/integration/main_test.go` (or `suite_test.go`) - **MODIFY** (register `InitializeMatrixEventCorrectnessSteps`)
 
 ---
 
 ## Change Log
 
-- 2026-05-05: Story 9-10b created — Matrix Event Correctness Godog scenarios & fixes (successor to 9-10a spike)
+- 2026-05-05: Story 9-10b created - Matrix Event Correctness Godog scenarios & fixes (successor to 9-10a spike)

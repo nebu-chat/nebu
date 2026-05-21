@@ -1,4 +1,4 @@
-# Story 2.6: Admin UI OIDC Client — Authorization Code Flow with PKCE
+# Story 2.6: Admin UI OIDC Client - Authorization Code Flow with PKCE
 
 Status: done
 
@@ -29,9 +29,9 @@ so that authorization codes cannot be intercepted or replayed by attackers.
 - [x] Create `gateway/internal/admin/auth.go` (AC: #1–#6)
   - [x] Define `AdminAuth` struct: `provider *auth.Provider`, `clientID string`, `clientSecret string`, `claimName string`, `secret []byte`
   - [x] Implement `NewAdminAuth(provider *auth.Provider, clientID, clientSecret, claimName string, secret []byte) *AdminAuth`
-  - [x] Implement private `signCookie(payload []byte) string` — `base64url(payload) + "." + base64url(HMAC-SHA256(secret, base64url(payload)))`
-  - [x] Implement private `verifyCookie(value string) ([]byte, error)` — split on ".", recompute HMAC, compare with `hmac.Equal` (constant-time)
-  - [x] Implement private `mapAdminRole(rawClaim string) string` — mirrors `middleware.mapRole` (same switch logic)
+  - [x] Implement private `signCookie(payload []byte) string` - `base64url(payload) + "." + base64url(HMAC-SHA256(secret, base64url(payload)))`
+  - [x] Implement private `verifyCookie(value string) ([]byte, error)` - split on ".", recompute HMAC, compare with `hmac.Equal` (constant-time)
+  - [x] Implement private `mapAdminRole(rawClaim string) string` - mirrors `middleware.mapRole` (same switch logic)
   - [x] Implement `LoginHandler(w http.ResponseWriter, r *http.Request)`:
     - Return 503 if `a.provider.Inner() == nil`
     - `verifier := oauth2.GenerateVerifier()`
@@ -54,7 +54,7 @@ so that authorization codes cannot be intercepted or replayed by attackers.
 
 - [x] Create `gateway/internal/admin/auth_test.go` (AC: #1–#6)
   - [x] Use `package admin` (consistent with `metrics_test.go`)
-  - [x] Create `setupAdminOIDCServer(t)` returning `(*httptest.Server, *rsa.PrivateKey)` — extends the pattern from `middleware/auth_test.go`:
+  - [x] Create `setupAdminOIDCServer(t)` returning `(*httptest.Server, *rsa.PrivateKey)` - extends the pattern from `middleware/auth_test.go`:
     - Discovery doc includes `authorization_endpoint`, `token_endpoint`, and `jwks_uri`
     - `/token` endpoint returns a signed ID token (via RSA key) with `sub`, `email`, configurable role claim
     - `/keys` serves the RSA public key JWKS
@@ -75,13 +75,13 @@ so that authorization codes cannot be intercepted or replayed by attackers.
   - [x] Register routes on `mux`: `mux.HandleFunc("GET /admin/auth/login", adminAuth.LoginHandler)` and `mux.HandleFunc("GET /admin/auth/callback", adminAuth.CallbackHandler)`
 
 - [x] Verify `go.mod` promotion (AC: #7)
-  - [x] Run `make build-gateway` — confirms `golang.org/x/oauth2` moves to direct dep
+  - [x] Run `make build-gateway` - confirms `golang.org/x/oauth2` moves to direct dep
 
 ## Dev Notes
 
 ### What This Story Does
 
-Adds PKCE-protected OIDC Authorization Code handlers (`GET /admin/auth/login`, `GET /admin/auth/callback`) to `gateway/internal/admin/`. This is the auth foundation that Epic 3 (Stories 3.9–3.11) builds on. Story 2.6 handles: verifier/state generation, cookie signing, token exchange, ID token validation, and session cookie creation. No templates, no UI — pure HTTP redirect/cookie handlers.
+Adds PKCE-protected OIDC Authorization Code handlers (`GET /admin/auth/login`, `GET /admin/auth/callback`) to `gateway/internal/admin/`. This is the auth foundation that Epic 3 (Stories 3.9–3.11) builds on. Story 2.6 handles: verifier/state generation, cookie signing, token exchange, ID token validation, and session cookie creation. No templates, no UI - pure HTTP redirect/cookie handlers.
 
 ### File Structure
 
@@ -89,9 +89,9 @@ Adds PKCE-protected OIDC Authorization Code handlers (`GET /admin/auth/login`, `
 gateway/
   internal/
     admin/
-      metrics.go      ← EXISTS — do not touch
-      api_gen.go      ← EXISTS (auto-generated) — do not touch
-      metrics_test.go ← EXISTS — do not touch
+      metrics.go      ← EXISTS - do not touch
+      api_gen.go      ← EXISTS (auto-generated) - do not touch
+      metrics_test.go ← EXISTS - do not touch
       auth.go         ← CREATE
       auth_test.go    ← CREATE
   cmd/gateway/
@@ -100,7 +100,7 @@ gateway/
 
 ### CRITICAL: OIDC Provider Not Yet Initialized in main.go
 
-Current `main.go` does **not** call `auth.NewProvider` — the `OIDCIssuer` config exists but is unused. Add initialization after `config.Load()`:
+Current `main.go` does **not** call `auth.NewProvider` - the `OIDCIssuer` config exists but is unused. Add initialization after `config.Load()`:
 
 ```go
 // auth.NewProvider tolerates an unreachable OIDC provider at startup
@@ -135,7 +135,7 @@ type AdminAuth struct {
     clientID     string
     clientSecret string
     claimName    string // from cfg.OIDCClaimRole
-    secret       []byte // HMAC key — same internalSecret as PSK
+    secret       []byte // HMAC key - same internalSecret as PSK
 }
 
 func NewAdminAuth(provider *auth.Provider, clientID, clientSecret, claimName string, secret []byte) *AdminAuth {
@@ -266,8 +266,8 @@ systemRole := mapAdminRole(rawRole)
 
 ```go
 // mapAdminRole maps a raw OIDC claim to a canonical Nebu system role.
-// Mirrors middleware.mapRole — both must remain in sync until refactored to shared package.
-// Future Story 6.3 will add role_overrides DB lookup — update both functions at that time.
+// Mirrors middleware.mapRole - both must remain in sync until refactored to shared package.
+// Future Story 6.3 will add role_overrides DB lookup - update both functions at that time.
 func mapAdminRole(rawClaim string) string {
     switch rawClaim {
     case "instance_admin", "compliance_officer":
@@ -285,7 +285,7 @@ func mapAdminRole(rawClaim string) string {
 | OIDC state | `admin_oidc_state` | `/admin/auth` | 600 (10min) | yes | `r.TLS != nil` | Lax |
 | Admin session | `admin_session` | `/admin` | 28800 (8h) | yes | `r.TLS != nil` | Strict |
 
-**Story 3.11 reads `admin_session` cookie** — the field names (`sub`, `email`, `role`, `exp`) and the HMAC signing scheme established here are final API contracts.
+**Story 3.11 reads `admin_session` cookie** - the field names (`sub`, `email`, `role`, `exp`) and the HMAC signing scheme established here are final API contracts.
 
 ### Test Helper: setupAdminOIDCServer
 
@@ -344,7 +344,7 @@ golang.org/x/oauth2 v0.34.0
 ### Build & Test
 
 ```bash
-make test-unit-go    # go test -race ./... in container — must pass 0 failures
+make test-unit-go    # go test -race ./... in container - must pass 0 failures
 make build-gateway   # verifies compilation + updates go.mod direct dep
 ```
 
@@ -353,27 +353,27 @@ make build-gateway   # verifies compilation + updates go.mod direct dep
 | Story | Relationship |
 |---|---|
 | 2.5 | `OIDCClaimRole` config field + `mapRole` pattern → Story 2.6 uses `cfg.OIDCClaimRole` as `claimName` and replicates mapping as `mapAdminRole` |
-| 2.7 | gRPC metadata flow — independent, no interaction with admin auth |
-| 3.9 | Admin login page UI at `/admin/login/start` — uses same `admin_oidc_state` cookie format |
-| 3.10 | Admin callback at `/admin/callback` — same `admin_session` cookie format; replaces Story 2.6 handlers with full version |
-| 3.11 | `SessionGuard` reads `admin_session` — field names (`sub`, `email`, `role`, `exp`) and HMAC format are frozen after this story |
-| 6.3 | Adds `role_overrides` DB lookup to role mapping — both `mapAdminRole` here and `mapRole` in middleware will need updating |
+| 2.7 | gRPC metadata flow - independent, no interaction with admin auth |
+| 3.9 | Admin login page UI at `/admin/login/start` - uses same `admin_oidc_state` cookie format |
+| 3.10 | Admin callback at `/admin/callback` - same `admin_session` cookie format; replaces Story 2.6 handlers with full version |
+| 3.11 | `SessionGuard` reads `admin_session` - field names (`sub`, `email`, `role`, `exp`) and HMAC format are frozen after this story |
+| 6.3 | Adds `role_overrides` DB lookup to role mapping - both `mapAdminRole` here and `mapRole` in middleware will need updating |
 
 ### Project Structure Notes
 
 - Test package: `package admin` (white-box, consistent with `metrics_test.go`)
-- `api_gen.go` uses `ServerInterface` for Admin API (`/api/v1/*`) — Story 2.6 auth handlers are NOT part of that interface (different URL space)
-- Architecture rule "Admin UI via embed.FS" — not triggered here (no template rendering in Story 2.6)
-- Architecture rule "Admin API must implement ServerInterface" — not triggered (auth handlers are separate from the CRUD API)
+- `api_gen.go` uses `ServerInterface` for Admin API (`/api/v1/*`) - Story 2.6 auth handlers are NOT part of that interface (different URL space)
+- Architecture rule "Admin UI via embed.FS" - not triggered here (no template rendering in Story 2.6)
+- Architecture rule "Admin API must implement ServerInterface" - not triggered (auth handlers are separate from the CRUD API)
 
 ### References
 
 - [Source: epics.md#Story-2.6] ACs 1–7 (authoritative)
 - [Source: epics.md#Story-3.9] Cookie names + attributes: `admin_oidc_state` (HttpOnly, Secure, SameSite=Lax, 10min)
 - [Source: epics.md#Story-3.10] Session cookie: `admin_session` (HttpOnly, Secure, SameSite=Strict, 8h), HMAC-SHA256
-- [Source: epics.md#Story-3.11] `SessionGuard` reads `admin_session` — cookie schema is final after this story
+- [Source: epics.md#Story-3.11] `SessionGuard` reads `admin_session` - cookie schema is final after this story
 - [Source: gateway/internal/auth/oidc.go] `auth.Provider.Inner()` → nil-safe OIDC provider access
-- [Source: gateway/internal/config/config.go] `OIDCClientID`, `OIDCClientSecret`, `OIDCClaimRole` — all present, no new fields needed
+- [Source: gateway/internal/config/config.go] `OIDCClientID`, `OIDCClientSecret`, `OIDCClaimRole` - all present, no new fields needed
 - [Source: gateway/internal/middleware/auth.go] `mapRole` pattern → replicated as `mapAdminRole`
 - [Source: gateway/internal/middleware/auth_test.go] `setupOIDCServer` helper → extend for admin (add `/token` endpoint)
 - [Source: gateway/cmd/gateway/main.go] PSK read pattern for `internalSecret` + mux setup
@@ -401,9 +401,9 @@ claude-sonnet-4-6 (1M context)
 - `gateway/internal/admin/auth.go` (created)
 - `gateway/internal/admin/auth_test.go` (created)
 - `gateway/cmd/gateway/main.go` (modified)
-- `gateway/go.mod` (modified — oauth2 + go-jose promoted to direct)
+- `gateway/go.mod` (modified - oauth2 + go-jose promoted to direct)
 
 ## Change Log
 
-- 2026-03-27: Implemented PKCE-protected OIDC Authorization Code flow for Admin UI — created auth.go + auth_test.go, wired routes in main.go, promoted go.mod deps to direct
-- 2026-03-27: Code review passed — 1 LOW fix applied (added error handling for `idToken.Claims()` in CallbackHandler). All ACs verified, all tasks confirmed done, security review clean.
+- 2026-03-27: Implemented PKCE-protected OIDC Authorization Code flow for Admin UI - created auth.go + auth_test.go, wired routes in main.go, promoted go.mod deps to direct
+- 2026-03-27: Code review passed - 1 LOW fix applied (added error handling for `idToken.Claims()` in CallbackHandler). All ACs verified, all tasks confirmed done, security review clean.

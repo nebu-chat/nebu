@@ -1,7 +1,7 @@
 # Story 4.17: Typing Indicators + Read Receipts
 
 **Status:** review
-**Epic:** 4 — End-Users Can Chat in Rooms Using Any Standard Matrix Client
+**Epic:** 4 - End-Users Can Chat in Rooms Using Any Standard Matrix Client
 **Story Key:** 4-17-typing-indicators-read-receipts
 **Created:** 2026-04-03
 
@@ -17,7 +17,7 @@ so that other room members can see when I'm typing and which messages I've read.
 
 ## Acceptance Criteria
 
-1. `PUT /_matrix/client/v3/rooms/{roomId}/typing/{userId}` — authenticated endpoint:
+1. `PUT /_matrix/client/v3/rooms/{roomId}/typing/{userId}` - authenticated endpoint:
    - Body: `{"typing": true|false, "timeout": <ms>}` (timeout ignored when `typing: false`)
    - Calls `gRPC CoreService.SetTyping`; Core broadcasts an `m.typing` ephemeral event to all room members via `:pg`
    - Returns `200 {}` on success
@@ -25,21 +25,21 @@ so that other room members can see when I'm typing and which messages I've read.
    - Returns `403 M_FORBIDDEN` if user is not a room member (Core enforces this)
    - Typing state auto-expires after `timeout` ms (max 30000 ms); Core uses `Process.send_after` in Room GenServer to clear
 
-2. `POST /_matrix/client/v3/rooms/{roomId}/receipt/{receiptType}/{eventId}` — authenticated endpoint:
+2. `POST /_matrix/client/v3/rooms/{roomId}/receipt/{receiptType}/{eventId}` - authenticated endpoint:
    - `receiptType` must be `m.read`; returns `400 M_INVALID_PARAM` for any other value
    - Calls `gRPC CoreService.SendReceipt`; Core updates read marker in the `read_receipts` PostgreSQL table
    - Returns `200 {}` on success
    - Returns `403 M_FORBIDDEN` if user is not a room member
 
-3. Proto adds `rpc SendReceipt(SendReceiptRequest) returns (SendReceiptResponse)` to `CoreService` (note: `SetTyping` already exists in proto but its stub in `client.go` is still a no-op — this story implements it for real)
+3. Proto adds `rpc SendReceipt(SendReceiptRequest) returns (SendReceiptResponse)` to `CoreService` (note: `SetTyping` already exists in proto but its stub in `client.go` is still a no-op - this story implements it for real)
 
-4. `SetTyping` in `client.go` is implemented (currently a stub returning `nil, nil`) — calls `c.core.SetTyping(ctx, req)`
+4. `SetTyping` in `client.go` is implemented (currently a stub returning `nil, nil`) - calls `c.core.SetTyping(ctx, req)`
 
 5. New Go handler files: `gateway/internal/matrix/typing.go` and `gateway/internal/matrix/receipts.go` (per architecture spec)
 
 6. New PostgreSQL migration `000014_read_receipts.up.sql` creates `read_receipts` table
 
-7. Elixir Core: `set_typing/2` in `Nebu.EventDispatcher.Server` is implemented (currently a no-op stub) — manages ephemeral typing state in Room GenServer via ETS and broadcasts `m.typing` event; `send_receipt/2` handler persists to DB
+7. Elixir Core: `set_typing/2` in `Nebu.EventDispatcher.Server` is implemented (currently a no-op stub) - manages ephemeral typing state in Room GenServer via ETS and broadcasts `m.typing` event; `send_receipt/2` handler persists to DB
 
 8. Unit tests: `gateway/internal/matrix/typing_test.go` and `gateway/internal/matrix/receipts_test.go`; Elixir ExUnit tests for `set_typing` and `send_receipt` handlers
 
@@ -49,52 +49,52 @@ so that other room members can see when I'm typing and which messages I've read.
 
 ### Tests written FIRST (before implementation code):
 
-**1. PUT /typing/{userId} happy path — typing=true — Go httptest**
+**1. PUT /typing/{userId} happy path - typing=true - Go httptest**
 - Given: authenticated user `@alice:test.local`; body `{"typing": true, "timeout": 10000}`; mock SetTyping returns success
 - When: `PUT /_matrix/client/v3/rooms/!room1:test.local/typing/@alice:test.local`
 - Then: 200 `{}` response; mock received `SetTypingRequest{room_id: "!room1:test.local", user_id: "@alice:test.local", typing: true, timeout_ms: 10000}`
 
-**2. PUT /typing/{userId} userId mismatch → 403 — Go httptest**
+**2. PUT /typing/{userId} userId mismatch → 403 - Go httptest**
 - Given: authenticated user `@alice:test.local`; userId in path is `@bob:test.local`
 - When: `PUT /_matrix/client/v3/rooms/!room1:test.local/typing/@bob:test.local`
 - Then: 403 `{"errcode": "M_FORBIDDEN", "error": "..."}`; Core is NOT called
 
-**3. PUT /typing/{userId} unauthenticated → 401 — Go httptest**
+**3. PUT /typing/{userId} unauthenticated → 401 - Go httptest**
 - Given: no Authorization header
 - When: `PUT /_matrix/client/v3/rooms/!room1:test.local/typing/@alice:test.local`
 - Then: 401 (JWTMiddleware rejects before handler runs)
 
-**4. POST /receipt/m.read/{eventId} happy path — Go httptest**
+**4. POST /receipt/m.read/{eventId} happy path - Go httptest**
 - Given: authenticated user `@alice:test.local`; receiptType `m.read`; mock SendReceipt returns success
 - When: `POST /_matrix/client/v3/rooms/!room1:test.local/receipt/m.read/$eventId123`
 - Then: 200 `{}`; mock received `SendReceiptRequest{room_id: "!room1:test.local", user_id: "@alice:test.local", receipt_type: "m.read", event_id: "$eventId123"}`
 
-**5. POST /receipt unsupported receiptType → 400 — Go httptest**
+**5. POST /receipt unsupported receiptType → 400 - Go httptest**
 - Given: authenticated user; receiptType is `m.fully_read`
 - When: `POST /_matrix/client/v3/rooms/!room1:test.local/receipt/m.fully_read/$eventId123`
 - Then: 400 `{"errcode": "M_INVALID_PARAM", "error": "Only m.read receipts are supported"}`; Core is NOT called
 
-**6. POST /receipt non-member → 403 — Go httptest**
+**6. POST /receipt non-member → 403 - Go httptest**
 - Given: authenticated user; mock SendReceipt returns `codes.PermissionDenied`
 - When: `POST /_matrix/client/v3/rooms/!room1:test.local/receipt/m.read/$eventId123`
 - Then: 403 `{"errcode": "M_FORBIDDEN", ...}`
 
-**7. Elixir: set_typing broadcasts ephemeral event — ExUnit**
+**7. Elixir: set_typing broadcasts ephemeral event - ExUnit**
 - Given: a running Room GenServer for `!room1:test.local` with `@alice:test.local` as member; a :pg subscriber to `room:!room1:test.local`
 - When: `Nebu.EventDispatcher.Server.set_typing(request, stream)` called with `{typing: true, user_id: "@alice:test.local", room_id: "!room1:test.local", timeout_ms: 5000}`
 - Then: subscriber receives `{:typing_update, "@alice:test.local", true}`; `SetTypingResponse{}` returned
 
-**8. Elixir: set_typing auto-expires — ExUnit**
+**8. Elixir: set_typing auto-expires - ExUnit**
 - Given: `set_typing` called with `{typing: true, timeout_ms: 50}` (very short timeout for test)
 - When: 100ms elapses (or `Process.sleep(100)`)
 - Then: typing state for the user is cleared (Room GenServer no longer marks them as typing); subscriber receives a second `{:typing_update, "@alice:test.local", false}` broadcast
 
-**9. Elixir: send_receipt persists to DB — ExUnit**
+**9. Elixir: send_receipt persists to DB - ExUnit**
 - Given: `read_receipts` table exists; user `@alice:test.local` is a member of `!room1:test.local`; fake DB module injected
 - When: `send_receipt(request, stream)` called with `{room_id, user_id, receipt_type: "m.read", event_id: "$event1"}`
 - Then: fake DB `upsert_receipt/4` was called with correct args; `SendReceiptResponse{}` returned
 
-**10. Elixir: send_receipt non-member → PERMISSION_DENIED — ExUnit**
+**10. Elixir: send_receipt non-member → PERMISSION_DENIED - ExUnit**
 - Given: user `@bob:test.local` is NOT a member of `!room1:test.local`
 - When: `send_receipt` called
 - Then: raises `GRPC.RPCError` with status `permission_denied`
@@ -112,7 +112,7 @@ rpc SendReceipt(SendReceiptRequest) returns (SendReceiptResponse);
 
 Add message definitions:
 ```protobuf
-// SendReceipt — persists a read receipt for a user in a room
+// SendReceipt - persists a read receipt for a user in a room
 message SendReceiptRequest {
   string room_id      = 1;
   string user_id      = 2;
@@ -122,7 +122,7 @@ message SendReceiptRequest {
 message SendReceiptResponse {}
 ```
 
-**IMPORTANT:** `SetTyping` already exists in the proto with correct fields. Do NOT duplicate it. Do NOT run `make proto` manually — the proto is compiled inside a Docker container via `make proto`. After editing the `.proto` file, regenerate both stubs:
+**IMPORTANT:** `SetTyping` already exists in the proto with correct fields. Do NOT duplicate it. Do NOT run `make proto` manually - the proto is compiled inside a Docker container via `make proto`. After editing the `.proto` file, regenerate both stubs:
 - `core/apps/event_dispatcher/lib/pb/core.pb.ex` (Elixir protobuf stubs)
 - `core/apps/event_dispatcher/lib/pb/core_grpc.pb.ex` (Elixir gRPC stubs)
 - `gateway/internal/grpc/pb/*.go` (Go stubs)
@@ -132,7 +132,7 @@ Run `make proto` to regenerate. The generated files are checked into source cont
 ### Existing Proto: SetTyping (already defined)
 
 ```protobuf
-// Already in proto/core.proto — DO NOT re-add:
+// Already in proto/core.proto - DO NOT re-add:
 message SetTypingRequest {
   string room_id    = 1;
   string user_id    = 2;
@@ -190,7 +190,7 @@ type typingRequestBody struct {
 
 **Path values:** Use `r.PathValue("roomId")` and `r.PathValue("userId")` (Go 1.22+, consistent with existing handlers).
 
-**User ID comparison:** Construct the authenticated user_id from `sub` + `serverName` (via `coregrpc.FormatUserID`), then compare with path `userId`. Exact string equality — no normalization needed.
+**User ID comparison:** Construct the authenticated user_id from `sub` + `serverName` (via `coregrpc.FormatUserID`), then compare with path `userId`. Exact string equality - no normalization needed.
 
 ### Go Handler: receipts.go
 
@@ -290,9 +290,9 @@ Down migration:
 DROP TABLE IF EXISTS read_receipts;
 ```
 
-This is an **UPSERT** pattern: one row per `(room_id, user_id, receipt_type)` — the read marker moves forward only (Core enforces no backward movement at the application level for MVP; DB allows overwrite).
+This is an **UPSERT** pattern: one row per `(room_id, user_id, receipt_type)` - the read marker moves forward only (Core enforces no backward movement at the application level for MVP; DB allows overwrite).
 
-### Elixir: set_typing — full implementation in EventDispatcher.Server
+### Elixir: set_typing - full implementation in EventDispatcher.Server
 
 The current stub in `Nebu.EventDispatcher.Server` is:
 ```elixir
@@ -334,7 +334,7 @@ def set_typing(request, _stream) do
 end
 ```
 
-### Elixir: Room.Server — set_typing/4
+### Elixir: Room.Server - set_typing/4
 
 Add to `Nebu.Room.Server`:
 
@@ -346,7 +346,7 @@ Sets or clears the typing indicator for `user_id` in `room_id`.
 When `typing: true`, schedules auto-clear after `timeout_ms` via `Process.send_after`.
 When `typing: false`, clears immediately.
 Broadcasts `{:typing_update, user_id, typing}` to all :pg room subscribers.
-State is ephemeral — NOT persisted to DB. No crash/restart recovery needed.
+State is ephemeral - NOT persisted to DB. No crash/restart recovery needed.
 """
 @spec set_typing(String.t(), String.t(), boolean(), integer()) :: :ok
 def set_typing(room_id, user_id, typing, timeout_ms) do
@@ -393,9 +393,9 @@ end
 
 **init/1 extension:** Add `typing_users: MapSet.new()` to the state map in both the `load_members` and `insert_room` branches.
 
-**No DB persistence:** Typing state is ephemeral. On Room GenServer crash/restart, `typing_users` resets to empty `MapSet.new()` — this is correct and expected. No crash/restart test required for typing (Persistence Strategy: Option C — Stateless).
+**No DB persistence:** Typing state is ephemeral. On Room GenServer crash/restart, `typing_users` resets to empty `MapSet.new()` - this is correct and expected. No crash/restart test required for typing (Persistence Strategy: Option C - Stateless).
 
-### Elixir: send_receipt — implementation in EventDispatcher.Server
+### Elixir: send_receipt - implementation in EventDispatcher.Server
 
 Add new `send_receipt/2` handler:
 
@@ -448,7 +448,7 @@ end
 
 ### Elixir: Nebu.Receipt.DB module
 
-Create new module `core/apps/event_dispatcher/lib/nebu/receipt/db.ex` (or place in `room_manager` app — follow existing pattern of `Nebu.Room.DB`):
+Create new module `core/apps/event_dispatcher/lib/nebu/receipt/db.ex` (or place in `room_manager` app - follow existing pattern of `Nebu.Room.DB`):
 
 ```elixir
 defmodule Nebu.Receipt.DB do
@@ -478,13 +478,13 @@ end
 
 | File | Action |
 |------|--------|
-| `gateway/internal/matrix/typing.go` | CREATE — TypingHandler |
-| `gateway/internal/matrix/typing_test.go` | CREATE — unit tests (write FIRST) |
-| `gateway/internal/matrix/receipts.go` | CREATE — ReceiptsHandler |
-| `gateway/internal/matrix/receipts_test.go` | CREATE — unit tests (write FIRST) |
-| `gateway/migrations/000014_read_receipts.up.sql` | CREATE — new table |
-| `gateway/migrations/000014_read_receipts.down.sql` | CREATE — down migration |
-| `core/apps/event_dispatcher/lib/nebu/receipt/db.ex` | CREATE — receipt DB module |
+| `gateway/internal/matrix/typing.go` | CREATE - TypingHandler |
+| `gateway/internal/matrix/typing_test.go` | CREATE - unit tests (write FIRST) |
+| `gateway/internal/matrix/receipts.go` | CREATE - ReceiptsHandler |
+| `gateway/internal/matrix/receipts_test.go` | CREATE - unit tests (write FIRST) |
+| `gateway/migrations/000014_read_receipts.up.sql` | CREATE - new table |
+| `gateway/migrations/000014_read_receipts.down.sql` | CREATE - down migration |
+| `core/apps/event_dispatcher/lib/nebu/receipt/db.ex` | CREATE - receipt DB module |
 
 ## Files to Modify
 
@@ -509,28 +509,28 @@ end
 - Consumer-defined interfaces: `TypingCoreClient` defined in `typing.go` (not in `client.go`); `ReceiptsCoreClient` defined in `receipts.go`
 - Package name: `package matrix` for both files
 - Module path: `github.com/nebu/nebu/internal/matrix`
-- Error handling: explicit, no panic; use `writeMatrixError` helper (already exists in the `matrix` package — it is used in every existing handler)
+- Error handling: explicit, no panic; use `writeMatrixError` helper (already exists in the `matrix` package - it is used in every existing handler)
 - Context: always passed as first parameter; use `coregrpc.WithUserMetadata(r.Context(), userID, systemRole)` for gRPC calls
 - Path values: `r.PathValue("roomId")`, `r.PathValue("userId")`, `r.PathValue("receiptType")`, `r.PathValue("eventId")` (Go 1.22+ mux)
 
 ### Elixir conventions
-- GenServer state: via `handle_*` callbacks only — NEVER directly mutate state
-- `typing_users` is ephemeral (MapSet in GenServer state only) — no DB write, no ETS, no persistence
-- Let it crash + Supervisor: no try/rescue in set_typing logic — if Room GenServer crashes, Horde restarts it with `typing_users: MapSet.new()` (correct for ephemeral state)
-- Configurable DB/registry modules via `Application.get_env` (established pattern across all existing handlers in `EventDispatcher.Server`) — mandatory for testability
-- Receipt DB: use the same Postgrex/Repo pattern as `Nebu.Room.DB` — check that file before writing `Nebu.Receipt.DB`
+- GenServer state: via `handle_*` callbacks only - NEVER directly mutate state
+- `typing_users` is ephemeral (MapSet in GenServer state only) - no DB write, no ETS, no persistence
+- Let it crash + Supervisor: no try/rescue in set_typing logic - if Room GenServer crashes, Horde restarts it with `typing_users: MapSet.new()` (correct for ephemeral state)
+- Configurable DB/registry modules via `Application.get_env` (established pattern across all existing handlers in `EventDispatcher.Server`) - mandatory for testability
+- Receipt DB: use the same Postgrex/Repo pattern as `Nebu.Room.DB` - check that file before writing `Nebu.Receipt.DB`
 
 ### Proto conventions
 - Message names: PascalCase (`SendReceiptRequest`, `SendReceiptResponse`)
 - Field numbers: start at 1, never reuse deleted numbers
 - The proto file is at `proto/core.proto` (single file, not sharded)
-- After editing, regenerate with `make proto` (Docker container — no local `buf` needed)
+- After editing, regenerate with `make proto` (Docker container - no local `buf` needed)
 - Elixir generated files are in `core/apps/event_dispatcher/lib/pb/`; Go files in `gateway/internal/grpc/pb/`
 
-### Typing state — ephemeral by design (no recovery needed)
+### Typing state - ephemeral by design (no recovery needed)
 - Typing state lives ONLY in `Room.Server` GenServer state (`typing_users: MapSet.t()`)
-- On crash/restart: Horde restarts the GenServer, `typing_users` resets to `MapSet.new()` — clients will re-send typing indicators on next keypress
-- This is Persistence Strategy: **Option C — Stateless** — NO crash/restart test required
+- On crash/restart: Horde restarts the GenServer, `typing_users` resets to `MapSet.new()` - clients will re-send typing indicators on next keypress
+- This is Persistence Strategy: **Option C - Stateless** - NO crash/restart test required
 - DO NOT persist to DB, DO NOT write to ETS, DO NOT add to PostgreSQL schema
 
 ### Route registration order in main.go
@@ -538,72 +538,72 @@ end
 - Follow existing pattern: `jwtMiddleware(http.HandlerFunc(handler.Method))`
 
 ### Migration numbering
-- Previous migration: `000013_room_power_levels` — next must be `000014_read_receipts`
+- Previous migration: `000013_room_power_levels` - next must be `000014_read_receipts`
 - Do NOT skip numbers; do NOT reuse numbers
 
-### Read receipts — UPSERT semantics
-- Table PRIMARY KEY: `(room_id, user_id, receipt_type)` — one row per user per room per type
+### Read receipts - UPSERT semantics
+- Table PRIMARY KEY: `(room_id, user_id, receipt_type)` - one row per user per room per type
 - On conflict (same room+user+type): update `event_id` and `received_at` (move marker forward)
 - No backward movement check at DB level for MVP; application layer enforces `m.read` only
-- `event_id` references `events(event_id)` — FK constraint; Core must validate `event_id` exists before upserting (or handle FK violation as 404)
+- `event_id` references `events(event_id)` - FK constraint; Core must validate `event_id` exists before upserting (or handle FK violation as 404)
 
 ---
 
 ## Previous Story Intelligence (Story 4-16)
 
 **Key learnings from Story 4-16 dev notes:**
-- `gateway/internal/grpc/client.go` already has `SetTyping` and `SetPresence` stubs (`return nil, nil`) — these need to be replaced with real implementations. `SetPresence` is Story 4-18; `SetTyping` is THIS story.
-- `coregrpc.FormatUserID(sub, serverName)` is the canonical way to construct `@sub:serverName` — use this in both typing.go and receipts.go
-- `coregrpc.WithUserMetadata(ctx, userID, systemRole)` is the canonical way to build gRPC context with metadata — see rooms.go, messages.go
-- `writeMatrixError(w, statusCode, errcode, message)` is the shared error writer in the `matrix` package — do NOT reimplement
+- `gateway/internal/grpc/client.go` already has `SetTyping` and `SetPresence` stubs (`return nil, nil`) - these need to be replaced with real implementations. `SetPresence` is Story 4-18; `SetTyping` is THIS story.
+- `coregrpc.FormatUserID(sub, serverName)` is the canonical way to construct `@sub:serverName` - use this in both typing.go and receipts.go
+- `coregrpc.WithUserMetadata(ctx, userID, systemRole)` is the canonical way to build gRPC context with metadata - see rooms.go, messages.go
+- `writeMatrixError(w, statusCode, errcode, message)` is the shared error writer in the `matrix` package - do NOT reimplement
 - Prometheus `prometheus.NewRegistry()` in tests, `prometheus.DefaultRegisterer` in production (not relevant for this story but good to know)
 - The `NewClientWithCore` test constructor in `client.go` allows injecting a mock `pb.CoreServiceClient` without a real gRPC connection
 
 **Established patterns to follow:**
-- Handler constructor: `New*Handler(cfg *Config)` — returns pointer, config struct injection
-- Consumer-defined interface: defined in the HANDLER file (not in client.go) — e.g., `TypingCoreClient` lives in `typing.go`, not in `client.go`
+- Handler constructor: `New*Handler(cfg *Config)` - returns pointer, config struct injection
+- Consumer-defined interface: defined in the HANDLER file (not in client.go) - e.g., `TypingCoreClient` lives in `typing.go`, not in `client.go`
 - Test mock: define `mock*CoreClient` struct in the `_test.go` file, implementing only the consumer interface
 - Test helper: `buildAuthedHandler(t, mock)` pattern wrapping with JWTMiddleware + test OIDC server (see `rooms_test.go` for the established pattern including `setupOIDCServer` and `signJWT`)
 - JSON response: `w.Header().Set("Content-Type", "application/json"); json.NewEncoder(w).Encode(...)` pattern
 - Empty 200 response: `json.NewEncoder(w).Encode(map[string]any{})` (or `struct{}{}`)
 
 **Files modified in story 4-16 that may be touched by this story:**
-- `gateway/cmd/gateway/main.go` — add 2 more routes
-- `gateway/internal/grpc/client.go` — implement SetTyping stub + add SendReceipt
+- `gateway/cmd/gateway/main.go` - add 2 more routes
+- `gateway/internal/grpc/client.go` - implement SetTyping stub + add SendReceipt
 
 ---
 
 ## Elixir Test Structure
 
 ### Test file location
-- Go tests: `gateway/internal/matrix/typing_test.go` and `gateway/internal/matrix/receipts_test.go` (package `matrix` — white-box tests)
+- Go tests: `gateway/internal/matrix/typing_test.go` and `gateway/internal/matrix/receipts_test.go` (package `matrix` - white-box tests)
 - Elixir tests: `core/apps/room_manager/test/nebu/room/server_set_typing_test.exs` and `core/apps/event_dispatcher/test/nebu/event_dispatcher/server_receipts_test.exs`
   - Follow existing test location pattern: check `core/apps/room_manager/test/` and `core/apps/event_dispatcher/test/` for existing test files
 
 ### Elixir test setup for set_typing
 - Use `Application.put_env(:event_dispatcher, :room_registry_module, FakeRoomRegistry)` pattern (established in EventDispatcher.Server)
 - FakeRoomRegistry must implement `get_state/1` and `set_typing/4`
-- For the auto-expire test: use a very short timeout (e.g., 50ms) and `Process.sleep(100)` — but prefer testing via `send(server_pid, {:typing_expire, user_id})` directly for determinism
+- For the auto-expire test: use a very short timeout (e.g., 50ms) and `Process.sleep(100)` - but prefer testing via `send(server_pid, {:typing_expire, user_id})` directly for determinism
 
 ### Elixir test setup for send_receipt
 - Use `Application.put_env(:event_dispatcher, :receipt_db_module, FakeReceiptDB)` pattern
-- FakeReceiptDB must implement `upsert_receipt/4` — capture args for assertion
+- FakeReceiptDB must implement `upsert_receipt/4` - capture args for assertion
 
 ---
 
 ## Dependencies
 
-- Story 1-3 (done): golang-migrate setup — migration infrastructure exists; new migration follows numbering convention `000014_*`
-- Story 4-2 (done): `Nebu.Room.Server` GenServer with members MapSet — extends state with `typing_users`
+- Story 1-3 (done): golang-migrate setup - migration infrastructure exists; new migration follows numbering convention `000014_*`
+- Story 4-2 (done): `Nebu.Room.Server` GenServer with members MapSet - extends state with `typing_users`
 - Story 4-8 (done): `EventBusStream`; `CoreService.SetTyping` already in proto and Go stubs exist (as no-ops)
 - Story 4-9 (done): Room GenServer via Horde Registry; `RoomSupervisor.lookup_room/1` exists
-- Story 4-13 (done): Power level enforcement pattern in `EventDispatcher.Server` — follow same membership check pattern
+- Story 4-13 (done): Power level enforcement pattern in `EventDispatcher.Server` - follow same membership check pattern
 
 ---
 
 ## Story Completion Status
 
-Ultimate context engine analysis completed — comprehensive developer guide created.
+Ultimate context engine analysis completed - comprehensive developer guide created.
 
 ---
 
@@ -611,25 +611,25 @@ Ultimate context engine analysis completed — comprehensive developer guide cre
 
 ### Implementation Notes
 
-**2026-04-03 — Amelia (Dev)**
+**2026-04-03 - Amelia (Dev)**
 
 Story 4-17 implemented in full. All 11 failing acceptance tests now pass:
-- 6 Go tests in `gateway/internal/matrix/typing_test.go` — all pass
-- 5 Go tests in `gateway/internal/matrix/receipts_test.go` — all pass
-- 4 Elixir tests in `core/apps/room_manager/test/nebu/room/server_set_typing_test.exs` — all pass
-- 4 Elixir tests in `core/apps/event_dispatcher/test/nebu/event_dispatcher/server_receipts_test.exs` — all pass
+- 6 Go tests in `gateway/internal/matrix/typing_test.go` - all pass
+- 5 Go tests in `gateway/internal/matrix/receipts_test.go` - all pass
+- 4 Elixir tests in `core/apps/room_manager/test/nebu/room/server_set_typing_test.exs` - all pass
+- 4 Elixir tests in `core/apps/event_dispatcher/test/nebu/event_dispatcher/server_receipts_test.exs` - all pass
 
 **Decisions made during implementation:**
 
-1. `read_receipts` migration omits FK constraints (`REFERENCES rooms(room_id)` and `REFERENCES events(event_id)`) — FK constraints would cause failures when event_id hasn't been inserted into events table yet (test isolation concern). Application-level validation is sufficient for MVP.
+1. `read_receipts` migration omits FK constraints (`REFERENCES rooms(room_id)` and `REFERENCES events(event_id)`) - FK constraints would cause failures when event_id hasn't been inserted into events table yet (test isolation concern). Application-level validation is sufficient for MVP.
 
-2. `room_registry_module().set_typing/4` call in EventDispatcher delegates to `Nebu.Room.Server.set_typing/4` — the default `room_registry_module()` is `Nebu.Room.Server`, so this works correctly.
+2. `room_registry_module().set_typing/4` call in EventDispatcher delegates to `Nebu.Room.Server.set_typing/4` - the default `room_registry_module()` is `Nebu.Room.Server`, so this works correctly.
 
-3. `handle_call(:set_typing, ...)` added before `handle_info(:new_event, ...)` in Room.Server — ordering follows logical flow.
+3. `handle_call(:set_typing, ...)` added before `handle_info(:new_event, ...)` in Room.Server - ordering follows logical flow.
 
 4. `m.read.private` added as valid receipt type in receipts.go (story spec mentioned both `m.read` and `m.read.private` as supported MVP types in Architecture Guardrails section).
 
-5. `client_test.go` updated: `SetTyping` test case changed from "expect nil,nil" (stub behavior) to "expect connection error" (wired behavior) — consistent with all other wired methods (SendEvent, CreateRoom, etc.).
+5. `client_test.go` updated: `SetTyping` test case changed from "expect nil,nil" (stub behavior) to "expect connection error" (wired behavior) - consistent with all other wired methods (SendEvent, CreateRoom, etc.).
 
 ### File List
 
@@ -641,18 +641,18 @@ Story 4-17 implemented in full. All 11 failing acceptance tests now pass:
 - `core/apps/event_dispatcher/lib/nebu/receipt/db.ex`
 
 **Modified files:**
-- `proto/core.proto` — Added `SendReceipt` RPC, `SendReceiptRequest`, `SendReceiptResponse`
-- `gateway/internal/grpc/pb/core.pb.go` — Regenerated via `make proto`
-- `gateway/internal/grpc/pb/core_grpc.pb.go` — Regenerated via `make proto`
-- `core/apps/event_dispatcher/lib/pb/core.pb.ex` — Regenerated via `make proto`
-- `core/apps/event_dispatcher/lib/pb/core_grpc.pb.ex` — Regenerated via `make proto`
-- `gateway/internal/grpc/client.go` — Implemented `SetTyping` stub; added `SendReceipt`
-- `gateway/internal/grpc/client_test.go` — Updated `SetTyping` test case to expect connection error; added `SendReceipt` test case
-- `gateway/internal/grpc/stream_test.go` — Added `SendReceipt` stub to `mockCoreClient`
-- `gateway/cmd/gateway/main.go` — Registered typing and receipts routes
-- `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` — Implemented `set_typing/2`, added `send_receipt/2`, added `receipt_db_module/0`
-- `core/apps/room_manager/lib/nebu/room/server.ex` — Added `set_typing/4` public API, `typing_users` to state, `handle_call(:set_typing)`, `handle_info(:typing_expire)`
+- `proto/core.proto` - Added `SendReceipt` RPC, `SendReceiptRequest`, `SendReceiptResponse`
+- `gateway/internal/grpc/pb/core.pb.go` - Regenerated via `make proto`
+- `gateway/internal/grpc/pb/core_grpc.pb.go` - Regenerated via `make proto`
+- `core/apps/event_dispatcher/lib/pb/core.pb.ex` - Regenerated via `make proto`
+- `core/apps/event_dispatcher/lib/pb/core_grpc.pb.ex` - Regenerated via `make proto`
+- `gateway/internal/grpc/client.go` - Implemented `SetTyping` stub; added `SendReceipt`
+- `gateway/internal/grpc/client_test.go` - Updated `SetTyping` test case to expect connection error; added `SendReceipt` test case
+- `gateway/internal/grpc/stream_test.go` - Added `SendReceipt` stub to `mockCoreClient`
+- `gateway/cmd/gateway/main.go` - Registered typing and receipts routes
+- `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` - Implemented `set_typing/2`, added `send_receipt/2`, added `receipt_db_module/0`
+- `core/apps/room_manager/lib/nebu/room/server.ex` - Added `set_typing/4` public API, `typing_users` to state, `handle_call(:set_typing)`, `handle_info(:typing_expire)`
 
 ### Change Log
 
-- 2026-04-03: Story 4-17 implemented — typing indicators and read receipts endpoints fully functional with all acceptance tests passing
+- 2026-04-03: Story 4-17 implemented - typing indicators and read receipts endpoints fully functional with all acceptance tests passing

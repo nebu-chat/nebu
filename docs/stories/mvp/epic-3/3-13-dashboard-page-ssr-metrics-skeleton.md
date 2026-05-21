@@ -10,16 +10,16 @@ so that I can immediately see whether Nebu is functioning correctly during Epic 
 
 ## Acceptance Criteria
 
-1. `GET /admin/dashboard` is served only to authenticated sessions (via `SessionGuard`) — unauthenticated requests redirect `302` to `/admin/login`
+1. `GET /admin/dashboard` is served only to authenticated sessions (via `SessionGuard`) - unauthenticated requests redirect `302` to `/admin/login`
 2. The page renders within the base layout with `ActiveNav: "dashboard"`
-3. SSR section — Status Cards (C1): three `StatusCard` components rendered server-side:
-   - **Gateway** — always GREEN (if this page loads, the gateway is up)
-   - **Core (gRPC)** — status from `connectivity.State` at request time: `Ready` → GREEN, `Idle`/`Connecting` → AMBER, `TransientFailure`/`Shutdown` → RED
-   - **Database** — status from `db.CheckDB(dbURL)` ping at request time: success → GREEN, error → RED
-4. SSR section — Server Info: instance name (from `server_config` table), server uptime (parsed from `/proc/uptime` or `time.Since(startTime)`), Go runtime version via `runtime.Version()`
-5. SSE Live Metrics section: an empty `<div id="live-metrics">` placeholder; renders a static "Connecting…" skeleton while Vue.js (Story 3.14) is not yet loaded — no JS at this story
+3. SSR section - Status Cards (C1): three `StatusCard` components rendered server-side:
+   - **Gateway** - always GREEN (if this page loads, the gateway is up)
+   - **Core (gRPC)** - status from `connectivity.State` at request time: `Ready` → GREEN, `Idle`/`Connecting` → AMBER, `TransientFailure`/`Shutdown` → RED
+   - **Database** - status from `db.CheckDB(dbURL)` ping at request time: success → GREEN, error → RED
+4. SSR section - Server Info: instance name (from `server_config` table), server uptime (parsed from `/proc/uptime` or `time.Since(startTime)`), Go runtime version via `runtime.Version()`
+5. SSE Live Metrics section: an empty `<div id="live-metrics">` placeholder; renders a static "Connecting…" skeleton while Vue.js (Story 3.14) is not yet loaded - no JS at this story
 6. The `TopbarStatusIndicator` (C3) in the base layout is updated **server-side** at render time: all GREEN → green dot text "OK", any AMBER → amber dot text "Degraded", any RED → red dot text "Down"
-7. If `db.CheckDB` fails, the Database card shows RED; no page-level error — the page still renders fully
+7. If `db.CheckDB` fails, the Database card shows RED; no page-level error - the page still renders fully
 8. If the gRPC state is not `Ready`, the Core card shows AMBER or RED accordingly; no page-level error
 9. A unit test `TestDashboardHandler_AllHealthy` mocks HealthCheck=OK and DB ping=OK and asserts all three cards show the `"green"` CSS class
 10. A unit test `TestDashboardHandler_DBDown` mocks DB ping failure and asserts the Database card shows the `"red"` CSS class and the page still renders `200 OK`
@@ -29,13 +29,13 @@ so that I can immediately see whether Nebu is functioning correctly during Epic 
 
 - [x] Task 1: Extend `PageData` in `gateway/internal/admin/page_data.go` with dashboard fields (AC: 3, 4, 6)
   - [x] 1.1 Add `DashboardPageData` struct embedding `PageData` with fields:
-    - `GatewayStatus string` — one of `"green"`, `"amber"`, `"red"`
-    - `CoreStatus string` — one of `"green"`, `"amber"`, `"red"`
-    - `DBStatus string` — one of `"green"`, `"amber"`, `"red"`
-    - `WorstStatus string` — worst of the three (used for TopbarStatusIndicator)
+    - `GatewayStatus string` - one of `"green"`, `"amber"`, `"red"`
+    - `CoreStatus string` - one of `"green"`, `"amber"`, `"red"`
+    - `DBStatus string` - one of `"green"`, `"amber"`, `"red"`
+    - `WorstStatus string` - worst of the three (used for TopbarStatusIndicator)
     - `InstanceName string`
-    - `Uptime string` — formatted string (e.g. `"3d 4h 12m"`)
-    - `GoVersion string` — value of `runtime.Version()`
+    - `Uptime string` - formatted string (e.g. `"3d 4h 12m"`)
+    - `GoVersion string` - value of `runtime.Version()`
   - [x] 1.2 Add `GatewayStatusLabel string`, `CoreStatusLabel string`, `DBStatusLabel string` fields to `DashboardPageData` for human-readable status text shown inside each card
 
 - [x] Task 2: Create `gateway/internal/admin/dashboard.go` with handler and helpers (AC: 3, 4, 5, 6, 7, 8)
@@ -61,7 +61,7 @@ so that I can immediately see whether Nebu is functioning correctly during Epic 
   - [x] 3.1 Use exact template structure pattern (see Dev Notes):
     ```
     {{ template "base" . }}
-    {{ define "title" }}Dashboard — Nebu Admin{{ end }}
+    {{ define "title" }}Dashboard - Nebu Admin{{ end }}
     {{ define "content" }}...{{ end }}
     {{ define "scripts" }}{{ end }}
     ```
@@ -73,11 +73,11 @@ so that I can immediately see whether Nebu is functioning correctly during Epic 
     - Card container class: `status-card status-card--{{ .GatewayStatus }}` (enables unit test assertions)
   - [x] 3.3 Server Info section: instance name, uptime, Go version in a `dl` (description list) or table
   - [x] 3.4 SSE Live Metrics section: `<div id="live-metrics" aria-label="Live metrics" aria-live="polite">` with static "Connecting…" skeleton using `animate-pulse` (respects `prefers-reduced-motion: reduce`)
-  - [x] 3.5 Update the topbar `#topbar-status` using template-rendered data from `WorstStatus` — use `{{ block "topbar-override" . }}` injection or pass data through PageData embed (see Dev Notes for approach)
+  - [x] 3.5 Update the topbar `#topbar-status` using template-rendered data from `WorstStatus` - use `{{ block "topbar-override" . }}` injection or pass data through PageData embed (see Dev Notes for approach)
 
 - [x] Task 4: Register dashboard route in `gateway/cmd/gateway/main.go` (AC: 1)
-  - [x] 4.1 Import `database/sql` (already imported), `google.golang.org/grpc/connectivity` (not needed — use interface)
-  - [x] 4.2 Open a dedicated `*sql.DB` for the dashboard handler (or reuse `bootstrapDB` if acceptable — see Dev Notes)
+  - [x] 4.1 Import `database/sql` (already imported), `google.golang.org/grpc/connectivity` (not needed - use interface)
+  - [x] 4.2 Open a dedicated `*sql.DB` for the dashboard handler (or reuse `bootstrapDB` if acceptable - see Dev Notes)
   - [x] 4.3 Create `dashboardHandler := admin.NewDashboardHandler(tmplHandler, coreClient, db, cfg.DBURL)`
   - [x] 4.4 Register: `mux.Handle("GET /admin/dashboard", sessionGuard(http.HandlerFunc(dashboardHandler.Handler)))`
   - [x] 4.5 Place this registration BEFORE the catch-all `"GET /admin/"` handler
@@ -94,12 +94,12 @@ so that I can immediately see whether Nebu is functioning correctly during Epic 
 
 ## Dev Notes
 
-### Critical: Template Discovery — `pageTmpls` Key is Base Filename
+### Critical: Template Discovery - `pageTmpls` Key is Base Filename
 
 `TemplateHandler.render()` keys templates by `path.Base(file)` with extension stripped. So:
 - `templates/dashboard.html` → key `"dashboard"`
 - Call: `h.tmpl.render(w, "dashboard", data)` (NOT `"templates/dashboard"`)
-- `NewTemplateHandler` already recursively walks `templates/` — **no changes to `handler.go` needed**
+- `NewTemplateHandler` already recursively walks `templates/` - **no changes to `handler.go` needed**
 
 ### Critical: Template `{{ define "scripts" }}{{ end }}` Is Mandatory
 
@@ -113,14 +113,14 @@ The base layout uses `{{ block "scripts" . }}{{ end }}`. Dashboard.html MUST def
 Follow exactly the same pattern as `login.html` and `bootstrap.html`:
 ```html
 {{ template "base" . }}
-{{ define "title" }}Dashboard — Nebu Admin{{ end }}
+{{ define "title" }}Dashboard - Nebu Admin{{ end }}
 {{ define "content" }}
 <!-- dashboard HTML here -->
 {{ end }}
 {{ define "scripts" }}{{ end }}
 ```
 
-### TopbarStatusIndicator (C3) — Server-Side Approach for Story 3.13
+### TopbarStatusIndicator (C3) - Server-Side Approach for Story 3.13
 
 The base layout (`templates/layouts/base.html`) has a hardcoded topbar status indicator:
 ```html
@@ -131,9 +131,9 @@ The base layout (`templates/layouts/base.html`) has a hardcoded topbar status in
 </span>
 ```
 
-For Story 3.13, update the `DashboardPageData` to include `WorstStatus`. **Do NOT modify `base.html`** — instead override the topbar indicator by passing status to the template data. Since `base.html` is shared across all pages and currently hardcodes the "Connecting..." state, the dashboard template should use a `{{ define "topbar-scripts" }}` block or simply accept the current "Connecting..." state for non-dashboard pages.
+For Story 3.13, update the `DashboardPageData` to include `WorstStatus`. **Do NOT modify `base.html`** - instead override the topbar indicator by passing status to the template data. Since `base.html` is shared across all pages and currently hardcodes the "Connecting..." state, the dashboard template should use a `{{ define "topbar-scripts" }}` block or simply accept the current "Connecting..." state for non-dashboard pages.
 
-**PREFERRED APPROACH**: Add a new block `{{ block "topbar-status-override" . }}{{ end }}` to `base.html` just before the existing topbar status span, so the dashboard template can override it. BUT this would require modifying `base.html` — an existing file.
+**PREFERRED APPROACH**: Add a new block `{{ block "topbar-status-override" . }}{{ end }}` to `base.html` just before the existing topbar status span, so the dashboard template can override it. BUT this would require modifying `base.html` - an existing file.
 
 **SIMPLEST APPROACH (recommended for Story 3.13)**: Update `base.html` to use `{{ .WorstStatus }}` if present, with a fallback. Pass `WorstStatus` through the embedded `PageData` or separately. Since `PageData` is used across all pages, add `TopbarStatus string` and `TopbarLabel string` to `PageData` itself. Default values (empty string) render "Connecting..." via conditional. Dashboard handler sets these fields.
 
@@ -184,7 +184,7 @@ Example StatusCard HTML:
 
 ### gRPC Status Mapping
 
-Use `connectivity.State` from `google.golang.org/grpc/connectivity` — same as the health handler pattern in `gateway/internal/health/health.go`:
+Use `connectivity.State` from `google.golang.org/grpc/connectivity` - same as the health handler pattern in `gateway/internal/health/health.go`:
 - `connectivity.Ready` → `"green"` + label `"OK"`
 - `connectivity.Idle`, `connectivity.Connecting` → `"amber"` + label `"Degraded"`
 - `connectivity.TransientFailure`, `connectivity.Shutdown` → `"red"` + label `"Unreachable"`
@@ -199,7 +199,7 @@ type CoreStateReader interface {
 
 ### DB Ping Strategy
 
-Do NOT call `db.CheckDB(dbURL)` (which opens a NEW connection each time) — this would cause a connection per dashboard load. Instead, inject a `*sql.DB` connection pool and call `db.PingContext(ctx)`:
+Do NOT call `db.CheckDB(dbURL)` (which opens a NEW connection each time) - this would cause a connection per dashboard load. Instead, inject a `*sql.DB` connection pool and call `db.PingContext(ctx)`:
 
 ```go
 type DBPinger interface {
@@ -235,7 +235,7 @@ func (r *postgresServerNameReader) ServerName(ctx context.Context) (string, erro
 
 The epic spec mentions `/proc/uptime` but this is non-portable (Linux only, not available in Mac dev environments, not reliable in containers). Use `time.Since(startTime)` where `startTime` is stored when `NewDashboardHandler` is called (at gateway startup). This is more accurate and portable.
 
-Format as: `"3d 4h 12m"` (days/hours/minutes — skip units with zero value, minimum `"<1m"`).
+Format as: `"3d 4h 12m"` (days/hours/minutes - skip units with zero value, minimum `"<1m"`).
 
 ### Worst Status Computation
 
@@ -260,7 +260,7 @@ The comment in `main.go` line 141 already anticipates this story:
 // Story 3.13 will add: mux.Handle("GET /admin/dashboard", sessionGuard(http.HandlerFunc(dashboardHandler.Handler)))
 ```
 
-Replace that comment with the actual route registration. The `sessionGuard` variable is already in scope. The catch-all `"GET /admin/"` is already registered — add the dashboard route BEFORE it (Go 1.22+ mux selects most-specific route first regardless of order, but convention is to register specific before catch-all).
+Replace that comment with the actual route registration. The `sessionGuard` variable is already in scope. The catch-all `"GET /admin/"` is already registered - add the dashboard route BEFORE it (Go 1.22+ mux selects most-specific route first regardless of order, but convention is to register specific before catch-all).
 
 The `coreClient` is already declared in `main.go`. `bootstrapDB` is already declared. Pass both to `NewDashboardHandler`.
 
@@ -320,29 +320,29 @@ if !strings.Contains(body, `status-card--green`) {
 
 | File | Action |
 |------|--------|
-| `gateway/internal/admin/page_data.go` | MODIFY — add `DashboardPageData`, add `TopbarStatus`/`TopbarLabel` to `PageData` |
-| `gateway/internal/admin/dashboard.go` | CREATE — `DashboardHandler`, interfaces, helpers |
-| `gateway/internal/admin/dashboard_test.go` | CREATE — 6 unit tests |
-| `gateway/internal/admin/templates/dashboard.html` | CREATE — dashboard template |
-| `gateway/internal/admin/templates/layouts/base.html` | MODIFY — add `TopbarStatus`/`TopbarLabel` conditional rendering |
-| `gateway/cmd/gateway/main.go` | MODIFY — register `GET /admin/dashboard` route |
+| `gateway/internal/admin/page_data.go` | MODIFY - add `DashboardPageData`, add `TopbarStatus`/`TopbarLabel` to `PageData` |
+| `gateway/internal/admin/dashboard.go` | CREATE - `DashboardHandler`, interfaces, helpers |
+| `gateway/internal/admin/dashboard_test.go` | CREATE - 6 unit tests |
+| `gateway/internal/admin/templates/dashboard.html` | CREATE - dashboard template |
+| `gateway/internal/admin/templates/layouts/base.html` | MODIFY - add `TopbarStatus`/`TopbarLabel` conditional rendering |
+| `gateway/cmd/gateway/main.go` | MODIFY - register `GET /admin/dashboard` route |
 
 **Do NOT modify:**
-- `gateway/internal/admin/handler.go` — no changes needed, WalkDir already discovers `dashboard.html`
-- `gateway/internal/admin/middleware.go` — `SessionGuard` is already complete
-- `gateway/internal/admin/errors.go` — no changes needed
+- `gateway/internal/admin/handler.go` - no changes needed, WalkDir already discovers `dashboard.html`
+- `gateway/internal/admin/middleware.go` - `SessionGuard` is already complete
+- `gateway/internal/admin/errors.go` - no changes needed
 - Any existing test files (add new file only)
 
 ### Anti-Patterns to Avoid
 
-- **DO NOT** call `db.CheckDB(dbURL)` in the dashboard handler — it opens a new connection each time. Use `db.PingContext(ctx)` on an injected `*sql.DB`.
-- **DO NOT** use `os.ReadFile("/proc/uptime")` — non-portable. Use `time.Since(startTime)`.
-- **DO NOT** put business logic (status mapping, uptime formatting) in the template — compute in the Go handler and pass precomputed values to the template.
-- **DO NOT** omit `{{ define "scripts" }}{{ end }}` in `dashboard.html` — causes template execution errors.
-- **DO NOT** use `h.render(w, "templates/dashboard", data)` — the key is `"dashboard"` (basename without extension).
-- **DO NOT** hardcode `"success"/"warning"/"error"` DaisyUI color classes directly in the `CoreStatus`/`GatewayStatus` fields — keep internal status as `"green"/"amber"/"red"` and map to DaisyUI in the template via `{{ if eq ... }}` blocks. This keeps the Go code decoupled from CSS framework choices.
-- **DO NOT** modify `handler.go` — `NewTemplateHandler()` already handles recursive discovery.
-- **DO NOT** add `ContentType` header manually before calling `h.render()` — `render()` already sets `Content-Type: text/html; charset=utf-8`.
+- **DO NOT** call `db.CheckDB(dbURL)` in the dashboard handler - it opens a new connection each time. Use `db.PingContext(ctx)` on an injected `*sql.DB`.
+- **DO NOT** use `os.ReadFile("/proc/uptime")` - non-portable. Use `time.Since(startTime)`.
+- **DO NOT** put business logic (status mapping, uptime formatting) in the template - compute in the Go handler and pass precomputed values to the template.
+- **DO NOT** omit `{{ define "scripts" }}{{ end }}` in `dashboard.html` - causes template execution errors.
+- **DO NOT** use `h.render(w, "templates/dashboard", data)` - the key is `"dashboard"` (basename without extension).
+- **DO NOT** hardcode `"success"/"warning"/"error"` DaisyUI color classes directly in the `CoreStatus`/`GatewayStatus` fields - keep internal status as `"green"/"amber"/"red"` and map to DaisyUI in the template via `{{ if eq ... }}` blocks. This keeps the Go code decoupled from CSS framework choices.
+- **DO NOT** modify `handler.go` - `NewTemplateHandler()` already handles recursive discovery.
+- **DO NOT** add `ContentType` header manually before calling `h.render()` - `render()` already sets `Content-Type: text/html; charset=utf-8`.
 
 ### Relationship to Adjacent Stories
 
@@ -353,10 +353,10 @@ if !strings.Contains(body, `status-card--green`) {
 
 ### Previous Story Learnings (from Story 3.12)
 
-- `w.Header().Set("Content-Type", ...)` MUST be called BEFORE `w.WriteHeader()`. However, `h.render()` already handles this correctly — do not call `WriteHeader` manually in the dashboard handler; let `render()` manage headers.
-- All tests in `admin` package use `package admin` (NOT `package admin_test`) — access to unexported types is standard.
-- `NewTemplateHandler()` is the standard test setup call — no mocking needed for template rendering tests.
-- The `pageTmpls` map key is `path.Base(file)` with extension stripped — always `"dashboard"`, never a path.
+- `w.Header().Set("Content-Type", ...)` MUST be called BEFORE `w.WriteHeader()`. However, `h.render()` already handles this correctly - do not call `WriteHeader` manually in the dashboard handler; let `render()` manage headers.
+- All tests in `admin` package use `package admin` (NOT `package admin_test`) - access to unexported types is standard.
+- `NewTemplateHandler()` is the standard test setup call - no mocking needed for template rendering tests.
+- The `pageTmpls` map key is `path.Base(file)` with extension stripped - always `"dashboard"`, never a path.
 
 ### Git Context (Recent Commits)
 
@@ -374,9 +374,9 @@ This story adds:
 
 ### Architecture Constraints
 
-Per `architecture.md` rule: "Admin UI ausschließlich via `embed.FS` ausliefern — kein Filesystem-Zugriff zur Laufzeit." The `dashboard.html` template is covered by the existing `//go:embed templates` directive in `handler.go`. No additional embed directives needed.
+Per `architecture.md` rule: "Admin UI ausschließlich via `embed.FS` ausliefern - kein Filesystem-Zugriff zur Laufzeit." The `dashboard.html` template is covered by the existing `//go:embed templates` directive in `handler.go`. No additional embed directives needed.
 
-Per ADR-009 (OpenAPI Spec-First): This is an SSR page, NOT an API endpoint — no OpenAPI spec changes needed.
+Per ADR-009 (OpenAPI Spec-First): This is an SSR page, NOT an API endpoint - no OpenAPI spec changes needed.
 
 ## Dev Agent Record
 
@@ -391,26 +391,26 @@ None.
 ### Completion Notes List
 
 - Task 1: Added `TopbarStatus` and `TopbarLabel` to `PageData`; created `DashboardPageData` struct with all required fields (status, labels, server info). Zero-value `TopbarStatus` causes base.html to render the default "Connecting..." state for all non-dashboard pages.
-- Task 2: Created `dashboard.go` with `CoreStateReader`, `DBPinger`, `ServerNameReader` consumer-defined interfaces; `postgresServerNameReader` implementation; `DashboardHandler` with `NewDashboardHandler` constructor; `Handler()` method computing all statuses at request time; helpers `mapCoreState`, `worstStatus`, `mapWorstToTopbar`, `formatUptime`. Constructor signature is `NewDashboardHandler(tmpl, core, db *sql.DB)` — `dbURL` parameter omitted per Dev Notes guidance to use `PingContext` on injected pool.
+- Task 2: Created `dashboard.go` with `CoreStateReader`, `DBPinger`, `ServerNameReader` consumer-defined interfaces; `postgresServerNameReader` implementation; `DashboardHandler` with `NewDashboardHandler` constructor; `Handler()` method computing all statuses at request time; helpers `mapCoreState`, `worstStatus`, `mapWorstToTopbar`, `formatUptime`. Constructor signature is `NewDashboardHandler(tmpl, core, db *sql.DB)` - `dbURL` parameter omitted per Dev Notes guidance to use `PingContext` on injected pool.
 - Task 3: Created `dashboard.html` with full base layout pattern, three status cards with `status-card--{{ .Status }}` classes and inline DaisyUI color conditionals, Server Info `dl`, `<div id="live-metrics">` SSE placeholder with `animate-pulse` skeleton, mandatory `{{ define "scripts" }}{{ end }}` block. Updated `base.html` topbar indicator with `{{ if .TopbarStatus }}` conditional.
 - Task 4: Registered `GET /admin/dashboard` before catch-all `GET /admin/` in `main.go`. Reuses `bootstrapDB` as per Dev Notes recommendation. `coreClient` satisfies `CoreStateReader` interface via its `State() connectivity.State` method.
 - Task 5: Created 6 handler tests + 3 helper unit tests (formatUptime, worstStatus, mapCoreState) in `dashboard_test.go`. All tests use `package admin` pattern with fake implementations.
-- Task 6: `make test-unit-go` — all packages pass, zero regressions.
+- Task 6: `make test-unit-go` - all packages pass, zero regressions.
 
 ### File List
 
-- `gateway/internal/admin/page_data.go` — MODIFIED (added `TopbarStatus`/`TopbarLabel` to `PageData`; added `DashboardPageData`)
-- `gateway/internal/admin/dashboard.go` — CREATED (`DashboardHandler`, interfaces, helpers)
-- `gateway/internal/admin/dashboard_test.go` — CREATED (9 unit tests)
-- `gateway/internal/admin/templates/dashboard.html` — CREATED (dashboard SSR template)
-- `gateway/internal/admin/templates/layouts/base.html` — MODIFIED (topbar status conditional rendering)
-- `gateway/cmd/gateway/main.go` — MODIFIED (registered `GET /admin/dashboard` route)
+- `gateway/internal/admin/page_data.go` - MODIFIED (added `TopbarStatus`/`TopbarLabel` to `PageData`; added `DashboardPageData`)
+- `gateway/internal/admin/dashboard.go` - CREATED (`DashboardHandler`, interfaces, helpers)
+- `gateway/internal/admin/dashboard_test.go` - CREATED (9 unit tests)
+- `gateway/internal/admin/templates/dashboard.html` - CREATED (dashboard SSR template)
+- `gateway/internal/admin/templates/layouts/base.html` - MODIFIED (topbar status conditional rendering)
+- `gateway/cmd/gateway/main.go` - MODIFIED (registered `GET /admin/dashboard` route)
 
 ### Review Findings
 
-- [x] [Review][Patch] MAJOR: Tailwind CSS purge strips `text-success` and `text-error` — dynamic class interpolation `text-{{ .TopbarStatus }}` in base.html prevents Tailwind from recognizing full class names; replaced with `{{ if eq }}` conditionals [gateway/internal/admin/templates/layouts/base.html:15-27] — FIXED
+- [x] [Review][Patch] MAJOR: Tailwind CSS purge strips `text-success` and `text-error` - dynamic class interpolation `text-{{ .TopbarStatus }}` in base.html prevents Tailwind from recognizing full class names; replaced with `{{ if eq }}` conditionals [gateway/internal/admin/templates/layouts/base.html:15-27] - FIXED
 
 ## Change Log
 
-- 2026-04-01: Code review passed — 1 MAJOR patch (Tailwind purge-safe topbar CSS classes) applied, 3 dismissed as noise
-- 2026-04-01: Story 3.13 implemented — Dashboard SSR page with system status cards, server info, SSE placeholder; TopbarStatusIndicator wired server-side; 9 unit tests added; all tests pass (Date: 2026-04-01)
+- 2026-04-01: Code review passed - 1 MAJOR patch (Tailwind purge-safe topbar CSS classes) applied, 3 dismissed as noise
+- 2026-04-01: Story 3.13 implemented - Dashboard SSR page with system status cards, server info, SSE placeholder; TopbarStatusIndicator wired server-side; 9 unit tests added; all tests pass (Date: 2026-04-01)

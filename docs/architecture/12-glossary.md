@@ -14,8 +14,8 @@
 | **m.relates_to** | A Matrix event content key that links a reply or reaction to its parent event via `event_id` + `rel_type` |
 | **Sync** | Matrix's long-polling endpoint (`GET /sync`) that delivers new events and room state to clients |
 | **since-token** | An opaque cursor used with `/sync` to retrieve only events after a given point in time |
-| **Content-Hash Event ID** | Event ID format `$<base64url(SHA-256(canonical_json(event)))>` — tamper-evident, deterministic |
-| **Server-Server API** | The Matrix federation protocol — deliberately excluded from Nebu |
+| **Content-Hash Event ID** | Event ID format `$<base64url(SHA-256(canonical_json(event)))>` - tamper-evident, deterministic |
+| **Server-Server API** | The Matrix federation protocol - deliberately excluded from Nebu |
 | **Power Level** | A numeric value (0–100) controlling what a room member can do in a room |
 | **EDU / PDU** | Ephemeral Data Unit (typing, presence) / Persistent Data Unit (messages, state) in Matrix terminology |
 
@@ -25,32 +25,32 @@
 |---|---|
 | **Go Gateway** | The stateless Go binary that handles all HTTP traffic, TLS termination, OIDC validation, and Admin UI serving |
 | **Elixir Core** | The Elixir/OTP application (umbrella) managing stateful chat logic via GenServers |
-| **gRPC** | Google Remote Procedure Call — the protocol used for Go Gateway ↔ Elixir Core communication |
+| **gRPC** | Google Remote Procedure Call - the protocol used for Go Gateway ↔ Elixir Core communication |
 | **EventBus** | A gRPC server-streaming service from Elixir Core to Go Gateway for real-time event delivery |
 | **message_buffer** | A PostgreSQL table that holds outgoing events when the Elixir Core is temporarily unavailable (ROT status) |
 | **Drain Worker** | A Go goroutine that processes buffered messages from `message_buffer` when the Core reconnects |
-| **GRÜN/GELB/ROT** | German for Green/Yellow/Red — the three-state health model for the gRPC connection status |
+| **GRÜN/GELB/ROT** | German for Green/Yellow/Red - the three-state health model for the gRPC connection status |
 | **Horde** | An Elixir library providing CRDT-based distributed process registry and supervision (https://hexdocs.pm/horde) |
-| **ETS** | Erlang Term Storage — an in-memory key-value store built into the Erlang/OTP runtime (no Redis needed) |
+| **ETS** | Erlang Term Storage - an in-memory key-value store built into the Erlang/OTP runtime (no Redis needed) |
 | **libcluster** | Elixir library for automatic cluster node discovery (Phase 2) |
 | **golang-migrate** | Go library for PostgreSQL schema migrations; the Go Gateway is the sole schema owner |
 | **MinIO** | S3-compatible object storage server used as the local-dev media backend (Epic 12). Apache 2.0 licensed. |
 | **nebu-media** | The MinIO bucket (created by the `createbuckets` init container) where all media uploads are stored |
 | **Storer** | Go interface (`Put / Get / Delete`) in `media/internal/storage` that abstracts file-system and S3 backends. `LocalStorer` implements it for the local filesystem; `MinIOStorer` for MinIO. Both handlers depend on `Storer` via injection (Story 12.2). |
 | **oapi-codegen** | A Go code generator that produces types and a `ServerInterface` from an OpenAPI 3.1 YAML spec |
-| **PSK** | Pre-Shared Key — used for node registration security in the MVP (Docker Compose secrets) |
-| **mTLS** | Mutual TLS — ephemeral certificate-based authentication planned for Phase 2 node registration |
-| **AIMD** | Additive Increase Multiplicative Decrease — the adaptive drain rate algorithm for Phase 2 |
-| **OIDC** | OpenID Connect — the authentication protocol used for all user logins (Keycloak, Azure AD, Dex, Google) |
-| **PKCE** | Proof Key for Code Exchange — OIDC extension required for public clients |
+| **PSK** | Pre-Shared Key - used for node registration security in the MVP (Docker Compose secrets) |
+| **mTLS** | Mutual TLS - ephemeral certificate-based authentication planned for Phase 2 node registration |
+| **AIMD** | Additive Increase Multiplicative Decrease - the adaptive drain rate algorithm for Phase 2 |
+| **OIDC** | OpenID Connect - the authentication protocol used for all user logins (Keycloak, Azure AD, Dex, Google) |
+| **PKCE** | Proof Key for Code Exchange - OIDC extension required for public clients |
 | **Bootstrap Mode** | First-run state where the first OIDC login automatically receives `instance_admin` role |
 | **Four-Eyes Principle** | Compliance access requires approval from two `instance_admin` users |
 | **Ed25519** | A fast elliptic-curve signing algorithm used for message non-repudiation |
 | **X25519** | An elliptic-curve Diffie-Hellman key exchange algorithm used for PII encryption |
 | **Canonical JSON** | Deterministic JSON serialization (keys sorted alphabetically) used for event hashing |
 | **GDPR / DSGVO** | General Data Protection Regulation (EU) / Datenschutz-Grundverordnung (German) |
-| **arc42** | A lean architecture documentation framework — see https://arc42.org |
-| **BMAD** | Build More Architect Dreams — the agent-driven development method used for Nebu development |
+| **arc42** | A lean architecture documentation framework - see https://arc42.org |
+| **BMAD** | Build More Architect Dreams - the agent-driven development method used for Nebu development |
 
 ## Roles
 

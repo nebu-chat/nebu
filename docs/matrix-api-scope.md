@@ -5,10 +5,10 @@ implementation status in Nebu. Derived from `gateway/cmd/gateway/main.go` route 
 cross-referenced with the Matrix Client-Server API specification.
 
 **Legend:**
-- ✅ Implemented — real handler with database-backed logic
-- 🔶 Stub — returns a hardcoded or minimal valid response; no persistent storage
-- ❌ Intentionally excluded — will not be implemented (by design)
-- ⏳ Planned — requires ADR decision before implementation
+- ✅ Implemented - real handler with database-backed logic
+- 🔶 Stub - returns a hardcoded or minimal valid response; no persistent storage
+- ❌ Intentionally excluded - will not be implemented (by design)
+- ⏳ Planned - requires ADR decision before implementation
 
 ---
 
@@ -19,10 +19,10 @@ cross-referenced with the Matrix Client-Server API specification.
 | GET | `/_matrix/client/versions` | ✅ | Returns v1.1–v1.11 |
 | GET | `/.well-known/matrix/client` | ✅ | Dynamic base_url from request Host |
 | GET | `/_matrix/client/v3/capabilities` | 🔶 | Returns change_password: false, room_versions: {6: stable} |
-| GET | `/_matrix/client/unstable/org.matrix.msc2965/auth_issuer` | ✅ | Returns `{"issuer":"<NEBU_OIDC_ISSUER>"}` — MSC2965 OIDC discovery (Story 13-7) |
-| GET | `/_matrix/client/v1/auth_issuer` | ✅ | Stable v1 path — same handler as unstable (Story 13-7) |
+| GET | `/_matrix/client/unstable/org.matrix.msc2965/auth_issuer` | ✅ | Returns `{"issuer":"<NEBU_OIDC_ISSUER>"}` - MSC2965 OIDC discovery (Story 13-7) |
+| GET | `/_matrix/client/v1/auth_issuer` | ✅ | Stable v1 path - same handler as unstable (Story 13-7) |
 | GET | `/_matrix/client/unstable/org.matrix.msc2965/auth_metadata` | ✅ | Proxies OIDC discovery document from `<NEBU_OIDC_ISSUER>/.well-known/openid-configuration`; 5-min TTL cache; 503 M_UNAVAILABLE on provider failure (Story 13-7) |
-| GET | `/_matrix/client/v1/auth_metadata` | ✅ | Stable v1 path — same handler as unstable (Story 13-7) |
+| GET | `/_matrix/client/v1/auth_metadata` | ✅ | Stable v1 path - same handler as unstable (Story 13-7) |
 
 ## Authentication
 
@@ -75,7 +75,7 @@ cross-referenced with the Matrix Client-Server API specification.
 
 | Method | Endpoint | Status | Notes |
 |---|---|---|---|
-| GET | `/_matrix/client/v1/rooms/{roomId}/relations/{eventId}` | ✅ | Base route — all relation types; dir/limit/recurse/from params; prev_batch in response (Story 9-29) |
+| GET | `/_matrix/client/v1/rooms/{roomId}/relations/{eventId}` | ✅ | Base route - all relation types; dir/limit/recurse/from params; prev_batch in response (Story 9-29) |
 | GET | `/_matrix/client/v1/rooms/{roomId}/relations/{eventId}/{relType}` | ✅ | Filter by relation type; same params (Story 9-28 / 9-29) |
 | GET | `/_matrix/client/v1/rooms/{roomId}/relations/{eventId}/{relType}/{eventType}` | ✅ | Filter by relation type and event type (Story 9-29) |
 
@@ -167,13 +167,13 @@ cross-referenced with the Matrix Client-Server API specification.
 | GET | `/_matrix/client/v3/account/3pid` | 🔶 | Returns empty list (3PIDs not supported) |
 | GET | `/_matrix/client/v3/thirdparty/protocols` | 🔶 | Returns {} |
 | GET | `/_matrix/client/v3/voip/turnServer` | 🔶 | Returns 404 (TURN not configured) |
-| GET | `/_matrix/media/v3/config` | ✅ | Returns `{"m.upload.size": N}` — unauthenticated, deprecated (Story 12.16) |
+| GET | `/_matrix/media/v3/config` | ✅ | Returns `{"m.upload.size": N}` - unauthenticated, deprecated (Story 12.16) |
 
 ## Media Repository (Media Gateway)
 
 These endpoints are served by the **Media Gateway** (`media/cmd/media/main.go`), not the API Gateway.
 
-**Deprecated unauthenticated endpoints (v3) — backward compatibility:**
+**Deprecated unauthenticated endpoints (v3) - backward compatibility:**
 
 | Method | Endpoint | Status | Notes |
 |---|---|---|---|
@@ -181,13 +181,13 @@ These endpoints are served by the **Media Gateway** (`media/cmd/media/main.go`),
 | GET | `/_matrix/media/v3/download/{serverName}/{mediaId}` | ✅ | Decrypt + stream; CSP + CORP headers (Story 12.16) |
 | GET | `/_matrix/media/v3/download/{serverName}/{mediaId}/{fileName}` | ✅ | Same + `Content-Disposition: filename="{fileName}"` |
 | GET | `/_matrix/media/v3/thumbnail/{serverName}/{mediaId}` | ✅ | On-demand thumbnail; AES decrypt + resize; CSP + CORP headers (Story 12.16) |
-| GET | `/_matrix/media/v3/config` | ✅ | `{"m.upload.size": N}` — unauthenticated, deprecated (Story 12.16) |
+| GET | `/_matrix/media/v3/config` | ✅ | `{"m.upload.size": N}` - unauthenticated, deprecated (Story 12.16) |
 
 **Authenticated endpoints (v1.11+, Matrix CS API spec):**
 
 | Method | Endpoint | Auth | Status | Notes |
 |---|---|---|---|---|
-| GET | `/_matrix/client/v1/media/config` | Bearer | ✅ | `{"m.upload.size": N}` — 401 M_MISSING_TOKEN if no token (Story 12.16) |
+| GET | `/_matrix/client/v1/media/config` | Bearer | ✅ | `{"m.upload.size": N}` - 401 M_MISSING_TOKEN if no token (Story 12.16) |
 | GET | `/_matrix/client/v1/media/download/{serverName}/{mediaId}` | Bearer | ✅ | Auth-gated download; same handler as v3 (Story 12.16) |
 | GET | `/_matrix/client/v1/media/download/{serverName}/{mediaId}/{fileName}` | Bearer | ✅ | Auth-gated download with filename in `Content-Disposition` (Story 12.16) |
 | GET | `/_matrix/client/v1/media/thumbnail/{serverName}/{mediaId}` | Bearer | ✅ | Auth-gated thumbnail (Story 12.16) |
@@ -217,16 +217,16 @@ the roadmap toward Managed E2EE.
 | GET | `/_matrix/client/v3/room_keys/version` | 🔶 | Returns 404 (no backup) |
 | POST | `/_matrix/client/v3/room_keys/version` | 🔶 | Returns version: "1" (not stored) |
 
-## Spaces (Phase 3 — MSC1772 / MSC2946 / MSC3083)
+## Spaces (Phase 3 - MSC1772 / MSC2946 / MSC3083)
 
 These endpoints are planned for Phase 3 (Epic 12). Not yet implemented.
 
 | Method | Endpoint | Status | Notes |
 |---|---|---|---|
-| POST | `/_matrix/client/v3/createRoom` (with `creation_content.type: "m.space"`) | ⏳ | Space creation via existing endpoint — `type` field added to `m.room.create`; see [spaces-spec §4.2](stories/phase3/spaces-spec.md) |
+| POST | `/_matrix/client/v3/createRoom` (with `creation_content.type: "m.space"`) | ⏳ | Space creation via existing endpoint - `type` field added to `m.room.create`; see [spaces-spec §4.2](stories/phase3/spaces-spec.md) |
 | PUT | `/_matrix/client/v3/rooms/{roomId}/state/m.space.child/{childRoomId}` | ⏳ | Add/remove child room from space; validated in Core (power level + `via` field) |
 | PUT | `/_matrix/client/v3/rooms/{roomId}/state/m.space.parent/{parentSpaceId}` | ⏳ | Link child room to parent space; security check: sender must have PL in parent space |
-| GET | `/_matrix/client/v1/rooms/{roomId}/hierarchy` | ⏳ | MSC2946 — BFS traversal over `m.space.child` state events; `limit`, `max_depth`, `suggested_only`, `from` params; paginated SpaceSummary response |
+| GET | `/_matrix/client/v1/rooms/{roomId}/hierarchy` | ⏳ | MSC2946 - BFS traversal over `m.space.child` state events; `limit`, `max_depth`, `suggested_only`, `from` params; paginated SpaceSummary response |
 
 **Dependent changes to existing endpoints (Phase 3):**
 
@@ -236,7 +236,7 @@ These endpoints are planned for Phase 3 (Epic 12). Not yet implemented.
 | POST | `/_matrix/client/v3/join/{roomIdOrAlias}` | Restricted join rule enforcement (MSC3083): checks caller membership in `allow`-listed spaces |
 | POST | `/_matrix/client/v3/rooms/{roomId}/join` | Same restricted join rule check |
 
-_Source: [docs/stories/phase3/spaces-spec.md](stories/phase3/spaces-spec.md) — full endpoint, event schema, and architecture spec_
+_Source: [docs/stories/phase3/spaces-spec.md](stories/phase3/spaces-spec.md) - full endpoint, event schema, and architecture spec_
 
 ---
 
@@ -248,8 +248,8 @@ identity services.
 
 | Namespace | Reason |
 |---|---|
-| `/_matrix/federation/*` | No federation — see [README §No Federation](../README.md#no-federation) (closed-network data-sovereignty model; Phase 3 vision) |
-| `/_matrix/identity/*` | No identity server — email/phone binding not supported |
+| `/_matrix/federation/*` | No federation - see [README §No Federation](../README.md#no-federation) (closed-network data-sovereignty model; Phase 3 vision) |
+| `/_matrix/identity/*` | No identity server - email/phone binding not supported |
 | `/_matrix/key/v2/server` | Server key exchange only needed for federation |
-| `POST /_matrix/client/v3/search` | Requires ADR-010 (FTS strategy) decision first — see [ADR-010](architecture/adr/ADR-010-fts-strategy.md) |
+| `POST /_matrix/client/v3/search` | Requires ADR-010 (FTS strategy) decision first - see [ADR-010](architecture/adr/ADR-010-fts-strategy.md) |
 

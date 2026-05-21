@@ -1,8 +1,8 @@
-# Security Review — Story 12.12: Media Gateway Startup + Rate Limiter Hardening (F-3/F-4/F-5)
+# Security Review - Story 12.12: Media Gateway Startup + Rate Limiter Hardening (F-3/F-4/F-5)
 
 **Date:** 2026-05-13
 **Reviewer:** Kassandra (nebu-agent-kassandra)
-**Story:** 12.12 — Media Gateway Startup + Rate Limiter Hardening
+**Story:** 12.12 - Media Gateway Startup + Rate Limiter Hardening
 **Classification: CLEAN**
 
 ---
@@ -12,12 +12,12 @@
 Story 12.12 closes three LOW advisories from the epic-12 definitive SEC Gate 2 review
 (`epic-12-security-review-final2-2026-05-13.md`):
 
-- **F-3 [LOW]** — `initOIDCVerifierWith` now adds a 10-second per-attempt timeout via
+- **F-3 [LOW]** - `initOIDCVerifierWith` now adds a 10-second per-attempt timeout via
   `context.WithTimeout(ctx, attemptTimeout)`, preventing startup hangs on a TCP-accepting
   but never-responding OIDC provider. Parent ctx cancellation check added at loop entry.
-- **F-4 [LOW]** — Existing `cleanupOnce` is confirmed correct (already uses `entry.lastSeen`).
+- **F-4 [LOW]** - Existing `cleanupOnce` is confirmed correct (already uses `entry.lastSeen`).
   New white-box tests (`ratelimit_internal_test.go`) guard against regression.
-- **F-5 [LOW]** — `logIfRateLimitDisabled()` emits a single `slog.Warn` at startup when
+- **F-5 [LOW]** - `logIfRateLimitDisabled()` emits a single `slog.Warn` at startup when
   `NEBU_RATE_LIMIT_DISABLED=true`. Exactly one call in `main()`.
 
 ---
@@ -26,7 +26,7 @@ Story 12.12 closes three LOW advisories from the epic-12 definitive SEC Gate 2 r
 
 | ID | Severity | Description | Status |
 |----|----------|-------------|--------|
-| — | — | No new findings | — |
+| - | - | No new findings | - |
 
 **CRITICAL: 0 | HIGH: 0 | MEDIUM: 0 | LOW: 0**
 
@@ -34,25 +34,25 @@ Story 12.12 closes three LOW advisories from the epic-12 definitive SEC Gate 2 r
 
 ## Detailed Analysis
 
-### F-3 — `initOIDCVerifierWith` per-attempt timeout
+### F-3 - `initOIDCVerifierWith` per-attempt timeout
 
 - `context.WithTimeout(ctx, attemptTimeout)` → child context with 10s deadline.
   Parent deadline takes precedence if earlier (correct Go semantics). ✓
-- `cancel()` called immediately after `newProvider` returns — no context leak. ✓
+- `cancel()` called immediately after `newProvider` returns - no context leak. ✓
 - `ctx.Err()` check at loop entry catches SIGTERM-style parent cancellation before each
-  attempt — the check is on the parent, not the attempt context. ✓
-- No credential or token data in `slog.Warn` output — only error type and attempt count. ✓
+  attempt - the check is on the parent, not the attempt context. ✓
+- No credential or token data in `slog.Warn` output - only error type and attempt count. ✓
 - `initOIDCVerifier` still calls `os.Exit(1)` when all retries fail. Fail-closed guarantee
   not weakened by adding the per-attempt timeout. ✓
 
-### F-5 — `logIfRateLimitDisabled()`
+### F-5 - `logIfRateLimitDisabled()`
 
-- Reads `NEBU_RATE_LIMIT_DISABLED` env var; compared to `"true"` only — value never logged. ✓
+- Reads `NEBU_RATE_LIMIT_DISABLED` env var; compared to `"true"` only - value never logged. ✓
 - `slog.Warn` message has no structured fields with sensitive data. ✓
-- Called once in `main()` before mux wiring — no per-request execution path. ✓
+- Called once in `main()` before mux wiring - no per-request execution path. ✓
 - Exactly one log line at startup regardless of how many `NewIPRateLimiter` instances created. ✓
 
-### F-4 — Test-only changes
+### F-4 - Test-only changes
 
 No production code changes to `ratelimit.go`. Tests verify `cleanupOnce` correctness
 directly via `package ratelimit` (internal test access). No new attack surface. ✓

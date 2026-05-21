@@ -26,18 +26,18 @@ so that no separate frontend server is needed and the binary is fully self-conta
   - [x] 1.4 Export `NewTemplateHandler() (*TemplateHandler, error)` constructor that parses all templates from the embedded FS
 
 - [x] Task 2: Create placeholder template (AC: 2, 5)
-  - [x] 2.1 Create `gateway/internal/admin/templates/base.html` — minimal skeleton (`<!DOCTYPE html><html>...`) with `{{ define "base" }}` block; will be replaced in Story 3.4
+  - [x] 2.1 Create `gateway/internal/admin/templates/base.html` - minimal skeleton (`<!DOCTYPE html><html>...`) with `{{ define "base" }}` block; will be replaced in Story 3.4
   - [x] 2.2 Verify `go build ./...` succeeds from `gateway/` directory
 
 - [x] Task 3: Write unit tests (AC: 6)
   - [x] 3.1 Create `gateway/internal/admin/handler_test.go` in `package admin` (whitebox test, consistent with `bootstrap_test.go` pattern)
   - [x] 3.2 Test: valid template name → `render()` writes non-empty HTML, status 200, Content-Type `text/html; charset=utf-8`
   - [x] 3.3 Test: unknown template name → `render()` writes status 500 (template lookup/execution fails)
-  - [x] 3.4 Run `make test-unit-go` — all tests green, no regressions
+  - [x] 3.4 Run `make test-unit-go` - all tests green, no regressions
 
 ## Dev Notes
 
-### Existing Admin Package — What Already Exists
+### Existing Admin Package - What Already Exists
 
 The `gateway/internal/admin/` package already contains production code. DO NOT change any existing files:
 
@@ -65,9 +65,9 @@ var adminFS embed.FS
 **NEVER use filesystem access at runtime** (`http.ServeFile`, `os.Open`, `template.ParseGlob` on disk paths).  
 The embed directive must appear in the same file as the `var adminFS embed.FS` declaration.
 
-### CRITICAL: go:embed Subtlety — No Static Dir Yet
+### CRITICAL: go:embed Subtlety - No Static Dir Yet
 
-Story 3.1 only embeds `templates/**/*`. Do NOT add `static/*` to the embed directive — there is no `static/` directory yet (CSS is Story 3.2, fonts Story 3.3). A `//go:embed` directive pointing to a non-existent path causes a **compile error**.
+Story 3.1 only embeds `templates/**/*`. Do NOT add `static/*` to the embed directive - there is no `static/` directory yet (CSS is Story 3.2, fonts Story 3.3). A `//go:embed` directive pointing to a non-existent path causes a **compile error**.
 
 Story 3.2 will add a separate embed directive for `static/` in its own file. Keep 3.1 scope minimal.
 
@@ -120,11 +120,11 @@ func (h *Handler) render(w http.ResponseWriter, name string, data any) {
 }
 ```
 
-**Note:** `http.Error` after `w.Header().Set(...)` works because headers haven't been sent yet (no body written before the error). If ExecuteTemplate writes partial output before failing, `http.Error` may append to it — this is acceptable for MVP (no streaming in SSR pages).
+**Note:** `http.Error` after `w.Header().Set(...)` works because headers haven't been sent yet (no body written before the error). If ExecuteTemplate writes partial output before failing, `http.Error` may append to it - this is acceptable for MVP (no streaming in SSR pages).
 
 ### Placeholder Template Design
 
-`gateway/internal/admin/templates/base.html` should be minimal — it will be completely replaced in Story 3.4:
+`gateway/internal/admin/templates/base.html` should be minimal - it will be completely replaced in Story 3.4:
 
 ```html
 {{ define "base" }}<!DOCTYPE html>
@@ -139,7 +139,7 @@ This provides a parseable template with a `"base"` name for unit tests to use.
 ### Test Pattern
 
 The existing tests in `bootstrap_test.go` use:
-- `package admin` (whitebox — same package, not `_test` suffix)
+- `package admin` (whitebox - same package, not `_test` suffix)
 - `httptest.NewRequest` + `httptest.NewRecorder`
 - No `t.Run` for simple single-assertion tests
 - Table-driven tests for functions with multiple input variations (architecture rule: Go: table-driven Tests für alle Funktionen mit mehreren Inputs)
@@ -188,11 +188,11 @@ The build target runs in Docker (no local Go required):
 ```bash
 make test-unit-go   # go test ./... in build container
 ```
-AC 5 (`go build ./...` succeeds) is validated implicitly by `make test-unit-go` — the test binary compilation requires the embed to succeed.
+AC 5 (`go build ./...` succeeds) is validated implicitly by `make test-unit-go` - the test binary compilation requires the embed to succeed.
 
 ### Path Discrepancy Note
 
-Architecture doc (`architecture.md`) shows `gateway/internal/ui/templates/` for templates. The epics (Story 3.1 AC) specify `gateway/internal/admin/templates/`. Follow the **epics** — all existing admin code (`auth.go`, `bootstrap.go`, `metrics.go`, `api_gen.go`) already lives in `gateway/internal/admin/`, and Stories 3.2–3.15 all reference `gateway/internal/admin/` consistently.
+Architecture doc (`architecture.md`) shows `gateway/internal/ui/templates/` for templates. The epics (Story 3.1 AC) specify `gateway/internal/admin/templates/`. Follow the **epics** - all existing admin code (`auth.go`, `bootstrap.go`, `metrics.go`, `api_gen.go`) already lives in `gateway/internal/admin/`, and Stories 3.2–3.15 all reference `gateway/internal/admin/` consistently.
 
 ### Future Story Awareness (Do NOT implement now)
 
@@ -206,9 +206,9 @@ Architecture doc (`architecture.md`) shows `gateway/internal/ui/templates/` for 
 
 | File | Action |
 |------|--------|
-| `gateway/internal/admin/handler.go` | CREATE — Handler struct, adminFS embed, render() |
-| `gateway/internal/admin/handler_test.go` | CREATE — table-driven render() unit tests |
-| `gateway/internal/admin/templates/base.html` | CREATE — minimal placeholder for embed |
+| `gateway/internal/admin/handler.go` | CREATE - Handler struct, adminFS embed, render() |
+| `gateway/internal/admin/handler_test.go` | CREATE - table-driven render() unit tests |
+| `gateway/internal/admin/templates/base.html` | CREATE - minimal placeholder for embed |
 
 No changes to: `main.go`, `auth.go`, `bootstrap.go`, `metrics.go`, `api_gen.go`, any test files except the new one.
 
@@ -218,7 +218,7 @@ No changes to: `main.go`, `auth.go`, `bootstrap.go`, `metrics.go`, `api_gen.go`,
 - [Source: _bmad-output/planning-artifacts/architecture.md#Enforcement] Rule #9: go:embed mandatory, no filesystem access at runtime
 - [Source: _bmad-output/planning-artifacts/architecture.md#Project-Structure] `gateway/internal/admin/` is the canonical admin package
 - [Source: gateway/internal/admin/bootstrap_test.go] Test pattern: `package admin`, `httptest`, whitebox
-- [Source: gateway/internal/admin/metrics.go] Existing admin package pattern — small focused structs
+- [Source: gateway/internal/admin/metrics.go] Existing admin package pattern - small focused structs
 
 ## Dev Agent Record
 
@@ -245,6 +245,6 @@ claude-sonnet-4-6[1m]
 
 ## Change Log
 
-- 2026-03-31: Story 3-1 created — Go Template Engine Setup + go:embed
-- 2026-03-31: Story 3-1 implemented — TemplateHandler + go:embed templates + unit tests, all ACs satisfied
-- 2026-03-31: Code review passed — clean review, 0 findings, all ACs verified
+- 2026-03-31: Story 3-1 created - Go Template Engine Setup + go:embed
+- 2026-03-31: Story 3-1 implemented - TemplateHandler + go:embed templates + unit tests, all ACs satisfied
+- 2026-03-31: Code review passed - clean review, 0 findings, all ACs verified

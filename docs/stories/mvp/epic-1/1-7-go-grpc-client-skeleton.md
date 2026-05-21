@@ -14,7 +14,7 @@ so that subsequent stories can implement individual RPC calls without repeating 
 
 2. **Given** the `gateway/internal/grpc/` package, **when** it is inspected, **then** it exports a `Client` struct with methods for all `CoreService` RPCs (stub implementations returning `nil, nil` or an empty response struct)
 
-3. **Given** gateway startup, **when** gRPC connection to core cannot be established within 5 seconds, **then** gateway logs a warning but does NOT exit — connection is non-blocking (lazy dial)
+3. **Given** gateway startup, **when** gRPC connection to core cannot be established within 5 seconds, **then** gateway logs a warning but does NOT exit - connection is non-blocking (lazy dial)
 
 4. **Given** the gRPC client, **when** it is used in later stories, **then** it accepts a `context.Context` as the first parameter on all method calls (standard Go gRPC pattern)
 
@@ -70,20 +70,20 @@ import (
 ### Generated Stub Location (from Story 1.6)
 
 The generated Go stubs from `make proto` live at:
-- `gateway/internal/grpc/pb/core.pb.go` — message types
-- `gateway/internal/grpc/pb/core_grpc.pb.go` — `CoreServiceClient` interface + `NewCoreServiceClient()`
+- `gateway/internal/grpc/pb/core.pb.go` - message types
+- `gateway/internal/grpc/pb/core_grpc.pb.go` - `CoreServiceClient` interface + `NewCoreServiceClient()`
 
-The architecture doc shows `proto/gen/go/` as an alternative — **ignore it**. The ACs are authoritative. The stubs are at `gateway/internal/grpc/pb/`. [Source: epics.md — Story 1.6 AC #4, Story 1.6 Dev Notes]
+The architecture doc shows `proto/gen/go/` as an alternative - **ignore it**. The ACs are authoritative. The stubs are at `gateway/internal/grpc/pb/`. [Source: epics.md - Story 1.6 AC #4, Story 1.6 Dev Notes]
 
 ### gRPC Dependency Versions (already in go.mod)
 
-`gateway/go.mod` already has — do NOT `go get` again:
+`gateway/go.mod` already has - do NOT `go get` again:
 - `google.golang.org/grpc v1.79.3`
 - `google.golang.org/protobuf v1.36.11`
 
 Required additional imports (packages within grpc module, no new deps needed):
-- `google.golang.org/grpc/connectivity` — for `connectivity.Ready` state check
-- `google.golang.org/grpc/credentials/insecure` — for `insecure.NewCredentials()`
+- `google.golang.org/grpc/connectivity` - for `connectivity.Ready` state check
+- `google.golang.org/grpc/credentials/insecure` - for `insecure.NewCredentials()`
 
 ### Modern gRPC Dial API (v1.79.3)
 
@@ -96,9 +96,9 @@ conn, err := grpclib.NewClient(
 )
 ```
 
-`grpc.NewClient()` is **lazy by default** — it does NOT open a TCP connection until the first RPC call. This satisfies AC #3 (non-blocking, gateway does not exit on unavailable core).
+`grpc.NewClient()` is **lazy by default** - it does NOT open a TCP connection until the first RPC call. This satisfies AC #3 (non-blocking, gateway does not exit on unavailable core).
 
-No TLS for internal gRPC (MVP). Phase 2 adds mTLS per ADR 008. [Source: architecture.md — ADR 008]
+No TLS for internal gRPC (MVP). Phase 2 adds mTLS per ADR 008. [Source: architecture.md - ADR 008]
 
 ### 5-Second Startup Probe (AC #3)
 
@@ -122,7 +122,7 @@ go func() {
 }()
 ```
 
-**Critical**: This goroutine is fire-and-forget. `New()` returns immediately without waiting for it. Gateway startup continues regardless of outcome. [Source: epics.md — Story 1.7 AC #3]
+**Critical**: This goroutine is fire-and-forget. `New()` returns immediately without waiting for it. Gateway startup continues regardless of outcome. [Source: epics.md - Story 1.7 AC #3]
 
 ### All 9 CoreService RPC Stubs
 
@@ -140,7 +140,7 @@ GetPendingEvents(ctx, *pb.GetPendingEventsRequest) → (*pb.GetPendingEventsResp
 EventBus(ctx, *pb.EventBusRequest)             → (grpclib.ServerStreamingClient[pb.Event], error)
 ```
 
-Note: `GetPendingEventsRequest/Response` (not `GetPendingRequest/Response`) — buf lint in Story 1.6 renamed these. Verify against `core_grpc.pb.go`. [Source: story 1-6 Dev Agent Record — Debug Log]
+Note: `GetPendingEventsRequest/Response` (not `GetPendingRequest/Response`) - buf lint in Story 1.6 renamed these. Verify against `core_grpc.pb.go`. [Source: story 1-6 Dev Agent Record - Debug Log]
 
 ### Config Already Present
 
@@ -152,7 +152,7 @@ Use `log/slog` (stdlib). Pattern from existing code in `main.go`:
 - `slog.Info("gRPC client initialized", "addr", cfg.CoreGRPCAddr)`
 - `slog.Warn("gRPC core not reachable at startup, continuing", "addr", addr)`
 
-Do NOT use `fmt.Println`, `log.Printf`, or any other logger. [Source: architecture.md — Logging section]
+Do NOT use `fmt.Println`, `log.Printf`, or any other logger. [Source: architecture.md - Logging section]
 
 ### main.go Integration
 
@@ -170,7 +170,7 @@ slog.Info("gRPC client initialized", "addr", cfg.CoreGRPCAddr)
 _ = coreClient // passed to HTTP handlers in Story 1.11
 ```
 
-`grpc.NewClient` can return an error only for invalid options — not for unreachable addresses. The `os.Exit(1)` is a safeguard for misconfiguration, NOT for core unavailability. [Source: grpc-go v1.79 docs]
+`grpc.NewClient` can return an error only for invalid options - not for unreachable addresses. The `os.Exit(1)` is a safeguard for misconfiguration, NOT for core unavailability. [Source: grpc-go v1.79 docs]
 
 ### Project Structure Notes
 
@@ -186,12 +186,12 @@ gateway/cmd/gateway/main.go           ← add coregrpc.New() call
 ```
 
 **Files NOT to touch:**
-- `gateway/internal/grpc/pb/` — generated, do NOT edit manually
-- `gateway/internal/grpc/.gitkeep` — harmless, leave it
-- `gateway/internal/grpc/stream.go` / `fallback.go` — Story 4.x territory
+- `gateway/internal/grpc/pb/` - generated, do NOT edit manually
+- `gateway/internal/grpc/.gitkeep` - harmless, leave it
+- `gateway/internal/grpc/stream.go` / `fallback.go` - Story 4.x territory
 - All other gateway packages (config, db, migrations)
 
-**No new Go module dependencies** — all required packages already in `go.mod`.
+**No new Go module dependencies** - all required packages already in `go.mod`.
 
 ### Testing
 
@@ -202,19 +202,19 @@ make test-unit-go  # runs: docker run golang:1.26-alpine sh -c "cd gateway && go
 
 Since `grpc.NewClient()` is lazy, `TestNew_returnsWithoutBlocking` can use a non-existent address and still succeed. Include `t.Helper()` in test helpers.
 
-Existing tests (config, db, migrations) must continue to pass — this story does not touch those packages.
+Existing tests (config, db, migrations) must continue to pass - this story does not touch those packages.
 
 ### References
 
 - CoreService RPC signatures: [Source: gateway/internal/grpc/pb/core_grpc.pb.go:39-55]
-- `GetPendingEventsRequest` name: [Source: story 1-6 Dev Agent Record — buf lint fixes]
+- `GetPendingEventsRequest` name: [Source: story 1-6 Dev Agent Record - buf lint fixes]
 - gRPC addr config: [Source: gateway/internal/config/config.go:7-18]
-- Non-blocking dial requirement: [Source: epics.md — Story 1.7 AC #3]
-- Insecure MVP / mTLS Phase 2: [Source: architecture.md — ADR 008]
+- Non-blocking dial requirement: [Source: epics.md - Story 1.7 AC #3]
+- Insecure MVP / mTLS Phase 2: [Source: architecture.md - ADR 008]
 - `grpc.NewClient` replaces `grpc.Dial`: [Source: grpc-go changelog v1.63+]
-- GRÜN/GELB/ROT status model: [Source: architecture.md — G12]
-- Logging with slog: [Source: architecture.md — Logging section, gateway/cmd/gateway/main.go]
-- Build/test container: [Source: Makefile — DOCKER_GO, test-unit-go targets]
+- GRÜN/GELB/ROT status model: [Source: architecture.md - G12]
+- Logging with slog: [Source: architecture.md - Logging section, gateway/cmd/gateway/main.go]
+- Build/test container: [Source: Makefile - DOCKER_GO, test-unit-go targets]
 
 ## Dev Agent Record
 
@@ -224,14 +224,14 @@ claude-sonnet-4-6
 
 ### Debug Log References
 
-No issues encountered. `grpc.NewClient()` is lazy by default — `TestNew_returnsWithoutBlocking` uses `localhost:19999` (non-existent) and succeeds without blocking, confirming AC #3.
+No issues encountered. `grpc.NewClient()` is lazy by default - `TestNew_returnsWithoutBlocking` uses `localhost:19999` (non-existent) and succeeds without blocking, confirming AC #3.
 
 ### Completion Notes List
 
 - Created `gateway/internal/grpc/client.go`: `Client` struct with `New()` (lazy dial via `grpclib.NewClient()`), background 5s startup probe with `slog.Warn`, `Close()`, and 9 stub methods all returning `nil, nil`.
 - Updated `gateway/cmd/gateway/main.go`: added `coregrpc` import alias, `coregrpc.New(cfg.CoreGRPCAddr)` call with error guard, `defer Close()`, and `_ = coreClient` placeholder.
 - Created `gateway/internal/grpc/client_test.go`: `TestNew_returnsWithoutBlocking` (lazy dial timing) + table-driven `TestStubsReturnNil` (9 RPCs).
-- All tests pass: `make test-unit-go` — `ok github.com/nebu/nebu/internal/grpc 0.002s`, no regressions in config/db/migrations packages.
+- All tests pass: `make test-unit-go` - `ok github.com/nebu/nebu/internal/grpc 0.002s`, no regressions in config/db/migrations packages.
 
 ### File List
 
@@ -241,4 +241,4 @@ No issues encountered. `grpc.NewClient()` is lazy by default — `TestNew_return
 
 ## Change Log
 
-- 2026-03-23: Implemented Go gRPC client skeleton — `Client` struct, lazy `New()` dial, 5s startup probe, 9 RPC stubs, `main.go` wiring, unit tests (Date: 2026-03-23)
+- 2026-03-23: Implemented Go gRPC client skeleton - `Client` struct, lazy `New()` dial, 5s startup probe, 9 RPC stubs, `main.go` wiring, unit tests (Date: 2026-03-23)

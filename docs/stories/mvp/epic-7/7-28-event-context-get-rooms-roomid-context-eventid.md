@@ -5,7 +5,7 @@ security_review: not-needed
 created: 2026-04-30
 ---
 
-# Story 7.28: Event Context — GET /rooms/{roomId}/context/{eventId}
+# Story 7.28: Event Context - GET /rooms/{roomId}/context/{eventId}
 
 Status: ready-for-dev
 
@@ -39,7 +39,7 @@ The existing `messages.go` handler already implements paginated event retrieval 
 
 4. If the authenticated user is not a member of `roomId`, returns HTTP 403 with `errcode` = `M_FORBIDDEN`. Membership check uses the same guard as `GET /rooms/{roomId}/messages`.
 
-5. `events_before` and `events_after` may each contain fewer than `limit` events if the target event is near the start or end of the timeline — this is not an error.
+5. `events_before` and `events_after` may each contain fewer than `limit` events if the target event is near the start or end of the timeline - this is not an error.
 
 6. The `start` and `end` tokens, when used in `GET /rooms/{roomId}/messages?from=end` and `GET /rooms/{roomId}/messages?to=start`, produce contiguous results with no gaps or overlaps relative to the context window.
 
@@ -47,37 +47,37 @@ The existing `messages.go` handler already implements paginated event retrieval 
 
 ### Tests written FIRST (before implementation code):
 
-1. [Returns target event with surrounding context] — Godog (`gateway/features/event_context.feature`)
+1. [Returns target event with surrounding context] - Godog (`gateway/features/event_context.feature`)
    - Given: authenticated user `@alice:nebu.test` is a member of `!room1:nebu.test`; room has 10 messages; target is the 5th message `$evt5`
    - When: GET `/_matrix/client/v3/rooms/!room1:nebu.test/context/$evt5?limit=3`
    - Then: HTTP 200; `event.event_id` = `$evt5`; `events_before` has 3 entries (events 4, 3, 2); `events_after` has 3 entries (events 6, 7, 8)
 
-2. [Context near start of timeline — fewer events_before] — Godog
+2. [Context near start of timeline - fewer events_before] - Godog
    - Given: target is the 2nd message `$evt2` in a room with 10 messages
    - When: GET `/_matrix/client/v3/rooms/!room1:nebu.test/context/$evt2?limit=5`
    - Then: `events_before` has 1 entry (event 1); `events_after` has 5 entries; no error
 
-3. [M_NOT_FOUND for unknown eventId] — Godog
+3. [M_NOT_FOUND for unknown eventId] - Godog
    - Given: authenticated user in `!room1:nebu.test`
    - When: GET `/_matrix/client/v3/rooms/!room1:nebu.test/context/$nonexistent`
    - Then: HTTP 404, `errcode` = `M_NOT_FOUND`
 
-4. [M_FORBIDDEN for non-member] — Godog
+4. [M_FORBIDDEN for non-member] - Godog
    - Given: authenticated user `@bob:nebu.test` who is NOT a member of `!room1:nebu.test`
    - When: GET `/_matrix/client/v3/rooms/!room1:nebu.test/context/$evt5`
    - Then: HTTP 403, `errcode` = `M_FORBIDDEN`
 
-5. [limit clamped to 100] — Go httptest (`gateway/internal/matrix/messages_test.go`)
+5. [limit clamped to 100] - Go httptest (`gateway/internal/matrix/messages_test.go`)
    - Given: authenticated room member, valid event
    - When: GET `/context/$evt?limit=999`
    - Then: HTTP 200; `events_before` and `events_after` each have at most 100 entries; no error
 
-6. [Pagination tokens are compatible with /messages] — Godog
+6. [Pagination tokens are compatible with /messages] - Godog
    - Given: context response for `$evt5` with `start` and `end` tokens
    - When: GET `/rooms/!room1:nebu.test/messages?from=<end>&dir=f&limit=5`
    - Then: first returned event is the one immediately after `events_after`'s last entry (no gap or overlap)
 
-7. [state array includes sender membership and power levels] — Go httptest
+7. [state array includes sender membership and power levels] - Go httptest
    - Given: valid context request for `$evt5`
    - When: inspect `state` array in response
    - Then: contains at least one `m.room.member` event (sender of `$evt5`) and one `m.room.power_levels` event
@@ -100,14 +100,14 @@ The Elixir gRPC handler in `room_manager` executes:
 3. Fetch state snapshot: query the latest `m.room.member` (for the event sender), `m.room.power_levels`, and `m.room.name` events with `origin_server_ts <= event.origin_server_ts`.
 4. Construct `start_token` (before the window) and `end_token` (after the window) using the same token format as `GetMessages`.
 
-**Membership guard** — reuse the existing `assertRoomMember(ctx, roomId, userId)` helper already used in `messages.go` and `members.go`.
+**Membership guard** - reuse the existing `assertRoomMember(ctx, roomId, userId)` helper already used in `messages.go` and `members.go`.
 
 **Route registration** in `gateway/cmd/gateway/main.go`:
 ```
 GET /_matrix/client/v3/rooms/{roomId}/context/{eventId} → jwtMiddleware(GetEventContextHandler)
 ```
 
-**limit parsing** — share the existing `parseLimitParam(r, defaultVal, maxVal int)` helper from `messages.go`, or extract it into `gateway/internal/matrix/validate.go` if not already there.
+**limit parsing** - share the existing `parseLimitParam(r, defaultVal, maxVal int)` helper from `messages.go`, or extract it into `gateway/internal/matrix/validate.go` if not already there.
 
 ## Tasks
 
@@ -117,5 +117,5 @@ GET /_matrix/client/v3/rooms/{roomId}/context/{eventId} → jwtMiddleware(GetEve
 - [ ] Implement Elixir gRPC handler in `room_manager` (locate event, fetch before/after, state snapshot, tokens)
 - [ ] Implement `GetEventContextHandler` in `gateway/internal/matrix/messages.go`
 - [ ] Register route in `main.go`
-- [ ] Run `make test-unit-go` + `make test-unit-elixir` — all pass
-- [ ] Run `make test-integration` — Godog scenarios green
+- [ ] Run `make test-unit-go` + `make test-unit-elixir` - all pass
+- [ ] Run `make test-integration` - Godog scenarios green

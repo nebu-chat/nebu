@@ -1,4 +1,4 @@
-# Story 1.11: Health + Readiness Endpoints — Go Gateway
+# Story 1.11: Health + Readiness Endpoints - Go Gateway
 
 Status: done
 
@@ -22,7 +22,7 @@ so that Docker Compose, monitoring systems, and CI pipelines can reliably verify
 
 6. **Given** the health endpoint under load, **when** response time is measured, **then** `GET :8080/health` responds in ≤200ms (NFR-O2)
 
-7. **Given** the gateway codebase, **when** handler and middleware code is reviewed, **then** no in-memory request session state exists — all persistent state reads go against PostgreSQL or Elixir via gRPC (NFR-SC1 stateless constraint)
+7. **Given** the gateway codebase, **when** handler and middleware code is reviewed, **then** no in-memory request session state exists - all persistent state reads go against PostgreSQL or Elixir via gRPC (NFR-SC1 stateless constraint)
 
 ## Tasks / Subtasks
 
@@ -35,17 +35,17 @@ so that Docker Compose, monitoring systems, and CI pipelines can reliably verify
 - [x] Task 2: Add `GetMigrationVersion` to DB package (AC: #2)
   - [x] In `gateway/internal/db/db.go`, add `func GetMigrationVersion(dbURL string) (int64, error)`
   - [x] Implementation: open SQL connection, query `SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1`
-  - [x] Returns `(0, err)` if table not found or no rows — caller treats 0 as "DOWN"
+  - [x] Returns `(0, err)` if table not found or no rows - caller treats 0 as "DOWN"
   - [x] Use the same `sql.Open("pgx", dbURL)` pattern as `CheckDB`
 
 - [x] Task 3: Create health package (AC: #1, #2, #3, #4)
   - [x] Create `gateway/internal/health/health.go` with `Handler` struct
-  - [x] `Handler` fields: `dbURL string`, `grpcClient coreState` (interface — see Dev Notes)
-  - [x] Implement `func (h *Handler) Health(w http.ResponseWriter, r *http.Request)` — always 200, `{"status": "UP", "version": "0.1.0"}`
-  - [x] Implement `func (h *Handler) Ready(w http.ResponseWriter, r *http.Request)` — checks DB + migrations + gRPC, returns READY/NOT_READY
+  - [x] `Handler` fields: `dbURL string`, `grpcClient coreState` (interface - see Dev Notes)
+  - [x] Implement `func (h *Handler) Health(w http.ResponseWriter, r *http.Request)` - always 200, `{"status": "UP", "version": "0.1.0"}`
+  - [x] Implement `func (h *Handler) Ready(w http.ResponseWriter, r *http.Request)` - checks DB + migrations + gRPC, returns READY/NOT_READY
   - [x] Create `gateway/internal/health/health_test.go` with unit tests for Health handler and all Ready scenarios
 
-- [x] Task 4: Update `main.go` — start public HTTP server on `:8080` (AC: #1, #2, #5)
+- [x] Task 4: Update `main.go` - start public HTTP server on `:8080` (AC: #1, #2, #5)
   - [x] Remove `_ = coreClient // passed to HTTP handlers in Story 1.11` blank identifier
   - [x] Create `pubMux := http.NewServeMux()` and register `GET /health` and `GET /ready` routes
   - [x] Instantiate `health.NewHandler(cfg.DBURL, coreClient)` and register handlers on `pubMux`
@@ -57,7 +57,7 @@ so that Docker Compose, monitoring systems, and CI pipelines can reliably verify
   - [x] Add `healthcheck:` to gateway service using `/health` endpoint
 
 - [x] Task 6: Validate (AC: all)
-  - [x] Run `make test-unit-go` — all tests pass
+  - [x] Run `make test-unit-go` - all tests pass
   - [x] Run `make dev` and verify `curl http://localhost:8080/health` → 200 `{"status":"UP","version":"0.1.0"}` (verified by unit tests; runtime docker verification on deploy)
   - [x] Verify `curl http://localhost:8080/ready` → 200 or 503 depending on service availability (verified by unit tests; runtime docker verification on deploy)
 
@@ -69,13 +69,13 @@ The gateway runs **two separate HTTP servers** (always has from Story 1.10 onwar
 
 | Port | Purpose | Auth | Status |
 |------|---------|------|--------|
-| `:8008` | Internal — node registration, node list | PSK required | Exists from Story 1.10 |
-| `:8080` | Public — health, readiness, future Matrix API, Admin UI | None (health endpoints unauthenticated) | **New in Story 1.11** |
+| `:8008` | Internal - node registration, node list | PSK required | Exists from Story 1.10 |
+| `:8080` | Public - health, readiness, future Matrix API, Admin UI | None (health endpoints unauthenticated) | **New in Story 1.11** |
 
 In `main.go`, start `:8080` as a background goroutine and block on `:8008`:
 
 ```go
-// Public HTTP server on :8080 (health, readiness — no auth)
+// Public HTTP server on :8080 (health, readiness - no auth)
 pubMux := http.NewServeMux()
 healthHandler := health.NewHandler(cfg.DBURL, coreClient)
 pubMux.HandleFunc("GET /health", healthHandler.Health)
@@ -97,9 +97,9 @@ if err := http.ListenAndServe(":8008", mux); err != nil {
 }
 ```
 
-### Health Handler — Always 200
+### Health Handler - Always 200
 
-`/health` is pure liveness — if the process is running, it responds 200. No dependency checks:
+`/health` is pure liveness - if the process is running, it responds 200. No dependency checks:
 
 ```go
 const gatewayVersion = "0.1.0"
@@ -111,7 +111,7 @@ func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-### Ready Handler — Dependency Checks + Response Structure
+### Ready Handler - Dependency Checks + Response Structure
 
 Use typed structs (not `map[string]interface{}`):
 
@@ -187,7 +187,7 @@ case connectivity.Ready:
     // GRÜN: gRPC connection healthy
     checks.CoreGRPC = coreGRPCCheck{Status: "UP", NebuStatus: "GRÜN"}
 case connectivity.Idle, connectivity.Connecting:
-    // GELB: not yet connected (warmup) or transitional — NOT_READY
+    // GELB: not yet connected (warmup) or transitional - NOT_READY
     checks.CoreGRPC = coreGRPCCheck{Status: "UP", NebuStatus: "GELB"}
     allReady = false
 default: // TransientFailure, Shutdown
@@ -201,7 +201,7 @@ default: // TransientFailure, Shutdown
 
 ### gRPC Client Interface for Testability
 
-The health handler MUST NOT import `*grpc.Client` directly — use an interface to enable unit testing without a real gRPC connection:
+The health handler MUST NOT import `*grpc.Client` directly - use an interface to enable unit testing without a real gRPC connection:
 
 ```go
 // gateway/internal/health/health.go
@@ -233,14 +233,14 @@ healthHandler := health.NewHandler(cfg.DBURL, coreClient)
 
 ### DB Check and Migration Version
 
-`db.CheckDB(dbURL)` already exists — use it directly (opens connection, pings).
+`db.CheckDB(dbURL)` already exists - use it directly (opens connection, pings).
 
 Add `GetMigrationVersion` to `gateway/internal/db/db.go`:
 
 ```go
 // GetMigrationVersion returns the highest applied (non-dirty) migration version.
 // Used by the /ready endpoint to verify migration state.
-// Returns (0, nil) if no migrations have been applied yet — caller treats 0 as DOWN.
+// Returns (0, nil) if no migrations have been applied yet - caller treats 0 as DOWN.
 func GetMigrationVersion(dbURL string) (int64, error) {
     database, err := sql.Open("pgx", dbURL)
     if err != nil {
@@ -287,7 +287,7 @@ import (
     "google.golang.org/grpc/connectivity"
 )
 
-// fakeCore is a test double for coreState — inline, not an external mock lib.
+// fakeCore is a test double for coreState - inline, not an external mock lib.
 type fakeCore struct {
     state connectivity.State
 }
@@ -318,7 +318,7 @@ func TestHealth_returns200(t *testing.T) {
 
 For `Ready` tests that require DB: use a fake `dbChecker` function or test only the gRPC-state-driven behavior. DB-dependent behavior is covered by integration tests.
 
-**Option: make DB checks injectable** — to unit test all Ready states without a real DB, extract DB check to a function type:
+**Option: make DB checks injectable** - to unit test all Ready states without a real DB, extract DB check to a function type:
 
 ```go
 type Handler struct {
@@ -329,7 +329,7 @@ type Handler struct {
 }
 ```
 
-Set defaults in `NewHandler`, override in tests. This is NOT over-engineering — it's the only way to unit test the DB-down scenario without a running database.
+Set defaults in `NewHandler`, override in tests. This is NOT over-engineering - it's the only way to unit test the DB-down scenario without a running database.
 
 ### Docker Compose Updates
 
@@ -349,7 +349,7 @@ gateway:
     start_period: 10s
 ```
 
-Use `wget` (available in Alpine base images) instead of `curl` — the gateway is built with a minimal base image.
+Use `wget` (available in Alpine base images) instead of `curl` - the gateway is built with a minimal base image.
 
 **Alternative if wget not available:** `test: ["CMD-SHELL", "echo OK"]` as a placeholder that's always healthy, but prefer the real check.
 
@@ -367,18 +367,18 @@ In `main.go`, add import:
 "github.com/nebu/nebu/internal/health"
 ```
 
-### What Already Exists — Do NOT Change
+### What Already Exists - Do NOT Change
 
-- `gateway/internal/middleware/psk.go` — PSK middleware — do NOT touch
-- `gateway/internal/registry/` — node registry — do NOT touch
-- `gateway/internal/grpc/client.go` — only ADD the `State()` method, do NOT change existing methods
-- `gateway/internal/db/db.go` — only ADD `GetMigrationVersion`, do NOT change existing functions
-- `gateway/internal/config/config.go` — no changes needed
-- The `:8008` internal server setup in `main.go` — keep exactly as-is, only add new code
+- `gateway/internal/middleware/psk.go` - PSK middleware - do NOT touch
+- `gateway/internal/registry/` - node registry - do NOT touch
+- `gateway/internal/grpc/client.go` - only ADD the `State()` method, do NOT change existing methods
+- `gateway/internal/db/db.go` - only ADD `GetMigrationVersion`, do NOT change existing functions
+- `gateway/internal/config/config.go` - no changes needed
+- The `:8008` internal server setup in `main.go` - keep exactly as-is, only add new code
 
 ### Architecture Placement Note
 
-The architecture doc shows `/health`, `/ready`, `/metrics` will eventually live in `gateway/internal/admin/metrics.go`. However, the `admin` package doesn't exist yet (created in Epic 3/6). For this story, create a dedicated `gateway/internal/health/` package. When Epic 3/6 creates the admin router, these handlers can be migrated or kept separate — both are valid.
+The architecture doc shows `/health`, `/ready`, `/metrics` will eventually live in `gateway/internal/admin/metrics.go`. However, the `admin` package doesn't exist yet (created in Epic 3/6). For this story, create a dedicated `gateway/internal/health/` package. When Epic 3/6 creates the admin router, these handlers can be migrated or kept separate - both are valid.
 
 ### Project Structure Notes
 
@@ -401,7 +401,7 @@ docker-compose.yml                    ← add 8080:8080 port, add healthcheck
 - `gateway/internal/config/config.go`
 - `gateway/internal/middleware/psk.go`
 - `gateway/internal/registry/`
-- Any Elixir files — this story is Go-only
+- Any Elixir files - this story is Go-only
 
 ### Build Validation
 
@@ -414,14 +414,14 @@ curl http://localhost:8080/ready    # → 200 or 503 depending on service state
 
 ### References
 
-- Health/readiness endpoint spec: [Source: architecture.md — Health & Readiness Endpoints section, lines 592–648]
-- Port architecture (`:8080` public, `:8008` internal): [Source: architecture.md — Health & Readiness Endpoints]
-- gRPC connectivity states: [Source: gateway/internal/grpc/client.go — connectivity package usage]
-- `db.CheckDB` already defined: [Source: gateway/internal/db/db.go — CheckDB function]
-- `schema_migrations` table: [Source: golang-migrate library — automatically managed migration version table]
-- Docker healthcheck pattern: [Source: architecture.md — Container Health-Check section, lines 161–171]
-- FR44: System exponiert Health- und Readiness-Endpunkte [Source: architecture.md — Requirements Overview]
-- NFR-P4 cold start ≤5s, NFR-O2 health ≤200ms [Source: architecture.md — Performance/Operability NFRs]
+- Health/readiness endpoint spec: [Source: architecture.md - Health & Readiness Endpoints section, lines 592–648]
+- Port architecture (`:8080` public, `:8008` internal): [Source: architecture.md - Health & Readiness Endpoints]
+- gRPC connectivity states: [Source: gateway/internal/grpc/client.go - connectivity package usage]
+- `db.CheckDB` already defined: [Source: gateway/internal/db/db.go - CheckDB function]
+- `schema_migrations` table: [Source: golang-migrate library - automatically managed migration version table]
+- Docker healthcheck pattern: [Source: architecture.md - Container Health-Check section, lines 161–171]
+- FR44: System exponiert Health- und Readiness-Endpunkte [Source: architecture.md - Requirements Overview]
+- NFR-P4 cold start ≤5s, NFR-O2 health ≤200ms [Source: architecture.md - Performance/Operability NFRs]
 - Story 1.10 patterns: [Source: _bmad-output/implementation-artifacts/1-10-elixir-node-registration-internal-nodes-register.md]
 
 ## Dev Agent Record
@@ -449,15 +449,15 @@ _No blockers encountered._
 
 - `gateway/internal/health/health.go` (new)
 - `gateway/internal/health/health_test.go` (new)
-- `gateway/internal/grpc/client.go` (modified — added `State()`)
-- `gateway/internal/grpc/client_test.go` (modified — added `TestState_returnsValidConnectivityState`)
-- `gateway/internal/db/db.go` (modified — added `GetMigrationVersion()`)
-- `gateway/cmd/gateway/main.go` (modified — public HTTP server on :8080)
-- `docker-compose.yml` (modified — port 8080, gateway healthcheck)
-- `gateway/cmd/healthcheck/main.go` (new — static healthcheck binary for distroless image)
-- `gateway/Dockerfile` (modified — build healthcheck binary, fix EXPOSE ports)
+- `gateway/internal/grpc/client.go` (modified - added `State()`)
+- `gateway/internal/grpc/client_test.go` (modified - added `TestState_returnsValidConnectivityState`)
+- `gateway/internal/db/db.go` (modified - added `GetMigrationVersion()`)
+- `gateway/cmd/gateway/main.go` (modified - public HTTP server on :8080)
+- `docker-compose.yml` (modified - port 8080, gateway healthcheck)
+- `gateway/cmd/healthcheck/main.go` (new - static healthcheck binary for distroless image)
+- `gateway/Dockerfile` (modified - build healthcheck binary, fix EXPOSE ports)
 
 ## Change Log
 
-- 2026-03-24: Story 1-11 implemented — health/readiness endpoints on Go gateway (:8080), gRPC State() method, GetMigrationVersion() DB helper, docker-compose healthcheck
-- 2026-03-24: Code review (claude-opus-4-6) — Fixed: Docker healthcheck used `wget` but runtime image is `distroless/static` (no binaries); added static Go healthcheck binary `cmd/healthcheck/`. Fixed: Dockerfile EXPOSE now lists 8008+8080 instead of 8008+8448.
+- 2026-03-24: Story 1-11 implemented - health/readiness endpoints on Go gateway (:8080), gRPC State() method, GetMigrationVersion() DB helper, docker-compose healthcheck
+- 2026-03-24: Code review (claude-opus-4-6) - Fixed: Docker healthcheck used `wget` but runtime image is `distroless/static` (no binaries); added static Go healthcheck binary `cmd/healthcheck/`. Fixed: Dockerfile EXPOSE now lists 8008+8080 instead of 8008+8448.

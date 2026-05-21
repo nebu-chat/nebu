@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted — 2026-05-21
+Accepted - 2026-05-21
 
 ## Context
 
@@ -92,7 +92,7 @@ main (v0.2.1)
 
 ## CI/CD and Registry Mapping
 
-Every branch and tag produces a deterministically named image in the GitLab Container Registry. The mapping is fully determined by the trigger — no manual lookup of pipeline logs required.
+Every branch and tag produces a deterministically named image in the GitLab Container Registry. The mapping is fully determined by the trigger - no manual lookup of pipeline logs required.
 
 | Trigger                          | Image Tag                               | Description                    |
 |----------------------------------|-----------------------------------------|--------------------------------|
@@ -142,12 +142,12 @@ Only Maintainers may create release tags. Prevents accidental or unauthorized re
 The `/nebu-release` skill automates Git Flow operations for this project:
 
 ```
-/nebu-release new-epic <name>   — create feature/<name> from develop
-/nebu-release open <version>    — cut release/<version> from develop
-/nebu-release rc                — tag current HEAD on release/* as RC
-/nebu-release hotfix <desc>     — create hotfix/* from main
-/nebu-release close             — close current release/* or hotfix/*
-/nebu-release status            — show current git flow state
+/nebu-release new-epic <name>   - create feature/<name> from develop
+/nebu-release open <version>    - cut release/<version> from develop
+/nebu-release rc                - tag current HEAD on release/* as RC
+/nebu-release hotfix <desc>     - create hotfix/* from main
+/nebu-release close             - close current release/* or hotfix/*
+/nebu-release status            - show current git flow state
 ```
 
 ---
@@ -177,14 +177,14 @@ Maximum separation, including long-lived `support/*` branches for backports of o
 ## Consequences
 
 **Positive:**
-- `:latest` is always a stable, tested release — reliable for deployment scripts and Docker Compose references in customer documentation
+- `:latest` is always a stable, tested release - reliable for deployment scripts and Docker Compose references in customer documentation
 - Audit trail: every image tag is uniquely traceable to a git commit and a pipeline run (compliance relevance)
 - RC phase enables controlled staging before release
 - Hotfix flow prevents critical fixes from being lost in `develop`
 - Named feature branches (`feature/<epic-name>`) enable parallel epic development without numbering conflicts
 
 **Negative / Overhead:**
-- Two merges per release (`release/*` → `main` and `release/*` → `develop`) — minor but real overhead
+- Two merges per release (`release/*` → `main` and `release/*` → `develop`) - minor but real overhead
 - Contributors must know the flow; documented in `CONTRIBUTING.md`
 - GitLab Protected Branch / Tag configuration must be set up initially
 

@@ -1,4 +1,4 @@
-# Story 2.17: GET /_matrix/client/v3/login — SSO Flow Discovery
+# Story 2.17: GET /_matrix/client/v3/login - SSO Flow Discovery
 
 Status: done
 
@@ -32,7 +32,7 @@ so that it can initiate the correct SSO flow automatically.
   - [x] Add config test for default and custom value
   - [x] Add env var to `docker-compose.yml` gateway service (optional, default is fine for dev)
 
-- [x] Task 2: Create `gateway/internal/matrix/login.go` — LoginHandler (AC: #1, #2)
+- [x] Task 2: Create `gateway/internal/matrix/login.go` - LoginHandler (AC: #1, #2)
   - [x] Define response structs: `LoginResponse`, `LoginFlow`, `IdentityProvider`
   - [x] Create `LoginHandler` struct with `displayName string` field
   - [x] Implement `NewLoginHandler(displayName string) *LoginHandler`
@@ -56,8 +56,8 @@ so that it can initiate the correct SSO flow automatically.
   - [x] Confirm `make test-unit-go` passes
 
 - [x] Task 5: Config test for `NEBU_OIDC_DISPLAY_NAME` (AC: #1)
-  - [x] Add `TestLoad_OIDCDisplayName_Default` — unset env → `"SSO"`
-  - [x] Add `TestLoad_OIDCDisplayName_CustomValue` — set env → custom value
+  - [x] Add `TestLoad_OIDCDisplayName_Default` - unset env → `"SSO"`
+  - [x] Add `TestLoad_OIDCDisplayName_CustomValue` - set env → custom value
   - [x] Confirm `make test-unit-go` passes
 
 ## Dev Notes
@@ -72,7 +72,7 @@ This story does **one thing**: implements the Matrix `GET /login` endpoint that 
 - SSO redirect flow (`/_matrix/client/v3/login/sso/redirect/{idpId}`) → Story 2-18
 - Element Web functional testing → Story 2-21 (Gherkin)
 
-### Task 1: Config — `NEBU_OIDC_DISPLAY_NAME`
+### Task 1: Config - `NEBU_OIDC_DISPLAY_NAME`
 
 **File: `gateway/internal/config/config.go`**
 
@@ -90,7 +90,7 @@ OIDCDisplayName: getEnvOrDefault("NEBU_OIDC_DISPLAY_NAME", "SSO"),
 
 **Why a new env var:** The OIDC discovery document does not expose a human-readable provider name. The issuer URL (`http://dex:5556`) is not suitable for display to end users. A configurable display name lets operators set something meaningful (e.g., "Corporate SSO", "Okta", "Keycloak"). Default `"SSO"` is a safe fallback.
 
-**Why NOT derive from issuer URL hostname:** Extracting hostname from `http://dex:5556` yields `"dex"`, which is a Docker-internal hostname — useless for end users. The env var approach is explicit and predictable.
+**Why NOT derive from issuer URL hostname:** Extracting hostname from `http://dex:5556` yields `"dex"`, which is a Docker-internal hostname - useless for end users. The env var approach is explicit and predictable.
 
 **Test file: `gateway/internal/config/config_test.go`**
 
@@ -120,7 +120,7 @@ Also update `TestLoad_AllEnvVars` (line 76): add `t.Setenv("NEBU_OIDC_DISPLAY_NA
 
 ### Task 2: LoginHandler
 
-**File: `gateway/internal/matrix/login.go`** (NEW — replaces `.gitkeep`)
+**File: `gateway/internal/matrix/login.go`** (NEW - replaces `.gitkeep`)
 
 This is the first file in the `matrix` package. Package declaration: `package matrix`.
 
@@ -178,7 +178,7 @@ func (h *LoginHandler) GetLogin(w http.ResponseWriter, r *http.Request) {
 **Key decisions:**
 - `Icon` is `*string` (pointer) so `json:"icon"` marshals as `null` instead of being omitted. This matches the Matrix spec format exactly.
 - `identity_providers` uses `omitempty` on the flow level for future-proofing but will always be populated for `m.login.sso`.
-- No error path — the handler is purely static with no external dependencies.
+- No error path - the handler is purely static with no external dependencies.
 - `displayName` injected at construction, not read from config at request time (immutable after startup).
 
 **Delete `.gitkeep`:** The new `login.go` file replaces `gateway/internal/matrix/.gitkeep`. Remove `.gitkeep` after creating `login.go`.
@@ -261,9 +261,9 @@ func TestGetLogin_ReturnsSSO(t *testing.T) {
 }
 ```
 
-**Test approach:** Use `httptest.NewRecorder()` (standard Go testing pattern used throughout the codebase — see `gateway/internal/admin/bootstrap_test.go`). Test is a single function that validates all ACs: status code, content type, JSON structure, flow type, identity provider fields.
+**Test approach:** Use `httptest.NewRecorder()` (standard Go testing pattern used throughout the codebase - see `gateway/internal/admin/bootstrap_test.go`). Test is a single function that validates all ACs: status code, content type, JSON structure, flow type, identity provider fields.
 
-**No table-driven tests needed:** There's exactly one code path — no branching logic, no error cases. A single test function is sufficient and clearer.
+**No table-driven tests needed:** There's exactly one code path - no branching logic, no error cases. A single test function is sufficient and clearer.
 
 ### Project Structure Notes
 
@@ -271,7 +271,7 @@ func TestGetLogin_ReturnsSSO(t *testing.T) {
 |------|--------|--------|
 | `gateway/internal/config/config.go` | MODIFY | Add `OIDCDisplayName` field + env loading |
 | `gateway/internal/config/config_test.go` | MODIFY | Add default + custom value tests |
-| `gateway/internal/matrix/login.go` | CREATE | New handler — first Matrix endpoint |
+| `gateway/internal/matrix/login.go` | CREATE | New handler - first Matrix endpoint |
 | `gateway/internal/matrix/login_test.go` | CREATE | Unit tests for LoginHandler |
 | `gateway/internal/matrix/.gitkeep` | DELETE | Replaced by actual code |
 | `gateway/cmd/gateway/main.go` | MODIFY | Import matrix package, register route |
@@ -288,31 +288,31 @@ No new dependencies. No `go.mod` changes. No database access. No gRPC calls. No 
 - `http.NotFound` for 404 (not applicable here but shows error response patterns)
 
 **From Story 2-4 (OIDC JWT Validation Middleware):**
-- `writeMatrixError()` helper in `middleware/auth.go` for Matrix-spec error responses — reuse in future Matrix handlers but NOT needed in this story (no error paths)
-- `matrixError` struct with `errcode` + `error` fields — consistent Matrix error format for future stories
+- `writeMatrixError()` helper in `middleware/auth.go` for Matrix-spec error responses - reuse in future Matrix handlers but NOT needed in this story (no error paths)
+- `matrixError` struct with `errcode` + `error` fields - consistent Matrix error format for future stories
 
 **From Story 2-6 (Admin UI OIDC Client):**
 - `AdminAuth` struct pattern: holds config values, exposes handler methods
-- OIDC provider info is available at `auth.Provider` level — but `go-oidc` doesn't expose a display name, so we need the env var approach
+- OIDC provider info is available at `auth.Provider` level - but `go-oidc` doesn't expose a display name, so we need the env var approach
 
 **Docker Compose context:**
-- `NEBU_OIDC_ISSUER: "http://dex:5556"` — issuer URL is a Docker-internal hostname
-- Dex redirectURI already includes `/_matrix/client/v3/login/sso/redirect/oidc` — prepared for Story 2-18
-- Dex `staticClients[0].name: "Nebu Gateway"` — this is the OAuth2 client name, NOT the provider display name
+- `NEBU_OIDC_ISSUER: "http://dex:5556"` - issuer URL is a Docker-internal hostname
+- Dex redirectURI already includes `/_matrix/client/v3/login/sso/redirect/oidc` - prepared for Story 2-18
+- Dex `staticClients[0].name: "Nebu Gateway"` - this is the OAuth2 client name, NOT the provider display name
 
 ### References
 
-- [Source: _bmad-output/planning-artifacts/epics.md#Story 2.17 — SSO Flow Discovery acceptance criteria]
-- [Source: _bmad-output/planning-artifacts/architecture.md — Directory structure: `gateway/internal/matrix/login.go`]
-- [Source: _bmad-output/planning-artifacts/architecture.md — G8 server_name immutability, NFR-M1 Matrix compatibility]
-- [Source: _bmad-output/planning-artifacts/architecture.md — Naming: Go PascalCase exports, snake_case JSON tags]
-- [Source: _bmad-output/planning-artifacts/epics.md — NFR-M2: OIDC-Integration via m.login.sso]
-- [Source: gateway/internal/config/config.go — Existing config pattern with getEnvOrDefault]
-- [Source: gateway/cmd/gateway/main.go — Route registration pattern on mux]
-- [Source: gateway/internal/admin/bootstrap.go — Handler struct pattern with constructor]
-- [Source: gateway/internal/middleware/auth.go — Matrix error response format for future reference]
-- [Source: dev/dex/config.yaml — Dex setup with redirectURI for Matrix SSO]
-- [Source: docker-compose.yml — NEBU_OIDC_ISSUER=http://dex:5556]
+- [Source: _bmad-output/planning-artifacts/epics.md#Story 2.17 - SSO Flow Discovery acceptance criteria]
+- [Source: _bmad-output/planning-artifacts/architecture.md - Directory structure: `gateway/internal/matrix/login.go`]
+- [Source: _bmad-output/planning-artifacts/architecture.md - G8 server_name immutability, NFR-M1 Matrix compatibility]
+- [Source: _bmad-output/planning-artifacts/architecture.md - Naming: Go PascalCase exports, snake_case JSON tags]
+- [Source: _bmad-output/planning-artifacts/epics.md - NFR-M2: OIDC-Integration via m.login.sso]
+- [Source: gateway/internal/config/config.go - Existing config pattern with getEnvOrDefault]
+- [Source: gateway/cmd/gateway/main.go - Route registration pattern on mux]
+- [Source: gateway/internal/admin/bootstrap.go - Handler struct pattern with constructor]
+- [Source: gateway/internal/middleware/auth.go - Matrix error response format for future reference]
+- [Source: dev/dex/config.yaml - Dex setup with redirectURI for Matrix SSO]
+- [Source: docker-compose.yml - NEBU_OIDC_ISSUER=http://dex:5556]
 
 ## Dev Agent Record
 
@@ -322,25 +322,25 @@ Claude Opus 4.6 (1M context)
 
 ### Debug Log References
 
-None — clean implementation, all tests passed first run.
+None - clean implementation, all tests passed first run.
 
 ### Completion Notes List
 
 - Task 1: Added `OIDCDisplayName` field to Config struct with `getEnvOrDefault("NEBU_OIDC_DISPLAY_NAME", "SSO")`. Updated `TestLoad_Defaults` and `TestLoad_EnvVarsOverrideDefaults` with new field assertions.
-- Task 2: Created `gateway/internal/matrix/login.go` — first file in matrix package. `LoginHandler` struct with `GetLogin` method returns static JSON with `m.login.sso` flow and configurable identity provider display name. `Icon` uses `*string` for proper `null` JSON marshaling.
+- Task 2: Created `gateway/internal/matrix/login.go` - first file in matrix package. `LoginHandler` struct with `GetLogin` method returns static JSON with `m.login.sso` flow and configurable identity provider display name. `Icon` uses `*string` for proper `null` JSON marshaling.
 - Task 3: Registered `GET /_matrix/client/v3/login` route on main mux (port 8008), NOT behind auth middleware. This is the first Matrix Client-Server API endpoint.
 - Task 4: Created `login_test.go` with `TestGetLogin_ReturnsSSO` covering status code, Content-Type, JSON structure, flow type, identity provider fields (id, name, icon null).
 - Task 5: Added `TestLoad_OIDCDisplayName_Default` and `TestLoad_OIDCDisplayName_CustomValue` config tests. All `make test-unit-go` passes with 0 failures.
 
 ### Change Log
 
-- 2026-03-30: Story 2-17 implementation complete — GET /_matrix/client/v3/login SSO flow discovery endpoint
+- 2026-03-30: Story 2-17 implementation complete - GET /_matrix/client/v3/login SSO flow discovery endpoint
 
 ### File List
 
-- `gateway/internal/config/config.go` — MODIFIED (added OIDCDisplayName field + env loading)
-- `gateway/internal/config/config_test.go` — MODIFIED (added default/custom tests, updated existing tests)
-- `gateway/internal/matrix/login.go` — CREATED (LoginHandler with GetLogin method)
-- `gateway/internal/matrix/login_test.go` — CREATED (unit tests for LoginHandler)
-- `gateway/internal/matrix/.gitkeep` — DELETED (replaced by actual code)
-- `gateway/cmd/gateway/main.go` — MODIFIED (imported matrix package, registered route)
+- `gateway/internal/config/config.go` - MODIFIED (added OIDCDisplayName field + env loading)
+- `gateway/internal/config/config_test.go` - MODIFIED (added default/custom tests, updated existing tests)
+- `gateway/internal/matrix/login.go` - CREATED (LoginHandler with GetLogin method)
+- `gateway/internal/matrix/login_test.go` - CREATED (unit tests for LoginHandler)
+- `gateway/internal/matrix/.gitkeep` - DELETED (replaced by actual code)
+- `gateway/cmd/gateway/main.go` - MODIFIED (imported matrix package, registered route)

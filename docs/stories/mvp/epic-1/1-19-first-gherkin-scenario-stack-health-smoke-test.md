@@ -1,4 +1,4 @@
-# Story 1.19: First Gherkin Scenario — Stack Health Smoke Test
+# Story 1.19: First Gherkin Scenario - Stack Health Smoke Test
 
 Status: done
 
@@ -16,7 +16,7 @@ So that CI has a definitive green signal that the entire deployment infrastructu
 
 2. **Given** the feature file,
    **When** read,
-   **Then** it contains the following steps (already written in Story 1.18 — do NOT modify the feature file content):
+   **Then** it contains the following steps (already written in Story 1.18 - do NOT modify the feature file content):
    - `Given the docker compose stack is started`
    - `When I call GET /health on the gateway`
    - `Then the response status is 200`
@@ -34,27 +34,27 @@ So that CI has a definitive green signal that the entire deployment infrastructu
 
 4. **Given** a CI pipeline configuration file (`.gitlab-ci.yml`),
    **When** it exists in the repository,
-   **Then** it defines a `unit-tests` job running `make test-unit-go` and `make test-unit-elixir`, and an `integration-test` job running `make test-integration` — both triggered on push to `main` and on merge requests.
+   **Then** it defines a `unit-tests` job running `make test-unit-go` and `make test-unit-elixir`, and an `integration-test` job running `make test-integration` - both triggered on push to `main` and on merge requests.
 
 ## Tasks / Subtasks
 
 - [x] Remove `@pending` tag from `gateway/features/health.feature` (AC: #1, #2)
   - [x] Delete the `@pending` line (line 6) from `health.feature`
-  - [x] Keep all scenario content unchanged — the steps were written verbatim for this story in 1.18
+  - [x] Keep all scenario content unchanged - the steps were written verbatim for this story in 1.18
 
 - [x] Add `coreURL` to `gateway/test/integration/main_test.go` and enable strict mode (AC: #1)
   - [x] Add `var coreURL string` package-level var
   - [x] Initialize `coreURL` from `NEBU_TEST_CORE_URL` env var (default: `http://localhost:4000`) in `TestMain`
-  - [x] Change `Strict: false` to `Strict: true` — all steps will be defined, undefined steps must fail
+  - [x] Change `Strict: false` to `Strict: true` - all steps will be defined, undefined steps must fail
 
 - [x] Create `gateway/test/integration/steps_test.go` with all step definitions (AC: #1, #2)
   - [x] Package `integration_test` (same package as `main_test.go`)
   - [x] Package-level response state vars: `lastStatusCode int`, `lastBody string`
-  - [x] Implement `theDockerComposeStackIsStarted` — no-op, stack already started by `make test-integration`
-  - [x] Implement `iCallGETOnGateway(path string)` — GET `gatewayURL + path`, store status + body
-  - [x] Implement `iCallGETOnCore(path string)` — GET `coreURL + path`, store status + body
-  - [x] Implement `theResponseStatusIs(expected int)` — assert `lastStatusCode == expected`
-  - [x] Implement `theResponseBodyContains(expected string)` — assert `strings.Contains(lastBody, expected)`
+  - [x] Implement `theDockerComposeStackIsStarted` - no-op, stack already started by `make test-integration`
+  - [x] Implement `iCallGETOnGateway(path string)` - GET `gatewayURL + path`, store status + body
+  - [x] Implement `iCallGETOnCore(path string)` - GET `coreURL + path`, store status + body
+  - [x] Implement `theResponseStatusIs(expected int)` - assert `lastStatusCode == expected`
+  - [x] Implement `theResponseBodyContains(expected string)` - assert `strings.Contains(lastBody, expected)`
   - [x] Move `InitializeScenario` from `main_test.go` to `steps_test.go` and register all 5 step patterns
   - [x] Remove the empty `InitializeScenario` stub from `main_test.go`
 
@@ -74,17 +74,17 @@ So that CI has a definitive green signal that the entire deployment infrastructu
 
 ## Dev Notes
 
-### Current State — What Exists from Story 1.18
+### Current State - What Exists from Story 1.18
 
 | File | Current State | Action in Story 1.19 |
 |---|---|---|
-| `gateway/features/health.feature` | EXISTS — correct steps, tagged `@pending` | **REMOVE `@pending` tag only** — content unchanged |
-| `gateway/test/integration/main_test.go` | EXISTS — `Strict: false`, `gatewayURL`, empty `InitializeScenario` | **UPDATE** — add `coreURL`, set `Strict: true`, remove `InitializeScenario` stub |
-| `gateway/test/integration/steps_test.go` | MISSING | **CREATE** — all step definitions + `InitializeScenario` |
-| `Makefile` `test-integration` | EXISTS — passes `NEBU_TEST_GATEWAY_URL` only | **UPDATE** — add `NEBU_TEST_CORE_URL` |
+| `gateway/features/health.feature` | EXISTS - correct steps, tagged `@pending` | **REMOVE `@pending` tag only** - content unchanged |
+| `gateway/test/integration/main_test.go` | EXISTS - `Strict: false`, `gatewayURL`, empty `InitializeScenario` | **UPDATE** - add `coreURL`, set `Strict: true`, remove `InitializeScenario` stub |
+| `gateway/test/integration/steps_test.go` | MISSING | **CREATE** - all step definitions + `InitializeScenario` |
+| `Makefile` `test-integration` | EXISTS - passes `NEBU_TEST_GATEWAY_URL` only | **UPDATE** - add `NEBU_TEST_CORE_URL` |
 | `.gitlab-ci.yml` | MISSING | **CREATE** |
 
-**Do NOT touch:** `gateway/go.mod`, `gateway/go.sum`, `docker-compose.yml` — no changes needed.
+**Do NOT touch:** `gateway/go.mod`, `gateway/go.sum`, `docker-compose.yml` - no changes needed.
 
 ### Exact Content: `gateway/features/health.feature` After Edit
 
@@ -149,7 +149,7 @@ func TestIntegrationSuite(t *testing.T) {
 			Format:   "pretty",
 			Paths:    []string{"../../features"},
 			TestingT: t,
-			Strict:   true, // all steps must be defined — undefined steps fail the suite
+			Strict:   true, // all steps must be defined - undefined steps fail the suite
 			NoColors: true, // cleaner CI output
 		},
 		ScenarioInitializer: InitializeScenario,
@@ -160,7 +160,7 @@ func TestIntegrationSuite(t *testing.T) {
 }
 ```
 
-**Key change:** `Strict: true` — now that all steps are defined, undefined steps are a bug and must fail.
+**Key change:** `Strict: true` - now that all steps are defined, undefined steps are a bug and must fail.
 
 ### Exact Content: `gateway/test/integration/steps_test.go` (CREATE)
 
@@ -177,7 +177,7 @@ import (
 )
 
 // lastStatusCode and lastBody hold the most recent HTTP response.
-// Scenarios run sequentially in godog — no concurrency concern.
+// Scenarios run sequentially in godog - no concurrency concern.
 var lastStatusCode int
 var lastBody string
 
@@ -251,7 +251,7 @@ func InitializeScenario(sc *godog.ScenarioContext) {
 
 **Step regex notes:**
 - `(/\S+)` captures `/health`, `/ready` etc. from steps like `I call GET /health on the gateway`
-- `:4000(/\S+)` captures `/health` from the literal step `I call GET :4000/health on the core` — the `:4000` in the step text is a literal string matching godog's regex; the capture group gets only the path portion
+- `:4000(/\S+)` captures `/health` from the literal step `I call GET :4000/health on the core` - the `:4000` in the step text is a literal string matching godog's regex; the capture group gets only the path portion
 - `(\d+)` is auto-converted to `int` by godog v0.15.x
 - `([^"]*)` captures the quoted string from `the response body contains "UP"`
 
@@ -285,13 +285,13 @@ test-integration:
 
 **Only change:** one `-e NEBU_TEST_CORE_URL=http://host.docker.internal:4000` line added to the existing docker run command.
 
-**Why `host.docker.internal:4000`?** The Elixir Core publishes its health endpoint on port 4000 (Docker Compose port mapping). Inside the test container, `host.docker.internal` resolves to the host where Compose is running — same pattern as `NEBU_TEST_GATEWAY_URL` for port 8080.
+**Why `host.docker.internal:4000`?** The Elixir Core publishes its health endpoint on port 4000 (Docker Compose port mapping). Inside the test container, `host.docker.internal` resolves to the host where Compose is running - same pattern as `NEBU_TEST_GATEWAY_URL` for port 8080.
 
 ### `.gitlab-ci.yml` (CREATE in project root)
 
 ```yaml
 # Nebu CI Pipeline
-# All builds run inside Docker containers — no local Go or Elixir installation required.
+# All builds run inside Docker containers - no local Go or Elixir installation required.
 # Runners must have Docker daemon access (either Docker socket mount or DinD).
 
 stages:
@@ -325,13 +325,13 @@ The simplest setup is socket mount, which works with all `make` targets that use
 
 Verify these exact response body contents are present:
 
-**`GET :8080/health`** — Gateway Liveness:
+**`GET :8080/health`** - Gateway Liveness:
 ```json
 { "status": "UP", "version": "0.1.0" }
 ```
 Contains `"UP"` → AC check passes.
 
-**`GET :8080/ready`** — Gateway Readiness:
+**`GET :8080/ready`** - Gateway Readiness:
 ```json
 {
   "status": "READY",
@@ -344,7 +344,7 @@ Contains `"UP"` → AC check passes.
 ```
 Contains `"READY"` → AC check passes.
 
-**`GET :4000/health`** — Core Liveness:
+**`GET :4000/health`** - Core Liveness:
 ```json
 {
   "status": "UP",
@@ -360,12 +360,12 @@ HTTP status for UP/READY is `200 OK`. HTTP `503` only for DOWN.
 
 ### Learnings from Story 1.18 (Critical)
 
-- **`apk add -q --no-cache gcc musl-dev`** is required for CGO in `golang:1.26-alpine` containers — already in the Makefile `test-integration` target. Do not remove.
+- **`apk add -q --no-cache gcc musl-dev`** is required for CGO in `golang:1.26-alpine` containers - already in the Makefile `test-integration` target. Do not remove.
 - **`../../features` path** in `main_test.go` resolves to `gateway/features/` because `go test` sets working directory to the package directory (`gateway/test/integration/`).
 - **`docker compose up -d --wait`** requires Docker Compose v2.1+. The `--wait` flag blocks until all healthchecked services report healthy. Do not change to `--abort-on-container-exit` or remove `--wait`.
 - **`EXIT=$$?; docker compose down; exit $$EXIT`** pattern guarantees `docker compose down` runs even on test failure. The `;` not `&&` is intentional.
 - **`godog v0.15.1`** is already in `gateway/go.mod`. No `go get` needed in this story.
-- **`"$(PWD)"`** quoting was needed for Docker volume mounts — already correct in current Makefile.
+- **`"$(PWD)"`** quoting was needed for Docker volume mounts - already correct in current Makefile.
 
 ### Package Structure Notes
 
@@ -379,19 +379,19 @@ gateway/
       steps_test.go         ← CREATE: all step definitions + InitializeScenario
 ```
 
-**Both `main_test.go` and `steps_test.go` must be `package integration_test`** — they share the same package, so `gatewayURL`, `coreURL`, `lastStatusCode`, `lastBody` are accessible across files without export.
+**Both `main_test.go` and `steps_test.go` must be `package integration_test`** - they share the same package, so `gatewayURL`, `coreURL`, `lastStatusCode`, `lastBody` are accessible across files without export.
 
 **Do NOT create `test/` at the project root.** The architecture doc mentions `test/features/` but story 1.18 established `gateway/features/` as the canonical location, and all subsequent stories (2.21, 3.15, 4.21) reference `gateway/features/*.feature`.
 
 ### No Regression Risk
 
-- `make test-unit-go` (`go test -race ./...`) does NOT pick up `gateway/test/integration/` — integration tests are isolated to `./test/integration/...`
+- `make test-unit-go` (`go test -race ./...`) does NOT pick up `gateway/test/integration/` - integration tests are isolated to `./test/integration/...`
 - Adding `steps_test.go` does not affect production binaries (`go build ./...` ignores `_test.go` files)
 - `Strict: true` only affects the integration test suite; unit tests are unaffected
 
 ### References
 
-- [Source: epics.md#Story-1.19] Full AC and user story (authoritative — steps match exactly)
+- [Source: epics.md#Story-1.19] Full AC and user story (authoritative - steps match exactly)
 - [Source: 1-18-godog-integration-test-framework-setup.md#Dev-Notes] Current file state, Makefile pattern, `Strict: false` rationale, `@pending` behavior
 - [Source: architecture.md#Health-Readiness-Endpoints] Response formats: `{"status": "UP"}` gateway, `{"status": "READY"}` gateway ready, `{"status": "UP"}` core
 - [Source: architecture.md#CI/CD-Integration-Test-Strategie] G6: Gherkin as primary quality gate; CI jobs on main/PR
@@ -409,13 +409,13 @@ claude-sonnet-4-6[1m]
 
 ### Debug Log References
 
-Pre-existing bug found in `core/apps/event_dispatcher/lib/nebu/health/server.ex`: `:gen_tcp` with `packet: :http` returns URI paths as Erlang charlists, not binaries. The pattern `{:abs_path, "/health"}` (binary) never matched, returning 404 for all health requests. Fixed by switching to `packet: :http_bin` which returns paths as binaries — consistent with the binary pattern matches already in the code. Bug was masked by `@pending` tag in Story 1.18.
+Pre-existing bug found in `core/apps/event_dispatcher/lib/nebu/health/server.ex`: `:gen_tcp` with `packet: :http` returns URI paths as Erlang charlists, not binaries. The pattern `{:abs_path, "/health"}` (binary) never matched, returning 404 for all health requests. Fixed by switching to `packet: :http_bin` which returns paths as binaries - consistent with the binary pattern matches already in the code. Bug was masked by `@pending` tag in Story 1.18.
 
 Docker images (gateway + core) had stale cached builds missing Story 1.11-1.13 public HTTP server code. Both images required explicit `docker compose build` before the stack was fully functional.
 
 ### Completion Notes List
 
-- Removed `@pending` tag from `gateway/features/health.feature` — scenario now active
+- Removed `@pending` tag from `gateway/features/health.feature` - scenario now active
 - Created `gateway/test/integration/steps_test.go` with all 5 step definitions + `InitializeScenario`
 - Updated `gateway/test/integration/main_test.go`: added `coreURL` var, `Strict: true`, removed empty stub
 - Added `-e NEBU_TEST_CORE_URL=http://host.docker.internal:4000` to Makefile `test-integration` target
@@ -425,12 +425,12 @@ Docker images (gateway + core) had stale cached builds missing Story 1.11-1.13 p
 
 ### File List
 
-- `gateway/features/health.feature` (modified — removed `@pending` tag)
-- `gateway/test/integration/main_test.go` (modified — added `coreURL`, `Strict: true`, removed stub)
-- `gateway/test/integration/steps_test.go` (created — all step definitions + `InitializeScenario`)
-- `Makefile` (modified — added `NEBU_TEST_CORE_URL` env var to `test-integration` target)
-- `.gitlab-ci.yml` (created — CI pipeline with unit-tests and integration-test jobs)
-- `core/apps/event_dispatcher/lib/nebu/health/server.ex` (modified — `packet: :http` → `packet: :http_bin`)
+- `gateway/features/health.feature` (modified - removed `@pending` tag)
+- `gateway/test/integration/main_test.go` (modified - added `coreURL`, `Strict: true`, removed stub)
+- `gateway/test/integration/steps_test.go` (created - all step definitions + `InitializeScenario`)
+- `Makefile` (modified - added `NEBU_TEST_CORE_URL` env var to `test-integration` target)
+- `.gitlab-ci.yml` (created - CI pipeline with unit-tests and integration-test jobs)
+- `core/apps/event_dispatcher/lib/nebu/health/server.ex` (modified - `packet: :http` → `packet: :http_bin`)
 
 ## Senior Developer Review (AI)
 
@@ -441,7 +441,7 @@ Docker images (gateway + core) had stale cached builds missing Story 1.11-1.13 p
 
 | # | Severity | Description | Resolution |
 |---|---|---|---|
-| 1 | LOW | `.gitlab-ci.yml` had a single `test` stage — both jobs ran in parallel. Split into `unit` → `integration` stages so integration tests only run after unit tests pass. | Fixed — two stages in `.gitlab-ci.yml` |
+| 1 | LOW | `.gitlab-ci.yml` had a single `test` stage - both jobs ran in parallel. Split into `unit` → `integration` stages so integration tests only run after unit tests pass. | Fixed - two stages in `.gitlab-ci.yml` |
 
 ### AC Verification
 
@@ -450,5 +450,5 @@ All 4 Acceptance Criteria verified as IMPLEMENTED. All 6 task groups marked `[x]
 ### Code Quality Notes
 
 - `steps_test.go`: Clean step definitions, real assertions, proper error wrapping
-- `server.ex` bug fix (`packet: :http_bin`): Correct — `:gen_tcp` with `:http` returns charlists, pattern matches expect binaries
+- `server.ex` bug fix (`packet: :http_bin`): Correct - `:gen_tcp` with `:http` returns charlists, pattern matches expect binaries
 - No security issues, no performance concerns

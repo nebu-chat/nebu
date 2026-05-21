@@ -51,9 +51,9 @@ so that message signing has a tested, dependency-free foundation.
 
 Replaces the placeholder `Nebu.Signature` module with the first real implementation: `generate_signing_keypair/0`. This function is the foundation for message signing (Story 2.13 orchestration, Epic 4 event signing).
 
-**Scope:** Only `generate_signing_keypair/0` — Story 2.9 adds `generate_encryption_keypair/0` (X25519), Story 2.10 adds operational PII encryption, Story 2.11 adds sensitive PII encryption. Do NOT implement anything beyond this story's AC.
+**Scope:** Only `generate_signing_keypair/0` - Story 2.9 adds `generate_encryption_keypair/0` (X25519), Story 2.10 adds operational PII encryption, Story 2.11 adds sensitive PII encryption. Do NOT implement anything beyond this story's AC.
 
-**No new dependencies:** `mix.exs` has `deps: []` — pure OTP `:crypto`. Do NOT add any external packages.
+**No new dependencies:** `mix.exs` has `deps: []` - pure OTP `:crypto`. Do NOT add any external packages.
 
 ### Files to Modify
 
@@ -61,9 +61,9 @@ Replaces the placeholder `Nebu.Signature` module with the first real implementat
 core/apps/signature/
   lib/
     nebu/
-      signature.ex           ← MODIFY — replace placeholder with real implementation
+      signature.ex           ← MODIFY - replace placeholder with real implementation
   test/
-    nebu_signature_test.exs  ← MODIFY — replace placeholder test with real tests
+    nebu_signature_test.exs  ← MODIFY - replace placeholder test with real tests
   mix.exs                    ← DO NOT TOUCH (no new deps needed)
   lib/nebu/signature/
     application.ex           ← DO NOT TOUCH
@@ -71,7 +71,7 @@ core/apps/signature/
 
 ### Implementation: signature.ex
 
-**Module:** `Nebu.Signature` (keep same module name — no rename needed)
+**Module:** `Nebu.Signature` (keep same module name - no rename needed)
 
 **OTP API (native, no external library):**
 ```elixir
@@ -82,9 +82,9 @@ core/apps/signature/
 - `public_key`: 32 bytes
 - `private_key`: 64 bytes
 
-**Architecture rule (CRITICAL):** Ed25519 is for SIGNING only — never for encryption. X25519 is the encryption keypair (Story 2.9). Do NOT confuse the two algorithms. [Source: architecture.md#V1]
+**Architecture rule (CRITICAL):** Ed25519 is for SIGNING only - never for encryption. X25519 is the encryption keypair (Story 2.9). Do NOT confuse the two algorithms. [Source: architecture.md#V1]
 
-**Architecture rule:** PII encryption uses X25519 (Encryption Key) — NEVER Ed25519 (Signing Key). [Source: architecture.md — Anti-pattern #10]
+**Architecture rule:** PII encryption uses X25519 (Encryption Key) - NEVER Ed25519 (Signing Key). [Source: architecture.md - Anti-pattern #10]
 
 ```elixir
 defmodule Nebu.Signature do
@@ -92,10 +92,10 @@ defmodule Nebu.Signature do
   Cryptographic key generation and signing operations for Nebu.
 
   Two separate keypairs per user (Architecture V1):
-  - Signing: Ed25519 — message signing, non-repudiation
-  - Encryption: X25519 — PII encryption via ECDH (Story 2.9)
+  - Signing: Ed25519 - message signing, non-repudiation
+  - Encryption: X25519 - PII encryption via ECDH (Story 2.9)
 
-  Both use OTP native :crypto — no external dependencies.
+  Both use OTP native :crypto - no external dependencies.
   """
 
   @doc """
@@ -116,7 +116,7 @@ end
 
 ### Implementation: nebu_signature_test.exs
 
-**Test module name:** `Nebu.SignatureTest` (keep existing name — matches file convention)
+**Test module name:** `Nebu.SignatureTest` (keep existing name - matches file convention)
 
 **Sign API:**
 ```elixir
@@ -162,16 +162,16 @@ defmodule Nebu.SignatureTest do
 end
 ```
 
-**Note on test style:** Use `async: true` — all operations are pure crypto with no shared state. Use `describe` blocks (established pattern from event_dispatcher tests like `metadata_test.exs`).
+**Note on test style:** Use `async: true` - all operations are pure crypto with no shared state. Use `describe` blocks (established pattern from event_dispatcher tests like `metadata_test.exs`).
 
 ### OTP Version Compatibility
 
 OTP `:crypto` Ed25519 support:
-- `:crypto.generate_key(:eddsa, :ed25519)` — available since OTP 24+
-- `:crypto.sign(:eddsa, :none, ...)` — available since OTP 24+
-- The project requires Elixir 1.19+ which targets OTP 26+ — no compatibility issues
+- `:crypto.generate_key(:eddsa, :ed25519)` - available since OTP 24+
+- `:crypto.sign(:eddsa, :none, ...)` - available since OTP 24+
+- The project requires Elixir 1.19+ which targets OTP 26+ - no compatibility issues
 
-**Verify the signature app's elixir version** in `mix.exs`: `elixir: "~> 1.19"` — OTP 24+ guaranteed.
+**Verify the signature app's elixir version** in `mix.exs`: `elixir: "~> 1.19"` - OTP 24+ guaranteed.
 
 ### Previous Story Intelligence (2.7)
 
@@ -180,7 +180,7 @@ From Story 2.7 (Nebu.Grpc.Metadata):
 - Module convention: `alias ModuleName` at top of test file before tests
 - Quality gate: `mix test --warnings-as-errors` must pass with 0 failures
 - Scope discipline: Do NOT touch files not listed in scope (application.ex, mix.exs)
-- No new dependencies — Story 2.8 follows same pattern
+- No new dependencies - Story 2.8 follows same pattern
 
 From Story 2.7 completion notes: "Created `core/apps/event_dispatcher/lib/nebu/grpc/metadata.ex` module with... all tests pass with `mix test --warnings-as-errors`"
 
@@ -208,19 +208,19 @@ make test-unit-elixir
 
 ### Project Structure Notes
 
-- Alignment: `Nebu.Signature` in `core/apps/signature/lib/nebu/signature.ex` — matches umbrella app naming (`Nebu.{App}.{Module}`)
-- Test file: `core/apps/signature/test/nebu_signature_test.exs` — matches Elixir test discovery conventions (no registration needed)
-- The `signature` app has no external deps — confirmed in `mix.exs` (`deps: []`); this remains unchanged
+- Alignment: `Nebu.Signature` in `core/apps/signature/lib/nebu/signature.ex` - matches umbrella app naming (`Nebu.{App}.{Module}`)
+- Test file: `core/apps/signature/test/nebu_signature_test.exs` - matches Elixir test discovery conventions (no registration needed)
+- The `signature` app has no external deps - confirmed in `mix.exs` (`deps: []`); this remains unchanged
 
 ### References
 
 - [Source: epics.md#Story-2.8] Authoritative acceptance criteria
 - [Source: architecture.md#V1] Two-keypair architecture: Ed25519 (signing) + X25519 (encryption), OTP native
 - [Source: architecture.md#G4] Unit tests mandatory for crypto operations
-- [Source: architecture.md#Anti-pattern #10] PII encryption via X25519 only — NEVER Ed25519
+- [Source: architecture.md#Anti-pattern #10] PII encryption via X25519 only - NEVER Ed25519
 - [Source: core/apps/signature/lib/nebu/signature.ex] Existing placeholder to replace
 - [Source: core/apps/signature/test/nebu_signature_test.exs] Existing placeholder test to replace
-- [Source: core/apps/signature/mix.exs] No external deps — pure OTP :crypto confirmed
+- [Source: core/apps/signature/mix.exs] No external deps - pure OTP :crypto confirmed
 
 ## Dev Agent Record
 
@@ -230,12 +230,12 @@ claude-sonnet-4-6 (1M context)
 
 ### Debug Log References
 
-- **OTP private key size discrepancy:** Story AC #2 specified private key = 64 bytes (libsodium convention). OTP's `:crypto.generate_key(:eddsa, :ed25519)` returns 32-byte private key seed. Test updated to assert 32 bytes — the actual OTP behavior. Sign/verify operations work correctly with the 32-byte key.
-- **OTP sign/verify API correction:** Story Dev Notes showed 5-arg `:crypto.sign(:eddsa, :none, msg, [key], [:ed25519])` — this is RSA-only. For EdDSA, curve is included in the key list: `:crypto.sign(:eddsa, :none, msg, [key, :ed25519])`. Both sign and verify corrected to 4-arg form with curve in key list.
+- **OTP private key size discrepancy:** Story AC #2 specified private key = 64 bytes (libsodium convention). OTP's `:crypto.generate_key(:eddsa, :ed25519)` returns 32-byte private key seed. Test updated to assert 32 bytes - the actual OTP behavior. Sign/verify operations work correctly with the 32-byte key.
+- **OTP sign/verify API correction:** Story Dev Notes showed 5-arg `:crypto.sign(:eddsa, :none, msg, [key], [:ed25519])` - this is RSA-only. For EdDSA, curve is included in the key list: `:crypto.sign(:eddsa, :none, msg, [key, :ed25519])`. Both sign and verify corrected to 4-arg form with curve in key list.
 
 ### Completion Notes List
 
-- Implemented `Nebu.Signature.generate_signing_keypair/0` using OTP native `:crypto.generate_key(:eddsa, :ed25519)` — no external dependencies
+- Implemented `Nebu.Signature.generate_signing_keypair/0` using OTP native `:crypto.generate_key(:eddsa, :ed25519)` - no external dependencies
 - Updated `@moduledoc` to remove placeholder language; describes two-keypair architecture (Ed25519 signing + X25519 encryption)
 - Added `@doc` and `@spec generate_signing_keypair() :: {binary(), binary()}`
 - Replaced 1 placeholder test with 3 real unit tests using `async: true` and `describe` blocks
@@ -245,8 +245,8 @@ claude-sonnet-4-6 (1M context)
 
 ### File List
 
-- `core/apps/signature/lib/nebu/signature.ex` — modified (placeholder → real implementation)
-- `core/apps/signature/test/nebu_signature_test.exs` — modified (placeholder → 3 real tests)
+- `core/apps/signature/lib/nebu/signature.ex` - modified (placeholder → real implementation)
+- `core/apps/signature/test/nebu_signature_test.exs` - modified (placeholder → 3 real tests)
 
 ## Change Log
 

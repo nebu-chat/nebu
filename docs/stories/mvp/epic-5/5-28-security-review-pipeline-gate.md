@@ -16,7 +16,7 @@ so that security-sensitive changes cannot slip through without review and the ep
 
 ## Background / Motivation
 
-Security audit (2026-04-20) surfaced CRITICAL/HIGH findings that went unnoticed through all four prior epics despite each story passing `bmad-code-review`. The code reviewer focuses on correctness and test coverage — not OWASP Top 10, not CSRF, not timing attacks.
+Security audit (2026-04-20) surfaced CRITICAL/HIGH findings that went unnoticed through all four prior epics despite each story passing `bmad-code-review`. The code reviewer focuses on correctness and test coverage - not OWASP Top 10, not CSRF, not timing attacks.
 
 User decision (2026-04-20): add a security-review step to `/bmad-pipeline`, evaluated per story (skip if not security-sensitive), mandatory at epic-end.
 
@@ -30,10 +30,10 @@ User decision (2026-04-20): add a security-review step to `/bmad-pipeline`, eval
    security_review: required | optional | not-needed
    ---
    ```
-   - `required` — pipeline MUST run a scoped security review (post-code-review, pre-commit)
-   - `optional` — pipeline asks the user once
-   - `not-needed` — pipeline skips (process stories, pure docs, etc.)
-   - Missing flag — pipeline auto-classifies via heuristics (see AC 3)
+   - `required` - pipeline MUST run a scoped security review (post-code-review, pre-commit)
+   - `optional` - pipeline asks the user once
+   - `not-needed` - pipeline skips (process stories, pure docs, etc.)
+   - Missing flag - pipeline auto-classifies via heuristics (see AC 3)
 
 2. **Auto-classification heuristic.** When the frontmatter flag is absent, the pipeline inspects the staged diff and marks the story as `required` if **any** of:
    - Files touched under `gateway/internal/auth/`, `middleware/`, `admin/`, `crypto/`, `db/`
@@ -55,34 +55,34 @@ User decision (2026-04-20): add a security-review step to `/bmad-pipeline`, eval
    - Computes the full diff of the epic (base = epic-start commit, HEAD = current)
    - Runs the same security scope prompt against that diff
    - Any CRITICAL or HIGH → blocks with a clear message; the user must create follow-up stories (or accept with documented justification)
-   - Produces a one-page `epic-{N}-security-review.md` in `_bmad-output/implementation-artifacts/` even if zero findings — as the auditable artifact
+   - Produces a one-page `epic-{N}-security-review.md` in `_bmad-output/implementation-artifacts/` even if zero findings - as the auditable artifact
 
 6. **Documentation.** `CLAUDE.md` is updated with:
    - The `security_review` frontmatter convention
    - The epic-end security gate
    - Reference to this story
 
-7. **Regression test.** None needed — this is a pipeline skill change, not runtime code. Manual smoke via running `/bmad-pipeline` on a small security-sensitive change and confirming the gate triggers.
+7. **Regression test.** None needed - this is a pipeline skill change, not runtime code. Manual smoke via running `/bmad-pipeline` on a small security-sensitive change and confirming the gate triggers.
 
 ---
 
 ## Acceptance Tests
 
-### Manual acceptance (no ATDD — pipeline skill, not Go code):
+### Manual acceptance (no ATDD - pipeline skill, not Go code):
 
-1. Run `/bmad-pipeline` on a dummy story with `security_review: required` — verify security review step executes after code review.
+1. Run `/bmad-pipeline` on a dummy story with `security_review: required` - verify security review step executes after code review.
 
-2. Run `/bmad-pipeline` on a dummy story with `security_review: not-needed` — verify security review step is skipped with a clear log message.
+2. Run `/bmad-pipeline` on a dummy story with `security_review: not-needed` - verify security review step is skipped with a clear log message.
 
-3. Complete a dummy single-story epic — verify epic-end security review runs and the `epic-{N}-security-review.md` artifact is created.
+3. Complete a dummy single-story epic - verify epic-end security review runs and the `epic-{N}-security-review.md` artifact is created.
 
-4. Introduce a synthetic SQL-injection vulnerability in the dummy story — verify the gate blocks the commit with CRITICAL severity.
+4. Introduce a synthetic SQL-injection vulnerability in the dummy story - verify the gate blocks the commit with CRITICAL severity.
 
 ---
 
 ## Implementation Notes
 
-- Edit `.claude/skills/bmad-pipeline/SKILL.md` — add Schritt 5b (per-story gate) and extend Schritt 7 (epic-end gate)
+- Edit `.claude/skills/bmad-pipeline/SKILL.md` - add Schritt 5b (per-story gate) and extend Schritt 7 (epic-end gate)
 - Update `CLAUDE.md` under the "BMAD Workflow" section
-- The security scope prompt is identical between per-story and epic-end — factor it out into a constant in the SKILL.md text so there's only one source of truth
+- The security scope prompt is identical between per-story and epic-end - factor it out into a constant in the SKILL.md text so there's only one source of truth
 - This story itself runs through the pipeline as `security_review: not-needed` (it IS the gate, so nothing to review)

@@ -1,4 +1,4 @@
-# Story 4.25: GET /user/{userId}/filter/{filterId} — Sync-Loop-Fix für Element Web
+# Story 4.25: GET /user/{userId}/filter/{filterId} - Sync-Loop-Fix für Element Web
 
 Status: done
 
@@ -39,25 +39,25 @@ This was the root cause of the sync-loop crash seen in Element Web after every p
 
 ### Tests written FIRST (ATDD gate):
 
-1. `TestGetFilter_HappyPath` — Go httptest
+1. `TestGetFilter_HappyPath` - Go httptest
    - Given: authenticated user `@filtertest:test.local`, requests `GET /user/{userId}/filter/0`
    - When: handler processes the request
    - Then: 200 OK, valid JSON with `room` key present, `Content-Type` set
 
-2. `TestGetFilter_UnknownFilterIdReturns200` — Go httptest
+2. `TestGetFilter_UnknownFilterIdReturns200` - Go httptest
    - Given: authenticated user requests `filter/999` (non-existent filter)
    - When: handler processes
-   - Then: 200 OK (stateless MVP — any ID returns default)
+   - Then: 200 OK (stateless MVP - any ID returns default)
 
-3. `TestGetFilter_Unauthenticated` — Go httptest
+3. `TestGetFilter_Unauthenticated` - Go httptest
    - Given: request without Authorization header
    - Then: 401 M_MISSING_TOKEN from JWTMiddleware
 
-4. `TestGetFilter_WrongUser_Forbidden` — Go httptest
+4. `TestGetFilter_WrongUser_Forbidden` - Go httptest
    - Given: authenticated as `@filtertest:test.local`, requests filter for `@other-user:test.local`
    - Then: 403 M_FORBIDDEN
 
-5. Browser E2E (element_e2e.spec.ts): "Reconnect after reload — no sync ERROR loop"
+5. Browser E2E (element_e2e.spec.ts): "Reconnect after reload - no sync ERROR loop"
    - Given: SSO login completed
    - When: page reloads (Element fetches GET /filter/0)
    - Then: room list visible, zero "Getting filter failed" console errors
@@ -66,7 +66,7 @@ This was the root cause of the sync-loop crash seen in Element Web after every p
 
 ## Implementation Notes
 
-- Handler: `gateway/internal/matrix/filter.go` — `FilterHandler`, zero gRPC dependencies
+- Handler: `gateway/internal/matrix/filter.go` - `FilterHandler`, zero gRPC dependencies
 - Ownership check: compares `r.PathValue("userId")` with `ContextKeyUserID` (full Matrix ID)
-- Static passthrough filter: `passthroughFilter` var — no DB, no gRPC
+- Static passthrough filter: `passthroughFilter` var - no DB, no gRPC
 - Registered in `main.go` after the existing POST filter stub

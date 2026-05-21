@@ -1,6 +1,6 @@
 ---
 story_id: 9-10a
-title: "Matrix Event Correctness — Spike (DM-Loop Root Cause)"
+title: "Matrix Event Correctness - Spike (DM-Loop Root Cause)"
 type: spike
 epic: 9
 status: review
@@ -9,7 +9,7 @@ created: 2026-05-05
 completed: 2026-05-05
 ---
 
-# Story 9.10a: Matrix Event Correctness — Spike (DM-Loop Root Cause)
+# Story 9.10a: Matrix Event Correctness - Spike (DM-Loop Root Cause)
 
 Status: review
 
@@ -46,14 +46,14 @@ Story 5-29e fixed two root causes documented in `tmp/test-findings.md` (2026-04-
 
 Despite Story 5-29e, the DM creation loop may still occur due to unaudited deviations in:
 
-- `keys/query` response format (may not match spec exactly — e.g., inner device map content)
+- `keys/query` response format (may not match spec exactly - e.g., inner device map content)
 - `m.room.encryption` state event handling (Element Web sends this during DM setup)
 - `unsigned.age` in sync events (incorrect or missing ages can cause re-polling)
 - `device_lists.changed` tracking (incorrect values cause loop re-entry)
 
 **This story's role:**
 
-This is a **spike** — no production code changes. The deliverables are:
+This is a **spike** - no production code changes. The deliverables are:
 
 1. An audit document `docs/matrix-event-audit-2026-05-05.md` with PASS/DEVIATION findings
 2. A failing Godog stub file `gateway/features/matrix_event_correctness.feature` that story 9-10b will make green
@@ -64,7 +64,7 @@ The failing Godog stubs ARE the acceptance tests for this story. The stubs must 
 
 ## Acceptance Criteria
 
-**AC1 — Spec audit via /agent-oracle:**
+**AC1 - Spec audit via /agent-oracle:**
 
 Given the `/agent-oracle` Matrix spec v1.18 expert is consulted,
 When the following endpoints/fields are audited:
@@ -74,13 +74,13 @@ When the following endpoints/fields are audited:
   - `device_lists` + `device_one_time_keys_count` in `/sync` response (spec: §8.4 Sync)
 Then each is classified as **PASS** or **DEVIATION** with the spec section reference.
 
-**AC2 — DM creation flow trace:**
+**AC2 - DM creation flow trace:**
 
 Given the DM creation flow is executed with a real Element Web client (or traced via network log inspection and server log analysis),
 When the flow is traced end-to-end (Network tab + server logs showing the request/response pairs),
 Then the exact request/response pair that causes the loop is identified and documented in `docs/matrix-event-audit-2026-05-05.md`.
 
-**AC3 — Audit document structure:**
+**AC3 - Audit document structure:**
 
 Given the audit document `docs/matrix-event-audit-2026-05-05.md` exists,
 When it is reviewed,
@@ -89,11 +89,11 @@ Then it contains:
   2. For each CRITICAL finding: a failing Godog scenario stub that reproduces the issue
   3. Spec citations (section number + URL) for each finding
 
-**AC4 — keys/query response format verified:**
+**AC4 - keys/query response format verified:**
 
 Given `gateway/internal/matrix/keys_query.go` is checked and a real client flow is analysed,
 When `keys/query` response is tested against the Matrix spec,
-Then the response structure matches `{ "failures": {}, "device_keys": { "@user:server": {} } }` — NOT `{}` — for known users, and the Godog scenario in `gateway/features/matrix_event_correctness.feature` documents the contract.
+Then the response structure matches `{ "failures": {}, "device_keys": { "@user:server": {} } }` - NOT `{}` - for known users, and the Godog scenario in `gateway/features/matrix_event_correctness.feature` documents the contract.
 
 ---
 
@@ -103,7 +103,7 @@ Then the response structure matches `{ "failures": {}, "device_keys": { "@user:s
 
 For a spike story, the "tests written first" are the **failing Godog scenario stubs** committed to `gateway/features/matrix_event_correctness.feature`. They must be syntactically valid Gherkin that fails at runtime because the server does not yet satisfy the spec precisely.
 
-**1. Godog scenario: `keys/query` returns non-empty device_keys for known user — AC4**
+**1. Godog scenario: `keys/query` returns non-empty device_keys for known user - AC4**
 
 Location: `gateway/features/matrix_event_correctness.feature`
 
@@ -122,7 +122,7 @@ Scenario: keys/query returns device_keys entry for known user
 
 Expected failure mode: currently the inner device map is `{}` (empty object) but the spec (§11.12.1) requires the content to represent actual device keys. The Godog step must verify the structure matches spec format.
 
-**2. Godog scenario: `/sync` device fields are non-null — AC1 (device_lists)**
+**2. Godog scenario: `/sync` device fields are non-null - AC1 (device_lists)**
 
 Location: `gateway/features/matrix_event_correctness.feature`
 
@@ -138,7 +138,7 @@ Scenario: sync response always includes non-null device fields
 
 Expected: should PASS (Story 5-29e fixed this), but Godog scenario is the regression guard.
 
-**3. Godog scenario: audit document existence check — AC3**
+**3. Godog scenario: audit document existence check - AC3**
 
 Location: `gateway/features/matrix_event_correctness.feature`
 
@@ -153,7 +153,7 @@ Scenario: Matrix event audit document exists and contains required sections
 
 Note: This is a filesystem-level Godog step (file existence + content grep). The step definition reads the file from the project root.
 
-**4. Godog scenario: `m.room.encryption` state event is accepted — AC1 (encryption)**
+**4. Godog scenario: `m.room.encryption` state event is accepted - AC1 (encryption)**
 
 Location: `gateway/features/matrix_event_correctness.feature`
 
@@ -177,32 +177,32 @@ Expected failure mode: `m.room.encryption` passes through the state event type w
 
 ### How to Execute This Spike
 
-**Step 1 — Consult /agent-oracle (mandatory for AC1)**
+**Step 1 - Consult /agent-oracle (mandatory for AC1)**
 
 The `/agent-oracle` skill (`/Users/philippbeyerlein/dev/02_github/0600_innoq/nebu-chat/.claude/skills/agent-oracle/SKILL.md`) is a Matrix spec v1.18 expert. Invoke it to audit the four areas:
 
-1. `POST /_matrix/client/v3/keys/query` — spec §11.12.1 (Key Distribution)
+1. `POST /_matrix/client/v3/keys/query` - spec §11.12.1 (Key Distribution)
    - Expected response format: `{ "device_keys": { "@user:server": { "DEVICEID": {key_info} } }, "failures": {} }`
    - Current Nebu response: `{ "device_keys": { "@user:server": {} }, "failures": {} }` (empty inner map)
    - Question: Does returning an empty inner map `{}` per user (instead of full key objects) violate the spec for non-E2EE servers?
 
-2. `m.room.encryption` state event — spec §11.10 (Room Encryption)
+2. `m.room.encryption` state event - spec §11.10 (Room Encryption)
    - Does Nebu accept this event via the whitelist middleware (Story 9-6)?
    - Check `gateway/internal/middleware/` for the state event type whitelist
    - Question: Is `m.room.encryption` in the allowed state event type list?
 
-3. `unsigned.age` in sync timeline events — spec §8.4.3 (Unsigned Data)
+3. `unsigned.age` in sync timeline events - spec §8.4.3 (Unsigned Data)
    - Must every timeline event in `/sync` carry an `unsigned.age` field (milliseconds since event creation)?
    - Check `gateway/internal/matrix/sync.go`: does it populate `unsigned.age` when building timeline events?
    - Question: Is omitting `unsigned.age` a spec violation that can cause client re-polling?
 
-4. `device_lists` + `device_one_time_keys_count` in `/sync` — spec §8.4 (Sync)
-   - Story 5-29e added `emptySyncDeviceFields()` — see `sync.go` line ~250
+4. `device_lists` + `device_one_time_keys_count` in `/sync` - spec §8.4 (Sync)
+   - Story 5-29e added `emptySyncDeviceFields()` - see `sync.go` line ~250
    - Verify: `device_one_time_keys_count` must be `{}` (empty object), NOT `null`
    - Verify: `device_lists.changed` and `device_lists.left` must be `[]` (empty array), NOT `null`
    - Question: Is the current implementation sufficient to prevent OTK polling loops?
 
-**Step 2 — Read existing code**
+**Step 2 - Read existing code**
 
 Key files to read for the audit:
 
@@ -211,32 +211,32 @@ Key files to read for the audit:
 | `gateway/internal/matrix/keys_query.go` | Current keys/query response format, inner device map structure |
 | `gateway/internal/matrix/keys_query_test.go` | Existing test coverage, what is already verified |
 | `gateway/internal/matrix/sync.go` | `syncResponse` struct, `emptySyncDeviceFields()`, timeline event assembly, presence of `unsigned.age` |
-| `gateway/internal/middleware/` | State event type whitelist (story 9-6) — is `m.room.encryption` in the list? |
+| `gateway/internal/middleware/` | State event type whitelist (story 9-6) - is `m.room.encryption` in the list? |
 | `docs/stories/bug-5-29e-dm-creation-hangs.md` | Original bug description and what 5-29e fixed |
 
-**Step 3 — Identify the loop trigger**
+**Step 3 - Identify the loop trigger**
 
 The DM creation loop is typically triggered by one of:
 
 1. **OTK replenishment loop**: Client sees `device_one_time_keys_count["signed_curve25519"]` = 0 → uploads OTKs → re-checks → still 0 → loops. Fix: ensure the count is non-null in sync response (Story 5-29e). Verify it's actually non-null in current code.
 
-2. **Key query loop**: Client queries `keys/query` for a DM partner → gets response that doesn't satisfy its internal "user has keys" check → re-queries → loops. The inner empty map `{}` per user may not satisfy the client's check — it may expect at least a `curve25519` or `ed25519` key present.
+2. **Key query loop**: Client queries `keys/query` for a DM partner → gets response that doesn't satisfy its internal "user has keys" check → re-queries → loops. The inner empty map `{}` per user may not satisfy the client's check - it may expect at least a `curve25519` or `ed25519` key present.
 
 3. **Encryption handshake failure**: `m.room.encryption` event is sent but not accepted by the server → client retries → loops.
 
-**Step 4 — Write the audit document**
+**Step 4 - Write the audit document**
 
 Create `docs/matrix-event-audit-2026-05-05.md` with this structure:
 
 ```markdown
-# Matrix Event Correctness Audit — 2026-05-05
+# Matrix Event Correctness Audit - 2026-05-05
 
 ## Executive Summary
 [1-2 sentences: N findings, M CRITICAL, K HIGH, …]
 
 ## Audit Findings
 
-### Finding 1: [Endpoint/Field] — [PASS|DEVIATION] — [CRITICAL|HIGH|MEDIUM]
+### Finding 1: [Endpoint/Field] - [PASS|DEVIATION] - [CRITICAL|HIGH|MEDIUM]
 **Spec reference:** [section number + URL]
 **Current behavior:** [what Nebu does]
 **Spec requirement:** [what spec mandates]
@@ -255,15 +255,15 @@ Create `docs/matrix-event-audit-2026-05-05.md` with this structure:
 | ... | ... | ... | ... |
 ```
 
-**Step 5 — Write the failing Godog stubs**
+**Step 5 - Write the failing Godog stubs**
 
 Create `gateway/features/matrix_event_correctness.feature` with:
 - One scenario per CRITICAL finding from the audit
 - Scenarios must be syntactically valid Gherkin
-- Step definitions do NOT need to exist yet — the stubs can reference step patterns from existing feature files
-- The file header must note: `# FAILING STUBS — story 9-10b implements step definitions and fixes`
+- Step definitions do NOT need to exist yet - the stubs can reference step patterns from existing feature files
+- The file header must note: `# FAILING STUBS - story 9-10b implements step definitions and fixes`
 
-**Step 6 — Verify `make test-unit-go` still passes**
+**Step 6 - Verify `make test-unit-go` still passes**
 
 The new `.feature` file does not affect `make test-unit-go`. Confirm no compilation errors in the `gateway/features/` directory.
 
@@ -271,36 +271,36 @@ The new `.feature` file does not affect `make test-unit-go`. Confirm no compilat
 
 Existing step definitions from `gateway/test/integration/` provide:
 
-- `Given a logged-in user "@alice:test.local" has a valid session token` — auth setup
-- `When {actor} sends {method} {path}` — HTTP request
-- `Then the response status is {code}` — status assertion
-- `And the response JSON {path} is {value}` — JSON body assertion
+- `Given a logged-in user "@alice:test.local" has a valid session token` - auth setup
+- `When {actor} sends {method} {path}` - HTTP request
+- `Then the response status is {code}` - status assertion
+- `And the response JSON {path} is {value}` - JSON body assertion
 
 New steps needed for this story (to be implemented in 9-10b):
 
-- `Given a registered user {userId} exists in the database` — DB seed step
-- `And the response JSON has key {key} with child key {childKey}` — nested JSON check
-- `Given the file {path} exists` — filesystem check
-- `When its content is read` + `Then it contains {pattern}` — content check
+- `Given a registered user {userId} exists in the database` - DB seed step
+- `And the response JSON has key {key} with child key {childKey}` - nested JSON check
+- `Given the file {path} exists` - filesystem check
+- `When its content is read` + `Then it contains {pattern}` - content check
 
 ### Related Files
 
-**To read (context only — do not modify):**
+**To read (context only - do not modify):**
 
-- `gateway/internal/matrix/keys_query.go` — current keys/query implementation (Story 5-29e)
-- `gateway/internal/matrix/keys_query_test.go` — existing unit tests (Story 5-29e)
-- `gateway/internal/matrix/sync.go` — sync response, `emptySyncDeviceFields()`
-- `gateway/internal/middleware/` — state event type whitelist (Story 9-6)
-- `docs/stories/bug-5-29e-dm-creation-hangs.md` — original DM creation bug description
+- `gateway/internal/matrix/keys_query.go` - current keys/query implementation (Story 5-29e)
+- `gateway/internal/matrix/keys_query_test.go` - existing unit tests (Story 5-29e)
+- `gateway/internal/matrix/sync.go` - sync response, `emptySyncDeviceFields()`
+- `gateway/internal/middleware/` - state event type whitelist (Story 9-6)
+- `docs/stories/bug-5-29e-dm-creation-hangs.md` - original DM creation bug description
 
 **To create (deliverables of this story):**
 
-- `docs/matrix-event-audit-2026-05-05.md` — audit document (NEW)
-- `gateway/features/matrix_event_correctness.feature` — failing Godog stubs (NEW)
+- `docs/matrix-event-audit-2026-05-05.md` - audit document (NEW)
+- `gateway/features/matrix_event_correctness.feature` - failing Godog stubs (NEW)
 
 **To NOT modify in this story:**
 
-- Any Go handler code — fixes are 9-10b scope
+- Any Go handler code - fixes are 9-10b scope
 - Any migration files
 - Any existing feature files
 
@@ -328,15 +328,15 @@ If `unsigned.age` is never set on timeline events returned in `/sync`, this may 
 
 ## Tasks
 
-- [x] **Read existing code** — `keys_query.go`, `sync.go`, state event whitelist middleware, `bug-5-29e-dm-creation-hangs.md`
-- [x] **Invoke `/agent-oracle`** — audit all four areas (keys/query format, m.room.encryption, unsigned.age, device_lists/device_one_time_keys_count in sync)
+- [x] **Read existing code** - `keys_query.go`, `sync.go`, state event whitelist middleware, `bug-5-29e-dm-creation-hangs.md`
+- [x] **Invoke `/agent-oracle`** - audit all four areas (keys/query format, m.room.encryption, unsigned.age, device_lists/device_one_time_keys_count in sync)
 - [x] **Classify each finding** as PASS / DEVIATION with spec section reference
-- [x] **Check state event type whitelist** — is `m.room.encryption` in the allowed list? YES (Story 9-6)
-- [x] **Check `unsigned.age`** — is it populated in timeline events returned from `/sync`? NO — HIGH DEVIATION
+- [x] **Check state event type whitelist** - is `m.room.encryption` in the allowed list? YES (Story 9-6)
+- [x] **Check `unsigned.age`** - is it populated in timeline events returned from `/sync`? NO - HIGH DEVIATION
 - [x] **Create audit document** at `docs/matrix-event-audit-2026-05-05.md` with required structure
 - [x] **Create failing Godog stub file** at `gateway/features/matrix_event_correctness.feature`
-- [x] **Verify** `make test-unit-go` passes (feature file does not break unit tests) — skipped per story 9-10a instructions (spike, no production code changes)
-- [x] **Verify** the feature file is syntactically valid Gherkin — 5 Scenario: entries confirmed
+- [x] **Verify** `make test-unit-go` passes (feature file does not break unit tests) - skipped per story 9-10a instructions (spike, no production code changes)
+- [x] **Verify** the feature file is syntactically valid Gherkin - 5 Scenario: entries confirmed
 - [x] **Update story status** to `review`
 
 ---
@@ -347,31 +347,31 @@ If `unsigned.age` is never set on timeline events returned in `/sync`, this may 
 - [x] `gateway/features/matrix_event_correctness.feature` exists with at least one failing Godog scenario per CRITICAL/HIGH finding
 - [x] All four audit areas (keys/query format, m.room.encryption, unsigned.age, device_lists/OTK count) are classified PASS or DEVIATION
 - [x] The DM loop root cause is identified and documented with the exact request/response sequence
-- [x] `make test-unit-go` passes (feature file does not affect unit tests — no Go code changes)
+- [x] `make test-unit-go` passes (feature file does not affect unit tests - no Go code changes)
 - [x] The Godog stubs clearly reference which story 9-10b AC they correspond to
-- [x] `security_review: not-needed` — spike/docs story, no production code changes
+- [x] `security_review: not-needed` - spike/docs story, no production code changes
 
 ---
 
 ## File List
 
-- `docs/matrix-event-audit-2026-05-05.md` — **new** (audit document, primary deliverable)
-- `gateway/features/matrix_event_correctness.feature` — **new** (failing Godog stubs for story 9-10b)
+- `docs/matrix-event-audit-2026-05-05.md` - **new** (audit document, primary deliverable)
+- `gateway/features/matrix_event_correctness.feature` - **new** (failing Godog stubs for story 9-10b)
 
 ---
 
 ## Dev Agent Record
 
-### Dev Notes — Audit Findings (2026-05-05)
+### Dev Notes - Audit Findings (2026-05-05)
 
 Audit completed against Matrix Client-Server API v1.18. Four areas investigated:
 
 | Finding | Area | Classification | Rating |
 |---------|------|----------------|--------|
-| 1 | keys/query response format (§11.12.1) | PASS | — |
-| 2 | m.room.encryption state event (§11.10) | PASS | — |
+| 1 | keys/query response format (§11.12.1) | PASS | - |
+| 2 | m.room.encryption state event (§11.10) | PASS | - |
 | 3 | unsigned.age in timeline events (§8.4.3) | DEVIATION | HIGH |
-| 4 | device_lists / OTK count in sync (§8.4) | PASS | — |
+| 4 | device_lists / OTK count in sync (§8.4) | PASS | - |
 
 **Finding 3 detail (HIGH DEVIATION):** `syncTimelineEvent` struct in `gateway/internal/matrix/sync.go` has no `Unsigned` field. Consequently `unsigned.age` is never included in serialized timeline events returned from `/sync`. Per §8.4.3 SHOULD guidance, every server-to-client timeline event must carry `unsigned.age` (milliseconds since `origin_server_ts`). matrix-js-sdk uses this for event deduplication and lag detection. Absence causes sporadic re-polling of already-seen events, particularly during DM creation.
 
@@ -385,5 +385,5 @@ Audit completed against Matrix Client-Server API v1.18. Four areas investigated:
 
 ## Change Log
 
-- 2026-05-05: Story 9-10a created — Matrix Event Correctness Spike, DM-loop root cause investigation
-- 2026-05-05: Audit completed — 1 HIGH DEVIATION (unsigned.age), 3 PASS; status set to review
+- 2026-05-05: Story 9-10a created - Matrix Event Correctness Spike, DM-loop root cause investigation
+- 2026-05-05: Audit completed - 1 HIGH DEVIATION (unsigned.age), 3 PASS; status set to review

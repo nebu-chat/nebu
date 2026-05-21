@@ -68,7 +68,7 @@ The `admin_ui.feature` file (Gherkin) describes a complete Bootstrap Wizard E2E 
 ```typescript
 import { test, expect } from '@playwright/test';
 
-test.describe('Bootstrap Wizard — Full Happy Path', () => {
+test.describe('Bootstrap Wizard - Full Happy Path', () => {
   test('Operator completes Bootstrap Wizard via real OIDC login', async ({ page }) => {
     // Given: no bootstrap_completed in server_config
     

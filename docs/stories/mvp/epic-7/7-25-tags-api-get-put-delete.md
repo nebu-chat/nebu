@@ -5,7 +5,7 @@ security_review: not-needed
 created: 2026-04-30
 ---
 
-# Story 7.25: Tags API — GET/PUT/DELETE /user/{userId}/rooms/{roomId}/tags
+# Story 7.25: Tags API - GET/PUT/DELETE /user/{userId}/rooms/{roomId}/tags
 
 Status: review
 
@@ -41,32 +41,32 @@ Standard Matrix tag names: `m.favourite`, `m.lowpriority`. Custom tags must use 
 
 ### Tests written FIRST (before implementation code):
 
-1. [GET returns empty tags for new room] — Godog (`gateway/features/tags.feature`)
+1. [GET returns empty tags for new room] - Godog (`gateway/features/tags.feature`)
    - Given: authenticated user `@alice:nebu.test`, no tags set for room `!room1:nebu.test`
    - When: GET `/_matrix/client/v3/user/@alice:nebu.test/rooms/!room1:nebu.test/tags`
    - Then: HTTP 200, body = `{"tags":{}}`
 
-2. [PUT sets a tag, GET reflects it] — Godog
+2. [PUT sets a tag, GET reflects it] - Godog
    - Given: authenticated user `@alice:nebu.test`, room `!room1:nebu.test`
    - When: PUT `/_matrix/client/v3/user/@alice:nebu.test/rooms/!room1:nebu.test/tags/m.favourite` with body `{"order":0.5}`
    - Then: HTTP 200 `{}`; GET tags returns `{"tags":{"m.favourite":{"order":0.5}}}`
 
-3. [DELETE removes a tag idempotently] — Godog
+3. [DELETE removes a tag idempotently] - Godog
    - Given: `m.favourite` tag set for `@alice:nebu.test` / `!room1:nebu.test`
    - When: DELETE `/_matrix/client/v3/user/@alice:nebu.test/rooms/!room1:nebu.test/tags/m.favourite`; then DELETE again
    - Then: both requests return HTTP 200 `{}`; GET tags returns `{"tags":{}}`
 
-4. [PUT/DELETE triggers m.tag sync event] — Godog
+4. [PUT/DELETE triggers m.tag sync event] - Godog
    - Given: `@alice:nebu.test` adds `u.work` tag to `!room1:nebu.test`
    - When: GET `/sync` with `since` token after the PUT
    - Then: `rooms.join.!room1:nebu.test.account_data.events` contains an entry with `type` = `m.tag`
 
-5. [userId mismatch returns M_FORBIDDEN] — Godog
+5. [userId mismatch returns M_FORBIDDEN] - Godog
    - Given: authenticated `@alice:nebu.test`
    - When: PUT `/_matrix/client/v3/user/@bob:nebu.test/rooms/!room1:nebu.test/tags/m.favourite`
    - Then: HTTP 403, `errcode` = `M_FORBIDDEN`
 
-6. [Invalid tag name returns 400] — Go httptest (`gateway/internal/matrix/tags_test.go`)
+6. [Invalid tag name returns 400] - Go httptest (`gateway/internal/matrix/tags_test.go`)
    - Given: authenticated user, valid room
    - When: PUT with empty tag `""` or tag exceeding 100 characters
    - Then: HTTP 400, `errcode` = `M_INVALID_PARAM`
@@ -76,9 +76,9 @@ Standard Matrix tag names: `m.favourite`, `m.lowpriority`. Custom tags must use 
 **New handler file:** `gateway/internal/matrix/tags.go`
 
 Implementation pattern:
-1. `GetTagsHandler` — calls `GetRoomAccountData(userId, roomId, "m.tag")`; if not found returns `{"tags":{}}`.
-2. `PutTagHandler` — reads existing `m.tag` content (or `{"tags":{}}` on not-found), merges the new tag entry, calls `SetRoomAccountData`.
-3. `DeleteTagHandler` — reads existing content, removes the tag key, calls `SetRoomAccountData`. Noop if key absent.
+1. `GetTagsHandler` - calls `GetRoomAccountData(userId, roomId, "m.tag")`; if not found returns `{"tags":{}}`.
+2. `PutTagHandler` - reads existing `m.tag` content (or `{"tags":{}}` on not-found), merges the new tag entry, calls `SetRoomAccountData`.
+3. `DeleteTagHandler` - reads existing content, removes the tag key, calls `SetRoomAccountData`. Noop if key absent.
 
 All three read/write via the gRPC calls introduced in Story 7-24 (`GetRoomAccountData` / `SetRoomAccountData`). Tag merge/delete is a pure Go map operation on the decoded JSON.
 
@@ -89,9 +89,9 @@ PUT    /_matrix/client/v3/user/{userId}/rooms/{roomId}/tags/{tag}   → jwtMiddl
 DELETE /_matrix/client/v3/user/{userId}/rooms/{roomId}/tags/{tag}   → jwtMiddleware(DeleteTagHandler)
 ```
 
-**Tag validation** — extracted into a shared `validateTag(tag string) error` helper in `tags.go`. Max length 100. Empty string disallowed.
+**Tag validation** - extracted into a shared `validateTag(tag string) error` helper in `tags.go`. Max length 100. Empty string disallowed.
 
-**Sync integration** — no additional sync work needed beyond Story 7-24: the `m.tag` account data entry is fetched alongside all other account data types for the room.
+**Sync integration** - no additional sync work needed beyond Story 7-24: the `m.tag` account data entry is fetched alongside all other account data types for the room.
 
 ## Tasks
 
@@ -99,5 +99,5 @@ DELETE /_matrix/client/v3/user/{userId}/rooms/{roomId}/tags/{tag}   → jwtMiddl
 - [x] Write failing Go httptest in `gateway/internal/matrix/tags_test.go`
 - [x] Implement `gateway/internal/matrix/tags.go` (TagsHandler, GetTags, PutTag, DeleteTag, validateTag)
 - [x] Register routes in `main.go`
-- [x] Run `make test-unit-go` — all pass (26s, no failures)
-- [ ] Run `make test-integration` — Godog scenarios green (requires running stack)
+- [x] Run `make test-unit-go` - all pass (26s, no failures)
+- [ ] Run `make test-integration` - Godog scenarios green (requires running stack)

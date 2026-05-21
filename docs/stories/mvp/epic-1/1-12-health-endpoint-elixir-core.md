@@ -1,4 +1,4 @@
-# Story 1.12: Health Endpoint — Elixir Core
+# Story 1.12: Health Endpoint - Elixir Core
 
 Status: done
 
@@ -10,15 +10,15 @@ so that Docker Compose and the Go gateway can monitor core liveness and componen
 
 ## Acceptance Criteria
 
-1. **GET :4000/health — UP state:** When all components are healthy → `200 OK` with body:
+1. **GET :4000/health - UP state:** When all components are healthy → `200 OK` with body:
    ```json
    {"status":"UP","load_factor":1.0,"version":"0.1.0","node":"nonode@nohost","components":{"database":{"status":"UP"},"room_registry":{"status":"UP","room_count":0},"event_bus":{"status":"UP","connected_gateways":0}}}
    ```
    `Content-Type: application/json`
 
-2. **GET :4000/health — DEGRADED state:** When a non-critical component is degraded → `200 OK` with `"status":"DEGRADED"` (not 503).
+2. **GET :4000/health - DEGRADED state:** When a non-critical component is degraded → `200 OK` with `"status":"DEGRADED"` (not 503).
 
-3. **GET :4000/health — DOWN state:** When a critical component is down → `503 Service Unavailable` with `"status":"DOWN"`.
+3. **GET :4000/health - DOWN state:** When a critical component is down → `503 Service Unavailable` with `"status":"DOWN"`.
 
 4. **load_factor:** Always returns `1.0` in MVP (Phase 2: real adaptive calculation based on scheduler utilization).
 
@@ -38,10 +38,10 @@ so that Docker Compose and the Go gateway can monitor core liveness and componen
 ## Tasks / Subtasks
 
 - [x] Add `jason` as direct dep in `event_dispatcher/mix.exs` (AC: #1)
-  - [x] Add `{:jason, "~> 1.4"}` to deps (it's already in mix.lock as transitive dep — just elevate to direct)
+  - [x] Add `{:jason, "~> 1.4"}` to deps (it's already in mix.lock as transitive dep - just elevate to direct)
 - [x] Create `Nebu.Health` module (AC: #1, #2, #3, #4)
   - [x] Implement `check/0` returning health map with status, load_factor, version, node, components
-  - [x] MVP component checks: database, room_registry, event_bus — all return UP stubs
+  - [x] MVP component checks: database, room_registry, event_bus - all return UP stubs
   - [x] Status logic: UP if all UP; DEGRADED if any DEGRADED; DOWN if any DOWN
   - [x] `load_factor` hardcoded to `1.0`
 - [x] Create `Nebu.Health.Server` GenServer (AC: #1, #6)
@@ -65,7 +65,7 @@ so that Docker Compose and the Go gateway can monitor core liveness and componen
 
 ### HTTP Server: Zero-Dependency Approach with `:gen_tcp`
 
-The project uses minimal external deps. Port 4000 serves a single health endpoint — a full web framework (Plug, Bandit) is overkill. Use OTP's built-in `:gen_tcp` with `packet: :http` parsing.
+The project uses minimal external deps. Port 4000 serves a single health endpoint - a full web framework (Plug, Bandit) is overkill. Use OTP's built-in `:gen_tcp` with `packet: :http` parsing.
 
 **Why `:gen_tcp` over `:inets`/`:httpd`:** The `:inets` httpd requires file-based config and mod_esi callbacks which are more complex than a direct `:gen_tcp` GenServer for a single-endpoint server.
 
@@ -179,7 +179,7 @@ defmodule Nebu.Health do
     }
   end
 
-  # MVP stubs — real checks wired in Epic 2/4 stories
+  # MVP stubs - real checks wired in Epic 2/4 stories
   defp check_database, do: %{status: "UP"}
   defp check_room_registry, do: %{status: "UP", room_count: 0}
   defp check_event_bus, do: %{status: "UP", connected_gateways: 0}
@@ -206,7 +206,7 @@ children = [
 ]
 ```
 
-### event_dispatcher/mix.exs — Add Jason as Direct Dep
+### event_dispatcher/mix.exs - Add Jason as Direct Dep
 
 Jason is already in `mix.lock` (transitive dep of grpc). Add it as a direct dependency:
 
@@ -219,7 +219,7 @@ defp deps do
 end
 ```
 
-**Do NOT run `mix deps.get`** — jason is already fetched. The lock file already has the resolved version (`1.4.4`).
+**Do NOT run `mix deps.get`** - jason is already fetched. The lock file already has the resolved version (`1.4.4`).
 
 ### Test Pattern
 
@@ -270,7 +270,7 @@ core:
     start_period: 30s
 ```
 
-The `core` Dockerfile uses `alpine:3.23` runtime — `curl` is NOT included by default. Add it:
+The `core` Dockerfile uses `alpine:3.23` runtime - `curl` is NOT included by default. Add it:
 
 ```dockerfile
 FROM alpine:3.23 AS runtime
@@ -288,16 +288,16 @@ RUN apk add --no-cache libstdc++ openssl ncurses curl
 
 ### Project Structure Notes
 
-- Health module in `event_dispatcher` app — this is correct. The `event_dispatcher` app owns the network runtime (gRPC on 9000, HTTP health on 4000, node registration)
-- Module name: `Nebu.Health` (not `Nebu.Event.Health`) — health is not event-specific, it's a cross-cutting concern
+- Health module in `event_dispatcher` app - this is correct. The `event_dispatcher` app owns the network runtime (gRPC on 9000, HTTP health on 4000, node registration)
+- Module name: `Nebu.Health` (not `Nebu.Event.Health`) - health is not event-specific, it's a cross-cutting concern
 - The `Nebu.Health.Server` module lives in `lib/nebu/health/server.ex`
 - The `Nebu.Health` module lives in `lib/nebu/health/health.ex`
 - Test: `test/nebu/health_test.exs` (consistent with `test/nebu/node_registration_test.exs` pattern)
 
 ### Previous Story Intelligence (from 1-11)
 
-- The Go gateway health endpoint (1-11) served on `:8080` — the Elixir equivalent serves on `:4000`
-- Go used a `Handler` struct with `Health()` and `Ready()` methods — Elixir uses `Nebu.Health.check/0` function
+- The Go gateway health endpoint (1-11) served on `:8080` - the Elixir equivalent serves on `:4000`
+- Go used a `Handler` struct with `Health()` and `Ready()` methods - Elixir uses `Nebu.Health.check/0` function
 - Go's health response has `database` + `core_grpc` components; Elixir's has `database` + `room_registry` + `event_bus`
 - The Go gateway maps gRPC state to GRÜN/GELB/ROT; the Elixir core maps component states to UP/DEGRADED/DOWN
 - Docker healthcheck for gateway used `/healthcheck` binary; for core uses `curl` (add to Alpine image)
@@ -311,8 +311,8 @@ RUN apk add --no-cache libstdc++ openssl ncurses curl
 - [Source: architecture.md#Elixir-Core-HTTP] Port 4000 for health endpoint
 - [Source: core/apps/event_dispatcher/lib/nebu/node_registration.ex] Established pattern for :inets/:httpc HTTP client; follow same style for HTTP server
 - [Source: core/apps/event_dispatcher/lib/nebu/event/application.ex] Supervisor tree where Health.Server must be added as first child
-- [Source: docker-compose.yml] Core service already has `4000:4000` port mapping — only healthcheck stanza needs to be added
-- [Source: core/Dockerfile] Runtime is `alpine:3.23` — must add `curl` for healthcheck CMD
+- [Source: docker-compose.yml] Core service already has `4000:4000` port mapping - only healthcheck stanza needs to be added
+- [Source: core/Dockerfile] Runtime is `alpine:3.23` - must add `curl` for healthcheck CMD
 
 ## Dev Agent Record
 
@@ -322,7 +322,7 @@ claude-sonnet-4-6[1m]
 
 ### Debug Log References
 
-None — implementation proceeded without issues.
+None - implementation proceeded without issues.
 
 ### Completion Notes List
 
@@ -337,15 +337,15 @@ None — implementation proceeded without issues.
 
 ### File List
 
-- `core/apps/event_dispatcher/mix.exs` (modified — added jason dep)
+- `core/apps/event_dispatcher/mix.exs` (modified - added jason dep)
 - `core/apps/event_dispatcher/lib/nebu/health/health.ex` (new)
 - `core/apps/event_dispatcher/lib/nebu/health/server.ex` (new)
-- `core/apps/event_dispatcher/lib/nebu/event/application.ex` (modified — added Health.Server as first child)
+- `core/apps/event_dispatcher/lib/nebu/event/application.ex` (modified - added Health.Server as first child)
 - `core/apps/event_dispatcher/test/nebu/health_test.exs` (new)
-- `docker-compose.yml` (modified — added core healthcheck stanza)
-- `core/Dockerfile` (modified — added curl to runtime apk install)
+- `docker-compose.yml` (modified - added core healthcheck stanza)
+- `core/Dockerfile` (modified - added curl to runtime apk install)
 
 ## Change Log
 
-- 2026-03-24: Implemented health endpoint for Elixir core (Story 1-12) — Nebu.Health module, Nebu.Health.Server gen_tcp listener on port 4000, supervisor integration, unit tests, docker-compose healthcheck, Dockerfile curl addition.
-- 2026-03-24: Code review (AI) — 0 HIGH, 1 MEDIUM, 2 LOW. Fixed: M1 unstaged unrelated gateway/cmd/healthcheck/main.go, L1 added drain_headers for 404 responses, L2 replaced bare spawn with Task.start for connection handlers. All ACs verified as implemented. Status → done.
+- 2026-03-24: Implemented health endpoint for Elixir core (Story 1-12) - Nebu.Health module, Nebu.Health.Server gen_tcp listener on port 4000, supervisor integration, unit tests, docker-compose healthcheck, Dockerfile curl addition.
+- 2026-03-24: Code review (AI) - 0 HIGH, 1 MEDIUM, 2 LOW. Fixed: M1 unstaged unrelated gateway/cmd/healthcheck/main.go, L1 added drain_headers for 404 responses, L2 replaced bare spawn with Task.start for connection handlers. All ACs verified as implemented. Status → done.

@@ -268,51 +268,51 @@ func TestSyncWakesOnPgNotification(t *testing.T) {
 
 #### Sync Long-Poll Tests
 
-1. **[Test: Sync wakes on pg notification]** — Integration Test (Go)
+1. **[Test: Sync wakes on pg notification]** - Integration Test (Go)
    - Given: Running sync long-poll with no events
    - When: Broadcast `:pg` event for new room message
    - Then: Sync response returns within 5 seconds
 
-2. **[Test: Invite event triggers pg broadcast]** — Integration Test (Go)
+2. **[Test: Invite event triggers pg broadcast]** - Integration Test (Go)
    - Given: User receives room invite
    - When: Event dispatcher calls `emit_membership_event`
    - Then: `pglisten` notification sent to correct channel
 
-3. **[Test: Membership change wakes sync]** — E2E Test (Playwright)
+3. **[Test: Membership change wakes sync]** - E2E Test (Playwright)
    - Given: User A invites User B to room
    - When: User B receives sync
    - Then: `rooms.invite` delivered within 10 seconds (not 35s)
 
 #### DM Creation Tests
 
-4. **[Test: Profile lookup returns 200 for bootstrap users]** — E2E Test (Playwright)
+4. **[Test: Profile lookup returns 200 for bootstrap users]** - E2E Test (Playwright)
    - Given: User Alex provisioned via OIDC bootstrap login
    - When: GET /_matrix/client/v3/profile/@alex:localhost
    - Then: 200 OK with displayname from OIDC preferred_username
 
-5. **[Test: keys/query returns known users]** — E2E Test (Playwright)
+5. **[Test: keys/query returns known users]** - E2E Test (Playwright)
    - Given: User Alex exists in database (no devices)
    - When: POST /_matrix/client/v3/keys/query for Alex
    - Then: Alex appears in device_keys map (empty array), not in failures
 
-6. **[Test: DM creation completes without spinner]** — E2E Test (Playwright)
+6. **[Test: DM creation completes without spinner]** - E2E Test (Playwright)
    - Given: Marie wants to create DM with Alex
    - When: POST /_matrix/client/v3/createRoom with is_direct=true
    - Then: 200 OK, no "Profile not found" warning, no infinite spinner
 
 #### Admin UI Tests
 
-7. **[Test: Full wizard flow with real OIDC]** — E2E Test (Playwright)
+7. **[Test: Full wizard flow with real OIDC]** - E2E Test (Playwright)
    - Given: No bootstrap_completed in server_config
    - When: Complete Steps 1-4 with real Dex OIDC login
    - Then: Redirect to /admin/bootstrap/done succeeds
 
-8. **[Test: OIDC connection timeout handled]** — E2E Test (Playwright)
+8. **[Test: OIDC connection timeout handled]** - E2E Test (Playwright)
    - Given: Invalid OIDC issuer URL configured
    - When: Click "Test Connection"
    - Then: User-friendly error shown, no 500 response
 
-9. **[Test: Invalid credentials retry]** — E2E Test (Playwright)
+9. **[Test: Invalid credentials retry]** - E2E Test (Playwright)
    - Given: Wrong OIDC client secret entered
    - When: Click "Complete Setup"
    - Then: Can retry with correct credentials, succeeds on retry

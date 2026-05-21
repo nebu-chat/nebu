@@ -2,9 +2,9 @@
 security_review: not-needed
 ---
 
-# Story 5.29: Security Follow-up Collector — INDEX (split into 5-29a..e)
+# Story 5.29: Security Follow-up Collector - INDEX (split into 5-29a..e)
 
-Status: split (no implementation work — see child stories)
+Status: split (no implementation work - see child stories)
 
 ## Purpose
 
@@ -28,11 +28,11 @@ The five child stories are independent units of work but share the Epic-5 close-
 
 ## Recommended landing order
 
-1. **5-29a** first — it changes the trust model and the migration grant matrix; many other tests can only be meaningful afterwards.
-2. **5-29b** in parallel with 5-29a — endpoint hardening is independent of the trust model, fixes are small.
-3. **5-29c** after 5-29a — FB-51-02 (event_time trigger) tests rely on the role split for correctness.
-4. **5-29d** any time — independent.
-5. **5-29e** any time — functional bugs, separate audience (end-users + admins, not security-team).
+1. **5-29a** first - it changes the trust model and the migration grant matrix; many other tests can only be meaningful afterwards.
+2. **5-29b** in parallel with 5-29a - endpoint hardening is independent of the trust model, fixes are small.
+3. **5-29c** after 5-29a - FB-51-02 (event_time trigger) tests rely on the role split for correctness.
+4. **5-29d** any time - independent.
+5. **5-29e** any time - functional bugs, separate audience (end-users + admins, not security-team).
 
 ---
 
@@ -41,13 +41,13 @@ The five child stories are independent units of work but share the Epic-5 close-
 1. Each of 5-29a..e is created with `ready-for-dev` status.
 2. Sprint-status.yaml lists all five with the correct status.
 3. The `deferred-work.md` Story-5-1 entry now points at 5-29a as the canonical home for FB-51-01 (was the original anchor).
-4. This story (5-29) is marked `done` in sprint-status.yaml because it has no further work — all content moved.
+4. This story (5-29) is marked `done` in sprint-status.yaml because it has no further work - all content moved.
 
 ---
 
 ## Acceptance Tests
 
-None — pure documentation reorganisation.
+None - pure documentation reorganisation.
 
 ---
 

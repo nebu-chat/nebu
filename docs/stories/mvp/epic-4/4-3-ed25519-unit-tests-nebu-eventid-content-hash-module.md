@@ -13,7 +13,7 @@ so that every event has a deterministic, verifiable, content-addressable identif
 1. `core/apps/signature/lib/nebu/event_id.ex` implements `Nebu.EventId.generate/1`:
    - Accepts an event content map (any `map()`)
    - Strips `signatures` and `unsigned` fields before hashing (per Matrix Room Version 6 spec)
-   - Serializes to canonical JSON: keys sorted alphabetically, no whitespace — via `Jason.encode!/1` with sorted keys
+   - Serializes to canonical JSON: keys sorted alphabetically, no whitespace - via `Jason.encode!/1` with sorted keys
    - Computes SHA-256 of the canonical JSON bytes via `:crypto.hash(:sha256, json_bytes)`
    - URL-safe Base64-encodes (no padding) the hash via `Base.url_encode64(hash, padding: false)`
    - Returns `"$" <> encoded_hash` (e.g., `"$abc123def456..."`)
@@ -25,7 +25,7 @@ so that every event has a deterministic, verifiable, content-addressable identif
 3. Unit tests in `core/apps/signature/test/nebu/event_id_test.exs` cover:
    - Same content always produces the same ID (determinism)
    - Different content produces different IDs (collision resistance)
-   - Key ordering in the input map does NOT affect the ID (canonical JSON — alphabetical sort)
+   - Key ordering in the input map does NOT affect the ID (canonical JSON - alphabetical sort)
    - `verify/2` returns `true` for a matching ID
    - `verify/2` returns `false` for a tampered ID (content changed after ID was generated)
    - `signatures` and `unsigned` fields are stripped before hashing (spec compliance)
@@ -48,13 +48,13 @@ so that every event has a deterministic, verifiable, content-addressable identif
   - [x] Add `@moduledoc`, `@doc`, `@spec` annotations
 
 - [x] Create `core/apps/signature/test/nebu/event_id_test.exs` (AC: #3)
-  - [x] Test: determinism — same map produces same ID
-  - [x] Test: collision resistance — different map produces different ID
-  - [x] Test: key-order independence — `%{b: 1, a: 2}` and `%{a: 2, b: 1}` produce same ID
+  - [x] Test: determinism - same map produces same ID
+  - [x] Test: collision resistance - different map produces different ID
+  - [x] Test: key-order independence - `%{b: 1, a: 2}` and `%{a: 2, b: 1}` produce same ID
   - [x] Test: `verify/2` true for matching ID
   - [x] Test: `verify/2` false for tampered content
-  - [x] Test: `signatures` field is stripped — `%{type: "m.room.message", signatures: %{}}` same ID as `%{type: "m.room.message"}`
-  - [x] Test: `unsigned` field is stripped — same pattern as above
+  - [x] Test: `signatures` field is stripped - `%{type: "m.room.message", signatures: %{}}` same ID as `%{type: "m.room.message"}`
+  - [x] Test: `unsigned` field is stripped - same pattern as above
   - [x] Use `async: true` (pure crypto, no shared state)
   - [x] Use `describe` blocks (established test pattern)
 
@@ -62,11 +62,11 @@ so that every event has a deterministic, verifiable, content-addressable identif
 
 ### Review Findings
 
-- [x] [Review][Patch] MAJOR: `normalize_keys/1` uses `Map.new/1` which destroys sort order for maps >32 keys — breaks canonical JSON spec [event_id.ex:80-84] — fixed: replaced with `Jason.OrderedObject`
-- [x] [Review][Patch] MINOR: Doctest example in `generate/1` has non-executable expected value `"$..."` [event_id.ex:25-26] — fixed: replaced with executable assertion
-- [x] [Review][Patch] MINOR: Comment in line 69 falsely claims Jason preserves insertion order for sorted maps [event_id.ex:69] — fixed: corrected comment
-- [x] [Review][Defer] INFO: Architecture expects separate `canonical_json.ex` module — deferred, acceptable as private function until extraction needed by Story 4-4+
-- [x] [Review][Defer] INFO: Tests do not cover maps with >32 keys — deferred, will be covered when MAJOR fix is verified via container tests
+- [x] [Review][Patch] MAJOR: `normalize_keys/1` uses `Map.new/1` which destroys sort order for maps >32 keys - breaks canonical JSON spec [event_id.ex:80-84] - fixed: replaced with `Jason.OrderedObject`
+- [x] [Review][Patch] MINOR: Doctest example in `generate/1` has non-executable expected value `"$..."` [event_id.ex:25-26] - fixed: replaced with executable assertion
+- [x] [Review][Patch] MINOR: Comment in line 69 falsely claims Jason preserves insertion order for sorted maps [event_id.ex:69] - fixed: corrected comment
+- [x] [Review][Defer] INFO: Architecture expects separate `canonical_json.ex` module - deferred, acceptable as private function until extraction needed by Story 4-4+
+- [x] [Review][Defer] INFO: Tests do not cover maps with >32 keys - deferred, will be covered when MAJOR fix is verified via container tests
 
 ---
 
@@ -76,13 +76,13 @@ so that every event has a deterministic, verifiable, content-addressable identif
 
 `Nebu.EventId` lives in `core/apps/signature/lib/nebu/event_id.ex`.
 
-Architecture rule #8: `canonical_json/1` from the Signature-App — `Nebu.EventId` IS the Signature-App's canonical JSON + content-hash module. Story 4-4 references `Signature.Ed25519.sign/2` and `Nebu.EventId.generate/1` — both from the same `signature` app.
+Architecture rule #8: `canonical_json/1` from the Signature-App - `Nebu.EventId` IS the Signature-App's canonical JSON + content-hash module. Story 4-4 references `Signature.Ed25519.sign/2` and `Nebu.EventId.generate/1` - both from the same `signature` app.
 
 Do NOT create a new umbrella app. Do NOT put `event_id.ex` in `room_manager`.
 
 ### Jason Dependency
 
-Jason is already compiled and present in `core/mix.lock` (used by `event_dispatcher` at `"~> 1.4"`, resolved to `1.4.4`). Adding it to `signature/mix.exs` deps triggers NO new download — it reuses the existing resolved version.
+Jason is already compiled and present in `core/mix.lock` (used by `event_dispatcher` at `"~> 1.4"`, resolved to `1.4.4`). Adding it to `signature/mix.exs` deps triggers NO new download - it reuses the existing resolved version.
 
 **Add to `core/apps/signature/mix.exs`:**
 ```elixir
@@ -91,13 +91,13 @@ defp deps do
 end
 ```
 
-**Do NOT modify** `core/mix.lock` manually — Mix resolves it automatically.
+**Do NOT modify** `core/mix.lock` manually - Mix resolves it automatically.
 
 ### Canonical JSON: Sorted Keys via Jason
 
 Matrix Room Version 6 requires canonical JSON: keys alphabetically sorted, no whitespace, no `signatures` or `unsigned` fields.
 
-Jason does NOT sort keys by default — `Jason.encode!(%{b: 1, a: 2})` may produce `{"b":1,"a":2}`. Use `Jason.encode!/2` with the `:keys` option? Actually, Jason sorts map keys by default for atom maps but NOT for string-keyed maps. The safest approach is to convert the map to a keyword list sorted by key:
+Jason does NOT sort keys by default - `Jason.encode!(%{b: 1, a: 2})` may produce `{"b":1,"a":2}`. Use `Jason.encode!/2` with the `:keys` option? Actually, Jason sorts map keys by default for atom maps but NOT for string-keyed maps. The safest approach is to convert the map to a keyword list sorted by key:
 
 **Correct pattern:**
 ```elixir
@@ -118,11 +118,11 @@ defp sort_keys_deep(list) when is_list(list), do: Enum.map(list, &sort_keys_deep
 defp sort_keys_deep(value), do: value
 ```
 
-**Alternative: use Jason.OrderedObject** — but this is heavier. The `sort_keys_deep` approach is simpler and follows the established pattern.
+**Alternative: use Jason.OrderedObject** - but this is heavier. The `sort_keys_deep` approach is simpler and follows the established pattern.
 
 **Important:** Jason encodes Elixir maps with string keys in insertion order (in Erlang, map ordering is hash-based, NOT alphabetical). Always normalize to sorted string keys before encoding.
 
-**Do NOT use atom keys in the canonical map** — event content from gRPC/JSON will arrive with string keys.
+**Do NOT use atom keys in the canonical map** - event content from gRPC/JSON will arrive with string keys.
 
 ### `generate/1` Implementation Sketch
 
@@ -183,11 +183,11 @@ end
 ```
 
 **Key points:**
-- `Map.drop/2` handles both atom keys (`:signatures`) and string keys (`"signatures"`) — event content may come either way
+- `Map.drop/2` handles both atom keys (`:signatures`) and string keys (`"signatures"`) - event content may come either way
 - `normalize_keys/1` converts all keys to strings and sorts alphabetically at every nesting level
 - `Jason.encode!` encodes the resulting string-keyed map (Jason preserves insertion order for maps created from `Enum.sort`)
-- `:crypto.hash(:sha256, json_bytes)` — `json_bytes` is a binary (Jason returns binary from `encode!`)
-- `Base.url_encode64(..., padding: false)` — URL-safe alphabet, no `=` padding
+- `:crypto.hash(:sha256, json_bytes)` - `json_bytes` is a binary (Jason returns binary from `encode!`)
+- `Base.url_encode64(..., padding: false)` - URL-safe alphabet, no `=` padding
 
 ### Test File Location
 
@@ -196,11 +196,11 @@ Per Elixir test discovery convention, a module `Nebu.EventId` tested in `Nebu.Ev
 core/apps/signature/test/nebu/event_id_test.exs
 ```
 
-The `test/` directory in the `signature` app is auto-discovered. Subdirectories (`test/nebu/`) are discovered automatically — no explicit `Code.require_file` needed.
+The `test/` directory in the `signature` app is auto-discovered. Subdirectories (`test/nebu/`) are discovered automatically - no explicit `Code.require_file` needed.
 
 Alternatively, the file can live at `core/apps/signature/test/nebu_event_id_test.exs` (flat). Both work. The flat pattern `nebu_event_id_test.exs` is simpler and consistent with `nebu_signature_test.exs`.
 
-**Recommendation: use flat pattern** `test/nebu_event_id_test.exs` — matches `nebu_signature_test.exs` convention.
+**Recommendation: use flat pattern** `test/nebu_event_id_test.exs` - matches `nebu_signature_test.exs` convention.
 
 ### Test Implementation Sketch
 
@@ -265,7 +265,7 @@ end
 
 ### OTP Sign/Verify API (Existing Tests, Must Keep Passing)
 
-From Story 2-8, the correct EdDSA sign/verify API in OTP (learned during implementation — not what the story spec said):
+From Story 2-8, the correct EdDSA sign/verify API in OTP (learned during implementation - not what the story spec said):
 
 ```elixir
 # Sign (4-arg form with curve in key list):
@@ -275,23 +275,23 @@ signature = :crypto.sign(:eddsa, :none, message, [private_key, :ed25519])
 :crypto.verify(:eddsa, :none, message, signature, [public_key, :ed25519])
 ```
 
-**NOT** the 5-arg form `(:eddsa, :none, msg, [key], [:ed25519])` — that is RSA-only syntax.
-**NOT** `private_key: 64 bytes` — OTP returns 32-byte seed format, not libsodium 64-byte format.
+**NOT** the 5-arg form `(:eddsa, :none, msg, [key], [:ed25519])` - that is RSA-only syntax.
+**NOT** `private_key: 64 bytes` - OTP returns 32-byte seed format, not libsodium 64-byte format.
 
-These tests are already correct in `nebu_signature_test.exs` — do NOT change them.
+These tests are already correct in `nebu_signature_test.exs` - do NOT change them.
 
 ### Architecture Enforcement Rules Relevant to This Story
 
 | Rule | Requirement |
 |---|---|
-| Rule #7 | Event-IDs always via `Nebu.EventId.generate/1` — never manually constructed |
-| Rule #8 | `canonical_json/1` from Signature-App — no custom implementation elsewhere |
-| Rule #6 | `{:ok, result}` / `{:error, reason}` for business logic — but `generate/1` returns a plain string (not a tagged tuple) since it cannot fail |
+| Rule #7 | Event-IDs always via `Nebu.EventId.generate/1` - never manually constructed |
+| Rule #8 | `canonical_json/1` from Signature-App - no custom implementation elsewhere |
+| Rule #6 | `{:ok, result}` / `{:error, reason}` for business logic - but `generate/1` returns a plain string (not a tagged tuple) since it cannot fail |
 | G7 (arch) | Format: `$<base64url(SHA-256(canonical_json(event \ {signatures, unsigned})))>` |
 
 ### `sign_event` Function: Deferred to Story 4-4
 
-Story 4-4 references `Signature.Ed25519.sign/2` for event signing. This is NOT in scope for Story 4-3. The epics.md acceptance criteria for Story 4-3 says "Existing Ed25519 unit tests from Story 1.x pass" — this refers to the existing `nebu_signature_test.exs` tests. Story 4-3 only adds `Nebu.EventId`.
+Story 4-4 references `Signature.Ed25519.sign/2` for event signing. This is NOT in scope for Story 4-3. The epics.md acceptance criteria for Story 4-3 says "Existing Ed25519 unit tests from Story 1.x pass" - this refers to the existing `nebu_signature_test.exs` tests. Story 4-3 only adds `Nebu.EventId`.
 
 Do NOT implement `Nebu.Signature.sign_event/2` in this story.
 
@@ -309,10 +309,10 @@ core/apps/signature/
 ```
 
 **Do NOT modify:**
-- `nebu_signature_test.exs` — existing tests must pass unchanged
-- `nebu/signature.ex` — no changes needed
-- `nebu/signature/application.ex` — no changes needed
-- `mix.lock` — auto-updated by Mix, do not manually edit
+- `nebu_signature_test.exs` - existing tests must pass unchanged
+- `nebu/signature.ex` - no changes needed
+- `nebu/signature/application.ex` - no changes needed
+- `mix.lock` - auto-updated by Mix, do not manually edit
 - Any other app's files
 
 ### Build & Test Commands
@@ -327,7 +327,7 @@ cd core && mix test apps/signature --warnings-as-errors
 make test-unit-elixir
 ```
 
-All tests run inside Docker containers — no local Elixir install needed.
+All tests run inside Docker containers - no local Elixir install needed.
 
 **Expected result:** All existing 20 signature tests pass + 8 new EventId tests = 28 tests, 0 failures.
 
@@ -339,23 +339,23 @@ All tests run inside Docker containers — no local Elixir install needed.
 
 1. **Runtime DB injection pattern**: `Application.get_env/3` at runtime (NOT `Application.compile_env`) enables test overrides via `Application.put_env`. This is NOT needed for Story 4-3 (no DB), but is the established pattern for config-injectable modules.
 
-2. **Module name convention confirmed**: All modules follow `Nebu.{Domain}.{Name}` — e.g., `Nebu.EventId`, NOT `EventDispatcher.EventId` or `Nebu.Event.Id`.
+2. **Module name convention confirmed**: All modules follow `Nebu.{Domain}.{Name}` - e.g., `Nebu.EventId`, NOT `EventDispatcher.EventId` or `Nebu.Event.Id`.
 
 3. **`async: true` for pure unit tests**: All tests with no shared state (pure crypto, pure logic) use `async: true`. The EventId tests qualify.
 
 4. **Dependency addition pattern**: When adding a new dep to an umbrella app's `mix.exs`, the dep must already exist in `mix.lock` OR will be fetched from hex. Jason IS in `mix.lock` already (version 1.4.4).
 
-5. **Horde `async: false` rule**: NOT needed here — EventId tests have no Horde processes.
+5. **Horde `async: false` rule**: NOT needed here - EventId tests have no Horde processes.
 
 6. **Files modified in Story 4-2:**
-   - `gateway/migrations/000009_rooms.up.sql` — NEW
-   - `gateway/migrations/000009_rooms.down.sql` — NEW
-   - `core/apps/room_manager/mix.exs` — MODIFIED
-   - `core/apps/room_manager/lib/nebu/room/server.ex` — MODIFIED
-   - `core/apps/room_manager/lib/nebu/room/db.ex` — NEW
-   - `core/apps/room_manager/test/nebu_room_test.exs` — MODIFIED
+   - `gateway/migrations/000009_rooms.up.sql` - NEW
+   - `gateway/migrations/000009_rooms.down.sql` - NEW
+   - `core/apps/room_manager/mix.exs` - MODIFIED
+   - `core/apps/room_manager/lib/nebu/room/server.ex` - MODIFIED
+   - `core/apps/room_manager/lib/nebu/room/db.ex` - NEW
+   - `core/apps/room_manager/test/nebu_room_test.exs` - MODIFIED
 
-7. **Review Finding: `ON CONFLICT DO NOTHING` broke rejoin** — not relevant here, but signals that edge cases in logic should be tested explicitly (the `verify/2` false-positive case is the equivalent here).
+7. **Review Finding: `ON CONFLICT DO NOTHING` broke rejoin** - not relevant here, but signals that edge cases in logic should be tested explicitly (the `verify/2` false-positive case is the equivalent here).
 
 ---
 
@@ -363,14 +363,14 @@ All tests run inside Docker containers — no local Elixir install needed.
 
 | Requirement | Source |
 |---|---|
-| `Nebu.EventId` lives in `signature` app | `architecture.md#G7` — "Implementierung: Elixir `Nebu.EventId` Modul, wiederverwendet `canonical_json/1` aus Signature-App" |
+| `Nebu.EventId` lives in `signature` app | `architecture.md#G7` - "Implementierung: Elixir `Nebu.EventId` Modul, wiederverwendet `canonical_json/1` aus Signature-App" |
 | Format: `$<base64url(SHA-256(canonical_json(event)))>` | `architecture.md#G7` |
-| Strip `signatures` + `unsigned` before hashing | `architecture.md#G7` — "keine `signatures`- und `unsigned`-Felder" |
+| Strip `signatures` + `unsigned` before hashing | `architecture.md#G7` - "keine `signatures`- und `unsigned`-Felder" |
 | Canonical JSON: keys alphabetisch sortiert | `architecture.md#G7` |
 | `Nebu.{Domain}.{Name}` module naming | `architecture.md#Naming Conventions > Elixir` |
 | Event-IDs always via `Nebu.EventId.generate/1` | `architecture.md#Enforcement rule #7` |
 | No custom canonical JSON implementation outside Signature-App | `architecture.md#Enforcement rule #8` |
-| OTP `:crypto` — no external crypto deps | `architecture.md#V1` — "beide native in OTP 24+" |
+| OTP `:crypto` - no external crypto deps | `architecture.md#V1` - "beide native in OTP 24+" |
 | Unit tests mandatory for crypto operations | `architecture.md#G6` |
 
 ---
@@ -381,8 +381,8 @@ All tests run inside Docker containers — no local Elixir install needed.
 |---|---|
 | Story 2-8 | Established `nebu_signature_test.exs` with `async: true`, `describe` blocks, correct OTP Ed25519 sign/verify 4-arg form |
 | Story 4-4 | Calls `Nebu.EventId.generate/1` for event ID in `handle_call({:send_event, ...})` |
-| Story 4-11 | Go gateway PUT handler returns `{"event_id": "$..."}` — the hash produced by this module |
-| Story 5-6 | Compliance export verifies event integrity by recomputing EventId — `verify/2` is used there |
+| Story 4-11 | Go gateway PUT handler returns `{"event_id": "$..."}` - the hash produced by this module |
+| Story 5-6 | Compliance export verifies event integrity by recomputing EventId - `verify/2` is used there |
 
 ---
 
@@ -394,20 +394,20 @@ All tests run inside Docker containers — no local Elixir install needed.
   - `generate/1`: strips `signatures`/`unsigned` (both string and atom key forms), normalizes all map keys to sorted string keys recursively via `normalize_keys/1`, serializes via `Jason.encode!`, computes SHA-256 with `:crypto.hash/2`, encodes with `Base.url_encode64/2` (no padding), prepends `"$"`.
   - `verify/2`: recomputes ID via `generate/1` and compares with `==`.
   - Full `@moduledoc`, `@doc`, `@spec` annotations.
-- Added `{:jason, "~> 1.4"}` to `core/apps/signature/mix.exs` — no version conflict; Jason 1.4.4 was already in `mix.lock`.
+- Added `{:jason, "~> 1.4"}` to `core/apps/signature/mix.exs` - no version conflict; Jason 1.4.4 was already in `mix.lock`.
 - Created 10 unit tests in flat pattern `test/nebu_event_id_test.exs` (consistent with `nebu_signature_test.exs`): determinism, collision resistance, key-order independence, `verify/2` true/false, string `signatures`/`unsigned` stripping, atom `:signatures`/`:unsigned` stripping, `"$"`-prefix check.
 - Full umbrella `mix test --warnings-as-errors` passed: 21 signature tests (11 existing + 10 new), 0 failures, no regressions in any app.
 
 ### File List
 
-- `core/apps/signature/mix.exs` — MODIFIED: added `{:jason, "~> 1.4"}` dependency
-- `core/apps/signature/lib/nebu/event_id.ex` — CREATED: `Nebu.EventId` module
-- `core/apps/signature/test/nebu_event_id_test.exs` — CREATED: 10 unit tests for `Nebu.EventId`
+- `core/apps/signature/mix.exs` - MODIFIED: added `{:jason, "~> 1.4"}` dependency
+- `core/apps/signature/lib/nebu/event_id.ex` - CREATED: `Nebu.EventId` module
+- `core/apps/signature/test/nebu_event_id_test.exs` - CREATED: 10 unit tests for `Nebu.EventId`
 
 ## Change Log
 
-- 2026-04-11: Test review passed — 100/100 (A), 0 actionable violations, all 5 ACs covered; status → done
-- 2026-04-11: Re-verification — `make test-unit-elixir` (221 tests, 0 failures, --warnings-as-errors clean); status → review
-- 2026-04-03: Code review — 1 MAJOR fixed (`normalize_keys` Map.new→Jason.OrderedObject), 2 MINOR fixed (doctest, comment); status → in-progress for re-verification
-- 2026-04-03: Story implemented — `Nebu.EventId` module + 10 unit tests added; all ACs satisfied; umbrella tests green
-- 2026-04-03: Story created — ready-for-dev
+- 2026-04-11: Test review passed - 100/100 (A), 0 actionable violations, all 5 ACs covered; status → done
+- 2026-04-11: Re-verification - `make test-unit-elixir` (221 tests, 0 failures, --warnings-as-errors clean); status → review
+- 2026-04-03: Code review - 1 MAJOR fixed (`normalize_keys` Map.new→Jason.OrderedObject), 2 MINOR fixed (doctest, comment); status → in-progress for re-verification
+- 2026-04-03: Story implemented - `Nebu.EventId` module + 10 unit tests added; all ACs satisfied; umbrella tests green
+- 2026-04-03: Story created - ready-for-dev

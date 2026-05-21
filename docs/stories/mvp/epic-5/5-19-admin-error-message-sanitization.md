@@ -16,15 +16,15 @@ so that DB/DNS/TLS internals are not leaked to unauthenticated clients.
 
 ## Background / Motivation
 
-Security audit (2026-04-20): `admin/auth.go:240` returns `"Failed to load OIDC configuration: "+err.Error()` and `:247` returns `"OIDC provider discovery failed: "+err.Error()` to the browser. These errors include Go driver messages (`pq: connection refused`, DNS lookup strings, TLS cert subjects) — valuable reconnaissance for an attacker.
+Security audit (2026-04-20): `admin/auth.go:240` returns `"Failed to load OIDC configuration: "+err.Error()` and `:247` returns `"OIDC provider discovery failed: "+err.Error()` to the browser. These errors include Go driver messages (`pq: connection refused`, DNS lookup strings, TLS cert subjects) - valuable reconnaissance for an attacker.
 
 ---
 
 ## Acceptance Criteria
 
 1. Every `http.Error(w, "...: "+err.Error(), ...)` call site in `gateway/internal/admin/` is replaced with two lines:
-   - `slog.Error("admin: <context>", "err", err)` — full error into logs
-   - `renderError(w, r, http.Status500, "Internal error", "Please contact your administrator.")` — generic message to client
+   - `slog.Error("admin: <context>", "err", err)` - full error into logs
+   - `renderError(w, r, http.Status500, "Internal error", "Please contact your administrator.")` - generic message to client
 
 2. The standard error page (existing `errors/500.html`) is used, including a request ID (generate with `crypto/rand`, log alongside the error).
 
@@ -38,9 +38,9 @@ Security audit (2026-04-20): `admin/auth.go:240` returns `"Failed to load OIDC c
 
 ### Tests written FIRST (ATDD gate):
 
-1. `TestAdminError_DoesNotLeakErrorString` — Go httptest, stub `oidc.NewProvider` to return `errors.New("pq: connection refused")`; expect response body to NOT contain `connection refused`
+1. `TestAdminError_DoesNotLeakErrorString` - Go httptest, stub `oidc.NewProvider` to return `errors.New("pq: connection refused")`; expect response body to NOT contain `connection refused`
 
-2. `TestAdminError_IncludesRequestID` — response body contains a request ID, logs contain the same ID with the real error
+2. `TestAdminError_IncludesRequestID` - response body contains a request ID, logs contain the same ID with the real error
 
 ---
 

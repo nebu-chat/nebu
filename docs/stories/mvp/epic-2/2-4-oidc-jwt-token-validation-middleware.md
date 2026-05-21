@@ -10,7 +10,7 @@ so that only authenticated users can access the API and my identity is reliably 
 
 ## Acceptance Criteria
 
-1. **Given** a Matrix API request with a valid `Authorization: Bearer <jwt>` header, **When** the middleware processes it, **Then** it validates the JWT signature against the cached JWKS, checks expiry, issuer, and audience — and passes the request to the handler with claims in context
+1. **Given** a Matrix API request with a valid `Authorization: Bearer <jwt>` header, **When** the middleware processes it, **Then** it validates the JWT signature against the cached JWKS, checks expiry, issuer, and audience - and passes the request to the handler with claims in context
 
 2. **Given** a request with an expired token, **When** the middleware processes it, **Then** it returns `401 Unauthorized` with Matrix error body `{"errcode": "M_UNKNOWN_TOKEN", "error": "Token has expired"}`
 
@@ -18,7 +18,7 @@ so that only authenticated users can access the API and my identity is reliably 
 
 4. **Given** a request with no `Authorization` header, **When** the middleware processes it, **Then** it returns `401 Unauthorized` with `{"errcode": "M_MISSING_TOKEN", "error": "Missing access token"}`
 
-5. **Given** the middleware scope, **When** its implementation is reviewed, **Then** it performs JWT validation only — no OAuth2 code exchange, no PKCE, no redirect logic
+5. **Given** the middleware scope, **When** its implementation is reviewed, **Then** it performs JWT validation only - no OAuth2 code exchange, no PKCE, no redirect logic
 
 6. **Given** validated claims, **When** extracted from the JWT, **Then** `sub`, `preferred_username`, `email`, and `nebu_role` are made available in the request context for downstream handlers
 
@@ -47,7 +47,7 @@ so that only authenticated users can access the API and my identity is reliably 
 
 ### Library: `github.com/coreos/go-oidc/v3` v3.17.0
 
-**Already in `gateway/go.mod` — do NOT run `go get` or modify go.mod.** No new direct dependencies needed for this story.
+**Already in `gateway/go.mod` - do NOT run `go get` or modify go.mod.** No new direct dependencies needed for this story.
 
 `go-jose/go-jose/v4` is also already present as an indirect dep (pulled in by go-oidc). Tests can import `github.com/go-jose/go-jose/v4` and `github.com/go-jose/go-jose/v4/jwt` without changing go.mod.
 
@@ -57,7 +57,7 @@ verifier := provider.Inner().Verifier(&oidc.Config{ClientID: clientID})
 idToken, err := verifier.Verify(r.Context(), rawToken)
 ```
 
-**Expiry error discrimination** — `go-oidc/v3` exports `*oidc.TokenExpiredError`:
+**Expiry error discrimination** - `go-oidc/v3` exports `*oidc.TokenExpiredError`:
 ```go
 var expiredErr *oidc.TokenExpiredError
 if errors.As(err, &expiredErr) {
@@ -76,7 +76,7 @@ var claims struct {
     NebuRole          string `json:"nebu_role"`
 }
 if err := idToken.Claims(&claims); err != nil {
-    // unexpected — return 500 M_UNKNOWN
+    // unexpected - return 500 M_UNKNOWN
 }
 ```
 
@@ -170,11 +170,11 @@ func JWTMiddleware(provider *auth.Provider, clientID string) func(http.Handler) 
 }
 ```
 
-**Important:** The `matrixError` struct uses `Error_` as the Go field name to avoid collision with the `error` interface, but the JSON tag must be `"error"` — double-check the JSON tag spelling. Alternative: use `Err string \`json:"error"\`` as the field name.
+**Important:** The `matrixError` struct uses `Error_` as the Go field name to avoid collision with the `error` interface, but the JSON tag must be `"error"` - double-check the JSON tag spelling. Alternative: use `Err string \`json:"error"\`` as the field name.
 
 ### Test Implementation Guide: `gateway/internal/middleware/auth_test.go`
 
-Tests use an httptest OIDC server with a real RSA key for end-to-end JWT validation. `go-jose/v4` is available as an indirect dep — no go.mod change needed.
+Tests use an httptest OIDC server with a real RSA key for end-to-end JWT validation. `go-jose/v4` is available as an indirect dep - no go.mod change needed.
 
 ```go
 package middleware_test
@@ -265,7 +265,7 @@ func signJWT(t *testing.T, serverURL string, privateKey *rsa.PrivateKey, expiry 
 **Test helpers allow each test to focus on the scenario.** Key points:
 - `setupOIDCServer` must set `serverURL` BEFORE the handler closure runs (same pattern as `oidc_test.go`)
 - `signJWT` with `expiry: time.Now().Add(-time.Hour)` → expired token
-- For invalid signature: use a second `rsa.GenerateKey` key to sign — the server doesn't serve its JWKS, or sign with a key whose `kid` doesn't match
+- For invalid signature: use a second `rsa.GenerateKey` key to sign - the server doesn't serve its JWKS, or sign with a key whose `kid` doesn't match
 - For nil provider: use `auth.NewProvider(ctx, "http://127.0.0.1:0")` (port 0 = always closed)
 
 **Test: Valid Token**
@@ -305,16 +305,16 @@ func TestJWTMiddleware_ValidToken(t *testing.T) {
 gateway/
   internal/
     middleware/
-      psk.go              ← EXISTS (PSK middleware — do not modify)
+      psk.go              ← EXISTS (PSK middleware - do not modify)
       psk_test.go         ← EXISTS
       auth.go             ← CREATE (this story)
       auth_test.go        ← CREATE (this story)
     auth/
-      oidc.go             ← EXISTS — provides Provider.Inner() — import as "github.com/nebu/nebu/internal/auth"
-      oidc_test.go        ← EXISTS — do NOT modify
+      oidc.go             ← EXISTS - provides Provider.Inner() - import as "github.com/nebu/nebu/internal/auth"
+      oidc_test.go        ← EXISTS - do NOT modify
 ```
 
-**Do NOT touch:** `main.go`, `config.go`, `oidc.go`, any Elixir files, migrations, gRPC files. No wiring into `main.go` is needed — Matrix routes don't exist yet; the middleware is created here and wired in Epic 4 stories.
+**Do NOT touch:** `main.go`, `config.go`, `oidc.go`, any Elixir files, migrations, gRPC files. No wiring into `main.go` is needed - Matrix routes don't exist yet; the middleware is created here and wired in Epic 4 stories.
 
 ### `matrixError` JSON Field Name
 
@@ -325,32 +325,32 @@ type matrixError struct {
     Err     string `json:"error"`
 }
 ```
-Use whichever is clearer — just ensure the JSON output has `"error"` (not `"err"` or `"error_"`).
+Use whichever is clearer - just ensure the JSON output has `"error"` (not `"err"` or `"error_"`).
 
 ### Cross-Story Context
 
-- **Story 2.3 created** `auth.Provider` with `Inner() *oidc.Provider`. Story 2.4 consumes it — do NOT change `Inner()` signature.
+- **Story 2.3 created** `auth.Provider` with `Inner() *oidc.Provider`. Story 2.4 consumes it - do NOT change `Inner()` signature.
 - **Story 2.5** (OIDC Claim-to-Role Mapping) adds `NEBU_OIDC_CLAIM_ROLE` config and maps `nebu_role` to `system_role`. Story 2.4 puts raw `nebu_role` claim in context; Story 2.5 adds the mapping layer. Do NOT implement role mapping in this story.
 - **Story 2.7** (Auth Token Flow) forwards `user_id` (`@{sub}:{server_name}`) and `system_role` to Elixir via gRPC metadata. It will read `ContextKeySub` and `ContextKeyNebuRole` from context. Exported constants must remain stable.
 - **Story 6.3** extends this middleware with `role_overrides` DB lookup (ETS-cached).
 
 ### Testing Patterns (from Story 2.3)
 
-- Use `t.Setenv()` for env var tests — auto-cleanup, no `os.Unsetenv` needed
-- Set `serverURL` var before handler closure captures it (Issue from 2.3: `oidc.NewProvider` validates that `issuer` in discovery doc matches the issuer URL — the httptest URL must be assigned before the handler fires)
+- Use `t.Setenv()` for env var tests - auto-cleanup, no `os.Unsetenv` needed
+- Set `serverURL` var before handler closure captures it (Issue from 2.3: `oidc.NewProvider` validates that `issuer` in discovery doc matches the issuer URL - the httptest URL must be assigned before the handler fires)
 - Tests run with `make test-unit-go` → `go test -race ./...` in Docker container
 
 ### Build & Test
 
 ```bash
-make test-unit-go    # go test -race ./... in container — must pass with 0 failures
+make test-unit-go    # go test -race ./... in container - must pass with 0 failures
 ```
 
 No go.mod changes required. All dependencies already present.
 
 ### References
 
-- [Source: epics.md#Story-2.4] Authoritative ACs — all 6 acceptance criteria
+- [Source: epics.md#Story-2.4] Authoritative ACs - all 6 acceptance criteria
 - [Source: architecture.md#Auth-Token-Flow] Claims mapping: sub→user_id, nebu_role→system_role
 - [Source: architecture.md#Directory-Structure line 957] File location: `gateway/internal/middleware/auth.go`
 - [Source: gateway/internal/auth/oidc.go] `Provider.Inner()` returns `*oidc.Provider`, nil if unreachable
@@ -370,12 +370,12 @@ _No issues encountered._
 
 ### Completion Notes List
 
-- Implemented `JWTMiddleware` in `gateway/internal/middleware/auth.go` using `go-oidc/v3` — no new dependencies needed.
+- Implemented `JWTMiddleware` in `gateway/internal/middleware/auth.go` using `go-oidc/v3` - no new dependencies needed.
 - Used `errors.As(err, &expiredErr)` with `*oidc.TokenExpiredError` for precise expiry vs. invalid-signature discrimination.
 - `matrixError` struct uses `Err string \`json:"error"\`` to avoid collision with Go's `error` interface while serializing to `"error"` in JSON.
 - All 5 tests pass with `-race` flag: MissingToken, ValidToken, ExpiredToken, InvalidSignature, NilProvider.
 - Exported context key constants (`ContextKeySub`, `ContextKeyPreferredUsername`, `ContextKeyEmail`, `ContextKeyNebuRole`) ready for Story 2.7 consumption.
-- No wiring into `main.go` — per story spec, Matrix routes don't exist yet; wiring happens in Epic 4.
+- No wiring into `main.go` - per story spec, Matrix routes don't exist yet; wiring happens in Epic 4.
 
 ### File List
 
@@ -384,5 +384,5 @@ _No issues encountered._
 
 ## Change Log
 
-- 2026-03-26: Implemented OIDC JWT Token Validation Middleware (Story 2.4) — auth.go + auth_test.go created, all ACs satisfied, tests pass.
-- 2026-03-27: Code review passed — 0 HIGH, 0 MEDIUM, 1 LOW (fixed: unnecessary test setup in MissingToken test). All 6 ACs verified, all tasks confirmed complete. Status → done.
+- 2026-03-26: Implemented OIDC JWT Token Validation Middleware (Story 2.4) - auth.go + auth_test.go created, all ACs satisfied, tests pass.
+- 2026-03-27: Code review passed - 0 HIGH, 0 MEDIUM, 1 LOW (fixed: unnecessary test setup in MissingToken test). All 6 ACs verified, all tasks confirmed complete. Status → done.

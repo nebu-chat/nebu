@@ -12,7 +12,7 @@ so that the gateway can receive real-time room events and query current room sta
 
 1. `proto/core.proto` adds two new RPCs to `CoreService`:
    - `rpc GetRoomState(GetRoomStateRequest) returns (GetRoomStateResponse)`
-   - The existing `rpc EventBus(EventBusRequest) returns (stream Event)` is already in the proto — no change to proto needed for EventBus itself
+   - The existing `rpc EventBus(EventBusRequest) returns (stream Event)` is already in the proto - no change to proto needed for EventBus itself
    - New messages: `GetRoomStateRequest { string room_id = 1; }` and `GetRoomStateResponse { repeated string members = 1; string power_levels_json = 2; string room_name = 3; }`
    - `make proto` regenerates Go stubs in `gateway/internal/grpc/pb/` and Elixir stubs in `core/apps/event_dispatcher/lib/pb/` without errors
 
@@ -58,32 +58,32 @@ so that the gateway can receive real-time room events and query current room sta
 
 ### Tests written FIRST (before implementation code):
 
-**1. event_bus: sends Core.Event on stream when :pg broadcasts {new_event} — ExUnit**
+**1. event_bus: sends Core.Event on stream when :pg broadcasts {new_event} - ExUnit**
 - Given: a mock `GRPC.Server.Stream.t()` is set up, the process joins `:pg` group `"room:!abc:nebu.local"` and the event_bus handler is running
 - When: `send(event_bus_pid, {:new_event, %{"room_id" => "!abc:nebu.local", "event_id" => "$ev1", "type" => "m.room.message", "sender" => "@kai:nebu.local", "content" => %{}, "origin_server_ts" => 1700000000000}})` is called
 - Then: `GRPC.Server.send_reply/2` is called with a `%Core.Event{}` containing matching fields
 
-**2. event_bus: pg cleanup on stream handler process exit — ExUnit**
+**2. event_bus: pg cleanup on stream handler process exit - ExUnit**
 - Given: `event_bus/2` is running in a test process registered with `:pg` in group `"room:!abc:nebu.local"`
 - When: the handler process is `Process.exit(pid, :kill)`
 - Then: `:pg.get_members("room:!abc:nebu.local")` no longer contains the dead PID (cleanup via process_flag :trap_exit or monitor)
 
-**3. get_room_state: returns members for existing room — ExUnit**
+**3. get_room_state: returns members for existing room - ExUnit**
 - Given: `Nebu.Room.Server` is started for `"!room1:nebu.local"` and `@kai:nebu.local` has joined
 - When: `Server.get_room_state(%Core.GetRoomStateRequest{room_id: "!room1:nebu.local"}, stream)` is called
 - Then: returns `%Core.GetRoomStateResponse{members: ["@kai:nebu.local"], power_levels_json: "{}", room_name: ""}`
 
-**4. get_room_state: raises NOT_FOUND for non-existent room — ExUnit**
+**4. get_room_state: raises NOT_FOUND for non-existent room - ExUnit**
 - Given: no Room GenServer is running for `"!ghost:nebu.local"`
 - When: `Server.get_room_state(%Core.GetRoomStateRequest{room_id: "!ghost:nebu.local"}, stream)` is called
 - Then: raises `GRPC.RPCError` with `status: GRPC.Status.not_found()`
 
-**5. Go EventBusStream: reconnects after stream error — Go unit test (httptest + mock)**
+**5. Go EventBusStream: reconnects after stream error - Go unit test (httptest + mock)**
 - Given: a mock `CoreServiceClient` that returns an error on first `EventBus` call, then succeeds on second
 - When: `EventBusStream.Start(ctx)` is called
 - Then: after the backoff interval, a second `EventBus` call is made (reconnect attempt)
 
-**6. Go EventBusStream: forwards received event to output channel — Go unit test**
+**6. Go EventBusStream: forwards received event to output channel - Go unit test**
 - Given: a mock stream that returns one `*pb.Event` then EOF
 - When: `EventBusStream.Start(ctx)` is running
 - Then: the event appears on the `Events()` channel within 1 second
@@ -95,11 +95,11 @@ so that the gateway can receive real-time room events and query current room sta
 - [x] Write failing tests FIRST (ATDD gate):
   - [x] Create `core/apps/event_dispatcher/test/nebu/event_dispatcher/event_bus_test.exs` with tests 1–4
   - [x] Create `gateway/internal/grpc/stream_test.go` with tests 5–6
-  - [x] Run tests — verify RED (failing)
+  - [x] Run tests - verify RED (failing)
 
 - [x] Update proto (AC #1):
   - [x] Add `GetRoomState`, `GetRoomStateRequest`, `GetRoomStateResponse` to `proto/core.proto`
-  - [x] Run `make proto` — verify stubs regenerated in `gateway/internal/grpc/pb/` and `core/apps/event_dispatcher/lib/pb/`
+  - [x] Run `make proto` - verify stubs regenerated in `gateway/internal/grpc/pb/` and `core/apps/event_dispatcher/lib/pb/`
   - [x] Verify `make test-unit-go` and `make test-unit-elixir` still compile (stubs present)
 
 - [x] Implement Elixir `event_bus/2` handler (AC #2):
@@ -125,28 +125,28 @@ so that the gateway can receive real-time room events and query current room sta
   - [x] Add `GetRoomState` method calling `c.core.GetRoomState(ctx, req)`
 
 - [x] Run all tests to green (AC #6–7):
-  - [x] `make test-unit-elixir` — full umbrella 0 failures 0 warnings
-  - [x] `make test-unit-go` — all gateway tests pass
+  - [x] `make test-unit-elixir` - full umbrella 0 failures 0 warnings
+  - [x] `make test-unit-go` - all gateway tests pass
 
 ---
 
 ## Dev Notes
 
-### CRITICAL: Proto Contract Analysis — What Already Exists vs. What is Missing
+### CRITICAL: Proto Contract Analysis - What Already Exists vs. What is Missing
 
 **ALREADY in proto and generated stubs:**
-- `rpc EventBus(EventBusRequest) returns (stream Event)` — exists in `proto/core.proto`
-- `EventBusRequest { node_id, since_token }` — exists
-- `message Event { event_id, room_id, sender_id, event_type, content, origin_ts, server_ts }` — exists
+- `rpc EventBus(EventBusRequest) returns (stream Event)` - exists in `proto/core.proto`
+- `EventBusRequest { node_id, since_token }` - exists
+- `message Event { event_id, room_id, sender_id, event_type, content, origin_ts, server_ts }` - exists
 - Elixir stub: `rpc :EventBus, Core.EventBusRequest, stream(Core.Event)` in `core/apps/event_dispatcher/lib/pb/core_grpc.pb.ex`
 - Go generated client: `EventBus(ctx, *EventBusRequest) (grpc.ServerStreamingClient[Event], error)` in `core_grpc.pb.go`
 
-**MISSING — must be added:**
-- `rpc GetRoomState(GetRoomStateRequest) returns (GetRoomStateResponse)` — NOT in proto
-- `GetRoomStateRequest { string room_id = 1; }` — NOT in proto
-- `GetRoomStateResponse { repeated string members = 1; string power_levels_json = 2; string room_name = 3; }` — NOT in proto
+**MISSING - must be added:**
+- `rpc GetRoomState(GetRoomStateRequest) returns (GetRoomStateResponse)` - NOT in proto
+- `GetRoomStateRequest { string room_id = 1; }` - NOT in proto
+- `GetRoomStateResponse { repeated string members = 1; string power_levels_json = 2; string room_name = 3; }` - NOT in proto
 
-**Note on epics.md discrepancy:** epics.md lists `EventBusRequest` with `gateway_id` and `room_ids` fields and a separate `EventEnvelope` message. The actual proto uses `node_id` (not `gateway_id`) and `Event` (not `EventEnvelope`). **Use the existing proto contract** (`node_id`, `Event`). Do NOT rename or add fields to `EventBusRequest` or create `EventEnvelope`. The existing generated stubs define the contract — proto additions should only add `GetRoomState`.
+**Note on epics.md discrepancy:** epics.md lists `EventBusRequest` with `gateway_id` and `room_ids` fields and a separate `EventEnvelope` message. The actual proto uses `node_id` (not `gateway_id`) and `Event` (not `EventEnvelope`). **Use the existing proto contract** (`node_id`, `Event`). Do NOT rename or add fields to `EventBusRequest` or create `EventEnvelope`. The existing generated stubs define the contract - proto additions should only add `GetRoomState`.
 
 ### File Locations
 
@@ -173,9 +173,9 @@ proto/core.proto                          ← MODIFY (add GetRoomState RPC + mes
 ```
 
 **Do NOT create:**
-- `core/apps/event_dispatcher/lib/nebu/event/bus.ex` — the architecture mentions this but the actual work is in `server.ex` (the grpc handler). Keep bus logic inline in `server.ex` for MVP.
-- Any new Elixir application — event_dispatcher app exists and is already running.
-- Any new mix.exs dependencies — grpc `~> 0.8` and `jason ~> 1.4` are already in event_dispatcher.
+- `core/apps/event_dispatcher/lib/nebu/event/bus.ex` - the architecture mentions this but the actual work is in `server.ex` (the grpc handler). Keep bus logic inline in `server.ex` for MVP.
+- Any new Elixir application - event_dispatcher app exists and is already running.
+- Any new mix.exs dependencies - grpc `~> 0.8` and `jason ~> 1.4` are already in event_dispatcher.
 
 ### Elixir: grpc-elixir 0.11.5 API for Server-Streaming
 
@@ -208,7 +208,7 @@ defp event_bus_loop(stream) do
       event_bus_loop(stream)
 
     {:EXIT, _pid, _reason} ->
-      # Stream closed by client — clean up and exit
+      # Stream closed by client - clean up and exit
       leave_all_rooms()
       {:ok, stream}
   end
@@ -240,7 +240,7 @@ defp subscribe_to_all_rooms do
 end
 ```
 
-**Note:** `Horde.Registry.select/2` uses match specs like `:ets.select/2`. The pattern above selects all keys. Adjust if the registry stores `{room_id, pid}` tuples — check actual Horde.Registry API.
+**Note:** `Horde.Registry.select/2` uses match specs like `:ets.select/2`. The pattern above selects all keys. Adjust if the registry stores `{room_id, pid}` tuples - check actual Horde.Registry API.
 
 **Alternative (simpler for MVP):** Subscribe to rooms as they're encountered. Since `event_bus` runs for one Go instance, and rooms may be created after the stream opens, a subscription refresh on each `{:new_event, ...}` miss is also valid. However, the preferred approach is to subscribe to all current rooms at open, and also handle a `{:new_room, room_id}` message if room creation broadcasts such events. For MVP, subscribing at open only is sufficient.
 
@@ -255,7 +255,7 @@ defp leave_all_rooms do
 end
 ```
 
-`:pg` automatically cleans up dead processes — explicit `leave` is not strictly required but is good practice.
+`:pg` automatically cleans up dead processes - explicit `leave` is not strictly required but is good practice.
 
 ### Elixir: get_room_state/2 Handler
 
@@ -302,7 +302,7 @@ case Horde.Registry.lookup(Nebu.Room.Registry, room_id) do
     raise GRPC.RPCError, status: GRPC.Status.not_found(), message: "room not found: #{room_id}"
 end
 ```
-Prefer the `Horde.Registry.lookup` approach — it avoids exception-driven control flow.
+Prefer the `Horde.Registry.lookup` approach - it avoids exception-driven control flow.
 
 ### Elixir: Map event_map to %Core.Event{}
 
@@ -328,7 +328,7 @@ defp map_to_proto_event(event_map) do
     room_id:    Map.get(event_map, "room_id", ""),
     sender_id:  Map.get(event_map, "sender", ""),
     event_type: Map.get(event_map, "type", ""),
-    content:    content_json,        # Core.Event.content is bytes — Jason-encoded JSON
+    content:    content_json,        # Core.Event.content is bytes - Jason-encoded JSON
     origin_ts:  Map.get(event_map, "origin_server_ts", 0),
     server_ts:  System.system_time(:millisecond)
   }
@@ -339,7 +339,7 @@ end
 
 ### Go: EventBusStream implementation
 
-**`gateway/internal/grpc/stream.go`** — new file:
+**`gateway/internal/grpc/stream.go`** - new file:
 
 ```go
 package grpc
@@ -412,7 +412,7 @@ func (s *EventBusStream) runOnce(ctx context.Context) error {
         return err
     }
     slog.Info("EventBus stream connected", "node_id", s.nodeID)
-    // Reset backoff on successful connect — caller resets by recreating stream.
+    // Reset backoff on successful connect - caller resets by recreating stream.
     // backoff reset is handled by Start() which is called with a fresh backoff after success.
     for {
         event, err := stream.Recv()
@@ -460,7 +460,7 @@ func (c *Client) GetRoomState(ctx context.Context, req *pb.GetRoomStateRequest) 
 
 ### Go: stream_test.go mock patterns
 
-Use interface mocking for `CoreServiceClient`. The generated `CoreServiceClient` is an interface — create a test double:
+Use interface mocking for `CoreServiceClient`. The generated `CoreServiceClient` is an interface - create a test double:
 
 ```go
 type mockCoreServiceClient struct {
@@ -480,14 +480,14 @@ Use `testing.T` + channels to synchronize assertions.
 Add to the end of `proto/core.proto` (after `GetMetrics` messages):
 
 ```protobuf
-// GetRoomState — unary: Go queries current room members + metadata
+// GetRoomState - unary: Go queries current room members + metadata
 message GetRoomStateRequest {
   string room_id = 1;
 }
 message GetRoomStateResponse {
   repeated string members       = 1;
-  string          power_levels_json = 2;  // JSON string — full power levels in Story 4-13
-  string          room_name         = 3;  // empty for now — full room metadata in Story 4-9
+  string          power_levels_json = 2;  // JSON string - full power levels in Story 4-13
+  string          room_name         = 3;  // empty for now - full room metadata in Story 4-9
 }
 ```
 
@@ -504,7 +504,7 @@ The `event_bus/2` handler is a blocking receive loop. Testing it requires the ha
 
 ```elixir
 defmodule Nebu.EventDispatcher.EventBusTest do
-  use ExUnit.Case, async: false  # async: false — :pg is process-global
+  use ExUnit.Case, async: false  # async: false - :pg is process-global
 
   setup do
     # Ensure :pg scope is started
@@ -520,7 +520,7 @@ defmodule Nebu.EventDispatcher.EventBusTest do
     parent = self()
 
     # Mock stream that captures send_reply calls
-    # grpc-elixir GRPC.Server.Stream is a struct — use a simple mock
+    # grpc-elixir GRPC.Server.Stream is a struct - use a simple mock
     stream = %{__struct__: MockStream, parent: parent}
 
     # Patch GRPC.Server.send_reply to send to parent test process
@@ -564,9 +564,9 @@ end
 | Rule | Requirement |
 |---|---|
 | ADR-005 | EventBus: one server-streaming connection per Go instance, not per client |
-| ADR-002 | `:pg` Process Groups for fan-out — no Phoenix.PubSub, no Redis |
-| Rule #6 | Tagged tuples `{:ok, ...}` / `{:error, ...}` — no `raise` for business logic (only for gRPC errors) |
-| Rule #1 | Timestamps as BIGINT (milliseconds) — `origin_ts`, `server_ts` as `int64` milliseconds |
+| ADR-002 | `:pg` Process Groups for fan-out - no Phoenix.PubSub, no Redis |
+| Rule #6 | Tagged tuples `{:ok, ...}` / `{:error, ...}` - no `raise` for business logic (only for gRPC errors) |
+| Rule #1 | Timestamps as BIGINT (milliseconds) - `origin_ts`, `server_ts` as `int64` milliseconds |
 | grpc-elixir | Unary handlers return struct directly; streaming handlers call `GRPC.Server.send_reply/2`; metadata via `stream.http_request_headers` |
 | Go convention | `context.Context` as first parameter, explicit error handling, no `panic` in library code |
 | Logging | Go: `slog.Info/Warn/Error` with structured key-value pairs; Elixir: `Logger.info/warning/error` with keyword metadata |
@@ -574,9 +574,9 @@ end
 ### Stream Disconnect and GELB/ROT Status
 
 When the EventBus Go stream is lost:
-- Go logs `slog.Warn("EventBus stream lost, switching to polling")` — this is the GELB status trigger
+- Go logs `slog.Warn("EventBus stream lost, switching to polling")` - this is the GELB status trigger
 - Go falls back to `GetPendingEvents` unary polling (already stubbed in `client.go`)
-- Matrix clients get empty sync responses with `retry_after_ms` — Matrix-compliant
+- Matrix clients get empty sync responses with `retry_after_ms` - Matrix-compliant
 - GELB/ROT status is derived directly from gRPC connection state, not from arbitrary thresholds (ADR-005)
 
 The `stream.go` should expose a method like `Status() string` returning `"green"` or `"yellow"` based on whether the stream is currently connected, for integration with `/ready` health endpoint.
@@ -588,29 +588,29 @@ The EventBus handler subscribes to `:pg` groups that are managed by `Nebu.Room.S
 - `core/apps/room_manager/lib/nebu/room/server.ex` line 221: `:pg.get_local_members("room:#{room_id}")`
 
 The event_dispatcher app must depend on room_manager app to call `Nebu.Room.Server.get_state/1` and `Horde.Registry` lookup. Check `core/apps/event_dispatcher/mix.exs`:
-- Currently has `{:session_manager, in_umbrella: true}` — room_manager is NOT listed
+- Currently has `{:session_manager, in_umbrella: true}` - room_manager is NOT listed
 - **Must add `{:room_manager, in_umbrella: true}`** to `event_dispatcher/mix.exs` deps for `get_room_state/2` and `Horde.Registry` access
 - Also add `{:presence, in_umbrella: true}` only if `SetPresence` handler calls Presence API (not needed in this story)
 
-### Existing Tests — Must NOT Break
+### Existing Tests - Must NOT Break
 
 All existing tests in event_dispatcher must keep passing:
-- `test/nebu/event_dispatcher/validate_token_test.exs` — 4 tests (validate_token handler)
-- `test/nebu/grpc/metadata_test.exs` — metadata extraction tests
-- `test/nebu/health_test.exs` — health endpoint tests
-- `test/nebu/node_registration_test.exs` — node registration tests
-- `test/nebu_event_test.exs` — placeholder test
+- `test/nebu/event_dispatcher/validate_token_test.exs` - 4 tests (validate_token handler)
+- `test/nebu/grpc/metadata_test.exs` - metadata extraction tests
+- `test/nebu/health_test.exs` - health endpoint tests
+- `test/nebu/node_registration_test.exs` - node registration tests
+- `test/nebu_event_test.exs` - placeholder test
 
 Full umbrella: currently ~122 tests (4-7 status). After 4-8 expect ~130+.
 
 ### What Story 4-8 Does NOT Implement
 
-- No Matrix API HTTP handlers (`POST /createRoom`, `/sync`, etc.) — those are Stories 4-9 through 4-18
-- No message_buffer integration — Story 4-16 connects EventBus output channel to buffer
-- No `SetPresence` gRPC handler real implementation (stub returns empty response) — that's integrated with Presence Manager in a later story
-- No `SendEvent`, `CreateRoom`, `JoinRoom` gRPC handler real implementations — those are Stories 4-9 through 4-11
-- No room subscriptions filter by `room_ids` from `EventBusRequest` — MVP: subscribe to all rooms; filtered subscription is a Phase 2 optimization
-- No `since_token` replay on reconnect — `EventBusRequest.since_token` is present but not used in MVP EventBus handler
+- No Matrix API HTTP handlers (`POST /createRoom`, `/sync`, etc.) - those are Stories 4-9 through 4-18
+- No message_buffer integration - Story 4-16 connects EventBus output channel to buffer
+- No `SetPresence` gRPC handler real implementation (stub returns empty response) - that's integrated with Presence Manager in a later story
+- No `SendEvent`, `CreateRoom`, `JoinRoom` gRPC handler real implementations - those are Stories 4-9 through 4-11
+- No room subscriptions filter by `room_ids` from `EventBusRequest` - MVP: subscribe to all rooms; filtered subscription is a Phase 2 optimization
+- No `since_token` replay on reconnect - `EventBusRequest.since_token` is present but not used in MVP EventBus handler
 
 ### Build & Test Commands
 
@@ -628,7 +628,7 @@ make test-unit-go
 make test-unit-elixir && make test-unit-go
 ```
 
-All runs inside Docker containers — no local Go or Elixir install needed.
+All runs inside Docker containers - no local Go or Elixir install needed.
 
 ---
 
@@ -636,37 +636,37 @@ All runs inside Docker containers — no local Go or Elixir install needed.
 
 Key learnings from Story 4-7 (Presence Manager) directly relevant to 4-8:
 
-1. **`:pg.start_link()` guard** — Always guard with `{:error, {:already_started, _}}` match. Already present in `Nebu.Room.Application` and `Nebu.Presence.Application`. The event_dispatcher's `Nebu.Event.Application` does NOT start `:pg` — it relies on `room_manager` starting it. Since `event_dispatcher` now depends on `room_manager`, `:pg` will be started. If standalone in test, add the same guard.
+1. **`:pg.start_link()` guard** - Always guard with `{:error, {:already_started, _}}` match. Already present in `Nebu.Room.Application` and `Nebu.Presence.Application`. The event_dispatcher's `Nebu.Event.Application` does NOT start `:pg` - it relies on `room_manager` starting it. Since `event_dispatcher` now depends on `room_manager`, `:pg` will be started. If standalone in test, add the same guard.
 
-2. **`async: false` for :pg tests** — Any test using `:pg` process groups (joining, subscribing) must use `async: false`. The EventBus tests involve `:pg` and must be `async: false`.
+2. **`async: false` for :pg tests** - Any test using `:pg` process groups (joining, subscribing) must use `async: false`. The EventBus tests involve `:pg` and must be `async: false`.
 
-3. **ETS guard pattern** — This story does NOT add ETS tables, but the guard pattern from Stories 4-4/4-5 is established: always check before creating.
+3. **ETS guard pattern** - This story does NOT add ETS tables, but the guard pattern from Stories 4-4/4-5 is established: always check before creating.
 
 4. **grpc-elixir 0.11.5 API** (from memory `feedback_grpc_elixir_api.md`):
    - Unary handlers return the response struct directly (NOT `{:ok, struct}`)
    - Metadata headers accessed via `stream.http_request_headers` (NOT `GRPC.Service.metadata/1`)
-   - These patterns are already used in `validate_token/2` — follow them exactly.
+   - These patterns are already used in `validate_token/2` - follow them exactly.
 
-5. **Module naming** — All modules use `Nebu.EventDispatcher.*` prefix. The `server.ex` already uses `defmodule Nebu.EventDispatcher.Server`. The test file should use `Nebu.EventDispatcher.EventBusTest`.
+5. **Module naming** - All modules use `Nebu.EventDispatcher.*` prefix. The `server.ex` already uses `defmodule Nebu.EventDispatcher.Server`. The test file should use `Nebu.EventDispatcher.EventBusTest`.
 
-6. **test helper_test setup** — The existing `test/test_helper.exs` already starts the app. No changes needed there.
+6. **test helper_test setup** - The existing `test/test_helper.exs` already starts the app. No changes needed there.
 
-7. **No direct DB calls in EventBus** — The event_dispatcher is purely a routing layer. It receives events from `:pg` (which Room GenServer writes to DB first) and routes to gRPC streams. No Ecto calls in this story.
+7. **No direct DB calls in EventBus** - The event_dispatcher is purely a routing layer. It receives events from `:pg` (which Room GenServer writes to DB first) and routes to gRPC streams. No Ecto calls in this story.
 
 ---
 
 ## Architecture References
 
-- `proto/core.proto` — existing EventBus and Event definitions; add GetRoomState here
-- `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` — extend this file
-- `core/apps/event_dispatcher/lib/pb/core_grpc.pb.ex` — existing gRPC service stubs (regenerated)
-- `core/apps/event_dispatcher/lib/pb/core.pb.ex` — existing proto message stubs (regenerated)
-- `core/apps/room_manager/lib/nebu/room/server.ex` — :pg group names, broadcast pattern, get_state API
-- `core/apps/room_manager/lib/nebu/room/application.ex` — :pg.start_link() guard pattern
-- `gateway/internal/grpc/client.go` — existing gRPC client stubs to extend
-- `gateway/internal/grpc/pb/core_grpc.pb.go` — generated Go client interface
-- `_bmad-output/planning-artifacts/architecture.md` — G2 (gRPC EventBus), ADR-005, GRÜN/GELB/ROT status definitions
-- `_bmad-output/planning-artifacts/epics.md` — Story 4.8 acceptance criteria (lines ~1976–2007)
+- `proto/core.proto` - existing EventBus and Event definitions; add GetRoomState here
+- `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` - extend this file
+- `core/apps/event_dispatcher/lib/pb/core_grpc.pb.ex` - existing gRPC service stubs (regenerated)
+- `core/apps/event_dispatcher/lib/pb/core.pb.ex` - existing proto message stubs (regenerated)
+- `core/apps/room_manager/lib/nebu/room/server.ex` - :pg group names, broadcast pattern, get_state API
+- `core/apps/room_manager/lib/nebu/room/application.ex` - :pg.start_link() guard pattern
+- `gateway/internal/grpc/client.go` - existing gRPC client stubs to extend
+- `gateway/internal/grpc/pb/core_grpc.pb.go` - generated Go client interface
+- `_bmad-output/planning-artifacts/architecture.md` - G2 (gRPC EventBus), ADR-005, GRÜN/GELB/ROT status definitions
+- `_bmad-output/planning-artifacts/epics.md` - Story 4.8 acceptance criteria (lines ~1976–2007)
 
 ---
 
@@ -713,4 +713,4 @@ _bmad-output/implementation-artifacts/4-8-grpc-eventbus-server-streaming-getroom
 
 ### Change Log
 
-- 2026-04-03: Story 4-8 created — gRPC EventBus Server-Streaming + GetRoomState Unary
+- 2026-04-03: Story 4-8 created - gRPC EventBus Server-Streaming + GetRoomState Unary

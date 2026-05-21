@@ -46,9 +46,9 @@ So that the site has a professional, memorable URL with valid TLS.
 - GitLab Pages custom domain: configure in GitLab project settings → Pages → Domains
 - Let's Encrypt TLS: GitLab Pages handles this automatically when domain is verified
 - DNS: domain owner must set CNAME (or A record for apex) at registrar
-- Apex domain CNAME limitation: many registrars do not support CNAME at apex (`@`) — may need A record instead
+- Apex domain CNAME limitation: many registrars do not support CNAME at apex (`@`) - may need A record instead
 - HTTP→HTTPS redirect: enabled by default in GitLab Pages when Force HTTPS is checked
-- DNS propagation: can take up to 48h — story acceptance requires propagation to complete
+- DNS propagation: can take up to 48h - story acceptance requires propagation to complete
 
 **Note:** DNS configuration (CNAME/A record) must be set by the domain owner in the nebuchat.eu registrar. Story acceptance requires DNS propagation to complete.
 
@@ -56,22 +56,22 @@ So that the site has a professional, memorable URL with valid TLS.
 
 ### Tests written FIRST (before implementation code):
 
-1. [GitLab Pages custom domain config test] — Manual GitLab UI verification
+1. [GitLab Pages custom domain config test] - Manual GitLab UI verification
    - Given: GitLab project → Pages → Domains settings
    - When: inspected
    - Then: `nebuchat.eu` is listed as verified custom domain with Let's Encrypt certificate active
 
-2. [DNS resolution test] — Manual DNS lookup
+2. [DNS resolution test] - Manual DNS lookup
    - Given: DNS propagation has completed
    - When: `dig nebuchat.eu` or `nslookup nebuchat.eu` is run
    - Then: response points to GitLab Pages endpoint
 
-3. [HTTPS reachability test] — Manual browser/curl verification
+3. [HTTPS reachability test] - Manual browser/curl verification
    - Given: DNS has propagated and GitLab Pages is deployed
    - When: `curl -I https://nebuchat.eu` is run
    - Then: HTTP 200 with valid TLS, no certificate errors
 
-4. [HTTP redirect test] — Manual curl verification
+4. [HTTP redirect test] - Manual curl verification
    - Given: site deployed with HTTPS forced
    - When: `curl -I http://nebuchat.eu` is run
    - Then: HTTP 301/302 redirect to `https://nebuchat.eu`

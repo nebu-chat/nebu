@@ -9,8 +9,8 @@
 | Stateless, horizontally-scalable gateway | Go 1.26 | Minimal memory footprint, fast startup, no GC pauses under load |
 | Stateful actor-model runtime | Elixir/OTP 1.19 (Erlang/OTP 27) | OTP Supervisor trees, Horde CRDT clustering, ETS in-memory state |
 | Reliable event log + schema authority | PostgreSQL 16 | Append-only event log, golang-migrate ownership, RLS policies |
-| No Redis | ETS (Elixir built-in) | Session state, since-token cursors — eliminates a stateful dependency |
-| No NATS/Kafka | pg Process Groups (Elixir built-in) | Pub/sub fanout — eliminates an external broker |
+| No Redis | ETS (Elixir built-in) | Session state, since-token cursors - eliminates a stateful dependency |
+| No NATS/Kafka | pg Process Groups (Elixir built-in) | Pub/sub fanout - eliminates an external broker |
 | Inter-process RPC | gRPC (protobuf) | Type-safe, streaming-capable (EventBus), well-defined contract |
 | Auth | OIDC-only (Authorization Code + PKCE) | No local accounts, no password hashing; IdP owns identity lifecycle |
 
@@ -31,7 +31,7 @@ message_buffer. On reconnect, a drain worker processes the buffer.
 
 **3. Content-Hash Event IDs (Matrix Room Version 6+)**
 
-Event IDs are computed as `$<base64url(SHA-256(canonical_json(event)))>` — tamper-evident,
+Event IDs are computed as `$<base64url(SHA-256(canonical_json(event)))>` - tamper-evident,
 federation-compatible, reproducible at recovery. No UUID generation.
 
 **4. Spec-First Admin API**

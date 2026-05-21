@@ -1,8 +1,8 @@
-# ADR-008: Node Registration — PSK via Compose Secrets (MVP) → Ephemeral mTLS (Phase 2)
+# ADR-008: Node Registration - PSK via Compose Secrets (MVP) → Ephemeral mTLS (Phase 2)
 
 ## Status
 
-Accepted — 2026-03-18
+Accepted - 2026-03-18
 
 ## Context
 
@@ -12,7 +12,7 @@ unauthorized nodes from registering.
 
 Two security models were considered:
 
-**MVP — Pre-Shared Secret (PSK):**
+**MVP - Pre-Shared Secret (PSK):**
 A random 32-byte hex secret is generated at `make setup` and mounted as a Docker Compose secret.
 Both Gateway and Core read it from the mounted file at startup. The Gateway validates
 `Authorization: Bearer <secret>` on all `/internal/*` requests.
@@ -21,7 +21,7 @@ Both Gateway and Core read it from the mounted file at startup. The Gateway vali
 - Secret must be rotated manually on `make setup` after `docker compose down`
 - Never passed as environment variable directly (no `docker inspect` leak)
 
-**Phase 2 — Ephemeral mTLS:**
+**Phase 2 - Ephemeral mTLS:**
 `generate-dev-certs.sh` (run at `make setup`) creates a short-lived CA + Gateway cert + Core
 client cert. Go Gateway validates incoming Elixir connections via mTLS. Certs are Docker secrets,
 rotated on every `make setup`.
@@ -41,7 +41,7 @@ secrets mechanism.
 mkdir -p .secrets && openssl rand -hex 32 > .secrets/internal_secret
 ```
 
-The secret is read from the file path at startup — never from the environment variable directly.
+The secret is read from the file path at startup - never from the environment variable directly.
 This prevents secret leakage via `docker inspect` or `/proc/{pid}/environ`.
 
 ## Consequences
@@ -53,7 +53,7 @@ This prevents secret leakage via `docker inspect` or `/proc/{pid}/environ`.
 - `docker compose down && up` forces `make setup` → automatic rotation
 
 **Negative:**
-- PSK is a shared secret — if it leaks, any node can register
+- PSK is a shared secret - if it leaks, any node can register
 - Manual rotation required after `make setup` (not automatic)
 - mTLS Phase 2 adds setup complexity for first-time operators
 

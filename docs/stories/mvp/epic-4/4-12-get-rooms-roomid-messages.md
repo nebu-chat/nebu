@@ -1,7 +1,7 @@
 # Story 4.12: GET /rooms/{roomId}/messages
 
 **Status:** review
-**Epic:** 4 — End-Users Can Chat in Rooms Using Any Standard Matrix Client
+**Epic:** 4 - End-Users Can Chat in Rooms Using Any Standard Matrix Client
 **Story Key:** 4-12-get-rooms-roomid-messages
 **Created:** 2026-04-03
 
@@ -17,13 +17,13 @@ so that I can read previous messages when opening a conversation.
 
 ## Acceptance Criteria
 
-1. `GET /_matrix/client/v3/rooms/{roomId}/messages` is protected by `JWTMiddleware` — unauthenticated requests return `401 M_MISSING_TOKEN`.
+1. `GET /_matrix/client/v3/rooms/{roomId}/messages` is protected by `JWTMiddleware` - unauthenticated requests return `401 M_MISSING_TOKEN`.
 2. Handler extracts `roomId` from the URL path using Go 1.22+ `r.PathValue("roomId")` and `user_id` from the JWT context (`middleware.ContextKeySub`).
 3. Query parameters:
-   - `from` (pagination token, optional — empty string if absent)
+   - `from` (pagination token, optional - empty string if absent)
    - `dir` (`"b"` backward or `"f"` forward; default `"b"` if absent or empty)
    - `limit` (integer 1–100; default `10` if absent or unparseable; clamp to range 1–100)
-   - `to` (optional end token — pass through to Core as `to_token`)
+   - `to` (optional end token - pass through to Core as `to_token`)
 4. Handler calls `gRPC CoreService.GetMessages` with `room_id`, `from_token`, `direction`, `limit`, `to_token`.
 5. Returns `200` with Matrix-standard body:
    ```json
@@ -58,7 +58,7 @@ so that I can read previous messages when opening a conversation.
 11. The Elixir `get_messages/2` handler in `Nebu.EventDispatcher.Server` replaces the current stub: queries the `events` table via a new `Nebu.Room.DB.fetch_events/4` function using keyset pagination on `(origin_server_ts, event_id)`.
 12. Membership check in the Elixir handler: user must be a member of the room; if not, return gRPC `PERMISSION_DENIED`.
 13. Room existence check in the Elixir handler: if the Room GenServer is not running, return gRPC `NOT_FOUND`.
-14. Keyset pagination token format: `v1_<base64url(origin_server_ts:event_id)>` — opaque to the client. When `from_token` is empty, fetch the most recent `limit` events (direction `"b"`) or the oldest `limit` events (direction `"f"`).
+14. Keyset pagination token format: `v1_<base64url(origin_server_ts:event_id)>` - opaque to the client. When `from_token` is empty, fetch the most recent `limit` events (direction `"b"`) or the oldest `limit` events (direction `"f"`).
 15. Unit tests (Go `httptest`): happy path → 200 with `chunk`, `start`, `end`, `state`; unauthenticated → 401; non-member → 403; room not found → 404; invalid limit → 400; empty room returns `chunk: []` and empty `end`.
 16. Unit tests (Elixir ExUnit): `get_messages/2` happy path → events returned in correct order; non-member → `GRPC.RPCError PERMISSION_DENIED`; room not found → `GRPC.RPCError NOT_FOUND`; pagination: second page with `from_token` returns next batch.
 17. `make test-unit-go` and `make test-unit-elixir` pass with zero new test failures.
@@ -69,57 +69,57 @@ so that I can read previous messages when opening a conversation.
 
 ### Tests written FIRST (before implementation code):
 
-**1. Happy path: fetch messages — Go unit test (httptest)**
+**1. Happy path: fetch messages - Go unit test (httptest)**
 - Given: valid JWT + mock core client returns `GetMessagesResponse` with 2 events, `next_batch="v1_abc"`, `prev_batch="v1_xyz"`
 - When: `GET /_matrix/client/v3/rooms/!room1:test.local/messages?dir=b&limit=10`
 - Then: `200` with body `{"chunk": [<2 events>], "start": "v1_xyz", "end": "v1_abc", "state": []}`
 
-**2. Unauthenticated request — Go unit test (httptest)**
+**2. Unauthenticated request - Go unit test (httptest)**
 - Given: no `Authorization` header
 - When: `GET /_matrix/client/v3/rooms/!room1:test.local/messages`
 - Then: `401` with `{"errcode": "M_MISSING_TOKEN"}`
 
-**3. Non-member (forbidden) — Go unit test (httptest)**
+**3. Non-member (forbidden) - Go unit test (httptest)**
 - Given: valid JWT + mock core client returns gRPC `PERMISSION_DENIED` error
 - When: `GET /_matrix/client/v3/rooms/!private:test.local/messages`
 - Then: `403` with `{"errcode": "M_FORBIDDEN"}`
 
-**4. Room not found — Go unit test (httptest)**
+**4. Room not found - Go unit test (httptest)**
 - Given: valid JWT + mock core client returns gRPC `NOT_FOUND` error
 - When: `GET /_matrix/client/v3/rooms/!nonexistent:test.local/messages`
 - Then: `404` with `{"errcode": "M_NOT_FOUND"}`
 
-**5. Invalid limit parameter — Go unit test (httptest)**
+**5. Invalid limit parameter - Go unit test (httptest)**
 - Given: valid JWT
 - When: `GET /_matrix/client/v3/rooms/!room1:test.local/messages?limit=abc`
 - Then: `400` with `{"errcode": "M_INVALID_PARAM"}`
 
-**6. Empty room — Go unit test (httptest)**
+**6. Empty room - Go unit test (httptest)**
 - Given: valid JWT + mock core client returns `GetMessagesResponse` with 0 events, `next_batch=""`, `prev_batch=""`
 - When: `GET /_matrix/client/v3/rooms/!empty:test.local/messages`
 - Then: `200` with `{"chunk": [], "start": "", "end": "", "state": []}`
 
-**7. Default direction and limit — Go unit test (httptest)**
+**7. Default direction and limit - Go unit test (httptest)**
 - Given: valid JWT + mock core client captures `GetMessagesRequest`
 - When: `GET /_matrix/client/v3/rooms/!room1:test.local/messages` (no params)
 - Then: captured request has `direction="b"` and `limit=10`
 
-**8. Elixir: get_messages happy path → events in backward order — ExUnit**
+**8. Elixir: get_messages happy path → events in backward order - ExUnit**
 - Given: Room GenServer running for `"!msgtest:test.local"`; `@alice:test.local` is a member; 3 events were sent previously and persisted to FakeDB
 - When: `Nebu.EventDispatcher.Server.get_messages(%Core.GetMessagesRequest{room_id: "!msgtest:test.local", direction: "b", limit: 10, from_token: "", to_token: ""}, stream)` is called
 - Then: returns `%Core.GetMessagesResponse{events: [<3 events in reverse ts order>], next_batch: token, prev_batch: ""}`
 
-**9. Elixir: non-member → GRPC.RPCError PERMISSION_DENIED — ExUnit**
+**9. Elixir: non-member → GRPC.RPCError PERMISSION_DENIED - ExUnit**
 - Given: Room GenServer running; `@bob:test.local` is NOT a member
 - When: `get_messages/2` is called with `sender_id: "@bob:test.local"` (via gRPC metadata)
 - Then: raises `GRPC.RPCError` with `status: GRPC.Status.permission_denied()`
 
-**10. Elixir: room not found → GRPC.RPCError NOT_FOUND — ExUnit**
+**10. Elixir: room not found → GRPC.RPCError NOT_FOUND - ExUnit**
 - Given: no Room GenServer running for `"!ghost:test.local"`
 - When: `get_messages/2` is called for that room
 - Then: raises `GRPC.RPCError` with `status: GRPC.Status.not_found()`
 
-**11. Elixir: pagination — second page with from_token returns next batch — ExUnit**
+**11. Elixir: pagination - second page with from_token returns next batch - ExUnit**
 - Given: Room GenServer running; 5 events in FakeDB; first call returned `next_batch="v1_abc"`
 - When: `get_messages/2` is called with `from_token: "v1_abc"`, `limit: 3`
 - Then: returns events not in the first batch, `prev_batch` is non-empty
@@ -128,7 +128,7 @@ so that I can read previous messages when opening a conversation.
 
 ## Technical Requirements
 
-### CRITICAL: File Location — NEW FILE `gateway/internal/matrix/messages.go`
+### CRITICAL: File Location - NEW FILE `gateway/internal/matrix/messages.go`
 
 **The architecture explicitly assigns `messages.go` as the file for this handler** (see architecture.md, directory tree section):
 
@@ -140,7 +140,7 @@ gateway/internal/matrix/
 
 Do NOT add `GetMessagesHandler` to `rooms.go`. Create `messages.go` as a NEW file in the same `matrix` package. This follows the one-handler-per-logical-resource pattern established by `login.go`, `logout.go`.
 
-### Go Handler — `gateway/internal/matrix/messages.go` (NEW FILE)
+### Go Handler - `gateway/internal/matrix/messages.go` (NEW FILE)
 
 **Handler struct and types:**
 
@@ -161,7 +161,7 @@ import (
 )
 
 // GetMessagesCoreClient is the consumer-defined interface for the GetMessages gRPC call.
-// Keep minimal — only what this handler needs (Go interface convention, ADR-009).
+// Keep minimal - only what this handler needs (Go interface convention, ADR-009).
 type GetMessagesCoreClient interface {
     GetMessages(ctx context.Context, req *pb.GetMessagesRequest) (*pb.GetMessagesResponse, error)
 }
@@ -215,20 +215,20 @@ func NewGetMessagesHandler(cfg GetMessagesConfig) *GetMessagesHandler {
 //  2. Parse query params: from, dir (default "b"), limit (default 10, clamp 1-100), to.
 //  3. Return 400 M_INVALID_PARAM if limit is provided but non-numeric.
 //  4. Extract sub + systemRole from JWT context (set by JWTMiddleware).
-//  5. Call Core.GetMessages — map gRPC errors to Matrix error codes.
+//  5. Call Core.GetMessages - map gRPC errors to Matrix error codes.
 //  6. Map response events to Matrix format; return 200.
 func (h *GetMessagesHandler) GetRoomMessages(w http.ResponseWriter, r *http.Request) {
     roomID := r.PathValue("roomId")
 
     q := r.URL.Query()
 
-    // Parse direction — default "b"
+    // Parse direction - default "b"
     dir := q.Get("dir")
     if dir == "" {
         dir = "b"
     }
 
-    // Parse limit — default 10, clamp 1–100, error on non-numeric
+    // Parse limit - default 10, clamp 1–100, error on non-numeric
     limitStr := q.Get("limit")
     limit := int32(10)
     if limitStr != "" {
@@ -304,9 +304,9 @@ func (h *GetMessagesHandler) GetRoomMessages(w http.ResponseWriter, r *http.Requ
 }
 ```
 
-**Note:** `writeMatrixError` is defined in `login.go` in the same `matrix` package — already accessible without additional import.
+**Note:** `writeMatrixError` is defined in `login.go` in the same `matrix` package - already accessible without additional import.
 
-### Go gRPC Client — `gateway/internal/grpc/client.go` (MODIFY)
+### Go gRPC Client - `gateway/internal/grpc/client.go` (MODIFY)
 
 Wire the `GetMessages` stub (currently returns `nil, nil`) to the real gRPC call:
 
@@ -334,7 +334,7 @@ func (c *Client) GetMessages(ctx context.Context, req *pb.GetMessagesRequest) (*
 },
 ```
 
-### Go Router — `gateway/cmd/gateway/main.go` (MODIFY)
+### Go Router - `gateway/cmd/gateway/main.go` (MODIFY)
 
 Register the new handler behind `jwtMiddleware`. Add after the `sendEventHandler` block:
 
@@ -347,9 +347,9 @@ mux.Handle("GET /_matrix/client/v3/rooms/{roomId}/messages",
     jwtMiddleware(http.HandlerFunc(messagesHandler.GetRoomMessages)))
 ```
 
-**IMPORTANT:** `coreClient`, `serverName`, and `jwtMiddleware` are already constructed — reuse, do NOT redeclare. `*coregrpc.Client` satisfies `GetMessagesCoreClient` once `GetMessages` is wired.
+**IMPORTANT:** `coreClient`, `serverName`, and `jwtMiddleware` are already constructed - reuse, do NOT redeclare. `*coregrpc.Client` satisfies `GetMessagesCoreClient` once `GetMessages` is wired.
 
-### Proto — `proto/core.proto`
+### Proto - `proto/core.proto`
 
 The `GetMessages` RPC and its messages are **ALREADY FULLY DEFINED**. Do NOT add duplicates. Existing definition (field names matter for gRPC stub calls):
 
@@ -382,7 +382,7 @@ message GetMessagesResponse {
 
 **No proto changes needed. Do NOT run `make proto`.** The generated stubs in `gateway/internal/grpc/pb/` and `core/apps/event_dispatcher/lib/pb/` already include `GetMessages`.
 
-### Elixir gRPC Handler — `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` (MODIFY)
+### Elixir gRPC Handler - `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` (MODIFY)
 
 Replace the current stub `get_messages/2`:
 
@@ -397,7 +397,7 @@ def get_messages(request, stream) do
   # Extract caller identity from gRPC metadata (set by Go JWTMiddleware).
   {user_id, _system_role} = Nebu.Grpc.Metadata.trusted_identity(stream)
 
-  # Room existence check — Room GenServer must be running.
+  # Room existence check - Room GenServer must be running.
   case Nebu.Room.RoomSupervisor.lookup_room(room_id) do
     {:error, :not_found} ->
       raise GRPC.RPCError,
@@ -405,7 +405,7 @@ def get_messages(request, stream) do
         message: "room not found: #{room_id}"
 
     {:ok, _pid} ->
-      # Membership check — caller must be a room member.
+      # Membership check - caller must be a room member.
       state = room_registry_module().get_state(room_id)
 
       unless MapSet.member?(state.members, user_id) do
@@ -457,9 +457,9 @@ defp event_map_to_proto(event) do
 end
 ```
 
-**IMPORTANT — `user_id` from metadata, NOT from request:** Unlike `send_event/2` which receives `sender_id` explicitly in the proto request, `get_messages` does NOT have a `user_id` field in `GetMessagesRequest`. Extract the caller's identity via `Nebu.Grpc.Metadata.trusted_identity(stream)` — this returns `{user_id, system_role}` from the `x-user-id` gRPC metadata header set by the Go JWTMiddleware. Pattern identical to `validate_token/2`.
+**IMPORTANT - `user_id` from metadata, NOT from request:** Unlike `send_event/2` which receives `sender_id` explicitly in the proto request, `get_messages` does NOT have a `user_id` field in `GetMessagesRequest`. Extract the caller's identity via `Nebu.Grpc.Metadata.trusted_identity(stream)` - this returns `{user_id, system_role}` from the `x-user-id` gRPC metadata header set by the Go JWTMiddleware. Pattern identical to `validate_token/2`.
 
-### Elixir DB — `core/apps/room_manager/lib/nebu/room/db.ex` (MODIFY)
+### Elixir DB - `core/apps/room_manager/lib/nebu/room/db.ex` (MODIFY)
 
 Add a new `fetch_events/4` function for keyset-paginated event retrieval:
 
@@ -467,7 +467,7 @@ Add a new `fetch_events/4` function for keyset-paginated event retrieval:
 @doc """
 Fetches paginated events from the `events` table for the given room.
 
-Pagination is keyset-based on `(origin_server_ts, event_id)` — both fields
+Pagination is keyset-based on `(origin_server_ts, event_id)` - both fields
 together provide a stable, unique cursor that avoids duplicates across pages.
 
 Token format: `"v1_" <> Base.url_encode64(ts_str <> ":" <> event_id, padding: false)`
@@ -581,24 +581,24 @@ end
 defp decode_token(_), do: :empty
 ```
 
-**IMPORTANT:** The `content` column in the `events` table is `JSONB`. Postgrex returns JSONB columns as already-decoded Elixir maps (not strings). When mapping rows to event maps, `content` will be a `%{}` map — NOT a string. Use `Jason.encode!/1` to re-serialize for the proto `content` bytes field.
+**IMPORTANT:** The `content` column in the `events` table is `JSONB`. Postgrex returns JSONB columns as already-decoded Elixir maps (not strings). When mapping rows to event maps, `content` will be a `%{}` map - NOT a string. Use `Jason.encode!/1` to re-serialize for the proto `content` bytes field.
 
 **IMPORTANT:** Do NOT add `insert_event/1`-style logic. `fetch_events/4` is read-only.
 
-### Elixir Unit Tests — `core/apps/event_dispatcher/test/nebu/event_dispatcher/get_messages_test.exs` (NEW FILE)
+### Elixir Unit Tests - `core/apps/event_dispatcher/test/nebu/event_dispatcher/get_messages_test.exs` (NEW FILE)
 
 Create a dedicated test file for `get_messages/2`. Follow the exact same `FakeDB` + `setup` pattern as `send_event_test.exs`.
 
 **FakeDB must implement `fetch_events/4`** in addition to the existing callbacks. The fake should store events in ETS (keyed by `{:event, room_id, origin_ts, event_id}`) and return them in the correct order based on `direction`.
 
 **Test setup requirements:**
-- `async: false` — shared Horde state
+- `async: false` - shared Horde state
 - Start Room GenServer via `Nebu.Room.RoomSupervisor.start_room/1` in setup
-- Inject `FakeDB` via `Application.put_env(:event_dispatcher, :db_module, FakeDB)` (new env key — separate from `:room_manager, :db_module`)
+- Inject `FakeDB` via `Application.put_env(:event_dispatcher, :db_module, FakeDB)` (new env key - separate from `:room_manager, :db_module`)
 - Inject `FakeRoomRegistry` via `Application.put_env(:event_dispatcher, :room_registry_module, FakeRoomRegistry)` for membership checks
 - Build a fake gRPC stream with `x-user-id` metadata so `Nebu.Grpc.Metadata.trusted_identity(stream)` returns the test user
 
-**Fake stream with metadata (critical — `get_messages/2` calls `trusted_identity/1`):**
+**Fake stream with metadata (critical - `get_messages/2` calls `trusted_identity/1`):**
 
 ```elixir
 defp build_stream(user_id) do
@@ -642,9 +642,9 @@ core/apps/room_manager/
 ```
 
 ### Do NOT create new files beyond the above:
-- No new proto files — `GetMessages` is already fully defined.
-- No new migrations — `events` table exists (`000010_events.up.sql` from Story 4-4). The index `events_room_id_ts_idx ON events (room_id, origin_server_ts)` covers the keyset query.
-- Do NOT modify any files in `core/apps/signature/` — event signing is not relevant here (read path only).
+- No new proto files - `GetMessages` is already fully defined.
+- No new migrations - `events` table exists (`000010_events.up.sql` from Story 4-4). The index `events_room_id_ts_idx ON events (room_id, origin_server_ts)` covers the keyset query.
+- Do NOT modify any files in `core/apps/signature/` - event signing is not relevant here (read path only).
 
 ---
 
@@ -652,49 +652,49 @@ core/apps/room_manager/
 
 | Rule | Requirement |
 |---|---|
-| Architecture tree | `messages.go` is the designated file for `GET /rooms/{id}/messages` — do NOT add to `rooms.go` |
-| Rule #1 | Timestamps as BIGINT — `events.origin_server_ts` is already BIGINT; cursor encodes as integer ms |
+| Architecture tree | `messages.go` is the designated file for `GET /rooms/{id}/messages` - do NOT add to `rooms.go` |
+| Rule #1 | Timestamps as BIGINT - `events.origin_server_ts` is already BIGINT; cursor encodes as integer ms |
 | Rule #3 | Matrix endpoints return Matrix format; never Admin format (`{"errcode": ...}`) |
-| ADR-002 | No Redis — keyset cursor is stateless; no session-side state needed |
+| ADR-002 | No Redis - keyset cursor is stateless; no session-side state needed |
 | ADR-003 | Event IDs are content-hash based (stored, not recomputed here) |
-| ADR-009 | Consumer-defined interface `GetMessagesCoreClient` — minimal, defined in `messages.go` |
+| ADR-009 | Consumer-defined interface `GetMessagesCoreClient` - minimal, defined in `messages.go` |
 | Go conventions | Errors explicit, context threaded, interfaces minimal (consumer-defined) |
 | Elixir conventions | Let-it-crash + Supervisor; no defensive try/rescue in happy path |
 | No panic in library code | `writeMatrixError` + return, no `panic()` anywhere |
-| Matrix API response format | `{"start": "...", "end": "...", "chunk": [...], "state": []}` — exact Matrix spec |
-| `state` field | Always `[]` (empty) — room state event population is out of scope |
+| Matrix API response format | `{"start": "...", "end": "...", "chunk": [...], "state": []}` - exact Matrix spec |
+| `state` field | Always `[]` (empty) - room state event population is out of scope |
 
 ---
 
 ## Previous Story Intelligence
 
-### From Story 4-11 (SendEvent — just completed, establishes exact patterns):
+### From Story 4-11 (SendEvent - just completed, establishes exact patterns):
 
 - **Consumer-defined interface pattern:** `SendEventCoreClient` in `rooms.go` → use same pattern for `GetMessagesCoreClient` in `messages.go`.
-- **Error mapping:** `status.FromError(err)` → `switch st.Code()` — exact same approach.
-- **`r.PathValue("roomId")`** — Go 1.22+ standard; confirmed working for room IDs with `!` and `:`.
-- **`coregrpc.FormatUserID(sub, serverName)` + `coregrpc.WithUserMetadata(...)`** — call before every gRPC call.
-- **`writeMatrixError`** is in `login.go` in the same `matrix` package — already accessible.
-- **Test pattern:** `buildAuthedHandler` with real OIDC test server + `signJWT` + `setupOIDCServer` — all in the `matrix` package's `rooms_test.go`. Use same helpers in `messages_test.go`.
+- **Error mapping:** `status.FromError(err)` → `switch st.Code()` - exact same approach.
+- **`r.PathValue("roomId")`** - Go 1.22+ standard; confirmed working for room IDs with `!` and `:`.
+- **`coregrpc.FormatUserID(sub, serverName)` + `coregrpc.WithUserMetadata(...)`** - call before every gRPC call.
+- **`writeMatrixError`** is in `login.go` in the same `matrix` package - already accessible.
+- **Test pattern:** `buildAuthedHandler` with real OIDC test server + `signJWT` + `setupOIDCServer` - all in the `matrix` package's `rooms_test.go`. Use same helpers in `messages_test.go`.
 - **mux routing in tests:** Use a real `http.NewServeMux()` to exercise `r.PathValue(...)` correctly in httptest.
 
-### From Story 4-10 (JoinRoom/InviteUser — shows Elixir `trusted_identity` pattern):
+### From Story 4-10 (JoinRoom/InviteUser - shows Elixir `trusted_identity` pattern):
 
 - `Nebu.Grpc.Metadata.trusted_identity(stream)` returns `{user_id, system_role}` from the stream's `http_request_headers`. This is how `validate_token/2` and other handlers extract the caller identity. **Use this in `get_messages/2` for the membership check** (unlike `send_event/2` which had `sender_id` in the request body).
 - In tests, simulate this by building the stream map with `%{http_request_headers: %{"x-user-id" => user_id, "x-system-role" => "user"}}`.
 
-### From Story 4-4 (Room.Server.send_event — DB patterns):
+### From Story 4-4 (Room.Server.send_event - DB patterns):
 
-- `Nebu.Room.DB` uses `Ecto.Adapters.SQL.query/3` with raw SQL — no Ecto schemas. Follow the same pattern for `fetch_events/4`.
+- `Nebu.Room.DB` uses `Ecto.Adapters.SQL.query/3` with raw SQL - no Ecto schemas. Follow the same pattern for `fetch_events/4`.
 - Postgrex returns JSONB columns as decoded Elixir maps, NOT as strings. When building the proto event, call `Jason.encode!/1` on `content` before assigning to `Core.Event.content` (which is a `bytes` field).
 - The `events` table has `event_type` as the column name (not `type`). The `sender` column holds the user_id string.
 
-### From Story 4-9 (CreateRoom — handler skeleton for new Go files):
+### From Story 4-9 (CreateRoom - handler skeleton for new Go files):
 
 - New handler file pattern: define consumer interface, response struct, handler struct, config struct, constructor, then ServeHTTP method. See `rooms.go` for the established pattern.
 - Route registration in `main.go`: place after all existing room-related handlers.
 
-### Known module naming (critical — epics.md may use wrong names):
+### Known module naming (critical - epics.md may use wrong names):
 
 | Epics.md Name | Correct Codebase Name |
 |---|---|
@@ -708,18 +708,18 @@ core/apps/room_manager/
 
 | Story | Relationship to 4-12 |
 |---|---|
-| Story 4-4 (done) | `events` table + `000010_events.up.sql` exists — no new migration; `events_room_id_ts_idx` covers the keyset query |
+| Story 4-4 (done) | `events` table + `000010_events.up.sql` exists - no new migration; `events_room_id_ts_idx` covers the keyset query |
 | Story 4-4 (done) | `Nebu.Room.DB` is the persistence layer to extend with `fetch_events/4` |
-| Story 4-9/4-10/4-11 (done) | `rooms.go` is complete — do NOT add to it; `messages.go` is the new file |
-| Story 4-11 (done) | gRPC client pattern, error mapping, JWTMiddleware wrapping — exact reuse |
-| Story 4-13 (backlog) | Power level enforcement will add more `PERMISSION_DENIED` cases from `Room.Server` — `get_messages/2` membership check handles this |
-| Story 4-14/4-15 (backlog) | `/sync` will fetch recent messages for initial/incremental sync — may reuse `fetch_events/4` |
-| Story 6-9 (backlog) | Room archival story: `GET /messages` must still return `200` after archival (read-only) — the current implementation naturally supports this |
+| Story 4-9/4-10/4-11 (done) | `rooms.go` is complete - do NOT add to it; `messages.go` is the new file |
+| Story 4-11 (done) | gRPC client pattern, error mapping, JWTMiddleware wrapping - exact reuse |
+| Story 4-13 (backlog) | Power level enforcement will add more `PERMISSION_DENIED` cases from `Room.Server` - `get_messages/2` membership check handles this |
+| Story 4-14/4-15 (backlog) | `/sync` will fetch recent messages for initial/incremental sync - may reuse `fetch_events/4` |
+| Story 6-9 (backlog) | Room archival story: `GET /messages` must still return `200` after archival (read-only) - the current implementation naturally supports this |
 | Story 4-21 (backlog) | End-to-end Gherkin test will exercise this endpoint |
 
 ---
 
-## Go Test Pattern — `messages_test.go`
+## Go Test Pattern - `messages_test.go`
 
 ```go
 package matrix
@@ -761,7 +761,7 @@ func buildGetMessagesHandler(mock *mockGetMessagesCoreClient) *GetMessagesHandle
 
 // buildAuthedGetMessagesHandler wraps the handler in JWTMiddleware and returns
 // the handler chain + a token factory. Reuses setupOIDCServer + signJWT from
-// rooms_test.go (same package — no re-import needed).
+// rooms_test.go (same package - no re-import needed).
 func buildAuthedGetMessagesHandler(t *testing.T, mock *mockGetMessagesCoreClient) (http.Handler, func() string) {
     t.Helper()
     oidcSrv, privateKey := setupOIDCServer(t)
@@ -825,9 +825,9 @@ mock := &mockGetMessagesCoreClient{
 
 ---
 
-## Elixir Test — Key Setup Differences from `send_event_test.exs`
+## Elixir Test - Key Setup Differences from `send_event_test.exs`
 
-1. **New `db_module` env key:** `Application.put_env(:event_dispatcher, :db_module, FakeDB)` — this is a NEW application env key used by `get_messages/2`. It does NOT conflict with `:room_manager, :db_module` used by Room.Server.
+1. **New `db_module` env key:** `Application.put_env(:event_dispatcher, :db_module, FakeDB)` - this is a NEW application env key used by `get_messages/2`. It does NOT conflict with `:room_manager, :db_module` used by Room.Server.
 
 2. **`FakeDB` must implement `fetch_events/4`:**
 
@@ -883,7 +883,7 @@ make test-unit-go
 make test-unit-elixir
 ```
 
-All builds and tests run inside Docker containers — no local Go or Elixir installation needed.
+All builds and tests run inside Docker containers - no local Go or Elixir installation needed.
 
 **Expected results after implementation:**
 - All existing Story 4-9/4-10/4-11 Go tests continue to pass (no regression in `rooms_test.go`).
@@ -920,11 +920,11 @@ make test-unit-elixir: 58 tests, 0 failures, 1 skipped (pre-existing skip)
 ### File List
 
 - gateway/internal/matrix/messages.go (NEW)
-- gateway/internal/matrix/messages_test.go (MODIFIED — removed duplicate interface, fixed comment)
-- gateway/internal/grpc/client.go (MODIFIED — wired GetMessages stub)
-- gateway/internal/grpc/client_test.go (MODIFIED — updated GetMessages test expectation)
-- gateway/cmd/gateway/main.go (MODIFIED — registered GET /rooms/{roomId}/messages route)
-- core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex (MODIFIED — implemented get_messages/2, added messages_db_module/0, added event_map_to_proto/1)
-- core/apps/room_manager/lib/nebu/room/db.ex (MODIFIED — added fetch_events/4, encode_token/2, decode_token/1)
-- core/apps/event_dispatcher/test/nebu/event_dispatcher/get_messages_test.exs (MODIFIED — fixed FakeDB prev_batch pagination logic)
-- _bmad-output/implementation-artifacts/sprint-status.yaml (MODIFIED — 4-12 status updated)
+- gateway/internal/matrix/messages_test.go (MODIFIED - removed duplicate interface, fixed comment)
+- gateway/internal/grpc/client.go (MODIFIED - wired GetMessages stub)
+- gateway/internal/grpc/client_test.go (MODIFIED - updated GetMessages test expectation)
+- gateway/cmd/gateway/main.go (MODIFIED - registered GET /rooms/{roomId}/messages route)
+- core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex (MODIFIED - implemented get_messages/2, added messages_db_module/0, added event_map_to_proto/1)
+- core/apps/room_manager/lib/nebu/room/db.ex (MODIFIED - added fetch_events/4, encode_token/2, decode_token/1)
+- core/apps/event_dispatcher/test/nebu/event_dispatcher/get_messages_test.exs (MODIFIED - fixed FakeDB prev_batch pagination logic)
+- _bmad-output/implementation-artifacts/sprint-status.yaml (MODIFIED - 4-12 status updated)

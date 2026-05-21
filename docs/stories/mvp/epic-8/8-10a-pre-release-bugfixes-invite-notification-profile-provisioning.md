@@ -18,16 +18,16 @@ sources:
 
 Three bugs discovered during E2E testing that block the initial public push (Story 8-10):
 
-1. **Invite long-poll timeout** — Sync long-poll sleeps 30s on new invites because
+1. **Invite long-poll timeout** - Sync long-poll sleeps 30s on new invites because
    `invite_user/2` in the Elixir EventDispatcher inserts the DB row but never sends
    a `:pg` broadcast to the invitee's waiting sync task.
 
-2. **Profile 404 for bootstrap users** — `GET /profile/{userId}` returns 404 after
+2. **Profile 404 for bootstrap users** - `GET /profile/{userId}` returns 404 after
    OIDC login because `validate_token/2` calls `TokenValidator.validate` (which writes
    to `users` + `user_keys`) but never calls `profile_db_module().upsert_profile`.
    The `profiles` table row is never created at provisioning time.
 
-3. **keys/query stub** — Already fixed in Story 5-29e (`keys_query.go` fully
+3. **keys/query stub** - Already fixed in Story 5-29e (`keys_query.go` fully
    implemented and wired in `main.go`). No action needed.
 
 ## Acceptance Criteria
@@ -56,7 +56,7 @@ Three bugs discovered during E2E testing that block the initial public push (Sto
 - Unit test: profile upsert failure does NOT block login (non-fatal)
 - Unit test: empty display_name becomes `nil` in upsert call (preserves existing row via COALESCE)
 - Note: read-back correctness ("GET /profile returns 200") is covered at E2E level by
-  `dm_create_bug_5_29e.spec.ts` AC2-a/AC2-b — no separate Elixir unit test for DB read-back
+  `dm_create_bug_5_29e.spec.ts` AC2-a/AC2-b - no separate Elixir unit test for DB read-back
 
 ## Implementation Notes
 
@@ -79,7 +79,7 @@ In `do_incremental_sync/3`, add user-level subscription:
 {:new_invite, _room_id} ->
   Process.cancel_timer(timer_ref)
   flush_long_poll_timeout()
-  []  # Return empty delta — Go gateway's buildInviteRooms queries DB for invite data
+  []  # Return empty delta - Go gateway's buildInviteRooms queries DB for invite data
 ```
 
 Cleanup: leave `"user:#{user_id}"` group before returning (in both paths).
@@ -110,22 +110,22 @@ After fixing the invite notification:
 
 ### Tests written FIRST (before implementation code):
 
-1. **[ExUnit: invite_user broadcasts to user pg group]** — ExUnit
+1. **[ExUnit: invite_user broadcasts to user pg group]** - ExUnit
    - Given: FakeInviteDB accepts the insert
    - When: invite_user request for room_id + invitee
    - Then: `:pg.get_local_members("user:#{invitee}")` receives `{:new_invite, room_id}`
 
-2. **[ExUnit: validate_token calls profile upsert]** — ExUnit
+2. **[ExUnit: validate_token calls profile upsert]** - ExUnit
    - Given: FakeProfileDB spy records calls
    - When: validate_token for a newly provisioned user with display_name "alex"
    - Then: `upsert_profile(user_id, "alex", nil)` is called exactly once
 
-3. **[E2E: invite delivered in sync within 10 s]** — Playwright (invites.spec.ts)
+3. **[E2E: invite delivered in sync within 10 s]** - Playwright (invites.spec.ts)
    - Given: alex is long-polling sync (30 s timeout)
    - When: marie sends invite to alex
    - Then: alex's sync returns `rooms.invite[roomId]` within 10 s
 
-4. **[E2E: GET /profile returns 200 after login]** — Playwright (dm_create_bug_5_29e.spec.ts)
+4. **[E2E: GET /profile returns 200 after login]** - Playwright (dm_create_bug_5_29e.spec.ts)
    - Given: alex logged in via OIDC for the first time
    - When: GET /_matrix/client/v3/profile/@alex:localhost
    - Then: 200 OK with displayname field

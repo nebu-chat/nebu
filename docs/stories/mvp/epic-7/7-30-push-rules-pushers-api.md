@@ -5,7 +5,7 @@ security_review: not-needed
 created: 2026-04-30
 ---
 
-# Story 7.30: Push Rules API — GET/PUT/DELETE /pushrules + Pushers
+# Story 7.30: Push Rules API - GET/PUT/DELETE /pushrules + Pushers
 
 Status: review
 
@@ -14,7 +14,7 @@ Status: review
 As an end-user,
 I want to manage my push notification rules via the Matrix push rules API,
 so that my Matrix client can show, enable, disable, and customise notification rules and register
-push endpoints — enabling full notification control without manual server intervention.
+push endpoints - enabling full notification control without manual server intervention.
 
 ## Context / Background
 
@@ -73,7 +73,7 @@ RLS: `nebu_app` reads/writes only rows where `user_id = current_setting('app.use
    rules for the authenticated user, grouped by kind under `{"global": {...}}`.
 
 2. Default rules are seeded lazily on the first `GET /pushrules/` for a user (subsequent calls are
-   idempotent — no duplicate rows).
+   idempotent - no duplicate rows).
 
 3. `GET /_matrix/client/v3/pushrules/{scope}/{kind}/{ruleId}` returns HTTP 200 with the single rule
    object (`rule_id`, `enabled`, `conditions`, `actions`), or 404 `M_NOT_FOUND` if absent.
@@ -102,61 +102,61 @@ RLS: `nebu_app` reads/writes only rows where `user_id = current_setting('app.use
 
 ### Tests written FIRST (before implementation code):
 
-1. [GetPushrules_ReturnsDefaultRules] — Godog
+1. [GetPushrules_ReturnsDefaultRules] - Godog
    - Given: authenticated user `@alice:server` with no prior push rule history
    - When: `GET /_matrix/client/v3/pushrules/`
    - Then: HTTP 200; response body has key `global`; `global.override` contains at least one rule
      with `rule_id = "m.rule.master"`
 
-2. [GetPushrules_LazySeeding_Idempotent] — Godog
+2. [GetPushrules_LazySeeding_Idempotent] - Godog
    - Given: same user calls `GET /pushrules/` twice
    - When: second call is made
    - Then: HTTP 200 both times; no duplicate rule rows (total default rule count unchanged)
 
-3. [PutPushrule_CreatesCustomRule] — Godog
+3. [PutPushrule_CreatesCustomRule] - Godog
    - Given: authenticated user; no custom rule `my.rule.test` exists yet
    - When: `PUT /_matrix/client/v3/pushrules/global/override/my.rule.test` with body
      `{"conditions":[],"actions":["notify"]}`
    - Then: HTTP 200; subsequent `GET /pushrules/global/override/my.rule.test` returns the rule
 
-4. [PutPushrule_DefaultRule_Rejected] — Godog
+4. [PutPushrule_DefaultRule_Rejected] - Godog
    - Given: authenticated user
    - When: `PUT /_matrix/client/v3/pushrules/global/override/m.rule.master` with any body
    - Then: HTTP 400 `{"errcode":"M_INVALID_PARAM","error":"Cannot overwrite a default rule"}`
 
-5. [DeletePushrule_CustomRule_Succeeds] — Godog
+5. [DeletePushrule_CustomRule_Succeeds] - Godog
    - Given: custom rule `my.rule.test` exists for the user
    - When: `DELETE /_matrix/client/v3/pushrules/global/override/my.rule.test`
    - Then: HTTP 200; subsequent GET returns 404 `M_NOT_FOUND`
 
-6. [DeletePushrule_DefaultRule_Rejected] — Godog
+6. [DeletePushrule_DefaultRule_Rejected] - Godog
    - Given: authenticated user
    - When: `DELETE /_matrix/client/v3/pushrules/global/override/m.rule.master`
    - Then: HTTP 400 `{"errcode":"M_INVALID_PARAM","error":"Cannot delete a default rule"}`
 
-7. [PutPushruleEnabled_ToggleDefaultRule] — Godog
+7. [PutPushruleEnabled_ToggleDefaultRule] - Godog
    - Given: authenticated user; `m.rule.master` is enabled by default
    - When: `PUT /_matrix/client/v3/pushrules/global/override/m.rule.master/enabled`
      body `{"enabled":false}`
    - Then: HTTP 200; `GET /pushrules/global/override/m.rule.master` returns `"enabled":false`
 
-8. [PutPushruleActions_UpdatesActions] — Godog
+8. [PutPushruleActions_UpdatesActions] - Godog
    - Given: authenticated user; custom rule `my.rule.test` with `actions=["notify"]`
    - When: `PUT /_matrix/client/v3/pushrules/global/override/my.rule.test/actions`
      body `{"actions":["dont_notify"]}`
    - Then: HTTP 200; subsequent GET shows `"actions":["dont_notify"]`
 
-9. [InvalidScope_Returns400] — Godog
+9. [InvalidScope_Returns400] - Godog
    - Given: authenticated user
    - When: `GET /_matrix/client/v3/pushrules/device/override/m.rule.master`
    - Then: HTTP 400 `{"errcode":"M_INVALID_PARAM","error":"scope must be 'global'"}`
 
-10. [GetPushers_EmptyList] — Godog
+10. [GetPushers_EmptyList] - Godog
     - Given: authenticated user with no pushers registered
     - When: `GET /_matrix/client/v3/pushers`
     - Then: HTTP 200 `{"pushers":[]}`
 
-11. [PostPushersSet_RegisterAndDeregister] — Godog
+11. [PostPushersSet_RegisterAndDeregister] - Godog
     - Given: authenticated user
     - When: `POST /_matrix/client/v3/pushers/set` with body
       `{"pushkey":"pk1","kind":"http","app_id":"app1","app_display_name":"Test","device_display_name":"Phone","lang":"en","data":{"url":"https://example.com/push"}}`
@@ -168,13 +168,13 @@ RLS: `nebu_app` reads/writes only rows where `user_id = current_setting('app.use
 
 **Files to create / modify:**
 
-- `gateway/migrations/000032_push_rules_pushers.up.sql` + `000032_push_rules_pushers.down.sql` —
+- `gateway/migrations/000032_push_rules_pushers.up.sql` + `000032_push_rules_pushers.down.sql` -
   tables `push_rules` and `pushers` with RLS.
-- `gateway/internal/matrix/push_rules.go` — handler structs for `PushRulesHandler` and
+- `gateway/internal/matrix/push_rules.go` - handler structs for `PushRulesHandler` and
   `PushersHandler`. The stub in `main.go` (line 474-479) must be **replaced** by the new handler.
-- `gateway/internal/matrix/push_rules_test.go` — unit tests with `httptest`.
-- `gateway/features/push_rules.feature` — Godog feature file (written first, red phase).
-- `gateway/cmd/gateway/main.go` — replace the existing pushrules stub with routes for all seven
+- `gateway/internal/matrix/push_rules_test.go` - unit tests with `httptest`.
+- `gateway/features/push_rules.feature` - Godog feature file (written first, red phase).
+- `gateway/cmd/gateway/main.go` - replace the existing pushrules stub with routes for all seven
   sub-paths plus the two pusher routes, all under `jwtMiddleware`:
   ```
   GET  /_matrix/client/v3/pushrules/
@@ -187,7 +187,7 @@ RLS: `nebu_app` reads/writes only rows where `user_id = current_setting('app.use
   POST /_matrix/client/v3/pushers/set
   ```
 
-**Default rules to seed** (from Matrix spec §11.14.1 — reference implementation):
+**Default rules to seed** (from Matrix spec §11.14.1 - reference implementation):
 `m.rule.master`, `m.rule.suppress_notices`, `m.rule.invite_for_me`, `m.rule.member_event`,
 `m.rule.is_user_mention`, `m.rule.contains_display_name`, `m.rule.is_room_mention`,
 `m.rule.tombstone`, `m.rule.roomnotif`, `m.rule.contains_user_name`, `m.rule.call`,
@@ -216,20 +216,20 @@ The gateway already holds a `db *sql.DB` connection for direct DB access (see ex
 ## Tasks/Subtasks
 
 - [x] Task 1: Create SQL migrations (000032_push_rules_pushers.up.sql + .down.sql)
-- [x] Task 2: Create gateway/internal/matrix/push_rules.go — PushRulesHandler + PushersHandler
+- [x] Task 2: Create gateway/internal/matrix/push_rules.go - PushRulesHandler + PushersHandler
   - [x] Subtask 2a: PushRulesDB and PushersDB consumer-defined interfaces
-  - [x] Subtask 2b: GetAllPushRules (AC1, AC2 — lazy seed + grouped response)
-  - [x] Subtask 2c: GetPushRule (AC3 — single rule or 404)
-  - [x] Subtask 2d: PutPushRule (AC4 — create/overwrite custom, 400 for default)
-  - [x] Subtask 2e: DeletePushRule (AC5 — delete custom, 400 for default)
-  - [x] Subtask 2f: PutPushRuleEnabled (AC6 — toggle any rule)
-  - [x] Subtask 2g: PutPushRuleActions (AC7 — replace actions on any rule)
-  - [x] Subtask 2h: Scope validation (AC8 — non-global → 400 M_INVALID_PARAM)
-  - [x] Subtask 2i: GetPushers (AC9 — empty array when none registered)
-  - [x] Subtask 2j: SetPusher (AC10 — register/deregister pusher)
-- [x] Task 3: Create gateway/internal/db/push_rules_store.go — PostgresPushRulesDB
-- [x] Task 4: Create gateway/internal/db/pushers_store.go — PostgresPushersDB
-- [x] Task 5: Update gateway/cmd/gateway/main.go — replace stub with real handler routes
+  - [x] Subtask 2b: GetAllPushRules (AC1, AC2 - lazy seed + grouped response)
+  - [x] Subtask 2c: GetPushRule (AC3 - single rule or 404)
+  - [x] Subtask 2d: PutPushRule (AC4 - create/overwrite custom, 400 for default)
+  - [x] Subtask 2e: DeletePushRule (AC5 - delete custom, 400 for default)
+  - [x] Subtask 2f: PutPushRuleEnabled (AC6 - toggle any rule)
+  - [x] Subtask 2g: PutPushRuleActions (AC7 - replace actions on any rule)
+  - [x] Subtask 2h: Scope validation (AC8 - non-global → 400 M_INVALID_PARAM)
+  - [x] Subtask 2i: GetPushers (AC9 - empty array when none registered)
+  - [x] Subtask 2j: SetPusher (AC10 - register/deregister pusher)
+- [x] Task 3: Create gateway/internal/db/push_rules_store.go - PostgresPushRulesDB
+- [x] Task 4: Create gateway/internal/db/pushers_store.go - PostgresPushersDB
+- [x] Task 5: Update gateway/cmd/gateway/main.go - replace stub with real handler routes
 - [x] Task 6: Verify all unit tests pass (make test-unit-go)
 
 ## Dev Agent Record
@@ -240,7 +240,7 @@ Followed red-green-refactor cycle. All 17 test packages passed after implementat
 
 **Architecture decisions:**
 - Consumer-defined interfaces `PushRulesDB` and `PushersDB` per Go convention (ADR-009).
-- PostgreSQL store uses `WHERE user_id=$1` directly — no GUC/RLS per story constraint.
+- PostgreSQL store uses `WHERE user_id=$1` directly - no GUC/RLS per story constraint.
 - `SeedDefaultRules` uses `ON CONFLICT DO NOTHING` per-rule (15 inserts) for idempotency.
 - Default rules: `m.rule.contains_user_name` placed in `content` kind (spec §11.14.1), not `underride`.
   All others follow the spec ordering.
@@ -264,7 +264,7 @@ New files:
 - `gateway/internal/db/pushers_store.go`
 
 Modified files:
-- `gateway/cmd/gateway/main.go` — replaced pushrules stub (lines 465-470) with 8 real routes
+- `gateway/cmd/gateway/main.go` - replaced pushrules stub (lines 465-470) with 8 real routes
 
 Pre-existing (from ATDD gate, unchanged):
 - `gateway/features/push_rules.feature`
@@ -275,4 +275,4 @@ Pre-existing (from ATDD gate, unchanged):
 
 - 2026-04-30: Story 7-30 implemented. Push Rules API (7 routes) + Pushers API (2 routes)
   backed by PostgreSQL (migration 000032). Default rules seeded lazily with ON CONFLICT DO NOTHING.
-  All 10 ACs covered by 21 unit tests — all green. Story moved to review.
+  All 10 ACs covered by 21 unit tests - all green. Story moved to review.

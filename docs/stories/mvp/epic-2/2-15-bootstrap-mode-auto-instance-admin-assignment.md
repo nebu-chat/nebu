@@ -1,4 +1,4 @@
-# Story 2.15: Bootstrap Mode — Auto Instance Admin Assignment
+# Story 2.15: Bootstrap Mode - Auto Instance Admin Assignment
 
 Status: done
 
@@ -22,7 +22,7 @@ so that a fresh deployment can be configured without a chicken-and-egg problem.
 
 3. **Given** concurrent first-login requests (race condition),
    **When** two requests arrive simultaneously,
-   **Then** exactly one user receives `instance_admin` — the other receives the role from their `nebu_role` claim (atomic check using PostgreSQL transaction)
+   **Then** exactly one user receives `instance_admin` - the other receives the role from their `nebu_role` claim (atomic check using PostgreSQL transaction)
 
 4. **Given** bootstrap mode is active and `GET /admin/bootstrap` is called,
    **When** processed,
@@ -43,7 +43,7 @@ so that a fresh deployment can be configured without a chicken-and-egg problem.
 
 - [x] Task 4: Write Elixir unit tests (AC: #1, #2, #3)
   - [x] Create `core/apps/session_manager/test/nebu/session/bootstrap_checker_test.exs`
-  - [x] Update `core/apps/session_manager/test/nebu/session/token_validator_test.exs` if needed — not needed, FakeValidator bypasses Postgres path
+  - [x] Update `core/apps/session_manager/test/nebu/session/token_validator_test.exs` if needed - not needed, FakeValidator bypasses Postgres path
   - [x] Confirm `mix test apps/session_manager --warnings-as-errors` passes (via make test-unit-elixir)
 
 - [x] Task 5: Write Go unit test (AC: #4)
@@ -60,10 +60,10 @@ This story does **three things**:
 3. Adds a `GET /admin/bootstrap` endpoint in Go gateway to check bootstrap status
 
 **NOT in this story:**
-- Permanent deactivation via `bootstrap_completed` INSERT — Story 2.16
-- `GET /admin/bootstrap` returning 404 after deactivation — Story 2.16
-- Bootstrap UI welcome page — Story 3.7 (Epic 3)
-- Any changes to `UserProvisioner` — Story 2.13 code is frozen
+- Permanent deactivation via `bootstrap_completed` INSERT - Story 2.16
+- `GET /admin/bootstrap` returning 404 after deactivation - Story 2.16
+- Bootstrap UI welcome page - Story 3.7 (Epic 3)
+- Any changes to `UserProvisioner` - Story 2.13 code is frozen
 
 ### Task 1: BootstrapChecker Behaviour + Postgres Implementation
 
@@ -138,13 +138,13 @@ ON CONFLICT (key) DO NOTHING
 ```
 
 **Transaction flow:**
-1. Acquire advisory lock `pg_advisory_xact_lock(@bootstrap_lock_id)` — serializes concurrent bootstrap checks
-2. Execute `@check_sql` — returns `true` if no `bootstrap_completed` AND no users
+1. Acquire advisory lock `pg_advisory_xact_lock(@bootstrap_lock_id)` - serializes concurrent bootstrap checks
+2. Execute `@check_sql` - returns `true` if no `bootstrap_completed` AND no users
 3. Determine `resolved_role`: `"instance_admin"` if bootstrap, else the OIDC-derived `system_role`
-4. Execute `@upsert_sql` with `resolved_role` — creates user record
-5. If bootstrap triggered: execute `@flag_sql` — records `bootstrap_active = 'true'` in `server_config`
+4. Execute `@upsert_sql` with `resolved_role` - creates user record
+5. If bootstrap triggered: execute `@flag_sql` - records `bootstrap_active = 'true'` in `server_config`
 6. Return `{:ok, {user_id, resolved_role}}`
-7. Transaction commits — advisory lock released, next request proceeds
+7. Transaction commits - advisory lock released, next request proceeds
 
 **Use `Nebu.DB.Helpers.now_ms()`** for timestamps (same as `UserStore.Postgres`).
 
@@ -154,7 +154,7 @@ ON CONFLICT (key) DO NOTHING
 
 ### Task 2: Modify TokenValidator.Postgres
 
-**Modify `core/apps/session_manager/lib/nebu/session/token_validator/postgres.ex` — change `provision_new_user/4`:**
+**Modify `core/apps/session_manager/lib/nebu/session/token_validator/postgres.ex` - change `provision_new_user/4`:**
 
 Replace the direct `UserStore.upsert_user/2` call with `BootstrapChecker.upsert_with_bootstrap/2`:
 
@@ -180,7 +180,7 @@ end
 
 **Critical change vs. old code:** The old code returned `system_role` (the OIDC claim) directly. The new code returns `resolved_role` (from the DB/bootstrap check). This is the fix noted in Story 2.14 dev notes: "Bootstrap mode will need to override system_role for the first user to instance_admin."
 
-**`UserStore.upsert_user/2` is NOT called directly anymore** for new users — `BootstrapChecker.upsert_with_bootstrap/2` subsumes that responsibility (same SQL, wrapped in bootstrap logic). `UserStore` remains unchanged and is still used by other code paths if needed.
+**`UserStore.upsert_user/2` is NOT called directly anymore** for new users - `BootstrapChecker.upsert_with_bootstrap/2` subsumes that responsibility (same SQL, wrapped in bootstrap logic). `UserStore` remains unchanged and is still used by other code paths if needed.
 
 ### Task 3: Go Gateway Bootstrap Endpoint
 
@@ -219,7 +219,7 @@ SELECT EXISTS(SELECT 1 FROM users);
 
 **Response format:** `Content-Type: application/json`, status 200 in all cases. The AC says "responds 200 OK" when active. For the not-active case, also return 200 with `bootstrap_active: false` (Story 2.16 will change this to 404).
 
-**The handler needs a `*sql.DB` parameter.** Follow the existing pattern from `serverconfig.go` — accept `dbURL string` and open a connection, OR better: accept a `*sql.DB` that's already open from the gateway's main setup. Check how `main.go` currently initializes DB and pass the same connection.
+**The handler needs a `*sql.DB` parameter.** Follow the existing pattern from `serverconfig.go` - accept `dbURL string` and open a connection, OR better: accept a `*sql.DB` that's already open from the gateway's main setup. Check how `main.go` currently initializes DB and pass the same connection.
 
 **Register in `gateway/cmd/gateway/main.go`:**
 ```go
@@ -235,12 +235,12 @@ Place it after the existing admin auth routes (line 117).
 Follow the established pattern from `token_validator_test.exs` and `user_store_test.exs`: use `FakeBootstrapChecker` with ETS for recording calls, configure via `Application.put_env`.
 
 Test cases:
-1. **Bootstrap active — first user gets instance_admin:** Call `upsert_with_bootstrap("@kai:nebu.local", "user")` when fake returns bootstrap-active → verify returns `{:ok, {"@kai:nebu.local", "instance_admin"}}`
-2. **Bootstrap not active — OIDC role preserved:** Call with `"user"` when fake returns not-bootstrap → verify returns `{:ok, {"@kai:nebu.local", "user"}}`
-3. **Bootstrap not active — admin role preserved:** Call with `"instance_admin"` when not bootstrap → verify returns `{:ok, {"@kai:nebu.local", "instance_admin"}}`
+1. **Bootstrap active - first user gets instance_admin:** Call `upsert_with_bootstrap("@kai:nebu.local", "user")` when fake returns bootstrap-active → verify returns `{:ok, {"@kai:nebu.local", "instance_admin"}}`
+2. **Bootstrap not active - OIDC role preserved:** Call with `"user"` when fake returns not-bootstrap → verify returns `{:ok, {"@kai:nebu.local", "user"}}`
+3. **Bootstrap not active - admin role preserved:** Call with `"instance_admin"` when not bootstrap → verify returns `{:ok, {"@kai:nebu.local", "instance_admin"}}`
 4. **Delegation works:** Verify `Application.get_env(:session_manager, :bootstrap_checker_module)` is respected
 
-**Note on race condition testing (AC #3):** True race condition testing requires integration tests with a real PostgreSQL instance and concurrent connections. The unit test level verifies the interface contract and delegation. The advisory lock atomicity is a PostgreSQL guarantee — no need to test PostgreSQL itself. Story 2.21 (Gherkin E2E) would be the appropriate place for an integration test of concurrent bootstrap.
+**Note on race condition testing (AC #3):** True race condition testing requires integration tests with a real PostgreSQL instance and concurrent connections. The unit test level verifies the interface contract and delegation. The advisory lock atomicity is a PostgreSQL guarantee - no need to test PostgreSQL itself. Story 2.21 (Gherkin E2E) would be the appropriate place for an integration test of concurrent bootstrap.
 
 **Update `token_validator_test.exs` if needed:** The existing tests for `TokenValidator` use a `FakeValidator` that bypasses `provision_new_user`. If there are tests that exercise the Postgres implementation path through mocks, update them to configure `bootstrap_checker_module` as well.
 
@@ -286,19 +286,19 @@ No new dependencies. No new mix.exs changes. `session_manager` already depends o
 - `UserStore.Postgres.upsert_user/2` uses `ON CONFLICT (user_id) DO UPDATE SET last_seen_at`. The bootstrap checker reuses the exact same SQL pattern.
 
 **From Story 1.5 (server_config + RLS):**
-- `server_config` has RLS with INSERT-only policy. `FORCE ROW LEVEL SECURITY` is enabled, so even the table owner cannot UPDATE/DELETE. The `ON CONFLICT (key) DO NOTHING` in `@flag_sql` is correct — it doesn't attempt an UPDATE on conflict.
+- `server_config` has RLS with INSERT-only policy. `FORCE ROW LEVEL SECURITY` is enabled, so even the table owner cannot UPDATE/DELETE. The `ON CONFLICT (key) DO NOTHING` in `@flag_sql` is correct - it doesn't attempt an UPDATE on conflict.
 
 ### References
 
-- [Source: _bmad-output/planning-artifacts/epics.md — Story 2.15 (lines 1252-1275)]
-- [Source: _bmad-output/planning-artifacts/architecture.md — server_config table + RLS (lines 302-310)]
-- [Source: _bmad-output/planning-artifacts/architecture.md — Bootstrap Mode (line 588)]
-- [Source: _bmad-output/planning-artifacts/architecture.md — File structure: gateway/internal/auth/bootstrap.go (line 914)]
-- [Source: _bmad-output/implementation-artifacts/2-14-validatetoken-grpc-handler.md — Bootstrap note (line 292)]
-- [Source: core/apps/session_manager/lib/nebu/session/token_validator/postgres.ex — provision_new_user (lines 55-69)]
-- [Source: core/apps/session_manager/lib/nebu/session/user_store/postgres.ex — upsert SQL (lines 6-11)]
-- [Source: gateway/internal/db/serverconfig.go — InitServerConfig pattern (lines 19-53)]
-- [Source: gateway/migrations/000003_server_config.up.sql — RLS policy (lines 1-26)]
+- [Source: _bmad-output/planning-artifacts/epics.md - Story 2.15 (lines 1252-1275)]
+- [Source: _bmad-output/planning-artifacts/architecture.md - server_config table + RLS (lines 302-310)]
+- [Source: _bmad-output/planning-artifacts/architecture.md - Bootstrap Mode (line 588)]
+- [Source: _bmad-output/planning-artifacts/architecture.md - File structure: gateway/internal/auth/bootstrap.go (line 914)]
+- [Source: _bmad-output/implementation-artifacts/2-14-validatetoken-grpc-handler.md - Bootstrap note (line 292)]
+- [Source: core/apps/session_manager/lib/nebu/session/token_validator/postgres.ex - provision_new_user (lines 55-69)]
+- [Source: core/apps/session_manager/lib/nebu/session/user_store/postgres.ex - upsert SQL (lines 6-11)]
+- [Source: gateway/internal/db/serverconfig.go - InitServerConfig pattern (lines 19-53)]
+- [Source: gateway/migrations/000003_server_config.up.sql - RLS policy (lines 1-26)]
 
 ## Dev Agent Record
 
@@ -319,8 +319,8 @@ Claude Opus 4.6 (1M context)
 - Task 5: 3 unit tests for Go bootstrap handler: active returns true, not active returns false, DB error returns 500. All pass via make test-unit-go.
 
 ### Change Log
-- 2026-03-30: Code review passed — fixed pin match race condition in BootstrapChecker.Postgres (^resolved_role → stored_role), moved Go test doubles from production to test file
-- 2026-03-30: Story 2-15 implemented — BootstrapChecker module, TokenValidator integration, GET /admin/bootstrap endpoint, full test coverage
+- 2026-03-30: Code review passed - fixed pin match race condition in BootstrapChecker.Postgres (^resolved_role → stored_role), moved Go test doubles from production to test file
+- 2026-03-30: Story 2-15 implemented - BootstrapChecker module, TokenValidator integration, GET /admin/bootstrap endpoint, full test coverage
 
 ### File List
 - core/apps/session_manager/lib/nebu/session/bootstrap_checker.ex (new)

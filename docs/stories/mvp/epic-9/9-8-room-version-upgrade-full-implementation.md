@@ -5,7 +5,7 @@ story: 8
 security_review: required
 ---
 
-# Story 9.8: Room Version Upgrade — Full Implementation
+# Story 9.8: Room Version Upgrade - Full Implementation
 
 Status: review
 
@@ -17,10 +17,10 @@ So that "Upgrade to recommended chat version" works correctly in Element Web.
 
 ## Acceptance Criteria
 
-1. `POST /rooms/{roomId}/upgrade` with `{"new_version": "10"}` by a room owner writes a `m.room.tombstone` state event to the old room with `body` and `replacement_room` fields per Matrix spec Section 11.35.1 — the old room is permanently closed.
-2. The new room's `m.room.create` event contains `predecessor: { "room_id": "<old_room_id>", "event_id": "<tombstone_event_id>" }` — clients can navigate the upgrade chain.
+1. `POST /rooms/{roomId}/upgrade` with `{"new_version": "10"}` by a room owner writes a `m.room.tombstone` state event to the old room with `body` and `replacement_room` fields per Matrix spec Section 11.35.1 - the old room is permanently closed.
+2. The new room's `m.room.create` event contains `predecessor: { "room_id": "<old_room_id>", "event_id": "<tombstone_event_id>" }` - clients can navigate the upgrade chain.
 3. Required state events are copied to the new room in the spec-mandated order: `m.room.create` (with predecessor), creator's `m.room.member` (join), all non-alias non-tombstone state events (name, topic, join_rules, power_levels, etc.), then `m.room.join_rules` last.
-4. All joined members of the old room (except the upgrading user who is already a member) receive an invite to the new room — server-generated, not client-triggered.
+4. All joined members of the old room (except the upgrading user who is already a member) receive an invite to the new room - server-generated, not client-triggered.
 5. A non-owner user attempting the upgrade receives `403 M_FORBIDDEN`.
 6. `GET /_matrix/client/v3/capabilities` returns `m.room_versions` containing `"10"` in `available` and `"10"` as `default`.
 
@@ -28,27 +28,27 @@ So that "Upgrade to recommended chat version" works correctly in Element Web.
 
 ### Tests written FIRST (before implementation code):
 
-1. **AC1+AC2+AC3 — PostUpgradeRoom_HappyPath_TombstoneAndNewRoom** — Go unit test (httptest)
+1. **AC1+AC2+AC3 - PostUpgradeRoom_HappyPath_TombstoneAndNewRoom** - Go unit test (httptest)
    - Given: room owner with valid JWT calls POST /rooms/!old:test.local/upgrade with `{"new_version":"10"}`
    - When: handler processes via mock `UpgradeRoomCoreClient` returning success
    - Then: response is 200 `{"replacement_room": "!new:test.local"}`, NOT 501
 
-2. **AC5 — PostUpgradeRoom_NonOwner_Returns403** — Go unit test (httptest)
+2. **AC5 - PostUpgradeRoom_NonOwner_Returns403** - Go unit test (httptest)
    - Given: regular user (non-owner) with valid JWT calls the upgrade endpoint
    - When: mock Core returns `codes.PermissionDenied`
    - Then: response is 403 `{"errcode":"M_FORBIDDEN"}`
 
-3. **AC5 — PostUpgradeRoom_RoomNotFound_Returns404** — Go unit test (httptest)
+3. **AC5 - PostUpgradeRoom_RoomNotFound_Returns404** - Go unit test (httptest)
    - Given: valid JWT, non-existent room ID
    - When: mock Core returns `codes.NotFound`
    - Then: response is 404 `{"errcode":"M_NOT_FOUND"}`
 
-4. **AC6 — GetCapabilities_IncludesVersion10** — Go unit test (httptest)
+4. **AC6 - GetCapabilities_IncludesVersion10** - Go unit test (httptest)
    - Given: GET /_matrix/client/v3/capabilities
    - When: handler returns capabilities
    - Then: response body contains `"10"` in `m.room_versions.available` and `default` is `"10"`
 
-5. **Godog E2E: room_upgrade.feature** — Godog integration test
+5. **Godog E2E: room_upgrade.feature** - Godog integration test
    - Scenario 1: room owner upgrades → 200 + `replacement_room` in response
    - Scenario 2: `GET /rooms/{newRoomId}/state` returns predecessor in m.room.create content
    - Scenario 3: non-member gets 403 on upgrade attempt
@@ -65,7 +65,7 @@ Room upgrade requires an **atomic multi-step sequence** in Core. It CANNOT be im
 **Add a new `UpgradeRoom` RPC to `proto/core.proto`.**
 
 ```protobuf
-// UpgradeRoom — Story 9.8: atomic room version upgrade
+// UpgradeRoom - Story 9.8: atomic room version upgrade
 // Creates tombstone in old room, creates new room with predecessor,
 // copies state, and invites all old members.
 rpc UpgradeRoom(UpgradeRoomRequest) returns (UpgradeRoomResponse);
@@ -86,21 +86,21 @@ message UpgradeRoomResponse {
 ### Files to Change
 
 #### NEW files:
-- `gateway/internal/matrix/rooms_upgrade_full_test.go` — unit tests AC1-AC5 (httptest); RED tests that replace the 501 stub tests with real behavior assertions
-- `gateway/features/room_upgrade.feature` — Godog scenarios AC1-AC5 (E2E)
-- `gateway/test/integration/room_upgrade_steps_test.go` — Godog step definitions
+- `gateway/internal/matrix/rooms_upgrade_full_test.go` - unit tests AC1-AC5 (httptest); RED tests that replace the 501 stub tests with real behavior assertions
+- `gateway/features/room_upgrade.feature` - Godog scenarios AC1-AC5 (E2E)
+- `gateway/test/integration/room_upgrade_steps_test.go` - Godog step definitions
 
 #### MODIFIED files:
-- `proto/core.proto` — add `UpgradeRoom` RPC + `UpgradeRoomRequest` + `UpgradeRoomResponse` messages
-- `gateway/internal/grpc/pb/core.pb.go` — regenerated (via `make proto`)
-- `gateway/internal/grpc/pb/core_grpc.pb.go` — regenerated (via `make proto`)
-- `core/apps/event_dispatcher/lib/pb/core.pb.ex` — regenerated (via `make proto`)
-- `core/apps/event_dispatcher/lib/pb/core_grpc.pb.ex` — regenerated (via `make proto`)
-- `gateway/internal/grpc/client.go` — add `UpgradeRoom` method to `Client`
-- `gateway/internal/matrix/rooms_upgrade.go` — replace 501 stub with full implementation; add `UpgradeRoomCoreClient` interface
-- `gateway/cmd/gateway/main.go` — update `NewUpgradeRoomHandler` call to pass `CoreClient`
-- `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` — add `upgrade_room/2` gRPC handler
-- `gateway/cmd/gateway/main.go` — update capabilities handler to expose version `"10"` as default
+- `proto/core.proto` - add `UpgradeRoom` RPC + `UpgradeRoomRequest` + `UpgradeRoomResponse` messages
+- `gateway/internal/grpc/pb/core.pb.go` - regenerated (via `make proto`)
+- `gateway/internal/grpc/pb/core_grpc.pb.go` - regenerated (via `make proto`)
+- `core/apps/event_dispatcher/lib/pb/core.pb.ex` - regenerated (via `make proto`)
+- `core/apps/event_dispatcher/lib/pb/core_grpc.pb.ex` - regenerated (via `make proto`)
+- `gateway/internal/grpc/client.go` - add `UpgradeRoom` method to `Client`
+- `gateway/internal/matrix/rooms_upgrade.go` - replace 501 stub with full implementation; add `UpgradeRoomCoreClient` interface
+- `gateway/cmd/gateway/main.go` - update `NewUpgradeRoomHandler` call to pass `CoreClient`
+- `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` - add `upgrade_room/2` gRPC handler
+- `gateway/cmd/gateway/main.go` - update capabilities handler to expose version `"10"` as default
 
 ### Detailed Go Gateway Changes
 
@@ -108,7 +108,7 @@ message UpgradeRoomResponse {
 
 ```go
 // UpgradeRoomCoreClient is the consumer-defined interface for the upgrade RPC.
-// Keeps dependencies minimal — only what PostUpgradeRoom needs.
+// Keeps dependencies minimal - only what PostUpgradeRoom needs.
 type UpgradeRoomCoreClient interface {
     UpgradeRoom(ctx context.Context, req *pb.UpgradeRoomRequest) (*pb.UpgradeRoomResponse, error)
 }
@@ -187,7 +187,7 @@ func (c *Client) UpgradeRoom(ctx context.Context, req *pb.UpgradeRoomRequest) (*
 }
 ```
 
-#### 5. Update `main.go` — UpgradeRoomHandler wiring
+#### 5. Update `main.go` - UpgradeRoomHandler wiring
 
 Change:
 ```go
@@ -273,7 +273,7 @@ def upgrade_room(request, stream) do
       #    c. m.room.join_rules last
       copy_state_events(old_room_id, new_room_id, requester_id, old_state)
 
-      # 6. Invite all old members (except requester — already joined).
+      # 6. Invite all old members (except requester - already joined).
       old_members = MapSet.delete(old_state.members, requester_id)
       Enum.each(old_members, fn member_id ->
         case db_module_invite().insert_invitation(new_room_id, requester_id, member_id) do
@@ -290,7 +290,7 @@ def upgrade_room(request, stream) do
 end
 ```
 
-Helper for state event emission (avoid code duplication — same signing pattern as `create_room/2`):
+Helper for state event emission (avoid code duplication - same signing pattern as `create_room/2`):
 ```elixir
 defp emit_state_event(room_id, sender_id, event_type, state_key, content) do
   event_map = %{
@@ -370,7 +370,7 @@ def get_current_state_events(room_id) do
 end
 ```
 
-**CHECK FIRST**: verify whether this function already exists in `db.ex` before adding it. Story 9-7 may have added `get_generic_state_events/1` — if so, alias or reuse it.
+**CHECK FIRST**: verify whether this function already exists in `db.ex` before adding it. Story 9-7 may have added `get_generic_state_events/1` - if so, alias or reuse it.
 
 #### 3. Register `upgrade_room/2` in Elixir gRPC server
 
@@ -380,11 +380,11 @@ Check that `server.ex` has:
 ```elixir
 use GRPC.Server, service: Core.CoreService.Service
 ```
-The `upgrade_room/2` function name must match exactly what protobuf generates. After `make proto`, the generated service module defines the function name — verify it is `upgrade_room/2`.
+The `upgrade_room/2` function name must match exactly what protobuf generates. After `make proto`, the generated service module defines the function name - verify it is `upgrade_room/2`.
 
 ### Files Must NOT Be Broken
 
-- All 5 existing unit tests in `rooms_upgrade_test.go` — they test the 501 stub, which is REPLACED by this story. The existing tests must be **updated** to test the new behavior:
+- All 5 existing unit tests in `rooms_upgrade_test.go` - they test the 501 stub, which is REPLACED by this story. The existing tests must be **updated** to test the new behavior:
   - `TestUpgradeRoom_StubReturns501_NotImplemented` → rename/replace to test 200 response
   - `TestUpgradeRoom_MissingNewVersion_Returns400` → keep as-is (still valid)
   - `TestUpgradeRoom_NoAuth_Returns401` → keep as-is
@@ -392,13 +392,13 @@ The `upgrade_room/2` function name must match exactly what protobuf generates. A
   - `TestUpgradeRoom_MalformedJSON_Returns400` → keep as-is
 
 - All existing Godog scenarios in all feature files must remain green
-- `TestPostCreateRoom_*` tests in `rooms_test.go` — no change to CreateRoom
-- `state_event_whitelist.feature` — no change
-- `set_room_state_full.feature` — no change
+- `TestPostCreateRoom_*` tests in `rooms_test.go` - no change to CreateRoom
+- `state_event_whitelist.feature` - no change
+- `set_room_state_full.feature` - no change
 
 ### Proto Field Numbers (do NOT conflict)
 
-`UpgradeRoomRequest` starts at field 1. Next available message field number across the file is not constrained — each message has its own field number space. Add new messages after the last message in `core.proto` (after `UpdateServerConfigResponse`).
+`UpgradeRoomRequest` starts at field 1. Next available message field number across the file is not constrained - each message has its own field number space. Add new messages after the last message in `core.proto` (after `UpdateServerConfigResponse`).
 
 ### Power Level Check for Upgrade
 
@@ -408,13 +408,13 @@ requester_level = get_in(old_state.power_levels, ["users", requester_id]) || 0
 if requester_level < 100 do ...
 ```
 
-Do NOT use `Nebu.Room.PowerLevels.can?/3` for this check — the existing `can?` function checks `events_default` or `change_state`, neither of which represents the "must be room creator/owner (100)" requirement. Check the `users` map directly.
+Do NOT use `Nebu.Room.PowerLevels.can?/3` for this check - the existing `can?` function checks `events_default` or `change_state`, neither of which represents the "must be room creator/owner (100)" requirement. Check the `users` map directly.
 
 ### `m.room.tombstone` is already whitelisted
 
 `gateway/internal/matrix/state_event_types.go` already has `"m.room.tombstone": true` (Story 9-6). The tombstone event sent through `send_event/6` in Core will use the `is_state_event: true` path and pass the `:change_state` power level check (requester_level >= 100 satisfies state_default = 50).
 
-### Capabilities Handler — AC6
+### Capabilities Handler - AC6
 
 The capabilities endpoint is an **inline lambda** in `main.go` (not a separate handler file). Find it at line ~474 and change the hardcoded JSON string. No separate handler struct needed.
 
@@ -434,7 +434,7 @@ The updated capabilities JSON (per Matrix spec Section 11.1):
 }
 ```
 
-### `send_event` and `m.room.tombstone` — Power Level Path
+### `send_event` and `m.room.tombstone` - Power Level Path
 
 When emitting the tombstone in the old room via `Nebu.Room.Server.send_event/6`:
 - Pass `state_key = ""` (tombstone has empty state_key)
@@ -478,16 +478,16 @@ func buildAuthedUpgradeRoomFullHandler(t *testing.T, mock *mockUpgradeRoomFullCo
 }
 ```
 
-**IMPORTANT**: The existing `mockUpgradeRoomCoreClient` in `rooms_upgrade_test.go` is an empty struct that satisfies no interface (it was written when the handler needed no gRPC). It should be left unchanged — the new mock is in the new file with the new interface. The **existing tests** in `rooms_upgrade_test.go` must be updated because `NewUpgradeRoomHandler` now requires a `CoreClient` field — the `buildAuthedUpgradeRoomHandler` helper must be updated to pass `mockUpgradeRoomCoreClient` (which needs to implement `UpgradeRoomCoreClient`). Add `UpgradeRoom` method to the existing `mockUpgradeRoomCoreClient` that returns 501-like behavior (or simply returns an error so the 501 test fails as intended).
+**IMPORTANT**: The existing `mockUpgradeRoomCoreClient` in `rooms_upgrade_test.go` is an empty struct that satisfies no interface (it was written when the handler needed no gRPC). It should be left unchanged - the new mock is in the new file with the new interface. The **existing tests** in `rooms_upgrade_test.go` must be updated because `NewUpgradeRoomHandler` now requires a `CoreClient` field - the `buildAuthedUpgradeRoomHandler` helper must be updated to pass `mockUpgradeRoomCoreClient` (which needs to implement `UpgradeRoomCoreClient`). Add `UpgradeRoom` method to the existing `mockUpgradeRoomCoreClient` that returns 501-like behavior (or simply returns an error so the 501 test fails as intended).
 
-Actually: the 501 test `TestUpgradeRoom_StubReturns501_NotImplemented` is **no longer valid** after this story — the endpoint returns 200. This test must be replaced with a 200 test. Keep the other 4 tests (400, 401, 400, 400) as they remain valid.
+Actually: the 501 test `TestUpgradeRoom_StubReturns501_NotImplemented` is **no longer valid** after this story - the endpoint returns 200. This test must be replaced with a 200 test. Keep the other 4 tests (400, 401, 400, 400) as they remain valid.
 
 ## Godog Feature File
 
 `gateway/features/room_upgrade.feature`:
 
 ```gherkin
-Feature: Room Version Upgrade — POST /rooms/{roomId}/upgrade
+Feature: Room Version Upgrade - POST /rooms/{roomId}/upgrade
   As a Matrix client user
   I want to upgrade a room to a new version
   So that Element Web's "Upgrade to recommended chat version" works correctly
@@ -519,9 +519,9 @@ Feature: Room Version Upgrade — POST /rooms/{roomId}/upgrade
 ## Integration Test Steps
 
 `gateway/test/integration/room_upgrade_steps_test.go` must define:
-- `kaiPostsUpgradeForRoomWithNewVersion(newVersion string) error` — POST to upgrade endpoint with kai's token
-- `mariePostsUpgradeForRoomWithNewVersion(newVersion string) error` — POST with marie's token
-- `kaiCallsGetRoomStateSingleEventForNewRoom(eventType string) error` — GET /state/{eventType} on new room
+- `kaiPostsUpgradeForRoomWithNewVersion(newVersion string) error` - POST to upgrade endpoint with kai's token
+- `mariePostsUpgradeForRoomWithNewVersion(newVersion string) error` - POST with marie's token
+- `kaiCallsGetRoomStateSingleEventForNewRoom(eventType string) error` - GET /state/{eventType} on new room
 - Store `newRoomID` in test scenario context after successful upgrade
 
 **Do NOT re-register steps already in:**
@@ -549,28 +549,28 @@ make test-integration   # full stack E2E (docker compose + Godog)
 ## Important Constraints
 
 ### What changes are REQUIRED:
-1. `proto/core.proto` — add `UpgradeRoom` RPC + request/response messages
-2. `make proto` — regenerates Go + Elixir stubs
-3. `gateway/internal/grpc/client.go` — add `UpgradeRoom` method on `Client`
-4. `gateway/internal/matrix/rooms_upgrade.go` — new `UpgradeRoomCoreClient` interface; update `UpgradeRoomConfig`/`UpgradeRoomHandler`; replace 501 with real implementation
-5. `gateway/cmd/gateway/main.go` — pass `CoreClient: coreClient` to `NewUpgradeRoomHandler`; update capabilities JSON to include version "10" as default
-6. `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` — add `upgrade_room/2` handler with tombstone + new room + state copy + invite logic
-7. `core/apps/room_manager/lib/nebu/room/db.ex` — add `get_current_state_events/1` (if not already present from 9-7)
-8. `gateway/internal/matrix/rooms_upgrade_test.go` — update existing mock (`mockUpgradeRoomCoreClient` must implement new interface); replace 501 test with 200 test
-9. `gateway/internal/matrix/rooms_upgrade_full_test.go` — NEW unit tests AC1-AC5
-10. `gateway/features/room_upgrade.feature` — NEW Godog feature
-11. `gateway/test/integration/room_upgrade_steps_test.go` — NEW step definitions
+1. `proto/core.proto` - add `UpgradeRoom` RPC + request/response messages
+2. `make proto` - regenerates Go + Elixir stubs
+3. `gateway/internal/grpc/client.go` - add `UpgradeRoom` method on `Client`
+4. `gateway/internal/matrix/rooms_upgrade.go` - new `UpgradeRoomCoreClient` interface; update `UpgradeRoomConfig`/`UpgradeRoomHandler`; replace 501 with real implementation
+5. `gateway/cmd/gateway/main.go` - pass `CoreClient: coreClient` to `NewUpgradeRoomHandler`; update capabilities JSON to include version "10" as default
+6. `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` - add `upgrade_room/2` handler with tombstone + new room + state copy + invite logic
+7. `core/apps/room_manager/lib/nebu/room/db.ex` - add `get_current_state_events/1` (if not already present from 9-7)
+8. `gateway/internal/matrix/rooms_upgrade_test.go` - update existing mock (`mockUpgradeRoomCoreClient` must implement new interface); replace 501 test with 200 test
+9. `gateway/internal/matrix/rooms_upgrade_full_test.go` - NEW unit tests AC1-AC5
+10. `gateway/features/room_upgrade.feature` - NEW Godog feature
+11. `gateway/test/integration/room_upgrade_steps_test.go` - NEW step definitions
 
 ### What must NOT be broken:
 - All 4 remaining valid tests in `rooms_upgrade_test.go` (400/401/400/400)
-- `TestPostCreateRoom_*` tests — no change to CreateRoom logic
-- `set_room_state_full.feature` Godog scenarios — no change
-- `state_event_whitelist.feature` — no change
-- All other existing Godog scenarios — no change
+- `TestPostCreateRoom_*` tests - no change to CreateRoom logic
+- `set_room_state_full.feature` Godog scenarios - no change
+- `state_event_whitelist.feature` - no change
+- All other existing Godog scenarios - no change
 
 ### Verify proto field numbers before commit:
-- `UpgradeRoomRequest`: fields 1, 2, 3 (new message — no conflict)
-- `UpgradeRoomResponse`: field 1 (new message — no conflict)
+- `UpgradeRoomRequest`: fields 1, 2, 3 (new message - no conflict)
+- `UpgradeRoomResponse`: field 1 (new message - no conflict)
 - Add the new `rpc` entry in the service block AFTER all existing RPCs to avoid merge conflicts
 
 ## Previous Story Context (9-7)
@@ -595,17 +595,17 @@ This story touches:
 The SEC Gate 1 mandatory review must verify:
 1. Power level check is performed BEFORE any state mutation (tombstone must not be emitted before authorization)
 2. `get_current_state_events` does NOT include events that could be used for state injection (e.g., `m.room.create` must have predecessor injected, not copied from old room)
-3. The new gRPC endpoint is covered by the Elixir auth interceptor (PSK check) — verify it appears in the interceptor's allowlist if one exists
+3. The new gRPC endpoint is covered by the Elixir auth interceptor (PSK check) - verify it appears in the interceptor's allowlist if one exists
 4. No TOCTOU on room membership between "get state" and "emit invitations"
 
 ## Dev Notes
 
 - The `db_module_invite()` function used in `invite_user/2` must also be accessible in `upgrade_room/2`. Verify it is a module-level helper or move the inline call to use the same pattern
-- After `make proto`, verify that the Elixir function name for the new RPC is `upgrade_room/2` (not `UpgradeRoom/2`) — Elixir uses snake_case function names
-- `generate_room_id/0` is already defined in `server.ex` (used by `create_room/2`) — reuse it
-- `messages_db_module()` resolves to the DB module used for event persistence — check its configuration in `server.ex` Application.get_env
+- After `make proto`, verify that the Elixir function name for the new RPC is `upgrade_room/2` (not `UpgradeRoom/2`) - Elixir uses snake_case function names
+- `generate_room_id/0` is already defined in `server.ex` (used by `create_room/2`) - reuse it
+- `messages_db_module()` resolves to the DB module used for event persistence - check its configuration in `server.ex` Application.get_env
 - If `get_current_state_events/1` was added to Story 9-7 as `get_generic_state_events/1`, use that function name instead
-- The `emit_state_event/5` helper is a **private** function — place it near `create_room/2` in `server.ex` for code locality
+- The `emit_state_event/5` helper is a **private** function - place it near `create_room/2` in `server.ex` for code locality
 - The state copy filter MUST exclude `m.room.member` events (membership is re-established via invite/join), `m.room.aliases`, and `m.room.tombstone`
 
 ## Dev Agent Record
@@ -620,14 +620,14 @@ Implemented Story 9.8 fully in a single session. All acceptance criteria are sat
 - [x] Task 2: Run `make proto` to regenerate Go (`core.pb.go`, `core_grpc.pb.go`) and Elixir (`core.pb.ex`, `core_grpc.pb.ex`) stubs
 - [x] Task 3: Add `UpgradeRoom` method to `gateway/internal/grpc/client.go`
 - [x] Task 4: Implement `UpgradeRoomCoreClient` interface and full handler in `gateway/internal/matrix/rooms_upgrade.go` (replaces 501 stub)
-- [x] Task 5: Update `gateway/cmd/gateway/main.go` — pass `CoreClient` to `NewUpgradeRoomHandler`; update capabilities JSON to version "10"
-- [x] Task 6: Update `gateway/internal/matrix/rooms_upgrade_test.go` — add `UpgradeRoom` method to `mockUpgradeRoomCoreClient`; replace 501 test with 200 test
-- [x] Task 7: Update `gateway/internal/matrix/upgrade_room_test.go` — update RED PHASE capabilities JSON to GREEN PHASE (version "10")
+- [x] Task 5: Update `gateway/cmd/gateway/main.go` - pass `CoreClient` to `NewUpgradeRoomHandler`; update capabilities JSON to version "10"
+- [x] Task 6: Update `gateway/internal/matrix/rooms_upgrade_test.go` - add `UpgradeRoom` method to `mockUpgradeRoomCoreClient`; replace 501 test with 200 test
+- [x] Task 7: Update `gateway/internal/matrix/upgrade_room_test.go` - update RED PHASE capabilities JSON to GREEN PHASE (version "10")
 - [x] Task 8: Implement `upgrade_room/2` in `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` with `emit_state_event/5` and `copy_state_events/3` helpers
 - [x] Task 9: Add `room_upgraded` to `@known_actions` in `core/apps/compliance/lib/compliance/audit_writer.ex`
 - [x] Task 10: Add `UpgradeRoom` method to `mockCoreClient` in all affected test files (stream_test.go, audit/writer_test.go, admin/auth_audit_test.go, compliance/handler_test.go)
-- [x] Task 11: Run `make test-unit-go` — all 16 packages pass
-- [x] Task 12: Run `make test-unit-elixir` — all 3 test suites pass (1, 21, 78 tests)
+- [x] Task 11: Run `make test-unit-go` - all 16 packages pass
+- [x] Task 12: Run `make test-unit-elixir` - all 3 test suites pass (1, 21, 78 tests)
 
 ### Completion Notes
 
@@ -643,24 +643,24 @@ All 10 unit tests pass (5 from `upgrade_room_test.go` AC1-AC6, 5 from `rooms_upg
 
 ### File List
 
-- `proto/core.proto` — added `UpgradeRoom` RPC + `UpgradeRoomRequest` + `UpgradeRoomResponse` messages
-- `gateway/internal/grpc/pb/core.pb.go` — regenerated by `make proto`
-- `gateway/internal/grpc/pb/core_grpc.pb.go` — regenerated by `make proto`
-- `core/apps/event_dispatcher/lib/pb/core.pb.ex` — regenerated by `make proto`
-- `core/apps/event_dispatcher/lib/pb/core_grpc.pb.ex` — regenerated by `make proto`
-- `gateway/internal/grpc/client.go` — added `UpgradeRoom` method
-- `gateway/internal/matrix/rooms_upgrade.go` — full implementation replacing 501 stub; `UpgradeRoomCoreClient` interface; `upgradeRoomResponse` type
-- `gateway/cmd/gateway/main.go` — `CoreClient` wired into `NewUpgradeRoomHandler`; capabilities JSON updated to version "10"
-- `gateway/internal/matrix/rooms_upgrade_test.go` — `mockUpgradeRoomCoreClient.UpgradeRoom` added; `buildAuthedUpgradeRoomHandler` updated; 501 test replaced with 200 test
-- `gateway/internal/matrix/upgrade_room_test.go` — capabilities handler JSON updated from RED to GREEN PHASE
-- `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` — `upgrade_room/2` gRPC handler + `emit_state_event/5` + `copy_state_events/3` helpers added
-- `core/apps/compliance/lib/compliance/audit_writer.ex` — `room_upgraded` added to `@known_actions`
-- `gateway/internal/grpc/stream_test.go` — `UpgradeRoom` stub added to `mockCoreClient`
-- `gateway/internal/audit/writer_test.go` — `UpgradeRoom` stub added to `mockCoreClient`
-- `gateway/internal/admin/auth_audit_test.go` — `UpgradeRoom` stub added to `mockCoreClient`
-- `gateway/internal/compliance/handler_test.go` — `UpgradeRoom` stub added to `mockCoreClient`
-- `_bmad-output/implementation-artifacts/sprint-status.yaml` — story status updated to "review"
+- `proto/core.proto` - added `UpgradeRoom` RPC + `UpgradeRoomRequest` + `UpgradeRoomResponse` messages
+- `gateway/internal/grpc/pb/core.pb.go` - regenerated by `make proto`
+- `gateway/internal/grpc/pb/core_grpc.pb.go` - regenerated by `make proto`
+- `core/apps/event_dispatcher/lib/pb/core.pb.ex` - regenerated by `make proto`
+- `core/apps/event_dispatcher/lib/pb/core_grpc.pb.ex` - regenerated by `make proto`
+- `gateway/internal/grpc/client.go` - added `UpgradeRoom` method
+- `gateway/internal/matrix/rooms_upgrade.go` - full implementation replacing 501 stub; `UpgradeRoomCoreClient` interface; `upgradeRoomResponse` type
+- `gateway/cmd/gateway/main.go` - `CoreClient` wired into `NewUpgradeRoomHandler`; capabilities JSON updated to version "10"
+- `gateway/internal/matrix/rooms_upgrade_test.go` - `mockUpgradeRoomCoreClient.UpgradeRoom` added; `buildAuthedUpgradeRoomHandler` updated; 501 test replaced with 200 test
+- `gateway/internal/matrix/upgrade_room_test.go` - capabilities handler JSON updated from RED to GREEN PHASE
+- `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` - `upgrade_room/2` gRPC handler + `emit_state_event/5` + `copy_state_events/3` helpers added
+- `core/apps/compliance/lib/compliance/audit_writer.ex` - `room_upgraded` added to `@known_actions`
+- `gateway/internal/grpc/stream_test.go` - `UpgradeRoom` stub added to `mockCoreClient`
+- `gateway/internal/audit/writer_test.go` - `UpgradeRoom` stub added to `mockCoreClient`
+- `gateway/internal/admin/auth_audit_test.go` - `UpgradeRoom` stub added to `mockCoreClient`
+- `gateway/internal/compliance/handler_test.go` - `UpgradeRoom` stub added to `mockCoreClient`
+- `_bmad-output/implementation-artifacts/sprint-status.yaml` - story status updated to "review"
 
 ### Change Log
 
-- 2026-05-05: Story 9.8 implemented — full room version upgrade (UpgradeRoom gRPC RPC, tombstone + new room + state copy + member invites, capabilities endpoint v10)
+- 2026-05-05: Story 9.8 implemented - full room version upgrade (UpgradeRoom gRPC RPC, tombstone + new room + state copy + member invites, capabilities endpoint v10)

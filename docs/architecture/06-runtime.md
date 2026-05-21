@@ -1,6 +1,6 @@
 # 6 Runtime View
 
-## Scenario 1: Matrix Client Message Send (Happy Path — GRÜN Status)
+## Scenario 1: Matrix Client Message Send (Happy Path - GRÜN Status)
 
 ```
 Matrix Client      Go Gateway          Elixir Core         PostgreSQL
@@ -44,9 +44,9 @@ Go Gateway Status Machine:
                                     │ Drain on reconnect
 ```
 
-**GRÜN:** EventBus stream healthy — direct gRPC streaming to Matrix clients.
-**GELB:** Stream lost, Unary polling succeeds — writes to message_buffer, polling continues.
-**ROT:** Stream AND Unary fail — all writes held in message_buffer, 200 OK returned to clients
+**GRÜN:** EventBus stream healthy - direct gRPC streaming to Matrix clients.
+**GELB:** Stream lost, Unary polling succeeds - writes to message_buffer, polling continues.
+**ROT:** Stream AND Unary fail - all writes held in message_buffer, 200 OK returned to clients
 (Matrix-conformant); Docker `restart: always` heals the Elixir core.
 
 ## Scenario 3: Matrix Client Sync (Long-Poll)
@@ -70,7 +70,7 @@ Matrix Client      Go Gateway          MessageBuffer       Elixir Core
 The Go Gateway distributes EventBus events from a single streaming connection to all waiting
 Matrix client long-poll connections via the in-memory per-user ring buffer.
 
-## Scenario 3a: Public Room Join — Sync Wakeup (GAP-JOIN-PUBLIC, Story 9-19)
+## Scenario 3a: Public Room Join - Sync Wakeup (GAP-JOIN-PUBLIC, Story 9-19)
 
 After `POST /join/{roomId}` for a **public room** (no prior invite), the sync long-poll must
 deliver `rooms.join[roomId]` within 10 s. Without a fix this hangs for 30 s: the sync Task
@@ -101,7 +101,7 @@ Matrix Client      Go Gateway    Elixir Core (gRPC join_room/2)
 **Key invariant:** The `{:new_join, room_id}` signal is only sent on the `:ok` (actual new join)
 path, not on the idempotent `{:error, :already_member}` path.
 
-## Scenario 3b: Incremental Sync — Left Rooms Filter (GAP-LEAVE-ONCE, Story 9-19)
+## Scenario 3b: Incremental Sync - Left Rooms Filter (GAP-LEAVE-ONCE, Story 9-19)
 
 After the first incremental sync delivers `rooms.leave[roomId]`, subsequent syncs with a fresh
 `since` token must NOT re-include the same left room. Without a filter, `buildLeaveRooms` queries
@@ -113,7 +113,7 @@ is read from `sync_tokens.updated_at` (the wall-clock timestamp of the previous 
 Only rooms where `left_at > sinceMs` OR `rejected_at > sinceMs` are returned.
 Initial sync passes `sinceMs = 0` to include all ever-left rooms.
 
-## Scenario 3c: POST /forget — Persistent Room Exclusion (GAP-FORGET, Story 9-19)
+## Scenario 3c: POST /forget - Persistent Room Exclusion (GAP-FORGET, Story 9-19)
 
 After `POST /rooms/{roomId}/forget`, the room must not appear in any subsequent sync response
 (`rooms.join`, `rooms.leave`, `rooms.invite`).
@@ -136,14 +136,14 @@ Matrix Client      Go Gateway                        PostgreSQL
      │◄──────────────────│                                │
 ```
 
-**DB table:** `forgotten_rooms (user_id, room_id, forgotten_at_ms BIGINT)` — migration 000040.
+**DB table:** `forgotten_rooms (user_id, room_id, forgotten_at_ms BIGINT)` - migration 000040.
 Insert is idempotent (`ON CONFLICT DO NOTHING`). Cascade delete on `users` row removal.
 
 ## Scenario 3d: Per-Device Sync Token Isolation (GAP-SINCE-IGNORED, Story 9-22)
 
 When a Matrix client opens a sync long-poll, the `device_id` (extracted from the `"did"` claim
 of the JWT) is forwarded in `GetSyncDeltaRequest`. The Elixir Core looks up and persists the
-`since` token in `sync_tokens` keyed by `(user_id, device_id)` — not just `user_id`.
+`since` token in `sync_tokens` keyed by `(user_id, device_id)` - not just `user_id`.
 
 ```
 Matrix Client A (device_id=AAAA)    Matrix Client B (device_id=BBBB)    Elixir Core
@@ -172,7 +172,7 @@ device's token and cause it to miss events.
 **Fallback:** When `device_id` is empty (legacy client or test), the Core falls back to the
 `(user_id, '')` row (legacy arity-3/1 functions) and triggers a full initial sync on mismatch.
 
-## Scenario 3e: Per-Device Logout — Sync Token Cleanup (Story 9-22)
+## Scenario 3e: Per-Device Logout - Sync Token Cleanup (Story 9-22)
 
 After `POST /logout`, the Go Gateway calls `InvalidateUserSessions` with both `user_id` and
 `device_id`. The Elixir Core deletes the `sync_tokens (user_id, device_id)` row and the
@@ -201,7 +201,7 @@ Matrix Client      Go Gateway            Elixir Core               PostgreSQL
 **Non-fatal on gRPC failure:** The JWT is already invalidated before the gRPC call. If the Core
 call fails, a warning is logged but the client still receives `200 {}` (Matrix spec conformance).
 
-## Scenario 3f: Invite Tiles — Stripped State Enrichment (GAP-INVITE-STATE, Story 9-23)
+## Scenario 3f: Invite Tiles - Stripped State Enrichment (GAP-INVITE-STATE, Story 9-23)
 
 Matrix Client-Server API spec §4.4.4 requires `invite_state` to contain stripped state events
 so clients can display room context before a user accepts an invitation. Without these events,
@@ -220,7 +220,7 @@ per pending invite room:
 
 Each query uses a JSONB double-encoding guard (`CASE WHEN jsonb_typeof(content) = 'object'`)
 to handle both direct JSONB objects and legacy double-encoded events. Missing events are silently
-omitted (spec SHOULD semantics) — no error is returned when an event type is absent for a room.
+omitted (spec SHOULD semantics) - no error is returned when an event type is absent for a room.
 
 ```
 Matrix Client      Go Gateway                                  PostgreSQL
@@ -275,9 +275,9 @@ All four sync paths now call `injectGlobalAccountData` before serialising the re
 | Sync path | Call site in `sync.go` |
 |---|---|
 | Initial sync (`GetInitialSync`) | `GetSync` handler |
-| Incremental delta sync (`GetSyncDelta`) | `handleIncrementalSync` — normal delta path |
-| Fallback-to-initial (`FallbackToInitial = true`) | `handleIncrementalSync` — fallback branch |
-| Buffer fast-path (local ring buffer drain) | `buildResponseFromBufferedEvents` — returns empty section (no DB call) |
+| Incremental delta sync (`GetSyncDelta`) | `handleIncrementalSync` - normal delta path |
+| Fallback-to-initial (`FallbackToInitial = true`) | `handleIncrementalSync` - fallback branch |
+| Buffer fast-path (local ring buffer drain) | `buildResponseFromBufferedEvents` - returns empty section (no DB call) |
 
 The buffer fast-path intentionally skips the DB query: global account data changes are rare, and
 the next non-buffered sync cycle will deliver them. This keeps the buffer hot path at zero extra
@@ -312,10 +312,10 @@ by `current_setting('app.user_id', true)`. Without this GUC the policy silently 
 
 **Empty-section guarantee:** `syncResponse.AccountData` is typed `syncAccountDataSection`
 (not a pointer) and never carries `omitempty`. Even when no global account data exists, the
-response always contains `"account_data": {"events": []}` — a JSON-null or missing key would
+response always contains `"account_data": {"events": []}` - a JSON-null or missing key would
 break `matrix-js-sdk`.
 
-## Scenario 3h: Buffer Fast-Path — Synthetic next_batch Token (GAP-BUFFER-NEXT-BATCH, Story 9-25)
+## Scenario 3h: Buffer Fast-Path - Synthetic next_batch Token (GAP-BUFFER-NEXT-BATCH, Story 9-25)
 
 When events are already present in the local ring buffer, `handleIncrementalSync` drains
 the buffer and returns immediately without a gRPC round-trip to Elixir Core. Prior to this
@@ -326,11 +326,11 @@ re-delivered the same delta, and `sync_tokens.updated_at` was never advanced.
 **Fix:** `syntheticNextBatch()` (added in Story 9-25) generates a `buf_<unix_ms>_<seq>`
 token on every buffer-path response. The token is:
 
-- **Monotonically advancing** — Unix-ms timestamp plus an `atomic.Int64` sequence counter
+- **Monotonically advancing** - Unix-ms timestamp plus an `atomic.Int64` sequence counter
   ensures uniqueness even for sub-millisecond bursts across goroutines.
-- **Opaque to the client** — the `buf_` prefix makes it clearly synthetic; it does not
+- **Opaque to the client** - the `buf_` prefix makes it clearly synthetic; it does not
   collide with Elixir's `v1_<base64url>` since-tokens.
-- **Never persisted** — `sync_tokens` is not written from the buffer path. When the client
+- **Never persisted** - `sync_tokens` is not written from the buffer path. When the client
   sends `?since=buf_<ts>_<seq>` on the next poll, Elixir's `GetSyncDelta` finds no matching
   `sync_tokens` row → `fallback_to_initial = true` → the existing `FallbackToInitial` branch
   issues a safe full re-sync with a fresh real token.
@@ -358,7 +358,7 @@ Matrix Client      Go Gateway (buffer fast-path)
 `matrix-js-sdk` always issues a fresh `since=` on the next poll. The fallback-to-initial
 safety net was already production-tested before this story.
 
-## Scenario 3i: Room Upgrade — Matrix §11.35.1 (Story 9-27)
+## Scenario 3i: Room Upgrade - Matrix §11.35.1 (Story 9-27)
 
 `POST /rooms/{oldRoomId}/upgrade` triggers `gRPC UpgradeRoom` which executes the full
 Matrix spec §11.35.1 sequence inside `upgrade_room/2` in `event_dispatcher/server.ex`.
@@ -405,7 +405,7 @@ Matrix Client      Go Gateway          Elixir Core (upgrade_room/2)         Post
 **Audit trail:** Both success and failure paths write to `audit_logs` via `audit_writer_module().log/6`
 with action `"room_upgraded"`, target `old_room_id`, and `%{"new_room_id" => ..., "error" => ...}` metadata.
 
-## Scenario 3j: Thread Relations — GetRelations + Bundled Aggregations in Sync (Story 9-28 / 9-29)
+## Scenario 3j: Thread Relations - GetRelations + Bundled Aggregations in Sync (Story 9-28 / 9-29)
 
 Stories 9-28 and 9-29 together add two complementary mechanisms for Matrix threaded messages.
 
@@ -414,9 +414,9 @@ Stories 9-28 and 9-29 together add two complementary mechanisms for Matrix threa
 Story 9-29 extended the single `/{relType}` route to three variants, all handled by the same
 `GetRelationsHandler.GetRelations` method:
 
-- `GET /_matrix/client/v1/rooms/{roomId}/relations/{eventId}` — base route (Story 9-29)
-- `GET /_matrix/client/v1/rooms/{roomId}/relations/{eventId}/{relType}` — (Story 9-28)
-- `GET /_matrix/client/v1/rooms/{roomId}/relations/{eventId}/{relType}/{eventType}` — (Story 9-29)
+- `GET /_matrix/client/v1/rooms/{roomId}/relations/{eventId}` - base route (Story 9-29)
+- `GET /_matrix/client/v1/rooms/{roomId}/relations/{eventId}/{relType}` - (Story 9-28)
+- `GET /_matrix/client/v1/rooms/{roomId}/relations/{eventId}/{relType}/{eventType}` - (Story 9-29)
 
 Query params added in Story 9-29: `dir` (`f`/`b`, default `b`), `recurse` (bool, accepted without
 error), `from` (pagination token). `limit` existed from Story 9-28.
@@ -499,7 +499,7 @@ JSON field. Element Web reads this to show reply count badges on parent messages
 The Go gateway sets `MRelations` only when `len(te.GetUnsignedRelations()) > 0`, so `m.relations` is
 entirely omitted from the `unsigned` JSON object for non-thread events (`omitempty` on the struct field).
 
-## Scenario 3k: Single Event Fetch — GET /rooms/{roomId}/event/{eventId} (Story 11-8)
+## Scenario 3k: Single Event Fetch - GET /rooms/{roomId}/event/{eventId} (Story 11-8)
 
 `GET /_matrix/client/v3/rooms/{roomId}/event/{eventId}` was previously unregistered. Element Web's
 `thread.ts` calls `fetchRootEvent()` on this endpoint to load the parent event of a thread before
@@ -562,7 +562,7 @@ Matrix Client      Go Gateway (event.go)        Elixir Core                  Pos
 `GetRelationsResponse`. Both stubs were added manually (protoc-gen-elixir does not auto-update the
 service module when `.proto` changes).
 
-## Scenario 3l: Matrix Login — Configurable OIDC Claim Mapping (Story 11-10)
+## Scenario 3l: Matrix Login - Configurable OIDC Claim Mapping (Story 11-10)
 
 When a user authenticates via `POST /_matrix/client/v3/login`, the Matrix user ID is now derived
 from the claim configured in `server_config.oidc_user_id_claim` (loaded with a 60-second TTL cache
@@ -591,7 +591,7 @@ Matrix Client      Go Gateway (login.go + middleware/auth.go)        PostgreSQL 
 
 **Fallback chain:**
 1. `claimLoader` returns the value of `oidc_user_id_claim` from `server_config` (cached 60s).
-2. If the DB key is absent or the loader returns `""`, the gateway falls back to `"name"` — identical
+2. If the DB key is absent or the loader returns `""`, the gateway falls back to `"name"` - identical
    to pre-11-10 behavior (AC7 backward compatibility guarantee).
 3. `NEBU_OIDC_USER_ID_CLAIM` env var overrides the DB value as a last-resort escape hatch.
 4. Inside `FormatUserIDFromClaims`: if `claims[claimName]` is empty or fails `sanitiseLocalpart`,
@@ -606,7 +606,7 @@ activates the backward-compat `"name"` claim path.
 same OIDC principals, breaking all room memberships. The Admin UI settings page and the Bootstrap
 Wizard Step 3 both display a prominent stability warning.
 
-## Scenario 3m: Bootstrap Wizard — Step 3 Claim Mapping (Story 11-10)
+## Scenario 3m: Bootstrap Wizard - Step 3 Claim Mapping (Story 11-10)
 
 The Bootstrap Wizard now has four steps. Step 3 (Claim Mapping) is inserted between the OIDC
 credentials step and the OIDC redirect:
@@ -655,13 +655,13 @@ Admin Browser      Go Gateway (bootstrap.go + auth.go)         PostgreSQL
 
 **Atomicity guarantee:** All five `server_config` keys (including the three claim mapping keys) are
 written in a single `runInTx` call. If any write fails, the entire bootstrap transaction is rolled
-back — no partial bootstrap state is persisted.
+back - no partial bootstrap state is persisted.
 
 **Defaults:** Step 3 is pre-filled with `sub` / `name` / `email`. Admins may accept the defaults
 without modification. For the `oidc_user_id_claim` field a `<datalist>` provides suggestions
 (`sub`, `preferred_username`, `email`).
 
-## Scenario 3n: Read Receipt — Start on Demand After Stack Restart (Story 11-11)
+## Scenario 3n: Read Receipt - Start on Demand After Stack Restart (Story 11-11)
 
 `POST /_matrix/client/v3/rooms/{roomId}/receipt/{receiptType}/{eventId}` returned `404 M_NOT_FOUND`
 after any stack restart because `send_receipt/2` previously called `lookup_room/1`, which returns
@@ -785,9 +785,9 @@ Matrix Client      Go Gateway (sso.go)        Dex OIDC              PostgreSQL (
 
 | Path | Root Cause | Fix |
 |---|---|---|
-| Path A — cached id_token | Dex reuses a 24h-cached JWT (nonce not required) | Nonce generated per request in GetSSORedirect; nonce claim verified in GetSSOCallback — stale JWTs rejected before loginToken is issued |
-| Path B — Safari cached 302 | Safari replays cached redirect with a consumed state | `Cache-Control: no-store` on the SSO 302 response prevents the redirect from being cached |
-| Path C — direct POST /login with invalidated JWT | PostLogin did not consult the denylist | `h.store.IsInvalidated(rawJWT)` called in PostLogin before issuing access_token; returns `403 M_FORBIDDEN` (not 401, as this is an auth *attempt*) |
+| Path A - cached id_token | Dex reuses a 24h-cached JWT (nonce not required) | Nonce generated per request in GetSSORedirect; nonce claim verified in GetSSOCallback - stale JWTs rejected before loginToken is issued |
+| Path B - Safari cached 302 | Safari replays cached redirect with a consumed state | `Cache-Control: no-store` on the SSO 302 response prevents the redirect from being cached |
+| Path C - direct POST /login with invalidated JWT | PostLogin did not consult the denylist | `h.store.IsInvalidated(rawJWT)` called in PostLogin before issuing access_token; returns `403 M_FORBIDDEN` (not 401, as this is an auth *attempt*) |
 
 **State store capacity cap:** `globalSSOState.save` rejects any entry when the store already
 holds ≥ 10,000 non-expired entries. `GetSSORedirect` returns `429 M_LIMIT_EXCEEDED`.
@@ -797,4 +797,4 @@ This prevents unbounded memory growth from unauthenticated flood attacks.
 a denylist, test setups), the denylist check in PostLogin is skipped. This preserves
 backwards compatibility.
 
-_Source: `_bmad-output/planning-artifacts/architecture.md`, §Implementation Patterns, §API & Kommunikation, §Resilienz & Selbst-Heilung; Story 9-19 (GAP-JOIN-PUBLIC, GAP-LEAVE-ONCE, GAP-FORGET); Story 9-22 (GAP-SINCE-IGNORED — per-device sync tokens, per-device logout cleanup); Story 9-23 (GAP-INVITE-STATE — invite_state stripped state enrichment: join_rules, avatar, create); Story 9-24 (GAP-GLOBAL-ACCOUNT-DATA — top-level account_data delivery in all 4 sync paths, RLS-aware ListGlobalAccountData); Story 9-25 (GAP-BUFFER-NEXT-BATCH — synthetic buf_<ms>_<seq> next_batch token on buffer fast-path, replaces echoed since= token); Story 9-27 (Scenario 3i — full Matrix §11.35.1 room upgrade flow, GRPC.RPCError error handling, archive_room_atomic idempotency, terminate_child, try/rescue failure audit); Story 9-28 (Scenario 3j — GetRelations RPC + bundled m.thread aggregations in sync unsigned field, attach_thread_aggregations, fetch_events_by_relation, count_thread_children, migration 000042); Story 9-29 (Scenario 3j-1 expanded — base route + three-segment route, dir/event_type/recurse/from params, prev_batch response field, fetch_events_by_relation/5 dynamic WHERE builder, 400 validation for invalid dir/recurse); Story 11-7 (Scenario 6 — SSO nonce generation + verification, Cache-Control: no-store on 302, denylist check in PostLogin, ssoStateStore capacity cap at 10,000); Story 11-8 (Scenario 3k — GET /rooms/{roomId}/event/{eventId} new route + GetEvent gRPC RPC, Horde membership guard, fetch_event/2 DB query, attach_thread_aggregations, core_grpc.pb.ex rpc :GetRelations + rpc :GetEvent bug fix); Story 11-10 (Scenario 3l — Matrix login claim mapping: claimLoader TTL-cached DB lookup, FormatUserIDFromClaims fallback chain, JWTMiddleware userIDClaimLoader param, NEBU_OIDC_USER_ID_CLAIM env override; Scenario 3m — Bootstrap Wizard Step 3 claim mapping form, draft save, atomic ClaimSelectionHandler transaction, identity-stability warning); Story 11-11 (Scenario 3n — send_receipt/2 start-on-demand fix: lookup_room → start_room, :noproc guard on get_state, 404 preserved for ghost rooms, 403 preserved for non-members)_
+_Source: `_bmad-output/planning-artifacts/architecture.md`, §Implementation Patterns, §API & Kommunikation, §Resilienz & Selbst-Heilung; Story 9-19 (GAP-JOIN-PUBLIC, GAP-LEAVE-ONCE, GAP-FORGET); Story 9-22 (GAP-SINCE-IGNORED - per-device sync tokens, per-device logout cleanup); Story 9-23 (GAP-INVITE-STATE - invite_state stripped state enrichment: join_rules, avatar, create); Story 9-24 (GAP-GLOBAL-ACCOUNT-DATA - top-level account_data delivery in all 4 sync paths, RLS-aware ListGlobalAccountData); Story 9-25 (GAP-BUFFER-NEXT-BATCH - synthetic buf_<ms>_<seq> next_batch token on buffer fast-path, replaces echoed since= token); Story 9-27 (Scenario 3i - full Matrix §11.35.1 room upgrade flow, GRPC.RPCError error handling, archive_room_atomic idempotency, terminate_child, try/rescue failure audit); Story 9-28 (Scenario 3j - GetRelations RPC + bundled m.thread aggregations in sync unsigned field, attach_thread_aggregations, fetch_events_by_relation, count_thread_children, migration 000042); Story 9-29 (Scenario 3j-1 expanded - base route + three-segment route, dir/event_type/recurse/from params, prev_batch response field, fetch_events_by_relation/5 dynamic WHERE builder, 400 validation for invalid dir/recurse); Story 11-7 (Scenario 6 - SSO nonce generation + verification, Cache-Control: no-store on 302, denylist check in PostLogin, ssoStateStore capacity cap at 10,000); Story 11-8 (Scenario 3k - GET /rooms/{roomId}/event/{eventId} new route + GetEvent gRPC RPC, Horde membership guard, fetch_event/2 DB query, attach_thread_aggregations, core_grpc.pb.ex rpc :GetRelations + rpc :GetEvent bug fix); Story 11-10 (Scenario 3l - Matrix login claim mapping: claimLoader TTL-cached DB lookup, FormatUserIDFromClaims fallback chain, JWTMiddleware userIDClaimLoader param, NEBU_OIDC_USER_ID_CLAIM env override; Scenario 3m - Bootstrap Wizard Step 3 claim mapping form, draft save, atomic ClaimSelectionHandler transaction, identity-stability warning); Story 11-11 (Scenario 3n - send_receipt/2 start-on-demand fix: lookup_room → start_room, :noproc guard on get_state, 404 preserved for ghost rooms, 403 preserved for non-members)_

@@ -7,7 +7,7 @@ matrix: true
 ui: false
 ---
 
-# Story 12.4: Media Download — MinIO Backend + Pre-Signed URL Security
+# Story 12.4: Media Download - MinIO Backend + Pre-Signed URL Security
 
 Status: ready-for-dev
 
@@ -23,7 +23,7 @@ So that files uploaded after the MinIO migration are retrievable.
 
 ## Acceptance Criteria
 
-**AC1 — Download retrieves file from MinIO via Storer.Get:**
+**AC1 - Download retrieves file from MinIO via Storer.Get:**
 
 Given a file is stored in MinIO (uploaded via Story 12.3),
 When a client calls `GET /_matrix/media/v3/download/{serverName}/{mediaId}`,
@@ -31,15 +31,15 @@ Then the gateway retrieves the encrypted file from MinIO via the `Storer.Get` in
 
 **This AC is already satisfied** by the `Storer` interface wiring from Stories 12.2 and 12.3 (`MinIOStorer.Get` delegates to `minio.Client.GetObject`). The test coverage exists. No new code is required for AC1.
 
-**AC2 — Pre-signed URL decision (ADR-013 deferred):**
+**AC2 - Pre-signed URL decision (ADR-013 deferred):**
 
 Given ADR-013 deferred the pre-signed URL policy decision to this story,
 When the download architecture is reviewed,
 Then the decision is: **direct authenticated streaming** (no pre-signed URLs).
 
-Rationale: The media gateway already validates the Matrix access token at the HTTP handler level and streams the decrypted plaintext directly to the client. Pre-signed URLs would expose a signed URL for the *encrypted* ciphertext, which clients cannot decrypt. Since decryption happens server-side (AES-256-GCM), a pre-signed URL pattern does not apply — the gateway must read and decrypt before sending. This decision is documented in the story; no code change required.
+Rationale: The media gateway already validates the Matrix access token at the HTTP handler level and streams the decrypted plaintext directly to the client. Pre-signed URLs would expose a signed URL for the *encrypted* ciphertext, which clients cannot decrypt. Since decryption happens server-side (AES-256-GCM), a pre-signed URL pattern does not apply - the gateway must read and decrypt before sending. This decision is documented in the story; no code change required.
 
-**AC3 — 404 M_NOT_FOUND when mediaId not in MinIO:**
+**AC3 - 404 M_NOT_FOUND when mediaId not in MinIO:**
 
 Given a `GET /_matrix/media/v3/download/{serverName}/{mediaId}` request is made,
 When the `mediaId` does not exist in MinIO (object not found),
@@ -50,7 +50,7 @@ Then:
 
 **Current gap:** `MinIOStorer.Get` calls `minio.Client.GetObject`, which returns a `*minio.ErrorResponse` with `Code: "NoSuchKey"` when the object does not exist. The current `minio.go` returns this as a generic `error`. The download handler in `handler.go` treats any storage error as `500 M_UNKNOWN`. Fix: `MinIOStorer.Get` must detect `minio.ToErrorResponse(err).Code == "NoSuchKey"` and return a sentinel error; the handler must map that sentinel to `404 M_NOT_FOUND`.
 
-**AC4 — 502 M_UNKNOWN when MinIO service is unavailable:**
+**AC4 - 502 M_UNKNOWN when MinIO service is unavailable:**
 
 Given a `GET /_matrix/media/v3/download/{serverName}/{mediaId}` request is made,
 When the MinIO service is unavailable (network unreachable, connection refused, timeout),
@@ -68,27 +68,27 @@ Then:
 
 ### Tests written FIRST (before implementation code):
 
-**AT-1** — `TestMinIOStorer_Get_NotFound_ReturnsStorageNotFoundError` in `media/internal/storage/minio_test.go` [Go unit test with fake MinIO]
+**AT-1** - `TestMinIOStorer_Get_NotFound_ReturnsStorageNotFoundError` in `media/internal/storage/minio_test.go` [Go unit test with fake MinIO]
 - Given: MinIO returns `NoSuchKey` error for `GetObject`
 - When: `MinIOStorer.Get` is called with a non-existent key
 - Then: Returns `storage.ErrNotFound` (or equivalent sentinel)
 
-**AT-2** — `TestDownload_MinIONotFound_Returns404` in `media/internal/download/download_test.go` [Go unit test]
+**AT-2** - `TestDownload_MinIONotFound_Returns404` in `media/internal/download/download_test.go` [Go unit test]
 - Given: `fakeDownloadStorer.Get` returns `storage.ErrNotFound`
 - When: `GET /_matrix/media/v3/download/{serverName}/{mediaId}`
 - Then: HTTP 404 with `{"errcode":"M_NOT_FOUND","error":"Media not found"}`
 
-**AT-3** — `TestDownload_MinIOUnavailable_Returns502` in `media/internal/download/download_test.go` [Go unit test]
+**AT-3** - `TestDownload_MinIOUnavailable_Returns502` in `media/internal/download/download_test.go` [Go unit test]
 - Given: `fakeDownloadStorer.Get` returns `storage.ErrStorageUnavailable` (or a non-ErrNotFound error wrapped as unavailable)
 - When: `GET /_matrix/media/v3/download/{serverName}/{mediaId}`
 - Then: HTTP 502 with `{"errcode":"M_UNKNOWN","error":"Media storage unavailable"}`; response body does NOT contain endpoint URL or any internal detail
 
-**AT-4** — `TestDownload_StorageError_NoCredentialLeak` in `media/internal/download/download_test.go` [Go unit test]
+**AT-4** - `TestDownload_StorageError_NoCredentialLeak` in `media/internal/download/download_test.go` [Go unit test]
 - Given: `fakeDownloadStorer.Get` returns an error containing a fake endpoint URL and fake credentials string
 - When: `GET /_matrix/media/v3/download/{serverName}/{mediaId}`
 - Then: Response body does NOT contain the endpoint URL or credentials string; only a generic error message is returned
 
-**AT-5** — `TestMinIOStorer_Get_NotFound_IsStorageNotFound` in `media/internal/storage/minio_test.go` [Go unit test]
+**AT-5** - `TestMinIOStorer_Get_NotFound_IsStorageNotFound` in `media/internal/storage/minio_test.go` [Go unit test]
 - Given: `MinIOStorer.Get` returns `storage.ErrNotFound` for a NoSuchKey error
 - When: `errors.Is(err, storage.ErrNotFound)` is called
 - Then: Returns `true`
@@ -115,20 +115,20 @@ GET /_matrix/media/v3/download/{serverName}/{mediaId}
 func (s *MinIOStorer) Get(ctx context.Context, key string) (io.ReadCloser, error) {
     obj, err := s.Client.GetObject(ctx, s.Bucket, key, minio.GetObjectOptions{})
     if err != nil {
-        return nil, err  // ← Returns raw minio error — no classification
+        return nil, err  // ← Returns raw minio error - no classification
     }
     return obj, nil
 }
 ```
 
-**NOTE:** `minio.Client.GetObject` returns a `*minio.Object` even for missing objects — the error surfaces on the first `Read()` call, not on `GetObject`. The `NoSuchKey` detection must happen during `io.ReadAll` in the handler, OR by calling `obj.Stat()` before reading. The safest approach: read with `io.ReadAll`, then check if the error is a MinIO `NoSuchKey` by inspecting `minio.ToErrorResponse(err).Code`.
+**NOTE:** `minio.Client.GetObject` returns a `*minio.Object` even for missing objects - the error surfaces on the first `Read()` call, not on `GetObject`. The `NoSuchKey` detection must happen during `io.ReadAll` in the handler, OR by calling `obj.Stat()` before reading. The safest approach: read with `io.ReadAll`, then check if the error is a MinIO `NoSuchKey` by inspecting `minio.ToErrorResponse(err).Code`.
 
 **Alternative approach:** Wrap the read in the `MinIOStorer.Get` method: after getting the `*minio.Object`, call `obj.Stat()` to probe existence before returning. `Stat()` returns the `NoSuchKey` error eagerly. This is cleaner because it keeps error classification in the storage layer.
 
 **Recommended approach (use this):**
 
 ```go
-// In MinIOStorer.Get — call obj.Stat() to detect NoSuchKey eagerly
+// In MinIOStorer.Get - call obj.Stat() to detect NoSuchKey eagerly
 func (s *MinIOStorer) Get(ctx context.Context, key string) (io.ReadCloser, error) {
     obj, err := s.Client.GetObject(ctx, s.Bucket, key, minio.GetObjectOptions{})
     if err != nil {
@@ -189,17 +189,17 @@ if err != nil {
 
 ### Files NOT to Modify
 
-- `media/cmd/media/main.go` — no changes needed; selectStorer/wiring unchanged
-- `media/internal/upload/` — upload path unaffected
-- `media/internal/crypto/` — crypto unchanged
-- `media/internal/storage/local.go` — LocalStorer unaffected (ErrNotFound should also be returned by LocalStorer for missing files — check and align)
+- `media/cmd/media/main.go` - no changes needed; selectStorer/wiring unchanged
+- `media/internal/upload/` - upload path unaffected
+- `media/internal/crypto/` - crypto unchanged
+- `media/internal/storage/local.go` - LocalStorer unaffected (ErrNotFound should also be returned by LocalStorer for missing files - check and align)
 
 ### LocalStorer.Get alignment
 
 Check `media/internal/storage/local.go` `Get` method. It likely returns `os.Open` errors for missing files. After this story, LocalStorer.Get should also return `ErrNotFound` when the file does not exist (wrapping `os.ErrNotExist`). This ensures consistent behavior regardless of backend.
 
 ```go
-// In LocalStorer.Get — align error codes
+// In LocalStorer.Get - align error codes
 func (s *LocalStorer) Get(ctx context.Context, key string) (io.ReadCloser, error) {
     path := filepath.Join(s.BasePath, filepath.FromSlash(key))
     f, err := os.Open(path)
@@ -213,9 +213,9 @@ func (s *LocalStorer) Get(ctx context.Context, key string) (io.ReadCloser, error
 }
 ```
 
-**Important:** After aligning LocalStorer.Get to return ErrNotFound, the existing download handler test `TestDownload_StorageReadError` (which expects 500 M_UNKNOWN for a missing file) needs updating — it should now expect 404 M_NOT_FOUND (because the file doesn't exist → ErrNotFound → 404). However, `TestDownload_NotFound` already covers DB-level 404. Review each existing test when aligning.
+**Important:** After aligning LocalStorer.Get to return ErrNotFound, the existing download handler test `TestDownload_StorageReadError` (which expects 500 M_UNKNOWN for a missing file) needs updating - it should now expect 404 M_NOT_FOUND (because the file doesn't exist → ErrNotFound → 404). However, `TestDownload_NotFound` already covers DB-level 404. Review each existing test when aligning.
 
-Actually — the existing `TestDownload_StorageReadError` test uses a DB row that exists but no file on disk. This is an inconsistent state (row in DB, file missing from storage). With the LocalStorer alignment:
+Actually - the existing `TestDownload_StorageReadError` test uses a DB row that exists but no file on disk. This is an inconsistent state (row in DB, file missing from storage). With the LocalStorer alignment:
 - Before: returns 500 (os.Open error treated as internal error)
 - After: returns 404 (ErrNotFound)
 
@@ -226,7 +226,7 @@ Update the test expectation to 404 M_NOT_FOUND. The DB check happens first; if D
 `minio.Client.GetObject` does NOT return an error immediately for missing objects. The `*minio.Object` is returned, but reading it (via `Read()` or `Stat()`) triggers the remote call. Therefore:
 - Call `obj.Stat()` after `GetObject` to eagerly detect `NoSuchKey`
 - `minio.ToErrorResponse(err)` converts a MinIO SDK error to `minio.ErrorResponse` with `Code` and `StatusCode`
-- For non-MinIO errors (network errors): `minio.ToErrorResponse` returns an empty struct — detect by `resp.Code == ""`
+- For non-MinIO errors (network errors): `minio.ToErrorResponse` returns an empty struct - detect by `resp.Code == ""`
 
 ### Test Strategy Notes
 

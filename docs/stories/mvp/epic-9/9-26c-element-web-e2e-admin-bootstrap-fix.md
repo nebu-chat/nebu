@@ -1,6 +1,6 @@
 ---
 story_id: 9-26c
-title: "Element Web E2E — Fix Admin Bootstrap Helper + Selector"
+title: "Element Web E2E - Fix Admin Bootstrap Helper + Selector"
 type: bugfix
 severity: high
 epic: 9
@@ -14,19 +14,19 @@ created: 2026-05-07
 
 Sub-story of 9-26. Fixes BUG-E2E-03 and BUG-E2E-04 in the admin-ui E2E suite.
 
-**BUG-E2E-03**: All 6 post-bootstrap admin-ui scenarios fail because `Given bootstrap has been completed` throws when bootstrap hasn't been done. There is no programmatic helper to complete bootstrap — each CI run starts with a fresh DB and needs bootstrap to be performed first.
+**BUG-E2E-03**: All 6 post-bootstrap admin-ui scenarios fail because `Given bootstrap has been completed` throws when bootstrap hasn't been done. There is no programmatic helper to complete bootstrap - each CI run starts with a fresh DB and needs bootstrap to be performed first.
 
-**BUG-E2E-04**: `bootstrap.feature` / "Operator completes Bootstrap Wizard" fails with `strict mode violation: getByText('Bootstrap Setup') resolved to 2 elements` — the nav link and the page heading both match.
+**BUG-E2E-04**: `bootstrap.feature` / "Operator completes Bootstrap Wizard" fails with `strict mode violation: getByText('Bootstrap Setup') resolved to 2 elements` - the nav link and the page heading both match.
 
 ## Fix: BUG-E2E-03
 
-`e2e/step-definitions/admin/bootstrap.steps.ts` — `Given bootstrap has been completed`:
+`e2e/step-definitions/admin/bootstrap.steps.ts` - `Given bootstrap has been completed`:
 
 Currently throws if bootstrap isn't done. Change to: **if bootstrap isn't done, run it**. Add a `doBootstrap()` helper function (or refactor the existing `When the operator completes the bootstrap wizard` step into a reusable helper):
 
 ```typescript
 async function doBootstrap(page: Page): Promise<void> {
-  // Navigate to /admin/ — will redirect to /admin/bootstrap if not done
+  // Navigate to /admin/ - will redirect to /admin/bootstrap if not done
   await page.goto('http://localhost:8008/admin/');
   if (!page.url().includes('/bootstrap')) return; // already done
 
@@ -60,15 +60,15 @@ With:
 page.getByRole('heading', { name: /bootstrap setup/i })
 ```
 
-This targets only `<h1>`, `<h2>`, etc. — not nav links.
+This targets only `<h1>`, `<h2>`, etc. - not nav links.
 
 ## Acceptance Tests
 
-1. **BUG-E2E-03** — On a fresh `docker compose up` (no prior bootstrap), `npx playwright test --project=admin-ui` runs all 7 admin-ui scenarios (bootstrap wizard + 6 post-bootstrap scenarios) without any `SKIP: Bootstrap has not been completed` error.
+1. **BUG-E2E-03** - On a fresh `docker compose up` (no prior bootstrap), `npx playwright test --project=admin-ui` runs all 7 admin-ui scenarios (bootstrap wizard + 6 post-bootstrap scenarios) without any `SKIP: Bootstrap has not been completed` error.
 
-2. **BUG-E2E-04** — `bootstrap.feature` / "Operator completes Bootstrap Wizard" passes without strict mode violation.
+2. **BUG-E2E-04** - `bootstrap.feature` / "Operator completes Bootstrap Wizard" passes without strict mode violation.
 
-3. **Regression** — Pre-existing bootstrap step `When the operator completes the bootstrap wizard` still works (it reuses `doBootstrap()`).
+3. **Regression** - Pre-existing bootstrap step `When the operator completes the bootstrap wizard` still works (it reuses `doBootstrap()`).
 
 ## DoD
 

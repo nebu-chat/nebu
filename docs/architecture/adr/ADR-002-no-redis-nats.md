@@ -1,8 +1,8 @@
-# ADR-002: No Redis, No NATS — ETS + pg Process Groups Replace Both
+# ADR-002: No Redis, No NATS - ETS + pg Process Groups Replace Both
 
 ## Status
 
-Accepted — 2026-03-18
+Accepted - 2026-03-18
 
 ## Context
 
@@ -45,8 +45,8 @@ unavailable. Linear drain worker in Go (MVP), AIMD-adaptive (Phase 2). No Kafka.
 - `docker compose up` stays at 4 services (gateway, core, postgres, dex)
 
 **Negative:**
-- ETS is not persistent — if Elixir crashes without checkpoint, since-tokens are lost (mitigated by PostgreSQL checkpoints)
-- pg Process Groups are not durable — if a message arrives when no subscriber exists, it is lost (mitigated by message_buffer)
+- ETS is not persistent - if Elixir crashes without checkpoint, since-tokens are lost (mitigated by PostgreSQL checkpoints)
+- pg Process Groups are not durable - if a message arrives when no subscriber exists, it is lost (mitigated by message_buffer)
 - Redis might still be needed if Nebu scales beyond what a single PostgreSQL instance can handle for session state (Phase 3 concern)
 
 _Source: `_bmad-output/planning-artifacts/architecture.md`, §Core Architectural Decisions (G1), §Infrastructure; `CLAUDE.md`, §ADR Table_

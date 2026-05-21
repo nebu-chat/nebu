@@ -1,4 +1,4 @@
-# Security Review — Story 12.5: Thumbnail Generation On-Demand, Sandboxed
+# Security Review - Story 12.5: Thumbnail Generation On-Demand, Sandboxed
 
 **Date:** 2026-05-12
 **Reviewer:** Kassandra (security review agent)
@@ -18,7 +18,7 @@ Staged diff for Story 12.5:
 
 ## Findings
 
-### LOW-1 — serverName path validation not enforced in thumbnail handler
+### LOW-1 - serverName path validation not enforced in thumbnail handler
 
 **File:** `media/internal/thumbnail/handler.go`
 **Risk:** Pre-existing gap (same in download handler, not introduced by this story)
@@ -27,7 +27,7 @@ Staged diff for Story 12.5:
 
 **Disposition:** Pre-existing issue, not introduced by this story. Same pattern as download handler. Bounded by the fact that serverName typically comes from the server's own configured value. Deferred.
 
-### LOW-2 — Large animated GIF memory pressure
+### LOW-2 - Large animated GIF memory pressure
 
 **File:** `media/internal/thumbnail/thumbnail.go:generateAnimatedGIFThumbnail`
 **Risk:** An animated GIF with many frames, each resized individually, could cause memory pressure during thumbnail generation.

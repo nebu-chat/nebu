@@ -1,7 +1,7 @@
-# Story 4.15: GET /sync — Incremental Sync (Long-Polling + since-token)
+# Story 4.15: GET /sync - Incremental Sync (Long-Polling + since-token)
 
 **Status:** review
-**Epic:** 4 — End-Users Can Chat in Rooms Using Any Standard Matrix Client
+**Epic:** 4 - End-Users Can Chat in Rooms Using Any Standard Matrix Client
 **Story Key:** 4-15-get-sync-incremental-sync-long-polling-since-token
 **Created:** 2026-04-07
 
@@ -25,12 +25,12 @@ so that my Matrix client stays up to date without constant polling.
    - If no events: holds the gRPC call open for up to `timeout_ms` (max 30 000 ms), returns when the first event arrives OR the timeout expires
 3. Response is the same Matrix sync response format as Story 4-14 (initial sync), containing ONLY rooms that have activity since the `since` token.
 4. If no events arrived before timeout: returns `200` with `{"next_batch": "<same_or_new_token>", "rooms": {"join": {}, "invite": {}, "leave": {}}, "presence": {"events": []}}`.
-5. `next_batch` in the response is ALWAYS a new token from `Nebu.Session.PgStore.persist_since_token/3` — never reuse the incoming `since` token verbatim.
+5. `next_batch` in the response is ALWAYS a new token from `Nebu.Session.PgStore.persist_since_token/3` - never reuse the incoming `since` token verbatim.
 6. Invalid or expired `since` token (i.e. `PgStore.get_since_token/1` returns `{:error, :not_found}`): Core falls back to initial sync response (same as `GetInitialSync`).
-7. `timeout` query param is optional; default is `0` (return immediately if no events); max 30 000 ms — values above 30 000 are clamped to 30 000.
+7. `timeout` query param is optional; default is `0` (return immediately if no events); max 30 000 ms - values above 30 000 are clamped to 30 000.
 8. `proto/core.proto` is extended with `rpc GetSyncDelta(GetSyncDeltaRequest) returns (GetSyncDeltaResponse)`.
 9. The existing `501 Not Implemented` stub in `GetSyncHandler.GetSync` (Story 4-14 placeholder for `?since`) is **replaced** by a call to a new `GetSyncDeltaCoreClient` interface method.
-10. Handler reuses all JSON response structs from `sync.go` (`syncResponse`, `syncRooms`, `syncJoinedRoom`, etc.) — do NOT duplicate structs.
+10. Handler reuses all JSON response structs from `sync.go` (`syncResponse`, `syncRooms`, `syncJoinedRoom`, etc.) - do NOT duplicate structs.
 11. Handler timeout for the gRPC call: `timeout_ms + 5 000 ms` (5 s grace period on top of the user-requested timeout so the gRPC call has time to return normally before the HTTP handler gives up).
 12. Go unit tests (httptest):
     - `?since=<token>` → Core returns delta with 1 room → `200` with `rooms.join` containing that room
@@ -52,52 +52,52 @@ so that my Matrix client stays up to date without constant polling.
 
 ### Tests written FIRST (before implementation code):
 
-**1. Go: incremental sync — delta with 1 room → 200 — Go httptest**
+**1. Go: incremental sync - delta with 1 room → 200 - Go httptest**
 - Given: valid JWT for `@alice:test.local`; `?since=s_token_abc`; mock Core returns `GetSyncDeltaResponse` with 1 room entry and a `since_token`
 - When: `GET /_matrix/client/v3/sync?since=s_token_abc`
 - Then: `200`; `next_batch` is non-empty; `rooms.join` contains exactly 1 room ID with `state.events` and `timeline.events`
 
-**2. Go: incremental sync — empty delta → 200 with empty rooms — Go httptest**
+**2. Go: incremental sync - empty delta → 200 with empty rooms - Go httptest**
 - Given: valid JWT; `?since=s_token_abc&timeout=0`; mock Core returns `GetSyncDeltaResponse` with empty rooms and a new `since_token`
 - When: `GET /_matrix/client/v3/sync?since=s_token_abc&timeout=0`
 - Then: `200`; `next_batch` is non-empty; `rooms.join` is `{}`; `rooms.invite` and `rooms.leave` are present (not null)
 
-**3. Go: incremental sync — Core fallback to initial sync on unknown token → 200 — Go httptest**
+**3. Go: incremental sync - Core fallback to initial sync on unknown token → 200 - Go httptest**
 - Given: valid JWT; mock Core returns `GetSyncDeltaResponse` with `fallback_to_initial: true` and full room data
 - When: `GET /_matrix/client/v3/sync?since=unknown_token`
 - Then: `200`; response is a full sync (rooms.join contains rooms); `next_batch` is non-empty
 
-**4. Go: incremental sync — Core UNAVAILABLE → 503 — Go httptest**
+**4. Go: incremental sync - Core UNAVAILABLE → 503 - Go httptest**
 - Given: valid JWT; mock Core returns gRPC `UNAVAILABLE` error
 - When: `GET /_matrix/client/v3/sync?since=s_token_abc`
 - Then: `503` with `{"errcode": "M_UNAVAILABLE"}`
 
-**5. Go: timeout clamped to 30 000 ms — Go httptest**
+**5. Go: timeout clamped to 30 000 ms - Go httptest**
 - Given: valid JWT; `?since=s_token_abc&timeout=40000`
 - When: `GET /_matrix/client/v3/sync?since=s_token_abc&timeout=40000`
 - Then: `GetSyncDelta` is called with `timeout_ms ≤ 30000`; specifically `timeout_ms == 30000`
 
-**6. Elixir: GetSyncDelta — pending events returned immediately — ExUnit**
+**6. Elixir: GetSyncDelta - pending events returned immediately - ExUnit**
 - Given: `@alice:test.local` is a member of `!room1:test.local`; 1 event has `origin_server_ts` > `last_event_id` timestamp; `FakePgStore` returns `{:ok, %{since_token: "s_old", last_event_id: "ev_10"}}` for `get_since_token`
 - When: `Nebu.EventDispatcher.Server.get_sync_delta/2` called with `user_id: "@alice:test.local"`, `since_token: "s_old"`, `timeout_ms: 5000`
 - Then: response `rooms` contains `!room1:test.local` with the new event in `timeline_events`; returns immediately (does not wait for timeout); `since_token` in response is different from `"s_old"`
 
-**7. Elixir: GetSyncDelta — no events, timeout fires → empty delta — ExUnit**
+**7. Elixir: GetSyncDelta - no events, timeout fires → empty delta - ExUnit**
 - Given: `@alice:test.local` is a member of `!room1:test.local`; no events after `last_event_id`; `FakePgStore` returns stored token
 - When: `get_sync_delta/2` called with `timeout_ms: 100` (short for test speed)
 - Then: after ~100 ms, returns `GetSyncDeltaResponse` with empty `rooms`; `since_token` is a NEW token (persisted via `FakePgStore`)
 
-**8. Elixir: GetSyncDelta — unknown since_token → fallback to initial sync — ExUnit**
+**8. Elixir: GetSyncDelta - unknown since_token → fallback to initial sync - ExUnit**
 - Given: `FakePgStore.get_since_token/1` returns `{:error, :not_found}` for the provided token
 - When: `get_sync_delta/2` called with `user_id: "@alice:test.local"`, `since_token: "unknown_token"`
 - Then: response contains full room list (same as `GetInitialSync`); `fallback_to_initial` field is `true` in response
 
-**9. Elixir: :pg cleanup on process exit — ExUnit**
+**9. Elixir: :pg cleanup on process exit - ExUnit**
 - Given: `get_sync_delta/2` process is running and has joined room `:pg` groups
 - When: the handler process exits (normally or abnormally)
 - Then: `:pg.get_members("room:!room1:test.local")` no longer contains the dead PID
 
-**10. Elixir: next_batch is always a new token — ExUnit**
+**10. Elixir: next_batch is always a new token - ExUnit**
 - Given: incoming `since_token = "s_old_token"`; FakePgStore returns `{:ok, %{since_token: "s_old_token", last_event_id: nil}}`
 - When: `get_sync_delta/2` called
 - Then: the `since_token` in the response is NOT equal to `"s_old_token"` (always freshly generated + persisted)
@@ -106,17 +106,17 @@ so that my Matrix client stays up to date without constant polling.
 
 ## Technical Requirements
 
-### Proto Changes — `proto/core.proto`
+### Proto Changes - `proto/core.proto`
 
 Add to `CoreService` (after the `GetInitialSync` RPC):
 ```protobuf
-// GetSyncDelta — incremental sync with long-polling; returns events after since_token
+// GetSyncDelta - incremental sync with long-polling; returns events after since_token
 rpc GetSyncDelta(GetSyncDeltaRequest) returns (GetSyncDeltaResponse);
 ```
 
 Add message definitions (use field numbers starting from 1 in each new message):
 ```protobuf
-// GetSyncDelta — incremental sync request with long-polling
+// GetSyncDelta - incremental sync request with long-polling
 message GetSyncDeltaRequest {
   string user_id     = 1;
   string since_token = 2;  // opaque token from previous next_batch
@@ -136,7 +136,7 @@ Run `make proto` after editing to regenerate `gateway/internal/grpc/pb/` and `co
 
 ### Elixir: New Handler `get_sync_delta/2` in `Nebu.EventDispatcher.Server`
 
-**File:** `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` (EXTEND — do NOT create a new file)
+**File:** `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` (EXTEND - do NOT create a new file)
 
 **Flow:**
 1. Extract `user_id`, `since_token`, `timeout_ms` from `request`
@@ -146,7 +146,7 @@ Run `make proto` after editing to regenerate `gateway/internal/grpc/pb/` and `co
    - `{:ok, %{last_event_id: last_event_id}}` → continue with incremental flow
 4. Get all room IDs where user is a member: `rooms_db_module().get_rooms_for_user(user_id)`
 5. Check for pending events (events with `origin_server_ts` > timestamp of `last_event_id`):
-   - For each room_id: `messages_db_module().fetch_events_since(room_id, last_event_id, 20)` (new DB function — see below)
+   - For each room_id: `messages_db_module().fetch_events_since(room_id, last_event_id, 20)` (new DB function - see below)
    - If any rooms have pending events → return delta immediately (skip long-poll wait)
 6. If no pending events AND `timeout_ms > 0` → enter long-poll wait:
    - Subscribe to `:pg` groups for all user rooms (same pattern as `event_bus/2`)
@@ -167,7 +167,7 @@ Run `make proto` after editing to regenerate `gateway/internal/grpc/pb/` and `co
 
 **Important considerations:**
 - The `:pg` subscription inside `get_sync_delta/2` is TEMPORARY (only for the long-poll wait duration), unlike `event_bus/2` which blocks indefinitely. Subscribe before the `receive` loop, leave after.
-- `Process.flag(:trap_exit, true)` is NOT needed here — the gRPC call lifecycle manages cleanup. Use `Process.send_after` + `receive` with `:timeout` message.
+- `Process.flag(:trap_exit, true)` is NOT needed here - the gRPC call lifecycle manages cleanup. Use `Process.send_after` + `receive` with `:timeout` message.
 - If `timeout_ms == 0`: skip the long-poll wait entirely, return immediately with whatever is pending.
 - Race condition: a `{:new_event, ...}` message may arrive between the DB check in step 5 and the `:pg` subscribe in step 6. To handle this: subscribe to `:pg` groups BEFORE the initial DB check (step 4), so no events are missed.
 
@@ -204,7 +204,7 @@ in chronological order (ASC).
 `since_ts` is the `origin_server_ts` of the last known event (from
 `last_event_id`). Pass `0` to get all events from the beginning.
 
-Returns `{:ok, [event_map]}` — empty list if no new events.
+Returns `{:ok, [event_map]}` - empty list if no new events.
 """
 @spec fetch_events_since(String.t(), integer(), pos_integer()) ::
         {:ok, [map()]} | {:error, term()}
@@ -238,10 +238,10 @@ def get_event_timestamp(event_id) do
   end
 end
 ```
-If `last_event_id` is `nil` or `""`, use `since_ts = 0` (return all events — same as initial sync).
+If `last_event_id` is `nil` or `""`, use `since_ts = 0` (return all events - same as initial sync).
 If `get_event_timestamp/1` returns `{:error, :not_found}`, use `since_ts = 0` (conservative fallback).
 
-**FakeDB extension for tests** — in `nebu_event_dispatcher_test.exs` (and wherever a FakeDB is defined for EventDispatcher tests), add:
+**FakeDB extension for tests** - in `nebu_event_dispatcher_test.exs` (and wherever a FakeDB is defined for EventDispatcher tests), add:
 ```elixir
 def fetch_events_since(room_id, _since_ts, _limit) do
   events = :ets.lookup(:fake_events, room_id) |> Enum.map(fn {_, ev} -> ev end)
@@ -255,7 +255,7 @@ def get_event_timestamp(_event_id), do: {:ok, 0}
 
 **Do NOT create a new file.** Extend the existing `sync.go`.
 
-**Step 1 — Extend the `GetSyncCoreClient` interface:**
+**Step 1 - Extend the `GetSyncCoreClient` interface:**
 ```go
 // GetSyncCoreClient is the consumer-defined interface for sync gRPC calls.
 // Extended in Story 4-15 to include GetSyncDelta.
@@ -265,7 +265,7 @@ type GetSyncCoreClient interface {
 }
 ```
 
-**Step 2 — Replace the `501` stub in `GetSync`:**
+**Step 2 - Replace the `501` stub in `GetSync`:**
 
 Replace the `since` stub block:
 ```go
@@ -284,7 +284,7 @@ if sinceToken := r.URL.Query().Get("since"); sinceToken != "" {
 }
 ```
 
-**Step 3 — New `handleIncrementalSync` method:**
+**Step 3 - New `handleIncrementalSync` method:**
 ```go
 const maxTimeoutMs = 30_000
 
@@ -346,7 +346,7 @@ func (h *GetSyncHandler) handleIncrementalSync(w http.ResponseWriter, r *http.Re
 }
 ```
 
-**Step 4 — Refactor `GetSync` to share response-building code:**
+**Step 4 - Refactor `GetSync` to share response-building code:**
 
 Extract the room-mapping loop from `GetSync` into a private helper to avoid duplication:
 ```go
@@ -365,7 +365,7 @@ Update `GetSync` to call `buildJoinedRooms(resp.GetRooms())` instead of the inli
 
 **NOTE:** The `strconv` import must be added to `sync.go` for `strconv.ParseInt`.
 
-### Go gRPC Client — `gateway/internal/grpc/client.go` (EXTEND)
+### Go gRPC Client - `gateway/internal/grpc/client.go` (EXTEND)
 
 Add `GetSyncDelta` method following the exact pattern of all other methods:
 ```go
@@ -375,7 +375,7 @@ func (c *Client) GetSyncDelta(ctx context.Context, req *pb.GetSyncDeltaRequest) 
 }
 ```
 
-### Existing Mock in `stream_test.go` — Add `GetSyncDelta` stub
+### Existing Mock in `stream_test.go` - Add `GetSyncDelta` stub
 
 The `mockCoreClient` in `gateway/internal/grpc/stream_test.go` implements the full `CoreServiceClient` interface. After adding `GetSyncDelta` to the proto, this mock needs a stub. Follow the existing pattern:
 ```go
@@ -391,37 +391,37 @@ Similarly, `gateway/internal/grpc/client_test.go` may need a test case for `GetS
 ## File Structure
 
 ### Modified Files
-- `proto/core.proto` — add `GetSyncDelta` RPC + `GetSyncDeltaRequest`, `GetSyncDeltaResponse` messages
-- `core/apps/event_dispatcher/lib/pb/core.pb.ex` — regenerated by `make proto`
-- `core/apps/event_dispatcher/lib/pb/core_grpc.pb.ex` — regenerated by `make proto`
-- `gateway/internal/grpc/pb/core.pb.go` — regenerated by `make proto`
-- `gateway/internal/grpc/pb/core_grpc.pb.go` — regenerated by `make proto`
-- `core/apps/room_manager/lib/nebu/room/db.ex` — add `fetch_events_since/3` and `get_event_timestamp/1`
-- `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` — add `get_sync_delta/2` handler
-- `gateway/internal/matrix/sync.go` — extend `GetSyncCoreClient` interface; replace `501` stub; add `handleIncrementalSync`; extract `buildJoinedRooms` helper
-- `gateway/internal/grpc/client.go` — add `GetSyncDelta` method
-- `gateway/internal/grpc/stream_test.go` — add `GetSyncDelta` stub to `mockCoreClient`
-- `gateway/internal/grpc/client_test.go` — add `GetSyncDelta` test case (follow existing pattern)
+- `proto/core.proto` - add `GetSyncDelta` RPC + `GetSyncDeltaRequest`, `GetSyncDeltaResponse` messages
+- `core/apps/event_dispatcher/lib/pb/core.pb.ex` - regenerated by `make proto`
+- `core/apps/event_dispatcher/lib/pb/core_grpc.pb.ex` - regenerated by `make proto`
+- `gateway/internal/grpc/pb/core.pb.go` - regenerated by `make proto`
+- `gateway/internal/grpc/pb/core_grpc.pb.go` - regenerated by `make proto`
+- `core/apps/room_manager/lib/nebu/room/db.ex` - add `fetch_events_since/3` and `get_event_timestamp/1`
+- `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` - add `get_sync_delta/2` handler
+- `gateway/internal/matrix/sync.go` - extend `GetSyncCoreClient` interface; replace `501` stub; add `handleIncrementalSync`; extract `buildJoinedRooms` helper
+- `gateway/internal/grpc/client.go` - add `GetSyncDelta` method
+- `gateway/internal/grpc/stream_test.go` - add `GetSyncDelta` stub to `mockCoreClient`
+- `gateway/internal/grpc/client_test.go` - add `GetSyncDelta` test case (follow existing pattern)
 
 ### New Files
-- `gateway/internal/matrix/sync_delta_test.go` — Go httptest unit tests for incremental sync (keep separate from `sync_test.go` for clarity)
-- `core/apps/event_dispatcher/test/nebu/event_dispatcher/sync_delta_test.exs` — Elixir ExUnit tests for `get_sync_delta`
-- `core/apps/room_manager/test/nebu/room/db_fetch_events_since_test.exs` — Unit tests for `fetch_events_since/3` and `get_event_timestamp/1` (or add to existing `db_test.exs` if it exists)
+- `gateway/internal/matrix/sync_delta_test.go` - Go httptest unit tests for incremental sync (keep separate from `sync_test.go` for clarity)
+- `core/apps/event_dispatcher/test/nebu/event_dispatcher/sync_delta_test.exs` - Elixir ExUnit tests for `get_sync_delta`
+- `core/apps/room_manager/test/nebu/room/db_fetch_events_since_test.exs` - Unit tests for `fetch_events_since/3` and `get_event_timestamp/1` (or add to existing `db_test.exs` if it exists)
 
 ---
 
 ## Dev Notes
 
-### CRITICAL: Story 4-14 Handoff — What Exists vs. What to Build
+### CRITICAL: Story 4-14 Handoff - What Exists vs. What to Build
 
 **Already implemented and MUST NOT be changed (Story 4-14):**
-- `GetSyncCoreClient` interface in `sync.go` — has only `GetInitialSync` method; **extend, do not replace**
-- `GetSyncHandler`, `GetSyncConfig`, `NewGetSyncHandler` — EXTEND only
-- All JSON response structs (`syncResponse`, `syncRooms`, `syncJoinedRoom`, `syncStateSection`, `syncTimelineSection`, `syncStateEvent`, `syncTimelineEvent`, `syncPresence`) — **reuse all of them, do not duplicate**
-- `GetSync` method in `GetSyncHandler` — currently has `?since → 501` stub that this story must replace
-- `GetInitialSync` RPC in proto — already generated; `SyncRoom` and `SyncRoomStateEvent` messages exist
-- `get_initial_sync/2` in `Nebu.EventDispatcher.Server` — do NOT modify; reuse its logic for the fallback path
-- `rooms_db_module/0`, `pg_store_module/0`, `messages_db_module/0`, `room_registry_module/0` injectable modules — already defined; follow the same pattern for any new ones
+- `GetSyncCoreClient` interface in `sync.go` - has only `GetInitialSync` method; **extend, do not replace**
+- `GetSyncHandler`, `GetSyncConfig`, `NewGetSyncHandler` - EXTEND only
+- All JSON response structs (`syncResponse`, `syncRooms`, `syncJoinedRoom`, `syncStateSection`, `syncTimelineSection`, `syncStateEvent`, `syncTimelineEvent`, `syncPresence`) - **reuse all of them, do not duplicate**
+- `GetSync` method in `GetSyncHandler` - currently has `?since → 501` stub that this story must replace
+- `GetInitialSync` RPC in proto - already generated; `SyncRoom` and `SyncRoomStateEvent` messages exist
+- `get_initial_sync/2` in `Nebu.EventDispatcher.Server` - do NOT modify; reuse its logic for the fallback path
+- `rooms_db_module/0`, `pg_store_module/0`, `messages_db_module/0`, `room_registry_module/0` injectable modules - already defined; follow the same pattern for any new ones
 
 **Must add in this story:**
 - `GetSyncDelta` RPC to proto + generated stubs
@@ -453,9 +453,9 @@ func (m *mockSyncDeltaCoreClient) GetSyncDelta(_ context.Context, req *pb.GetSyn
 }
 ```
 
-Use `buildAuthedSyncHandler` from `sync_test.go` — it accepts `*mockGetSyncCoreClient`. For delta tests, define a parallel `buildAuthedSyncHandlerForDelta` or ensure the mock struct satisfies the interface. The simplest approach: make `mockSyncDeltaCoreClient` also implement `GetInitialSync` and pass it to `NewGetSyncHandler(cfg)` directly.
+Use `buildAuthedSyncHandler` from `sync_test.go` - it accepts `*mockGetSyncCoreClient`. For delta tests, define a parallel `buildAuthedSyncHandlerForDelta` or ensure the mock struct satisfies the interface. The simplest approach: make `mockSyncDeltaCoreClient` also implement `GetInitialSync` and pass it to `NewGetSyncHandler(cfg)` directly.
 
-**IMPORTANT:** After Story 4-15, `TestGetSync_IncrementalSync_Stub` in `sync_test.go` must be updated — it currently expects `501` but this story changes the behavior. Either delete that test (it was a Story 4-14 placeholder) or update it to verify the actual incremental sync behavior.
+**IMPORTANT:** After Story 4-15, `TestGetSync_IncrementalSync_Stub` in `sync_test.go` must be updated - it currently expects `501` but this story changes the behavior. Either delete that test (it was a Story 4-14 placeholder) or update it to verify the actual incremental sync behavior.
 
 ### Elixir: Long-Poll Receive Loop Pattern
 
@@ -531,7 +531,7 @@ end
 defp wait_for_events(room_ids, since_ts) do
   receive do
     {:new_event, _event_map} ->
-      # Event arrived — re-query DB for complete delta (use DB as source of truth)
+      # Event arrived - re-query DB for complete delta (use DB as source of truth)
       fetch_delta_rooms(room_ids, since_ts)
     :sync_timeout ->
       []
@@ -541,7 +541,7 @@ end
 
 **Key notes:**
 - Use `:sync_timeout` atom (not `:timeout`) to avoid accidental collisions with OTP system messages
-- On `{:new_event, ...}`, re-query the DB rather than trying to use the message payload directly — ensures consistency with events that may have arrived slightly before the `:pg` subscription
+- On `{:new_event, ...}`, re-query the DB rather than trying to use the message payload directly - ensures consistency with events that may have arrived slightly before the `:pg` subscription
 - `fetch_delta_rooms/2` queries `messages_db_module().fetch_events_since(room_id, since_ts, 20)` for each room and builds `%Core.SyncRoom{}` structs (reuse `build_state_events/1` and `event_map_to_proto/1` from the initial sync)
 
 ### Resolving `last_event_id` → `since_ts`
@@ -570,7 +570,7 @@ end
 defp fetch_delta_rooms(room_ids, since_ts) do
   Enum.flat_map(room_ids, fn room_id ->
     case messages_db_module().fetch_events_since(room_id, since_ts, 20) do
-      {:ok, []} -> []  # no new events — exclude this room from delta
+      {:ok, []} -> []  # no new events - exclude this room from delta
       {:ok, events} ->
         state = try do
           room_registry_module().get_state(room_id)
@@ -595,7 +595,7 @@ defp fetch_delta_rooms(room_ids, since_ts) do
 end
 ```
 
-Note: `build_state_events/1` and `event_map_to_proto/1` already exist as private helpers in `Nebu.EventDispatcher.Server` from Story 4-14 — reuse them directly.
+Note: `build_state_events/1` and `event_map_to_proto/1` already exist as private helpers in `Nebu.EventDispatcher.Server` from Story 4-14 - reuse them directly.
 
 ### Fallback to Initial Sync Path
 
@@ -617,9 +617,9 @@ This keeps `get_initial_sync/2` unchanged in behavior while enabling reuse.
 
 ### Module Naming and File Conventions
 
-- Elixir module: `Nebu.EventDispatcher.Server` — extend, not a new module
-- DB functions: `Nebu.Room.DB.fetch_events_since/3`, `Nebu.Room.DB.get_event_timestamp/1` — extend existing file
-- Go handler: extend `sync.go` — no new handler file needed; new test file `sync_delta_test.go` for clarity
+- Elixir module: `Nebu.EventDispatcher.Server` - extend, not a new module
+- DB functions: `Nebu.Room.DB.fetch_events_since/3`, `Nebu.Room.DB.get_event_timestamp/1` - extend existing file
+- Go handler: extend `sync.go` - no new handler file needed; new test file `sync_delta_test.go` for clarity
 - Do NOT create a separate `Nebu.Sync.DeltaServer` or any new OTP app
 
 ### `make proto` Must Run After Proto Edit
@@ -638,9 +638,9 @@ This story adds NO new GenServer state. The long-poll wait uses a regular `recei
 
 ### Existing Tests Must Not Break
 
-- `TestGetSync_IncrementalSync_Stub` in `sync_test.go` asserts `501` for `?since=...`. This story replaces the `501` stub. **Delete or update** this test case — it will fail after this story's implementation. The new behavior for `?since=...` is covered by `sync_delta_test.go`.
-- All existing 4-14 Go tests (`TestGetSync_InitialSync_HappyPath`, etc.) must continue to pass — the `GetSync` method for no-`since` is unchanged.
-- All Elixir tests from Story 4-14 (`sync_test.exs`) must continue to pass — `get_initial_sync/2` behavior is unchanged.
+- `TestGetSync_IncrementalSync_Stub` in `sync_test.go` asserts `501` for `?since=...`. This story replaces the `501` stub. **Delete or update** this test case - it will fail after this story's implementation. The new behavior for `?since=...` is covered by `sync_delta_test.go`.
+- All existing 4-14 Go tests (`TestGetSync_InitialSync_HappyPath`, etc.) must continue to pass - the `GetSync` method for no-`since` is unchanged.
+- All Elixir tests from Story 4-14 (`sync_test.exs`) must continue to pass - `get_initial_sync/2` behavior is unchanged.
 
 ### String Keys and Proto Field Names
 
@@ -654,22 +654,22 @@ Follow established codebase convention:
 Both initial and incremental sync responses must:
 - Set `Content-Type: application/json`
 - Use `json.NewEncoder(w).Encode(syncResp)` (consistent with initial sync)
-- Never return `null` for `rooms.join`, `rooms.invite`, `rooms.leave` — always initialize as empty maps
+- Never return `null` for `rooms.join`, `rooms.invite`, `rooms.leave` - always initialize as empty maps
 
 ---
 
 ## Dependencies
 
-- Story 4-6 (done): `Nebu.Session.PgStore.get_since_token/1` and `persist_since_token/3` — directly called; `sync_tokens` table exists (migration `000011`)
-- Story 4-8 (done): `:pg` process group subscription pattern — reuse `subscribe_to_all_rooms` approach; note that EventBus subscribes to all rooms globally, while `get_sync_delta` subscribes only to the user's rooms
-- Story 4-14 (review): `GetInitialSync` gRPC RPC; `GetSyncHandler` struct; all JSON response structs in `sync.go`; `get_initial_sync/2` in EventDispatcher; `fetch_events/4` in `Nebu.Room.DB`; `get_rooms_for_user/1` in `Nebu.Room.DB` — all reused here
-- Story 4-16 (backlog): `message_buffer` — Story 4-15 does NOT depend on the message_buffer. Long-polling is implemented directly via `:pg` groups. The message_buffer (Story 4-16) will wrap the sync handler in a later story for burst absorption. Do NOT wait for or implement 4-16 logic here.
+- Story 4-6 (done): `Nebu.Session.PgStore.get_since_token/1` and `persist_since_token/3` - directly called; `sync_tokens` table exists (migration `000011`)
+- Story 4-8 (done): `:pg` process group subscription pattern - reuse `subscribe_to_all_rooms` approach; note that EventBus subscribes to all rooms globally, while `get_sync_delta` subscribes only to the user's rooms
+- Story 4-14 (review): `GetInitialSync` gRPC RPC; `GetSyncHandler` struct; all JSON response structs in `sync.go`; `get_initial_sync/2` in EventDispatcher; `fetch_events/4` in `Nebu.Room.DB`; `get_rooms_for_user/1` in `Nebu.Room.DB` - all reused here
+- Story 4-16 (backlog): `message_buffer` - Story 4-15 does NOT depend on the message_buffer. Long-polling is implemented directly via `:pg` groups. The message_buffer (Story 4-16) will wrap the sync handler in a later story for burst absorption. Do NOT wait for or implement 4-16 logic here.
 
 ---
 
 ## Story Completion Status
 
-Ultimate context engine analysis completed — comprehensive developer guide created.
+Ultimate context engine analysis completed - comprehensive developer guide created.
 
 ---
 
@@ -677,32 +677,32 @@ Ultimate context engine analysis completed — comprehensive developer guide cre
 
 ### Implementation Notes
 
-**2026-04-03 — Implementation by Amelia (Dev Agent)**
+**2026-04-03 - Implementation by Amelia (Dev Agent)**
 
 All acceptance criteria satisfied. `make test-unit-go` and `make test-unit-elixir` both pass with 0 failures.
 
 **Key implementation decisions:**
 
-1. **Proto already updated** — `GetSyncDeltaRequest`, `GetSyncDeltaResponse`, and `rpc GetSyncDelta` were already in `proto/core.proto` from the story setup. Ran `make proto` to regenerate stubs.
+1. **Proto already updated** - `GetSyncDeltaRequest`, `GetSyncDeltaResponse`, and `rpc GetSyncDelta` were already in `proto/core.proto` from the story setup. Ran `make proto` to regenerate stubs.
 
-2. **Elixir gRPC pb file gap** — `core_grpc.pb.ex` was missing `SetPowerLevels`, `GetInitialSync`, and `GetSyncDelta` RPCs (protoc-gen-elixir had only regenerated partial content). Manually added missing RPCs to `core/apps/event_dispatcher/lib/pb/core_grpc.pb.ex`.
+2. **Elixir gRPC pb file gap** - `core_grpc.pb.ex` was missing `SetPowerLevels`, `GetInitialSync`, and `GetSyncDelta` RPCs (protoc-gen-elixir had only regenerated partial content). Manually added missing RPCs to `core/apps/event_dispatcher/lib/pb/core_grpc.pb.ex`.
 
-3. **`get_sync_delta/2` uses Task for `:pg` isolation** — The handler spawns the incremental sync logic in a short-lived `Task.async/await`. The Task process joins/leaves `:pg` groups. When the Task exits, OTP auto-removes its PID from all `:pg` groups. This satisfies the AT#4 test assertion that no live handler PIDs remain in the group after the function returns.
+3. **`get_sync_delta/2` uses Task for `:pg` isolation** - The handler spawns the incremental sync logic in a short-lived `Task.async/await`. The Task process joins/leaves `:pg` groups. When the Task exits, OTP auto-removes its PID from all `:pg` groups. This satisfies the AT#4 test assertion that no live handler PIDs remain in the group after the function returns.
 
-4. **Room.Server no longer joins its own `:pg` group** — Removed `Room.Server.init`'s `:pg.join("room:#{room_id}", self())`. The Room GenServer only BROADCASTS to group members; it never needed to receive its own broadcasts (`handle_info({:new_event, _}, state)` does nothing). Removing this join ensures the `:pg` group is clean for the sync handler's cleanup test.
+4. **Room.Server no longer joins its own `:pg` group** - Removed `Room.Server.init`'s `:pg.join("room:#{room_id}", self())`. The Room GenServer only BROADCASTS to group members; it never needed to receive its own broadcasts (`handle_info({:new_event, _}, state)` does nothing). Removing this join ensures the `:pg` group is clean for the sync handler's cleanup test.
 
-5. **Go side was already fully implemented** — `sync.go` already had `GetSyncCoreClient` with `GetSyncDelta`, `handleIncrementalSync`, `buildJoinedRooms`, and timeout clamping. `client.go` and `stream_test.go` already had the delta stubs.
+5. **Go side was already fully implemented** - `sync.go` already had `GetSyncCoreClient` with `GetSyncDelta`, `handleIncrementalSync`, `buildJoinedRooms`, and timeout clamping. `client.go` and `stream_test.go` already had the delta stubs.
 
 ### Files Modified
 
-- `core/apps/event_dispatcher/lib/pb/core_grpc.pb.ex` — Added `SetPowerLevels`, `GetInitialSync`, `GetSyncDelta` RPCs
-- `core/apps/event_dispatcher/lib/pb/core.pb.ex` — Regenerated by `make proto` (added GetSyncDeltaRequest, GetSyncDeltaResponse)
-- `gateway/internal/grpc/pb/core.pb.go` — Regenerated by `make proto`
-- `gateway/internal/grpc/pb/core_grpc.pb.go` — Regenerated by `make proto`
-- `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` — Implemented `get_sync_delta/2` + `do_incremental_sync/3` helpers
-- `core/apps/room_manager/lib/nebu/room/server.ex` — Removed `Room.Server`'s own `:pg.join` from `init/1`
-- `_bmad-output/implementation-artifacts/sprint-status.yaml` — Updated 4-15 to `review`
+- `core/apps/event_dispatcher/lib/pb/core_grpc.pb.ex` - Added `SetPowerLevels`, `GetInitialSync`, `GetSyncDelta` RPCs
+- `core/apps/event_dispatcher/lib/pb/core.pb.ex` - Regenerated by `make proto` (added GetSyncDeltaRequest, GetSyncDeltaResponse)
+- `gateway/internal/grpc/pb/core.pb.go` - Regenerated by `make proto`
+- `gateway/internal/grpc/pb/core_grpc.pb.go` - Regenerated by `make proto`
+- `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` - Implemented `get_sync_delta/2` + `do_incremental_sync/3` helpers
+- `core/apps/room_manager/lib/nebu/room/server.ex` - Removed `Room.Server`'s own `:pg.join` from `init/1`
+- `_bmad-output/implementation-artifacts/sprint-status.yaml` - Updated 4-15 to `review`
 
 ### Change Log
 
-- 2026-04-03: Implemented Story 4-15 — GET /sync incremental sync with long-polling via `:pg` groups and new `GetSyncDelta` gRPC RPC. All 72 Elixir + all Go matrix/grpc tests pass.
+- 2026-04-03: Implemented Story 4-15 - GET /sync incremental sync with long-polling via `:pg` groups and new `GetSyncDelta` gRPC RPC. All 72 Elixir + all Go matrix/grpc tests pass.

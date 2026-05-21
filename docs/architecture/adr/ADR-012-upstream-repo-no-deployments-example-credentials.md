@@ -1,8 +1,8 @@
-# ADR-012: Upstream Repo Contains Example-Only Credentials — No Official Deployments
+# ADR-012: Upstream Repo Contains Example-Only Credentials - No Official Deployments
 
 ## Status
 
-Accepted — 2026-05-04
+Accepted - 2026-05-04
 
 ## Context
 
@@ -11,12 +11,12 @@ CI pipelines contain credentials for test infrastructure (PostgreSQL, Dex OIDC, 
 
 Two approaches exist for managing these CI credentials:
 
-**Option A — GitLab CI/CD masked variables:**
+**Option A - GitLab CI/CD masked variables:**
 Credentials are removed from YAML and stored in project settings (masked, not visible in logs).
 Requires manual variable setup per project; contributors without project access cannot trigger CI;
 forks lose the variables and cannot run integration tests out of the box.
 
-**Option B — Example-only credentials in YAML, no-deployment policy:**
+**Option B - Example-only credentials in YAML, no-deployment policy:**
 Credentials remain in YAML but are explicitly scoped to CI-only infrastructure (postgres sidecar,
 dex sidecar) that is never reachable from outside the CI pod. The upstream repo declares a
 no-deployment policy: it is a reference implementation, not an operational system.
@@ -33,7 +33,7 @@ stacks that are not reachable from outside the process boundary.
 Policy:
 - No production or staging deployments are made from the upstream `innoq/nebu-chat` repository.
 - Operators deploying Nebu must fork the repository and replace all credentials with their own.
-- CI uses `POSTGRES_HOST_AUTH_METHOD: trust` for the postgres sidecar — no static password needed.
+- CI uses `POSTGRES_HOST_AUTH_METHOD: trust` for the postgres sidecar - no static password needed.
 - The OIDC client secret, gRPC PSK, and other CI values carry a `ci-example-*` naming convention
   to signal their example-only status.
 

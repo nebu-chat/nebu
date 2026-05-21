@@ -1,4 +1,4 @@
-# Story 4.28: Element Web Browser E2E — Gap Coverage (Stories 4-25/26/27 + Patterns)
+# Story 4.28: Element Web Browser E2E - Gap Coverage (Stories 4-25/26/27 + Patterns)
 
 Status: done
 
@@ -24,7 +24,7 @@ Patterns adapted from:
 
 ## Acceptance Criteria
 
-1. New test "Reconnect after reload — no sync ERROR loop" in `element_e2e.spec.ts`:
+1. New test "Reconnect after reload - no sync ERROR loop" in `element_e2e.spec.ts`:
    - SSO login → create room → page reload → Element reconnects
    - Zero "Getting filter failed" console errors after reload
    - Room list visible (sync healthy)
@@ -55,6 +55,6 @@ These ARE the acceptance tests (browser E2E = the story itself).
 
 - File: `e2e/tests/element_e2e.spec.ts` (append-only, new `test.describe` block at end)
 - Pattern: API-setup + browser-verify (Element Web docs best practice: "minimize UI driving for setup")
-- No Synapse-specific fixtures used — SSO via Dex, direct HTTP calls for room setup
+- No Synapse-specific fixtures used - SSO via Dex, direct HTTP calls for room setup
 - `test.skip` guards replace `homeserver` fixture from Element Web test suite
 - Unused `Request` type import removed

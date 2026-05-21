@@ -5,7 +5,7 @@ story: 17
 security_review: not-needed
 ---
 
-# Story 9.17: GAP-9-002 — Admin Rooms PATCH max_members and visibility Coverage
+# Story 9.17: GAP-9-002 - Admin Rooms PATCH max_members and visibility Coverage
 
 Status: done
 
@@ -15,7 +15,7 @@ As a **quality engineer**,
 I want Go unit tests for `POST /admin/rooms/{roomId}/settings` covering the `max_members` and `visibility` fields,
 so that AC-9.3-3 has full test coverage and the PATCH handler's validation logic is regression-protected.
 
-**Size:** XS — pure test addition, zero production code changes.
+**Size:** XS - pure test addition, zero production code changes.
 
 ---
 
@@ -49,38 +49,38 @@ This reflects the real-world form POST an admin would send from the UI detail pa
 
 ## Acceptance Criteria
 
-**AC1 — TestUpdateRoomMaxMembers (happy path):**
+**AC1 - TestUpdateRoomMaxMembers (happy path):**
 - `POST /admin/rooms/room-001/settings` with `max_members=50` returns HTTP 302.
 - Location header contains `/admin/rooms/room-001`.
 - Location header contains `flash=Settings+updated`.
 
-**AC2 — TestUpdateRoomMaxMembersZero (zero = no limit):**
+**AC2 - TestUpdateRoomMaxMembersZero (zero = no limit):**
 - `POST /admin/rooms/room-001/settings` with `max_members=0` returns HTTP 302.
-- Handler treats `0` as "no limit" — no 400 error.
+- Handler treats `0` as "no limit" - no 400 error.
 
-**AC3 — TestUpdateRoomMaxMembersNegative (invalid):**
+**AC3 - TestUpdateRoomMaxMembersNegative (invalid):**
 - `POST /admin/rooms/room-001/settings` with `max_members=-1` returns HTTP 400.
 - Response body contains the validation message.
 
-**AC4 — TestUpdateRoomMaxMembersInvalid (non-numeric string):**
+**AC4 - TestUpdateRoomMaxMembersInvalid (non-numeric string):**
 - `POST /admin/rooms/room-001/settings` with `max_members=abc` returns HTTP 400.
 
-**AC5 — TestUpdateRoomMaxMembersTooLarge (over 1_000_000):**
+**AC5 - TestUpdateRoomMaxMembersTooLarge (over 1_000_000):**
 - `POST /admin/rooms/room-001/settings` with `max_members=1000001` returns HTTP 400.
 
-**AC6 — TestUpdateRoomMaxMembersAtLimit (boundary: exactly 1_000_000):**
+**AC6 - TestUpdateRoomMaxMembersAtLimit (boundary: exactly 1_000_000):**
 - `POST /admin/rooms/room-001/settings` with `max_members=1000000` returns HTTP 302 (valid boundary).
 
-**AC7 — TestUpdateRoomSettingsWithVisibility (visibility field ignored, not breaking):**
+**AC7 - TestUpdateRoomSettingsWithVisibility (visibility field ignored, not breaking):**
 - `POST /admin/rooms/room-001/settings` with `max_members=50` AND `visibility=private` returns HTTP 302.
 - Location contains `flash=Settings+updated`.
 - Confirms visibility field is silently accepted without error.
 
-**AC8 — TestUpdateRoomSettingsEmptyMaxMembers (empty = no-limit, no-op):**
+**AC8 - TestUpdateRoomSettingsEmptyMaxMembers (empty = no-limit, no-op):**
 - `POST /admin/rooms/room-001/settings` with `max_members=` (empty string) returns HTTP 302.
 - Confirms empty max_members is not a validation error.
 
-**AC9 — No production code changed:**
+**AC9 - No production code changed:**
 - `gateway/internal/admin/rooms.go` is NOT modified.
 - No other production files changed.
 
@@ -90,42 +90,42 @@ This reflects the real-world form POST an admin would send from the UI detail pa
 
 ### Tests written FIRST (before implementation code):
 
-1. **TestUpdateRoomMaxMembers** — Go unit test (`httptest`)
+1. **TestUpdateRoomMaxMembers** - Go unit test (`httptest`)
    - Given: `RoomsHandler` with nil core (stub path)
    - When: POST `/admin/rooms/room-001/settings` with body `max_members=50`
    - Then: HTTP 302, Location `/admin/rooms/room-001?flash=Settings+updated`
 
-2. **TestUpdateRoomMaxMembersZero** — Go unit test
+2. **TestUpdateRoomMaxMembersZero** - Go unit test
    - Given: same setup
    - When: POST with `max_members=0`
    - Then: HTTP 302 (zero is valid, means no limit)
 
-3. **TestUpdateRoomMaxMembersNegative** — Go unit test
+3. **TestUpdateRoomMaxMembersNegative** - Go unit test
    - Given: same setup
    - When: POST with `max_members=-1`
    - Then: HTTP 400
 
-4. **TestUpdateRoomMaxMembersInvalid** — Go unit test
+4. **TestUpdateRoomMaxMembersInvalid** - Go unit test
    - Given: same setup
    - When: POST with `max_members=abc`
    - Then: HTTP 400
 
-5. **TestUpdateRoomMaxMembersTooLarge** — Go unit test
+5. **TestUpdateRoomMaxMembersTooLarge** - Go unit test
    - Given: same setup
    - When: POST with `max_members=1000001`
    - Then: HTTP 400
 
-6. **TestUpdateRoomMaxMembersAtLimit** — Go unit test
+6. **TestUpdateRoomMaxMembersAtLimit** - Go unit test
    - Given: same setup
    - When: POST with `max_members=1000000`
    - Then: HTTP 302 (boundary: exactly at limit is valid)
 
-7. **TestUpdateRoomSettingsWithVisibility** — Go unit test
+7. **TestUpdateRoomSettingsWithVisibility** - Go unit test
    - Given: same setup
    - When: POST with `max_members=50` AND `visibility=private`
    - Then: HTTP 302, flash=Settings+updated (visibility silently ignored)
 
-8. **TestUpdateRoomSettingsEmptyMaxMembers** — Go unit test
+8. **TestUpdateRoomSettingsEmptyMaxMembers** - Go unit test
    - Given: same setup
    - When: POST with empty `max_members` string
    - Then: HTTP 302 (empty = 0 = no limit)
@@ -134,7 +134,7 @@ This reflects the real-world form POST an admin would send from the UI detail pa
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — Add 8 unit tests to `gateway/internal/admin/rooms_detail_test.go`** (AC: #1–#9)
+- [ ] **Task 1 - Add 8 unit tests to `gateway/internal/admin/rooms_detail_test.go`** (AC: #1–#9)
   - [ ] Add `TestUpdateRoomMaxMembers` (AC1)
   - [ ] Add `TestUpdateRoomMaxMembersZero` (AC2)
   - [ ] Add `TestUpdateRoomMaxMembersNegative` (AC3)
@@ -144,7 +144,7 @@ This reflects the real-world form POST an admin would send from the UI detail pa
   - [ ] Add `TestUpdateRoomSettingsWithVisibility` (AC7)
   - [ ] Add `TestUpdateRoomSettingsEmptyMaxMembers` (AC8)
 
-- [ ] **Task 2 — Verify no production code changes** (AC9)
+- [ ] **Task 2 - Verify no production code changes** (AC9)
   - [ ] Confirm `rooms.go` is unmodified after test run
   - [ ] Run `make test-unit-go` to confirm all tests pass (existing + new)
 
@@ -156,7 +156,7 @@ This reflects the real-world form POST an admin would send from the UI detail pa
 
 | File | Change type |
 |------|-------------|
-| `gateway/internal/admin/rooms_detail_test.go` | MODIFY — append 8 new test functions |
+| `gateway/internal/admin/rooms_detail_test.go` | MODIFY - append 8 new test functions |
 
 No other files. No new files. No production code.
 
@@ -177,7 +177,7 @@ In unit tests, the mux is set up directly without CSRF/session middleware (ident
 
 Follow the exact pattern used by the existing tests in `rooms_detail_test.go`. Each test:
 1. Creates `NewTemplateHandler()` (ignores error for brevity but fatals if err != nil)
-2. Creates `NewRoomsHandler(tmpl)` — nil core triggers stub/no-op path
+2. Creates `NewRoomsHandler(tmpl)` - nil core triggers stub/no-op path
 3. Registers `mux.HandleFunc("POST /admin/rooms/{roomId}/settings", h.UpdateRoomSettingsHandler)`
 4. Builds a `url.Values{}` form body
 5. POSTs via `httptest.NewRequest` + `httptest.NewRecorder`
@@ -256,9 +256,9 @@ form.Set("max_members", "50")
 form.Set("visibility", "private")
 ```
 
-The handler ignores `visibility` completely (not in the proto; not read from form). The test just confirms the response is still 302 with `flash=Settings+updated` — no 400, no crash.
+The handler ignores `visibility` completely (not in the proto; not read from form). The test just confirms the response is still 302 with `flash=Settings+updated` - no 400, no crash.
 
-### Handler validation boundaries (source truth — rooms.go line 356–362)
+### Handler validation boundaries (source truth - rooms.go line 356–362)
 
 ```go
 if maxMembersStr != "" {
@@ -286,10 +286,10 @@ if maxMembersStr != "" {
 
 On the nil-core path, `UpdateRoomSettingsHandler` does **not** mutate `stubRooms`. The comment on line 382 confirms:
 ```go
-// stub fallback (nil client, unit-test path): no-op — max_members has no stub field to mutate
+// stub fallback (nil client, unit-test path): no-op - max_members has no stub field to mutate
 ```
 
-Therefore, no `t.Cleanup()` is needed — unlike `TestUpdateRoomName` and `TestArchiveRoom` which do require cleanup because they mutate stub data.
+Therefore, no `t.Cleanup()` is needed - unlike `TestUpdateRoomName` and `TestArchiveRoom` which do require cleanup because they mutate stub data.
 
 ### Imports already present in rooms_detail_test.go
 
@@ -301,7 +301,7 @@ Follow the existing comment convention for AC attribution:
 ```go
 // TestUpdateRoomMaxMembers verifies that POST /admin/rooms/room-001/settings with max_members=50
 // returns HTTP 302 with flash=Settings+updated.
-// AC: 9.3-3 (TestUpdateRoomMaxMembers — Story 9.17 GAP-9-002)
+// AC: 9.3-3 (TestUpdateRoomMaxMembers - Story 9.17 GAP-9-002)
 ```
 
 ### Running the tests
@@ -335,15 +335,15 @@ claude-sonnet-4-6
 
 Reviewer: bmad-code-review (Auto-Mode); Test-Review-Findings vom bmad-testarch-test-review reingenommen.
 
-- [x] [Review][Patch] MINOR-001 — `t.Parallel()` in alle 8 neuen Tests ergänzt [`gateway/internal/admin/rooms_detail_test.go`]
-- [x] [Review][Patch] MINOR-002 — Magic Number `1_000_000` durch benannte Konstante `maxMembersLimit` ersetzt; Tests `TestUpdateRoomMaxMembersTooLarge` und `TestUpdateRoomMaxMembersAtLimit` nutzen `strconv.Itoa(maxMembersLimit[+1])` statt String-Literalen [`gateway/internal/admin/rooms_detail_test.go`]
-- [x] [Review][Dismiss] INFO-001 — `t.Run` Subtest-Grouping nicht eingeführt (konsistent mit existierendem Stil im File, kein AC-Verstoß)
-- [x] [Review][Dismiss] INFO-002 — 400-Response-Body in `TestUpdateRoomMaxMembersNegative` nicht zusätzlich verifiziert (optional, nicht im AC)
-- [x] [Review][Dismiss] INFO/EDGE-001 — Float `"1.5"`-Test nicht ergänzt (in Handler-Doku-Tabelle erwähnt, aber nicht in AC1–AC8)
+- [x] [Review][Patch] MINOR-001 - `t.Parallel()` in alle 8 neuen Tests ergänzt [`gateway/internal/admin/rooms_detail_test.go`]
+- [x] [Review][Patch] MINOR-002 - Magic Number `1_000_000` durch benannte Konstante `maxMembersLimit` ersetzt; Tests `TestUpdateRoomMaxMembersTooLarge` und `TestUpdateRoomMaxMembersAtLimit` nutzen `strconv.Itoa(maxMembersLimit[+1])` statt String-Literalen [`gateway/internal/admin/rooms_detail_test.go`]
+- [x] [Review][Dismiss] INFO-001 - `t.Run` Subtest-Grouping nicht eingeführt (konsistent mit existierendem Stil im File, kein AC-Verstoß)
+- [x] [Review][Dismiss] INFO-002 - 400-Response-Body in `TestUpdateRoomMaxMembersNegative` nicht zusätzlich verifiziert (optional, nicht im AC)
+- [x] [Review][Dismiss] INFO/EDGE-001 - Float `"1.5"`-Test nicht ergänzt (in Handler-Doku-Tabelle erwähnt, aber nicht in AC1–AC8)
 
 ### Verifikation
 
-- `go vet ./internal/admin/` — clean
-- `go test ./internal/admin/ -run "TestUpdateRoom(MaxMembers|Settings)" -v` — 8/8 neue Tests pass + Regression `TestUpdateRoomName` pass
-- `go test ./internal/admin/` — 406/406 pass, keine Regression
+- `go vet ./internal/admin/` - clean
+- `go test ./internal/admin/ -run "TestUpdateRoom(MaxMembers|Settings)" -v` - 8/8 neue Tests pass + Regression `TestUpdateRoomName` pass
+- `go test ./internal/admin/` - 406/406 pass, keine Regression
 - `git diff --staged --name-only` bestätigt AC9: nur `rooms_detail_test.go` + Story- und ATDD-Doku staged, `gateway/internal/admin/rooms.go` unverändert

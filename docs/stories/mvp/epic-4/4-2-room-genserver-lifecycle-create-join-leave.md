@@ -1,4 +1,4 @@
-# Story 4.2: Room GenServer — Lifecycle (create, join, leave)
+# Story 4.2: Room GenServer - Lifecycle (create, join, leave)
 
 Status: done
 
@@ -20,7 +20,7 @@ so that Rooms can be created, users can join and leave, and the current member l
 5. `mix test --warnings-as-errors` passes. Unit tests cover:
    - `join/2` idempotency: second join returns `{:error, :already_member}`
    - `leave/2` from non-member returns `{:error, :not_member}`
-   - State recovery from DB on `init/1` (start a room, join user, stop room, restart — member still present)
+   - State recovery from DB on `init/1` (start a room, join user, stop room, restart - member still present)
 6. A new SQL migration (`000009_rooms.up.sql`) creates the `rooms` and `room_members` tables.
 7. `Nebu.Room.RoomSupervisor.start_room/1` still works (no regression to Story 4-1).
 
@@ -47,9 +47,9 @@ so that Rooms can be created, users can join and leave, and the current member l
   - [x] DB errors → return `{:error, reason}`, do NOT update MapSet
 
 - [x] Add public API functions (convenience wrappers) to `Nebu.Room.Server`
-  - [x] `get_state(room_id)` — `GenServer.call(via(room_id), :get_state)`
-  - [x] `join(room_id, user_id)` — `GenServer.call(via(room_id), {:join, user_id})`
-  - [x] `leave(room_id, user_id)` — `GenServer.call(via(room_id), {:leave, user_id})`
+  - [x] `get_state(room_id)` - `GenServer.call(via(room_id), :get_state)`
+  - [x] `join(room_id, user_id)` - `GenServer.call(via(room_id), {:join, user_id})`
+  - [x] `leave(room_id, user_id)` - `GenServer.call(via(room_id), {:leave, user_id})`
   - [x] `defp via(room_id)` helper: `{:via, Horde.Registry, {Nebu.Room.Registry, room_id}}`
 
 - [x] Write unit tests (AC: #5, #7)
@@ -71,7 +71,7 @@ so that Rooms can be created, users can join and leave, and the current member l
 
 ### Critical: Correct Module Names (From Story 4-1 Learning)
 
-The epics.md acceptance criteria use `RoomManager.RoomServer` — this is **WRONG** for this codebase.
+The epics.md acceptance criteria use `RoomManager.RoomServer` - this is **WRONG** for this codebase.
 
 All modules follow `Nebu.{Domain}.{Name}` pattern. Use:
 
@@ -81,7 +81,7 @@ All modules follow `Nebu.{Domain}.{Name}` pattern. Use:
 | `RoomManager.Registry` | `Nebu.Room.Registry` |
 | `RoomManager.Supervisor` | `Nebu.Room.HordeSupervisor` |
 
-**File to modify:** `core/apps/room_manager/lib/nebu/room/server.ex` — **do NOT create a new file, replace the stub**.
+**File to modify:** `core/apps/room_manager/lib/nebu/room/server.ex` - **do NOT create a new file, replace the stub**.
 
 ### State Design
 
@@ -90,16 +90,16 @@ All modules follow `Nebu.{Domain}.{Name}` pattern. Use:
 %{
   room_id: "!abc123:server.name",
   members: MapSet.new(["@user1:server.name"]),
-  power_levels: %{},        # empty map — Story 4-13 fills this
+  power_levels: %{},        # empty map - Story 4-13 fills this
   created_at: ~U[2026-04-02 12:00:00Z]  # DateTime.utc_now() on first creation
 }
 ```
 
-`power_levels` is initialized as `%{}` — power level enforcement is Story 4-13. Do not implement now.
+`power_levels` is initialized as `%{}` - power level enforcement is Story 4-13. Do not implement now.
 
 ### DB Access Pattern
 
-This project uses raw SQL via `Ecto.Adapters.SQL.query/3` — NOT Ecto schemas or changesets.
+This project uses raw SQL via `Ecto.Adapters.SQL.query/3` - NOT Ecto schemas or changesets.
 
 Pattern established in Story 2-12 (`Nebu.Session.UserStore.Postgres`):
 
@@ -121,10 +121,10 @@ end
 Per architecture enforcement rule #1:
 
 ```elixir
-# ✅ Correct — all PostgreSQL timestamps are BIGINT milliseconds
+# ✅ Correct - all PostgreSQL timestamps are BIGINT milliseconds
 now_ms = Nebu.DB.Helpers.now_ms()   # = System.system_time(:millisecond)
 
-# ❌ Wrong — never TIMESTAMPTZ or TEXT in PostgreSQL
+# ❌ Wrong - never TIMESTAMPTZ or TEXT in PostgreSQL
 ```
 
 `created_at` in **in-memory state** is `DateTime.utc_now()` (for GenServer use).
@@ -166,7 +166,7 @@ DROP TABLE IF EXISTS room_members;
 DROP TABLE IF EXISTS rooms;
 ```
 
-Migration goes in `gateway/migrations/` — Go is the sole schema owner. Elixir has **no schema write access**.
+Migration goes in `gateway/migrations/` - Go is the sole schema owner. Elixir has **no schema write access**.
 
 ### `init/1` Logic
 
@@ -224,19 +224,19 @@ For `leave`: If `UPDATE` returns 0 rows, user was not an active member → retur
 
 ### Test Strategy (No Real DB Required)
 
-Story 4-1 tests used the app-started Horde processes. Story 4-2 adds DB calls — the unit tests must NOT require a live PostgreSQL.
+Story 4-1 tests used the app-started Horde processes. Story 4-2 adds DB calls - the unit tests must NOT require a live PostgreSQL.
 
 **Pattern: Dependency injection via module attribute or application config:**
 
 ```elixir
-# In server.ex — configurable DB module
+# In server.ex - configurable DB module
 @db_module Application.compile_env(:room_manager, :db_module, Nebu.Room.DB)
 
-# In test — inject fake
+# In test - inject fake
 Application.put_env(:room_manager, :db_module, Nebu.Room.FakeDB)
 ```
 
-Or use Mox (already in deps if session_manager tests use it — check `core/mix.lock`).
+Or use Mox (already in deps if session_manager tests use it - check `core/mix.lock`).
 
 **Alternative (simpler):** Use `start_supervised` with a mock DB module and test the GenServer logic without real SQL. The DB SQL itself can be tested via separate integration tests.
 
@@ -252,7 +252,7 @@ defp via(room_id), do: {:via, Horde.Registry, {Nebu.Room.Registry, room_id}}
 def join(room_id, user_id), do: GenServer.call(via(room_id), {:join, user_id})
 ```
 
-Always use `via/1` — never use `GenServer.call(pid, ...)` directly in public API.
+Always use `via/1` - never use `GenServer.call(pid, ...)` directly in public API.
 
 ### DB init_room SQL
 
@@ -313,7 +313,7 @@ gateway/migrations/
 make test-unit-elixir   # runs: mix test in container with --warnings-as-errors
 ```
 
-All tests run inside Docker containers — no local Elixir install needed.
+All tests run inside Docker containers - no local Elixir install needed.
 
 ---
 
@@ -323,24 +323,24 @@ All tests run inside Docker containers — no local Elixir install needed.
 
 1. **Horde resolves to 0.10.0** (semver compatible with `~> 0.9`). Use `Horde.DynamicSupervisor` and `Horde.Registry` as already configured.
 
-2. **`Horde.Registry.lookup/2` returns `[{pid, value}]` list** — empty list = not found. This is already handled in `room_supervisor.ex`.
+2. **`Horde.Registry.lookup/2` returns `[{pid, value}]` list** - empty list = not found. This is already handled in `room_supervisor.ex`.
 
-3. **`child_spec/1` must override `id`** — `{__MODULE__, room_id}` not `__MODULE__`. Already done in stub. Keep this.
+3. **`child_spec/1` must override `id`** - `{__MODULE__, room_id}` not `__MODULE__`. Already done in stub. Keep this.
 
 4. **Test isolation:** Use `on_exit` + `GenServer.stop` to clean up Room processes after tests. The existing pattern in `nebu_room_test.exs` with `start_and_track/1` is correct. Extend it.
 
-5. **`async: false` required** — Horde uses global named processes. All room tests must use `async: false`.
+5. **`async: false` required** - Horde uses global named processes. All room tests must use `async: false`.
 
 6. **App-started Horde:** The umbrella test runner starts `Nebu.Room.Application`, which starts `Horde.Registry` and `Horde.DynamicSupervisor`. Tests run against these. Do NOT `start_supervised` them again.
 
-7. **Module naming:** `Nebu.Room.HordeSupervisor` for the `Horde.DynamicSupervisor` (not `Nebu.Room.Supervisor` — that's the OTP root supervisor).
+7. **Module naming:** `Nebu.Room.HordeSupervisor` for the `Horde.DynamicSupervisor` (not `Nebu.Room.Supervisor` - that's the OTP root supervisor).
 
 **Files modified/created in Story 4-1:**
-- `core/apps/room_manager/lib/nebu/room/application.ex` — has Horde.Registry + Horde.DynamicSupervisor
-- `core/apps/room_manager/lib/nebu/room/room_supervisor.ex` — has start_room/1 + lookup_room/1
-- `core/apps/room_manager/lib/nebu/room/manager.ex` — delegates to RoomSupervisor
-- `core/apps/room_manager/lib/nebu/room/server.ex` — **stub** to be replaced in this story
-- `core/apps/room_manager/test/nebu_room_test.exs` — 6 tests, all passing
+- `core/apps/room_manager/lib/nebu/room/application.ex` - has Horde.Registry + Horde.DynamicSupervisor
+- `core/apps/room_manager/lib/nebu/room/room_supervisor.ex` - has start_room/1 + lookup_room/1
+- `core/apps/room_manager/lib/nebu/room/manager.ex` - delegates to RoomSupervisor
+- `core/apps/room_manager/lib/nebu/room/server.ex` - **stub** to be replaced in this story
+- `core/apps/room_manager/test/nebu_room_test.exs` - 6 tests, all passing
 
 ---
 
@@ -352,11 +352,11 @@ All tests run inside Docker containers — no local Elixir install needed.
 | `Nebu.{Domain}.{Name}` module naming | `architecture.md#Naming Conventions > Elixir` |
 | Raw SQL via `Ecto.Adapters.SQL.query/3` | `session_manager/lib/nebu/session/user_store/postgres.ex` |
 | `Nebu.Repo` as the Ecto repo | `nebu_db/lib/nebu/repo.ex` |
-| Horde via-tuple registration | `architecture.md#G3 — Room-Autorität: Horde` |
-| Let it crash — no try/rescue in GenServer | `CLAUDE.md#Elixir Conventions` |
+| Horde via-tuple registration | `architecture.md#G3 - Room-Autorität: Horde` |
+| Let it crash - no try/rescue in GenServer | `CLAUDE.md#Elixir Conventions` |
 | DB schema ownership by Go Gateway migrations | `architecture.md#Resolved: Migrations` |
 | Tagged tuples `{:ok, result}` / `{:error, reason}` | `architecture.md#Enforcement rule #6` |
-| Go is sole schema owner — Elixir read-only via Repo | `architecture.md#Resolved: Migrations` |
+| Go is sole schema owner - Elixir read-only via Repo | `architecture.md#Resolved: Migrations` |
 | `snake_case` plural table names | `architecture.md#Naming Conventions > PostgreSQL` |
 
 ---
@@ -368,7 +368,7 @@ All tests run inside Docker containers — no local Elixir install needed.
 1. Created `gateway/migrations/000009_rooms.up.sql` with `rooms` and `room_members` tables (BIGINT timestamps, FK constraints, visibility CHECK, indexes).
 2. Created `gateway/migrations/000009_rooms.down.sql` (DROP in FK-safe order: members first, then rooms).
 3. Added `{:nebu_db, in_umbrella: true}` to `room_manager/mix.exs` deps.
-4. Created `core/apps/room_manager/lib/nebu/room/db.ex` — PostgreSQL persistence layer with raw SQL (load_members, insert_room, insert_member, delete_member). Separate module for testability.
+4. Created `core/apps/room_manager/lib/nebu/room/db.ex` - PostgreSQL persistence layer with raw SQL (load_members, insert_room, insert_member, delete_member). Separate module for testability.
 5. Replaced `Nebu.Room.Server` stub with full lifecycle GenServer. DB module resolved at runtime via `Application.get_env/3` (not compile_env) to allow test injection.
 6. Updated `nebu_room_test.exs` with 10 new lifecycle tests + ETS-backed FakeDB + FailingWriteDB for fail-safe testing. All 6 Story 4-1 regression tests retained.
 
@@ -387,22 +387,22 @@ The story spec suggested `Application.compile_env` for the `@db_module` attribut
 
 ## File List
 
-- `gateway/migrations/000009_rooms.up.sql` — NEW: rooms + room_members tables
-- `gateway/migrations/000009_rooms.down.sql` — NEW: DROP both tables (FK-safe order)
-- `core/apps/room_manager/mix.exs` — MODIFIED: added `{:nebu_db, in_umbrella: true}`
-- `core/apps/room_manager/lib/nebu/room/server.ex` — MODIFIED: replaced stub with full lifecycle GenServer
-- `core/apps/room_manager/lib/nebu/room/db.ex` — NEW: PostgreSQL persistence layer
-- `core/apps/room_manager/test/nebu_room_test.exs` — MODIFIED: 10 new tests + FakeDB + FailingWriteDB
+- `gateway/migrations/000009_rooms.up.sql` - NEW: rooms + room_members tables
+- `gateway/migrations/000009_rooms.down.sql` - NEW: DROP both tables (FK-safe order)
+- `core/apps/room_manager/mix.exs` - MODIFIED: added `{:nebu_db, in_umbrella: true}`
+- `core/apps/room_manager/lib/nebu/room/server.ex` - MODIFIED: replaced stub with full lifecycle GenServer
+- `core/apps/room_manager/lib/nebu/room/db.ex` - NEW: PostgreSQL persistence layer
+- `core/apps/room_manager/test/nebu_room_test.exs` - MODIFIED: 10 new tests + FakeDB + FailingWriteDB
 
 ### Review Findings
 
-- [x] [Review][Patch][MAJOR] Rejoin nach Leave nicht moeglich — `ON CONFLICT DO NOTHING` ignoriert soft-deleted Row, State/DB-Divergenz bei Restart [db.ex:25-32] — FIXED: changed to `ON CONFLICT DO UPDATE SET left_at = NULL`
-- [x] [Review][Patch][MINOR] Redundanter Index `room_members_room_id_idx` — PK-Prefix liefert bereits B-tree auf `room_id` [000009_rooms.up.sql:20] — FIXED: removed
-- [x] [Review][Patch][MINOR] `created_at` im State bei Recovery immer `DateTime.utc_now()` statt DB-Wert — echtes Erstellungsdatum geht bei Restart verloren [server.ex:84-86, db.ex:47] — FIXED: `load_members` gibt `created_at_ms` zurueck, `init/1` konvertiert via `DateTime.from_unix!/2`
-- [x] [Review][Defer][INFO] Kein `@behaviour`-Modul fuer DB-Interface — FakeDB/FailingWriteDB implementieren gleiche API ohne Vertrag — deferred, pre-existing pattern
+- [x] [Review][Patch][MAJOR] Rejoin nach Leave nicht moeglich - `ON CONFLICT DO NOTHING` ignoriert soft-deleted Row, State/DB-Divergenz bei Restart [db.ex:25-32] - FIXED: changed to `ON CONFLICT DO UPDATE SET left_at = NULL`
+- [x] [Review][Patch][MINOR] Redundanter Index `room_members_room_id_idx` - PK-Prefix liefert bereits B-tree auf `room_id` [000009_rooms.up.sql:20] - FIXED: removed
+- [x] [Review][Patch][MINOR] `created_at` im State bei Recovery immer `DateTime.utc_now()` statt DB-Wert - echtes Erstellungsdatum geht bei Restart verloren [server.ex:84-86, db.ex:47] - FIXED: `load_members` gibt `created_at_ms` zurueck, `init/1` konvertiert via `DateTime.from_unix!/2`
+- [x] [Review][Defer][INFO] Kein `@behaviour`-Modul fuer DB-Interface - FakeDB/FailingWriteDB implementieren gleiche API ohne Vertrag - deferred, pre-existing pattern
 
 ## Change Log
 
-- 2026-04-03: Story created — ready-for-dev
-- 2026-04-03: Story implemented — all tasks complete, 16/16 tests pass, status → review
-- 2026-04-03: Code review — 1 MAJOR + 2 MINOR fixed, 1 INFO deferred
+- 2026-04-03: Story created - ready-for-dev
+- 2026-04-03: Story implemented - all tasks complete, 16/16 tests pass, status → review
+- 2026-04-03: Code review - 1 MAJOR + 2 MINOR fixed, 1 INFO deferred

@@ -17,7 +17,7 @@ so that I can navigate directly to a specific user or room and share links with 
 1. `gateway/internal/admin/templates/components/master_detail.html` implements the C4 MasterDetailLayout:
    - Two-column grid: list column (fixed 320px) + detail column (flex remaining)
    - On mobile (< 768px): single column, detail panel overlays list as a drawer
-   - Accepts Go template data: `ActiveItemID string` — the currently selected item ID
+   - Accepts Go template data: `ActiveItemID string` - the currently selected item ID
 
 2. `gateway/internal/admin/templates/components/detail_panel.html` implements C5 DetailPanel:
    - Header with item title + close button (`×`) that navigates back to the list URL
@@ -26,7 +26,7 @@ so that I can navigate directly to a specific user or room and share links with 
 
 3. Go routes for User detail: `GET /admin/users/{userId}` renders the User List page with the MasterDetailLayout, pre-selecting `userId` in the list and loading the detail panel server-side; the URL `/admin/users/abc123` is bookmarkable and directly shareable
 
-4. Go routes for Room detail: `GET /admin/rooms/{roomId}` — same pattern as users
+4. Go routes for Room detail: `GET /admin/rooms/{roomId}` - same pattern as users
 
 5. If `userId` or `roomId` does not exist, the detail panel renders a 404-within-panel state (not a full-page 404)
 
@@ -40,37 +40,37 @@ so that I can navigate directly to a specific user or room and share links with 
 
 ### Tests written FIRST (before implementation code):
 
-1. **Navigate to `/admin/users` — list page renders** — Playwright (`e2e/tests/features/admin/master-detail.spec.ts`)
+1. **Navigate to `/admin/users` - list page renders** - Playwright (`e2e/tests/features/admin/master-detail.spec.ts`)
    - Given: the full dev stack is running (`make dev`) and admin is logged in
    - When: Playwright navigates to `/admin/users`
    - Then: the page shows the user list with at least one stub user entry
 
-2. **Click a user — detail panel opens and URL changes** — Playwright
+2. **Click a user - detail panel opens and URL changes** - Playwright
    - Given: Playwright is on `/admin/users`
    - When: the user clicks on a stub user entry (e.g. "Alice Müller")
    - Then: the URL changes to `/admin/users/{userId}` and the detail panel appears with user information
 
-3. **Direct URL navigation — detail panel is pre-selected** — Playwright
+3. **Direct URL navigation - detail panel is pre-selected** - Playwright
    - Given: a known stub user ID (e.g. `usr-001`)
    - When: Playwright navigates directly to `/admin/users/usr-001`
    - Then: the detail panel is visible with `usr-001`'s information and the list item is highlighted
 
-4. **Non-existent item — 404-within-panel state** — Playwright
+4. **Non-existent item - 404-within-panel state** - Playwright
    - Given: Playwright navigates to `/admin/users/nonexistent-id`
    - When: the page renders
    - Then: the detail panel shows a "User not found" message (no full-page 404)
 
-5. **Mobile viewport — single column drawer behavior** — Playwright
+5. **Mobile viewport - single column drawer behavior** - Playwright
    - Given: Playwright viewport is set to 375px wide
    - When: Playwright navigates to `/admin/users` and clicks a user
    - Then: the detail panel appears as a full-width overlay (master list is hidden or stacked vertically)
 
-6. **Go unit test — `active` class on selected list item** — Go `net/http/httptest` (`gateway/internal/admin/master_detail_test.go`)
+6. **Go unit test - `active` class on selected list item** - Go `net/http/httptest` (`gateway/internal/admin/master_detail_test.go`)
    - Given: `UsersPageData` with `ActiveItemID = "usr-001"` and stub users including one with ID `usr-001`
    - When: the `users` template is rendered via `TemplateHandler`
    - Then: the rendered HTML contains `active` class on the element for `usr-001` and the detail panel `role="region"` is present
 
-7. **Go unit test — Room detail route not-found state** — Go `net/http/httptest`
+7. **Go unit test - Room detail route not-found state** - Go `net/http/httptest`
    - Given: `RoomsPageData` with `ActiveItemID = "nonexistent"` and no matching stub room
    - When: the `rooms` template is rendered
    - Then: the rendered HTML contains "not found" text inside the detail panel (no HTTP 404 response)
@@ -80,7 +80,7 @@ so that I can navigate directly to a specific user or room and share links with 
 - [x] Task 1: Create Go template components and page templates (AC: 1, 2, 6, 7)
   - [x] 1.1 Create directory `gateway/internal/admin/templates/components/` (does NOT yet exist)
   - [x] 1.2 Create `gateway/internal/admin/templates/components/master_detail.html`:
-    - Define a Go template partial `{{ define "master_detail" }}` — see Dev Notes for exact markup
+    - Define a Go template partial `{{ define "master_detail" }}` - see Dev Notes for exact markup
     - Accepts: `.Items` (slice of stub items), `.ActiveItemID` (string), `.ListURL` (back link), `.DetailContent` (inner template name or empty)
     - Desktop (≥768px): `flex` row with `w-80 shrink-0` master column + `flex-1` detail column
     - Mobile (<768px): use Tailwind `sm:` prefix classes for stacked layout; detail panel gets `sm:fixed sm:inset-0 sm:z-10 sm:overflow-y-auto` when an item is selected (`ActiveItemID != ""`)
@@ -101,7 +101,7 @@ so that I can navigate directly to a specific user or room and share links with 
     - List column: renders stub users from `.StubUsers`; each row is a `<a href="/admin/users/{{ .ID }}">` link with `{{ if eq .ID $.ActiveItemID }}class="active"{{ end }}`
     - Detail column: calls `{{ template "detail_panel" . }}` if `.ActiveItemID != ""`; otherwise renders an empty-state placeholder ("Select a user from the list")
     - If `.ActiveUser` is nil and `.ActiveItemID != ""`: detail panel shows "User not found" message
-  - [x] 2.2 Create `gateway/internal/admin/templates/rooms.html` — same pattern as `users.html` but for rooms
+  - [x] 2.2 Create `gateway/internal/admin/templates/rooms.html` - same pattern as `users.html` but for rooms
 
 - [x] Task 3: Add Go handler types and data structs (AC: 3, 4, 5, 6)
   - [x] 3.1 Add to `gateway/internal/admin/page_data.go`:
@@ -110,51 +110,51 @@ so that I can navigate directly to a specific user or room and share links with 
     - `StubRoom` struct: `ID`, `Name`, `Visibility`, `MemberCount int`, `Status string`
     - `RoomsPageData` struct embedding `PageData` + `StubRooms []StubRoom` + `ActiveItemID string` + `ActiveRoom *StubRoom`
   - [x] 3.2 Define stub data slices (5–10 fake users and 5 fake rooms) in `gateway/internal/admin/stubs.go` (new file):
-    - `var stubUsers = []StubUser{...}` — 8 fake users with realistic display names, masked emails, roles (instance_admin, compliance_officer, user), statuses (active, deactivated)
-    - `var stubRooms = []StubRoom{...}` — 5 fake rooms with realistic names, visibility, member counts, statuses
+    - `var stubUsers = []StubUser{...}` - 8 fake users with realistic display names, masked emails, roles (instance_admin, compliance_officer, user), statuses (active, deactivated)
+    - `var stubRooms = []StubRoom{...}` - 5 fake rooms with realistic names, visibility, member counts, statuses
     - These are package-level vars used only by handler functions; Epic 7 API integration will replace them later
 
 - [x] Task 4: Create HTTP handlers (AC: 3, 4, 5)
   - [x] 4.1 Create `gateway/internal/admin/users.go`:
     - `UsersHandler` struct with `tmpl *TemplateHandler` field
-    - `ListHandler(w, r)` — handles `GET /admin/users`; sets `ActiveItemID = ""`; renders `users` template
-    - `DetailHandler(w, r)` — handles `GET /admin/users/{userId}`; reads `r.PathValue("userId")`; finds matching stub user; sets `ActiveUser` (or nil if not found); sets `ActiveItemID = userId`; renders `users` template
-  - [x] 4.2 Create `gateway/internal/admin/rooms.go` — same structure for rooms
+    - `ListHandler(w, r)` - handles `GET /admin/users`; sets `ActiveItemID = ""`; renders `users` template
+    - `DetailHandler(w, r)` - handles `GET /admin/users/{userId}`; reads `r.PathValue("userId")`; finds matching stub user; sets `ActiveUser` (or nil if not found); sets `ActiveItemID = userId`; renders `users` template
+  - [x] 4.2 Create `gateway/internal/admin/rooms.go` - same structure for rooms
 
 - [x] Task 5: Register routes in `gateway/cmd/gateway/main.go` (AC: 3, 4)
   - [x] 5.1 Instantiate `usersHandler := admin.NewUsersHandler(tmplHandler)` and `roomsHandler := admin.NewRoomsHandler(tmplHandler)` near the dashboard handler registration (around line 304)
-  - [x] 5.2 Register routes — must be BEFORE the `/admin/` catch-all (line 333):
+  - [x] 5.2 Register routes - must be BEFORE the `/admin/` catch-all (line 333):
     ```go
     mux.Handle("GET /admin/users", csrf(sessionGuard(http.HandlerFunc(usersHandler.ListHandler))))
     mux.Handle("GET /admin/users/{userId}", csrf(sessionGuard(http.HandlerFunc(usersHandler.DetailHandler))))
     mux.Handle("GET /admin/rooms", csrf(sessionGuard(http.HandlerFunc(roomsHandler.ListHandler))))
     mux.Handle("GET /admin/rooms/{roomId}", csrf(sessionGuard(http.HandlerFunc(roomsHandler.DetailHandler))))
     ```
-  - [x] 5.3 Verify Go 1.22+ mux pattern: `{userId}` in route pattern is extracted via `r.PathValue("userId")` — no gorilla/mux or chi needed
+  - [x] 5.3 Verify Go 1.22+ mux pattern: `{userId}` in route pattern is extracted via `r.PathValue("userId")` - no gorilla/mux or chi needed
 
 - [x] Task 6: Write Go unit tests (AC: 8)
   - [x] 6.1 Create `gateway/internal/admin/master_detail_test.go` in `package admin`:
-    - **Test A** — `TestUsersListRendersStubUsers`: render `users` template with 3 stub users + no active item; assert all 3 names appear in HTML
-    - **Test B** — `TestUsersDetailActiveClass`: render `users` template with `ActiveItemID = "usr-001"`; assert `active` class appears near the `usr-001` list item; assert `role="region"` appears in detail panel
-    - **Test C** — `TestUsersDetailNotFound`: render `users` template with `ActiveItemID = "nonexistent"` and `ActiveUser = nil`; assert "not found" text appears in HTML; assert HTTP 200 (not 404)
-    - **Test D** — `TestRoomsDetailActiveClass`: same pattern as B but for rooms
-  - [x] 6.2 Use `NewTemplateHandler()` + `h.render(w, "users", data)` pattern — see Dev Notes for exact render pattern
+    - **Test A** - `TestUsersListRendersStubUsers`: render `users` template with 3 stub users + no active item; assert all 3 names appear in HTML
+    - **Test B** - `TestUsersDetailActiveClass`: render `users` template with `ActiveItemID = "usr-001"`; assert `active` class appears near the `usr-001` list item; assert `role="region"` appears in detail panel
+    - **Test C** - `TestUsersDetailNotFound`: render `users` template with `ActiveItemID = "nonexistent"` and `ActiveUser = nil`; assert "not found" text appears in HTML; assert HTTP 200 (not 404)
+    - **Test D** - `TestRoomsDetailActiveClass`: same pattern as B but for rooms
+  - [x] 6.2 Use `NewTemplateHandler()` + `h.render(w, "users", data)` pattern - see Dev Notes for exact render pattern
 
-- [x] Task 7: Write Playwright E2E tests (AC: 1–5) — **write these FIRST, before any implementation**
+- [x] Task 7: Write Playwright E2E tests (AC: 1–5) - **write these FIRST, before any implementation**
   - [x] 7.1 Create `e2e/tests/features/admin/master-detail.spec.ts`
-  - [x] 7.2 The tests must navigate as an authenticated admin — reuse the auth helper pattern from existing E2E tests (login via OIDC flow or use a session cookie if a helper exists)
+  - [x] 7.2 The tests must navigate as an authenticated admin - reuse the auth helper pattern from existing E2E tests (login via OIDC flow or use a session cookie if a helper exists)
   - [x] 7.3 Write the 5 Playwright scenarios listed in Acceptance Tests section above
   - [x] 7.4 Mobile viewport test must use `page.setViewportSize({ width: 375, height: 667 })` before navigation
-  - [x] 7.5 No `page.waitForTimeout` or hard waits — use Playwright's built-in auto-waiting and `await expect(...)` assertions
+  - [x] 7.5 No `page.waitForTimeout` or hard waits - use Playwright's built-in auto-waiting and `await expect(...)` assertions
 
 - [x] Task 8: Rebuild CSS and verify (AC: 1, 7)
-  - [x] 8.1 After adding new templates with new Tailwind classes, run `make build-admin-css` to regenerate `gateway/internal/admin/static/admin.css` — NOTE: `make build-admin-css` requires Docker; skipped per story instructions (do not run make dev or Docker). CSS classes used (fixed, inset-0, z-10, md:relative, etc.) must be present in next CSS rebuild.
-  - [x] 8.2 Verify `make test-unit-go` passes with zero regressions — verified: 172 admin tests pass, 758 total tests pass
-  - [x] 8.3 Verify Go compilation: `make build-gateway` exits 0 — verified: `go build ./...` exits 0
+  - [x] 8.1 After adding new templates with new Tailwind classes, run `make build-admin-css` to regenerate `gateway/internal/admin/static/admin.css` - NOTE: `make build-admin-css` requires Docker; skipped per story instructions (do not run make dev or Docker). CSS classes used (fixed, inset-0, z-10, md:relative, etc.) must be present in next CSS rebuild.
+  - [x] 8.2 Verify `make test-unit-go` passes with zero regressions - verified: 172 admin tests pass, 758 total tests pass
+  - [x] 8.3 Verify Go compilation: `make build-gateway` exits 0 - verified: `go build ./...` exits 0
 
 ## Dev Notes
 
-### CRITICAL: Template Handler Keying — How Components Are Loaded
+### CRITICAL: Template Handler Keying - How Components Are Loaded
 
 The `NewTemplateHandler` in `handler.go` uses `path.Base(pageFile)` as the key for `pageTmpls`. This means:
 
@@ -162,9 +162,9 @@ The `NewTemplateHandler` in `handler.go` uses `path.Base(pageFile)` as the key f
 - `templates/rooms.html` → keyed as `"rooms"` → render via `h.render(w, "rooms", data)` ✓
 - `templates/components/master_detail.html` → keyed as `"master_detail"` in pageTmpls
 
-**CRITICAL:** Component partials under `templates/components/` are picked up by the `WalkDir` loop in `NewTemplateHandler` and included in **every** page template set (because the loop collects all `.html` files not under `layouts/`). This means `master_detail.html` and `detail_panel.html` are parsed into every page's isolated template set — they will be available as `{{ template "master_detail" . }}` and `{{ template "detail_panel" . }}` from any page template. No manual registration is needed.
+**CRITICAL:** Component partials under `templates/components/` are picked up by the `WalkDir` loop in `NewTemplateHandler` and included in **every** page template set (because the loop collects all `.html` files not under `layouts/`). This means `master_detail.html` and `detail_panel.html` are parsed into every page's isolated template set - they will be available as `{{ template "master_detail" . }}` and `{{ template "detail_panel" . }}` from any page template. No manual registration is needed.
 
-**However:** The component files MUST use `{{ define "<name>" }}...{{ end }}` — they must NOT define a `"base"` or `"content"` block at the top level or they will conflict with the layout. Use:
+**However:** The component files MUST use `{{ define "<name>" }}...{{ end }}` - they must NOT define a `"base"` or `"content"` block at the top level or they will conflict with the layout. Use:
 ```html
 {{ define "master_detail" }}
   ... layout markup ...
@@ -206,7 +206,7 @@ type UsersPageData struct {
 }
 ```
 
-### C4 MasterDetailLayout — Template Markup
+### C4 MasterDetailLayout - Template Markup
 
 Exact markup for `templates/components/master_detail.html`:
 ```html
@@ -248,7 +248,7 @@ Per UX spec: breakpoint is `md:` (768px). Adjust Tailwind prefix accordingly:
 
 This makes the detail panel a full-screen overlay on mobile when an item is selected, and hidden otherwise. On desktop (≥768px) it is always visible in the grid.
 
-### C5 DetailPanel — Template Markup
+### C5 DetailPanel - Template Markup
 
 Exact markup for `templates/components/detail_panel.html`:
 ```html
@@ -284,11 +284,11 @@ Exact markup for `templates/components/detail_panel.html`:
 
 **Note:** `CloseURL` is a field on `UsersPageData` / `RoomsPageData` (e.g. `"/admin/users"` for the users list page). Add it to the page data structs.
 
-### Users Page Template — Key Parts
+### Users Page Template - Key Parts
 
 ```html
 {{/* templates/users.html */}}
-{{ define "title" }}Users — Nebu Admin{{ end }}
+{{ define "title" }}Users - Nebu Admin{{ end }}
 
 {{ define "content" }}
 
@@ -344,7 +344,7 @@ Exact markup for `templates/components/detail_panel.html`:
 {{ end }}
 ```
 
-### Stub Data — Realistic Examples
+### Stub Data - Realistic Examples
 
 ```go
 // gateway/internal/admin/stubs.go
@@ -423,11 +423,11 @@ func (h *UsersHandler) DetailHandler(w http.ResponseWriter, r *http.Request) {
         CloseURL:     "/admin/users",
     }
     h.tmpl.render(w, "users", data)
-    // NOTE: Always render HTTP 200 — "not found" is rendered within the panel
+    // NOTE: Always render HTTP 200 - "not found" is rendered within the panel
 }
 ```
 
-### Route Registration — Critical Ordering
+### Route Registration - Critical Ordering
 
 In `gateway/cmd/gateway/main.go`, new routes MUST be registered AFTER `sessionGuard` and CSRF middleware setup (after line ~284), and BEFORE the catch-all `mux.HandleFunc("GET /admin/", ...)` (currently around line 333). Failing to register before the catch-all means the catch-all fires instead.
 
@@ -442,7 +442,7 @@ mux.Handle("GET /admin/rooms",          csrf(sessionGuard(http.HandlerFunc(rooms
 mux.Handle("GET /admin/rooms/{roomId}", csrf(sessionGuard(http.HandlerFunc(roomsHandler.DetailHandler))))
 ```
 
-**Go 1.22+ path value extraction:** `r.PathValue("userId")` — this is stdlib, no external router needed.
+**Go 1.22+ path value extraction:** `r.PathValue("userId")` - this is stdlib, no external router needed.
 
 ### Go Unit Test Pattern (reference: handler_test.go)
 
@@ -573,21 +573,21 @@ test.describe('Master-Detail Layout', () => {
 | `gateway/internal/admin/templates/components/detail_panel.html` | CREATE |
 | `gateway/internal/admin/templates/users.html` | CREATE |
 | `gateway/internal/admin/templates/rooms.html` | CREATE |
-| `gateway/internal/admin/templates/layouts/base.html` | MODIFY — add Users + Rooms nav entries |
-| `gateway/internal/admin/page_data.go` | MODIFY — add UsersPageData, RoomsPageData, StubUser, StubRoom structs; add CloseURL field |
-| `gateway/internal/admin/stubs.go` | CREATE — stub data + find helpers |
-| `gateway/internal/admin/users.go` | CREATE — UsersHandler |
-| `gateway/internal/admin/rooms.go` | CREATE — RoomsHandler |
-| `gateway/internal/admin/master_detail_test.go` | CREATE — Go unit tests |
-| `gateway/cmd/gateway/main.go` | MODIFY — register 4 new routes |
+| `gateway/internal/admin/templates/layouts/base.html` | MODIFY - add Users + Rooms nav entries |
+| `gateway/internal/admin/page_data.go` | MODIFY - add UsersPageData, RoomsPageData, StubUser, StubRoom structs; add CloseURL field |
+| `gateway/internal/admin/stubs.go` | CREATE - stub data + find helpers |
+| `gateway/internal/admin/users.go` | CREATE - UsersHandler |
+| `gateway/internal/admin/rooms.go` | CREATE - RoomsHandler |
+| `gateway/internal/admin/master_detail_test.go` | CREATE - Go unit tests |
+| `gateway/cmd/gateway/main.go` | MODIFY - register 4 new routes |
 | `gateway/internal/admin/static/admin.css` | REGENERATE via `make build-admin-css` |
-| `e2e/tests/features/admin/master-detail.spec.ts` | CREATE — Playwright E2E tests |
+| `e2e/tests/features/admin/master-detail.spec.ts` | CREATE - Playwright E2E tests |
 
 ### Do NOT Modify
 
-- `gateway/internal/admin/handler.go` — `NewTemplateHandler` already picks up all HTML under `templates/` recursively
-- `gateway/internal/admin/static.go` — embed directive already covers all static files
-- `gateway/internal/admin/tailwind.config.js` — Story 7.1 already set it up correctly
+- `gateway/internal/admin/handler.go` - `NewTemplateHandler` already picks up all HTML under `templates/` recursively
+- `gateway/internal/admin/static.go` - embed directive already covers all static files
+- `gateway/internal/admin/tailwind.config.js` - Story 7.1 already set it up correctly
 - Any existing `*_test.go` files in the admin package
 - Any existing handler files (bootstrap.go, auth.go, dashboard.go, etc.)
 
@@ -597,7 +597,7 @@ test.describe('Master-Detail Layout', () => {
 
 **Template keying:** `NewTemplateHandler` keys by `path.Base(filename)`. Two component files with the same base name would collide. Ensure `master_detail.html` and `detail_panel.html` are unique names across the entire `templates/` tree (they are).
 
-**`{{ define }}` uniqueness:** Go templates panic if two files in the same set define the same template name. Component files use `{{ define "master_detail" }}` and `{{ define "detail_panel" }}` — verify no existing template file defines these names.
+**`{{ define }}` uniqueness:** Go templates panic if two files in the same set define the same template name. Component files use `{{ define "master_detail" }}` and `{{ define "detail_panel" }}` - verify no existing template file defines these names.
 
 ### WCAG Requirements
 
@@ -605,7 +605,7 @@ Per AC 7 and UX spec:
 - Detail panel: `<section role="region" aria-label="Item details">` ✓
 - Close button: `aria-label="Close detail panel"` ✓
 - Master list: `<nav role="navigation" aria-label="Item list">` → inner list: `<ul role="listbox">` → items: `role="option"` + `aria-selected`
-- No `div` as interactive elements — use `<a>` for navigation, `<button>` for actions
+- No `div` as interactive elements - use `<a>` for navigation, `<button>` for actions
 
 ### CSS Build After Template Changes
 
@@ -615,26 +615,26 @@ If `fixed inset-0 z-10` or other new classes are used in components, they must a
 
 ### Project Structure Notes
 
-- New component directory `templates/components/` is a NEW directory — must be created
+- New component directory `templates/components/` is a NEW directory - must be created
 - The UX spec lists this directory as the canonical location (see `ux-design-specification.md` §Component Implementation Strategy)
 - Handler files follow the naming convention `<feature>.go` in `gateway/internal/admin/` (e.g. `dashboard.go`, `bootstrap.go`)
 - Test files follow `<feature>_test.go` in the same package (`package admin`, not `package admin_test`)
 
 ### References
 
-- [Source: `_bmad-output/planning-artifacts/epics.md#Story-7.2`] — Authoritative AC
-- [Source: `_bmad-output/planning-artifacts/ux-design-specification.md#C4-MasterDetailLayout`] — C4 anatomy, ARIA, breakpoints
-- [Source: `_bmad-output/planning-artifacts/ux-design-specification.md#C5-MasterListItem`] — C5 anatomy
-- [Source: `_bmad-output/planning-artifacts/ux-design-specification.md#Breakpoint-Strategy`] — `md:` = 768px for mobile breakpoint
-- [Source: `_bmad-output/planning-artifacts/ux-design-specification.md#Component-Implementation-Strategy`] — `templates/components/` directory structure
-- [Source: `gateway/internal/admin/handler.go`] — Template loading via `path.Base()`; `WalkDir` picks up all HTML recursively
-- [Source: `gateway/internal/admin/page_data.go`] — Existing page data pattern (embed `PageData`, add fields)
-- [Source: `gateway/internal/admin/dashboard.go`] — Handler constructor + render pattern to replicate
-- [Source: `gateway/internal/admin/handler_test.go`] — Test pattern: `NewTemplateHandler()` + `h.render(w, name, data)` + `httptest.NewRecorder()`
-- [Source: `gateway/internal/admin/templates/layouts/base.html`] — Sidebar nav structure; where to add Users/Rooms entries
-- [Source: `gateway/cmd/gateway/main.go#L303-333`] — Where to register new routes; catch-all is at ~L333
-- [Source: `e2e/tests/features/admin/obsidian-theme.spec.ts`] — Playwright test pattern (no hard waits, `expect()` assertions)
-- [Source: `_bmad-output/implementation-artifacts/7-1-obsidian-color-system-vollstandig-typography-ux-dr1-ux-dr2.md`] — Previous story (Story 7.1 patterns, CSS build details)
+- [Source: `_bmad-output/planning-artifacts/epics.md#Story-7.2`] - Authoritative AC
+- [Source: `_bmad-output/planning-artifacts/ux-design-specification.md#C4-MasterDetailLayout`] - C4 anatomy, ARIA, breakpoints
+- [Source: `_bmad-output/planning-artifacts/ux-design-specification.md#C5-MasterListItem`] - C5 anatomy
+- [Source: `_bmad-output/planning-artifacts/ux-design-specification.md#Breakpoint-Strategy`] - `md:` = 768px for mobile breakpoint
+- [Source: `_bmad-output/planning-artifacts/ux-design-specification.md#Component-Implementation-Strategy`] - `templates/components/` directory structure
+- [Source: `gateway/internal/admin/handler.go`] - Template loading via `path.Base()`; `WalkDir` picks up all HTML recursively
+- [Source: `gateway/internal/admin/page_data.go`] - Existing page data pattern (embed `PageData`, add fields)
+- [Source: `gateway/internal/admin/dashboard.go`] - Handler constructor + render pattern to replicate
+- [Source: `gateway/internal/admin/handler_test.go`] - Test pattern: `NewTemplateHandler()` + `h.render(w, name, data)` + `httptest.NewRecorder()`
+- [Source: `gateway/internal/admin/templates/layouts/base.html`] - Sidebar nav structure; where to add Users/Rooms entries
+- [Source: `gateway/cmd/gateway/main.go#L303-333`] - Where to register new routes; catch-all is at ~L333
+- [Source: `e2e/tests/features/admin/obsidian-theme.spec.ts`] - Playwright test pattern (no hard waits, `expect()` assertions)
+- [Source: `_bmad-output/implementation-artifacts/7-1-obsidian-color-system-vollstandig-typography-ux-dr1-ux-dr2.md`] - Previous story (Story 7.1 patterns, CSS build details)
 
 ## Dev Agent Record
 
@@ -651,7 +651,7 @@ None.
 - All implementation files were pre-created before this dev session. Verified correctness and ran full test suite.
 - Critical fix applied to `gateway/internal/admin/handler.go`: `NewTemplateHandler` now separates component partials (`templates/components/*.html`) from page templates and includes all component files in every page's isolated template set. Without this fix, `{{ template "master_detail" . }}` in `users.html` would fail because the component template would not be in the page's template set.
 - 4 Go unit tests pass: `TestUsersListRendersStubUsers`, `TestUsersDetailActiveClass`, `TestUsersDetailNotFound`, `TestRoomsDetailActiveClass`.
-- 172 admin package tests pass, 758 total gateway tests pass — zero regressions.
+- 172 admin package tests pass, 758 total gateway tests pass - zero regressions.
 - `go build ./...` compiles cleanly.
 - Playwright E2E tests written with full OIDC login flow via Dex; 5 scenarios covering all ACs. Tests will pass when `make dev` stack is running with a bootstrapped admin.
 - CSS rebuild (`make build-admin-css`) requires Docker; deferred to next `make dev` run. New Tailwind classes (`fixed inset-0 z-10 md:relative md:inset-auto md:z-auto hidden md:block hidden md:flex`) are already present in templates verbatim for the CSS scanner.
@@ -659,26 +659,26 @@ None.
 
 ### File List
 
-- `gateway/internal/admin/handler.go` (MODIFIED — component partials now included in every page template set)
-- `gateway/internal/admin/templates/components/master_detail.html` (CREATED — C4 MasterDetailLayout component)
-- `gateway/internal/admin/templates/components/detail_panel.html` (CREATED — C5 DetailPanel component)
-- `gateway/internal/admin/templates/users.html` (CREATED — Users master-detail page template)
-- `gateway/internal/admin/templates/rooms.html` (CREATED — Rooms master-detail page template)
-- `gateway/internal/admin/templates/layouts/base.html` (MODIFIED — Users + Rooms sidebar nav entries added)
-- `gateway/internal/admin/page_data.go` (MODIFIED — StubUser, UsersPageData, StubRoom, RoomsPageData structs added)
-- `gateway/internal/admin/stubs.go` (CREATED — 8 fake users + 5 fake rooms + find helpers)
-- `gateway/internal/admin/users.go` (CREATED — UsersHandler with ListHandler + DetailHandler)
-- `gateway/internal/admin/rooms.go` (CREATED — RoomsHandler with ListHandler + DetailHandler)
-- `gateway/internal/admin/master_detail_test.go` (CREATED — 4 Go unit tests)
-- `gateway/cmd/gateway/main.go` (MODIFIED — 4 new routes registered before catch-all)
-- `e2e/tests/features/admin/master-detail.spec.ts` (CREATED — 5 Playwright E2E scenarios)
+- `gateway/internal/admin/handler.go` (MODIFIED - component partials now included in every page template set)
+- `gateway/internal/admin/templates/components/master_detail.html` (CREATED - C4 MasterDetailLayout component)
+- `gateway/internal/admin/templates/components/detail_panel.html` (CREATED - C5 DetailPanel component)
+- `gateway/internal/admin/templates/users.html` (CREATED - Users master-detail page template)
+- `gateway/internal/admin/templates/rooms.html` (CREATED - Rooms master-detail page template)
+- `gateway/internal/admin/templates/layouts/base.html` (MODIFIED - Users + Rooms sidebar nav entries added)
+- `gateway/internal/admin/page_data.go` (MODIFIED - StubUser, UsersPageData, StubRoom, RoomsPageData structs added)
+- `gateway/internal/admin/stubs.go` (CREATED - 8 fake users + 5 fake rooms + find helpers)
+- `gateway/internal/admin/users.go` (CREATED - UsersHandler with ListHandler + DetailHandler)
+- `gateway/internal/admin/rooms.go` (CREATED - RoomsHandler with ListHandler + DetailHandler)
+- `gateway/internal/admin/master_detail_test.go` (CREATED - 4 Go unit tests)
+- `gateway/cmd/gateway/main.go` (MODIFIED - 4 new routes registered before catch-all)
+- `e2e/tests/features/admin/master-detail.spec.ts` (CREATED - 5 Playwright E2E scenarios)
 
 ### Review Findings
 
-- [x] [Review][Patch] Not-found title inconsistency — `detail_title` said "Not Found" (title case) while `detail_content` said "User/Room not found." (sentence case); fixed inline to "User not found" / "Room not found" [`templates/users.html:32`, `templates/rooms.html:32`]
+- [x] [Review][Patch] Not-found title inconsistency - `detail_title` said "Not Found" (title case) while `detail_content` said "User/Room not found." (sentence case); fixed inline to "User not found" / "Room not found" [`templates/users.html:32`, `templates/rooms.html:32`]
 
 ## Change Log
 
-- 2026-04-29: Story created for Epic 7 Story 2 — MasterDetailLayout + DetailPanel (C4, C5) + bookmarkbare URL-Routen
-- 2026-04-29: Implementation complete — all tasks checked, 4 Go unit tests pass (172 admin / 758 total), go build clean, Playwright E2E tests written. Critical fix to handler.go to include component partials in every page template set. Status → review.
-- 2026-04-29: Code review complete — 1 MINOR patch fixed inline (not-found title casing), 0 dismissed. All ACs verified. Status → done.
+- 2026-04-29: Story created for Epic 7 Story 2 - MasterDetailLayout + DetailPanel (C4, C5) + bookmarkbare URL-Routen
+- 2026-04-29: Implementation complete - all tasks checked, 4 Go unit tests pass (172 admin / 758 total), go build clean, Playwright E2E tests written. Critical fix to handler.go to include component partials in every page template set. Status → review.
+- 2026-04-29: Code review complete - 1 MINOR patch fixed inline (not-found title casing), 0 dismissed. All ACs verified. Status → done.

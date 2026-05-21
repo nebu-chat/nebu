@@ -44,9 +44,9 @@ Security audit (2026-04-20): `Secure: r.TLS != nil` (`admin/auth.go:536`, `:643`
 
 ### Tests written FIRST (ATDD gate):
 
-1. `TestCookie_SecureFlagWithForwardedProto` — Go httptest, `NEBU_TRUSTED_PROXY=true`, request with `X-Forwarded-Proto: https`, verify `Secure` flag set on all three cookies
+1. `TestCookie_SecureFlagWithForwardedProto` - Go httptest, `NEBU_TRUSTED_PROXY=true`, request with `X-Forwarded-Proto: https`, verify `Secure` flag set on all three cookies
 
-2. `TestCookie_NoSecureFlagWithoutTrust` — `NEBU_TRUSTED_PROXY=` (unset), same headers, verify `Secure=false`
+2. `TestCookie_NoSecureFlagWithoutTrust` - `NEBU_TRUSTED_PROXY=` (unset), same headers, verify `Secure=false`
 
 ---
 

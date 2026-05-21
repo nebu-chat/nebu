@@ -24,7 +24,7 @@ so that Epic 4's gateway resilience implementation has its schema ready without 
   - [x] CREATE TABLE message_buffer with all specified columns and CHECK constraint on status
   - [x] CREATE TABLE message_dead_letter with all specified columns
 - [x] Task 2: Create `gateway/migrations/000002_message_buffer.down.sql` (AC: #4)
-  - [x] DROP TABLE message_dead_letter (drop first — references message_buffer)
+  - [x] DROP TABLE message_dead_letter (drop first - references message_buffer)
   - [x] DROP TABLE message_buffer
 - [x] Task 3: Verify migration runs end-to-end
   - [x] `docker compose up postgres -d` then run gateway; confirm migration version 2 recorded
@@ -42,7 +42,7 @@ This story is **SQL-only**. No Go source code changes are needed. The migration 
 
 **Do NOT modify:** `main.go`, `db.go`, `migrations.go`, `go.mod`, `go.sum`, or any existing migration file.
 
-### Migration File — Up
+### Migration File - Up
 
 **File:** `gateway/migrations/000002_message_buffer.up.sql`
 
@@ -75,13 +75,13 @@ CREATE TABLE message_dead_letter (
 ```
 
 **Critical notes:**
-- `received_at` and `failed_at` are `BIGINT` (Unix milliseconds), NOT `TIMESTAMPTZ` — follows architecture timestamp decision
-- `processed_at` is nullable `BIGINT` — no `NOT NULL` constraint
-- `buffer_id` references `message_buffer(id)` logically but **no FOREIGN KEY constraint** — rows in `message_buffer` may be deleted after drain; the dead-letter store must survive independently
-- No explicit indexes in this story — drain queries (`ORDER BY received_at WHERE status = 'pending'`) will get an index in Story 1-16 (drain strategy implementation)
+- `received_at` and `failed_at` are `BIGINT` (Unix milliseconds), NOT `TIMESTAMPTZ` - follows architecture timestamp decision
+- `processed_at` is nullable `BIGINT` - no `NOT NULL` constraint
+- `buffer_id` references `message_buffer(id)` logically but **no FOREIGN KEY constraint** - rows in `message_buffer` may be deleted after drain; the dead-letter store must survive independently
+- No explicit indexes in this story - drain queries (`ORDER BY received_at WHERE status = 'pending'`) will get an index in Story 1-16 (drain strategy implementation)
 - `status` CHECK constraint name must be explicit: `message_buffer_status_check` (aids error messages)
 
-### Migration File — Down
+### Migration File - Down
 
 **File:** `gateway/migrations/000002_message_buffer.down.sql`
 
@@ -106,11 +106,11 @@ Consistent with existing `000001_init.up.sql`.
 
 ### How the Embed Works
 
-`gateway/migrations/migrations.go` uses `//go:embed *.sql` — adding new `.sql` files in this directory is **sufficient**; no code changes needed. The embed FS is rebuilt at compile time.
+`gateway/migrations/migrations.go` uses `//go:embed *.sql` - adding new `.sql` files in this directory is **sufficient**; no code changes needed. The embed FS is rebuilt at compile time.
 
 ### Critical: pgx5 URL Scheme (from Story 1.3)
 
-The `db.go:pgx5URL()` helper already converts `postgres://` → `pgx5://`. The golang-migrate pgx/v5 driver registers as `pgx5`, not `postgres`. This is already handled — do NOT change anything in `db.go`.
+The `db.go:pgx5URL()` helper already converts `postgres://` → `pgx5://`. The golang-migrate pgx/v5 driver registers as `pgx5`, not `postgres`. This is already handled - do NOT change anything in `db.go`.
 
 ### Docker Build System
 
@@ -144,7 +144,7 @@ docker compose exec postgres psql -U nebu -d nebu \
 
 ### Go Module Import Path
 
-`github.com/nebu/nebu` (from `gateway/go.mod`). No imports needed for this story — pure SQL.
+`github.com/nebu/nebu` (from `gateway/go.mod`). No imports needed for this story - pure SQL.
 
 ### Architecture Context
 
@@ -158,8 +158,8 @@ This story implements tables for the Gateway Resilience mechanism (ADR G12):
 | GREEN after RED | Stream re-established | Drain worker processes `message_buffer` FIFO |
 
 The `status` values:
-- `'pending'` — buffered, awaiting drain
-- `'held'` — temporarily held (e.g., during rate-limited drain)
+- `'pending'` - buffered, awaiting drain
+- `'held'` - temporarily held (e.g., during rate-limited drain)
 
 The drain strategy (Story 1-16, Epic 4) queries: `SELECT ... FROM message_buffer WHERE status = 'pending' ORDER BY received_at LIMIT N`.
 
@@ -169,10 +169,10 @@ Dead-letter flow: after `retry_count >= 3` (configurable default), message is mo
 
 **Critical findings to apply:**
 
-1. **golang-migrate v4.19.1 used** — compatible with Go 1.26. No version changes needed.
-2. **pgx/v5 driver registers as `pgx5`** — URL scheme must be `pgx5://`. Already handled by `pgx5URL()` helper in `db.go`.
-3. **`000001_init.up.sql` enables `pgcrypto` and `uuid-ossp`** — do NOT re-enable these in migration 2; they're already active.
-4. **`//go:embed *.sql` in `migrations.go`** — new `.sql` files are automatically picked up; no code change needed.
+1. **golang-migrate v4.19.1 used** - compatible with Go 1.26. No version changes needed.
+2. **pgx/v5 driver registers as `pgx5`** - URL scheme must be `pgx5://`. Already handled by `pgx5URL()` helper in `db.go`.
+3. **`000001_init.up.sql` enables `pgcrypto` and `uuid-ossp`** - do NOT re-enable these in migration 2; they're already active.
+4. **`//go:embed *.sql` in `migrations.go`** - new `.sql` files are automatically picked up; no code change needed.
 5. **Migration version 1** is already recorded in `schema_migrations`; migration 2 will append cleanly.
 
 ### Project Structure Notes
@@ -185,8 +185,8 @@ gateway/migrations/
 ```
 
 **Files NOT to touch:**
-- `gateway/migrations/migrations.go` (embed package — no changes needed)
-- `gateway/migrations/migrations_test.go` (existing tests — do not regress)
+- `gateway/migrations/migrations.go` (embed package - no changes needed)
+- `gateway/migrations/migrations_test.go` (existing tests - do not regress)
 - `gateway/migrations/000001_init.up.sql` / `000001_init.down.sql`
 - `gateway/internal/db/db.go`
 - `gateway/cmd/gateway/main.go`
@@ -197,15 +197,15 @@ gateway/migrations/
 
 ### References
 
-- message_buffer schema: [Source: architecture.md — "Go Gateway Status-Modell (G12)" + SQL schema definition]
-- Drain strategy context: [Source: architecture.md — "Buffer-Drain-Strategie (G13)"]
-- Acceptance Criteria: [Source: epics.md — Epic 1, Story 1.4]
-- Migration naming format: [Source: epics.md — Story 1.3 AC, confirmed by existing `000001_init.up.sql`]
-- Migration embed pattern: [Source: `gateway/migrations/migrations.go` — `//go:embed *.sql`]
-- pgx5 URL requirement: [Source: `gateway/internal/db/db.go` — `pgx5URL()` helper]
-- Timestamp as BIGINT: [Source: architecture.md — timestamp decision, all timestamps are Unix milliseconds BIGINT]
-- Go module path: [Source: `gateway/go.mod` — `github.com/nebu/nebu`]
-- No FK constraint: [Source: architecture.md G13 — dead-letter survives buffer deletion]
+- message_buffer schema: [Source: architecture.md - "Go Gateway Status-Modell (G12)" + SQL schema definition]
+- Drain strategy context: [Source: architecture.md - "Buffer-Drain-Strategie (G13)"]
+- Acceptance Criteria: [Source: epics.md - Epic 1, Story 1.4]
+- Migration naming format: [Source: epics.md - Story 1.3 AC, confirmed by existing `000001_init.up.sql`]
+- Migration embed pattern: [Source: `gateway/migrations/migrations.go` - `//go:embed *.sql`]
+- pgx5 URL requirement: [Source: `gateway/internal/db/db.go` - `pgx5URL()` helper]
+- Timestamp as BIGINT: [Source: architecture.md - timestamp decision, all timestamps are Unix milliseconds BIGINT]
+- Go module path: [Source: `gateway/go.mod` - `github.com/nebu/nebu`]
+- No FK constraint: [Source: architecture.md G13 - dead-letter survives buffer deletion]
 
 ## Dev Agent Record
 
@@ -219,7 +219,7 @@ No issues encountered. Pure SQL migration, framework handles embed automatically
 
 ### Completion Notes List
 
-- Created `000002_message_buffer.up.sql` with `message_buffer` (BIGSERIAL PK, txn_id, room_id, sender, payload JSONB, received_at BIGINT, status TEXT with CHECK constraint `message_buffer_status_check`, retry_count SMALLINT, processed_at BIGINT nullable) and `message_dead_letter` (BIGSERIAL PK, buffer_id BIGINT, txn_id, payload JSONB, failed_at BIGINT, last_error TEXT nullable) — no FK constraint by design (ADR G13).
+- Created `000002_message_buffer.up.sql` with `message_buffer` (BIGSERIAL PK, txn_id, room_id, sender, payload JSONB, received_at BIGINT, status TEXT with CHECK constraint `message_buffer_status_check`, retry_count SMALLINT, processed_at BIGINT nullable) and `message_dead_letter` (BIGSERIAL PK, buffer_id BIGINT, txn_id, payload JSONB, failed_at BIGINT, last_error TEXT nullable) - no FK constraint by design (ADR G13).
 - Created `000002_message_buffer.down.sql` dropping `message_dead_letter` first, then `message_buffer`.
 - Verified via Docker: gateway applies migration cleanly to version 2 (dirty=false).
 - CHECK constraint `message_buffer_status_check` correctly rejects status='invalid' with `violates check constraint` error.

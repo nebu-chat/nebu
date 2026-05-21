@@ -1,6 +1,6 @@
 ---
 story_id: 9-26
-title: "Element Web E2E Suite — Browser-First Feature Tests via Element Web UI"
+title: "Element Web E2E Suite - Browser-First Feature Tests via Element Web UI"
 type: feature
 severity: high
 epic: 9
@@ -13,16 +13,16 @@ ci_gate: PASS (14/15 pass, 1 skip; M-1 regression stable)
 
 ## Summary
 
-Die bestehenden E2E-Tests unter `e2e/tests/features/` sind **keine echten UI-Tests** — sie melden sich via SSO an und fahren dann direkt die Matrix API (`page.request.post`). Der echte Element Web Client wird nicht getestet.
+Die bestehenden E2E-Tests unter `e2e/tests/features/` sind **keine echten UI-Tests** - sie melden sich via SSO an und fahren dann direkt die Matrix API (`page.request.post`). Der echte Element Web Client wird nicht getestet.
 
-Diese Story ersetzt diesen Ansatz durch eine **Browser-First E2E Suite**, die ausschließlich über die Element Web UI interagiert: Button-Klicks, Formular-Eingaben, Timeline-Assertions. Jede Feature-Interaktion läuft über das echte Element Web Interface — genau so wie ein menschlicher Nutzer.
+Diese Story ersetzt diesen Ansatz durch eine **Browser-First E2E Suite**, die ausschließlich über die Element Web UI interagiert: Button-Klicks, Formular-Eingaben, Timeline-Assertions. Jede Feature-Interaktion läuft über das echte Element Web Interface - genau so wie ein menschlicher Nutzer.
 
 **Struktur spiegelt element-web/playwright/e2e:** Kleine, fokussierte Specs pro Feature, organisiert in `login/`, `room/`, `messages/`. Kein Mega-Test.
 
-**Zwei Phasen — klar getrennt:**
+**Zwei Phasen - klar getrennt:**
 
-1. **Phase 1 — Framework:** Fixtures, storageState-Caching, ElementAppPage, playwright config
-2. **Phase 2 — Feature Tests:** Kleine Specs (login, logout, relogin, room/create, room/join, room/leave, messages/send, messages/receive)
+1. **Phase 1 - Framework:** Fixtures, storageState-Caching, ElementAppPage, playwright config
+2. **Phase 2 - Feature Tests:** Kleine Specs (login, logout, relogin, room/create, room/join, room/leave, messages/send, messages/receive)
 
 ---
 
@@ -32,10 +32,10 @@ Diese Story ersetzt diesen Ansatz durch eine **Browser-First E2E Suite**, die au
 
 | element-web Tests | Nebu Tests |
 |---|---|
-| `homeserver.registerUser()` — dynamisch neue User anlegen | Nicht verfügbar — Nebu nutzt Dex (vorkonfigurierte User) |
-| testcontainer spinnt Synapse/Dendrite hoch | Nicht nötig — Nebu läuft bereits via `docker compose` |
-| `grant_type=password` ROPC Login | Verboten — Dex v2.41+ ohne ROPC; immer Authorization Code + PKCE |
-| Cookie-Injection für Auth-State | Nicht möglich — Element speichert Access-Token im localStorage, nicht Cookies |
+| `homeserver.registerUser()` - dynamisch neue User anlegen | Nicht verfügbar - Nebu nutzt Dex (vorkonfigurierte User) |
+| testcontainer spinnt Synapse/Dendrite hoch | Nicht nötig - Nebu läuft bereits via `docker compose` |
+| `grant_type=password` ROPC Login | Verboten - Dex v2.41+ ohne ROPC; immer Authorization Code + PKCE |
+| Cookie-Injection für Auth-State | Nicht möglich - Element speichert Access-Token im localStorage, nicht Cookies |
 
 ### Vorkonfigurierte Test-User (Dex)
 
@@ -50,7 +50,7 @@ Alle Tests nutzen ausschließlich diese 4 User (Passwort `changeme`):
 
 ### API-Seeding ist erlaubt für Test-Setup
 
-Matrix API Calls via `page.request` sind erlaubt für **Test-Setup** (Raum anlegen, User einladen) — aber **nicht** für die Feature-Assertion selbst. Die Assertion muss über die Element Web UI erfolgen.
+Matrix API Calls via `page.request` sind erlaubt für **Test-Setup** (Raum anlegen, User einladen) - aber **nicht** für die Feature-Assertion selbst. Die Assertion muss über die Element Web UI erfolgen.
 
 Beispiel `room/join`:
 - Setup (API): bot-User erstellt Raum, lädt `alex` ein
@@ -66,9 +66,9 @@ Beispiel `room/join`:
 
 ---
 
-## Phase 1 — Framework (AC1–AC4)
+## Phase 1 - Framework (AC1–AC4)
 
-### AC1: Fixture-Datei `e2e/fixtures/nebu-fixtures.ts` — Merged Test Base
+### AC1: Fixture-Datei `e2e/fixtures/nebu-fixtures.ts` - Merged Test Base
 
 Erstelle `e2e/fixtures/nebu-fixtures.ts` als Ersatz für element-web's `element-web-test.ts`:
 
@@ -92,10 +92,10 @@ export const NEBU_USERS = {
 } as const satisfies Record<string, NebUser>;
 ```
 
-**`fixtures/dex-auth.ts`** — storageState-Cache-Fixture:
+**`fixtures/dex-auth.ts`** - storageState-Cache-Fixture:
 ```typescript
 // Pure function: führt OIDC-Flow durch, gibt storageState-Pfad zurück.
-// Nutzt die bestehende loginViaOidc() aus tests/fixtures/oidc.ts —
+// Nutzt die bestehende loginViaOidc() aus tests/fixtures/oidc.ts -
 // ergänzt nur die storageState-Persistenz.
 export async function ensureStorageState(
   browser: Browser, user: NebUser, password: string
@@ -124,7 +124,7 @@ export const test = base.extend<{
 });
 ```
 
-**`fixtures/nebu-fixtures.ts`** — Merged Base:
+**`fixtures/nebu-fixtures.ts`** - Merged Base:
 ```typescript
 // Browser-Context wird mit gespeichertem Auth-State geöffnet
 // → kein OIDC-Redirect in jedem Test
@@ -146,7 +146,7 @@ export { expect } from '@playwright/test';
 
 **Acceptance:** Import `{ test, expect }` from `fixtures/nebu-fixtures.ts` in jedem Feature-Spec möglich.
 
-### AC2: `e2e/fixtures/element-app.ts` — ElementAppPage für Nebu
+### AC2: `e2e/fixtures/element-app.ts` - ElementAppPage für Nebu
 
 Adaptiere `ElementAppPage` aus element-web. Kopiere die Klasse, passe nur die Dinge an die Nebu-spezifisch sind:
 
@@ -158,13 +158,13 @@ Methoden die direkt übernommen werden (keine Änderung nötig):
 - `inviteUserToCurrentRoom(userId)` → "Room info" → "Invite" dialog
 
 Methoden die wegfallen (Nebu MVP):
-- `openSpotlight()` — nur wenn Spotlight in Nebu verfügbar (skip if not)
-- `settings` — nur für `openUserMenu()` und `closeDialog()`
-- `crypto` — nicht in Nebu MVP
+- `openSpotlight()` - nur wenn Spotlight in Nebu verfügbar (skip if not)
+- `settings` - nur für `openUserMenu()` und `closeDialog()`
+- `crypto` - nicht in Nebu MVP
 
 **Acceptance:** `app.getComposerField()`, `app.openCreateRoomDialog()`, `app.viewRoomByName()` sind einsetzbar in Feature-Tests.
 
-### AC3: `e2e/playwright.config.ts` — Neues `element-web` Projekt
+### AC3: `e2e/playwright.config.ts` - Neues `element-web` Projekt
 
 Füge ein zweites Playwright-Projekt hinzu (bestehendes `chromium` Projekt bleibt unverändert):
 
@@ -188,11 +188,11 @@ projects: [
 ],
 ```
 
-**Separate Test-Directory:** `e2e/tests/element/` — damit `make test-e2e-element` nur diese Specs laufen kann.
+**Separate Test-Directory:** `e2e/tests/element/` - damit `make test-e2e-element` nur diese Specs laufen kann.
 
 **Acceptance:** `npx playwright test --project=element-web` startet nur die Browser-First-Tests.
 
-### AC4: `e2e/auth-state/` + `global-setup.ts` — Auth-Warming
+### AC4: `e2e/auth-state/` + `global-setup.ts` - Auth-Warming
 
 ```
 e2e/auth-state/          ← gitignored; enthält alex.json, marie.json, tom.json, kai.json
@@ -207,7 +207,7 @@ e2e/global-setup.ts      ← Wärmt storageState für alex + marie (die häufigs
 
 ---
 
-## Phase 2 — Feature Tests (AC5–AC12)
+## Phase 2 - Feature Tests (AC5–AC12)
 
 **Design-Prinzip:** Jeder Spec testet **genau eine Sache**. Kein Mega-Test. Setup via API erlaubt, Feature-Assertion **nur via UI**.
 
@@ -243,7 +243,7 @@ Scenario: SSO Login via Dex zeigt Room-Liste
   And kein Error-Dialog erscheint
 ```
 
-**Besonderheit:** Dieser Test nutzt KEINEN gecachten storageState — er testet den echten Login-Flow.
+**Besonderheit:** Dieser Test nutzt KEINEN gecachten storageState - er testet den echten Login-Flow.
 
 ### AC6: `login/logout.spec.ts`
 
@@ -264,7 +264,7 @@ Scenario: Logout leitet auf Welcome-Screen zurück
 ### AC7: `login/relogin.spec.ts`
 
 ```
-Scenario: Gecachter storageState — kein OIDC-Redirect beim Reload
+Scenario: Gecachter storageState - kein OIDC-Redirect beim Reload
   Given auth-state/alex.json existiert (vorheriger Login)
   When Browser-Context mit storageState geöffnet wird
   And page.goto('http://localhost:7070') aufgerufen wird
@@ -287,7 +287,7 @@ Scenario: Neuen Raum via Element Web UI erstellen
   And der Room-Header zeigt den Raum-Namen
 ```
 
-**Cleanup:** Nach dem Test den erstellten Raum via API verlassen (Raum bleibt aber im Server — kein Delete nötig).
+**Cleanup:** Nach dem Test den erstellten Raum via API verlassen (Raum bleibt aber im Server - kein Delete nötig).
 
 ### AC9: `room/join.spec.ts`
 
@@ -302,7 +302,7 @@ Scenario: Invite akzeptieren via Element Web UI
   And der Raum-Header zeigt den Raum-Namen
 ```
 
-**Hinweis:** Das Invite-Banner erscheint in der Sidebar als Raum mit "?" oder "Invite"-Indikator — Element zeigt es normalerweise als eigene Sektion "Invites" in der Sidebar an.
+**Hinweis:** Das Invite-Banner erscheint in der Sidebar als Raum mit "?" oder "Invite"-Indikator - Element zeigt es normalerweise als eigene Sektion "Invites" in der Sidebar an.
 
 ### AC10: `room/leave.spec.ts`
 
@@ -350,7 +350,7 @@ Scenario: Nachricht von User A empfangen in User B's Timeline
 
 Diese Tests werden **ZUERST geschrieben** (Red Phase), bevor die Implementierung beginnt.
 
-### Framework-Tests (Phase 1 — Red Phase):
+### Framework-Tests (Phase 1 - Red Phase):
 
 ```
 1. storageState-Caching [Playwright]
@@ -369,7 +369,7 @@ Diese Tests werden **ZUERST geschrieben** (Red Phase), bevor die Implementierung
    - Then: Listet nur Tests aus e2e/tests/element/
 ```
 
-### Feature-Tests (Phase 2 — Red Phase):
+### Feature-Tests (Phase 2 - Red Phase):
 
 ```
 4. login.spec.ts [Playwright, Browser]
@@ -428,7 +428,7 @@ Phase 1 (Framework):
 5. e2e/playwright.config.ts          ← element-web project hinzufügen
 6. e2e/global-setup.ts               ← auth-state warming (optional, aber empfohlen)
 
-Phase 2 (Feature Tests) — jeweils: Red → Green → Refactor:
+Phase 2 (Feature Tests) - jeweils: Red → Green → Refactor:
 7. e2e/tests/element/login/login.spec.ts
 8. e2e/tests/element/login/logout.spec.ts
 9. e2e/tests/element/login/relogin.spec.ts
@@ -500,7 +500,7 @@ if (await consentBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
 |---|---|---|
 | Element Web-Selektoren ändern sich | HIGH | ElementAppPage als Puffer; Selektoren an einer Stelle |
 | storageState expired (Element-Token läuft ab) | MEDIUM | auth-state/ wird beim nächsten Lauf automatisch refreshed wenn Datei > 12h alt |
-| Dex Consent-Screen taucht sporadisch auf | MEDIUM | loginViaOidc() behandelt ihn bereits — in dex-auth.ts weiterverwenden |
+| Dex Consent-Screen taucht sporadisch auf | MEDIUM | loginViaOidc() behandelt ihn bereits - in dex-auth.ts weiterverwenden |
 | Element Web nicht erreichbar | LOW | Auto-skip Guard in jeder Spec (wie in bestehenden Tests) |
 | Race condition: zweiter Context bekommt Nachricht nicht | MEDIUM | `expect(mariePage.locator(...)).toBeVisible({ timeout: 20_000 })` mit großzügigem Timeout |
 

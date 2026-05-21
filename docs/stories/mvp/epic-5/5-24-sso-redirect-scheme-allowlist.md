@@ -25,7 +25,7 @@ if u.Scheme != "http" && u.Scheme != "https" { return u.Scheme != "" }
 The in-code comment argues custom schemes are safe because "browsers do not follow them", but this is incorrect for:
 - Embedded webviews (e.g. mobile Matrix apps)
 - Non-browser clients (curl, scanners)
-- Browsers that do follow `intent://` (Android) — the `loginToken` query param is then harvested by the receiving app
+- Browsers that do follow `intent://` (Android) - the `loginToken` query param is then harvested by the receiving app
 
 The correct pattern is strict allowlist of known Matrix-client schemes, configurable by the operator.
 
@@ -35,7 +35,7 @@ The correct pattern is strict allowlist of known Matrix-client schemes, configur
 
 1. `matrix/sso.go:isRedirectURLAllowed` rejects any URL whose scheme is not in:
    - `https` (always allowed)
-   - `http` — only if host is `localhost` or `127.0.0.1` (development)
+   - `http` - only if host is `localhost` or `127.0.0.1` (development)
    - The allowlist of deep-link schemes configured in `NEBU_SSO_REDIRECT_SCHEMES` (comma-separated)
 
 2. Default allowlist includes well-known Matrix-client schemes:
@@ -44,7 +44,7 @@ The correct pattern is strict allowlist of known Matrix-client schemes, configur
    - `fluffychat`
    - (list finalized during implementation, confirmed via Matrix client docs)
 
-3. Explicit deny of `javascript`, `data`, `file`, `vbscript`, `blob` — these return an error even if an operator accidentally adds them to the allowlist (hardcoded blocklist wins).
+3. Explicit deny of `javascript`, `data`, `file`, `vbscript`, `blob` - these return an error even if an operator accidentally adds them to the allowlist (hardcoded blocklist wins).
 
 4. Rejected redirect → 400 with error body `M_INVALID_PARAM`, scheme name NOT echoed back (no XSS vector).
 
@@ -63,7 +63,7 @@ The correct pattern is strict allowlist of known Matrix-client schemes, configur
 
 1. Table-driven test covering 10+ scheme/host combinations with expected allow/deny
 
-2. `TestSSORedirect_ErrorDoesNotLeakScheme` — response body for `javascript:alert(1)` does not contain `javascript` or `alert`
+2. `TestSSORedirect_ErrorDoesNotLeakScheme` - response body for `javascript:alert(1)` does not contain `javascript` or `alert`
 
 ---
 
@@ -87,10 +87,10 @@ The correct pattern is strict allowlist of known Matrix-client schemes, configur
 1. `gateway/internal/matrix/sso.go`
    - Replaced old `isRedirectURLAllowed` (which accepted any non-http scheme) with a strict allowlist implementation
    - Added `defaultDeepLinkSchemes` (`element`, `io.element.fluffychat`, `fluffychat`)
-   - Added `schemeDenylist` (`javascript`, `data`, `file`, `vbscript`, `blob`) — blocklist wins over allowlist
+   - Added `schemeDenylist` (`javascript`, `data`, `file`, `vbscript`, `blob`) - blocklist wins over allowlist
    - Added `isRedirectURLAllowedWithSchemes(raw string, extraSchemes []string) bool` for operator-configured schemes
    - `isRedirectURLAllowed` delegates to `isRedirectURLAllowedWithSchemes(raw, nil)`
-   - `GetSSORedirect` now calls `isRedirectURLAllowedWithSchemes(clientRedirectURL, h.ssoRedirectSchemes)` and does NOT echo the scheme in the error response (AC 4 — XSS prevention)
+   - `GetSSORedirect` now calls `isRedirectURLAllowedWithSchemes(clientRedirectURL, h.ssoRedirectSchemes)` and does NOT echo the scheme in the error response (AC 4 - XSS prevention)
 
 2. `gateway/internal/matrix/login.go`
    - Added `ssoRedirectSchemes []string` field to `LoginHandler`

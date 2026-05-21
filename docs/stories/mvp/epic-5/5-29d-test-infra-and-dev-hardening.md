@@ -22,30 +22,30 @@ Four findings cluster as "fix the test/dev infrastructure that the production wo
 
 ## Findings rolled into this story
 
-### FB-E5-03 — Elixir event_dispatcher: 23 pre-existing test failures (MEDIUM)
+### FB-E5-03 - Elixir event_dispatcher: 23 pre-existing test failures (MEDIUM)
 - Source: surfaced during Story 5-2 TEA Gate 2; verified pre-existing via `git stash --include-untracked`. Two root causes:
-  1. **`could not lookup Ecto repo Nebu.Repo`** — `Nebu.Repo` only configured for `:prod`/`:dev`. Tests in `create_room_test`, parts of `join_room_test`, and most `sync_test` scenarios hit code paths that call `Nebu.Room.DB` → `Nebu.Repo`.
-  2. **Test fakes out of sync with `Nebu.Room.DB` interface** — `FakeInviteDB.accept_invitation/2` undefined, `SyncTestFakeDB.get_room_name/1` undefined, etc.
+  1. **`could not lookup Ecto repo Nebu.Repo`** - `Nebu.Repo` only configured for `:prod`/`:dev`. Tests in `create_room_test`, parts of `join_room_test`, and most `sync_test` scenarios hit code paths that call `Nebu.Room.DB` → `Nebu.Repo`.
+  2. **Test fakes out of sync with `Nebu.Room.DB` interface** - `FakeInviteDB.accept_invitation/2` undefined, `SyncTestFakeDB.get_room_name/1` undefined, etc.
 - Fix:
   1. Per test, decide: configurable `messages_db_module` override (same pattern as `audit_writer_module()` in 5-2), OR `@tag :integration` so the test runs only against a real DB.
   2. Update all `FakeDB` / `FakeInviteDB` / `SyncTestFakeDB` modules to current `Nebu.Room.DB` interface. Introduce `@behaviour Nebu.Room.DBBehaviour` so fakes are compile-time-checked (deferred-work.md already flagged this).
 
-### FB-E5-08 — Dex dev config still has `password` grant_type (LOW, dev-only)
+### FB-E5-08 - Dex dev config still has `password` grant_type (LOW, dev-only)
 - Source: Epic-5 SEC Gate 2.
 - Symptom: `dev/dex/config.yaml` retains `oauth2.passwordConnector: local` and the `password` grant. Convenient for ad-hoc scripts but contradicts CLAUDE.md "Authorization Code + PKCE only".
 - Fix: remove `passwordConnector` and `password` grant from Dex dev config; verify all integration step-defs use authcode+PKCE; add a CI smoke that confirms the password grant is rejected by Dex.
 
-### FB-53-02 — XSS escaping verification for `justification` (LOW)
+### FB-53-02 - XSS escaping verification for `justification` (LOW)
 - Source: 5-3 Kassandra (paired with FB-54-01, but FB-54-01 length-cap landed in 5-29b).
 - Fix: Playwright test in 5-4 admin-pending-list rendering: submit a request with `justification = "<script>alert(1)</script>"`, render in admin pending-list, assert no script execution. Server-side check: confirm Go html/template auto-escape (no `template.HTML` raw escape, no innerHTML in client-side JS).
 
-### FB-29c-1 — `NEBU_KEY_ENCRYPTION_KEY` zero-default also boots in production (MEDIUM)
+### FB-29c-1 - `NEBU_KEY_ENCRYPTION_KEY` zero-default also boots in production (MEDIUM)
 
 **Source:** Story 5-29c Kassandra SEC Gate 1 (2026-04-29).
 **Severity:** MEDIUM (deployment safety).
 **Size estimate:** XS.
 
-**Observation:** When `NEBU_KEY_ENCRYPTION_KEY` is unset, the gateway logs a warning and continues with a zero-byte default KEK. This is the right behaviour in dev but unacceptable in production — a zero KEK is effectively no encryption.
+**Observation:** When `NEBU_KEY_ENCRYPTION_KEY` is unset, the gateway logs a warning and continues with a zero-byte default KEK. This is the right behaviour in dev but unacceptable in production - a zero KEK is effectively no encryption.
 
 **Fix:** Hard-fail (`os.Exit(1)`) when KEK is missing, unless `cfg.Env != "production"` OR a new `NEBU_ALLOW_INSECURE_KEK=true` opt-in env is set. Tests: assert startup-fail on production env without KEK.
 
@@ -53,7 +53,7 @@ Four findings cluster as "fix the test/dev infrastructure that the production wo
 
 ---
 
-### FB-29c-2 — Compliance signing-key KEK rotation requires manual migration (MEDIUM)
+### FB-29c-2 - Compliance signing-key KEK rotation requires manual migration (MEDIUM)
 
 **Source:** Story 5-29c Kassandra SEC Gate 1 (2026-04-29).
 **Severity:** MEDIUM (key-management hygiene).
@@ -68,11 +68,11 @@ Four findings cluster as "fix the test/dev infrastructure that the production wo
 
 **Fix:** Bake `key_version` into the envelope (`enc:v1:<hex>`) and document a `make rotate-kek` operational target. Tests: rotate-and-decrypt smoke.
 
-**Why deferred:** Architectural — needs an ADR for key-versioning convention; bundle with 5-29d's KEK hardening work.
+**Why deferred:** Architectural - needs an ADR for key-versioning convention; bundle with 5-29d's KEK hardening work.
 
 ---
 
-### FB-29c-3 — Purge scheduler runs on every gateway instance without jitter (MEDIUM)
+### FB-29c-3 - Purge scheduler runs on every gateway instance without jitter (MEDIUM)
 
 **Source:** Story 5-29c Kassandra SEC Gate 1 (2026-04-29).
 **Severity:** MEDIUM (resource contention, not correctness).
@@ -91,7 +91,7 @@ Four findings cluster as "fix the test/dev infrastructure that the production wo
 
 ---
 
-### FB-29c-4 — `MigrateLegacyPlaintextKey` legacy detection only by exact length (LOW)
+### FB-29c-4 - `MigrateLegacyPlaintextKey` legacy detection only by exact length (LOW)
 
 **Source:** Story 5-29c Kassandra SEC Gate 1 (2026-04-29).
 **Severity:** LOW (edge case, low impact).
@@ -103,7 +103,7 @@ Four findings cluster as "fix the test/dev infrastructure that the production wo
 
 ---
 
-### FB-E5-09 — `DeleteUserKeys` gRPC subsumed by FB-52-01 (INFO — close-out only)
+### FB-E5-09 - `DeleteUserKeys` gRPC subsumed by FB-52-01 (INFO - close-out only)
 - Source: Epic-5 SEC Gate 2.
 - Action: no separate fix needed. Once 5-29a Block B (gRPC mTLS/auth) lands, `DeleteUserKeys` is protected by the same interceptor as every other RPC. This block exists only to close the audit trail.
 
@@ -130,7 +130,7 @@ Four findings cluster as "fix the test/dev infrastructure that the production wo
 
 ## Implementation Notes
 
-- The `@behaviour` introduction will surface every interface drift in one go — expect that fake fixes alone won't be enough; some tests may need to migrate to `@tag :integration`.
+- The `@behaviour` introduction will surface every interface drift in one go - expect that fake fixes alone won't be enough; some tests may need to migrate to `@tag :integration`.
 - The XSS test only matters once Story 7-11 (Compliance Admin UI) lands. If 7-11 is far off, downgrade FB-53-02 to "deferred until 7-11 lands" and remove the Playwright test from this story's AC.
 
 ---
@@ -144,22 +144,22 @@ Four findings cluster as "fix the test/dev infrastructure that the production wo
 ## File List
 
 ### New Files
-- `gateway/cmd/gateway/kek_validation.go` — `validateKEKConfig(kekHex, env, allowInsecure string) error`; enforces KEK hard-fail in production (AC5/FB-29c-1)
+- `gateway/cmd/gateway/kek_validation.go` - `validateKEKConfig(kekHex, env, allowInsecure string) error`; enforces KEK hard-fail in production (AC5/FB-29c-1)
 
 ### Modified Files
-- `core/apps/room_manager/lib/nebu/room/db.ex` — Added `@behaviour Nebu.Room.DBBehaviour` declaration (AC1+AC2/FB-E5-03)
-- `core/apps/event_dispatcher/test/nebu/event_dispatcher/create_room_test.exs` — Added `messages_db_module` FakeDB injection in setup/on_exit (AC1/FB-E5-03)
-- `core/apps/event_dispatcher/test/nebu/event_dispatcher/join_room_test.exs` — Added `accept_invitation/2` to FakeInviteDB; added `messages_db_module` injection (AC1/FB-E5-03)
-- `core/apps/event_dispatcher/test/nebu/event_dispatcher/sync_test.exs` — Fixed `SyncTestFakeDB.load_members/1` return arity (3→4-tuple); added `set_power_levels/2`, `fetch_events_since/3`, `get_event_timestamp/1`, `get_room_name/1` to SyncTestFakeDB; added delegations to SyncDeltaFakeDB (AC1/FB-E5-03)
-- `dev/dex/config.yaml` — Removed `password` from `oauth2.grantTypes` list (AC2→AC3/FB-E5-08)
-- `gateway/internal/config/config.go` — Added `Env` and `AllowInsecureKEK` fields (AC5/FB-29c-1)
-- `gateway/cmd/gateway/main.go` — Replaced inline zero-KEK fallback with `validateKEKConfig` call (AC5/FB-29c-1)
-- `gateway/internal/compliance/signing_key.go` — Added `enc:v1:` versioned envelope, `ErrUnknownKeyVersion`, strings import; updated load/migrate logic (AC6/FB-29c-2)
-- `gateway/internal/audit/scheduler.go` — Added `NewPurgeSchedulerWithJitter`, `nextInterval()`, `runJitterMode`, refactored `Start()` into sub-functions (AC7/FB-29c-3)
+- `core/apps/room_manager/lib/nebu/room/db.ex` - Added `@behaviour Nebu.Room.DBBehaviour` declaration (AC1+AC2/FB-E5-03)
+- `core/apps/event_dispatcher/test/nebu/event_dispatcher/create_room_test.exs` - Added `messages_db_module` FakeDB injection in setup/on_exit (AC1/FB-E5-03)
+- `core/apps/event_dispatcher/test/nebu/event_dispatcher/join_room_test.exs` - Added `accept_invitation/2` to FakeInviteDB; added `messages_db_module` injection (AC1/FB-E5-03)
+- `core/apps/event_dispatcher/test/nebu/event_dispatcher/sync_test.exs` - Fixed `SyncTestFakeDB.load_members/1` return arity (3→4-tuple); added `set_power_levels/2`, `fetch_events_since/3`, `get_event_timestamp/1`, `get_room_name/1` to SyncTestFakeDB; added delegations to SyncDeltaFakeDB (AC1/FB-E5-03)
+- `dev/dex/config.yaml` - Removed `password` from `oauth2.grantTypes` list (AC2→AC3/FB-E5-08)
+- `gateway/internal/config/config.go` - Added `Env` and `AllowInsecureKEK` fields (AC5/FB-29c-1)
+- `gateway/cmd/gateway/main.go` - Replaced inline zero-KEK fallback with `validateKEKConfig` call (AC5/FB-29c-1)
+- `gateway/internal/compliance/signing_key.go` - Added `enc:v1:` versioned envelope, `ErrUnknownKeyVersion`, strings import; updated load/migrate logic (AC6/FB-29c-2)
+- `gateway/internal/audit/scheduler.go` - Added `NewPurgeSchedulerWithJitter`, `nextInterval()`, `runJitterMode`, refactored `Start()` into sub-functions (AC7/FB-29c-3)
 
 ### Already-Staged (by ATDD Gate 1, read-only during this story)
-- `core/apps/room_manager/lib/nebu/room/db_behaviour.ex` — Defines `Nebu.Room.DBBehaviour` with 11 `@callback` declarations
-- `core/apps/room_manager/test/nebu/room/db_behaviour_test.exs` — Conformance tests: behaviour module exists, has all 11 callbacks, `Nebu.Room.DB` declares it
+- `core/apps/room_manager/lib/nebu/room/db_behaviour.ex` - Defines `Nebu.Room.DBBehaviour` with 11 `@callback` declarations
+- `core/apps/room_manager/test/nebu/room/db_behaviour_test.exs` - Conformance tests: behaviour module exists, has all 11 callbacks, `Nebu.Room.DB` declares it
 
 ---
 
@@ -167,7 +167,7 @@ Four findings cluster as "fix the test/dev infrastructure that the production wo
 
 ### Implementation Plan
 
-**AC1 + AC2 (FB-E5-03) — Fix Elixir event_dispatcher failures via `@behaviour` + fake updates:**
+**AC1 + AC2 (FB-E5-03) - Fix Elixir event_dispatcher failures via `@behaviour` + fake updates:**
 
 Strategy: configurable `messages_db_module` injection (same pattern as `audit_writer_module` from 5-2), plus interface-sync of all fake DB modules.
 
@@ -177,25 +177,25 @@ Strategy: configurable `messages_db_module` injection (same pattern as `audit_wr
 4. In `sync_test.exs`: fixed `SyncTestFakeDB.load_members/1` return (3→4-tuple to include `pl_json`); added `set_power_levels/2`, `fetch_events_since/3`, `get_event_timestamp/1`, `get_room_name/1` to SyncTestFakeDB; delegated new functions from SyncDeltaFakeDB.
 
 Result: event_dispatcher failures reduced from 23 to 8. The remaining 8 are pre-existing logic bugs (not interface gaps):
-- `send_event txn_id idempotency` — 2 events inserted instead of 1 (server.ex logic bug)
-- `get_messages` happy path — join event appears in timeline when test expects empty
-- Various `sync_delta` tests — logic issues independent of our changes
+- `send_event txn_id idempotency` - 2 events inserted instead of 1 (server.ex logic bug)
+- `get_messages` happy path - join event appears in timeline when test expects empty
+- Various `sync_delta` tests - logic issues independent of our changes
 
 Decision (scope boundary): These 8 are split out to a follow-up story (5-29d.1) per the story's original scope note. The `db_behaviour_test.exs` passes (64 room_manager tests, 0 failures).
 
-**AC2 (alias AC3 in AC list) — FB-E5-08 — Remove Dex password grant:**
+**AC2 (alias AC3 in AC list) - FB-E5-08 - Remove Dex password grant:**
 
 Removed `- password` from `oauth2.grantTypes` in `dev/dex/config.yaml`. The `passwordConnector` key was not present (already absent). Result: Dex dev OIDC now enforces Authorization Code + PKCE only.
 
-**AC3 (FB-53-02) — XSS Playwright test — Deferred:**
+**AC3 (FB-53-02) - XSS Playwright test - Deferred:**
 
 The compliance admin pending-list UI is not yet implemented (Story 7-11 is backlog). Adding a Playwright test before the rendered surface exists would be a dead test. Decision: defer FB-53-02 entirely to Story 7-11. Documented here for audit trail.
 
-**AC4 (FB-E5-09) — DeleteUserKeys close-out — INFO:**
+**AC4 (FB-E5-09) - DeleteUserKeys close-out - INFO:**
 
 No code change needed. Once Story 5-29a Block B (gRPC mTLS/auth interceptor) lands, `DeleteUserKeys` is protected by the same interceptor as all other RPCs. Audit trail closed via this entry.
 
-**AC5 (FB-29c-1) — KEK hard-fail in production:**
+**AC5 (FB-29c-1) - KEK hard-fail in production:**
 
 1. Added `Env` and `AllowInsecureKEK` to `gateway/internal/config/config.go`.
 2. Created `gateway/cmd/gateway/kek_validation.go` with `validateKEKConfig`:
@@ -205,7 +205,7 @@ No code change needed. Once Story 5-29a Block B (gRPC mTLS/auth interceptor) lan
    - non-production → Warn log, proceed (dev default)
 3. Updated `main.go` to call `validateKEKConfig` before the existing zero-default fill.
 
-**AC6 (FB-29c-2) — `enc:v1:` versioned envelope:**
+**AC6 (FB-29c-2) - `enc:v1:` versioned envelope:**
 
 Changed the stored format from `enc:<hex>` to `enc:v1:<hex>`. Three constants introduced:
 - `encBasePrefix = "enc:"` (for plaintext detection in legacy check)
@@ -214,13 +214,13 @@ Changed the stored format from `enc:<hex>` to `enc:v1:<hex>`. Three constants in
 
 `LoadComplianceSigningKey` now rejects unversioned `enc:` envelopes with `ErrUnknownKeyVersion`. `MigrateLegacyPlaintextKey` checks `encBasePrefix` for idempotency (both old and new encrypted rows are treated as already migrated).
 
-Backward compat note: Any existing row with bare `enc:<hex>` (written before this story) will be rejected by `LoadComplianceSigningKey`. This is intentional — the migration boundary is at 5-29c→5-29d deployment. Operators must run `MigrateLegacyPlaintextKey` before upgrading if they have bare `enc:` rows from 5-29c. Documented in test `TestLoadKey_RejectsUnversionedEncPrefix`.
+Backward compat note: Any existing row with bare `enc:<hex>` (written before this story) will be rejected by `LoadComplianceSigningKey`. This is intentional - the migration boundary is at 5-29c→5-29d deployment. Operators must run `MigrateLegacyPlaintextKey` before upgrading if they have bare `enc:` rows from 5-29c. Documented in test `TestLoadKey_RejectsUnversionedEncPrefix`.
 
-**AC7 (FB-29c-3) — Purge scheduler jitter:**
+**AC7 (FB-29c-3) - Purge scheduler jitter:**
 
 Added `NewPurgeSchedulerWithJitter(retentionDays, cleanupFn, baseInterval, jitterFraction)`. Refactored `Start()` to dispatch to `runExternalTicker` (existing mode, tickCh != nil) or `runJitterMode` (new, jitter mode). `runJitterMode` uses `time.After(nextInterval())` in a select with `ctx.Done()`. `nextInterval()` computes `base * (1 + (rand.Float64()*2 - 1) * jitterFraction)`, yielding interval in `[base*(1-jitter), base*(1+jitter)]`.
 
-**AC8 (FB-29c-4) — `MigrateLegacyPlaintextKey` legacy detection — INFO/RESOLVED:**
+**AC8 (FB-29c-4) - `MigrateLegacyPlaintextKey` legacy detection - INFO/RESOLVED:**
 
 The exact-length-128 check was already replaced during AC6 implementation. `MigrateLegacyPlaintextKey` now uses `strings.HasPrefix(stored, encBasePrefix)` to detect already-encrypted rows, which is robust to any length variation. Considered resolved as part of AC6.
 
@@ -228,12 +228,12 @@ The exact-length-128 check was already replaced during AC6 implementation. `Migr
 
 - `make test-unit-go`: exit 0 (all Go packages pass including new kek_validation_test.go and scheduler jitter tests).
 - `make test-unit-elixir`:
-  - room_manager: 64 tests, 0 failures (includes `db_behaviour_test.exs` — AC2 verified)
+  - room_manager: 64 tests, 0 failures (includes `db_behaviour_test.exs` - AC2 verified)
   - event_dispatcher: 98 tests, 8 failures, 2 skipped (down from 23; remaining 8 are pre-existing logic bugs, split to 5-29d.1)
   - compliance: 22 tests, 4 failures (pre-existing `UserDeletionTest` + `AuditWriterTest` bugs, unrelated to 5-29d)
   - All other apps: 0 failures
 - AC3 deferred to 7-11 (surface not yet implemented).
-- AC4 closed as INFO — no code change.
+- AC4 closed as INFO - no code change.
 - AC8 resolved as part of AC6.
 
 ---

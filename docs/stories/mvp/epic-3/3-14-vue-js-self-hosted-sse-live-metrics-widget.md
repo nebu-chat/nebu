@@ -10,11 +10,11 @@ so that I can monitor Nebu in real time without page reloads during chat tests.
 
 ## Acceptance Criteria
 
-1. `vue.esm-browser.prod.js` (Vue 3, ESM build) is placed in `gateway/internal/admin/static/vendor/` and embedded via `//go:embed`; served at `/admin/static/vendor/vue.esm-browser.prod.js` — no CDN
+1. `vue.esm-browser.prod.js` (Vue 3, ESM build) is placed in `gateway/internal/admin/static/vendor/` and embedded via `//go:embed`; served at `/admin/static/vendor/vue.esm-browser.prod.js` - no CDN
 2. `GET /admin/sse/metrics` is an SSE endpoint (`Content-Type: text/event-stream`):
    - Sends an initial `event: metrics` with JSON payload `{"msg_per_sec": <float>, "active_sessions": <int>, "room_count": <int>}` immediately on connect
    - Sends updated payload every 5 seconds
-   - Metrics are fetched from `gRPC CoreService.GetMetrics`; if gRPC fails (or method not yet implemented — see Dev Notes), sends `event: error` with `{"error": "core unavailable"}` and keeps connection open for retry
+   - Metrics are fetched from `gRPC CoreService.GetMetrics`; if gRPC fails (or method not yet implemented - see Dev Notes), sends `event: error` with `{"error": "core unavailable"}` and keeps connection open for retry
    - Sends `event: ping` every 30 seconds to keep the connection alive
 3. The Dashboard template's `{{ define "scripts" }}` block loads the self-hosted Vue.js and a `metrics-widget.js` inline script
 4. `metrics-widget.js` mounts a Vue 3 app on `#live-metrics`, connects to `/admin/sse/metrics` via `EventSource`, and renders:
@@ -34,13 +34,13 @@ so that I can monitor Nebu in real time without page reloads during chat tests.
   - [x] 1.4 Register `GET /admin/static/vendor/{filename}` in `main.go` alongside existing static asset routes
 
 - [x] Task 2: Add `GetMetrics` stub to proto and gRPC client (AC: 2)
-  - [x] 2.1 Add `GetMetrics` RPC to `proto/core.proto` with `GetMetricsRequest` (empty) and `GetMetricsResponse` (`msg_per_sec float`, `active_sessions int32`, `room_count int32`) — see Dev Notes for exact field types
+  - [x] 2.1 Add `GetMetrics` RPC to `proto/core.proto` with `GetMetricsRequest` (empty) and `GetMetricsResponse` (`msg_per_sec float`, `active_sessions int32`, `room_count int32`) - see Dev Notes for exact field types
   - [x] 2.2 Run `make proto` to regenerate `gateway/internal/grpc/pb/` stubs
   - [x] 2.3 Add `GetMetrics` stub method to `gateway/internal/grpc/client.go` (returns `nil, nil` like other Epic 4 stubs)
 
-- [x] Task 3: Create `gateway/internal/admin/sse.go` — SSE metrics handler (AC: 2)
+- [x] Task 3: Create `gateway/internal/admin/sse.go` - SSE metrics handler (AC: 2)
   - [x] 3.1 Define `MetricsReader` interface (consumer-defined): `GetMetrics(ctx context.Context) (msgPerSec float64, activeSessions int, roomCount int, err error)`
-  - [x] 3.2 Implement `coreMetricsReader` that calls `grpcClient.GetMetrics(ctx, &pb.GetMetricsRequest{})` and maps fields — implemented as `coreMetricsAdapter` in `main.go` to avoid pb import in admin package (follows existing `CoreStateReader` pattern)
+  - [x] 3.2 Implement `coreMetricsReader` that calls `grpcClient.GetMetrics(ctx, &pb.GetMetricsRequest{})` and maps fields - implemented as `coreMetricsAdapter` in `main.go` to avoid pb import in admin package (follows existing `CoreStateReader` pattern)
   - [x] 3.3 Implement `SSEMetricsHandler` struct: `{ core MetricsReader }`
   - [x] 3.4 Implement `NewSSEMetricsHandler(core MetricsReader) *SSEMetricsHandler`
   - [x] 3.5 Implement `Handler(w http.ResponseWriter, r *http.Request)`:
@@ -51,7 +51,7 @@ so that I can monitor Nebu in real time without page reloads during chat tests.
     - Use `r.Context().Done()` channel to detect client disconnect and exit loop cleanly
 
 - [x] Task 4: Create `gateway/internal/admin/templates/metrics-widget.js` (inline script) (AC: 3, 4, 5)
-  - [x] 4.1 Use Vue 3 Composition API with `createApp` + `ref` (no `<script setup>` — this is a plain JS file)
+  - [x] 4.1 Use Vue 3 Composition API with `createApp` + `ref` (no `<script setup>` - this is a plain JS file)
   - [x] 4.2 Root component template (inline string) renders: three metric stat blocks (`msg_per_sec`, `active_sessions`, `room_count`) and an error badge (`"Core unreachable"`) that appears when `hasError` is true
   - [x] 4.3 On mount: open `new EventSource('/admin/sse/metrics')`, register `message` + `metrics` event handlers, register `error` handler
   - [x] 4.4 On `event: metrics`: parse JSON, update reactive refs, clear error state
@@ -88,7 +88,7 @@ so that I can monitor Nebu in real time without page reloads during chat tests.
 
 ### CRITICAL: `GetMetrics` Does NOT Exist in `core.proto` Yet
 
-The current `proto/core.proto` has no `GetMetrics` RPC. This story adds it as a new RPC. Because the Elixir Core does not implement it yet (Epic 4), the Go gRPC client stub returns `nil, nil` — this means `GetMetrics` will always fail (nil response). The `coreMetricsReader` must handle `nil` response gracefully:
+The current `proto/core.proto` has no `GetMetrics` RPC. This story adds it as a new RPC. Because the Elixir Core does not implement it yet (Epic 4), the Go gRPC client stub returns `nil, nil` - this means `GetMetrics` will always fail (nil response). The `coreMetricsReader` must handle `nil` response gracefully:
 
 ```go
 resp, err := c.grpcClient.GetMetrics(ctx, &pb.GetMetricsRequest{})
@@ -105,7 +105,7 @@ This means the SSE endpoint will always emit `event: error` with `{"error":"core
 Add to `proto/core.proto`:
 
 ```protobuf
-// GetMetrics — Admin Dashboard live metrics (Epic 3 skeleton; full implementation Epic 4)
+// GetMetrics - Admin Dashboard live metrics (Epic 3 skeleton; full implementation Epic 4)
 rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse);
 
 message GetMetricsRequest {}
@@ -119,7 +119,7 @@ message GetMetricsResponse {
 
 After editing `core.proto`, run `make proto` to regenerate Go and Elixir stubs. The generated Go struct will be `pb.GetMetricsResponse` with fields `MsgPerSec float32`, `ActiveSessions int32`, `RoomCount int32`.
 
-### CRITICAL: Vue 3 ESM Browser Build — Self-Hosting
+### CRITICAL: Vue 3 ESM Browser Build - Self-Hosting
 
 Download URL for Vue 3.x ESM browser production build:
 ```
@@ -139,7 +139,7 @@ gateway/internal/admin/static/vendor/vue.esm-browser.prod.js
 
 The file is approximately 140KB (minified). Do NOT use `vue.global.prod.js` (that's the UMD build) or `vue.esm-bundler.js` (requires bundler).
 
-### CRITICAL: `metrics-widget.js` — Vue 3 ESM Import Pattern
+### CRITICAL: `metrics-widget.js` - Vue 3 ESM Import Pattern
 
 Because this is an ESM module (served as `<script type="module">`), use ES module import syntax:
 
@@ -238,17 +238,17 @@ function updateTopbar(status) {
 
 ### CRITICAL: Tailwind CSS Purge-Safe Classes in `metrics-widget.js`
 
-The `admin.css` is built by Tailwind CSS Standalone CLI which scans for class strings. Because `metrics-widget.js` is in `gateway/internal/admin/templates/`, it IS scanned by Tailwind (configured via `tailwind.config.js` — check the `content` array). Verify that all classes used in the template string are either:
+The `admin.css` is built by Tailwind CSS Standalone CLI which scans for class strings. Because `metrics-widget.js` is in `gateway/internal/admin/templates/`, it IS scanned by Tailwind (configured via `tailwind.config.js` - check the `content` array). Verify that all classes used in the template string are either:
 1. Already present in the CSS from other templates (most DaisyUI/Tailwind utility classes are safe), OR
 2. Added as safelist entries in `tailwind.config.js`
 
 Key classes that might be missing if not used elsewhere:
-- `badge`, `badge-warning` — DaisyUI component, likely safe
-- `text-2xl` — Tailwind utility, likely safe
+- `badge`, `badge-warning` - DaisyUI component, likely safe
+- `text-2xl` - Tailwind utility, likely safe
 
 **IMPORTANT**: After adding `metrics-widget.js`, run `make build-gateway` to confirm Tailwind picks up new classes and the CSS is regenerated correctly before testing.
 
-### CRITICAL: SSE Handler Implementation — Avoid Goroutine Leaks
+### CRITICAL: SSE Handler Implementation - Avoid Goroutine Leaks
 
 The SSE handler MUST use `r.Context()` for lifecycle management:
 
@@ -298,7 +298,7 @@ func (h *SSEMetricsHandler) sendMetrics(w http.ResponseWriter, flusher http.Flus
 }
 ```
 
-### CRITICAL: `embed.FS` Extension — Do NOT Break Existing Pattern
+### CRITICAL: `embed.FS` Extension - Do NOT Break Existing Pattern
 
 The current `static.go` uses:
 ```go
@@ -318,14 +318,14 @@ The `//go:embed` directive in `handler.go` already covers `templates/` (includin
 var adminFS embed.FS
 ```
 
-So `metrics-widget.js` should be served from `adminFS` (already embedded) — add `ServeMetricsWidgetJS` to `static.go` reading from `adminFS` but exposing it as a public function. OR alternatively serve it directly from the `templates/` embed. See file structure table below.
+So `metrics-widget.js` should be served from `adminFS` (already embedded) - add `ServeMetricsWidgetJS` to `static.go` reading from `adminFS` but exposing it as a public function. OR alternatively serve it directly from the `templates/` embed. See file structure table below.
 
 ### CRITICAL: `#live-metrics` Div Already Exists in `dashboard.html`
 
 Story 3.13 already created `<div id="live-metrics">` with a skeleton placeholder in `dashboard.html`. Story 3.14 must:
 1. Keep the `id="live-metrics"` attribute exactly as is
-2. Vue's `createApp(...).mount('#live-metrics')` will REPLACE the inner content of that div with the Vue component — the skeleton/spinner text will be replaced once Vue loads and mounts
-3. Do NOT remove the skeleton content from `dashboard.html` — it serves as the SSR no-JS fallback and appears before Vue hydrates
+2. Vue's `createApp(...).mount('#live-metrics')` will REPLACE the inner content of that div with the Vue component - the skeleton/spinner text will be replaced once Vue loads and mounts
+3. Do NOT remove the skeleton content from `dashboard.html` - it serves as the SSR no-JS fallback and appears before Vue hydrates
 
 ### CRITICAL: Dashboard `{{ define "scripts" }}` Update
 
@@ -341,30 +341,30 @@ with:
 {{ end }}
 ```
 
-**IMPORTANT**: Use `type="module"` for both scripts. The `metrics-widget.js` imports from the vendor file using a bare path — this only works in module context. Without `type="module"`, the `import` statement will throw a `SyntaxError`.
+**IMPORTANT**: Use `type="module"` for both scripts. The `metrics-widget.js` imports from the vendor file using a bare path - this only works in module context. Without `type="module"`, the `import` statement will throw a `SyntaxError`.
 
-**ALSO IMPORTANT**: The `<script type="module">` for `metrics-widget.js` must come AFTER the vendor script tag (or rely on the ESM import inside the file — the explicit import line inside `metrics-widget.js` makes the ordering irrelevant for browsers that support modules, but being explicit is safer).
+**ALSO IMPORTANT**: The `<script type="module">` for `metrics-widget.js` must come AFTER the vendor script tag (or rely on the ESM import inside the file - the explicit import line inside `metrics-widget.js` makes the ordering irrelevant for browsers that support modules, but being explicit is safer).
 
 ### File Structure
 
 | File | Action |
 |------|--------|
-| `gateway/internal/admin/static/vendor/vue.esm-browser.prod.js` | CREATE — downloaded Vue 3 ESM build (binary asset) |
-| `gateway/internal/admin/static.go` | MODIFY — add `static/vendor` to embed, add `ServeVendorFile` handler |
-| `proto/core.proto` | MODIFY — add `GetMetrics` RPC + messages |
-| `gateway/internal/grpc/pb/` | REGENERATE — run `make proto` |
-| `gateway/internal/grpc/client.go` | MODIFY — add `GetMetrics` stub |
-| `gateway/internal/admin/sse.go` | CREATE — `SSEMetricsHandler`, `MetricsReader` interface |
-| `gateway/internal/admin/sse_test.go` | CREATE — 4 unit tests |
-| `gateway/internal/admin/templates/metrics-widget.js` | CREATE — Vue 3 component, SSE client, topbar updater |
-| `gateway/internal/admin/templates/dashboard.html` | MODIFY — update `{{ define "scripts" }}` block |
-| `gateway/cmd/gateway/main.go` | MODIFY — register 3 new routes + SSE handler |
+| `gateway/internal/admin/static/vendor/vue.esm-browser.prod.js` | CREATE - downloaded Vue 3 ESM build (binary asset) |
+| `gateway/internal/admin/static.go` | MODIFY - add `static/vendor` to embed, add `ServeVendorFile` handler |
+| `proto/core.proto` | MODIFY - add `GetMetrics` RPC + messages |
+| `gateway/internal/grpc/pb/` | REGENERATE - run `make proto` |
+| `gateway/internal/grpc/client.go` | MODIFY - add `GetMetrics` stub |
+| `gateway/internal/admin/sse.go` | CREATE - `SSEMetricsHandler`, `MetricsReader` interface |
+| `gateway/internal/admin/sse_test.go` | CREATE - 4 unit tests |
+| `gateway/internal/admin/templates/metrics-widget.js` | CREATE - Vue 3 component, SSE client, topbar updater |
+| `gateway/internal/admin/templates/dashboard.html` | MODIFY - update `{{ define "scripts" }}` block |
+| `gateway/cmd/gateway/main.go` | MODIFY - register 3 new routes + SSE handler |
 
 **Do NOT modify:**
-- `gateway/internal/admin/handler.go` — no changes needed; `adminFS //go:embed templates` already picks up `metrics-widget.js`
-- `gateway/internal/admin/dashboard.go` — no changes needed; SSE is a separate handler
-- `gateway/internal/admin/page_data.go` — no changes needed; Vue updates topbar via DOM
-- `gateway/internal/admin/templates/layouts/base.html` — no changes needed; Vue manipulates `#topbar-status` via DOM directly
+- `gateway/internal/admin/handler.go` - no changes needed; `adminFS //go:embed templates` already picks up `metrics-widget.js`
+- `gateway/internal/admin/dashboard.go` - no changes needed; SSE is a separate handler
+- `gateway/internal/admin/page_data.go` - no changes needed; Vue updates topbar via DOM
+- `gateway/internal/admin/templates/layouts/base.html` - no changes needed; Vue manipulates `#topbar-status` via DOM directly
 
 ### SSE Wire Format Reference
 
@@ -424,7 +424,7 @@ Use option 2 for test correctness. The handler's Flusher check should be a warni
 ### UX Requirements (UX-DR4, UX-DR6, UX-DR23)
 
 From the UX spec:
-- **UX-DR4 (C1 StatusCard)**: `role="status"`, `aria-live="polite"` — the Vue component renders inside `#live-metrics` which already has these ARIA attributes from `dashboard.html`. Do NOT add duplicate ARIA attributes in the Vue template.
+- **UX-DR4 (C1 StatusCard)**: `role="status"`, `aria-live="polite"` - the Vue component renders inside `#live-metrics` which already has these ARIA attributes from `dashboard.html`. Do NOT add duplicate ARIA attributes in the Vue template.
 - **UX-DR6 (C3 TopbarStatusIndicator)**: SSE-driven; Vue updates the topbar when status changes. For `ok` state: only green dot (no text per UX spec). For `error`: dot + text "Core unreachable".
 - **UX-DR23 (Sentinel Dashboard)**: Live metrics are SECONDARY (below the fold); the Vue widget hydrates the existing `#live-metrics` placeholder that already has the skeleton/spinner as fallback.
 - **UX-DR25 (Reduced-Motion)**: The `animate-pulse` skeleton in `dashboard.html` already respects `prefers-reduced-motion: reduce`. Vue component does not add any animations.
@@ -432,7 +432,7 @@ From the UX spec:
 ### Relationship to Adjacent Stories
 
 - **Story 3.13 (done)**: Provides `<div id="live-metrics">` placeholder, `DashboardPageData` with `TopbarStatus`/`TopbarLabel` (used server-side on initial render), `base.html` with `#topbar-status` span structure. Story 3.14 EXTENDS this via client-side Vue.
-- **Story 3.15 (next)**: Gherkin test scenario "Dashboard accessible after authentication" asserts body contains "Dashboard" and a StatusCard for "Gateway" with class `"green"`. This test runs at the HTTP level (Godog/net/http), not browser level — the SSE/Vue behavior is out of scope for that Gherkin test.
+- **Story 3.15 (next)**: Gherkin test scenario "Dashboard accessible after authentication" asserts body contains "Dashboard" and a StatusCard for "Gateway" with class `"green"`. This test runs at the HTTP level (Godog/net/http), not browser level - the SSE/Vue behavior is out of scope for that Gherkin test.
 - **Epic 4 (future)**: When `GetMetrics` is implemented in Elixir Core, the stub in `client.go` will be replaced with a real gRPC call. No changes to the SSE handler or Vue widget needed.
 
 ### Proto Regeneration
@@ -441,36 +441,36 @@ After editing `proto/core.proto`, run:
 ```bash
 make proto
 ```
-This runs `buf generate` inside the build container. The generated files appear in `gateway/internal/grpc/pb/core.pb.go` and `gateway/internal/grpc/pb/core_grpc.pb.go`. The Elixir stub generation is also triggered but the Elixir core will not implement `GetMetrics` yet — this is fine.
+This runs `buf generate` inside the build container. The generated files appear in `gateway/internal/grpc/pb/core.pb.go` and `gateway/internal/grpc/pb/core_grpc.pb.go`. The Elixir stub generation is also triggered but the Elixir core will not implement `GetMetrics` yet - this is fine.
 
 ### Anti-Patterns to Avoid
 
-- **DO NOT** use a CDN for Vue.js — the epic explicitly requires self-hosting (`no CDN` per AC 1). The file must be in `static/vendor/` and served from the embedded FS.
-- **DO NOT** use `vue.global.prod.js` — that's the UMD/IIFE build which adds `Vue` to `window`. Use `vue.esm-browser.prod.js` with `<script type="module">`.
-- **DO NOT** use `vue.esm-bundler.js` — that requires a bundler (Vite/webpack) to resolve `@vue/runtime-core` etc.
-- **DO NOT** create a Vue SFC (`.vue` file) — no bundler in this project. Use inline template string in `metrics-widget.js`.
-- **DO NOT** forget `type="module"` on the `<script>` tags — ES module `import` syntax requires it, otherwise browser throws SyntaxError.
-- **DO NOT** call `w.WriteHeader()` manually before writing SSE data — setting headers before the first `Fprintf` is sufficient.
-- **DO NOT** close the SSE connection on gRPC error — keep it open and send `event: error` so the client can display the error state and retry on reconnect.
-- **DO NOT** use Go's `http.Flusher` type assertion as a hard fatal — return 500 if no flusher (as shown in sample), but ensure tests use `flusherRecorder`.
-- **DO NOT** duplicate the `//go:embed templates` directive in `handler.go` — it already covers `templates/metrics-widget.js`.
-- **DO NOT** add `metrics-widget.js` to `staticFS` — it's a template asset (served from `adminFS`), not a static asset. It does NOT need `Cache-Control: immutable` since it may change between releases.
-- **DO NOT** interpolate dynamic class names in Vue template strings that Tailwind can't statically scan (e.g., `:class="'text-' + status"`) — always use full class names in conditionals.
+- **DO NOT** use a CDN for Vue.js - the epic explicitly requires self-hosting (`no CDN` per AC 1). The file must be in `static/vendor/` and served from the embedded FS.
+- **DO NOT** use `vue.global.prod.js` - that's the UMD/IIFE build which adds `Vue` to `window`. Use `vue.esm-browser.prod.js` with `<script type="module">`.
+- **DO NOT** use `vue.esm-bundler.js` - that requires a bundler (Vite/webpack) to resolve `@vue/runtime-core` etc.
+- **DO NOT** create a Vue SFC (`.vue` file) - no bundler in this project. Use inline template string in `metrics-widget.js`.
+- **DO NOT** forget `type="module"` on the `<script>` tags - ES module `import` syntax requires it, otherwise browser throws SyntaxError.
+- **DO NOT** call `w.WriteHeader()` manually before writing SSE data - setting headers before the first `Fprintf` is sufficient.
+- **DO NOT** close the SSE connection on gRPC error - keep it open and send `event: error` so the client can display the error state and retry on reconnect.
+- **DO NOT** use Go's `http.Flusher` type assertion as a hard fatal - return 500 if no flusher (as shown in sample), but ensure tests use `flusherRecorder`.
+- **DO NOT** duplicate the `//go:embed templates` directive in `handler.go` - it already covers `templates/metrics-widget.js`.
+- **DO NOT** add `metrics-widget.js` to `staticFS` - it's a template asset (served from `adminFS`), not a static asset. It does NOT need `Cache-Control: immutable` since it may change between releases.
+- **DO NOT** interpolate dynamic class names in Vue template strings that Tailwind can't statically scan (e.g., `:class="'text-' + status"`) - always use full class names in conditionals.
 
 ### Previous Story Learnings (from Story 3.13)
 
 - `w.Header().Set(...)` MUST be called BEFORE any `Fprintf` or `Write` to the response. In SSE handler, set all headers at the top.
-- `path.Base(filename)` prevents directory traversal — use this same pattern in `ServeVendorFile`.
-- The `pageTmpls` key is `path.Base(file)` without extension — irrelevant for `metrics-widget.js` (served directly, not via template engine), but ensure the `.js` file doesn't accidentally get parsed as a template.
-- Tailwind CSS class purging: dynamic class interpolation (e.g., `class="text-{{ .Status }}"`) BREAKS purging. Story 3.13's code review caught this. Apply same discipline to Vue template class bindings — always use full static class strings with `v-if`/`v-else` conditionals.
-- All existing `admin` package tests use `package admin` (NOT `package admin_test`) — follow same convention for `sse_test.go`.
+- `path.Base(filename)` prevents directory traversal - use this same pattern in `ServeVendorFile`.
+- The `pageTmpls` key is `path.Base(file)` without extension - irrelevant for `metrics-widget.js` (served directly, not via template engine), but ensure the `.js` file doesn't accidentally get parsed as a template.
+- Tailwind CSS class purging: dynamic class interpolation (e.g., `class="text-{{ .Status }}"`) BREAKS purging. Story 3.13's code review caught this. Apply same discipline to Vue template class bindings - always use full static class strings with `v-if`/`v-else` conditionals.
+- All existing `admin` package tests use `package admin` (NOT `package admin_test`) - follow same convention for `sse_test.go`.
 
 ### Architecture Constraints
 
 Per `architecture.md`:
-- "Admin UI ausschließlich via `embed.FS` ausliefern — kein Filesystem-Zugriff zur Laufzeit" — both `vue.esm-browser.prod.js` and `metrics-widget.js` MUST be served from embedded FS, never from the filesystem at runtime.
-- ADR-009 (OpenAPI Spec-First): The SSE endpoint `/admin/sse/metrics` is NOT a REST/Matrix API endpoint — do NOT add it to `openapi.yaml`.
-- The SSE endpoint is an admin endpoint — it MUST be behind `sessionGuard` (same as `/admin/dashboard`).
+- "Admin UI ausschließlich via `embed.FS` ausliefern - kein Filesystem-Zugriff zur Laufzeit" - both `vue.esm-browser.prod.js` and `metrics-widget.js` MUST be served from embedded FS, never from the filesystem at runtime.
+- ADR-009 (OpenAPI Spec-First): The SSE endpoint `/admin/sse/metrics` is NOT a REST/Matrix API endpoint - do NOT add it to `openapi.yaml`.
+- The SSE endpoint is an admin endpoint - it MUST be behind `sessionGuard` (same as `/admin/dashboard`).
 
 ## Dev Agent Record
 
@@ -485,40 +485,40 @@ None.
 ### Completion Notes List
 
 - Task 1: Downloaded Vue 3.4.21 ESM browser build (~150KB) from jsDelivr CDN. Placed at `gateway/internal/admin/static/vendor/vue.esm-browser.prod.js`. Extended `//go:embed` in `static.go` to include `static/vendor`.
-- Task 2: Added `GetMetrics` RPC + `GetMetricsRequest`/`GetMetricsResponse` messages to `proto/core.proto`. Ran `make proto` — Elixir and Go stubs regenerated successfully. Added `GetMetrics` stub to `gateway/internal/grpc/client.go` (returns `nil, nil` — Epic 4 placeholder).
+- Task 2: Added `GetMetrics` RPC + `GetMetricsRequest`/`GetMetricsResponse` messages to `proto/core.proto`. Ran `make proto` - Elixir and Go stubs regenerated successfully. Added `GetMetrics` stub to `gateway/internal/grpc/client.go` (returns `nil, nil` - Epic 4 placeholder).
 - Task 3: Created `gateway/internal/admin/sse.go` with `MetricsReader` interface, `SSEMetricsHandler` struct, `NewSSEMetricsHandler` constructor, and `Handler` method with ticker-based 5s/30s intervals. The `coreMetricsReader` adapter was implemented in `main.go` as `coreMetricsAdapter` (following the existing `CoreStateReader` pattern in `dashboard.go` to avoid importing `pb` types in the `admin` package). Handler returns HTTP 500 if `http.Flusher` unavailable; uses `r.Context().Done()` for clean shutdown.
 - Task 4: Created `gateway/internal/admin/templates/metrics-widget.js` with Vue 3 Composition API (`createApp`, `ref`, `onMounted`, `onUnmounted`). ESM import from self-hosted `/admin/static/vendor/vue.esm-browser.prod.js`. Handles `event: metrics`, `event: error`, and network-level `onerror`. `updateTopbar()` function directly manipulates `#topbar-status` DOM element. All template class names are full static strings (Tailwind purge-safe).
 - Task 5: Updated `dashboard.html` `{{ define "scripts" }}` block to load both `vue.esm-browser.prod.js` and `metrics-widget.js` via `<script type="module">`.
 - Task 6: Added `ServeVendorFile` and `ServeMetricsWidgetJS` handlers to `static.go`. Vendor files get `Cache-Control: public, max-age=31536000, immutable`. `metrics-widget.js` gets `Cache-Control: no-cache` (served from `adminFS` templates embed, may change between releases).
 - Task 7: Registered all three new routes in `main.go`. SSE endpoint behind `sessionGuard`. `coreMetricsAdapter` struct defined in `main.go` as the bridge between `*coregrpc.Client` and `admin.MetricsReader`.
 - Task 8: Created `gateway/internal/admin/sse_test.go` with `flusherRecorder` test helper (wraps `httptest.ResponseRecorder` to implement `http.Flusher`), `fakeMetricsReader`, and 4 unit tests: ContentType, InitialEvent, GRPCError, NoCacheHeaders. Context with 200ms timeout terminates the infinite loop cleanly.
-- Task 9: `make test-unit-go` — all 11 packages pass, zero regressions. `make build-gateway` — Docker build succeeds.
+- Task 9: `make test-unit-go` - all 11 packages pass, zero regressions. `make build-gateway` - Docker build succeeds.
 
 ### File List
 
-- `gateway/internal/admin/static/vendor/vue.esm-browser.prod.js` — CREATED (Vue 3.4.21 ESM browser build, ~150KB)
-- `gateway/internal/admin/static.go` — MODIFIED (added `static/vendor` to embed, added `ServeVendorFile` and `ServeMetricsWidgetJS` handlers)
-- `proto/core.proto` — MODIFIED (added `GetMetrics` RPC, `GetMetricsRequest`, `GetMetricsResponse`)
-- `gateway/internal/grpc/pb/core.pb.go` — REGENERATED
-- `gateway/internal/grpc/pb/core_grpc.pb.go` — REGENERATED
-- `core/apps/event_dispatcher/lib/pb/core.pb.ex` — REGENERATED (Elixir stub)
-- `gateway/internal/grpc/client.go` — MODIFIED (added `GetMetrics` stub)
-- `gateway/internal/admin/sse.go` — CREATED (`MetricsReader` interface, `SSEMetricsHandler`)
-- `gateway/internal/admin/sse_test.go` — CREATED (4 unit tests)
-- `gateway/internal/admin/templates/metrics-widget.js` — CREATED (Vue 3 SSE widget)
-- `gateway/internal/admin/templates/dashboard.html` — MODIFIED (`{{ define "scripts" }}` block)
-- `gateway/cmd/gateway/main.go` — MODIFIED (added `coreMetricsAdapter`, new routes)
+- `gateway/internal/admin/static/vendor/vue.esm-browser.prod.js` - CREATED (Vue 3.4.21 ESM browser build, ~150KB)
+- `gateway/internal/admin/static.go` - MODIFIED (added `static/vendor` to embed, added `ServeVendorFile` and `ServeMetricsWidgetJS` handlers)
+- `proto/core.proto` - MODIFIED (added `GetMetrics` RPC, `GetMetricsRequest`, `GetMetricsResponse`)
+- `gateway/internal/grpc/pb/core.pb.go` - REGENERATED
+- `gateway/internal/grpc/pb/core_grpc.pb.go` - REGENERATED
+- `core/apps/event_dispatcher/lib/pb/core.pb.ex` - REGENERATED (Elixir stub)
+- `gateway/internal/grpc/client.go` - MODIFIED (added `GetMetrics` stub)
+- `gateway/internal/admin/sse.go` - CREATED (`MetricsReader` interface, `SSEMetricsHandler`)
+- `gateway/internal/admin/sse_test.go` - CREATED (4 unit tests)
+- `gateway/internal/admin/templates/metrics-widget.js` - CREATED (Vue 3 SSE widget)
+- `gateway/internal/admin/templates/dashboard.html` - MODIFIED (`{{ define "scripts" }}` block)
+- `gateway/cmd/gateway/main.go` - MODIFIED (added `coreMetricsAdapter`, new routes)
 
 ### Review Findings
 
-- [x] [Review][Patch][MINOR] Go convention: `ctx context.Context` must be first parameter in `sendMetrics` — reordered from `(w, flusher, ctx)` to `(ctx, w, flusher)` [sse.go:63] — FIXED
-- [x] [Review][Patch][MINOR] HTML5 validity: `<dt>`/`<dd>` elements wrapped in `<div>` instead of required `<dl>` parent — changed outer `<div v-else>` to `<dl v-else>` [metrics-widget.js:68] — FIXED
-- [x] [Review][Dismiss] Redundant `<script type="module">` tag for Vue ESM in dashboard.html — ESM loader deduplicates automatically, no functional impact
-- [x] [Review][Dismiss] Proto `float` (32-bit) vs Go `float64` in MetricsReader interface — upcast is lossless, no precision loss
-- [x] [Review][Dismiss] Vendor/widget JS routes unauthenticated — consistent with existing static asset pattern (CSS/fonts), no secrets exposed
+- [x] [Review][Patch][MINOR] Go convention: `ctx context.Context` must be first parameter in `sendMetrics` - reordered from `(w, flusher, ctx)` to `(ctx, w, flusher)` [sse.go:63] - FIXED
+- [x] [Review][Patch][MINOR] HTML5 validity: `<dt>`/`<dd>` elements wrapped in `<div>` instead of required `<dl>` parent - changed outer `<div v-else>` to `<dl v-else>` [metrics-widget.js:68] - FIXED
+- [x] [Review][Dismiss] Redundant `<script type="module">` tag for Vue ESM in dashboard.html - ESM loader deduplicates automatically, no functional impact
+- [x] [Review][Dismiss] Proto `float` (32-bit) vs Go `float64` in MetricsReader interface - upcast is lossless, no precision loss
+- [x] [Review][Dismiss] Vendor/widget JS routes unauthenticated - consistent with existing static asset pattern (CSS/fonts), no secrets exposed
 
 ## Change Log
 
-- 2026-04-01: Story created — ready-for-dev
-- 2026-04-01: Story implemented — all tasks complete, tests pass, status set to review
-- 2026-04-01: Code review passed — 2 MINOR fixes applied (ctx parameter order, HTML5 dl wrapper), 3 dismissed
+- 2026-04-01: Story created - ready-for-dev
+- 2026-04-01: Story implemented - all tasks complete, tests pass, status set to review
+- 2026-04-01: Code review passed - 2 MINOR fixes applied (ctx parameter order, HTML5 dl wrapper), 3 dismissed

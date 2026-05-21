@@ -14,11 +14,11 @@ so that token validation works without a network call on every request.
 
 2. **Given** the JWKS URI is known, **When** the gateway starts, **Then** it fetches and caches the JWKS (public keys) for JWT signature validation
 
-3. **Given** the OIDC provider is unreachable at startup, **When** the gateway tries to fetch the discovery document, **Then** it logs a warning `"OIDC provider unreachable — token validation will fail until resolved"` but does NOT crash
+3. **Given** the OIDC provider is unreachable at startup, **When** the gateway tries to fetch the discovery document, **Then** it logs a warning `"OIDC provider unreachable - token validation will fail until resolved"` but does NOT crash
 
 4. **Given** cached JWKS, **When** 1 hour has elapsed since last fetch, **Then** the gateway refreshes the JWKS in the background (key rotation support)
 
-5. **Given** MVP scope constraint, **When** OIDC configuration is read, **Then** it is sourced exclusively from environment variables — no runtime update via API
+5. **Given** MVP scope constraint, **When** OIDC configuration is read, **Then** it is sourced exclusively from environment variables - no runtime update via API
 
 ## Tasks / Subtasks
 
@@ -32,10 +32,10 @@ so that token validation works without a network call on every request.
 
 - [x] Create `gateway/internal/auth/oidc.go` (AC: #1–#4)
   - [x] Define `Provider` struct with `mu sync.RWMutex`, `inner *oidc.Provider`, `issuer string`
-  - [x] Implement `NewProvider(ctx context.Context, issuer string) *Provider` — calls `discover`, logs warning on failure, starts `go refresh()`
-  - [x] Implement `Inner() *oidc.Provider` — thread-safe read (used by Story 2.4 middleware)
-  - [x] Implement `discover(ctx context.Context) error` — calls `oidc.NewProvider(ctx, issuer)`, updates `inner` under write lock
-  - [x] Implement `refresh()` — `time.NewTicker(time.Hour)`, calls `discover` each tick, logs warning on failure
+  - [x] Implement `NewProvider(ctx context.Context, issuer string) *Provider` - calls `discover`, logs warning on failure, starts `go refresh()`
+  - [x] Implement `Inner() *oidc.Provider` - thread-safe read (used by Story 2.4 middleware)
+  - [x] Implement `discover(ctx context.Context) error` - calls `oidc.NewProvider(ctx, issuer)`, updates `inner` under write lock
+  - [x] Implement `refresh()` - `time.NewTicker(time.Hour)`, calls `discover` each tick, logs warning on failure
 
 - [x] Create `gateway/internal/auth/oidc_test.go` (AC: #1, #2, #3)
   - [x] `TestNewProvider_Success`: httptest server serving discovery doc + JWKS, assert `Inner() != nil`
@@ -48,9 +48,9 @@ so that token validation works without a network call on every request.
 
 ### Library: `github.com/coreos/go-oidc/v3`
 
-**Use this library — do not implement discovery/JWKS manually.** It is the standard Go OIDC library (Apache 2.0 licensed, compatible with project license). `oidc.NewProvider(ctx, issuer)` fetches `<issuer>/.well-known/openid-configuration`, validates the `issuer` claim, and creates an internal `RemoteKeySet` backed by the JWKS URI. Story 2.4 (JWT validation middleware) will use `provider.Inner().Verifier(&oidc.Config{ClientID: cfg.OIDCClientID})`.
+**Use this library - do not implement discovery/JWKS manually.** It is the standard Go OIDC library (Apache 2.0 licensed, compatible with project license). `oidc.NewProvider(ctx, issuer)` fetches `<issuer>/.well-known/openid-configuration`, validates the `issuer` claim, and creates an internal `RemoteKeySet` backed by the JWKS URI. Story 2.4 (JWT validation middleware) will use `provider.Inner().Verifier(&oidc.Config{ClientID: cfg.OIDCClientID})`.
 
-The library requires `golang.org/x/oauth2` as an indirect dependency — `go mod tidy` resolves this automatically.
+The library requires `golang.org/x/oauth2` as an indirect dependency - `go mod tidy` resolves this automatically.
 
 ### Canonical Implementation of `gateway/internal/auth/oidc.go`
 
@@ -75,12 +75,12 @@ type Provider struct {
 }
 
 // NewProvider performs OIDC discovery. If the provider is unreachable, it
-// logs a warning and returns a Provider with nil Inner() — the gateway starts
+// logs a warning and returns a Provider with nil Inner() - the gateway starts
 // normally but token validation will fail until the next background refresh.
 func NewProvider(ctx context.Context, issuer string) *Provider {
     p := &Provider{issuer: issuer}
     if err := p.discover(ctx); err != nil {
-        log.Printf("OIDC provider unreachable — token validation will fail until resolved")
+        log.Printf("OIDC provider unreachable - token validation will fail until resolved")
     }
     go p.refresh()
     return p
@@ -111,7 +111,7 @@ func (p *Provider) refresh() {
     for range t.C {
         ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
         if err := p.discover(ctx); err != nil {
-            log.Printf("OIDC provider unreachable — token validation will fail until resolved")
+            log.Printf("OIDC provider unreachable - token validation will fail until resolved")
         }
         cancel()
     }
@@ -161,7 +161,7 @@ func TestNewProvider_Success(t *testing.T) {
 }
 
 func TestNewProvider_Unreachable(t *testing.T) {
-    // Port 0 is always closed — simulates unreachable OIDC provider.
+    // Port 0 is always closed - simulates unreachable OIDC provider.
     p := auth.NewProvider(context.Background(), "http://127.0.0.1:0")
     if p == nil {
         t.Fatal("NewProvider must never return nil")
@@ -172,9 +172,9 @@ func TestNewProvider_Unreachable(t *testing.T) {
 }
 ```
 
-**Critical test detail:** `oidc.NewProvider` validates that the `"issuer"` field in the discovery document exactly matches the issuer URL passed to `NewProvider`. The `serverURL` variable must therefore be set before the handler closure runs — use a `var serverURL string` captured by the handler closure and assigned after `httptest.NewServer` returns.
+**Critical test detail:** `oidc.NewProvider` validates that the `"issuer"` field in the discovery document exactly matches the issuer URL passed to `NewProvider`. The `serverURL` variable must therefore be set before the handler closure runs - use a `var serverURL string` captured by the handler closure and assigned after `httptest.NewServer` returns.
 
-### Config Changes — `gateway/internal/config/config.go`
+### Config Changes - `gateway/internal/config/config.go`
 
 Add two fields to the `Config` struct:
 
@@ -201,7 +201,7 @@ NEBU_OIDC_CLIENT_ID: "nebu-gateway"
 NEBU_OIDC_CLIENT_SECRET: "nebu-dev-secret"
 ```
 
-These match the Dex static client in `dev/dex/config.yaml` (id: `nebu-gateway`, secret: `nebu-dev-secret`). Dex is the dev OIDC provider at `http://dex:5556`. **Note:** The architecture doc mentions Keycloak but the project already uses Dex (Story 2.20 formalises the Dex setup — do not change this).
+These match the Dex static client in `dev/dex/config.yaml` (id: `nebu-gateway`, secret: `nebu-dev-secret`). Dex is the dev OIDC provider at `http://dex:5556`. **Note:** The architecture doc mentions Keycloak but the project already uses Dex (Story 2.20 formalises the Dex setup - do not change this).
 
 ### Project Structure Notes
 
@@ -221,36 +221,36 @@ docker-compose.yml               ← MODIFY: add CLIENT_ID + CLIENT_SECRET env v
 
 **Do NOT touch:** Any Elixir files, migrations, gRPC files, health handler, PSK middleware, Prometheus handler, or Makefile.
 
-**Do NOT create** `gateway/testdata/oidc/` — the httptest server in the unit test is sufficient for Story 2.3.
+**Do NOT create** `gateway/testdata/oidc/` - the httptest server in the unit test is sufficient for Story 2.3.
 
 ### Build & Test
 
 All builds run in Docker containers (no local Go required):
 ```bash
-make test-unit-go    # go test -race ./... in container — must pass with 0 failures
+make test-unit-go    # go test -race ./... in container - must pass with 0 failures
 ```
 
 Adding `go-oidc/v3` requires running `go mod tidy` inside the build container environment. The Makefile `make test-unit-go` target calls `go test ./...` via the build container, which uses the current `go.mod`/`go.sum`. Ensure `go mod tidy` is run inside the container (or locally if Go 1.26 is available) before committing.
 
 ### Previous Story Intelligence (Story 2.2)
 
-- Story 2.2 only created SQL files and updated `migrations_test.go` — no application code patterns to inherit directly
+- Story 2.2 only created SQL files and updated `migrations_test.go` - no application code patterns to inherit directly
 - The code review for Story 2.2 confirmed no regressions from migration-only changes
-- Pattern: `config_test.go` uses `t.Setenv()` (automatic cleanup) for env var tests — follow this pattern
+- Pattern: `config_test.go` uses `t.Setenv()` (automatic cleanup) for env var tests - follow this pattern
 
 ### Cross-Story Dependencies
 
 - **Story 2.4 (OIDC JWT Token Validation Middleware)** consumes `auth.Provider.Inner()` to create `provider.Inner().Verifier(&oidc.Config{ClientID: cfg.OIDCClientID})`. Do not change the `Inner()` signature.
 - **Story 2.6 (Admin UI PKCE Flow)** will use `cfg.OIDCClientID` and `cfg.OIDCClientSecret` from config. Do not remove these fields.
-- **Story 2.20 (Dex Dev Setup)** formalises the Dex configuration — do not add or modify `dev/dex/config.yaml` in this story.
+- **Story 2.20 (Dex Dev Setup)** formalises the Dex configuration - do not add or modify `dev/dex/config.yaml` in this story.
 
 ### References
 
-- [Source: epics.md#Story-2.3] Authoritative AC — all 5 acceptance criteria
+- [Source: epics.md#Story-2.3] Authoritative AC - all 5 acceptance criteria
 - [Source: architecture.md#Auth-Token-Flow] Gateway validates OIDC token, extracts user_id + system_role
 - [Source: architecture.md#Technical-Constraints] OIDC-only auth, Apache 2.0 dependency requirement
-- [Source: gateway/internal/config/config.go] Existing config struct — OIDCIssuer already present
-- [Source: gateway/go.mod] Current dependencies — coreos/go-oidc/v3 not yet present
+- [Source: gateway/internal/config/config.go] Existing config struct - OIDCIssuer already present
+- [Source: gateway/go.mod] Current dependencies - coreos/go-oidc/v3 not yet present
 - [Source: docker-compose.yml] NEBU_OIDC_ISSUER=http://dex:5556 already set; CLIENT_ID/SECRET not yet set
 - [Source: dev/dex/config.yaml] Dex client id: nebu-gateway, secret: nebu-dev-secret
 
@@ -286,5 +286,5 @@ docker-compose.yml
 
 ## Change Log
 
-- 2026-03-26: Implemented OIDC Provider configuration — added auth.Provider with startup-tolerant discovery and hourly JWKS refresh, extended config with OIDCClientID/OIDCClientSecret, updated docker-compose.yml gateway environment, added go-oidc/v3 dependency.
-- 2026-03-26: Code review passed — fixed MEDIUM issue: error details now included in OIDC unreachable log messages (both startup and refresh). LOW (goroutine shutdown) accepted for MVP.
+- 2026-03-26: Implemented OIDC Provider configuration - added auth.Provider with startup-tolerant discovery and hourly JWKS refresh, extended config with OIDCClientID/OIDCClientSecret, updated docker-compose.yml gateway environment, added go-oidc/v3 dependency.
+- 2026-03-26: Code review passed - fixed MEDIUM issue: error details now included in OIDC unreachable log messages (both startup and refresh). LOW (goroutine shutdown) accepted for MVP.

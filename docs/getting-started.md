@@ -26,7 +26,7 @@ make setup
 - Generates `.secrets/internal_secret` (32-byte random hex, the PSK for node registration) if absent
 - Prints the dev OIDC credentials (Dex local users, see step 4 below)
 
-The `.secrets/` directory is in `.gitignore` — never commit it. If you need a custom
+The `.secrets/` directory is in `.gitignore` - never commit it. If you need a custom
 `POSTGRES_PASSWORD`, copy `.env.example` to `.env` manually before `make dev`.
 
 ---
@@ -75,11 +75,11 @@ Open http://localhost:8008/admin in your browser.
 If this is a fresh installation (empty database), you will be redirected to the Bootstrap Wizard.
 Complete the following steps:
 
-**Step 1 — Server Name:**
+**Step 1 - Server Name:**
 Enter a server name (e.g., `localhost`). This becomes part of all Matrix user IDs
 (`@user:localhost`). It cannot be changed after setup without a full data migration.
 
-**Step 2 — OIDC Provider:**
+**Step 2 - OIDC Provider:**
 Enter the development Dex configuration:
 
 | Field | Value |
@@ -89,7 +89,7 @@ Enter the development Dex configuration:
 | Client Secret | `nebu-admin-secret` |
 | Role Claim Name | `nebu_role` |
 
-**Step 3 — First Login:**
+**Step 3 - First Login:**
 You will be redirected to Dex. Log in with one of the pre-configured dev users:
 
 | Email | Password | Role |
@@ -161,7 +161,7 @@ docker compose logs -f core | grep "Nebu.Application started"
 ```bash
 sudo sh -c 'echo "127.0.0.1 dex" >> /etc/hosts'
 ```
-Then retry. If you are in a corporate VPN, the VPN may intercept DNS — disable VPN for local dev.
+Then retry. If you are in a corporate VPN, the VPN may intercept DNS - disable VPN for local dev.
 
 ---
 

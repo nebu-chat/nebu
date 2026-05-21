@@ -1,6 +1,6 @@
 # 5 Building Block View
 
-## Level 1 — Top-Level Decomposition
+## Level 1 - Top-Level Decomposition
 
 ```
 nebu/
@@ -11,7 +11,7 @@ nebu/
 └── docs/             ← Architecture docs (this file)
 ```
 
-## Level 2 — Go Gateway Internal Structure
+## Level 2 - Go Gateway Internal Structure
 
 ```
 gateway/
@@ -50,10 +50,10 @@ gateway/
     │   │                          forgotten_rooms exclusion (GAP-FORGET); queryForgottenRoomIDs +
     │   │                          querySinceTsMs helpers; top-level AccountData field in syncResponse
     │   │                          populated via injectGlobalAccountData on all 4 sync paths
-    │   │                          (initial, incremental, FallbackToInitial, buffer fast-path — Story 9-24);
+    │   │                          (initial, incremental, FallbackToInitial, buffer fast-path - Story 9-24);
     │   │                          syntheticNextBatch() + syntheticBatchSeq atomic counter generate
     │   │                          buf_<ms>_<seq> next_batch on buffer fast-path (GAP-BUFFER-NEXT-BATCH,
-    │   │                          Story 9-25) — replaces echoed sinceToken to prevent stuck-token loops;
+    │   │                          Story 9-25) - replaces echoed sinceToken to prevent stuck-token loops;
     │   │                          syncUnsigned.MRelations carries bundled m.thread aggregations from
     │   │                          proto Event.unsigned_relations (Story 9-28)
     │   ├── relations.go        ← All three /relations route variants (Story 9-28 / 9-29):
@@ -83,8 +83,8 @@ gateway/
     │   │                          NOT_FOUND → 404 M_NOT_FOUND; returns Matrix event JSON via
     │   │                          protoEventToMatrix (shared with other event handlers)
     │   ├── oidc_discovery.go   ← MSC2965 OIDC discovery endpoints (Story 13-7):
-    │   │                          AuthIssuerHandler — GET auth_issuer returns {"issuer":"<cfg.OIDCIssuer>"};
-    │   │                          AuthMetadataHandler — GET auth_metadata proxies OIDC provider's
+    │   │                          AuthIssuerHandler - GET auth_issuer returns {"issuer":"<cfg.OIDCIssuer>"};
+    │   │                          AuthMetadataHandler - GET auth_metadata proxies OIDC provider's
     │   │                          /.well-known/openid-configuration; 5-minute TTL cache (metadataCache,
     │   │                          sync.RWMutex); 503 M_UNAVAILABLE on provider error; registered on
     │   │                          both unstable/org.matrix.msc2965/ and stable v1/ paths; unauthenticated
@@ -111,11 +111,11 @@ gateway/
     │   ├── config.go           ← ConfigHandler (Story 7.10/9.4/14-2a): GET/POST /admin/config;
     │   │                          serves server configuration page; gRPC path calls Core UpdateServerConfig
     │   │                          for string fields; direct DB upsert via ConfigKeyWriter interface for
-    │   │                          proto3 bool fields (oidc_directory_enabled — proto3 default false
+    │   │                          proto3 bool fields (oidc_directory_enabled - proto3 default false
     │   │                          indistinguishable from "not set"); WithConfigDB(repo) wires the direct
     │   │                          DB path; StubConfig gains OidcDirectoryEnabled bool + OidcDirectoryEndpoint
     │   │                          string (Story 14-2a); config.html renders toggle + conditional endpoint
-    │   │                          field (plain JS onchange — no Alpine.js in templates);
+    │   │                          field (plain JS onchange - no Alpine.js in templates);
     │   │                          Story 14-3c: secret []byte field + WithSecret(secret) fluent setter
     │   │                          for AES-256-GCM encryption of scim_bearer_token on save (CR-1);
     │   │                          StubConfig gains ScimEnabled bool, ScimBaseURL string,
@@ -134,11 +134,11 @@ gateway/
     │   │                          for OIDC-only users (never logged into Nebu); UsersPageData gains
     │   │                          OIDCWarning bool + OIDCWarningBanner AlertBannerData for non-blocking
     │   │                          availability warning when OIDC directory is unreachable;
-    │   │                          Story 14-3b: BootstrapPageData extended with Step 4 fields —
+    │   │                          Story 14-3b: BootstrapPageData extended with Step 4 fields -
     │   │                          OIDCDirectoryEnabled bool, ImportPreview []ImportPreviewUser,
     │   │                          ImportResult *ImportResult, ImportError string;
-    │   │                          ImportPreviewUser{DisplayName, Email, MatrixUserID} — one row in preview table;
-    │   │                          ImportResult{Imported, Skipped, Failed int32} — BulkImportUsers response counts
+    │   │                          ImportPreviewUser{DisplayName, Email, MatrixUserID} - one row in preview table;
+    │   │                          ImportResult{Imported, Skipped, Failed int32} - BulkImportUsers response counts
     │   ├── oidc_directory.go   ← OIDCDirectoryService (Story 14-2b): outbound HTTP client for OIDC
     │   │                          user directory endpoint; secretString type masks bearer token in logs
     │   │                          (CR-3); HTTPS-only validation at each call (CR-1); CheckRedirect
@@ -146,9 +146,9 @@ gateway/
     │   │                          30-second cache keyed on SHA-256(endpoint+token) (MR-1);
     │   │                          singleflight.Group collapses concurrent refreshes (MR-4);
     │   │                          per-session rate limiter via sync.Map[sessionID → *rate.Limiter]
-    │   │                          at 5 req/s (CR-5 — caller calls Allow(sessionID) before FetchUsers);
+    │   │                          at 5 req/s (CR-5 - caller calls Allow(sessionID) before FetchUsers);
     │   │                          explicit HTTP status handling (MR-3); HR-2 SSRF trust boundary
-    │   │                          documented (Option B — private IP blocking tracked as follow-up);
+    │   │                          documented (Option B - private IP blocking tracked as follow-up);
     │   │                          Story 14-2c: IsEnabled() method exposes enabled flag for handler-level
     │   │                          distinction between "disabled (no calls)" vs "enabled but empty (possibly
     │   │                          unreachable)";
@@ -203,13 +203,13 @@ gateway/
     │   │                          Orchestrates: DeactivateUser gRPC → DeleteUserKeys gRPC (best-effort) →
     │   │                          anonymizeUser TX → gdpr_deletion audit (never-raise) → 200
     ├── health/                 ← /health + /ready handlers; info.go adds GET /info
-    │   │                          (NewInfoHandler — static JSON, no DB/gRPC, zero allocs per request;
+    │   │                          (NewInfoHandler - static JSON, no DB/gRPC, zero allocs per request;
     │   │                          component/version/gitCommit/buildTime set via ldflags at Docker build
-    │   │                          time; fallback "unknown" when built locally without ldflags — Story 11-9)
+    │   │                          time; fallback "unknown" when built locally without ldflags - Story 11-9)
     └── config/                 ← NEBU_* env-var configuration
 ```
 
-## Level 2 — Go Media Gateway Internal Structure
+## Level 2 - Go Media Gateway Internal Structure
 
 ```
 media/
@@ -244,7 +244,7 @@ media/
     ├── config/                 ← Media config handler (Story 12.16)
     │   └── handler.go          ← Handler struct with MaxBytes int64;
     │                              ServeHTTP returns {"m.upload.size": N} as JSON;
-    │                              no auth logic — auth applied via middleware at routing layer
+    │                              no auth logic - auth applied via middleware at routing layer
     ├── upload/                 ← POST /_matrix/media/v3/upload
     │   └── upload.go           ← Handler; depends on MediaStore (DB) + Storer (storage);
     │                              encrypts body AES-256-GCM, calls Storer.Put("<server>/<id>"),
@@ -260,12 +260,12 @@ media/
     │                              non-empty, falls back to mediaId (AC-6, Story 12.16);
     │                              Content-Security-Policy + Cross-Origin-Resource-Policy: cross-origin
     │                              headers set on all 200 responses (Matrix spec §Media Repository
-    │                              SHOULD requirements — Story 12.16)
+    │                              SHOULD requirements - Story 12.16)
     └── thumbnail/              ← GET /_matrix/media/v3/thumbnail/{serverName}/{mediaId}
                                    GET /_matrix/client/v1/media/thumbnail/{serverName}/{mediaId}
         ├── thumbnail.go        ← GenerateThumbnail + DetectMIMEType + ThumbnailParams
         │                          Library: github.com/disintegration/imaging v1.6.2 (pure Go, MIT,
-        │                          no cgo — sandboxed by construction, AC4 Story 12.5)
+        │                          no cgo - sandboxed by construction, AC4 Story 12.5)
         │                          method=scale → imaging.Fit (aspect-ratio-preserved, ≤W×H)
         │                          method=crop  → imaging.Fill (center-crop, exactly W×H)
         │                          animated=true + GIF → generateAnimatedGIFThumbnail (all frames)
@@ -287,7 +287,7 @@ media/
 
 **pgThumbnailStore adapter (Story 12.5):** `thumbnail.MediaStore` and `download.MediaStore` both
 require `GetMediaFile` returning different row types (Go structural constraint). `pgThumbnailStore`
-wraps `pgMediaStore` and converts `*download.MediaFileRow` to `*thumbnail.MediaFileRow` — zero
+wraps `pgMediaStore` and converts `*download.MediaFileRow` to `*thumbnail.MediaFileRow` - zero
 additional SQL queries. Both handlers share the same underlying DB access.
 
 **Storer injection (Story 12.3):** `main.go` uses `selectStorer(cfg mediaConfig)` to select the backend:
@@ -299,7 +299,7 @@ Credentials are loaded from Docker Secrets via `readSecretFile(path)` (mirrors t
 
 The `minio-go/v7` client is lazily constructed in `selectStorer`; empty `minioEndpoint`, `minioAccessKey`, or `minioSecretKey` returns an error (fail-fast, no silent anonymous access).
 
-## Level 2 — Elixir/OTP Core Internal Structure
+## Level 2 - Elixir/OTP Core Internal Structure
 
 ```
 core/apps/
@@ -310,13 +310,13 @@ core/apps/
 │       ├── server.ex       ← Room GenServer (state, history, power levels)
 │       ├── db.ex           ← PostgreSQL queries; get_recently_left_rooms_for_user/1 added (Story 9-19);
 │       │                      fetch_events_by_relation/5 (events by m.relates_to event_id; optional
-│       │                      rel_type filter — empty = all types; opts: event_type filter, dir for
-│       │                      ORDER BY ASC/DESC; dynamic WHERE builder — Story 9-28/9-29);
+│       │                      rel_type filter - empty = all types; opts: event_type filter, dir for
+│       │                      ORDER BY ASC/DESC; dynamic WHERE builder - Story 9-28/9-29);
 │       │                      count_thread_children/2 (reply count for thread root);
 │       │                      event_in_room?/2 (membership guard) added (Story 9-28);
-│       │                      fetch_event/2 (single event by event_id scoped to room_id —
+│       │                      fetch_event/2 (single event by event_id scoped to room_id -
 │       │                      SELECT … WHERE event_id=$1 AND room_id=$2; returns {:ok, map} |
-│       │                      {:error, :not_found} | {:error, reason} — Story 11-8)
+│       │                      {:error, :not_found} | {:error, reason} - Story 11-8)
 │       ├── db_behaviour.ex ← @callback contract for db.ex (mockable in tests);
 │       │                      corresponding callbacks for Story 9-28/9-29 DB functions
 │       └── power_level.ex  ← Room policy enforcement
@@ -340,7 +340,7 @@ core/apps/
 ├── presence/         ← FR15: Presence status (online/offline/unavailable)
 ├── event_dispatcher/ ← EventBus gRPC streaming + pg Process Groups fanout + FTS search layer
 │   └── lib/nebu/
-│       ├── build_info.ex   ← Nebu.BuildInfo.get/0 — returns component/version/git_commit/build_time;
+│       ├── build_info.ex   ← Nebu.BuildInfo.get/0 - returns component/version/git_commit/build_time;
 │       │                      reads Application.get_env(:event_dispatcher, :build_info, %{}) with
 │       │                      System.get_env("RELEASE_VERSION"/"GIT_COMMIT"/"BUILD_TIME", "unknown")
 │       │                      as fallback; used by health/server.ex GET /info route (Story 11-9)
@@ -373,7 +373,7 @@ core/apps/
 │           │                      on failure (Story 9-27);
 │           │                      search_messages/2 executes FTS via Nebu.Search.DB.search_messages/5;
 │           │                      user_id sourced exclusively from trusted_identity(stream) metadata
-│           │                      (NEVER from request.user_id — security invariant); offset capped at
+│           │                      (NEVER from request.user_id - security invariant); offset capped at
 │           │                      10_000 to prevent expensive deep-page queries; next_batch is
 │           │                      Base64(offset+limit) for cursor pagination (Story 11-3);
 │           │                      bulk_import_users/2 (Story 14-3a): admin bulk provisioning RPC;
@@ -384,7 +384,7 @@ core/apps/
 │           ├── dispatcher.ex   ← Routes events to rooms + subscribers
 │           ├── bus.ex          ← gRPC ServerStream to Go Gateway
 │           └── search/
-│               └── db.ex       ← Nebu.Search.DB — membership-scoped full-text search SQL layer (Story 11-2);
+│               └── db.ex       ← Nebu.Search.DB - membership-scoped full-text search SQL layer (Story 11-2);
 │                                  search_messages/4 (user_id, term, limit, offset) executes canonical SQL
 │                                  against the events.search_vector GIN index (migration 000042); membership
 │                                  filter enforced at SQL layer via subquery on room_members WHERE left_at IS NULL
@@ -419,7 +419,7 @@ core/apps/
 > rather than represent distinct architectural blocks.
 
 > **PostgreSQL tables added in Story 9-19:** `forgotten_rooms (user_id, room_id, forgotten_at_ms BIGINT)`
-> — migration 000040. Tracks rooms the user has permanently dismissed via `POST /forget`.
+> - migration 000040. Tracks rooms the user has permanently dismissed via `POST /forget`.
 > Excluded from all `/sync` sections (join, leave, invite). Primary key `(user_id, room_id)`;
 > cascade delete on `users` removal.
 
@@ -433,7 +433,7 @@ core/apps/
 > column to the `events` table, populated by a PL/pgSQL trigger (`events_search_vector_trigger`)
 > on every `INSERT OR UPDATE OF content`. The trigger calls
 > `to_tsvector('pg_catalog.simple', coalesce(content->>'body', ''))`, using the `simple`
-> text search configuration (language-agnostic, no stemming — appropriate for a multilingual
+> text search configuration (language-agnostic, no stemming - appropriate for a multilingual
 > chat server). A GIN index (`events_search_vector_gin_idx`) enables efficient `@@ tsquery`
 > queries. All existing events were backfilled during the migration. This is the database
 > foundation for `POST /_matrix/client/v3/search` (Epic 11). Scope enforcement at query time:
@@ -447,7 +447,7 @@ core/apps/
 > `PostgresAccountDataDB.ListGlobalAccountData` (in `gateway/internal/db/account_data_store.go`)
 > queries `room_account_data WHERE room_id = ''` inside a `withUserDB` transaction to satisfy the
 > RLS policy (GUC `app.user_id`). The buffer fast-path returns an empty `account_data.events` slice
-> (no DB call) — global account data changes are rare and are picked up on the next full sync cycle.
+> (no DB call) - global account data changes are rare and are picked up on the next full sync cycle.
 
 > **Synthetic next_batch token on buffer fast-path (Story 9-25, GAP-BUFFER-NEXT-BATCH):**
 > `syntheticNextBatch()` in `gateway/internal/matrix/sync.go` generates a `buf_<unix_ms>_<seq>`
@@ -458,7 +458,7 @@ core/apps/
 > sends it on the next request, Elixir's `GetSyncDelta` triggers `FallbackToInitial = true`, which
 > issues a safe full re-sync. No schema change and no new interfaces were introduced.
 
-## Level 2 — Proto / gRPC Contract
+## Level 2 - Proto / gRPC Contract
 
 ```
 proto/
@@ -494,8 +494,8 @@ Key gRPC services: `SendEvent`, `CreateRoom`, `JoinRoom`, `GetMessages`, `GetRoo
 | `device_id` | string | When set, only invalidates this device; when empty, invalidates all user sessions |
 
 
-_Source: `_bmad-output/planning-artifacts/architecture.md`, §Project Structure & Boundaries, §Complete Project Directory Structure; Story 9-19 (room_moderation.go, sync.go, event_dispatcher/server.ex, forgotten_rooms migration); Story 9-22 (per-device sync tokens, device_id in proto); Story 9-24 (GlobalAccountDataDB interface, ListGlobalAccountData, top-level account_data in syncResponse); Story 9-25 (syntheticNextBatch helper, syntheticBatchSeq atomic counter, sinceToken param removed from buildResponseFromBufferedEvents); Story 9-27 (upgrade_room/2 full Matrix §11.35.1 flow, GRPC.RPCError error handling, archive_room_atomic, terminate_child, try/rescue failure audit); Story 11-2 (Nebu.Search.DB, membership-scoped FTS SQL contract, encrypted-room exclusion, integration test infrastructure); Story 11-10 (ClaimMappingHandler admin settings page, ClaimSelectionHandler bootstrap extension, ServerConfigReader interface with LoadClaimMapping/SaveClaimMapping, FormatUserIDFromClaims refactored signature, JWTMiddleware userIDClaimLoader param, migration 000044 default claim mapping seed); Story 12.16 (media/internal/auth middleware package — TokenVerifier interface + fail-closed nil guard; media/internal/config handler package; CSP + Cross-Origin-Resource-Policy headers on download/thumbnail; v1 authenticated media routes in main.go)_
-**`Event` message — `unsigned_relations` field (Story 9-28):**
+_Source: `_bmad-output/planning-artifacts/architecture.md`, §Project Structure & Boundaries, §Complete Project Directory Structure; Story 9-19 (room_moderation.go, sync.go, event_dispatcher/server.ex, forgotten_rooms migration); Story 9-22 (per-device sync tokens, device_id in proto); Story 9-24 (GlobalAccountDataDB interface, ListGlobalAccountData, top-level account_data in syncResponse); Story 9-25 (syntheticNextBatch helper, syntheticBatchSeq atomic counter, sinceToken param removed from buildResponseFromBufferedEvents); Story 9-27 (upgrade_room/2 full Matrix §11.35.1 flow, GRPC.RPCError error handling, archive_room_atomic, terminate_child, try/rescue failure audit); Story 11-2 (Nebu.Search.DB, membership-scoped FTS SQL contract, encrypted-room exclusion, integration test infrastructure); Story 11-10 (ClaimMappingHandler admin settings page, ClaimSelectionHandler bootstrap extension, ServerConfigReader interface with LoadClaimMapping/SaveClaimMapping, FormatUserIDFromClaims refactored signature, JWTMiddleware userIDClaimLoader param, migration 000044 default claim mapping seed); Story 12.16 (media/internal/auth middleware package - TokenVerifier interface + fail-closed nil guard; media/internal/config handler package; CSP + Cross-Origin-Resource-Policy headers on download/thumbnail; v1 authenticated media routes in main.go)_
+**`Event` message - `unsigned_relations` field (Story 9-28):**
 
 The shared `Event` proto message gained field 9:
 
@@ -505,7 +505,7 @@ bytes unsigned_relations = 9;
 ```
 
 Set by `attach_thread_aggregations/3` in Elixir for events that have at least one thread reply.
-Empty (zero bytes) for events with no relations — the Go gateway omits `m.relations` from the
+Empty (zero bytes) for events with no relations - the Go gateway omits `m.relations` from the
 `unsigned` JSON object when the field is absent.
 
 **`GetRelationsRequest` / `GetRelationsResponse` fields (Story 9-28 / 9-29):**
@@ -525,38 +525,38 @@ Empty (zero bytes) for events with no relations — the Go gateway omits `m.rela
 Response: `repeated Event events` + `string next_batch` (empty when no more pages) + `string prev_batch` (for dir=b backward pagination, Story 9-29, field 3).
 
 > **Migration 000042 (Story 9-28):** `CREATE INDEX CONCURRENTLY … ON events
-> ((content->'m.relates_to'->>'event_id')) WHERE content ? 'm.relates_to'` — expression index
+> ((content->'m.relates_to'->>'event_id')) WHERE content ? 'm.relates_to'` - expression index
 > on the `m.relates_to` JSONB field; required by `fetch_events_by_relation/5` and
 > `count_thread_children/2` to avoid sequential scans on the events table.
 
-> **`Nebu.Search.DB` — membership-scoped FTS query layer (Story 11-2):**
+> **`Nebu.Search.DB` - membership-scoped FTS query layer (Story 11-2):**
 > `core/apps/event_dispatcher/lib/nebu/search/db.ex` defines the SQL contract for
 > `POST /_matrix/client/v3/search` (Epic 11). Key design invariants:
 >
-> 1. **SQL-layer membership enforcement** — the subquery `WHERE room_id IN (SELECT room_id FROM room_members WHERE user_id = $1 AND left_at IS NULL)` runs inside the same PostgreSQL query. There is no application-layer post-filter; membership is checked at query execution time. This prevents cross-room IDOR leakage even if Elixir application logic is bypassed.
+> 1. **SQL-layer membership enforcement** - the subquery `WHERE room_id IN (SELECT room_id FROM room_members WHERE user_id = $1 AND left_at IS NULL)` runs inside the same PostgreSQL query. There is no application-layer post-filter; membership is checked at query execution time. This prevents cross-room IDOR leakage even if Elixir application logic is bypassed.
 >
-> 2. **Encrypted-room exclusion** — rooms that have an `m.room.encryption` state event (`state_key = '' OR state_key IS NULL`) are excluded from search results via `NOT EXISTS (SELECT 1 FROM events enc WHERE enc.room_id = e.room_id AND enc.event_type = 'm.room.encryption')`. Ciphertext bodies are never returned in plaintext search responses.
+> 2. **Encrypted-room exclusion** - rooms that have an `m.room.encryption` state event (`state_key = '' OR state_key IS NULL`) are excluded from search results via `NOT EXISTS (SELECT 1 FROM events enc WHERE enc.room_id = e.room_id AND enc.event_type = 'm.room.encryption')`. Ciphertext bodies are never returned in plaintext search responses.
 >
-> 3. **`user_id` security invariant** — the `user_id` parameter MUST be sourced from the validated session (gRPC metadata or JWT claim), never from the request payload. Passing a caller-supplied user_id bypasses all membership enforcement and enables cross-room IDOR. This invariant is enforced by the caller (Story 11.3 SearchMessages handler) not by `Nebu.Search.DB` itself.
+> 3. **`user_id` security invariant** - the `user_id` parameter MUST be sourced from the validated session (gRPC metadata or JWT claim), never from the request payload. Passing a caller-supplied user_id bypasses all membership enforcement and enables cross-room IDOR. This invariant is enforced by the caller (Story 11.3 SearchMessages handler) not by `Nebu.Search.DB` itself.
 >
-> 4. **`websearch_to_tsquery` + `pg_catalog.simple`** — consistent with the trigger configuration in migration 000042 (ADR-010). `ts_rank_cd` for result ordering (density-aware ranking).
+> 4. **`websearch_to_tsquery` + `pg_catalog.simple`** - consistent with the trigger configuration in migration 000042 (ADR-010). `ts_rank_cd` for result ordering (density-aware ranking).
 >
-> 5. **Module placement** — in `event_dispatcher` (not `room_manager`) because the gRPC search handler (Story 11.3) lives in `Nebu.EventDispatcher.Server`. Adding search to `Nebu.Room.DB` would violate the single-responsibility principle and pollute `Nebu.Room.DBBehaviour`.
+> 5. **Module placement** - in `event_dispatcher` (not `room_manager`) because the gRPC search handler (Story 11.3) lives in `Nebu.EventDispatcher.Server`. Adding search to `Nebu.Room.DB` would violate the single-responsibility principle and pollute `Nebu.Room.DBBehaviour`.
 
 > **Integration test infrastructure (Story 11-2):** `Makefile` gains a `test-integration-elixir` target that runs ExUnit tests tagged `@tag :integration` against a live PostgreSQL instance (`NEBU_TEST_DB_URL`). The 6 search integration tests (AC1 cross-room scope, AC2 structural SQL shape, AC3 kicked-user exclusion, zero-membership guard, encrypted-room exclusion, multi-room inclusion) are excluded from the `test-unit-elixir` target via `ExUnit.configure(exclude: [:integration])` in `event_dispatcher/test/test_helper.exs`.
 
 > **SearchMessages gRPC handler (Story 11-3):** `Nebu.EventDispatcher.Server.search_messages/2` is the
 > gRPC entry point for `POST /_matrix/client/v3/search` (implemented in Story 11-4). Key design decisions:
 >
-> 1. **Delegated search module** — the handler delegates to `search_db_module()` (runtime-swappable via `Application.get_env(:event_dispatcher, :search_db_module, Nebu.Search.DB)`) to keep SQL logic in `Nebu.Search.DB` and make the handler unit-testable with a fake via `FakeSearchDB`.
+> 1. **Delegated search module** - the handler delegates to `search_db_module()` (runtime-swappable via `Application.get_env(:event_dispatcher, :search_db_module, Nebu.Search.DB)`) to keep SQL logic in `Nebu.Search.DB` and make the handler unit-testable with a fake via `FakeSearchDB`.
 >
-> 2. **`user_id` from trusted metadata only** — `{user_id, _} = Nebu.Grpc.Metadata.trusted_identity(stream)`. The `request.user_id` field is intentionally ignored. This enforces the Story 11-2 security invariant at the transport layer.
+> 2. **`user_id` from trusted metadata only** - `{user_id, _} = Nebu.Grpc.Metadata.trusted_identity(stream)`. The `request.user_id` field is intentionally ignored. This enforces the Story 11-2 security invariant at the transport layer.
 >
-> 3. **Pagination** — `next_batch` is `Base64(Integer.to_string(offset + limit))`. An empty string signals no more pages. The handler caps `offset` at `10_000` to prevent unbounded deep-paging queries (Kassandra MEDIUM finding, fixed inline).
+> 3. **Pagination** - `next_batch` is `Base64(Integer.to_string(offset + limit))`. An empty string signals no more pages. The handler caps `offset` at `10_000` to prevent unbounded deep-paging queries (Kassandra MEDIUM finding, fixed inline).
 >
-> 4. **Limit clamping** — `limit` is clamped to `[1, 100]`; zero defaults to 10.
+> 4. **Limit clamping** - `limit` is clamped to `[1, 100]`; zero defaults to 10.
 >
-> 5. **Proto additions** — `core.proto` gains `ProfileInfo`, `SearchResult`, `SearchMessagesRequest`, `SearchMessagesResponse` message types and the `SearchMessages` RPC. Go stubs auto-regenerated via `make proto`; Elixir `core_grpc.pb.ex` service stub updated manually (protoc-gen-elixir does not auto-update the service module).
+> 5. **Proto additions** - `core.proto` gains `ProfileInfo`, `SearchResult`, `SearchMessagesRequest`, `SearchMessagesResponse` message types and the `SearchMessages` RPC. Go stubs auto-regenerated via `make proto`; Elixir `core_grpc.pb.ex` service stub updated manually (protoc-gen-elixir does not auto-update the service module).
 
 **`GetEventRequest` / `GetEventResponse` fields (Story 11-8):**
 
@@ -566,16 +566,16 @@ Response: `repeated Event events` + `string next_batch` (empty when no more page
 | `event_id` | string | Unique event ID to fetch |
 | `user_id` | string | Caller; Elixir enforces joined-member check via Horde room state |
 
-Response: `Event event` — the full event proto (same `Event` message used by sync and relations endpoints).
+Response: `Event event` - the full event proto (same `Event` message used by sync and relations endpoints).
 
 > **`GetEvent` gRPC handler design (Story 11-8):** `Nebu.EventDispatcher.Server.get_event/2` looks up
 > the room via `Nebu.Room.RoomSupervisor.lookup_room/1` (Horde registry). If the room is unknown, it
 > raises `GRPC.RPCError` with `NOT_FOUND`. It then calls `room_registry_module().get_state/1` and checks
-> `MapSet.member?(state.members, user_id)` — non-members receive `PERMISSION_DENIED`. On success it
+> `MapSet.member?(state.members, user_id)` - non-members receive `PERMISSION_DENIED`. On success it
 > delegates to `messages_db_module().fetch_event/2` (SQL: `SELECT … WHERE event_id=$1 AND room_id=$2 LIMIT 1`)
 > and calls `attach_thread_aggregations/3` so the returned event already carries bundled `m.thread`
 > aggregation data (same as sync responses). The `GetEvent` RPC and its message types were added to
 > `core.proto`; the Elixir `core_grpc.pb.ex` service stub was updated manually (`rpc :GetEvent` entry
 > added alongside the pre-existing `rpc :GetRelations` fix).
 
-_Source: `_bmad-output/planning-artifacts/architecture.md`, §Project Structure & Boundaries, §Complete Project Directory Structure; Story 9-19 (room_moderation.go, sync.go, event_dispatcher/server.ex, forgotten_rooms migration); Story 9-22 (per-device sync tokens, device_id in proto); Story 9-24 (GlobalAccountDataDB interface, ListGlobalAccountData, top-level account_data in syncResponse); Story 9-25 (syntheticNextBatch helper, syntheticBatchSeq atomic counter, sinceToken param removed from buildResponseFromBufferedEvents); Story 9-27 (upgrade_room/2 full Matrix §11.35.1 flow, GRPC.RPCError error handling, archive_room_atomic, terminate_child, try/rescue failure audit); Story 9-28 (GetRelations RPC, unsigned_relations field on Event, attach_thread_aggregations, fetch_events_by_relation, count_thread_children, event_in_room?, migration 000042); Story 9-29 (base /relations/{eventId} route, three-segment /{relType}/{eventType} route, dir/event_type/recurse/from query params, prev_batch in response, fetch_events_by_relation/5 dynamic WHERE builder); Story 11-3 (SearchMessages gRPC handler, proto extension, delegated search_db_module pattern, offset-cap security fix); Story 11-4 (search.go Gateway handler, SearchCoreClient consumer interface, §11.14.1 response shape, gRPC error mapping); Story 11-5 (NewUserRateLimiter middleware, per-user 10 req/min for /search, retry_after_ms in body); Story 11-8 (GetEvent RPC, event.go Go handler, fetch_event/2 DB function, core_grpc.pb.ex rpc :GetEvent + rpc :GetRelations bug fix); Story 11-9 (health/info.go NewInfoHandler, Nebu.BuildInfo module, GET /info on pubMux + health server, Admin UI footer via page_data.go SetBuildInfo/newPageData, ErrorMode on PageData, Dockerfile ARG/ldflags injection, docker-compose.yml build args); Story 11-10 (ClaimMappingHandler + ClaimMappingPageData + ClaimMappingConfig in claim_mapping.go, claim-mapping.html template, ClaimSelectionHandler atomic claim persistence in auth.go, ServerConfigReader LoadClaimMapping/SaveClaimMapping extension, FormatUserIDFromClaims signature refactor in grpc/metadata.go, JWTMiddleware userIDClaimLoader param, LoginHandler per-request claim resolution, migration 000044 claim mapping defaults seed); Story 12.16 (media/internal/auth middleware — TokenVerifier interface + fail-closed nil guard; media/internal/config handler; CSP + Cross-Origin-Resource-Policy headers on download/thumbnail; v1 authenticated routes in main.go)_
+_Source: `_bmad-output/planning-artifacts/architecture.md`, §Project Structure & Boundaries, §Complete Project Directory Structure; Story 9-19 (room_moderation.go, sync.go, event_dispatcher/server.ex, forgotten_rooms migration); Story 9-22 (per-device sync tokens, device_id in proto); Story 9-24 (GlobalAccountDataDB interface, ListGlobalAccountData, top-level account_data in syncResponse); Story 9-25 (syntheticNextBatch helper, syntheticBatchSeq atomic counter, sinceToken param removed from buildResponseFromBufferedEvents); Story 9-27 (upgrade_room/2 full Matrix §11.35.1 flow, GRPC.RPCError error handling, archive_room_atomic, terminate_child, try/rescue failure audit); Story 9-28 (GetRelations RPC, unsigned_relations field on Event, attach_thread_aggregations, fetch_events_by_relation, count_thread_children, event_in_room?, migration 000042); Story 9-29 (base /relations/{eventId} route, three-segment /{relType}/{eventType} route, dir/event_type/recurse/from query params, prev_batch in response, fetch_events_by_relation/5 dynamic WHERE builder); Story 11-3 (SearchMessages gRPC handler, proto extension, delegated search_db_module pattern, offset-cap security fix); Story 11-4 (search.go Gateway handler, SearchCoreClient consumer interface, §11.14.1 response shape, gRPC error mapping); Story 11-5 (NewUserRateLimiter middleware, per-user 10 req/min for /search, retry_after_ms in body); Story 11-8 (GetEvent RPC, event.go Go handler, fetch_event/2 DB function, core_grpc.pb.ex rpc :GetEvent + rpc :GetRelations bug fix); Story 11-9 (health/info.go NewInfoHandler, Nebu.BuildInfo module, GET /info on pubMux + health server, Admin UI footer via page_data.go SetBuildInfo/newPageData, ErrorMode on PageData, Dockerfile ARG/ldflags injection, docker-compose.yml build args); Story 11-10 (ClaimMappingHandler + ClaimMappingPageData + ClaimMappingConfig in claim_mapping.go, claim-mapping.html template, ClaimSelectionHandler atomic claim persistence in auth.go, ServerConfigReader LoadClaimMapping/SaveClaimMapping extension, FormatUserIDFromClaims signature refactor in grpc/metadata.go, JWTMiddleware userIDClaimLoader param, LoginHandler per-request claim resolution, migration 000044 claim mapping defaults seed); Story 12.16 (media/internal/auth middleware - TokenVerifier interface + fail-closed nil guard; media/internal/config handler; CSP + Cross-Origin-Resource-Policy headers on download/thumbnail; v1 authenticated routes in main.go)_

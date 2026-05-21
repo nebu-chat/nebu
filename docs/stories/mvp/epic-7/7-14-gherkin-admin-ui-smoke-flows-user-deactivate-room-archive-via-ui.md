@@ -3,7 +3,7 @@ id: 7-14
 security_review: not-needed
 ---
 
-# Story 7.14: Gherkin Admin UI Smoke Flows — User Deactivate + Room Archive via UI
+# Story 7.14: Gherkin Admin UI Smoke Flows - User Deactivate + Room Archive via UI
 
 Status: ready-for-dev
 
@@ -17,13 +17,13 @@ so that regressions in server-side rendering, confirm-dialog wiring, form POST h
 
 Stories 7.1–7.13 have delivered the complete Admin UI: master-detail layout, user list/detail/deactivation, room list/detail/archive, compliance, config, audit log, and axe accessibility scans. The existing specs (`user-role.spec.ts`, `room-detail.spec.ts`) each test isolated component interactions. This story adds a dedicated smoke spec that covers the **end-to-end business flows** that matter most for day-to-day admin operation: the full deactivate-a-user journey and the full archive-a-room journey, written in a BDD `describe/scenario` style that reads like a business flow.
 
-These are real Playwright tests (no `test.skip`) running against the live dev stack. The stub layer is in-memory and mutations persist for the duration of the server process — the tests must save the original status and restore it in `test.afterEach` via the inverse action (POST to the reactivate/unarchive route, or directly via re-navigating the form).
+These are real Playwright tests (no `test.skip`) running against the live dev stack. The stub layer is in-memory and mutations persist for the duration of the server process - the tests must save the original status and restore it in `test.afterEach` via the inverse action (POST to the reactivate/unarchive route, or directly via re-navigating the form).
 
 ## Acceptance Criteria
 
-1. **New spec file `e2e/tests/features/admin/smoke-flows.spec.ts` exists** — contains two `test.describe` blocks, one per business flow, written in a Gherkin-flavoured BDD style (`describe` = scenario group, each `test` name starts with `Given`, `When`, or `Then` or uses full flow naming). No `test.skip`.
+1. **New spec file `e2e/tests/features/admin/smoke-flows.spec.ts` exists** - contains two `test.describe` blocks, one per business flow, written in a Gherkin-flavoured BDD style (`describe` = scenario group, each `test` name starts with `Given`, `When`, or `Then` or uses full flow naming). No `test.skip`.
 
-2. **Flow 1 — Admin deactivates a user:**
+2. **Flow 1 - Admin deactivates a user:**
    - Admin logs in via OIDC Authorization Code + PKCE (same `loginAsAdmin` helper pattern)
    - Navigates to `/admin/users`
    - Clicks on the usr-001 (Alice Müller) row in the list
@@ -34,7 +34,7 @@ These are real Playwright tests (no `test.skip`) running against the live dev st
    - Flash banner (`div[role="alert"]`) is visible and contains "deactivated" (case-insensitive)
    - The status badge in the detail panel shows "Inactive" (the normalised display value)
 
-3. **Flow 2 — Admin archives a room:**
+3. **Flow 2 - Admin archives a room:**
    - Admin logs in via OIDC Authorization Code + PKCE
    - Navigates to `/admin/rooms`
    - Clicks on the room-001 (General) row in the list
@@ -45,12 +45,12 @@ These are real Playwright tests (no `test.skip`) running against the live dev st
    - Flash banner is visible and contains "archived" (case-insensitive)
    - The status badge in the detail panel shows "Inactive"
 
-4. **State cleanup via `test.afterEach`** — because the stub layer is in-memory and mutations persist within a server process lifetime, the spec restores the original stub state after each flow test. Restoration is done by navigating to the detail page and verifying current state, then posting to the inverse endpoint if needed. Specifically:
-   - After user-deactivation flow: POST to `/admin/users/usr-001/reactivate` if that route exists; otherwise navigate to the page and verify the "Reactivate" button is present (documenting the limitation in a code comment). If a reactivate route is not yet wired, use `usr-003` (Carla Reiter, `user`, `active`) as the deactivation target instead — it avoids colliding with the `user-role.spec.ts` tests that also touch `usr-001`.
+4. **State cleanup via `test.afterEach`** - because the stub layer is in-memory and mutations persist within a server process lifetime, the spec restores the original stub state after each flow test. Restoration is done by navigating to the detail page and verifying current state, then posting to the inverse endpoint if needed. Specifically:
+   - After user-deactivation flow: POST to `/admin/users/usr-001/reactivate` if that route exists; otherwise navigate to the page and verify the "Reactivate" button is present (documenting the limitation in a code comment). If a reactivate route is not yet wired, use `usr-003` (Carla Reiter, `user`, `active`) as the deactivation target instead - it avoids colliding with the `user-role.spec.ts` tests that also touch `usr-001`.
    - After room-archive flow: POST to `/admin/rooms/room-001/unarchive` if that route exists; otherwise document the limitation. If unarchive is not yet wired, use `room-002` (Engineering, `active`) as the archive target instead.
    - **Decision rule:** check whether a reactivate/unarchive route is registered in `gateway/cmd/gateway/main.go` before writing the afterEach. If not present, use the alternative stub IDs and note the cleanup limitation clearly.
 
-5. **Spec is self-contained** — uses its own `loginAsAdmin` function (same pattern as all other admin specs, no shared helper file). No changes to `playwright.config.ts`. Runs under the existing `e2e/` Playwright harness (`workers: 1`, serial execution).
+5. **Spec is self-contained** - uses its own `loginAsAdmin` function (same pattern as all other admin specs, no shared helper file). No changes to `playwright.config.ts`. Runs under the existing `e2e/` Playwright harness (`workers: 1`, serial execution).
 
 6. **All tests pass green** against the live dev stack (`make dev` + bootstrap complete). TypeScript check (`cd e2e && npx tsc --noEmit`) passes with no errors.
 
@@ -58,17 +58,17 @@ These are real Playwright tests (no `test.skip`) running against the live dev st
 
 ### Tests written FIRST (before implementation code):
 
-1. **`Admin deactivates user — full flow`** — Playwright (`e2e/tests/features/admin/smoke-flows.spec.ts`)
+1. **`Admin deactivates user - full flow`** - Playwright (`e2e/tests/features/admin/smoke-flows.spec.ts`)
    - Given: full dev stack running (`make dev`), bootstrap complete, admin logged in via OIDC Authorization Code + PKCE (kai@example.com / changeme)
    - When: navigate to `/admin/users`, click the usr-001 row, click "Deactivate", click confirm in the dialog
    - Then: page redirects to `/admin/users/usr-001?flash=...`, flash banner contains "deactivated", status badge shows "Inactive"
 
-2. **`Admin archives room — full flow`** — Playwright (`e2e/tests/features/admin/smoke-flows.spec.ts`)
+2. **`Admin archives room - full flow`** - Playwright (`e2e/tests/features/admin/smoke-flows.spec.ts`)
    - Given: full dev stack running, bootstrap complete, admin logged in
    - When: navigate to `/admin/rooms`, click the room-001 row, click "Archive room", click confirm in the dialog
    - Then: page redirects to `/admin/rooms/room-001?flash=...`, flash banner contains "archived", status badge shows "Inactive"
 
-3. **`State is restored after each test`** — Playwright `test.afterEach` hook
+3. **`State is restored after each test`** - Playwright `test.afterEach` hook
    - Given: deactivation or archive has occurred during the preceding test
    - When: afterEach runs
    - Then: the stub entry is restored to original status (via inverse POST or documented limitation), leaving the stack clean for subsequent tests
@@ -88,23 +88,23 @@ These are real Playwright tests (no `test.skip`) running against the live dev st
   - [ ] 2.4 Run the spec against the live stack to confirm it is failing (stub flow not yet verified end-to-end)
 
 - [ ] Task 3: Implement any missing pieces needed for the tests to pass (AC: 2, 3, 4)
-  - [ ] 3.1 Confirm the list row click navigates to the detail URL (`/admin/users/usr-001`) — existing feature from Story 7.2, but verify in browser
-  - [ ] 3.2 Confirm "Deactivate" button exists in the detail panel when `status=active` — existing from Story 7.7, verify selector `button:has-text("Deactivate")`
-  - [ ] 3.3 Confirm "Archive room" button exists in the room detail panel — existing from Story 7.9, verify selector `button:has-text("Archive room")`
+  - [ ] 3.1 Confirm the list row click navigates to the detail URL (`/admin/users/usr-001`) - existing feature from Story 7.2, but verify in browser
+  - [ ] 3.2 Confirm "Deactivate" button exists in the detail panel when `status=active` - existing from Story 7.7, verify selector `button:has-text("Deactivate")`
+  - [ ] 3.3 Confirm "Archive room" button exists in the room detail panel - existing from Story 7.9, verify selector `button:has-text("Archive room")`
   - [ ] 3.4 Confirm the confirm dialog submit wires correctly and the PRG redirect lands with `flash=` param
-  - [ ] 3.5 Confirm the status badge renders "Inactive" (not "deactivated"/"archived") — normalisation is in `toUserRowData` / `toRoomRowData` in `users.go` / `rooms.go`
+  - [ ] 3.5 Confirm the status badge renders "Inactive" (not "deactivated"/"archived") - normalisation is in `toUserRowData` / `toRoomRowData` in `users.go` / `rooms.go`
   - [ ] 3.6 If reactivate/unarchive routes are missing and needed for cleanup: add them to `gateway/cmd/gateway/main.go` + add handler stubs (mirror of `DeactivateUserHandler`/`ArchiveRoomHandler` setting status back to "active")
 
 - [ ] Task 4: Final verification (AC: 5, 6)
-  - [ ] 4.1 Run `cd e2e && npx playwright test tests/features/admin/smoke-flows.spec.ts --reporter=list` — all tests green
-  - [ ] 4.2 Run `cd e2e && npx tsc --noEmit` — no TypeScript errors
+  - [ ] 4.1 Run `cd e2e && npx playwright test tests/features/admin/smoke-flows.spec.ts --reporter=list` - all tests green
+  - [ ] 4.2 Run `cd e2e && npx tsc --noEmit` - no TypeScript errors
   - [ ] 4.3 Verify no interference with parallel specs: since `workers: 1`, execution is serial; confirm `smoke-flows.spec.ts` leaves stub state clean after each test
 
 ## Dev Notes
 
 ### File to Create
 
-`e2e/tests/features/admin/smoke-flows.spec.ts` — this is the only file added by this story (plus optional route handlers if reactivate/unarchive are missing).
+`e2e/tests/features/admin/smoke-flows.spec.ts` - this is the only file added by this story (plus optional route handlers if reactivate/unarchive are missing).
 
 ### Auth Helper Pattern
 
@@ -153,7 +153,7 @@ The `stubUsers` and `stubRooms` slices in `gateway/internal/admin/stubs.go` are 
 1. Use a different user stub (`usr-003` Carla Reiter) that is not touched by any other spec.
 2. Or implement a reactivate route and restore in `afterEach`.
 
-**Recommendation**: use `usr-003` for the deactivation target (safe — no other spec touches it). Use `room-002` for the archive target (safe — `room-detail.spec.ts` only opens the dialog but does NOT submit it, so `room-001` is still `active`; however `room-002` is still safer). Document the choice in a comment.
+**Recommendation**: use `usr-003` for the deactivation target (safe - no other spec touches it). Use `room-002` for the archive target (safe - `room-detail.spec.ts` only opens the dialog but does NOT submit it, so `room-001` is still `active`; however `room-002` is still safer). Document the choice in a comment.
 
 ### Route Check for Reactivate / Unarchive
 
@@ -194,8 +194,8 @@ These handlers are also required by Story 7.7 AC (Reactivate button is mentioned
 /**
  * Story 7.14: Gherkin Admin UI Smoke Flows
  *
- * Flow 1: Admin deactivates a user (usr-003 Carla Reiter — active, role: user)
- * Flow 2: Admin archives a room (room-002 Engineering — active, private)
+ * Flow 1: Admin deactivates a user (usr-003 Carla Reiter - active, role: user)
+ * Flow 2: Admin archives a room (room-002 Engineering - active, private)
  *
  * Target IDs chosen to avoid collision with user-role.spec.ts (usr-001) and
  * room-detail.spec.ts (room-001 dialog-open-only, but room-002 is cleaner).
@@ -330,7 +330,7 @@ make test-integration
 
 | File | Action |
 |---|---|
-| `e2e/tests/features/admin/smoke-flows.spec.ts` | CREATE — new spec (primary deliverable) |
+| `e2e/tests/features/admin/smoke-flows.spec.ts` | CREATE - new spec (primary deliverable) |
 | `gateway/internal/admin/users.go` | ADD `ReactivateUserHandler` if missing |
 | `gateway/internal/admin/rooms.go` | ADD `UnarchiveRoomHandler` if missing |
 | `gateway/cmd/gateway/main.go` | REGISTER reactivate + unarchive routes if missing |
@@ -339,9 +339,9 @@ make test-integration
 
 | Spec | User touched | Room touched |
 |---|---|---|
-| `user-detail.spec.ts` | `usr-001` (display name edit — restored by next navigate) | — |
-| `user-role.spec.ts` | `usr-001` (deactivate — NOT restored; risk!) | — |
-| `room-detail.spec.ts` | — | `room-001` (archive dialog opened but NOT submitted — safe) |
+| `user-detail.spec.ts` | `usr-001` (display name edit - restored by next navigate) | - |
+| `user-role.spec.ts` | `usr-001` (deactivate - NOT restored; risk!) | - |
+| `room-detail.spec.ts` | - | `room-001` (archive dialog opened but NOT submitted - safe) |
 | `smoke-flows.spec.ts` (this story) | `usr-003` (deactivated + restored) | `room-002` (archived + restored) |
 
 Use `usr-003` and `room-002` to keep isolation clean regardless of test run order.

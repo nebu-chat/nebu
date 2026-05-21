@@ -1,7 +1,7 @@
-# Security Review — 13-2c: AWS ECS Task Definitions, ALB, Secrets Manager — 2026-05-13
+# Security Review - 13-2c: AWS ECS Task Definitions, ALB, Secrets Manager - 2026-05-13
 
 **Agent:** Kassandra
-**Diff base:** `git diff --staged` — story 13-2c
+**Diff base:** `git diff --staged` - story 13-2c
 **Classification:** CLEAN
 **Config:** `blocking_severity=CRITICAL` (default), `model=claude-sonnet-4-6`
 
@@ -10,7 +10,7 @@
 This diff provisions the AWS-facing security perimeter of Nebu: ALB with HTTP→HTTPS redirect,
 Secrets Manager resources for all runtime credentials, and ECS task definitions that inject those
 secrets via the `secrets` field (never `environment`). The IAM policy is correctly scoped to
-`nebu/${environment}/*`. No CRITICAL or HIGH findings. Three LOW items are advisory — all are
+`nebu/${environment}/*`. No CRITICAL or HIGH findings. Three LOW items are advisory - all are
 standard IaC patterns worth documenting for operators.
 
 ## Findings
@@ -42,19 +42,19 @@ standard IaC patterns worth documenting for operators.
 - **File:** `deploy/tofu/modules/nebu-aws/secrets.tf`, `aws_secretsmanager_secret.db_url`, line ~16
 - **Description:** The `description` field reads `"Full PostgreSQL DSN for Nebu. Format:
   postgres://nebu:PASSWORD@host:5432/nebu"`. This description is stored as unencrypted AWS metadata
-  and is visible to any principal with `secretsmanager:DescribeSecret` — a broader permission than
+  and is visible to any principal with `secretsmanager:DescribeSecret` - a broader permission than
   `secretsmanager:GetSecretValue`. It discloses the database username (`nebu`) and database name
   (`nebu`), which slightly reduces the effort required for a targeted attack if an attacker has
   AWS console read access.
 - **Impact:** Low. Username is typically derivable from application code anyway. No credential is
-  exposed — only the schema format.
+  exposed - only the schema format.
 - **Recommendation:** Shorten description to `"Full PostgreSQL DSN for Nebu gateway and core."`,
   omitting the format template that reveals the username.
 - **Reference:** OWASP ASVS V2.10.4
 
 ---
 
-### [LOW] OpenTofu state contains placeholder secret values — S3 bucket encryption advisory
+### [LOW] OpenTofu state contains placeholder secret values - S3 bucket encryption advisory
 
 - **CWE / OWASP:** CWE-312 (Cleartext Storage of Sensitive Information)
 - **File:** `deploy/tofu/modules/nebu-aws/secrets.tf`, all `aws_secretsmanager_secret_version` resources
@@ -63,7 +63,7 @@ standard IaC patterns worth documenting for operators.
   However, once operators rotate the secrets via `aws secretsmanager put-secret-value`, OpenTofu's
   state file will **not** contain the real secret (because of `ignore_changes`). This is the correct
   behaviour. No real credentials will be stored in state. The advisory is that the S3 backend bucket
-  holding the state file should have server-side encryption (SSE-S3 or SSE-KMS) enabled — this is
+  holding the state file should have server-side encryption (SSE-S3 or SSE-KMS) enabled - this is
   not enforced by the current IaC.
 - **Impact:** None from this diff. Advisory for operators: if S3 state bucket lacks encryption, any
   future secret value accidentally introduced into a resource argument (not covered by `ignore_changes`)
@@ -75,7 +75,7 @@ standard IaC patterns worth documenting for operators.
 
 ---
 
-### [INFO] ALB enforces HTTPS correctly — HTTP_301 redirect on port 80
+### [INFO] ALB enforces HTTPS correctly - HTTP_301 redirect on port 80
 
 - **File:** `deploy/tofu/modules/nebu-aws/alb.tf`
 - **Description:** Port 80 listener performs a permanent `HTTP_301` redirect to HTTPS/443. No
@@ -94,7 +94,7 @@ standard IaC patterns worth documenting for operators.
 
 ---
 
-### [INFO] Secrets Manager secrets use `ignore_changes` — operator rotation is safe
+### [INFO] Secrets Manager secrets use `ignore_changes` - operator rotation is safe
 
 - **File:** `deploy/tofu/modules/nebu-aws/secrets.tf`, all `aws_secretsmanager_secret_version` resources
 - **Description:** All six secret version resources use `lifecycle { ignore_changes = [secret_string] }`.
@@ -107,17 +107,17 @@ standard IaC patterns worth documenting for operators.
 
 | Invariant                                   | Status |
 |---------------------------------------------|:------:|
-| Compliance RSP coverage                     | ✅ N/A — no application DB code in diff |
-| `reason` field on compliance access         | ✅ N/A — no compliance handler in diff |
-| Audit-log immutability                      | ✅ N/A — no migration or DB code in diff |
-| `instance_admin` notification (if in-scope) | ✅ N/A — no compliance escalation path |
-| OIDC token validation (`iss`/`aud`/`exp`)   | ✅ N/A — no handler code; OIDC issuer URL injected as secret (correct) |
-| Matrix Power Level checks                   | ✅ N/A — no room operation code in diff |
+| Compliance RSP coverage                     | ✅ N/A - no application DB code in diff |
+| `reason` field on compliance access         | ✅ N/A - no compliance handler in diff |
+| Audit-log immutability                      | ✅ N/A - no migration or DB code in diff |
+| `instance_admin` notification (if in-scope) | ✅ N/A - no compliance escalation path |
+| OIDC token validation (`iss`/`aud`/`exp`)   | ✅ N/A - no handler code; OIDC issuer URL injected as secret (correct) |
+| Matrix Power Level checks                   | ✅ N/A - no room operation code in diff |
 | No hardcoded secrets                        | ✅ All values are `PLACEHOLDER_*` or empty strings |
 | TLS 1.3 enforcement                         | ✅ `ELBSecurityPolicy-TLS13-1-2-2021-06` on HTTPS listener |
-| AES-256-GCM correctness                     | ✅ N/A — no crypto code in diff |
-| Ed25519 verify-before-accept                | ✅ N/A — no signature code in diff |
-| No secrets in logs / error messages         | ✅ N/A — no application logging code in diff |
+| AES-256-GCM correctness                     | ✅ N/A - no crypto code in diff |
+| Ed25519 verify-before-accept                | ✅ N/A - no signature code in diff |
+| No secrets in logs / error messages         | ✅ N/A - no application logging code in diff |
 
 ## Overall Risk
 
@@ -131,7 +131,7 @@ standard IaC patterns worth documenting for operators.
 
 ## Pipeline Decision
 
-**CLEAN** — no CRITICAL or HIGH findings. Pipeline may proceed.
+**CLEAN** - no CRITICAL or HIGH findings. Pipeline may proceed.
 
 The three LOW findings are advisory items for operators. The IAM ARN wildcard (LOW-1) and the
 DB description disclosure (LOW-2) may be addressed in a follow-up story or operator documentation
@@ -140,4 +140,4 @@ be captured in the RUNBOOK.md as an operator prerequisite note.
 
 ---
 
-*Generated by Kassandra — BMAD Security Review Agent. This report is an immutable audit artifact — do not edit retrospectively; create a new review if re-analysis is required.*
+*Generated by Kassandra - BMAD Security Review Agent. This report is an immutable audit artifact - do not edit retrospectively; create a new review if re-analysis is required.*

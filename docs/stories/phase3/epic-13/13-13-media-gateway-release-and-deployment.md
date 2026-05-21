@@ -25,7 +25,7 @@ Story 13.11 introduced a versioned release pipeline (`make release TAG=vN.N.N`) 
 
 - `make release` builds `${CI_REGISTRY_IMAGE}/nebu-gateway:<version>` and `${CI_REGISTRY_IMAGE}/nebu-core:<version>`
 - `make release-push` pushes only those two images
-- GitLab CI has `release-gateway-image` and `release-core-image` Kaniko jobs — no media equivalent
+- GitLab CI has `release-gateway-image` and `release-core-image` Kaniko jobs - no media equivalent
 
 Meanwhile, the media gateway is a first-class service in the system:
 
@@ -34,13 +34,13 @@ Meanwhile, the media gateway is a first-class service in the system:
 - The Matrix Media API (`POST /_matrix/media/v3/upload`, `GET /_matrix/media/v3/download/{server}/{id}`) requires the media gateway to be running
 - Helm chart templates exist for gateway and core but **not** for media-gateway (the `media-gateway/` directory under `deploy/helm/nebu/templates/` is empty)
 
-Without a media gateway release image and Helm deployment, operators cannot deploy a complete Nebu instance — users can join rooms and sync messages, but cannot upload or download media.
+Without a media gateway release image and Helm deployment, operators cannot deploy a complete Nebu instance - users can join rooms and sync messages, but cannot upload or download media.
 
 ---
 
 ## Acceptance Criteria
 
-**AC1 — `make release` builds the media gateway image:**
+**AC1 - `make release` builds the media gateway image:**
 Given `Makefile`,
 When `TAG=v1.0.0 make release` is executed,
 Then:
@@ -48,14 +48,14 @@ Then:
 - The build uses the same `--build-arg` flags as gateway/core (`GIT_COMMIT`, `BUILD_TIME`, `RELEASE_VERSION`)
 - The build context is `./media` (where `media/Dockerfile` lives)
 
-**AC2 — `make release-push` pushes the media gateway image:**
+**AC2 - `make release-push` pushes the media gateway image:**
 Given all three images are built by `make release TAG=v1.0.0`,
 When `TAG=v1.0.0 make release-push` is executed,
 Then:
 - All three images are pushed: `nebu-gateway:1.0.0`, `nebu-core:1.0.0`, `nebu-media:1.0.0`
 - If any single push fails, the pipeline reports the failure but does not silently succeed
 
-**AC3 — GitLab CI builds and pushes the media image on tag pushes:**
+**AC3 - GitLab CI builds and pushes the media image on tag pushes:**
 Given `.gitlab-ci.yml`,
 When a SemVer tag is pushed (e.g. `v1.0.0`),
 Then:
@@ -63,7 +63,7 @@ Then:
 - The job uses Kaniko to build `media/Dockerfile` and pushes `${CI_REGISTRY_IMAGE}/nebu-media:${RELEASE_VERSION}`
 - The job shares the same structure as the existing release jobs: `<<: *build_ci_image`, `interruptible: false`, `--cache=false`, SemVer-only rules
 
-**AC4 — Helm chart includes media-gateway deployment and service:**
+**AC4 - Helm chart includes media-gateway deployment and service:**
 Given `deploy/helm/nebu/`,
 When the chart is rendered with `helm template`,
 Then:
@@ -72,14 +72,14 @@ Then:
 - Both templates follow the same patterns as gateway/core (label selectors, fullname helper, security context, nodeSelector, affinity, tolerations)
 - The Helm values structure includes `media:` section with `image.tag`, `replicaCount`, and `resources`
 
-**AC5 — Helm values.yaml documents media image naming:**
+**AC5 - Helm values.yaml documents media image naming:**
 Given `deploy/helm/nebu/values.yaml`,
 When it is inspected,
 Then:
 - A `media:` section exists with `image.registry`, `image.pullPolicy`, `image.tag`, `replicaCount`, and `resources`
 - Comments document that `nebu-media:<version>` is produced by the release pipeline
 
-**AC6 — docker-compose.ci.yml includes media service for integration tests:**
+**AC6 - docker-compose.ci.yml includes media service for integration tests:**
 Given `docker-compose.ci.yml`,
 When it is inspected,
 Then:
@@ -92,23 +92,23 @@ Then:
 
 ### Tests written FIRST (before implementation code):
 
-1. **`make release` builds three images** — Shell
+1. **`make release` builds three images** - Shell
     - When: `TAG=v0.0.1 make release` (dry-run or actual)
     - Then: `docker images | grep nebu` shows `nebu-gateway`, `nebu-core`, and `nebu-media` with the same version tag
 
-2. **`make release-push` pushes three images** — Shell
+2. **`make release-push` pushes three images** - Shell
     - When: `TAG=v0.0.1 make release-push` (dry-run: check `docker push` would be called for all three)
     - Then: All three image names appear in the command output
 
-3. **CI release job exists for media** — YAML inspection
+3. **CI release job exists for media** - YAML inspection
     - When: `.gitlab-ci.yml` is inspected
     - Then: `release-media-image` job exists with `stage: release`, SemVer-only rules, and `<<: *build_ci_image` anchor
 
-4. **Helm chart renders media templates** — Helm template
+4. **Helm chart renders media templates** - Helm template
     - When: `helm template nebu deploy/helm/nebu/ --set gateway.image.tag=v --set core.image.tag=v --set media.image.tag=v`
     - Then: `kubectl apply --dry-run=client` succeeds for both `media-gateway/deployment.yaml` and `media-gateway/service.yaml`
 
-5. **CI overlay includes media** — YAML inspection
+5. **CI overlay includes media** - YAML inspection
     - When: `docker-compose.ci.yml` is inspected
     - Then: `media:` service with `image: ${CI_REGISTRY_IMAGE}/media:${CI_COMMIT_SHA}` is present
 
@@ -116,23 +116,23 @@ Then:
 
 ## Tasks / Subtasks
 
-- [x] **T1 — Makefile: add media to `release` and `release-push`** (AC1, AC2)
+- [x] **T1 - Makefile: add media to `release` and `release-push`** (AC1, AC2)
    - [x] T1.1: Add a third `docker build` block for media gateway in `make release` target
    - [x] T1.2: Add a third `docker push` line in `make release-push` target
    - [x] T1.3: Use same build arg pattern (`GIT_COMMIT`, `BUILD_TIME`, `RELEASE_VERSION`)
 
-- [x] **T2 — GitLab CI: add `release-media-image` job** (AC3)
+- [x] **T2 - GitLab CI: add `release-media-image` job** (AC3)
    - [x] T2.1: Mirror `release-core-image` structure with `media/Dockerfile` context
    - [x] T2.2: Destination `${CI_REGISTRY_IMAGE}/nebu-media:${RELEASE_VERSION}`
    - [x] T2.3: Same `rules` (SemVer tag only), `interruptible: false`, `needs: []`
 
-- [x] **T3 — Helm chart: media-gateway templates** (AC4, AC5)
+- [x] **T3 - Helm chart: media-gateway templates** (AC4, AC5)
    - [x] T3.1: Create `media-gateway/deployment.yaml` following gateway pattern
    - [x] T3.2: Create `media-gateway/service.yaml` exposing port 8009
    - [x] T3.3: Add `media:` section to `values.yaml` with image, replicaCount, resources
    - [x] T3.4: Add comments documenting release image naming convention
 
-- [x] **T4 — docker-compose.ci.yml: add media overlay** (AC6)
+- [x] **T4 - docker-compose.ci.yml: add media overlay** (AC6)
    - [x] T4.1: Add `media:` service with image override to `${CI_REGISTRY_IMAGE}/media:${CI_COMMIT_SHA}`
 
 ---
@@ -158,7 +158,7 @@ release:
 		./core
 ```
 
-Add a third block for media. The pattern is repetitive by design — keep it simple, do not abstract into a loop.
+Add a third block for media. The pattern is repetitive by design - keep it simple, do not abstract into a loop.
 
 **Existing `make release-push` pattern:**
 ```makefile
@@ -173,7 +173,7 @@ Add a third `docker push` line.
 - Multi-stage build (golang builder → Alpine final)
 - Exposes port 8009
 - ENTRYPOINT `/media`
-- Accepts no special build args currently — but we should pass the same `GIT_COMMIT`, `BUILD_TIME`, `RELEASE_VERSION` for consistency
+- Accepts no special build args currently - but we should pass the same `GIT_COMMIT`, `BUILD_TIME`, `RELEASE_VERSION` for consistency
 
 **Helm chart structure:**
 - `deploy/helm/nebu/templates/media-gateway/` directory exists but is empty
@@ -185,10 +185,10 @@ Add a third `docker push` line.
 
 ### Anti-Patterns to Avoid
 
-1. **Do NOT change the image naming convention** — use `nebu-media` (consistent with `nebu-gateway`, `nebu-core`)
-2. **Do NOT add HPA for media** — MVP only needs a basic deployment + service
-3. **Do NOT add media to docker-compose.yml main services** — it already exists there; the CI overlay is the only change needed
-4. **Do NOT modify existing release jobs** — `release-gateway-image` and `release-core-image` stay as-is
+1. **Do NOT change the image naming convention** - use `nebu-media` (consistent with `nebu-gateway`, `nebu-core`)
+2. **Do NOT add HPA for media** - MVP only needs a basic deployment + service
+3. **Do NOT add media to docker-compose.yml main services** - it already exists there; the CI overlay is the only change needed
+4. **Do NOT modify existing release jobs** - `release-gateway-image` and `release-core-image` stay as-is
 
 ### References
 
@@ -235,4 +235,4 @@ _None_
 ## Change Log
 
 - 2026-05-14: Story created (claude-sonnet-4-6)
-- 2026-05-14: Story implemented — media gateway added to release pipeline, Helm chart, and CI overlay (claude-sonnet-4-6)
+- 2026-05-14: Story implemented - media gateway added to release pipeline, Helm chart, and CI overlay (claude-sonnet-4-6)

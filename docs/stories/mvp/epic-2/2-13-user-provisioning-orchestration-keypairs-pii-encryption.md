@@ -1,4 +1,4 @@
-# Story 2.13: User Provisioning Orchestration — Keypairs + PII Encryption
+# Story 2.13: User Provisioning Orchestration - Keypairs + PII Encryption
 
 Status: done
 
@@ -24,7 +24,7 @@ so that every user has cryptographic identity and protected PII from their first
 
 4. **Given** the entire provisioning process,
    **When** it runs,
-   **Then** it executes within a single PostgreSQL transaction — either all succeed or all roll back
+   **Then** it executes within a single PostgreSQL transaction - either all succeed or all roll back
 
 5. **Given** a unit test with a fake provisioner,
    **When** `provision_user/4` is called twice for the same `user_id`,
@@ -33,9 +33,9 @@ so that every user has cryptographic identity and protected PII from their first
 ## Tasks / Subtasks
 
 - [x] Create migration `000006_users_email_pii` (AC: #3)
-  - [x] Create `gateway/migrations/000006_users_email_pii.up.sql` — ALTER TABLE users ADD COLUMN email_encrypted, email_nonce, email_ephemeral_pub
+  - [x] Create `gateway/migrations/000006_users_email_pii.up.sql` - ALTER TABLE users ADD COLUMN email_encrypted, email_nonce, email_ephemeral_pub
   - [x] Create `gateway/migrations/000006_users_email_pii.down.sql`
-  - [x] Update `gateway/migrations/migrations_test.go` — add 000006 files to `TestFS_ContainsExpectedMigrationFiles`
+  - [x] Update `gateway/migrations/migrations_test.go` - add 000006 files to `TestFS_ContainsExpectedMigrationFiles`
 
 - [x] Add `{:signature, in_umbrella: true}` to `session_manager/mix.exs` deps (AC: #1, #2, #3)
 
@@ -74,11 +74,11 @@ This story does **three things**:
 3. Orchestrates: keypair generation → `user_keys` inserts → `users` UPDATE, all in one transaction
 
 **NOT in this story:**
-- Calling `provision_user/4` from the `ValidateToken` gRPC handler — that is Story 2.14
-- Bootstrap mode / `instance_admin` auto-assignment — Story 2.15
-- Proto changes for email/display_name in `ValidateTokenRequest` — Story 2.14's concern
-- DSGVO private key deletion — Story 5.7
-- Any changes to `upsert_user/2` — do NOT touch Story 2.12's code
+- Calling `provision_user/4` from the `ValidateToken` gRPC handler - that is Story 2.14
+- Bootstrap mode / `instance_admin` auto-assignment - Story 2.15
+- Proto changes for email/display_name in `ValidateTokenRequest` - Story 2.14's concern
+- DSGVO private key deletion - Story 5.7
+- Any changes to `upsert_user/2` - do NOT touch Story 2.12's code
 
 ### Step 1: Go Migration `000006_users_email_pii`
 
@@ -159,7 +159,7 @@ defmodule Nebu.Session.UserProvisioner do
   - server_key: 32-byte binary from Application.get_env(:signature, :pii_encryption_key) (Tier 1)
 
   Returns {:ok, :provisioned} on success, {:error, reason} on failure.
-  Idempotent: UPDATE uses WHERE signing_key_id IS NULL — safe to call twice.
+  Idempotent: UPDATE uses WHERE signing_key_id IS NULL - safe to call twice.
   """
   @spec provision_user(String.t(), String.t(), String.t(), binary()) ::
           {:ok, :provisioned} | {:error, term()}
@@ -205,7 +205,7 @@ defmodule Nebu.Session.UserProvisioner.Postgres do
   def provision_user(user_id, display_name, email, server_key) do
     now_ms = Nebu.DB.Helpers.now_ms()
 
-    # Generate crypto material outside the transaction — keeps transaction window short
+    # Generate crypto material outside the transaction - keeps transaction window short
     {sign_pub, sign_priv} = Nebu.Signature.generate_signing_keypair()
     {enc_pub, enc_priv} = Nebu.Signature.generate_encryption_keypair()
     signing_key_id = Ecto.UUID.generate()
@@ -249,13 +249,13 @@ end
 
 - **`Ecto.UUID.generate/0`**: Available from `ecto_sql ~> 3.12` (already in deps via `nebu_db`). Returns UUID v4 strings like `"a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"`, valid for `TEXT PRIMARY KEY`.
 
-- **`WHERE signing_key_id IS NULL` guard**: Prevents double-provisioning in race conditions. If a second concurrent request calls `provision_user` after the first completes, the UPDATE affects 0 rows. This is safe — `Repo.transaction/1` still returns `{:ok, :provisioned}` even if 0 rows were updated. Story 2.14 controls whether to call provisioning at all.
+- **`WHERE signing_key_id IS NULL` guard**: Prevents double-provisioning in race conditions. If a second concurrent request calls `provision_user` after the first completes, the UPDATE affects 0 rows. This is safe - `Repo.transaction/1` still returns `{:ok, :provisioned}` even if 0 rows were updated. Story 2.14 controls whether to call provisioning at all.
 
 - **`Nebu.Repo.rollback/1`**: Calling this inside `Repo.transaction/1` immediately terminates the transaction and returns `{:error, reason}` from `Repo.transaction/1`.
 
 - **Raw SQL only**: No `Ecto.Schema`, no `Repo.insert/2`. Go owns all schema migrations. See anti-patterns section below.
 
-- **`enc_priv` in INSERT**: The private key is stored in `user_keys.private_key` (BYTEA, nullable for DSGVO deletion). Raw binary from `:crypto.generate_key(:ecdh, :x25519)` — no encoding needed. Postgrex maps Elixir binaries to PostgreSQL BYTEA directly.
+- **`enc_priv` in INSERT**: The private key is stored in `user_keys.private_key` (BYTEA, nullable for DSGVO deletion). Raw binary from `:crypto.generate_key(:ecdh, :x25519)` - no encoding needed. Postgrex maps Elixir binaries to PostgreSQL BYTEA directly.
 
 ### Step 5: Unit Tests
 
@@ -264,7 +264,7 @@ end
 ```elixir
 defmodule Nebu.Session.UserProvisionerTest do
   use ExUnit.Case, async: false
-  # async: false required — Application.put_env is process-global
+  # async: false required - Application.put_env is process-global
 
   alias Nebu.Session.UserProvisioner
 
@@ -360,7 +360,7 @@ email_ephemeral_pub       BYTEA           -- 32-byte ephemeral X25519 public key
 **`user_keys` table** (two rows per user after provisioning):
 
 ```sql
-key_id      TEXT   PRIMARY KEY   -- Ecto.UUID.generate() — UUID v4
+key_id      TEXT   PRIMARY KEY   -- Ecto.UUID.generate() - UUID v4
 user_id     TEXT   NOT NULL REFERENCES users(user_id)
 key_type    TEXT   NOT NULL CHECK (key_type IN ('signing', 'encryption'))
 algorithm   TEXT   NOT NULL      -- 'ed25519' | 'x25519'
@@ -376,8 +376,8 @@ deleted_at  BIGINT              -- NULL until DSGVO deletion (Story 5.7)
 
 | Function | Input | Returns | Used for |
 |----------|-------|---------|---------|
-| `generate_signing_keypair/0` | — | `{pub_32b, priv_32b}` | Ed25519 keypair |
-| `generate_encryption_keypair/0` | — | `{pub_32b, priv_32b}` | X25519 keypair |
+| `generate_signing_keypair/0` | - | `{pub_32b, priv_32b}` | Ed25519 keypair |
+| `generate_encryption_keypair/0` | - | `{pub_32b, priv_32b}` | X25519 keypair |
 | `encrypt_operational_pii/2` | `(plaintext, server_key_32b)` | `{ciphertext_with_tag, nonce_12b}` | display_name |
 | `encrypt_sensitive_pii/2` | `(plaintext, recipient_pub_32b)` | `{ciphertext_with_tag, ephemeral_pub_32b, nonce_12b}` | email |
 
@@ -389,49 +389,49 @@ server_key = Application.get_env(:signature, :pii_encryption_key)
 
 ### Architecture Compliance
 
-**AI-Constraint #1:** All timestamps `BIGINT` — `Nebu.DB.Helpers.now_ms/0` used for `user_keys.created_at` ✓
+**AI-Constraint #1:** All timestamps `BIGINT` - `Nebu.DB.Helpers.now_ms/0` used for `user_keys.created_at` ✓
 
 **AI-Constraint #2:** Auth token NEVER forwarded. Provisioner receives `user_id` + `display_name` + `email` (derived claims), never the raw JWT ✓
 
-**AI-Constraint #6:** All fallible operations return `{:ok, result}` / `{:error, reason}` — `Repo.rollback/1` used inside transaction, never raise/throw ✓
+**AI-Constraint #6:** All fallible operations return `{:ok, result}` / `{:error, reason}` - `Repo.rollback/1` used inside transaction, never raise/throw ✓
 
-**AI-Constraint #10:** PII encrypted exclusively via X25519 (Encryption Key) — `encrypt_sensitive_pii/2` uses `enc_pub` (X25519), never `sign_pub` (Ed25519) ✓
+**AI-Constraint #10:** PII encrypted exclusively via X25519 (Encryption Key) - `encrypt_sensitive_pii/2` uses `enc_pub` (X25519), never `sign_pub` (Ed25519) ✓
 
 **Architecture V1:** Two keypairs per user: Ed25519 (signing) + X25519 (encryption) stored as separate rows in `user_keys` ✓
 
 ### Critical Anti-Patterns to Avoid
 
-**NEVER define `Ecto.Schema` in Elixir** — use raw SQL only:
+**NEVER define `Ecto.Schema` in Elixir** - use raw SQL only:
 ```elixir
-# ❌ WRONG — Go owns schema
+# ❌ WRONG - Go owns schema
 defmodule Nebu.UserKey do
   use Ecto.Schema
   schema "user_keys" do ...
 end
 
-# ✅ CORRECT — raw SQL
+# ✅ CORRECT - raw SQL
 Ecto.Adapters.SQL.query(Nebu.Repo, @insert_key_sql, params)
 ```
 
 **NEVER use the Ed25519 private key for PII encryption**:
 ```elixir
-# ❌ WRONG — Ed25519 is for signing, not encryption
+# ❌ WRONG - Ed25519 is for signing, not encryption
 encrypt_sensitive_pii(email, sign_pub)
 
-# ✅ CORRECT — X25519 key is the encryption key
+# ✅ CORRECT - X25519 key is the encryption key
 encrypt_sensitive_pii(email, enc_pub)
 ```
 
-**NEVER call `encrypt_operational_pii/2` for email** — Tier 2 uses ECDH:
+**NEVER call `encrypt_operational_pii/2` for email** - Tier 2 uses ECDH:
 ```elixir
-# ❌ WRONG — email is Tier 2 (per-user key), not Tier 1 (server key)
+# ❌ WRONG - email is Tier 2 (per-user key), not Tier 1 (server key)
 {email_enc, email_nonce} = Nebu.Signature.encrypt_operational_pii(email, server_key)
 
-# ✅ CORRECT — email uses user's X25519 public key
+# ✅ CORRECT - email uses user's X25519 public key
 {email_enc, email_ephemeral_pub, email_nonce} = Nebu.Signature.encrypt_sensitive_pii(email, enc_pub)
 ```
 
-**NEVER store enc_pub as the X25519 public key AND as email_ephemeral_pub** — they are different things:
+**NEVER store enc_pub as the X25519 public key AND as email_ephemeral_pub** - they are different things:
 - `enc_pub` = the user's **permanent** X25519 public key (stored in `user_keys.public_key`)
 - `email_ephemeral_pub` = the **ephemeral** sender public key returned by `encrypt_sensitive_pii/2` (stored in `users.email_ephemeral_pub` for future ECDH decryption)
 
@@ -444,16 +444,16 @@ created_at = DateTime.utc_now() |> DateTime.to_unix(:millisecond)
 now_ms = Nebu.DB.Helpers.now_ms()
 ```
 
-**NEVER put crypto generation inside `Repo.transaction/1`** — it's not DB work:
+**NEVER put crypto generation inside `Repo.transaction/1`** - it's not DB work:
 ```elixir
-# ❌ WRONG — extends transaction duration unnecessarily
+# ❌ WRONG - extends transaction duration unnecessarily
 Nebu.Repo.transaction(fn ->
   {sign_pub, sign_priv} = Nebu.Signature.generate_signing_keypair()  # not DB
   {dn_enc, dn_nonce} = Nebu.Signature.encrypt_operational_pii(...)    # not DB
   ...
 end)
 
-# ✅ CORRECT — compute outside, only DB writes inside transaction
+# ✅ CORRECT - compute outside, only DB writes inside transaction
 {sign_pub, sign_priv} = Nebu.Signature.generate_signing_keypair()
 ...
 Nebu.Repo.transaction(fn ->
@@ -464,13 +464,13 @@ end)
 
 ### Previous Story Intelligence (2.12)
 
-- **`async: false` required** — `Application.put_env(:session_manager, :provisioner_module, ...)` is global state
-- **ETS table pattern** — Create named table in `setup`, clean up in `on_exit`. Use `[:set]` semantics for upsert-like behavior
-- **`Nebu.DB.Helpers.now_ms/0`** — now lives in `core/apps/nebu_db/lib/nebu/db_helpers.ex`, available to all umbrella apps that depend on `nebu_db`
-- **`Nebu.Repo`** — lives in `core/apps/nebu_db/lib/nebu/repo.ex`, started by `Nebu.DB.Application`. No test DB config (unit tests use fake modules, not real DB)
-- **`Nebu.Session.UserStore.Postgres` pattern** — the raw SQL + `Ecto.Adapters.SQL.query/3` + no Ecto.Schema pattern is established and must be continued
-- **`--warnings-as-errors` discipline** — prefix all unused variables with `_`
-- **`@behaviour` compiler enforcement** — `@behaviour Nebu.Session.UserProvisioner` on `Postgres` and `FakeProvisioner` gets callback signatures checked at compile time
+- **`async: false` required** - `Application.put_env(:session_manager, :provisioner_module, ...)` is global state
+- **ETS table pattern** - Create named table in `setup`, clean up in `on_exit`. Use `[:set]` semantics for upsert-like behavior
+- **`Nebu.DB.Helpers.now_ms/0`** - now lives in `core/apps/nebu_db/lib/nebu/db_helpers.ex`, available to all umbrella apps that depend on `nebu_db`
+- **`Nebu.Repo`** - lives in `core/apps/nebu_db/lib/nebu/repo.ex`, started by `Nebu.DB.Application`. No test DB config (unit tests use fake modules, not real DB)
+- **`Nebu.Session.UserStore.Postgres` pattern** - the raw SQL + `Ecto.Adapters.SQL.query/3` + no Ecto.Schema pattern is established and must be continued
+- **`--warnings-as-errors` discipline** - prefix all unused variables with `_`
+- **`@behaviour` compiler enforcement** - `@behaviour Nebu.Session.UserProvisioner` on `Postgres` and `FakeProvisioner` gets callback signatures checked at compile time
 
 ### Build & Test Commands
 
@@ -512,10 +512,10 @@ core/apps/session_manager/mix.exs              ← add {:signature, in_umbrella:
 ```
 
 **DO NOT TOUCH:**
-- `core/apps/signature/` — no changes (crypto functions already exist and are complete)
-- `core/apps/session_manager/lib/nebu/session/user_store.ex` — do NOT modify Story 2.12's code
-- `core/apps/session_manager/lib/nebu/session/user_store/postgres.ex` — do NOT modify
-- `core/config/runtime.exs` — no new env vars needed (NEBU_PII_ENCRYPTION_KEY already exists)
+- `core/apps/signature/` - no changes (crypto functions already exist and are complete)
+- `core/apps/session_manager/lib/nebu/session/user_store.ex` - do NOT modify Story 2.12's code
+- `core/apps/session_manager/lib/nebu/session/user_store/postgres.ex` - do NOT modify
+- `core/config/runtime.exs` - no new env vars needed (NEBU_PII_ENCRYPTION_KEY already exists)
 - Any gateway Go files beyond the migration files
 - Any `*_test.exs` in other apps
 
@@ -523,12 +523,12 @@ core/apps/session_manager/mix.exs              ← add {:signature, in_umbrella:
 
 - `user_provisioner.ex` and `user_provisioner/postgres.ex` mirror the established `user_store.ex` + `user_store/postgres.ex` pattern exactly
 - The `session_manager` app is the right home for this (Story 2.14 will call `provision_user/4` from the session_manager context)
-- Adding `{:signature, in_umbrella: true}` to `session_manager/mix.exs` deps creates a direct dep on the `signature` app — this is correct per project structure (session_manager calls crypto functions from signature)
+- Adding `{:signature, in_umbrella: true}` to `session_manager/mix.exs` deps creates a direct dep on the `signature` app - this is correct per project structure (session_manager calls crypto functions from signature)
 
 ### References
 
 - [Source: epics.md#Story-2.13] Authoritative user story, acceptance criteria, PII tier definitions
-- [Source: epics.md#Story-2.14] Scope boundary — ValidateToken gRPC wiring is next story
+- [Source: epics.md#Story-2.14] Scope boundary - ValidateToken gRPC wiring is next story
 - [Source: architecture.md#Enforcement rule 1] BIGINT timestamps via `now_ms/0`
 - [Source: architecture.md#Enforcement rule 6] `{:ok, result}` / `{:error, reason}` mandate
 - [Source: architecture.md#Enforcement rule 10] PII encryption via X25519 only, never Ed25519
@@ -536,7 +536,7 @@ core/apps/session_manager/mix.exs              ← add {:signature, in_umbrella:
 - [Source: architecture.md#NFR-S2] Sensitive PII at-rest encrypted, Operational PII at-rest encrypted
 - [Source: gateway/migrations/000004_users.up.sql] users + user_keys schema (Story 2.1)
 - [Source: gateway/migrations/000005_sessions.up.sql] Migration naming pattern
-- [Source: core/apps/signature/lib/nebu/signature.ex] All crypto functions — generate_signing_keypair/0, generate_encryption_keypair/0, encrypt_operational_pii/2, encrypt_sensitive_pii/2
+- [Source: core/apps/signature/lib/nebu/signature.ex] All crypto functions - generate_signing_keypair/0, generate_encryption_keypair/0, encrypt_operational_pii/2, encrypt_sensitive_pii/2
 - [Source: implementation-artifacts/2-12-user-record-db-write-on-first-login.md] UserStore pattern, nebu_db setup, async:false test pattern, now_ms usage
 
 ## Dev Agent Record
@@ -563,5 +563,5 @@ claude-sonnet-4-6 (1M context)
 
 ## Change Log
 
-- 2026-03-29: Story 2-13 implemented — migration 000006 (email PII columns), UserProvisioner behaviour + Postgres implementation, unit tests. All tests green (6 session_manager, migrations ok).
-- 2026-03-30: Code review passed — 0 HIGH, 0 MEDIUM, 2 LOW (commit label cosmetic, sprint tracking gap). All ACs verified, all tasks confirmed done. Status → done.
+- 2026-03-29: Story 2-13 implemented - migration 000006 (email PII columns), UserProvisioner behaviour + Postgres implementation, unit tests. All tests green (6 session_manager, migrations ok).
+- 2026-03-30: Code review passed - 0 HIGH, 0 MEDIUM, 2 LOW (commit label cosmetic, sprint tracking gap). All ACs verified, all tasks confirmed done. Status → done.

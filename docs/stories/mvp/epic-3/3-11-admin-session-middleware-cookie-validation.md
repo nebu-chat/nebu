@@ -56,11 +56,11 @@ so that unauthenticated requests are always redirected to `/admin/login`.
     - `GET /admin/logout` → `sessionGuard(http.HandlerFunc(adminAuth.LogoutHandler))`
     - `GET /admin/dashboard` (Story 3.13 will add this; for now this story only wraps already-registered routes)
   - [x] 2.3 Confirm the following routes remain UNPROTECTED (no SessionGuard):
-    - `GET /admin/login`, `GET /admin/login/start` — login routes
-    - `GET /admin/callback` — OIDC callback (sets the cookie)
-    - `GET /admin/logout` must be protected — Story 3.10 explicitly noted this
-    - `GET /admin/bootstrap`, `POST /admin/bootstrap`, `POST /admin/bootstrap/*` — guarded by `BootstrapGuard`, not `SessionGuard`
-    - `GET /admin/static/*` — public static assets
+    - `GET /admin/login`, `GET /admin/login/start` - login routes
+    - `GET /admin/callback` - OIDC callback (sets the cookie)
+    - `GET /admin/logout` must be protected - Story 3.10 explicitly noted this
+    - `GET /admin/bootstrap`, `POST /admin/bootstrap`, `POST /admin/bootstrap/*` - guarded by `BootstrapGuard`, not `SessionGuard`
+    - `GET /admin/static/*` - public static assets
   - [x] 2.4 Apply `sessionGuard` to `/admin/logout`: change `mux.HandleFunc("GET /admin/logout", adminAuth.LogoutHandler)` to `mux.Handle("GET /admin/logout", sessionGuard(http.HandlerFunc(adminAuth.LogoutHandler)))`
 
 - [x] Task 3: Write unit tests in `gateway/internal/admin/middleware_test.go` (AC: 7)
@@ -74,16 +74,16 @@ so that unauthenticated requests are always redirected to `/admin/login`.
 
 ### Review Findings
 
-- [x] [Review][Patch] MINOR: iota-Redundanz — `contextKeyAdminEmail contextKey = iota` statt idiomatisch ohne `= iota` [middleware.go:22] — fixed
-- [x] [Review][Defer] INFO: Inkonsistentes Logging — fehlender Cookie und Signatur-Fehler werden nicht geloggt, nur JSON-Parse-Fehler [middleware.go:62-67] — deferred, stylistic consistency; not a bug
-- [x] [Review][Defer] INFO: Duplikat-Logik — `verifySessionCookie` und `AdminAuth.verifyCookie` sind identische Implementierungen; Refactoring zu einer shared Funktion wuerde Wartungsrisiko reduzieren [middleware.go:39-52, auth.go:124-137] — deferred, pre-existing architecture decision from Story spec
-- [x] [Review][Defer] INFO: Leeres Secret nicht validiert — `SessionGuard` prueft nicht ob `secret` leer ist; in Praxis durch `main.go` PSK-Read abgesichert [middleware.go:57] — deferred, defense-in-depth improvement
+- [x] [Review][Patch] MINOR: iota-Redundanz - `contextKeyAdminEmail contextKey = iota` statt idiomatisch ohne `= iota` [middleware.go:22] - fixed
+- [x] [Review][Defer] INFO: Inkonsistentes Logging - fehlender Cookie und Signatur-Fehler werden nicht geloggt, nur JSON-Parse-Fehler [middleware.go:62-67] - deferred, stylistic consistency; not a bug
+- [x] [Review][Defer] INFO: Duplikat-Logik - `verifySessionCookie` und `AdminAuth.verifyCookie` sind identische Implementierungen; Refactoring zu einer shared Funktion wuerde Wartungsrisiko reduzieren [middleware.go:39-52, auth.go:124-137] - deferred, pre-existing architecture decision from Story spec
+- [x] [Review][Defer] INFO: Leeres Secret nicht validiert - `SessionGuard` prueft nicht ob `secret` leer ist; in Praxis durch `main.go` PSK-Read abgesichert [middleware.go:57] - deferred, defense-in-depth improvement
 
 ## Dev Notes
 
 ### Architecture: `SessionGuard` Placement
 
-`SessionGuard` lives in `gateway/internal/admin/middleware.go` — the same file as `BootstrapGuard`. It is a package-level function, NOT a method on `AdminAuth`. This is consistent with the existing `BootstrapGuard` signature:
+`SessionGuard` lives in `gateway/internal/admin/middleware.go` - the same file as `BootstrapGuard`. It is a package-level function, NOT a method on `AdminAuth`. This is consistent with the existing `BootstrapGuard` signature:
 
 ```go
 // Existing pattern in middleware.go:
@@ -97,15 +97,15 @@ Do NOT put `SessionGuard` as a method on `AdminAuth`. The guard only needs the `
 
 ### Reuse: `verifyCookie` and `adminSessionCookie` Already Exist in auth.go
 
-**DO NOT REIMPLEMENT** the HMAC verification or session struct — they are already defined in `gateway/internal/admin/auth.go`:
+**DO NOT REIMPLEMENT** the HMAC verification or session struct - they are already defined in `gateway/internal/admin/auth.go`:
 
-- `adminSessionCookie` struct (line 107–112): `Sub`, `Email`, `Role`, `Exp` — use this directly
+- `adminSessionCookie` struct (line 107–112): `Sub`, `Email`, `Role`, `Exp` - use this directly
 - `signCookie(payload []byte) string` (line 115–121): base64url(payload) + "." + HMAC signature
 - `verifyCookie(value string) ([]byte, error)` (line 123–137): verifies HMAC, returns decoded payload
 
 Since these methods are on `*AdminAuth` but `SessionGuard` is a standalone function, you have two valid approaches:
 
-**Option A (preferred — extract standalone helper):** Create a package-private helper:
+**Option A (preferred - extract standalone helper):** Create a package-private helper:
 ```go
 // verifySessionCookie verifies the HMAC-SHA256 signature and decodes the cookie.
 // This mirrors the AdminAuth.verifyCookie logic for use in middleware without an AdminAuth instance.
@@ -125,7 +125,7 @@ func verifySessionCookie(secret []byte, value string) ([]byte, error) {
 }
 ```
 
-**Option B:** Create a temporary `AdminAuth` just for verification — this is wasteful and unclean; avoid.
+**Option B:** Create a temporary `AdminAuth` just for verification - this is wasteful and unclean; avoid.
 
 The cookie format is: `base64url(jsonPayload) + "." + base64url(HMAC-SHA256(secret, base64url(jsonPayload)))`.
 
@@ -142,26 +142,26 @@ const (
 )
 ```
 
-Place these in `middleware.go` (not auth.go). Export only the accessor functions `AdminSubFromContext` and `AdminEmailFromContext` — never export the key constants themselves.
+Place these in `middleware.go` (not auth.go). Export only the accessor functions `AdminSubFromContext` and `AdminEmailFromContext` - never export the key constants themselves.
 
 This allows Story 3.13 (`GET /admin/dashboard`) and later stories to read the admin identity from context safely without importing unexported types.
 
 ### Route Exclusion List (Critical)
 
 `SessionGuard` must NOT be applied to:
-- `GET /admin/login` — LoginPageHandler (renders login form)
-- `GET /admin/login/start` — LoginStartHandler (initiates OIDC redirect)
-- `GET /admin/callback` — CallbackHandler (receives OIDC code, sets session cookie)
-- `GET /admin/bootstrap`, `POST /admin/bootstrap`, `POST /admin/bootstrap/test-oidc`, `POST /admin/bootstrap/generate-keys` — protected by `BootstrapGuard` only
-- `GET /admin/static/admin.css`, `GET /admin/static/fonts/{filename}` — public static assets
-- Legacy routes `GET /admin/auth/login`, `GET /admin/auth/callback` — leave as-is (will be removed in a future story)
+- `GET /admin/login` - LoginPageHandler (renders login form)
+- `GET /admin/login/start` - LoginStartHandler (initiates OIDC redirect)
+- `GET /admin/callback` - CallbackHandler (receives OIDC code, sets session cookie)
+- `GET /admin/bootstrap`, `POST /admin/bootstrap`, `POST /admin/bootstrap/test-oidc`, `POST /admin/bootstrap/generate-keys` - protected by `BootstrapGuard` only
+- `GET /admin/static/admin.css`, `GET /admin/static/fonts/{filename}` - public static assets
+- Legacy routes `GET /admin/auth/login`, `GET /admin/auth/callback` - leave as-is (will be removed in a future story)
 
 `SessionGuard` MUST be applied to:
-- `GET /admin/logout` — currently registered as `mux.HandleFunc("GET /admin/logout", adminAuth.LogoutHandler)` in main.go; change to `mux.Handle(...)`
+- `GET /admin/logout` - currently registered as `mux.HandleFunc("GET /admin/logout", adminAuth.LogoutHandler)` in main.go; change to `mux.Handle(...)`
 
 Story 3.13 will add `GET /admin/dashboard` wrapped with `sessionGuard`. This story only covers already-registered routes.
 
-### Cookie Contract (Established in Stories 3.9 and 3.10 — Must Match)
+### Cookie Contract (Established in Stories 3.9 and 3.10 - Must Match)
 
 | Cookie | Name | Path | MaxAge | HttpOnly | Secure | SameSite |
 |--------|------|------|--------|----------|--------|----------|
@@ -210,9 +210,9 @@ func SessionGuard(secret []byte) func(http.Handler) http.Handler {
 ### Test Helpers Available in `admin` Package
 
 `middleware_test.go` uses `package admin` (not `package admin_test`). This gives access to:
-- `adminSessionCookie` struct (unexported) — use directly in tests to build payloads
-- `contextKeyAdminSub`, `contextKeyAdminEmail` (unexported) — access via `AdminSubFromContext` / `AdminEmailFromContext`
-- `fakeBootstrapChecker`, `errFakeDB` from `bootstrap_test.go` — already in same package
+- `adminSessionCookie` struct (unexported) - use directly in tests to build payloads
+- `contextKeyAdminSub`, `contextKeyAdminEmail` (unexported) - access via `AdminSubFromContext` / `AdminEmailFromContext`
+- `fakeBootstrapChecker`, `errFakeDB` from `bootstrap_test.go` - already in same package
 
 To build a valid signed cookie in tests, replicate the `signCookie` logic inline or add a `signCookieForTest(secret []byte, payload []byte) string` package-private helper (place in middleware.go or create a test helper file). Do NOT reach into `AdminAuth` just to sign a test cookie.
 
@@ -247,7 +247,7 @@ import (
 )
 ```
 
-`slog` is already imported for `BootstrapGuard` error logging. Use it for any unexpected errors in `SessionGuard` (e.g., malformed JSON that passes HMAC — log at warn level before redirect).
+`slog` is already imported for `BootstrapGuard` error logging. Use it for any unexpected errors in `SessionGuard` (e.g., malformed JSON that passes HMAC - log at warn level before redirect).
 
 ### `main.go` Change: Wrap `/admin/logout`
 
@@ -262,38 +262,38 @@ sessionGuard := admin.SessionGuard([]byte(internalSecret))
 mux.Handle("GET /admin/logout", sessionGuard(http.HandlerFunc(adminAuth.LogoutHandler)))
 ```
 
-Place the `sessionGuard` variable definition after `adminAuth` is created and before route registration. The `BootstrapGuard` is already assigned as `guard` — follow the same pattern.
+Place the `sessionGuard` variable definition after `adminAuth` is created and before route registration. The `BootstrapGuard` is already assigned as `guard` - follow the same pattern.
 
 Story 3.13 will add:
 ```go
 mux.Handle("GET /admin/dashboard", sessionGuard(http.HandlerFunc(dashboardHandler.Handler)))
 ```
 
-This story does NOT add the dashboard handler — leave a comment as a placeholder if helpful.
+This story does NOT add the dashboard handler - leave a comment as a placeholder if helpful.
 
 ### File Structure
 
 | File | Action |
 |------|--------|
-| `gateway/internal/admin/middleware.go` | MODIFY — add `SessionGuard`, `verifySessionCookie`, context key types and accessor functions |
-| `gateway/internal/admin/middleware_test.go` | MODIFY — add 5 `TestSessionGuard_*` test cases |
-| `gateway/cmd/gateway/main.go` | MODIFY — create `sessionGuard` variable, wrap `GET /admin/logout` |
+| `gateway/internal/admin/middleware.go` | MODIFY - add `SessionGuard`, `verifySessionCookie`, context key types and accessor functions |
+| `gateway/internal/admin/middleware_test.go` | MODIFY - add 5 `TestSessionGuard_*` test cases |
+| `gateway/cmd/gateway/main.go` | MODIFY - create `sessionGuard` variable, wrap `GET /admin/logout` |
 
 **Do NOT modify:**
-- `gateway/internal/admin/auth.go` — no changes (already complete from Story 3.10)
-- `gateway/internal/admin/auth_test.go` — no changes
-- `gateway/internal/admin/callback_test.go` — no changes
-- `gateway/internal/admin/handler.go` — no changes
-- `gateway/internal/admin/page_data.go` — no changes (Story 3.13 adds DashboardPageData)
-- Any template files — no changes
+- `gateway/internal/admin/auth.go` - no changes (already complete from Story 3.10)
+- `gateway/internal/admin/auth_test.go` - no changes
+- `gateway/internal/admin/callback_test.go` - no changes
+- `gateway/internal/admin/handler.go` - no changes
+- `gateway/internal/admin/page_data.go` - no changes (Story 3.13 adds DashboardPageData)
+- Any template files - no changes
 
 ### Anti-Patterns to Avoid
 
 - **DO NOT** put `SessionGuard` as a method on `AdminAuth`. It is a package-level function.
-- **DO NOT** re-implement HMAC logic from scratch — reuse the exact same algorithm as `AdminAuth.signCookie`/`verifyCookie` via the standalone `verifySessionCookie` helper.
-- **DO NOT** use `string` as a context key type — use typed `contextKey int` to prevent collisions.
+- **DO NOT** re-implement HMAC logic from scratch - reuse the exact same algorithm as `AdminAuth.signCookie`/`verifyCookie` via the standalone `verifySessionCookie` helper.
+- **DO NOT** use `string` as a context key type - use typed `contextKey int` to prevent collisions.
 - **DO NOT** apply `SessionGuard` to login/callback/bootstrap/static routes.
-- **DO NOT** export the `contextKey` type or constants — only export the accessor functions.
+- **DO NOT** export the `contextKey` type or constants - only export the accessor functions.
 - **DO NOT** change the `302` redirect code (the epics spec says `302`, not `303`).
 
 ### Previous Story Learnings (from Stories 3.9, 3.10)
@@ -303,11 +303,11 @@ This story does NOT add the dashboard handler — leave a comment as a placehold
 - `Secure: r.TLS != nil` pattern is used consistently across all admin cookies.
 - Tests in the `admin` package use `package admin` (not `package admin_test`) to access unexported types.
 - `fakeBootstrapChecker` and `errFakeDB` are defined in `bootstrap_test.go` and available to all test files in the same package.
-- The `BootstrapGuard` test pattern in `middleware_test.go` uses a `nextCalled bool` flag to verify pass-through — follow the same pattern for `SessionGuard`.
+- The `BootstrapGuard` test pattern in `middleware_test.go` uses a `nextCalled bool` flag to verify pass-through - follow the same pattern for `SessionGuard`.
 
 ### Deferred Work Note
 
-The `GET /admin/logout` endpoint has no CSRF protection (noted in deferred-work.md from Story 3.10). Applying `SessionGuard` to logout does NOT add CSRF protection — it only verifies the session is valid before deleting it. The SameSite=Strict attribute on the `admin_session` cookie provides cross-site protection. Do not add CSRF token handling in this story.
+The `GET /admin/logout` endpoint has no CSRF protection (noted in deferred-work.md from Story 3.10). Applying `SessionGuard` to logout does NOT add CSRF protection - it only verifies the session is valid before deleting it. The SameSite=Strict attribute on the `admin_session` cookie provides cross-site protection. Do not add CSRF token handling in this story.
 
 ## Dev Agent Record
 
@@ -328,11 +328,11 @@ No issues encountered. All tests passed on first run.
 
 ### File List
 
-- `gateway/internal/admin/middleware.go` — MODIFIED: added `contextKey` type, constants, `AdminSubFromContext`, `AdminEmailFromContext`, `verifySessionCookie`, `SessionGuard`
-- `gateway/internal/admin/middleware_test.go` — MODIFIED: added `signTestCookie` test helper and 5 `TestSessionGuard_*` test functions
-- `gateway/cmd/gateway/main.go` — MODIFIED: added `sessionGuard` variable, wrapped `GET /admin/logout` with `sessionGuard`
+- `gateway/internal/admin/middleware.go` - MODIFIED: added `contextKey` type, constants, `AdminSubFromContext`, `AdminEmailFromContext`, `verifySessionCookie`, `SessionGuard`
+- `gateway/internal/admin/middleware_test.go` - MODIFIED: added `signTestCookie` test helper and 5 `TestSessionGuard_*` test functions
+- `gateway/cmd/gateway/main.go` - MODIFIED: added `sessionGuard` variable, wrapped `GET /admin/logout` with `sessionGuard`
 
 ## Change Log
 
-- 2026-04-01: Story 3.11 created — Admin Session Middleware (Cookie Validation). Ready for implementation. Status: ready-for-dev.
-- 2026-04-01: Story 3.11 implemented — `SessionGuard` middleware added, 5 unit tests added, `/admin/logout` protected, all tests green. Status: review.
+- 2026-04-01: Story 3.11 created - Admin Session Middleware (Cookie Validation). Ready for implementation. Status: ready-for-dev.
+- 2026-04-01: Story 3.11 implemented - `SessionGuard` middleware added, 5 unit tests added, `/admin/logout` protected, all tests green. Status: review.

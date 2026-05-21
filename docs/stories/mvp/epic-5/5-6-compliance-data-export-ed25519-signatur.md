@@ -18,12 +18,12 @@ so that the export is tamper-evident and legally defensible.
 
 ## Acceptance Criteria
 
-### AC1 — GET /api/v1/compliance/export: Happy Path → 200 + signed JSON file
+### AC1 - GET /api/v1/compliance/export: Happy Path → 200 + signed JSON file
 
 - Route: `GET /api/v1/compliance/export`
 - Protected by `jwtMiddleware` (same chain as Stories 5.3–5.5).
-- Role gate: `compliance_officer` only — 403 `M_FORBIDDEN "Compliance officer role required"` otherwise.
-- Requires `X-Compliance-Token: <jwt>` header — 401 `M_UNKNOWN_TOKEN "Compliance token required"` if absent.
+- Role gate: `compliance_officer` only - 403 `M_FORBIDDEN "Compliance officer role required"` otherwise.
+- Requires `X-Compliance-Token: <jwt>` header - 401 `M_UNKNOWN_TOKEN "Compliance token required"` if absent.
 - Validates compliance session token via `ValidateComplianceToken` from `gateway/internal/compliance/jwt.go` (Story 5.5):
   - Signature (EdDSA-pinned, uses `compPubKey` loaded at startup).
   - `exp` not in the past.
@@ -37,7 +37,7 @@ so that the export is tamper-evident and legally defensible.
    WHERE id = $1
   ```
   - Uses `claims.ComplianceRequestID` as the key.
-  - 0 rows → 500 M_UNKNOWN (token was valid but request deleted — data integrity issue).
+  - 0 rows → 500 M_UNKNOWN (token was valid but request deleted - data integrity issue).
   - DB error → 500 M_UNKNOWN.
 - Fetch `m.room.message` events directly from the `events` table (Go Gateway owns the DB):
   ```sql
@@ -48,14 +48,14 @@ so that the export is tamper-evident and legally defensible.
      AND origin_server_ts BETWEEN $2 AND $3
    ORDER BY origin_server_ts ASC
   ```
-  - `$1` = `claims.RoomID` (from token — not from URL).
+  - `$1` = `claims.RoomID` (from token - not from URL).
   - `$2` = `time.Parse(time.RFC3339, claims.TimeRangeStart).UnixMilli()`.
   - `$3` = `time.Parse(time.RFC3339, claims.TimeRangeEnd).UnixMilli()`.
-  - Strict scope enforcement: ALL scope comes from token claims — no URL query params for room_id or time_range.
+  - Strict scope enforcement: ALL scope comes from token claims - no URL query params for room_id or time_range.
 - Build export document:
   ```json
   {
-    "export_id": "<gen_random_uuid — generate via crypto/rand UUID>",
+    "export_id": "<gen_random_uuid - generate via crypto/rand UUID>",
     "generated_at": "<time.Now().UTC().Format(time.RFC3339)>",
     "compliance_request_id": "<claims.ComplianceRequestID>",
     "room_id": "<claims.RoomID>",
@@ -63,7 +63,7 @@ so that the export is tamper-evident and legally defensible.
     "time_range_end": "<claims.TimeRangeEnd>",
     "requester": "<requester_user_id from DB>",
     "approver": "<approver_user_id from DB>",
-    "events": [<array of event objects — see AC5 for shape>]
+    "events": [<array of event objects - see AC5 for shape>]
   }
   ```
 - Sign the export document:
@@ -71,26 +71,26 @@ so that the export is tamper-evident and legally defensible.
   - Sign the marshalled bytes with `compSignKey` (Ed25519 private key) using `crypto/ed25519.Sign(compSignKey, docBytes)`.
   - Base64-encode the signature: `base64.StdEncoding.EncodeToString(sig)`.
   - Append `"server_signature"` field to the final response JSON (add to the same struct/map before final marshal).
-  - **Note:** The final response body is `json.Marshal` of the full struct including `server_signature` — the signature is over the document WITHOUT `server_signature`.
+  - **Note:** The final response body is `json.Marshal` of the full struct including `server_signature` - the signature is over the document WITHOUT `server_signature`.
 - Response headers:
   - `Content-Type: application/json`
   - `Content-Disposition: attachment; filename="compliance-export-<compliance_request_id>.json"`
 - Response status: `200 OK`
-- Audit: `auditpkg.LogEvent(auditCtx, h.CoreClient, callerSub, "compliance_export_downloaded", "compliance_request", complianceRequestID, map[string]any{"event_count": len(events)}, "success", "")` — never-raise, 500ms timeout.
+- Audit: `auditpkg.LogEvent(auditCtx, h.CoreClient, callerSub, "compliance_export_downloaded", "compliance_request", complianceRequestID, map[string]any{"event_count": len(events)}, "success", "")` - never-raise, 500ms timeout.
 
-### AC2 — No X-Compliance-Token header → 401
+### AC2 - No X-Compliance-Token header → 401
 
 - Request has no `X-Compliance-Token` header → `401 M_UNKNOWN_TOKEN "Compliance token required"`.
 
-### AC3 — Invalid/expired/tampered token → 401
+### AC3 - Invalid/expired/tampered token → 401
 
 - `ValidateComplianceToken` returns an error for any reason → `401 M_UNKNOWN_TOKEN "Invalid or expired compliance token"`.
 
-### AC4 — Non-officer JWT → 403
+### AC4 - Non-officer JWT → 403
 
 - Caller's OIDC JWT has `system_role != 'compliance_officer'` → `403 M_FORBIDDEN "Compliance officer role required"`.
 
-### AC5 — Event shape in export
+### AC5 - Event shape in export
 
 Each element in `"events"` array:
 ```json
@@ -99,46 +99,46 @@ Each element in `"events"` array:
   "room_id": "<TEXT from DB>",
   "sender": "<TEXT from DB>",
   "type": "m.room.message",
-  "content": <JSONB from DB — raw JSON object>,
-  "origin_server_ts": <BIGINT from DB — milliseconds>,
-  "signatures": <JSONB from DB — may be null/nil>
+  "content": <JSONB from DB - raw JSON object>,
+  "origin_server_ts": <BIGINT from DB - milliseconds>,
+  "signatures": <JSONB from DB - may be null/nil>
 }
 ```
 - `content` and `signatures` are raw JSON (stored as `JSONB` in DB → scan as `json.RawMessage`).
-- `signatures` column is nullable (`JSONB` without NOT NULL constraint) — use `omitempty` or explicit null handling.
+- `signatures` column is nullable (`JSONB` without NOT NULL constraint) - use `omitempty` or explicit null handling.
 
-### AC6 — Strict scope: no events outside token's time_range
+### AC6 - Strict scope: no events outside token's time_range
 
 - Events with `origin_server_ts` outside `[time_range_start_ms, time_range_end_ms]` are never present in export.
 - Events from a room other than `token.room_id` are never present (the WHERE clause enforces this).
 
-### AC7 — Empty range → valid signed export with `"events": []`
+### AC7 - Empty range → valid signed export with `"events": []`
 
-- No events in range: valid export document with `"events": []` — NOT a 404.
+- No events in range: valid export document with `"events": []` - NOT a 404.
 - `server_signature` is still present and valid over the document with the empty events array.
 - Audit is still emitted with `event_count: 0`.
 
-### AC8 — Audit on success with correct event_count
+### AC8 - Audit on success with correct event_count
 
 - `compliance_export_downloaded` audit always emitted on 200.
 - `metadata.event_count` == actual number of events included in the export.
 
-### AC9 — Audit failure → 200 (never-raise)
+### AC9 - Audit failure → 200 (never-raise)
 
 - If `auditpkg.LogEvent` gRPC call fails or times out → still return 200 with valid signed export.
 - Matches established `auditTimeout = 500 * time.Millisecond` pattern from Stories 5.3–5.5.
 
-### AC10 — Token sub mismatch → 401
+### AC10 - Token sub mismatch → 401
 
 - `ValidateComplianceToken` is called with `expectedSub = callerSub` (from JWT middleware).
 - If `token.sub != callerSub` → `ValidateComplianceToken` returns an error → 401.
 
-### AC11 — Signature verifiability
+### AC11 - Signature verifiability
 
 - `server_signature` field in the response can be verified using `compPubKey` (the Ed25519 public key stored in `server_config.compliance_signing_key_pub`).
 - Verification: `ed25519.Verify(pubKey, docBytes, sig)` where `docBytes` is the JSON of the document WITHOUT `server_signature`.
 
-### AC12 — Unit Tests
+### AC12 - Unit Tests
 
 Written FIRST (failing) before handler implementation. No real PostgreSQL required (fake DB driver pattern as in Stories 5.3–5.5).
 
@@ -163,62 +163,62 @@ Written FIRST (failing) before handler implementation. No real PostgreSQL requir
 
 ### Tests written FIRST (before implementation code):
 
-1. `TestGetExport_HappyPath` — Go httptest (unit)
+1. `TestGetExport_HappyPath` - Go httptest (unit)
    - Given: valid `jwtMiddleware` context with `system_role=compliance_officer`, `sub=@alice:server`; valid `X-Compliance-Token` signed with test Ed25519 key (sub=@alice:server, not expired); mock DB returns 1 `compliance_requests` row + 3 event rows
    - When: `GET /api/v1/compliance/export`
    - Then: HTTP 200, `Content-Type: application/json`, `Content-Disposition` header set with request_id, body contains `export_id`, `events` array with 3 items, `server_signature` non-empty
 
-2. `TestGetExport_EmptyRange` — Go httptest (unit)
+2. `TestGetExport_EmptyRange` - Go httptest (unit)
    - Given: same as happy path but mock DB returns 0 event rows
    - When: `GET /api/v1/compliance/export`
    - Then: HTTP 200, `"events":[]`, `server_signature` present
 
-3. `TestGetExport_SignatureVerifiable` — Go httptest (unit)
+3. `TestGetExport_SignatureVerifiable` - Go httptest (unit)
    - Given: test Ed25519 keypair; mock returns 2 events; handler uses test signing key
    - When: `GET /api/v1/compliance/export`
    - Then: parse response body; base64-decode `server_signature`; reconstruct doc JSON without `server_signature`; `ed25519.Verify(pubKey, docBytes, sig)` == true
 
-4. `TestGetExport_NoComplianceToken` — Go httptest (unit)
+4. `TestGetExport_NoComplianceToken` - Go httptest (unit)
    - Given: valid JWT context, no `X-Compliance-Token` header
    - When: `GET /api/v1/compliance/export`
    - Then: HTTP 401 `{"errcode":"M_UNKNOWN_TOKEN","error":"Compliance token required"}`
 
-5. `TestGetExport_ExpiredToken` — Go httptest (unit)
+5. `TestGetExport_ExpiredToken` - Go httptest (unit)
    - Given: `X-Compliance-Token` with `exp = now-1` (past)
    - When: `GET /api/v1/compliance/export`
    - Then: HTTP 401 `M_UNKNOWN_TOKEN`
 
-6. `TestGetExport_SubMismatch` — Go httptest (unit)
+6. `TestGetExport_SubMismatch` - Go httptest (unit)
    - Given: token signed with `sub=@bob:server`, caller JWT has `sub=@alice:server`
    - When: `GET /api/v1/compliance/export`
    - Then: HTTP 401 `M_UNKNOWN_TOKEN`
 
-7. `TestGetExport_TamperedToken` — Go httptest (unit)
+7. `TestGetExport_TamperedToken` - Go httptest (unit)
    - Given: `X-Compliance-Token` signed with a different Ed25519 key
    - When: `GET /api/v1/compliance/export`
    - Then: HTTP 401 `M_UNKNOWN_TOKEN`
 
-8. `TestGetExport_NonOfficer` — Go httptest (unit)
+8. `TestGetExport_NonOfficer` - Go httptest (unit)
    - Given: caller JWT has `system_role=instance_admin`
    - When: `GET /api/v1/compliance/export`
    - Then: HTTP 403 `M_FORBIDDEN "Compliance officer role required"`
 
-9. `TestGetExport_EventsOutsideRangeExcluded` — Go httptest (unit)
+9. `TestGetExport_EventsOutsideRangeExcluded` - Go httptest (unit)
    - Given: mock DB query is verified to include `room_id`, `event_type`, and `origin_server_ts BETWEEN` clauses; events returned are only those in range
    - When: `GET /api/v1/compliance/export`
    - Then: `events` array length matches only in-scope events
 
-10. `TestGetExport_AuditEventCount` — Go httptest (unit)
+10. `TestGetExport_AuditEventCount` - Go httptest (unit)
     - Given: mock returns 5 events; mock `pb.CoreServiceClient`
     - When: `GET /api/v1/compliance/export`
     - Then: `WriteAuditLog` called once with `action="compliance_export_downloaded"`, `target_type="compliance_request"`, metadata JSON contains `"event_count":5`
 
-11. `TestGetExport_AuditFailureStill200` — Go httptest (unit)
+11. `TestGetExport_AuditFailureStill200` - Go httptest (unit)
     - Given: mock `WriteAuditLog` returns gRPC error
     - When: `GET /api/v1/compliance/export`
     - Then: HTTP 200 (audit failure suppressed, never-raise)
 
-12. `TestGetExport_ContentDispositionHeader` — Go httptest (unit)
+12. `TestGetExport_ContentDispositionHeader` - Go httptest (unit)
     - Given: happy path conditions, `compliance_request_id = "abc-123"`
     - When: `GET /api/v1/compliance/export`
     - Then: `Content-Disposition: attachment; filename="compliance-export-abc-123.json"`
@@ -243,10 +243,10 @@ Written FIRST (failing) before handler implementation. No real PostgreSQL requir
 
 - [x] Route registration in `gateway/cmd/gateway/main.go`
   - [x] `GET /api/v1/compliance/export`
-  - [x] `jwtMiddleware(http.HandlerFunc(exportHandler.GetExport))` — no `bodyLimit64KiB` needed (GET, no body); no `requireJSON` needed
+  - [x] `jwtMiddleware(http.HandlerFunc(exportHandler.GetExport))` - no `bodyLimit64KiB` needed (GET, no body); no `requireJSON` needed
   - [x] Wire `complianceDB`, `coreClient`, `compSignKey`, `compPubKey` (already loaded in main.go by Story 5.5)
 
-- [x] Run `make test-unit-go` — all green
+- [x] Run `make test-unit-go` - all green
 
 ---
 
@@ -282,7 +282,7 @@ Note: `origin_server_ts` is BIGINT (Unix milliseconds). Token claims `TimeRangeS
 
 **Decision: Use `crypto/ed25519.Sign(privKey, docBytes)` directly for export document signing.**
 
-This is different from the JWT signing in Story 5.5 which uses `go-jose/v4`. The export document is NOT a JWT — it's a raw JSON document. The signature is over the JSON bytes of the document (excluding the `server_signature` field itself).
+This is different from the JWT signing in Story 5.5 which uses `go-jose/v4`. The export document is NOT a JWT - it's a raw JSON document. The signature is over the JSON bytes of the document (excluding the `server_signature` field itself).
 
 ```go
 import (
@@ -306,13 +306,13 @@ response := exportResponse{
 responseBytes, _ := json.Marshal(response)
 ```
 
-**Canonical JSON note:** `json.Marshal` on a struct in Go produces deterministic field ordering (struct field order). Use a struct (not a map) for the export document to ensure deterministic serialization order. Document this clearly in code comments as "struct-field-order JSON, not Matrix Canonical JSON — sufficient for compliance export tamper-evidence at MVP; full Matrix Canonical JSON deferred per BMAD Scope Decision."
+**Canonical JSON note:** `json.Marshal` on a struct in Go produces deterministic field ordering (struct field order). Use a struct (not a map) for the export document to ensure deterministic serialization order. Document this clearly in code comments as "struct-field-order JSON, not Matrix Canonical JSON - sufficient for compliance export tamper-evidence at MVP; full Matrix Canonical JSON deferred per BMAD Scope Decision."
 
-Architecture enforcement rule from `architecture.md` line 1014: `canonical_json/1` from the Signature app is for Event IDs — this is a different use-case (export document signing, not event signing). A struct-based approach is acceptable here.
+Architecture enforcement rule from `architecture.md` line 1014: `canonical_json/1` from the Signature app is for Event IDs - this is a different use-case (export document signing, not event signing). A struct-based approach is acceptable here.
 
-### Compliance Signing Key — Already in Memory
+### Compliance Signing Key - Already in Memory
 
-The `compSignKey` (ed25519.PrivateKey) and `compPubKey` (ed25519.PublicKey) are already loaded by the Go Gateway at startup by Story 5.5 (`ensureComplianceSigningKey` in `cmd/gateway/main.go`). Story 5.6 just needs them passed to `ExportHandler` — no new loading code needed.
+The `compSignKey` (ed25519.PrivateKey) and `compPubKey` (ed25519.PublicKey) are already loaded by the Go Gateway at startup by Story 5.5 (`ensureComplianceSigningKey` in `cmd/gateway/main.go`). Story 5.6 just needs them passed to `ExportHandler` - no new loading code needed.
 
 ### ExportHandler Struct
 
@@ -346,14 +346,14 @@ func generateUUID() string {
 }
 ```
 
-Or import `github.com/google/uuid` if already in `go.mod`. Check `go.mod` first — if not present, use the crypto/rand approach above to avoid adding a dependency.
+Or import `github.com/google/uuid` if already in `go.mod`. Check `go.mod` first - if not present, use the crypto/rand approach above to avoid adding a dependency.
 
 ### Export Document Struct Design
 
-Use two structs — one for signing, one for the final response:
+Use two structs - one for signing, one for the final response:
 
 ```go
-// exportDoc is serialized to JSON and SIGNED — must NOT contain server_signature.
+// exportDoc is serialized to JSON and SIGNED - must NOT contain server_signature.
 type exportDoc struct {
     ExportID            string        `json:"export_id"`
     GeneratedAt         string        `json:"generated_at"`
@@ -386,7 +386,7 @@ type exportResponse struct {
 
 **Important:** Embed `exportDoc` (not pointer, to get flat JSON output) in `exportResponse`. Then sign `json.Marshal(exportDoc{...})` and set `ServerSignature`.
 
-Actually: Go embedding in JSON marshaling embeds all fields at top level — test this carefully. Alternative: duplicate fields or use `json.RawMessage` composition. Simplest: marshal `doc` separately for signing, then build final JSON manually using `json.RawMessage`:
+Actually: Go embedding in JSON marshaling embeds all fields at top level - test this carefully. Alternative: duplicate fields or use `json.RawMessage` composition. Simplest: marshal `doc` separately for signing, then build final JSON manually using `json.RawMessage`:
 
 ```go
 docBytes, _ := json.Marshal(doc)
@@ -409,7 +409,7 @@ m["server_signature"] = sigBytes
 responseBytes, _ := json.Marshal(m)
 ```
 
-**CAUTION:** `json.Marshal` on a map produces alphabetically-ordered keys (Go map marshaling is sorted by key). For the final response this is fine. For the signed doc use the STRUCT (deterministic by field order). Do NOT use a map for the signed portion — only for the final output that includes `server_signature`.
+**CAUTION:** `json.Marshal` on a map produces alphabetically-ordered keys (Go map marshaling is sorted by key). For the final response this is fine. For the signed doc use the STRUCT (deterministic by field order). Do NOT use a map for the signed portion - only for the final output that includes `server_signature`.
 
 ### Handler Flow (Detailed)
 
@@ -445,7 +445,7 @@ func (h *ExportHandler) GetExport(w http.ResponseWriter, r *http.Request) {
 
     // 5. Pre-flight: fetch requester + approver from compliance_requests
     var requesterUserID, approverUserID string
-    // approver_user_id is nullable — use sql.NullString
+    // approver_user_id is nullable - use sql.NullString
     var approverNull sql.NullString
     err = h.DB.QueryRowContext(r.Context(),
         `SELECT requester_user_id, approver_user_id FROM compliance_requests WHERE id = $1`,
@@ -488,7 +488,7 @@ func (h *ExportHandler) GetExport(w http.ResponseWriter, r *http.Request) {
 Add near the existing compliance session route (~line 705, after the 5.5 block):
 
 ```go
-// Story 5.6 — Compliance Data Export
+// Story 5.6 - Compliance Data Export
 exportHandler := &compliance.ExportHandler{
     DB:         complianceDB,
     CoreClient: coreClient,
@@ -512,17 +512,17 @@ _ = auditpkg.LogEvent(auditCtx, h.CoreClient, callerSub,
     "success", "")
 ```
 
-`auditTimeout = 500 * time.Millisecond` — already declared as `const` in `handler.go`. Do NOT redefine.
+`auditTimeout = 500 * time.Millisecond` - already declared as `const` in `handler.go`. Do NOT redefine.
 
 ### Error Response Pattern
 
-`writeComplianceError` already defined in `handler.go` — do NOT redefine. Status 401 uses `writeComplianceError(w, http.StatusUnauthorized, "M_UNKNOWN_TOKEN", "...")`.
+`writeComplianceError` already defined in `handler.go` - do NOT redefine. Status 401 uses `writeComplianceError(w, http.StatusUnauthorized, "M_UNKNOWN_TOKEN", "...")`.
 
-### Test Pattern (Fake DB Driver — Same as Stories 5.3–5.5)
+### Test Pattern (Fake DB Driver - Same as Stories 5.3–5.5)
 
 Stories 5.3, 5.4, 5.5 use a fake DB driver pattern for unit tests (no real PostgreSQL). Follow the exact same approach used in:
-- `gateway/internal/compliance/handler_test.go` — approval tests
-- `gateway/internal/compliance/session_test.go` — session tests
+- `gateway/internal/compliance/handler_test.go` - approval tests
+- `gateway/internal/compliance/session_test.go` - session tests
 
 The test file should be named `gateway/internal/compliance/export_test.go`.
 
@@ -543,26 +543,26 @@ The epics spec mentions "If compliance session token scope does not match reques
 
 Architecture enforcement rule (`architecture.md` line 1014): `canonical_json/1` from the Elixir Signature app is for Matrix event IDs. For compliance export document signing:
 - Use Go struct-based `json.Marshal` (deterministic by struct field order).
-- This is "best-effort canonical JSON" — sufficient for MVP tamper-evidence.
+- This is "best-effort canonical JSON" - sufficient for MVP tamper-evidence.
 - Full Matrix Canonical JSON for export documents is deferred as a follow-up (FB-56-01, to be added to 5-29 story as a MEDIUM finding if the legal team requires it).
 - Add a code comment: `// Export document is signed over struct-marshalled JSON (deterministic field order). Full Matrix Canonical JSON deferred per Story 5.6 scope decision.`
 
 ### Project Structure Notes
 
-- Handler addition: `gateway/internal/compliance/handler.go` — add `ExportHandler` struct and `GetExport` method at the end of the file (after `SessionHandler`). Do NOT create a new file; keep all compliance handlers in one file per established pattern.
+- Handler addition: `gateway/internal/compliance/handler.go` - add `ExportHandler` struct and `GetExport` method at the end of the file (after `SessionHandler`). Do NOT create a new file; keep all compliance handlers in one file per established pattern.
 - Test file: NEW `gateway/internal/compliance/export_test.go` (following the naming convention of `session_test.go`, `approval_test.go`, `handler_test.go`).
-- Route: `gateway/cmd/gateway/main.go` — add after the Story 5.5 session route block.
+- Route: `gateway/cmd/gateway/main.go` - add after the Story 5.5 session route block.
 - No new migrations needed for this story.
-- No new proto/gRPC methods needed — events are fetched directly from DB.
+- No new proto/gRPC methods needed - events are fetched directly from DB.
 - No new Elixir code needed for this story.
 
 ### Files to Create / Modify
 
 | File | Action |
 |---|---|
-| `gateway/internal/compliance/handler.go` | MODIFY — add `ExportHandler` struct + `GetExport` method |
-| `gateway/internal/compliance/export_test.go` | NEW — 12 unit tests |
-| `gateway/cmd/gateway/main.go` | MODIFY — route registration (GET /api/v1/compliance/export) |
+| `gateway/internal/compliance/handler.go` | MODIFY - add `ExportHandler` struct + `GetExport` method |
+| `gateway/internal/compliance/export_test.go` | NEW - 12 unit tests |
+| `gateway/cmd/gateway/main.go` | MODIFY - route registration (GET /api/v1/compliance/export) |
 
 ### References
 
@@ -591,23 +591,23 @@ claude-sonnet-4-6 (Story implemented by bmad-dev-story skill, 2026-04-23)
 
 ### Debug Log References
 
-None — implementation green on first pass.
+None - implementation green on first pass.
 
 ### Completion Notes List
 
-- Implemented `ExportHandler` struct + `GetExport` method appended to `gateway/internal/compliance/handler.go`. No new file created (per established pattern — all compliance handlers in one file).
-- Key decision: signed bytes use **map-based JSON marshaling** (alphabetically sorted keys). The test `TestGetExport_SignatureVerifiable` reconstructs the signed doc by removing `server_signature` from the response map and re-marshaling — this is only consistent if the handler also produces alphabetically sorted JSON for the signed portion. Using a `map[string]json.RawMessage` for both the signed doc and the final response guarantees this.
+- Implemented `ExportHandler` struct + `GetExport` method appended to `gateway/internal/compliance/handler.go`. No new file created (per established pattern - all compliance handlers in one file).
+- Key decision: signed bytes use **map-based JSON marshaling** (alphabetically sorted keys). The test `TestGetExport_SignatureVerifiable` reconstructs the signed doc by removing `server_signature` from the response map and re-marshaling - this is only consistent if the handler also produces alphabetically sorted JSON for the signed portion. Using a `map[string]json.RawMessage` for both the signed doc and the final response guarantees this.
 - `events.origin_server_ts` is confirmed as BIGINT (epoch milliseconds) per migration `000010_events.up.sql`. RFC 3339 claims from token → `time.Parse` → `.UnixMilli()` before passing to SQL `BETWEEN`.
-- `approver_user_id` is nullable in `compliance_requests` (no NOT NULL constraint) — scanned via `sql.NullString`; defaults to empty string if NULL.
+- `approver_user_id` is nullable in `compliance_requests` (no NOT NULL constraint) - scanned via `sql.NullString`; defaults to empty string if NULL.
 - Added `crypto/rand`, `encoding/base64`, `fmt` to handler.go imports.
 - Route `GET /api/v1/compliance/export` registered in `main.go` after Story 5.5 session handler block. No `bodyLimit64KiB` (GET, no body). No `requireJSON`.
 - All 13 tests pass: `make test-unit-go` → `ok github.com/nebu/nebu/internal/compliance 1.06s`.
 
 ### File List
 
-- `gateway/internal/compliance/handler.go` — MODIFIED: added `ExportHandler` struct + `GetExport` method + helper `generateExportUUID`; added `crypto/rand`, `encoding/base64`, `fmt` imports
-- `gateway/cmd/gateway/main.go` — MODIFIED: added `GET /api/v1/compliance/export` route + `ExportHandler` wiring after Story 5.5 block
+- `gateway/internal/compliance/handler.go` - MODIFIED: added `ExportHandler` struct + `GetExport` method + helper `generateExportUUID`; added `crypto/rand`, `encoding/base64`, `fmt` imports
+- `gateway/cmd/gateway/main.go` - MODIFIED: added `GET /api/v1/compliance/export` route + `ExportHandler` wiring after Story 5.5 block
 
 ### Change Log
 
-- 2026-04-23: Story 5.6 implemented — `ExportHandler.GetExport` with Ed25519 document signing, strict scope enforcement, audit emission, and 13 unit tests all green.
+- 2026-04-23: Story 5.6 implemented - `ExportHandler.GetExport` with Ed25519 document signing, strict scope enforcement, audit emission, and 13 unit tests all green.

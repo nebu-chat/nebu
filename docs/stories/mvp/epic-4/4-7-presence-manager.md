@@ -12,7 +12,7 @@ so that Matrix clients can display accurate presence indicators.
 
 1. `core/apps/presence/lib/nebu/presence/manager.ex` implements `Nebu.Presence.Manager` as a `GenServer`:
    - State: ETS table `NebuPresence` with entries `{user_id, status, last_active_at}` where `status ∈ [:online, :offline, :unavailable]`
-   - `set_presence(user_id, status)` — upserts the ETS entry; broadcasts `{:presence_update, user_id, status}` via `:pg` Process Group `"presence"`
+   - `set_presence(user_id, status)` - upserts the ETS entry; broadcasts `{:presence_update, user_id, status}` via `:pg` Process Group `"presence"`
    - `get_presence(user_id)` → `{:ok, %{status: atom(), last_active_at: integer()}}` or `{:error, :not_found}`; missing users default to `:offline` (i.e., return `{:ok, %{status: :offline, last_active_at: nil}}`)
    - Heartbeat: if no `set_presence` call for a user within 60 seconds, auto-transition to `:unavailable`; after 5 minutes with no activity, transition to `:offline`
 
@@ -39,32 +39,32 @@ so that Matrix clients can display accurate presence indicators.
 
 ### Tests written FIRST (before implementation code):
 
-**1. set_presence online → get returns online — ExUnit**
+**1. set_presence online → get returns online - ExUnit**
 - Given: `NebuPresence` ETS table is empty for `"@kai:nebu.local"`
 - When: `Nebu.Presence.Manager.set_presence("@kai:nebu.local", :online)` is called
 - Then: `Nebu.Presence.Manager.get_presence("@kai:nebu.local")` returns `{:ok, %{status: :online, last_active_at: last_active_at}}` where `last_active_at` is an integer millisecond timestamp
 
-**2. Missing user defaults to offline — ExUnit**
+**2. Missing user defaults to offline - ExUnit**
 - Given: no presence entry exists for `"@unknown:nebu.local"` in ETS
 - When: `Nebu.Presence.Manager.get_presence("@unknown:nebu.local")` is called
 - Then: returns `{:ok, %{status: :offline, last_active_at: nil}}`
 
-**3. Heartbeat: mock timeout triggers unavailable transition — ExUnit**
+**3. Heartbeat: mock timeout triggers unavailable transition - ExUnit**
 - Given: `set_presence("@kai:nebu.local", :online)` was called (user is online)
 - When: a `:check_heartbeats` message is sent directly to the GenServer via `Process.send/3`, simulating the 60-second timer firing; the `last_active_at` in ETS is backdated to be >60 seconds ago
 - Then: `get_presence("@kai:nebu.local")` returns `{:ok, %{status: :unavailable, last_active_at: _}}`
 
-**4. Heartbeat: unavailable → offline after 5 minutes — ExUnit**
+**4. Heartbeat: unavailable → offline after 5 minutes - ExUnit**
 - Given: user is in `:unavailable` state with `last_active_at` more than 5 minutes ago (300 seconds)
 - When: a `:check_heartbeats` message is sent to the GenServer
 - Then: `get_presence("@kai:nebu.local")` returns `{:ok, %{status: :offline, last_active_at: _}}`
 
-**5. Crash/Restart: ETS data survives GenServer crash — ExUnit (mandatory for ETS-state stories)**
+**5. Crash/Restart: ETS data survives GenServer crash - ExUnit (mandatory for ETS-state stories)**
 - Given: `set_presence("@kai:nebu.local", :online)` called; `Nebu.Presence.Manager` is a running supervised GenServer
 - When: `Process.exit(pid, :kill)` is called on the GenServer PID
 - Then: the Supervisor restarts the GenServer; `get_presence("@kai:nebu.local")` still returns `{:ok, %{status: :online, last_active_at: _}}` (ETS owned by Application process, not the GenServer)
 
-**6. :pg broadcast on set_presence — ExUnit**
+**6. :pg broadcast on set_presence - ExUnit**
 - Given: the test process has joined the `:pg` Process Group `"presence"` via `:pg.join("presence", self())`
 - When: `Nebu.Presence.Manager.set_presence("@kai:nebu.local", :online)` is called
 - Then: the test process receives message `{:presence_update, "@kai:nebu.local", :online}` (via `:pg.send/2` or direct message from broadcast)
@@ -73,10 +73,10 @@ so that Matrix clients can display accurate presence indicators.
 
 ## Tasks / Subtasks
 
-- [x] Write failing unit tests FIRST (ATDD gate — tests must be red before any implementation)
+- [x] Write failing unit tests FIRST (ATDD gate - tests must be red before any implementation)
   - [x] Create `core/apps/presence/test/nebu/presence/manager_test.exs`
   - [x] Write 6 test cases as described in Acceptance Tests section
-  - [x] Run tests — verify they FAIL (red phase)
+  - [x] Run tests - verify they FAIL (red phase)
 
 - [x] Create ETS table + :pg scope in `Nebu.Presence.Application` (AC: #2)
   - [x] Modify `core/apps/presence/lib/nebu/presence/application.ex`
@@ -90,8 +90,8 @@ so that Matrix clients can display accurate presence indicators.
   - [x] Implement `init/1` with `Process.send_after(self(), :check_heartbeats, 60_000)` to start heartbeat timer
   - [x] Implement `set_presence/2` public API (GenServer.cast for non-blocking upsert)
   - [x] Implement `get_presence/1` public API (direct ETS lookup, no GenServer.call overhead)
-  - [x] Implement `handle_cast({:set_presence, user_id, status}, state)` — upserts ETS, broadcasts via `:pg`
-  - [x] Implement `handle_info(:check_heartbeats, state)` — scans ETS, transitions stale entries, reschedules timer
+  - [x] Implement `handle_cast({:set_presence, user_id, status}, state)` - upserts ETS, broadcasts via `:pg`
+  - [x] Implement `handle_info(:check_heartbeats, state)` - scans ETS, transitions stale entries, reschedules timer
   - [x] Add `@spec` for all public functions
 
 - [x] Implement until all tests pass (AC: #1–#4)
@@ -104,14 +104,14 @@ so that Matrix clients can display accurate presence indicators.
 
 ## Dev Notes
 
-### CRITICAL: Module Naming — epics.md vs. Codebase Reality
+### CRITICAL: Module Naming - epics.md vs. Codebase Reality
 
 The `epics.md` acceptance criteria reference `Presence.Manager` and `Presence.Application`. These are WRONG for this codebase. All modules follow the `Nebu.{Domain}.{Name}` convention without exception:
 
 | Epics.md Spec | Correct Name in Codebase |
 |---|---|
 | `Presence.Manager` | `Nebu.Presence.Manager` |
-| `Presence.Application` | `Nebu.Presence.Application` (already exists — placeholder) |
+| `Presence.Application` | `Nebu.Presence.Application` (already exists - placeholder) |
 
 This convention is established by `Nebu.Room.*`, `Nebu.Session.*`, `Nebu.Signature.*`.
 
@@ -133,7 +133,7 @@ core/apps/presence/
 ```
 
 **Do NOT create:**
-- `core/apps/presence/lib/presence/manager.ex` (wrong path — epics.md convention, not codebase convention)
+- `core/apps/presence/lib/presence/manager.ex` (wrong path - epics.md convention, not codebase convention)
 - Any `Presence.Manager` module (missing `Nebu.` prefix)
 
 ### ETS Table: `NebuPresence`
@@ -169,11 +169,11 @@ case :ets.lookup(:NebuPresence, user_id) do
 end
 ```
 
-**IMPORTANT:** `get_presence/1` returns `{:ok, ...}` for missing users (defaults to `:offline`) — NOT `{:error, :not_found}`. This is the spec from epics.md ("missing users default to offline"). This is different from `EtsStore.get_session/1` which returns `{:error, :not_found}` for missing keys.
+**IMPORTANT:** `get_presence/1` returns `{:ok, ...}` for missing users (defaults to `:offline`) - NOT `{:error, :not_found}`. This is the spec from epics.md ("missing users default to offline"). This is different from `EtsStore.get_session/1` which returns `{:error, :not_found}` for missing keys.
 
-### :pg Process Groups — Broadcast Pattern
+### :pg Process Groups - Broadcast Pattern
 
-`:pg` is an OTP built-in (OTP 23+) — no external dependency. The `:pg` scope must be started before use.
+`:pg` is an OTP built-in (OTP 23+) - no external dependency. The `:pg` scope must be started before use.
 
 **Start in `Application.start/2` (same as `Nebu.Room.Application`):**
 ```elixir
@@ -201,7 +201,7 @@ end)
 assert_receive {:presence_update, "@kai:nebu.local", :online}, 500
 ```
 
-**Why `:pg` (not Phoenix.PubSub, not GenEvent):** ADR-002 mandates pg Process Groups as the Pub/Sub mechanism — no NATS, no Redis, no Phoenix.PubSub dependency. `:pg` is OTP built-in and sufficient for intra-node broadcast in MVP.
+**Why `:pg` (not Phoenix.PubSub, not GenEvent):** ADR-002 mandates pg Process Groups as the Pub/Sub mechanism - no NATS, no Redis, no Phoenix.PubSub dependency. `:pg` is OTP built-in and sufficient for intra-node broadcast in MVP.
 
 ### Heartbeat Timer Pattern
 
@@ -278,7 +278,7 @@ end
 
 ### `set_presence/2` Implementation Options
 
-**Option A (GenServer.cast — recommended):** Non-blocking. Client does not wait for ETS write. Suitable for presence updates which are fire-and-forget:
+**Option A (GenServer.cast - recommended):** Non-blocking. Client does not wait for ETS write. Suitable for presence updates which are fire-and-forget:
 
 ```elixir
 @spec set_presence(String.t(), :online | :offline | :unavailable) :: :ok
@@ -287,13 +287,13 @@ def set_presence(user_id, status) do
 end
 ```
 
-**Option B (direct ETS write in public function):** Skips GenServer for the ETS write but must still call GenServer for `:pg` broadcast. This splits responsibilities — avoid.
+**Option B (direct ETS write in public function):** Skips GenServer for the ETS write but must still call GenServer for `:pg` broadcast. This splits responsibilities - avoid.
 
 **Use Option A.** The GenServer handles both the ETS write AND the `:pg` broadcast atomically (within one message).
 
 ### `get_presence/1` Implementation
 
-`get_presence/1` reads ETS **directly** without `GenServer.call/2`. This is consistent with `EtsStore.get_session/1` (Story 4-5 pattern) — ETS with `:public` access allows any process to read without message passing:
+`get_presence/1` reads ETS **directly** without `GenServer.call/2`. This is consistent with `EtsStore.get_session/1` (Story 4-5 pattern) - ETS with `:public` access allows any process to read without message passing:
 
 ```elixir
 @spec get_presence(String.t()) :: {:ok, %{status: atom(), last_active_at: integer() | nil}}
@@ -324,7 +324,7 @@ test "ETS data survives Manager GenServer crash and supervisor restart" do
   # Wait for supervisor to restart
   Process.sleep(50)
 
-  # ETS data must survive — table owned by Application process, not GenServer
+  # ETS data must survive - table owned by Application process, not GenServer
   assert {:ok, %{status: :online}} = Nebu.Presence.Manager.get_presence("@crash_test:nebu.local")
 end
 ```
@@ -341,11 +341,11 @@ end
 
 ```elixir
 defmodule Nebu.Presence.ManagerTest do
-  use ExUnit.Case, async: false  # async: false — shared named ETS + :pg scope
+  use ExUnit.Case, async: false  # async: false - shared named ETS + :pg scope
 
   setup do
     # Clear all ETS entries between tests for isolation
-    # Do NOT call :ets.delete/1 — that destroys the table entirely
+    # Do NOT call :ets.delete/1 - that destroys the table entirely
     if :ets.whereis(:NebuPresence) != :undefined do
       :ets.delete_all_objects(:NebuPresence)
     end
@@ -355,8 +355,8 @@ end
 ```
 
 **`async: false` is REQUIRED** because:
-1. `:NebuPresence` is a named global ETS table — concurrent test writes cause race conditions
-2. `:pg` group membership is process-global — concurrent test subscribes interfere
+1. `:NebuPresence` is a named global ETS table - concurrent test writes cause race conditions
+2. `:pg` group membership is process-global - concurrent test subscribes interfere
 
 ### Updated `Nebu.Presence.Application`
 
@@ -376,7 +376,7 @@ defmodule Nebu.Presence.Application do
     end
 
     # Start :pg scope for presence broadcast (ADR-002, ADR-005).
-    # :pg is OTP built-in (OTP 23+) — no external dependency.
+    # :pg is OTP built-in (OTP 23+) - no external dependency.
     case :pg.start_link() do
       {:ok, _pid} -> :ok
       {:error, {:already_started, _pid}} -> :ok
@@ -396,12 +396,12 @@ end
 
 | Rule | Requirement | Source |
 |---|---|---|
-| Rule #1 | Timestamps as BIGINT (milliseconds) — `last_active_at` as `integer()`, NOT `DateTime.t()` | `architecture.md#Enforcement rule #1` |
-| Rule #6 | `{:ok, result}` / `{:error, reason}` — no raise/throw for business logic | `architecture.md#Enforcement rule #6` |
-| ADR-002 | No Redis, no NATS — ETS for state, `:pg` Process Groups for broadcast | `architecture.md#ADR-002` |
-| ETS ownership | Table created in Application.start/2 (NOT in GenServer.init/1) — crash safety | Story 4-4, 4-5 precedent |
-| Naming | All modules follow `Nebu.Presence.*` — ignore `Presence.*` in epics.md | Code convention |
-| async: false | Required for presence tests — shared ETS + :pg global state | Story 4-5 precedent |
+| Rule #1 | Timestamps as BIGINT (milliseconds) - `last_active_at` as `integer()`, NOT `DateTime.t()` | `architecture.md#Enforcement rule #1` |
+| Rule #6 | `{:ok, result}` / `{:error, reason}` - no raise/throw for business logic | `architecture.md#Enforcement rule #6` |
+| ADR-002 | No Redis, no NATS - ETS for state, `:pg` Process Groups for broadcast | `architecture.md#ADR-002` |
+| ETS ownership | Table created in Application.start/2 (NOT in GenServer.init/1) - crash safety | Story 4-4, 4-5 precedent |
+| Naming | All modules follow `Nebu.Presence.*` - ignore `Presence.*` in epics.md | Code convention |
+| async: false | Required for presence tests - shared ETS + :pg global state | Story 4-5 precedent |
 | Config injection | All timeouts via `Application.get_env(:presence, :key, default)` for testability | Story 4-6 pattern |
 
 ### Timestamps: Integer Milliseconds (NOT DateTime)
@@ -415,7 +415,7 @@ System.system_time(:millisecond)  # returns integer ms since epoch
 
 ### No Database / No Migration Needed
 
-Presence state is **volatile ETS only** — no PostgreSQL persistence. There is no migration required for this story. Presence state is lost on Application restart (acceptable for presence — clients re-announce their status on reconnect). This is consistent with the epics.md spec which specifies only ETS state.
+Presence state is **volatile ETS only** - no PostgreSQL persistence. There is no migration required for this story. Presence state is lost on Application restart (acceptable for presence - clients re-announce their status on reconnect). This is consistent with the epics.md spec which specifies only ETS state.
 
 ### What Story 4-7 Does NOT Implement
 
@@ -423,11 +423,11 @@ Presence state is **volatile ETS only** — no PostgreSQL persistence. There is 
 - No `GET /_matrix/client/v3/presence/{userId}/status` Go handler (that is Story 4-18)
 - No PostgreSQL persistence for presence state (volatile ETS is the spec)
 - No cross-node presence synchronization (single-node MVP; clustering is Phase 2)
-- No `Nebu.Presence.Manager` behaviour/adapter split (unlike `PgStore` — presence is ETS-only, no DB injection needed)
+- No `Nebu.Presence.Manager` behaviour/adapter split (unlike `PgStore` - presence is ETS-only, no DB injection needed)
 
 ### mix.exs Dependencies
 
-No new dependencies are needed. `:pg` is OTP built-in (OTP 23+). `:crypto` is OTP built-in. The `presence` app currently has empty deps — this story adds no new entries.
+No new dependencies are needed. `:pg` is OTP built-in (OTP 23+). `:crypto` is OTP built-in. The `presence` app currently has empty deps - this story adds no new entries.
 
 ### Build & Test Commands
 
@@ -439,7 +439,7 @@ make test-unit-elixir
 make test-unit-elixir
 ```
 
-All tests run inside Docker containers — no local Elixir install needed.
+All tests run inside Docker containers - no local Elixir install needed.
 
 **Expected result after implementation:**
 - All existing Story 4-1 through 4-6 tests pass (no regression)
@@ -452,35 +452,35 @@ All tests run inside Docker containers — no local Elixir install needed.
 
 Key learnings from Stories 4-5 and 4-6 that directly impact Story 4-7:
 
-1. **ETS guard pattern is mandatory** — Always use `if :ets.whereis(:NebuPresence) == :undefined` before creating the table. Story 4-4 code review found a MAJOR: missing guard caused crash on Application restart in same VM.
+1. **ETS guard pattern is mandatory** - Always use `if :ets.whereis(:NebuPresence) == :undefined` before creating the table. Story 4-4 code review found a MAJOR: missing guard caused crash on Application restart in same VM.
 
-2. **ETS owned by Application, NOT GenServer** — The ETS table must be created in `Application.start/2` before `Supervisor.start_link/2`. If created inside `GenServer.init/1`, the data would be lost on every GenServer crash.
+2. **ETS owned by Application, NOT GenServer** - The ETS table must be created in `Application.start/2` before `Supervisor.start_link/2`. If created inside `GenServer.init/1`, the data would be lost on every GenServer crash.
 
-3. **`delete_all_objects` vs `delete` in tests** — Use `:ets.delete_all_objects(:NebuPresence)` in `setup` (wipes entries, table survives). NEVER use `:ets.delete(:NebuPresence)` (destroys the table, next lookup crashes).
+3. **`delete_all_objects` vs `delete` in tests** - Use `:ets.delete_all_objects(:NebuPresence)` in `setup` (wipes entries, table survives). NEVER use `:ets.delete(:NebuPresence)` (destroys the table, next lookup crashes).
 
-4. **`async: false` is required** — All presence tests share a named ETS table and `:pg` group memberships. Concurrent tests would cause flaky failures.
+4. **`async: false` is required** - All presence tests share a named ETS table and `:pg` group memberships. Concurrent tests would cause flaky failures.
 
-5. **Config injection for testability** — Story 4-6 established the pattern: read timeout values from `Application.get_env(:presence, :key, default)` in runtime functions. Override in tests via `Application.put_env/3`. Do NOT hardcode timeout constants in function bodies.
+5. **Config injection for testability** - Story 4-6 established the pattern: read timeout values from `Application.get_env(:presence, :key, default)` in runtime functions. Override in tests via `Application.put_env/3`. Do NOT hardcode timeout constants in function bodies.
 
-6. **Module naming is `Nebu.Presence.*`** — epics.md uses `Presence.Manager`, codebase uses `Nebu.Presence.Manager`. This is consistent with all other epic 4 stories.
+6. **Module naming is `Nebu.Presence.*`** - epics.md uses `Presence.Manager`, codebase uses `Nebu.Presence.Manager`. This is consistent with all other epic 4 stories.
 
-7. **`:pg` is already used in `Nebu.Room.Application`** — Copy the exact `case :pg.start_link() do` guard pattern from `core/apps/room_manager/lib/nebu/room/application.ex`. Do NOT invent a new guard style.
+7. **`:pg` is already used in `Nebu.Room.Application`** - Copy the exact `case :pg.start_link() do` guard pattern from `core/apps/room_manager/lib/nebu/room/application.ex`. Do NOT invent a new guard style.
 
-8. **Crash/restart test requires named registration** — `Process.whereis(Nebu.Presence.Manager)` only works if the GenServer is registered with `name: __MODULE__`. Use `Keyword.put_new(opts, :name, __MODULE__)` in `start_link/1`.
+8. **Crash/restart test requires named registration** - `Process.whereis(Nebu.Presence.Manager)` only works if the GenServer is registered with `name: __MODULE__`. Use `Keyword.put_new(opts, :name, __MODULE__)` in `start_link/1`.
 
 ---
 
 ## Architecture References
 
-- `_bmad-output/planning-artifacts/architecture.md` — Enforcement rule #1 (BIGINT timestamps), Rule #6 (no raise), ADR-002 (ETS + pg Process Groups)
-- `_bmad-output/planning-artifacts/epics.md` — Story 4.7 Acceptance Criteria (line ~1956)
-- `core/apps/presence/lib/nebu/presence/application.ex` — Current placeholder to extend
-- `core/apps/presence/lib/nebu/presence.ex` — Top-level placeholder, DO NOT MODIFY
-- `core/apps/room_manager/lib/nebu/room/application.ex` — `:pg.start_link()` guard pattern to replicate exactly
-- `core/apps/session_manager/lib/nebu/session/ets_store.ex` — Direct ETS public API pattern (no GenServer.call in hot-path)
-- `core/apps/session_manager/lib/nebu/session/application.ex` — ETS creation guard pattern reference (Story 4-5)
-- `core/apps/room_manager/test/nebu_room_test.exs` — Crash/restart test pattern (Story 4-4)
-- `core/apps/session_manager/test/nebu/session/ets_store_test.exs` — ETS crash/restart + delete_all_objects pattern (Story 4-5)
+- `_bmad-output/planning-artifacts/architecture.md` - Enforcement rule #1 (BIGINT timestamps), Rule #6 (no raise), ADR-002 (ETS + pg Process Groups)
+- `_bmad-output/planning-artifacts/epics.md` - Story 4.7 Acceptance Criteria (line ~1956)
+- `core/apps/presence/lib/nebu/presence/application.ex` - Current placeholder to extend
+- `core/apps/presence/lib/nebu/presence.ex` - Top-level placeholder, DO NOT MODIFY
+- `core/apps/room_manager/lib/nebu/room/application.ex` - `:pg.start_link()` guard pattern to replicate exactly
+- `core/apps/session_manager/lib/nebu/session/ets_store.ex` - Direct ETS public API pattern (no GenServer.call in hot-path)
+- `core/apps/session_manager/lib/nebu/session/application.ex` - ETS creation guard pattern reference (Story 4-5)
+- `core/apps/room_manager/test/nebu_room_test.exs` - Crash/restart test pattern (Story 4-4)
+- `core/apps/session_manager/test/nebu/session/ets_store_test.exs` - ETS crash/restart + delete_all_objects pattern (Story 4-5)
 
 ---
 
@@ -495,9 +495,9 @@ claude-sonnet-4-6[1m] (2026-04-03)
 - Implemented `Nebu.Presence.Application.start/2`: creates `:NebuPresence` ETS table with idempotency guard before `Supervisor.start_link/2`; starts `:pg` scope with `{:error, {:already_started, _}}` guard (identical to `Nebu.Room.Application` pattern); adds `Nebu.Presence.Manager` as supervised child.
 - Implemented `Nebu.Presence.Manager` GenServer: `start_link/1` registers with `name: __MODULE__`; `init/1` schedules heartbeat via `Process.send_after`; `set_presence/2` is a non-blocking cast; `get_presence/1` reads ETS directly (no GenServer round-trip); heartbeat thresholds read from `Application.get_env` for testability.
 - Test file was already written (ATDD gate satisfied). All 14 tests in `manager_test.exs` pass (14/14), plus all existing app tests pass (22 room_manager, 38 session_manager, 21 signature, 6 event_dispatcher, 1 permissions). Full umbrella: 122 tests, 0 failures, 0 warnings with `--warnings-as-errors`.
-- ETS table ownership: owned by Application process — confirmed ETS data survives `Process.exit(pid, :kill)` on the GenServer (crash/restart test green).
-- :pg broadcast: `handle_cast({:set_presence, ...})` uses `:pg.get_members("presence")` and `Enum.each(&send(&1, ...))` — confirmed by 3 :pg broadcast tests all passing.
-- `mix.exs` and umbrella `core/mix.exs` already included `:presence` — no changes needed.
+- ETS table ownership: owned by Application process - confirmed ETS data survives `Process.exit(pid, :kill)` on the GenServer (crash/restart test green).
+- :pg broadcast: `handle_cast({:set_presence, ...})` uses `:pg.get_members("presence")` and `Enum.each(&send(&1, ...))` - confirmed by 3 :pg broadcast tests all passing.
+- `mix.exs` and umbrella `core/mix.exs` already included `:presence` - no changes needed.
 
 ### File List
 
@@ -513,5 +513,5 @@ _bmad-output/implementation-artifacts/sprint-status.yaml       ← MODIFIED (sta
 
 ### Change Log
 
-- 2026-04-03: Story 4-7 created — Presence Manager
-- 2026-04-03: Story 4-7 implemented — Nebu.Presence.Application (ETS + :pg setup) and Nebu.Presence.Manager (GenServer with heartbeat, :pg broadcast, direct ETS read); 14/14 tests green, full umbrella 0 failures 0 warnings
+- 2026-04-03: Story 4-7 created - Presence Manager
+- 2026-04-03: Story 4-7 implemented - Nebu.Presence.Application (ETS + :pg setup) and Nebu.Presence.Manager (GenServer with heartbeat, :pg broadcast, direct ETS read); 14/14 tests green, full umbrella 0 failures 0 warnings

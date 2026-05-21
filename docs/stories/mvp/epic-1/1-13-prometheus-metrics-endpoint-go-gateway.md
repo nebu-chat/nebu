@@ -1,4 +1,4 @@
-# Story 1.13: Prometheus Metrics Endpoint — Go Gateway
+# Story 1.13: Prometheus Metrics Endpoint - Go Gateway
 
 Status: done
 
@@ -10,7 +10,7 @@ so that standard monitoring tools can scrape operational data without custom ins
 
 ## Acceptance Criteria
 
-1. **GET :8080/metrics — 200 OK:** Response is `200 OK` with `Content-Type: text/plain; version=0.0.4` (Prometheus exposition format).
+1. **GET :8080/metrics - 200 OK:** Response is `200 OK` with `Content-Type: text/plain; version=0.0.4` (Prometheus exposition format).
 
 2. **Standard Go runtime metrics present:** The response includes `go_goroutines`, `go_memstats_alloc_bytes`, and `go_gc_duration_seconds` (from Go runtime collector registered by default).
 
@@ -20,7 +20,7 @@ so that standard monitoring tools can scrape operational data without custom ins
 
 5. **Dependency added:** `github.com/prometheus/client_golang` is a direct dep in `gateway/go.mod`; `go build ./...` succeeds.
 
-6. **No authentication:** `GET /metrics` returns `200 OK` without any auth header — ops/internal use only.
+6. **No authentication:** `GET /metrics` returns `200 OK` without any auth header - ops/internal use only.
 
 ## Tasks / Subtasks
 
@@ -59,9 +59,9 @@ Per architecture (FR44-45), observability lives in `gateway/internal/admin/metri
 gateway/internal/admin/metrics.go       ← new file
 gateway/internal/admin/metrics_test.go  ← new file
 ```
-The `gateway/internal/admin/.gitkeep` placeholder already exists — delete it or let it coexist.
+The `gateway/internal/admin/.gitkeep` placeholder already exists - delete it or let it coexist.
 
-### Dependency — prometheus/client_golang
+### Dependency - prometheus/client_golang
 
 Add as direct dependency. Use the container to keep everything Docker-only (CLAUDE.md requirement):
 
@@ -71,10 +71,10 @@ docker run --rm -v $(PWD):/workspace -w /workspace/gateway golang:1.26-alpine \
 ```
 
 This updates `gateway/go.mod` and `gateway/go.sum`. Packages used:
-- `github.com/prometheus/client_golang/prometheus` — CounterVec, GaugeFunc, Registerer
-- `github.com/prometheus/client_golang/prometheus/promhttp` — HTTP exposition handler
+- `github.com/prometheus/client_golang/prometheus` - CounterVec, GaugeFunc, Registerer
+- `github.com/prometheus/client_golang/prometheus/promhttp` - HTTP exposition handler
 
-### metrics.go — Full Implementation Pattern
+### metrics.go - Full Implementation Pattern
 
 ```go
 package admin
@@ -148,7 +148,7 @@ func (sr *statusRecorder) WriteHeader(code int) {
 }
 ```
 
-### main.go — Integration
+### main.go - Integration
 
 Add to `gateway/cmd/gateway/main.go` (after gRPC client init, before pubMux routes):
 
@@ -181,7 +181,7 @@ go func() {
 
 **Critical**: `promhttp.Handler()` uses `prometheus.DefaultGatherer` which includes Go runtime metrics automatically (go_goroutines, go_memstats_alloc_bytes, go_gc_duration_seconds). Do NOT replace it with a custom registry handler unless you also register GoCollector and ProcessCollector.
 
-### metrics_test.go — Full Test Pattern
+### metrics_test.go - Full Test Pattern
 
 Use `prometheus.NewRegistry()` per test to avoid global state contamination. Use `promhttp.HandlerFor(reg, ...)` as handler:
 
@@ -315,42 +315,42 @@ func TestMiddleware_captures_503(t *testing.T) {
 }
 ```
 
-### statusRecorder — WriteHeader Call Behaviour
+### statusRecorder - WriteHeader Call Behaviour
 
-The `statusRecorder.WriteHeader` is called explicitly by handlers that set non-200 codes. Handlers that call only `w.Write(...)` without `WriteHeader` never trigger `WriteHeader`, so the default `200` in `statusRecorder.code` is used. This matches `net/http/httptest.ResponseRecorder` behaviour — same pattern, compatible with existing tests.
+The `statusRecorder.WriteHeader` is called explicitly by handlers that set non-200 codes. Handlers that call only `w.Write(...)` without `WriteHeader` never trigger `WriteHeader`, so the default `200` in `statusRecorder.code` is used. This matches `net/http/httptest.ResponseRecorder` behaviour - same pattern, compatible with existing tests.
 
 ### Architecture Compliance
 
-- [Source: architecture.md#Health-Readiness-Endpoints] `GET :8080/metrics` → Prometheus — co-located on pubMux with `/health` and `/ready`
+- [Source: architecture.md#Health-Readiness-Endpoints] `GET :8080/metrics` → Prometheus - co-located on pubMux with `/health` and `/ready`
 - [Source: architecture.md#Gateway-Status-Modell] GRÜN=2, GELB=1, ROT=0 for `nebu_grpc_status` gauge
 - [Source: architecture.md#Planned-Directory-Structure] `gateway/internal/admin/metrics.go` ← FR44-45
 - [Source: epics.md#Story-1.13] No auth required for `/metrics`; ops-only endpoint
 
 ### Project Structure Notes
 
-- File: `gateway/internal/admin/metrics.go` — package `admin` (dir already exists with `.gitkeep`)
-- Test: `gateway/internal/admin/metrics_test.go` — package `admin` (consistent with `health_test.go` which uses same package)
-- `coreStateProvider` interface defined locally in `admin` package — `*coregrpc.Client` satisfies it via duck-typing, no cross-package import needed
-- Do NOT put metrics in `gateway/internal/health/` — health is a separate concern. Metrics is in `admin` per architecture
-- `promhttp.Handler()` (default gatherer) is used in main.go for production — includes GoCollector/ProcessCollector automatically
+- File: `gateway/internal/admin/metrics.go` - package `admin` (dir already exists with `.gitkeep`)
+- Test: `gateway/internal/admin/metrics_test.go` - package `admin` (consistent with `health_test.go` which uses same package)
+- `coreStateProvider` interface defined locally in `admin` package - `*coregrpc.Client` satisfies it via duck-typing, no cross-package import needed
+- Do NOT put metrics in `gateway/internal/health/` - health is a separate concern. Metrics is in `admin` per architecture
+- `promhttp.Handler()` (default gatherer) is used in main.go for production - includes GoCollector/ProcessCollector automatically
 
 ### Previous Story Intelligence (from 1-12 Elixir health)
 
-- The Go pattern for injectable deps is a struct with function fields (see `health.Handler.checkDB`, `health.Handler.getMigVersion`) — follow the same injectable-interface approach for `coreStateProvider`
-- Tests use `package health` (same package, not `health_test`) — follow same pattern: `package admin` in test file
-- Inline test doubles (fakeCore with `State()` method) — same pattern used in `health_test.go:fakeCore`
+- The Go pattern for injectable deps is a struct with function fields (see `health.Handler.checkDB`, `health.Handler.getMigVersion`) - follow the same injectable-interface approach for `coreStateProvider`
+- Tests use `package health` (same package, not `health_test`) - follow same pattern: `package admin` in test file
+- Inline test doubles (fakeCore with `State()` method) - same pattern used in `health_test.go:fakeCore`
 - The `statusRecorder` pattern (embed `http.ResponseWriter`, override `WriteHeader`) is standard; `health_test.go` uses `httptest.NewRecorder()` for the same purpose
-- The existing `pubMux` goroutine in `main.go` already wraps with `http.ListenAndServe(":8080", pubMux)` — change this to `metrics.Middleware(pubMux)` without touching the goroutine structure
+- The existing `pubMux` goroutine in `main.go` already wraps with `http.ListenAndServe(":8080", pubMux)` - change this to `metrics.Middleware(pubMux)` without touching the goroutine structure
 - All 1-11 gateway tests must remain green (0 regressions) after this change
 
 ### References
 
 - [Source: epics.md#Story-1.13] Full AC and BDD scenarios
 - [Source: architecture.md#Health-Readiness-Endpoints] `GET :8080/metrics` Prometheus endpoint definition
-- [Source: gateway/cmd/gateway/main.go:51-63] pubMux setup — where `/metrics` route and middleware wrap goes
-- [Source: gateway/internal/health/health.go:15-17] `coreState` interface — mirrors the `coreStateProvider` to define in admin package
-- [Source: gateway/internal/health/health_test.go:13-18] `fakeCore` inline test double pattern — reuse same approach
-- [Source: gateway/go.mod] Current Go module: `github.com/nebu/nebu`, Go 1.26 — no existing prometheus dep
+- [Source: gateway/cmd/gateway/main.go:51-63] pubMux setup - where `/metrics` route and middleware wrap goes
+- [Source: gateway/internal/health/health.go:15-17] `coreState` interface - mirrors the `coreStateProvider` to define in admin package
+- [Source: gateway/internal/health/health_test.go:13-18] `fakeCore` inline test double pattern - reuse same approach
+- [Source: gateway/go.mod] Current Go module: `github.com/nebu/nebu`, Go 1.26 - no existing prometheus dep
 
 ## Dev Agent Record
 
@@ -373,7 +373,7 @@ claude-sonnet-4-6[1m]
 - `gateway/internal/admin/metrics.go` (new)
 - `gateway/internal/admin/metrics_test.go` (new)
 - `gateway/cmd/gateway/main.go` (modified)
-- `gateway/go.mod` (modified — prometheus/client_golang v1.23.2 added as direct dep)
+- `gateway/go.mod` (modified - prometheus/client_golang v1.23.2 added as direct dep)
 - `gateway/go.sum` (modified)
 
 ## Senior Developer Review (AI)
@@ -382,7 +382,7 @@ claude-sonnet-4-6[1m]
 **Outcome:** Approved (1 LOW fixed)
 
 ### Findings
-- **LOW (fixed):** Weak assertion in `TestMiddleware_captures_503` — negative check replaced with positive assertion verifying both `method` and `status_code` labels exist with expected values
+- **LOW (fixed):** Weak assertion in `TestMiddleware_captures_503` - negative check replaced with positive assertion verifying both `method` and `status_code` labels exist with expected values
 
 ### Verification
 - All 6 Acceptance Criteria: IMPLEMENTED
@@ -393,5 +393,5 @@ claude-sonnet-4-6[1m]
 
 ## Change Log
 
-- 2026-03-24: Implemented Prometheus metrics endpoint for Go gateway — added nebu_http_requests_total counter, nebu_grpc_status gauge, HTTP middleware, and /metrics route (Story 1-13)
-- 2026-03-24: Code review passed — fixed weak test assertion in TestMiddleware_captures_503 (1 LOW)
+- 2026-03-24: Implemented Prometheus metrics endpoint for Go gateway - added nebu_http_requests_total counter, nebu_grpc_status gauge, HTTP middleware, and /metrics route (Story 1-13)
+- 2026-03-24: Code review passed - fixed weak test assertion in TestMiddleware_captures_503 (1 LOW)

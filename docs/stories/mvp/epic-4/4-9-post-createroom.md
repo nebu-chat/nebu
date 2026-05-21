@@ -1,7 +1,7 @@
-# Story 4.9: POST /createRoom — Matrix Room Creation Endpoint
+# Story 4.9: POST /createRoom - Matrix Room Creation Endpoint
 
 **Status:** review
-**Epic:** 4 — End-Users Can Chat in Rooms Using Any Standard Matrix Client
+**Epic:** 4 - End-Users Can Chat in Rooms Using Any Standard Matrix Client
 **Story Key:** 4-9-post-createroom
 **Created:** 2026-04-03
 
@@ -17,13 +17,13 @@ so that I have a space to invite others and exchange messages.
 
 ## Acceptance Criteria
 
-1. `POST /_matrix/client/v3/createRoom` is protected by the JWT middleware (`JWTMiddleware`) — unauthenticated requests return `401 M_MISSING_TOKEN`.
+1. `POST /_matrix/client/v3/createRoom` is protected by the JWT middleware (`JWTMiddleware`) - unauthenticated requests return `401 M_MISSING_TOKEN`.
 2. Request body (JSON): `room_alias_name` (optional string), `name` (optional string), `topic` (optional string), `visibility` (`"public"` | `"private"`, default `"private"`), `invite` (optional `[]string` of user IDs), `preset` (`"private_chat"` | `"public_chat"` | `"trusted_private_chat"`, optional).
 3. Handler calls `gRPC CoreService.CreateRoom` with `creator_id` (from JWT context), `name`, `topic`; Core starts a new `RoomServer` via `RoomSupervisor.start_room/1` and registers the room.
 4. Returns `200 {"room_id": "!<random_opaque>:<server_name>"}` on success.
 5. Returns `400 M_BAD_JSON` if the body cannot be decoded as valid JSON.
 6. Returns `400 M_ROOM_IN_USE` if `room_alias_name` is already taken (Core returns `ALREADY_EXISTS` gRPC status).
-7. Returns `403 M_FORBIDDEN` if the user is not allowed to create rooms (Core returns `PERMISSION_DENIED` gRPC status — all authenticated users can create rooms by default in MVP).
+7. Returns `403 M_FORBIDDEN` if the user is not allowed to create rooms (Core returns `PERMISSION_DENIED` gRPC status - all authenticated users can create rooms by default in MVP).
 8. The gRPC `CreateRoom` stub in `gateway/internal/grpc/client.go` is wired up to call `c.core.CreateRoom(ctx, req)` (currently returns `nil, nil`).
 9. The Elixir `create_room/2` handler in `Nebu.EventDispatcher.Server` is implemented: generates a `room_id`, calls `Nebu.Room.RoomSupervisor.start_room/1`, auto-joins the creator, and returns `%Core.CreateRoomResponse{room_id: room_id}`.
 10. Unit tests (Go `httptest`): valid request → 200 with `room_id`; duplicate alias → 400 `M_ROOM_IN_USE`; missing auth → 401.
@@ -34,32 +34,32 @@ so that I have a space to invite others and exchange messages.
 
 ### Tests written FIRST (before implementation code):
 
-**1. Happy path: authenticated user creates a room — Go unit test (httptest)**
+**1. Happy path: authenticated user creates a room - Go unit test (httptest)**
 - Given: a valid JWT is provided via `Authorization: Bearer <token>` and the mock core client returns `CreateRoomResponse{room_id: "!abc123:test.local"}`
 - When: `POST /_matrix/client/v3/createRoom` with body `{"name": "Test Room"}`
 - Then: response is `200` with body `{"room_id": "!abc123:test.local"}`
 
-**2. Unauthenticated request — Go unit test (httptest)**
+**2. Unauthenticated request - Go unit test (httptest)**
 - Given: no `Authorization` header is provided
 - When: `POST /_matrix/client/v3/createRoom` with body `{"name": "Test Room"}`
 - Then: response is `401` with `{"errcode": "M_MISSING_TOKEN", ...}`
 
-**3. Invalid JSON body — Go unit test (httptest)**
+**3. Invalid JSON body - Go unit test (httptest)**
 - Given: a valid JWT is provided
 - When: `POST /_matrix/client/v3/createRoom` with body `{not valid json}`
 - Then: response is `400` with `{"errcode": "M_BAD_JSON", ...}`
 
-**4. Duplicate alias — Go unit test (httptest)**
+**4. Duplicate alias - Go unit test (httptest)**
 - Given: a valid JWT and the mock core client returns a gRPC `ALREADY_EXISTS` error
 - When: `POST /_matrix/client/v3/createRoom` with body `{"room_alias_name": "existing-room"}`
 - Then: response is `400` with `{"errcode": "M_ROOM_IN_USE", ...}`
 
-**5. Elixir: create_room generates room_id and starts RoomServer — ExUnit**
+**5. Elixir: create_room generates room_id and starts RoomServer - ExUnit**
 - Given: no Room GenServer is running for the new room_id
 - When: `Nebu.EventDispatcher.Server.create_room(%Core.CreateRoomRequest{creator_id: "@alice:test.local", name: "My Room"}, stream)` is called
 - Then: returns `%Core.CreateRoomResponse{room_id: room_id}` where `room_id` matches `~r/^![a-z0-9]+:test\.local$/` and the Room GenServer is running in Horde
 
-**6. Elixir: creator is auto-joined to the new room — ExUnit**
+**6. Elixir: creator is auto-joined to the new room - ExUnit**
 - Given: `create_room/2` succeeds for `@alice:test.local`
 - When: `Nebu.Room.Server.get_state(room_id)` is called
 - Then: `state.members` contains `"@alice:test.local"`
@@ -68,7 +68,7 @@ so that I have a space to invite others and exchange messages.
 
 ## Technical Requirements
 
-### Go Handler — `gateway/internal/matrix/rooms.go` (CREATE NEW)
+### Go Handler - `gateway/internal/matrix/rooms.go` (CREATE NEW)
 
 Architecture rule: one Matrix feature group per file. The architecture document specifies `rooms.go` for `POST /createRoom` and `POST /join/{id}`.
 
@@ -80,7 +80,7 @@ type CreateRoomHandler struct {
     serverName  string
 }
 
-// Consumer-defined interface — keep it minimal
+// Consumer-defined interface - keep it minimal
 type CreateRoomCoreClient interface {
     CreateRoom(ctx context.Context, req *pb.CreateRoomRequest) (*pb.CreateRoomResponse, error)
 }
@@ -105,10 +105,10 @@ type CreateRoomResponse struct {
 
 **Handler logic (PostCreateRoom):**
 
-1. Decode JSON body → `400 M_BAD_JSON` on error (use `writeMatrixError` from `login.go` in the same `matrix` package — already exported)
-2. Extract `sub` from context: `r.Context().Value(middleware.ContextKeySub).(string)` — set by `JWTMiddleware`
+1. Decode JSON body → `400 M_BAD_JSON` on error (use `writeMatrixError` from `login.go` in the same `matrix` package - already exported)
+2. Extract `sub` from context: `r.Context().Value(middleware.ContextKeySub).(string)` - set by `JWTMiddleware`
 3. Format user ID: `coregrpc.FormatUserID(sub, h.serverName)`
-4. Attach gRPC metadata: `coregrpc.WithUserMetadata(r.Context(), userID, systemRole)` — `systemRole` from `r.Context().Value(middleware.ContextKeySystemRole).(string)`
+4. Attach gRPC metadata: `coregrpc.WithUserMetadata(r.Context(), userID, systemRole)` - `systemRole` from `r.Context().Value(middleware.ContextKeySystemRole).(string)`
 5. Call `h.coreClient.CreateRoom(grpcCtx, &pb.CreateRoomRequest{CreatorId: userID, Name: req.Name, Topic: req.Topic})`
 6. Map gRPC errors to Matrix errors:
    - `codes.AlreadyExists` → `400 M_ROOM_IN_USE`
@@ -116,7 +116,7 @@ type CreateRoomResponse struct {
    - Any other error → `500 M_UNKNOWN`
 7. Return `200 {"room_id": resp.RoomId}`
 
-**gRPC error code mapping — import required:**
+**gRPC error code mapping - import required:**
 
 ```go
 import (
@@ -135,7 +135,7 @@ default:
 }
 ```
 
-### Go gRPC Client — `gateway/internal/grpc/client.go` (MODIFY)
+### Go gRPC Client - `gateway/internal/grpc/client.go` (MODIFY)
 
 The `CreateRoom` stub currently returns `nil, nil`. Wire it up:
 
@@ -145,7 +145,7 @@ func (c *Client) CreateRoom(ctx context.Context, req *pb.CreateRoomRequest) (*pb
 }
 ```
 
-### Go Router — `gateway/cmd/gateway/main.go` (MODIFY)
+### Go Router - `gateway/cmd/gateway/main.go` (MODIFY)
 
 Register the new handler behind `jwtMiddleware`:
 
@@ -160,7 +160,7 @@ mux.Handle("POST /_matrix/client/v3/createRoom",
 
 Note: `jwtMiddleware` and `tokenStore` are already constructed before this point in `main.go`.
 
-### Elixir gRPC Handler — `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` (MODIFY)
+### Elixir gRPC Handler - `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` (MODIFY)
 
 Replace the existing `create_room/2` stub:
 
@@ -189,9 +189,9 @@ defp generate_room_id do
 end
 ```
 
-**Server name config:** The `server_name` is needed in Core to build the room ID. Read from `Application.get_env(:event_dispatcher, :server_name, "nebu.local")`. This env key should be set in `config/config.exs` or passed via Docker environment — check how other Elixir apps read it. Currently `Nebu.Node.Registration` reads `server_name` from the gateway's DB; for room ID generation, use `Application.get_env` with a default.
+**Server name config:** The `server_name` is needed in Core to build the room ID. Read from `Application.get_env(:event_dispatcher, :server_name, "nebu.local")`. This env key should be set in `config/config.exs` or passed via Docker environment - check how other Elixir apps read it. Currently `Nebu.Node.Registration` reads `server_name` from the gateway's DB; for room ID generation, use `Application.get_env` with a default.
 
-**Alias collision check:** MVP does not implement a room alias registry. The `M_ROOM_IN_USE` path is triggered when Core raises `GRPC.RPCError` with `status: GRPC.Status.already_exists()`. In MVP, since room IDs are random and unique, this error path is only tested via mock — no actual alias table exists yet.
+**Alias collision check:** MVP does not implement a room alias registry. The `M_ROOM_IN_USE` path is triggered when Core raises `GRPC.RPCError` with `status: GRPC.Status.already_exists()`. In MVP, since room IDs are random and unique, this error path is only tested via mock - no actual alias table exists yet.
 
 ---
 
@@ -223,9 +223,9 @@ core/apps/event_dispatcher/lib/pb/  ← Already generated, NO changes needed
 
 ---
 
-## Proto Contract — Already Exists
+## Proto Contract - Already Exists
 
-**CRITICAL:** `rpc CreateRoom(CreateRoomRequest) returns (CreateRoomResponse)` is ALREADY in `proto/core.proto`. Do NOT run `make proto` for this story — the stubs are already generated and present.
+**CRITICAL:** `rpc CreateRoom(CreateRoomRequest) returns (CreateRoomResponse)` is ALREADY in `proto/core.proto`. Do NOT run `make proto` for this story - the stubs are already generated and present.
 
 Current proto definition:
 
@@ -241,7 +241,7 @@ message CreateRoomResponse {
 }
 ```
 
-The `is_direct` field is defined but not used in MVP (Story 4-9). Set it to `false` / leave at default. `room_alias_name`, `visibility`, `invite`, and `preset` from the HTTP request body are NOT forwarded to Core in MVP — only `name` and `topic` are included. This is intentional scope reduction; alias and invitation features are Story 4-10.
+The `is_direct` field is defined but not used in MVP (Story 4-9). Set it to `false` / leave at default. `room_alias_name`, `visibility`, `invite`, and `preset` from the HTTP request body are NOT forwarded to Core in MVP - only `name` and `topic` are included. This is intentional scope reduction; alias and invitation features are Story 4-10.
 
 ---
 
@@ -260,7 +260,7 @@ grpcCtx := coregrpc.WithUserMetadata(r.Context(), userID, systemRole)
 
 ### Pattern: `writeMatrixError` (defined in `login.go`)
 
-`writeMatrixError(w, statusCode, errcode, message)` is in the `matrix` package and accessible from `rooms.go` without duplication — do NOT redefine it.
+`writeMatrixError(w, statusCode, errcode, message)` is in the `matrix` package and accessible from `rooms.go` without duplication - do NOT redefine it.
 
 The middleware package also has its own `writeMatrixError`. Use the one from `login.go` (same package = `matrix`).
 
@@ -272,7 +272,7 @@ type CoreClient interface {
 }
 ```
 
-Define `CreateRoomCoreClient` with only `CreateRoom` — not the full `*grpc.Client`. This keeps the interface minimal (Go convention, ADR-009 + CLAUDE.md).
+Define `CreateRoomCoreClient` with only `CreateRoom` - not the full `*grpc.Client`. This keeps the interface minimal (Go convention, ADR-009 + CLAUDE.md).
 
 ### Pattern: handler construction (established in `login.go`)
 
@@ -292,7 +292,7 @@ func NewCreateRoomHandler(cfg CreateRoomConfig) *CreateRoomHandler {
 
 ### Pattern: Elixir gRPC server stubs (established in `server.ex`)
 
-The `Nebu.EventDispatcher.Server` currently has skeleton stubs returning empty structs. When implementing `create_room/2`, raise `GRPC.RPCError` for error cases — do NOT use defensive try/rescue (Elixir convention: let it crash).
+The `Nebu.EventDispatcher.Server` currently has skeleton stubs returning empty structs. When implementing `create_room/2`, raise `GRPC.RPCError` for error cases - do NOT use defensive try/rescue (Elixir convention: let it crash).
 
 ### Pattern: Room GenServer interaction (Story 4-2)
 
@@ -358,7 +358,7 @@ From Story 4-8 dev notes:
 - `Nebu.Room.RoomSupervisor.start_room/1` returns `{:ok, pid}` for both new and already-running rooms (idempotent).
 - The `room_registry_module` injection pattern in `server.ex` is used for test isolation: `Application.put_env(:event_dispatcher, :room_registry_module, FakeModule)`.
 - `GRPC.Status.not_found()` / `GRPC.Status.internal()` / `GRPC.Status.already_exists()` are the correct status helpers for `GRPC.RPCError`.
-- Go: `grpclib.ServerStreamingClient[pb.Event]` is the type for streaming clients — not relevant for unary, but note the import alias `grpclib "google.golang.org/grpc"` used in `client.go`.
+- Go: `grpclib.ServerStreamingClient[pb.Event]` is the type for streaming clients - not relevant for unary, but note the import alias `grpclib "google.golang.org/grpc"` used in `client.go`.
 
 ---
 
@@ -382,7 +382,7 @@ From Story 4-8 dev notes:
 - [x] Write failing tests FIRST (ATDD gate):
   - [x] Create `gateway/internal/matrix/rooms_test.go` with tests 1–4 (Go)
   - [x] Add `describe "create_room/2"` block to Elixir server tests (tests 5–6)
-  - [x] Run tests — verify RED (failing)
+  - [x] Run tests - verify RED (failing)
 
 - [x] Implement Go `CreateRoomHandler` (AC #1–7):
   - [x] Create `gateway/internal/matrix/rooms.go`
@@ -401,8 +401,8 @@ From Story 4-8 dev notes:
   - [x] Call `Nebu.Room.RoomSupervisor.start_room/1` and `Nebu.Room.Server.join/2`
 
 - [x] Run all tests green (AC #10):
-  - [x] `make test-unit-go` — all gateway tests pass
-  - [x] `make test-unit-elixir` — all umbrella tests pass
+  - [x] `make test-unit-go` - all gateway tests pass
+  - [x] `make test-unit-elixir` - all umbrella tests pass
 
 ---
 
@@ -410,9 +410,9 @@ From Story 4-8 dev notes:
 
 1. **`server_name` in Elixir:** The room ID needs `server_name`. Check if `Application.get_env(:event_dispatcher, :server_name, "nebu.local")` is already set in the Docker compose environment for the `core` service. If not, add it to `config/runtime.exs` reading from `System.get_env("NEBU_SERVER_NAME", "nebu.local")`. This is consistent with how Go reads `NEBU_SERVER_NAME`.
 
-2. **`room_alias_name` scope:** The HTTP request body accepts `room_alias_name` but MVP does NOT implement alias registration in Core. Parse it in Go but do not forward it to Core via gRPC in Story 4-9. The `M_ROOM_IN_USE` error in AC #6 is only reachable if Core raises `ALREADY_EXISTS` — which in MVP only happens via mock. This is documented in the epics as acceptable scope reduction.
+2. **`room_alias_name` scope:** The HTTP request body accepts `room_alias_name` but MVP does NOT implement alias registration in Core. Parse it in Go but do not forward it to Core via gRPC in Story 4-9. The `M_ROOM_IN_USE` error in AC #6 is only reachable if Core raises `ALREADY_EXISTS` - which in MVP only happens via mock. This is documented in the epics as acceptable scope reduction.
 
-3. **OpenAPI spec (`gateway/api/openapi.yaml`):** The spec currently only covers the Admin API health endpoint. Per ADR-009 (spec-first), the Matrix API should ideally be in the spec too. However, given that `oapi-codegen` is set up for the Admin API path and the Matrix API is implemented via direct handler registration in `main.go`, **do NOT add Matrix endpoints to `openapi.yaml` in this story** — that would require significant refactoring of the router architecture. The existing pattern (direct `mux.Handle` registration) is consistent with all prior Matrix endpoint stories.
+3. **OpenAPI spec (`gateway/api/openapi.yaml`):** The spec currently only covers the Admin API health endpoint. Per ADR-009 (spec-first), the Matrix API should ideally be in the spec too. However, given that `oapi-codegen` is set up for the Admin API path and the Matrix API is implemented via direct handler registration in `main.go`, **do NOT add Matrix endpoints to `openapi.yaml` in this story** - that would require significant refactoring of the router architecture. The existing pattern (direct `mux.Handle` registration) is consistent with all prior Matrix endpoint stories.
 
 ---
 
@@ -422,11 +422,11 @@ From Story 4-8 dev notes:
 - `gateway/internal/matrix/rooms.go`
 
 ### Modified files:
-- `gateway/internal/grpc/client.go` — wired `CreateRoom` stub to `c.core.CreateRoom(ctx, req)`
-- `gateway/internal/grpc/client_test.go` — updated `TestStubsReturnNil/CreateRoom` to expect connection error (now wired)
-- `gateway/cmd/gateway/main.go` — registered `POST /_matrix/client/v3/createRoom` with `jwtMiddleware`
-- `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` — implemented `create_room/2` and `generate_room_id/0`
-- `_bmad-output/implementation-artifacts/sprint-status.yaml` — updated `4-9-post-createroom` to `review`
+- `gateway/internal/grpc/client.go` - wired `CreateRoom` stub to `c.core.CreateRoom(ctx, req)`
+- `gateway/internal/grpc/client_test.go` - updated `TestStubsReturnNil/CreateRoom` to expect connection error (now wired)
+- `gateway/cmd/gateway/main.go` - registered `POST /_matrix/client/v3/createRoom` with `jwtMiddleware`
+- `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` - implemented `create_room/2` and `generate_room_id/0`
+- `_bmad-output/implementation-artifacts/sprint-status.yaml` - updated `4-9-post-createroom` to `review`
 
 ### Pre-existing (tests written before implementation, not modified):
 - `gateway/internal/matrix/rooms_test.go`
@@ -452,7 +452,7 @@ Followed the red-green-refactor cycle against the pre-written failing tests:
 
 - All 6 Go tests pass (`make test-unit-go` green).
 - All 9 new Elixir tests pass in `create_room_test.exs` plus all 31 existing Elixir tests (`make test-unit-elixir` green, 40 event_dispatcher tests total).
-- `server_name` is read from `Application.get_env(:event_dispatcher, :server_name, "nebu.local")` — injectable in tests via `Application.put_env`.
+- `server_name` is read from `Application.get_env(:event_dispatcher, :server_name, "nebu.local")` - injectable in tests via `Application.put_env`.
 - `room_alias_name` is parsed in Go request body but not forwarded to Core in MVP (AC scope documented in story).
 - No new dependencies introduced.
 
@@ -460,4 +460,4 @@ Followed the red-green-refactor cycle against the pre-written failing tests:
 
 ## Change Log
 
-- 2026-04-03: Story 4-9 implemented — `POST /_matrix/client/v3/createRoom` handler, gRPC wire-up, Elixir create_room/2. All tests green.
+- 2026-04-03: Story 4-9 implemented - `POST /_matrix/client/v3/createRoom` handler, gRPC wire-up, Elixir create_room/2. All tests green.

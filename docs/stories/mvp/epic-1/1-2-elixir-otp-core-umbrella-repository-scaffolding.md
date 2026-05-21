@@ -1,4 +1,4 @@
-# Story 1.2: Elixir/OTP Core Umbrella — Repository Scaffolding
+# Story 1.2: Elixir/OTP Core Umbrella - Repository Scaffolding
 
 Status: done
 
@@ -30,12 +30,12 @@ so that Elixir development can begin with a correct supervision tree structure.
   - [x] Create `core/config/config.exs`, `core/config/dev.exs`, `core/config/prod.exs`, `core/config/runtime.exs`
 
 - [x] Task 2: Create all 6 sub-applications with supervision trees (AC: #2, #4, #6)
-  - [x] `room_manager` app — module root `Nebu.Room`
-  - [x] `session_manager` app — module root `Nebu.Session`
-  - [x] `presence` app — module root `Nebu.Presence`
-  - [x] `event_dispatcher` app — module root `Nebu.Event`
-  - [x] `signature` app — module root `Nebu.Signature`
-  - [x] `permissions` app — module root `Nebu.Permissions`
+  - [x] `room_manager` app - module root `Nebu.Room`
+  - [x] `session_manager` app - module root `Nebu.Session`
+  - [x] `presence` app - module root `Nebu.Presence`
+  - [x] `event_dispatcher` app - module root `Nebu.Event`
+  - [x] `signature` app - module root `Nebu.Signature`
+  - [x] `permissions` app - module root `Nebu.Permissions`
   - [x] Each app's `application.ex` uses `Supervisor` with `strategy: :one_for_one`
 
 - [x] Task 3: Apply Nebu module naming convention (AC: #6)
@@ -51,7 +51,7 @@ so that Elixir development can begin with a correct supervision tree structure.
   - [x] Stage 2 `runtime`: `alpine:3.19` (with libstdc++, openssl, ncurses)
   - [x] Output: OTP release via `mix release`
 
-- [x] Task 5: Update root Makefile — fill in `build-core` and `test-unit-elixir` targets (AC: #3, #5)
+- [x] Task 5: Update root Makefile - fill in `build-core` and `test-unit-elixir` targets (AC: #3, #5)
   - [x] `build-core` target: `$(DOCKER_ELIXIR) sh -c "cd core && mix deps.get && mix compile"`
   - [x] `test-unit-elixir` target: `$(DOCKER_ELIXIR) sh -c "cd core && mix test"`
   - [x] Verify: `make -n build-core` and `make -n test-unit-elixir` do not error
@@ -64,7 +64,7 @@ so that Elixir development can begin with a correct supervision tree structure.
 
 ### CRITICAL: How to Generate the Umbrella Structure
 
-**Do NOT run mix locally** — all commands run inside Docker containers (hard requirement from Story 1.1, no local tooling required). The structure must be created manually by writing files directly:
+**Do NOT run mix locally** - all commands run inside Docker containers (hard requirement from Story 1.1, no local tooling required). The structure must be created manually by writing files directly:
 
 ```
 core/
@@ -117,7 +117,7 @@ core/
 
 ### Module Naming Convention (MANDATORY)
 
-**Pattern:** `Nebu.{Domain}.{Name}` — This is a hard requirement from the architecture.
+**Pattern:** `Nebu.{Domain}.{Name}` - This is a hard requirement from the architecture.
 
 | App Directory | Application Module | Primary Module |
 |---|---|---|
@@ -128,7 +128,7 @@ core/
 | `signature` | `Nebu.Signature.Application` | `Nebu.Signature` |
 | `permissions` | `Nebu.Permissions.Application` | `Nebu.Permissions` |
 
-**NEVER** use the auto-generated default names (`RoomManager`, `SessionManager`, `EventDispatcher`) — they violate the `Nebu.*` namespace pattern.
+**NEVER** use the auto-generated default names (`RoomManager`, `SessionManager`, `EventDispatcher`) - they violate the `Nebu.*` namespace pattern.
 
 [Source: architecture.md, lines 482-505]
 
@@ -144,7 +144,7 @@ defmodule Nebu.Room.Application do
   @impl true
   def start(_type, _args) do
     children = [
-      # Placeholder — Room GenServer processes added in Epic 4
+      # Placeholder - Room GenServer processes added in Epic 4
     ]
 
     opts = [strategy: :one_for_one, name: Nebu.Room.Supervisor]
@@ -153,7 +153,7 @@ defmodule Nebu.Room.Application do
 end
 ```
 
-**Same pattern applies to all 6 apps** — only module names and supervisor names differ.
+**Same pattern applies to all 6 apps** - only module names and supervisor names differ.
 [Source: architecture.md, lines 113-125]
 
 ### Umbrella Root mix.exs
@@ -181,7 +181,7 @@ defmodule Nebu.MixProject do
 end
 ```
 
-**NO dependencies yet** — this is scaffolding only. Dependencies will be added story-by-story.
+**NO dependencies yet** - this is scaffolding only. Dependencies will be added story-by-story.
 
 ### Per-App mix.exs Pattern
 
@@ -220,7 +220,7 @@ end
 
 ### Config Files
 
-**`core/config/config.exs`** — shared config (import_config for env-specific):
+**`core/config/config.exs`** - shared config (import_config for env-specific):
 ```elixir
 import Config
 
@@ -241,11 +241,11 @@ import Config
 config :logger, level: :info
 ```
 
-**`core/config/runtime.exs`** — NEBU_* env vars read at startup:
+**`core/config/runtime.exs`** - NEBU_* env vars read at startup:
 ```elixir
 import Config
 
-# Placeholder — NEBU_* env vars added as each story requires them
+# Placeholder - NEBU_* env vars added as each story requires them
 # e.g., Story 1.3 adds database URL:
 # config :room_manager, Nebu.Repo,
 #   url: System.get_env("NEBU_DB_URL") || raise "NEBU_DB_URL not set"
@@ -255,7 +255,7 @@ import Config
 
 ### Elixir Logging Pattern
 
-Use `Logger` with keyword metadata — NEVER use `IO.puts` or plain strings:
+Use `Logger` with keyword metadata - NEVER use `IO.puts` or plain strings:
 
 ```elixir
 Logger.info("app started", app: :room_manager)
@@ -290,7 +290,7 @@ COPY --from=builder /app/_build/prod/rel/nebu ./
 ENTRYPOINT ["./bin/nebu", "start"]
 ```
 
-**NOTE:** `mix release` requires a `releases` config in the umbrella `mix.exs` for Phase 2. For now, the Dockerfile is sufficient as a scaffold — the actual release config is added when Docker Compose is wired in Story 1.9.
+**NOTE:** `mix release` requires a `releases` config in the umbrella `mix.exs` for Phase 2. For now, the Dockerfile is sufficient as a scaffold - the actual release config is added when Docker Compose is wired in Story 1.9.
 [Source: architecture.md, lines 1168-1182]
 
 ### Makefile Updates (Mandatory)
@@ -311,7 +311,7 @@ test-unit-elixir:
 	$(DOCKER_ELIXIR) sh -c "cd core && mix local.hex --force && mix test"
 ```
 
-**DO NOT** modify `build-gateway`, `test-unit-go`, `gen-api`, `proto`, `dev`, `setup`, `test-integration` — those are owned by other stories.
+**DO NOT** modify `build-gateway`, `test-unit-go`, `gen-api`, `proto`, `dev`, `setup`, `test-integration` - those are owned by other stories.
 
 ### Placeholder Test Pattern
 
@@ -332,7 +332,7 @@ Pattern: `use ExUnit.Case`, single `test` block with trivial assertion. Tests wi
 
 ### Previous Story Intelligence (Story 1.1)
 
-From Story 1.1 (done), the following is already in place — DO NOT recreate:
+From Story 1.1 (done), the following is already in place - DO NOT recreate:
 
 - Root `Makefile` with all 9 targets already defined (including `build-core` and `test-unit-elixir` as stubs)
 - `DOCKER_ELIXIR = docker run --rm -v $(PWD):/workspace -w /workspace elixir:1.19-alpine` variable already defined in Makefile
@@ -340,9 +340,9 @@ From Story 1.1 (done), the following is already in place — DO NOT recreate:
 - `gateway/go.mod` (module `github.com/nebu/nebu`), `media/go.mod` already in place
 - `.gitignore` exists (added during Story 1.1 code review)
 
-**Build system pattern:** All Makefile commands use Docker containers — no local tool installation required. The `DOCKER_ELIXIR` variable is already defined in the Makefile.
+**Build system pattern:** All Makefile commands use Docker containers - no local tool installation required. The `DOCKER_ELIXIR` variable is already defined in the Makefile.
 
-### Architecture Decision — 6 Apps (not 7)
+### Architecture Decision - 6 Apps (not 7)
 
 The epics AC specifies exactly 6 apps. The architecture detailed structure (lines 994-1051) also shows a `nebu_db` app for shared Ecto Repo. **For this story, implement only the 6 apps per the AC.** The `nebu_db` app will be evaluated when Ecto/PostgreSQL is introduced in Story 1.3.
 
@@ -359,11 +359,11 @@ The epics AC specifies exactly 6 apps. The architecture detailed structure (line
 
 ### Project Structure Notes
 
-- `core/` directory does NOT yet exist — must be created from scratch
-- `proto/` directory exists with `.gitkeep` (from Story 1.1) — leave untouched
+- `core/` directory does NOT yet exist - must be created from scratch
+- `proto/` directory exists with `.gitkeep` (from Story 1.1) - leave untouched
 - `core/` is a sibling to `gateway/` and `media/` at the repo root
-- This story does NOT add gRPC dependencies — those come in Story 1.6
-- This story does NOT add Ecto/PostgreSQL — those come in Story 1.3
+- This story does NOT add gRPC dependencies - those come in Story 1.6
+- This story does NOT add Ecto/PostgreSQL - those come in Story 1.3
 - `mix.lock` starts empty (no dependencies)
 
 ### References
@@ -388,11 +388,11 @@ claude-sonnet-4-6
 
 ### Debug Log References
 
-- `config/test.exs` was missing — `mix test` (MIX_ENV=test) requires it. Added with `config :logger, level: :warning`.
+- `config/test.exs` was missing - `mix test` (MIX_ENV=test) requires it. Added with `config :logger, level: :warning`.
 
 ### Completion Notes List
 
-- Created Elixir/OTP umbrella manually (no `mix new` locally — Docker-only build system).
+- Created Elixir/OTP umbrella manually (no `mix new` locally - Docker-only build system).
 - All 6 apps scaffolded: `room_manager`, `session_manager`, `presence`, `event_dispatcher`, `signature`, `permissions`.
 - All module names follow `Nebu.{Domain}.{Name}` pattern from architecture.
 - Each `application.ex` uses `Supervisor` with `strategy: :one_for_one` and named supervisor.
@@ -446,5 +446,5 @@ claude-sonnet-4-6
 
 ## Change Log
 
-- 2026-03-20: Implemented Story 1.2 — Elixir/OTP umbrella scaffolding. Created `core/` with 6 sub-apps (room_manager, session_manager, presence, event_dispatcher, signature, permissions), all configs, Dockerfile, and placeholder tests. Updated Makefile build-core/test-unit-elixir targets. All 6 tests pass, 0 compile warnings.
-- 2026-03-20: Code Review fixes applied — (1) Added Elixir patterns to `.gitignore` (`_build/`, `deps/`, `*.beam`, etc.), (2) Moved `signature/lib/nebu/application.ex` → `signature/lib/nebu/signature/application.ex` for consistency with all other apps, (3) Fixed Dockerfile `COPY apps/*/mix.exs apps/` glob flattening bug — replaced with per-app COPY statements. All 6 tests still pass, 0 compile warnings.
+- 2026-03-20: Implemented Story 1.2 - Elixir/OTP umbrella scaffolding. Created `core/` with 6 sub-apps (room_manager, session_manager, presence, event_dispatcher, signature, permissions), all configs, Dockerfile, and placeholder tests. Updated Makefile build-core/test-unit-elixir targets. All 6 tests pass, 0 compile warnings.
+- 2026-03-20: Code Review fixes applied - (1) Added Elixir patterns to `.gitignore` (`_build/`, `deps/`, `*.beam`, etc.), (2) Moved `signature/lib/nebu/application.ex` → `signature/lib/nebu/signature/application.ex` for consistency with all other apps, (3) Fixed Dockerfile `COPY apps/*/mix.exs apps/` glob flattening bug - replaced with per-app COPY statements. All 6 tests still pass, 0 compile warnings.

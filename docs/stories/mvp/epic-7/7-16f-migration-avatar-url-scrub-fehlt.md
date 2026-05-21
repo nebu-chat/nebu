@@ -5,7 +5,7 @@ security_review: optional
 created: 2026-04-30
 ---
 
-# Story 7.16f: Bugfix — Migration 000026 avatar_url_scrub fehlt (Story 5.29b AC7 deferred)
+# Story 7.16f: Bugfix - Migration 000026 avatar_url_scrub fehlt (Story 5.29b AC7 deferred)
 
 Status: ready-for-dev
 
@@ -19,7 +19,7 @@ so that `TestProfilesAvatarURLScrub_MigrationApplied` grün wird und die bereits
 
 **Failure:**
 ```
-avatar_url_scrub_migration_test.go:75: migration 000026 (avatar_url_scrub) has not been applied —
+avatar_url_scrub_migration_test.go:75: migration 000026 (avatar_url_scrub) has not been applied -
   000026_avatar_url_scrub.up.sql must be created and run (Story 5.29b AC7 not implemented)
 ```
 
@@ -45,7 +45,7 @@ WHERE avatar_url IS NOT NULL
 
 1. `gateway/migrations/000026_avatar_url_scrub.up.sql` existiert mit einem UPDATE-Statement, das unsichere Avatar-URLs (javascript:, data:, vbscript:, file: Schemes) auf NULL setzt.
 
-2. `gateway/migrations/000026_avatar_url_scrub.down.sql` existiert (no-op oder leeres Statement — Daten-Verlust ist irreversibel, aber die Migration selbst kann registriert bleiben).
+2. `gateway/migrations/000026_avatar_url_scrub.down.sql` existiert (no-op oder leeres Statement - Daten-Verlust ist irreversibel, aber die Migration selbst kann registriert bleiben).
 
 3. Die Migration ist in `schema_migrations`-Tabelle als angewendet registriert wenn der Stack gestartet wird (golang-migrate läuft automatisch beim Gateway-Start).
 
@@ -60,12 +60,12 @@ WHERE avatar_url IS NOT NULL
 
 ### Tests written FIRST (before implementation code):
 
-1. [Integration: TestProfilesAvatarURLScrub_MigrationApplied] — Go integration (existierender Test)
+1. [Integration: TestProfilesAvatarURLScrub_MigrationApplied] - Go integration (existierender Test)
    - Given: Stack gestartet mit neuer Migration
    - When: SELECT COUNT(*) FROM schema_migrations WHERE version='000026'
    - Then: count = 1
 
-2. [Integration: TestProfilesAvatarURLScrub_RemovesUnsafeURIs] — Go integration (existierend, Regression-Guard)
+2. [Integration: TestProfilesAvatarURLScrub_RemovesUnsafeURIs] - Go integration (existierend, Regression-Guard)
    - Given: profiles-Row mit `avatar_url = 'javascript:alert(1)'`
    - When: Migration angewendet
    - Then: `avatar_url IS NULL`
@@ -73,9 +73,9 @@ WHERE avatar_url IS NOT NULL
 ## Implementation Notes
 
 **Dateien:**
-- `gateway/migrations/000026_avatar_url_scrub.up.sql` — neu erstellen
-- `gateway/migrations/000026_avatar_url_scrub.down.sql` — neu erstellen (no-op: `SELECT 1;`)
+- `gateway/migrations/000026_avatar_url_scrub.up.sql` - neu erstellen
+- `gateway/migrations/000026_avatar_url_scrub.down.sql` - neu erstellen (no-op: `SELECT 1;`)
 
 **Migrations-Nummerierung prüfen:** Sicherstellen, dass 000026 tatsächlich die nächste freie Nummer ist (aktuelle letzte Migration in `gateway/migrations/` prüfen).
 
-**Security-Gate 1 (per-story):** Optional. XSS-Prävention via Datenmigration ist sicherheitsrelevant aber kein neuer Angriffsvektor — Scrub-Logik existiert bereits in der Anwendung.
+**Security-Gate 1 (per-story):** Optional. XSS-Prävention via Datenmigration ist sicherheitsrelevant aber kein neuer Angriffsvektor - Scrub-Logik existiert bereits in der Anwendung.

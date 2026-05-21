@@ -1,6 +1,6 @@
-## Security Review — Story 12.6
+## Security Review - Story 12.6
 
-**Diff scope:** 4 files — story file, sprint-status update, rooms_test.go (+160 lines), sync_test.go (+147 lines). Test files only; no production code changes.
+**Diff scope:** 4 files - story file, sprint-status update, rooms_test.go (+160 lines), sync_test.go (+147 lines). Test files only; no production code changes.
 **Date:** 2026-05-12
 
 ### Findings

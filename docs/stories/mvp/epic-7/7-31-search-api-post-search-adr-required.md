@@ -5,7 +5,7 @@ security_review: optional
 created: 2026-04-30
 ---
 
-# Story 7.31: Search API — POST /search (ADR-010 required)
+# Story 7.31: Search API - POST /search (ADR-010 required)
 
 Status: backlog
 
@@ -24,7 +24,7 @@ Before any implementation work begins, the Architecture Decision Record at
 The ADR must answer:
 
 - PostgreSQL FTS (`tsvector`/`tsquery` + GIN index) vs. external search component (e.g. Meilisearch, Elasticsearch, Typesense).
-- Recommended path for MVP: PostgreSQL FTS — no new infrastructure dependency.
+- Recommended path for MVP: PostgreSQL FTS - no new infrastructure dependency.
 - Trade-offs: query complexity, multi-language tokenisation, ranking quality, operational cost.
 - Migration path if a future epic introduces an external engine.
 
@@ -107,7 +107,7 @@ ADR outcome (e.g. if an external engine is chosen, the migration steps change).
 2. `POST /_matrix/client/v3/search` with `search_categories.room_events.search_term` returns HTTP 200
    with matching events from rooms the user is a member of.
 
-3. Results respect the `filter.rooms` list — if provided, only those rooms (intersected with
+3. Results respect the `filter.rooms` list - if provided, only those rooms (intersected with
    rooms the user is a member of) are searched.
 
 4. `order_by: "recent"` returns results sorted by event timestamp descending.
@@ -120,7 +120,7 @@ ADR outcome (e.g. if an external engine is chosen, the migration steps change).
    in `context.events_before` / `context.events_after` on each result.
 
 7. Only events in rooms where the user is (or was, within their history_visibility) a member are
-   returned — no cross-room leakage.
+   returned - no cross-room leakage.
 
 8. Performance: a search against a user's rooms must complete in under 500 ms for a dataset of
    100 000 events (verified in an integration benchmark, not a unit test).
@@ -134,39 +134,39 @@ ADR outcome (e.g. if an external engine is chosen, the migration steps change).
 Note: all tests below are to be authored after ADR-010 is accepted. They are written here as
 **intent specifications** to guide the ADR and ensure testability of the chosen approach.
 
-1. [Search_ReturnsMatchingEvents] — Godog
+1. [Search_ReturnsMatchingEvents] - Godog
    - Given: authenticated user `@alice:server`; room `!test:server` contains a message with body "hello world"
    - When: `POST /_matrix/client/v3/search` body
      `{"search_categories":{"room_events":{"search_term":"hello"}}}`
    - Then: HTTP 200; `results.room_events.results` contains an entry whose `result.content.body`
      includes "hello world"
 
-2. [Search_FilterByRoom_ExcludesOtherRooms] — Godog
+2. [Search_FilterByRoom_ExcludesOtherRooms] - Godog
    - Given: user is member of two rooms; "hello" appears in both; filter specifies only room A
    - When: `POST /search` with `filter.rooms: ["!roomA:server"]`
    - Then: HTTP 200; all returned results are from `!roomA:server`
 
-3. [Search_Pagination_NoOverlap] — Godog
+3. [Search_Pagination_NoOverlap] - Godog
    - Given: user has 10 matching events; search with `limit=5` returns first page with `next_batch`
    - When: second `POST /search?next_batch=TOKEN` with same body
    - Then: HTTP 200; 5 new unique results returned; no event_id duplicated across pages
 
-4. [Search_EventContext_SurroundingEvents] — Godog
+4. [Search_EventContext_SurroundingEvents] - Godog
    - Given: room with events e1, e2 (matching), e3
    - When: `POST /search` with `event_context: {"before_limit":1,"after_limit":1}`
    - Then: result for e2 includes `context.events_before: [e1]` and `context.events_after: [e3]`
 
-5. [Search_MembershipEnforcement_NonMemberRoomExcluded] — Godog
+5. [Search_MembershipEnforcement_NonMemberRoomExcluded] - Godog
    - Given: user is NOT a member of `!private:server`; that room has matching events
    - When: `POST /search` body `{"search_categories":{"room_events":{"search_term":"secret"}}}`
    - Then: HTTP 200; no results from `!private:server`
 
-6. [Search_Unauthenticated_Rejected] — Godog
+6. [Search_Unauthenticated_Rejected] - Godog
    - Given: no Authorization header
    - When: `POST /_matrix/client/v3/search` with valid body
    - Then: HTTP 401 `{"errcode":"M_MISSING_TOKEN",...}`
 
-7. [Search_EmptyTerm_Returns400] — Godog
+7. [Search_EmptyTerm_Returns400] - Godog
    - Given: authenticated user
    - When: `POST /search` with empty `search_term: ""`
    - Then: HTTP 400 `{"errcode":"M_INVALID_PARAM","error":"search_term must not be empty"}`
@@ -180,21 +180,21 @@ Decision, Consequences, Alternatives considered.
 
 **Files to create / modify (after ADR-010 approval):**
 
-- `docs/architecture/adr/010-search-fulltext-strategy.md` — the ADR (prerequisite, not implementation).
-- `gateway/migrations/000031_events_fts.up.sql` + `000031_events_fts.down.sql` — add `fts tsvector`
+- `docs/architecture/adr/010-search-fulltext-strategy.md` - the ADR (prerequisite, not implementation).
+- `gateway/migrations/000031_events_fts.up.sql` + `000031_events_fts.down.sql` - add `fts tsvector`
   generated column and GIN index to the `events` table (or equivalent per ADR decision).
-- `proto/core.proto` — add `SearchEvents` RPC with `SearchEventsRequest` / `SearchEventsResponse`.
-- `gateway/internal/matrix/search.go` — `SearchHandler` struct + handler method.
-- `gateway/internal/matrix/search_test.go` — unit tests with `httptest`.
-- `gateway/features/search.feature` — Godog feature file (written first, red phase).
-- `gateway/cmd/gateway/main.go` — register `POST /_matrix/client/v3/search` under `jwtMiddleware`.
-- `core/apps/room_manager/` or a dedicated search module — implement `SearchEvents` gRPC handler.
+- `proto/core.proto` - add `SearchEvents` RPC with `SearchEventsRequest` / `SearchEventsResponse`.
+- `gateway/internal/matrix/search.go` - `SearchHandler` struct + handler method.
+- `gateway/internal/matrix/search_test.go` - unit tests with `httptest`.
+- `gateway/features/search.feature` - Godog feature file (written first, red phase).
+- `gateway/cmd/gateway/main.go` - register `POST /_matrix/client/v3/search` under `jwtMiddleware`.
+- `core/apps/room_manager/` or a dedicated search module - implement `SearchEvents` gRPC handler.
 
 **Membership enforcement implementation pattern:**
 1. Gateway calls `GetUserRooms(user_id)` → list of room_ids the user is/was a member of.
 2. Intersect with `filter.rooms` if provided.
 3. Pass the filtered room_id list to `SearchEvents` RPC.
-4. Core enforces the list at query level — never returns events from rooms not in the list.
+4. Core enforces the list at query level - never returns events from rooms not in the list.
 
 **Error-mapping pattern:**
 - `codes.InvalidArgument` → 400 `M_INVALID_PARAM`
@@ -207,6 +207,6 @@ benchmark scenario (AC8). 500 ms p95 threshold on 100 000 events is a hard gate.
 
 **Out of scope for this story:**
 - Searching `content.name` / `content.topic` (keys other than `content.body`).
-- Encrypted event search (requires client-side key export — Phase 3+).
+- Encrypted event search (requires client-side key export - Phase 3+).
 - Spell correction or fuzzy matching.
 - Highlights / snippet extraction in results (nice-to-have, Phase 2).

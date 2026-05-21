@@ -25,8 +25,8 @@ so that the Admin UI never handles my password and the authorization code cannot
 
 ## Tasks / Subtasks
 
-- [x] Task 1: Add `LoginPageHandler` to `AdminAuth` — serve `GET /admin/login` (AC: 1)
-  - [x] 1.1 Create `gateway/internal/admin/templates/login.html` — extends `base.html` layout; contains a centered card with Nebu heading, "Login with SSO" primary DaisyUI button linking to `/admin/login/start`; also renders an optional `{{.Error}}` alert banner if set (for future use); set `ActiveNav: "login"` and `BootstrapMode: false`
+- [x] Task 1: Add `LoginPageHandler` to `AdminAuth` - serve `GET /admin/login` (AC: 1)
+  - [x] 1.1 Create `gateway/internal/admin/templates/login.html` - extends `base.html` layout; contains a centered card with Nebu heading, "Login with SSO" primary DaisyUI button linking to `/admin/login/start`; also renders an optional `{{.Error}}` alert banner if set (for future use); set `ActiveNav: "login"` and `BootstrapMode: false`
   - [x] 1.2 Add `LoginPageData` struct to `page_data.go`:
     ```go
     // LoginPageData holds data for the Admin login page.
@@ -45,7 +45,7 @@ so that the Admin UI never handles my password and the authorization code cannot
     ```
     Pass `tmplHandler` from `main.go` to `NewAdminAuth`.
 
-- [x] Task 2: Add `LoginStartHandler` — PKCE redirect with DB-sourced OIDC config (AC: 2–3)
+- [x] Task 2: Add `LoginStartHandler` - PKCE redirect with DB-sourced OIDC config (AC: 2–3)
   - [x] 2.1 Add `db *sql.DB` field to `AdminAuth` struct; update `NewAdminAuth` to also accept `db *sql.DB`:
     ```go
     func NewAdminAuth(provider *auth.Provider, clientID, clientSecret, claimName string, secret []byte, db *sql.DB, tmpl *TemplateHandler) *AdminAuth
@@ -56,7 +56,7 @@ so that the Admin UI never handles my password and the authorization code cannot
     - Return `("", "", "", ErrOIDCConfigMissing)` if any of the three keys is absent
   - [x] 2.3 Add `LoginStartHandler(w http.ResponseWriter, r *http.Request)` method on `AdminAuth`:
     - Call `a.loadOIDCConfigFromDB(r.Context())`
-    - On `ErrOIDCConfigMissing`: render a 503 response — `http.Error(w, "OIDC configuration not found in server config. Please complete the Bootstrap Wizard first.", http.StatusServiceUnavailable)`
+    - On `ErrOIDCConfigMissing`: render a 503 response - `http.Error(w, "OIDC configuration not found in server config. Please complete the Bootstrap Wizard first.", http.StatusServiceUnavailable)`
     - Build `oauth2.Config` using DB-loaded `issuer`, `clientID`, `clientSecret`, `redirect_uri` = `scheme + "://" + r.Host + "/admin/callback"`, scopes `openid profile email`
     - Generate `verifier := oauth2.GenerateVerifier()`
     - Generate 16-byte state via `crypto/rand.Read`, hex-encode
@@ -76,8 +76,8 @@ so that the Admin UI never handles my password and the authorization code cannot
     mux.HandleFunc("GET /admin/login/start", adminAuth.LoginStartHandler)
     mux.HandleFunc("GET /admin/callback", adminAuth.CallbackHandler)
     ```
-  - [x] 3.3 Keep the existing `GET /admin/auth/login` and `GET /admin/auth/callback` routes registered (backward compatibility; Story 3.10 will supersede them). Do NOT remove them — the `BootstrapGuard` and middleware still redirect to `/admin/login` and `/admin/callback` will be the new canonical path going forward.
-  - [x] 3.4 Update `bootstrapDB` usage: `bootstrapDB` is already opened in `main.go` (line 121); pass it to `NewAdminAuth` as well. Note: it is a shared `*sql.DB` — sharing a pool is safe (Go's `database/sql` is concurrency-safe).
+  - [x] 3.3 Keep the existing `GET /admin/auth/login` and `GET /admin/auth/callback` routes registered (backward compatibility; Story 3.10 will supersede them). Do NOT remove them - the `BootstrapGuard` and middleware still redirect to `/admin/login` and `/admin/callback` will be the new canonical path going forward.
+  - [x] 3.4 Update `bootstrapDB` usage: `bootstrapDB` is already opened in `main.go` (line 121); pass it to `NewAdminAuth` as well. Note: it is a shared `*sql.DB` - sharing a pool is safe (Go's `database/sql` is concurrency-safe).
 
 - [x] Task 4: Write unit tests (AC: 4–5)
   - [x] 4.1 Create `gateway/internal/admin/login_test.go` (package `admin`)
@@ -93,15 +93,15 @@ so that the Admin UI never handles my password and the authorization code cannot
 ### Critical Context: Story 2.6 Already Implemented PKCE (Different URLs)
 
 Story 2.6 created `gateway/internal/admin/auth.go` with `AdminAuth`, `LoginHandler`, and `CallbackHandler` at routes:
-- `GET /admin/auth/login` — PKCE login (redirects immediately to OIDC, no HTML page)
-- `GET /admin/auth/callback` — token exchange
+- `GET /admin/auth/login` - PKCE login (redirects immediately to OIDC, no HTML page)
+- `GET /admin/auth/callback` - token exchange
 
 Story 3.9 introduces **new routes** layered on top:
-- `GET /admin/login` — HTML login page (new, requires `login.html` template)
-- `GET /admin/login/start` — PKCE redirect, but reading OIDC config from DB (not env vars)
-- `GET /admin/callback` — callback URL updated (same logic as `CallbackHandler`, new path)
+- `GET /admin/login` - HTML login page (new, requires `login.html` template)
+- `GET /admin/login/start` - PKCE redirect, but reading OIDC config from DB (not env vars)
+- `GET /admin/callback` - callback URL updated (same logic as `CallbackHandler`, new path)
 
-Do NOT delete or modify the existing `/admin/auth/login` and `/admin/auth/callback` routes — they serve a different purpose (Matrix client login via `m.login.sso`) and Story 3.10 will wire the session cookie creation to the new `/admin/callback` path.
+Do NOT delete or modify the existing `/admin/auth/login` and `/admin/auth/callback` routes - they serve a different purpose (Matrix client login via `m.login.sso`) and Story 3.10 will wire the session cookie creation to the new `/admin/callback` path.
 
 ### AdminAuth Struct Changes
 
@@ -125,7 +125,7 @@ Must become:
 ```go
 adminAuth := admin.NewAdminAuth(oidcProvider, cfg.OIDCClientID, cfg.OIDCClientSecret, cfg.OIDCClaimRole, []byte(internalSecret), bootstrapDB, tmplHandler)
 ```
-`bootstrapDB` is already opened at line 121. `tmplHandler` is already initialized at line 127. However, `bootstrapDB` is opened AFTER `adminAuth` currently — reorder initialization so `bootstrapDB` and `tmplHandler` are created BEFORE `adminAuth`.
+`bootstrapDB` is already opened at line 121. `tmplHandler` is already initialized at line 127. However, `bootstrapDB` is opened AFTER `adminAuth` currently - reorder initialization so `bootstrapDB` and `tmplHandler` are created BEFORE `adminAuth`.
 
 ### Reading OIDC Config from DB
 
@@ -138,7 +138,7 @@ db.QueryRow("SELECT value FROM server_config WHERE key = $1", "oidc_issuer").Sca
 ```go
 plain, err := decryptAES256GCM(a.secret, encryptedHex)
 ```
-The key derivation in `decryptAES256GCM` is `sha256.Sum256(secret)` → 32-byte AES key — already implemented and tested.
+The key derivation in `decryptAES256GCM` is `sha256.Sum256(secret)` → 32-byte AES key - already implemented and tested.
 
 A sentinel error for missing config:
 ```go
@@ -209,21 +209,21 @@ oauth2Config := &oauth2.Config{
 
 This performs OIDC discovery on each `LoginStartHandler` invocation. In production this is acceptable: the login page is hit rarely (once per admin session). If needed, a cache can be added in a later story. For unit tests: use a test OIDC server (same `setupAdminOIDCServer` helper from `auth_test.go`).
 
-### Cookie Attributes (Established Contract — must match Story 3.10)
+### Cookie Attributes (Established Contract - must match Story 3.10)
 
 | Cookie | Name | Path | MaxAge | HttpOnly | Secure | SameSite |
 |--------|------|------|--------|----------|--------|----------|
 | OIDC state | `admin_oidc_state` | `/admin` | 600 (10min) | yes | `r.TLS != nil` | Lax |
 | Admin session | `admin_session` | `/admin` | 28800 (8h) | yes | `r.TLS != nil` | Strict |
 
-Note: Story 2.6 set `admin_oidc_state` with `Path: "/admin/auth"` — this story **changes the path to `/admin`** so that `GET /admin/callback` (not `/admin/auth/callback`) can read it. This is a deliberate change.
+Note: Story 2.6 set `admin_oidc_state` with `Path: "/admin/auth"` - this story **changes the path to `/admin`** so that `GET /admin/callback` (not `/admin/auth/callback`) can read it. This is a deliberate change.
 
 ### `login.html` Template
 
 Follow the same pattern as `bootstrap.html`:
 ```
 {{ template "base" . }}
-{{ define "title" }}Login — Nebu Admin{{ end }}
+{{ define "title" }}Login - Nebu Admin{{ end }}
 {{ define "content" }}
 ```
 
@@ -257,17 +257,17 @@ Inject as `configReader ServerConfigReader` field. Implement `postgresServerConf
 
 ### Template Registration
 
-`TemplateHandler.NewTemplateHandler()` auto-discovers all `.html` files under `templates/` that are not in `templates/layouts/`. Adding `templates/login.html` is sufficient — it will be auto-discovered and compiled into its own isolated template set.
+`TemplateHandler.NewTemplateHandler()` auto-discovers all `.html` files under `templates/` that are not in `templates/layouts/`. Adding `templates/login.html` is sufficient - it will be auto-discovered and compiled into its own isolated template set.
 
 ### Redirect Destination After Callback
 
-`CallbackHandler` in Story 2.6 redirects to `/admin/` (with trailing slash) on success. This story does NOT change the `CallbackHandler` redirect target — Story 3.10 wires the full session cookie + redirect to `/admin/dashboard`. For now, keep the existing behavior.
+`CallbackHandler` in Story 2.6 redirects to `/admin/` (with trailing slash) on success. This story does NOT change the `CallbackHandler` redirect target - Story 3.10 wires the full session cookie + redirect to `/admin/dashboard`. For now, keep the existing behavior.
 
 ### BootstrapGuard and SessionGuard Exclusions
 
 Story 3.11 specifies that `SessionGuard` excludes `/admin/login*`, `/admin/callback`, `/admin/bootstrap*`, and `/admin/static/*`. The new routes in this story (`/admin/login` and `/admin/login/start`) will match the `/admin/login*` exclusion pattern. The new `/admin/callback` is also explicitly excluded. No changes needed to `BootstrapGuard` or `SessionGuard` for this story.
 
-However, `BootstrapGuard` currently redirects to `/admin/login` on bootstrap-complete. Story 3.8 already redirects to `/admin/login` after bootstrap (line 322 of `bootstrap.go`). This story PROVIDES that endpoint — no circular dependency.
+However, `BootstrapGuard` currently redirects to `/admin/login` on bootstrap-complete. Story 3.8 already redirects to `/admin/login` after bootstrap (line 322 of `bootstrap.go`). This story PROVIDES that endpoint - no circular dependency.
 
 ### `main.go` Initialization Order
 
@@ -288,46 +288,46 @@ All required packages are already in `go.mod`:
 - `database/sql` (stdlib)
 - `crypto/rand`, `encoding/hex` (stdlib)
 
-Do NOT add `golang.org/x/crypto` — not present in `go.mod` and not needed.
+Do NOT add `golang.org/x/crypto` - not present in `go.mod` and not needed.
 
 ### Project Structure Notes
 
 | File | Action |
 |------|--------|
-| `gateway/internal/admin/auth.go` | MODIFY — add `db *sql.DB`, `tmpl *TemplateHandler` fields; add `loadOIDCConfigFromDB` helper; add `LoginPageHandler`, `LoginStartHandler` methods; update `NewAdminAuth` signature; update `buildOAuth2Config` redirect URL to `/admin/callback` |
-| `gateway/internal/admin/page_data.go` | MODIFY — add `LoginPageData` struct |
-| `gateway/internal/admin/templates/login.html` | CREATE — login page with SSO button |
-| `gateway/internal/admin/login_test.go` | CREATE — 5 unit tests |
-| `gateway/cmd/gateway/main.go` | MODIFY — reorder init (bootstrapDB + tmplHandler before adminAuth); update `NewAdminAuth` call; add `/admin/login`, `/admin/login/start`, `/admin/callback` routes |
+| `gateway/internal/admin/auth.go` | MODIFY - add `db *sql.DB`, `tmpl *TemplateHandler` fields; add `loadOIDCConfigFromDB` helper; add `LoginPageHandler`, `LoginStartHandler` methods; update `NewAdminAuth` signature; update `buildOAuth2Config` redirect URL to `/admin/callback` |
+| `gateway/internal/admin/page_data.go` | MODIFY - add `LoginPageData` struct |
+| `gateway/internal/admin/templates/login.html` | CREATE - login page with SSO button |
+| `gateway/internal/admin/login_test.go` | CREATE - 5 unit tests |
+| `gateway/cmd/gateway/main.go` | MODIFY - reorder init (bootstrapDB + tmplHandler before adminAuth); update `NewAdminAuth` call; add `/admin/login`, `/admin/login/start`, `/admin/callback` routes |
 
 **Do NOT modify:**
-- `gateway/internal/admin/crypto.go` — `decryptAES256GCM` is package-private and already correct
-- `gateway/internal/admin/bootstrap.go` — no changes needed
-- `gateway/internal/admin/middleware.go` — `BootstrapGuard` already redirects to `/admin/login`; no changes for this story
-- `gateway/internal/admin/auth_test.go` — existing tests remain valid; only `buildOAuth2Config` changes (redirect URL), but auth_test.go tests do not assert the redirect URL fragment from the callback, so no test breakage expected. Verify after implementing.
+- `gateway/internal/admin/crypto.go` - `decryptAES256GCM` is package-private and already correct
+- `gateway/internal/admin/bootstrap.go` - no changes needed
+- `gateway/internal/admin/middleware.go` - `BootstrapGuard` already redirects to `/admin/login`; no changes for this story
+- `gateway/internal/admin/auth_test.go` - existing tests remain valid; only `buildOAuth2Config` changes (redirect URL), but auth_test.go tests do not assert the redirect URL fragment from the callback, so no test breakage expected. Verify after implementing.
 
 ### Existing Test Patterns to Follow
 
-- `fakeBootstrapChecker` in `bootstrap_test.go` — pattern for fake interface implementations
-- `setupAdminOIDCServer` in `auth_test.go` — reuse for `TestLoginStartHandler_SetsStateAndRedirects`
-- `newTestAdminAuth` in `auth_test.go` — update signature to include `db` and `tmpl` parameters; for existing tests, pass `nil` for both
+- `fakeBootstrapChecker` in `bootstrap_test.go` - pattern for fake interface implementations
+- `setupAdminOIDCServer` in `auth_test.go` - reuse for `TestLoginStartHandler_SetsStateAndRedirects`
+- `newTestAdminAuth` in `auth_test.go` - update signature to include `db` and `tmpl` parameters; for existing tests, pass `nil` for both
 
 ### References
 
 - [Source: _bmad-output/planning-artifacts/epics.md#Story-3.9, lines 1639–1659] Authoritative ACs
 - [Source: _bmad-output/planning-artifacts/epics.md#Story-3.10, line 1675] `redirect_uri=/admin/callback` (canonical callback path)
 - [Source: _bmad-output/planning-artifacts/epics.md#Story-3.11, line 1705] SessionGuard excludes `/admin/login*`, `/admin/callback`
-- [Source: gateway/internal/admin/auth.go] `AdminAuth` struct, `signCookie`, `verifyCookie`, `oidcStateCookie`, `LoginHandler`, `CallbackHandler` — reuse and extend
+- [Source: gateway/internal/admin/auth.go] `AdminAuth` struct, `signCookie`, `verifyCookie`, `oidcStateCookie`, `LoginHandler`, `CallbackHandler` - reuse and extend
 - [Source: gateway/internal/admin/auth_test.go] `setupAdminOIDCServer`, `newTestAdminAuth`, cookie assertion patterns
-- [Source: gateway/internal/admin/crypto.go] `decryptAES256GCM(secret []byte, hexCiphertext string) (string, error)` — package-private, available in same package
+- [Source: gateway/internal/admin/crypto.go] `decryptAES256GCM(secret []byte, hexCiphertext string) (string, error)` - package-private, available in same package
 - [Source: gateway/internal/admin/bootstrap.go#line 418] `SELECT key, value FROM server_config WHERE key IN (...)` pattern
-- [Source: gateway/internal/admin/handler.go] `TemplateHandler.render(w, name, data)` — render page template by name
+- [Source: gateway/internal/admin/handler.go] `TemplateHandler.render(w, name, data)` - render page template by name
 - [Source: gateway/internal/admin/page_data.go] `PageData` struct (embedded in all page data)
 - [Source: gateway/internal/admin/templates/bootstrap.html] Template structure pattern (`{{ template "base" . }}`, `{{ define "title" }}`, `{{ define "content" }}`)
-- [Source: gateway/internal/admin/middleware.go#line 33] `BootstrapGuard` redirects to `/admin/login` — this story provides that endpoint
-- [Source: gateway/internal/admin/bootstrap.go#line 322] `FinalizeHandler` redirects 303 to `/admin/login` — confirmed endpoint must exist
+- [Source: gateway/internal/admin/middleware.go#line 33] `BootstrapGuard` redirects to `/admin/login` - this story provides that endpoint
+- [Source: gateway/internal/admin/bootstrap.go#line 322] `FinalizeHandler` redirects 303 to `/admin/login` - confirmed endpoint must exist
 - [Source: gateway/cmd/gateway/main.go, lines 107–134] Current init order; must reorder for this story
-- [Source: _bmad-output/implementation-artifacts/2-6-admin-ui-oidc-client-authorization-code-flow-with-pkce.md] Story 2.6 notes — PKCE implementation already complete; this story adds DB-based config + HTML page
+- [Source: _bmad-output/implementation-artifacts/2-6-admin-ui-oidc-client-authorization-code-flow-with-pkce.md] Story 2.6 notes - PKCE implementation already complete; this story adds DB-based config + HTML page
 - [Source: _bmad-output/implementation-artifacts/3-8-bootstrap-api-handler-post-admin-bootstrap.md#File-List] Confirms `crypto.go` with `decryptAES256GCM` exists
 
 ## Dev Agent Record
@@ -342,38 +342,38 @@ No debug issues encountered. All tests passed on first run.
 
 ### Completion Notes List
 
-- Implemented `ServerConfigReader` interface with `postgresServerConfigReader` implementation for testability — this is a better design than the story's `loadOIDCConfigFromDB` suggestion since it allows full DI without needing a real DB in tests.
+- Implemented `ServerConfigReader` interface with `postgresServerConfigReader` implementation for testability - this is a better design than the story's `loadOIDCConfigFromDB` suggestion since it allows full DI without needing a real DB in tests.
 - `NewAdminAuth` now accepts `db *sql.DB` and `tmpl *TemplateHandler`; a `nil` DB means `configReader` is `nil` (safe for legacy callers passing `nil, nil`).
 - `buildOAuth2Config` redirect URL updated from `/admin/auth/callback` to `/admin/callback` (AC: 2, Task 2.4).
 - `CallbackHandler` state cookie delete path updated from `/admin/auth` to `/admin` so the new `/admin/callback` route can clear it correctly.
 - `login.html` template created with DaisyUI card, SSO button, and error alert mapping three known error keys.
-- `auth_test.go` `newTestAdminAuth` and `TestSignAndVerifyCookie` updated to pass `nil, nil` for the new `db` and `tmpl` parameters — no existing test logic changed.
+- `auth_test.go` `newTestAdminAuth` and `TestSignAndVerifyCookie` updated to pass `nil, nil` for the new `db` and `tmpl` parameters - no existing test logic changed.
 - `login_test.go` contains 8 unit tests: `TestLoginPageHandler_RendersPage`, `TestLoginPageHandler_WithError`, `TestLoginStartHandler_SetsStateAndRedirects`, `TestLoginStartHandler_MissingOIDCConfig`, `TestLoginStartHandler_CookieSecurity`, `TestLoginStartHandler_CookieSecureTLS`, `TestLoginStartHandler_NilConfigReader_Returns503`, `TestLoginStartHandler_DBError_Returns503`.
 - `main.go` initialization order rewritten: `bootstrapDB` and `tmplHandler` are now created BEFORE `adminAuth`; new routes registered; legacy routes kept.
 - `make test-unit-go`: all 11 packages pass, zero regressions.
 
 ### File List
 
-- `gateway/internal/admin/auth.go` — MODIFIED: added `ErrOIDCConfigMissing`, `ServerConfigReader` interface, `postgresServerConfigReader`, `configReader`/`tmpl` fields on `AdminAuth`, updated `NewAdminAuth` signature, added `LoginPageHandler` and `LoginStartHandler`, updated `buildOAuth2Config` redirect URL, updated state cookie delete path in `CallbackHandler`
-- `gateway/internal/admin/page_data.go` — MODIFIED: added `LoginPageData` struct
-- `gateway/internal/admin/templates/login.html` — CREATED: login page template with DaisyUI card, SSO button, error alert
-- `gateway/internal/admin/login_test.go` — CREATED: 8 unit tests for `LoginPageHandler` and `LoginStartHandler`
-- `gateway/internal/admin/auth_test.go` — MODIFIED: updated `newTestAdminAuth` and `TestSignAndVerifyCookie` to pass `nil, nil` for new `NewAdminAuth` parameters
-- `gateway/cmd/gateway/main.go` — MODIFIED: reordered init (bootstrapDB + tmplHandler before adminAuth), updated `NewAdminAuth` call, registered `/admin/login`, `/admin/login/start`, `/admin/callback` routes
+- `gateway/internal/admin/auth.go` - MODIFIED: added `ErrOIDCConfigMissing`, `ServerConfigReader` interface, `postgresServerConfigReader`, `configReader`/`tmpl` fields on `AdminAuth`, updated `NewAdminAuth` signature, added `LoginPageHandler` and `LoginStartHandler`, updated `buildOAuth2Config` redirect URL, updated state cookie delete path in `CallbackHandler`
+- `gateway/internal/admin/page_data.go` - MODIFIED: added `LoginPageData` struct
+- `gateway/internal/admin/templates/login.html` - CREATED: login page template with DaisyUI card, SSO button, error alert
+- `gateway/internal/admin/login_test.go` - CREATED: 8 unit tests for `LoginPageHandler` and `LoginStartHandler`
+- `gateway/internal/admin/auth_test.go` - MODIFIED: updated `newTestAdminAuth` and `TestSignAndVerifyCookie` to pass `nil, nil` for new `NewAdminAuth` parameters
+- `gateway/cmd/gateway/main.go` - MODIFIED: reordered init (bootstrapDB + tmplHandler before adminAuth), updated `NewAdminAuth` call, registered `/admin/login`, `/admin/login/start`, `/admin/callback` routes
 
 ### Review Findings
 
-- [x] [Review][Patch] P1 MAJOR: Build broken — `fakeServerConfigReader` missing `CompleteBootstrap` method; `callback_test.go` SameSite assertion Strict→Lax; all callback tests missing `configReader` injection; `TestLoginStartHandler_MissingOIDCConfig` expected 503 but code returns 302 redirect; `TestBootstrapWizard_StepHandler_BackNavigation` broken by hidden carry-fields; `TestFinalizeHandler_Success` redirect target updated [login_test.go, callback_test.go, auth_test.go, bootstrap_api_test.go, bootstrap_wizard_test.go]
-- [x] [Review][Patch] P2 MAJOR: `CompleteBootstrap` not idempotent — plain INSERT fails on retry with unique_violation; changed to `ON CONFLICT (key) DO NOTHING` + RowsAffected check [auth.go:76-90]
-- [x] [Review][Patch] P3 MAJOR: `mode=bootstrap` replay after bootstrap complete enables privilege escalation — combined with P2 fix: RowsAffected==0 returns error, blocking grant of instance_admin [auth.go:76-90]
-- [x] [Review][Patch] P4 MINOR: Double `LoadOIDCConfig` call in CallbackHandler — second call silently swallowed errors; used first call's clientSecret directly [auth.go:335]
-- [x] [Review][Patch] P5 MINOR: CallbackHandler missing nil guard on `configReader` — added nil check matching LoginStartHandler pattern [auth.go:302]
-- [x] [Review][Defer] D1: `extractFirstRoleClaim` takes only first array element — order-dependent privilege. Pre-existing OIDC pattern.
+- [x] [Review][Patch] P1 MAJOR: Build broken - `fakeServerConfigReader` missing `CompleteBootstrap` method; `callback_test.go` SameSite assertion Strict→Lax; all callback tests missing `configReader` injection; `TestLoginStartHandler_MissingOIDCConfig` expected 503 but code returns 302 redirect; `TestBootstrapWizard_StepHandler_BackNavigation` broken by hidden carry-fields; `TestFinalizeHandler_Success` redirect target updated [login_test.go, callback_test.go, auth_test.go, bootstrap_api_test.go, bootstrap_wizard_test.go]
+- [x] [Review][Patch] P2 MAJOR: `CompleteBootstrap` not idempotent - plain INSERT fails on retry with unique_violation; changed to `ON CONFLICT (key) DO NOTHING` + RowsAffected check [auth.go:76-90]
+- [x] [Review][Patch] P3 MAJOR: `mode=bootstrap` replay after bootstrap complete enables privilege escalation - combined with P2 fix: RowsAffected==0 returns error, blocking grant of instance_admin [auth.go:76-90]
+- [x] [Review][Patch] P4 MINOR: Double `LoadOIDCConfig` call in CallbackHandler - second call silently swallowed errors; used first call's clientSecret directly [auth.go:335]
+- [x] [Review][Patch] P5 MINOR: CallbackHandler missing nil guard on `configReader` - added nil check matching LoginStartHandler pattern [auth.go:302]
+- [x] [Review][Defer] D1: `extractFirstRoleClaim` takes only first array element - order-dependent privilege. Pre-existing OIDC pattern.
 - [x] [Review][Defer] D2: Catch-all `/admin/` silently swallows DB errors. Operational observability gap.
 - [x] [Review][Defer] D3: `bootstrap-done.html` hardcodes `instance_admin` role name. Acceptable for bootstrap-only page.
 
 ## Change Log
 
-- 2026-04-01: Story 3.9 implemented — Admin OIDC Login Flow (PKCE + State). Added `GET /admin/login` HTML page, `GET /admin/login/start` PKCE redirect with DB-sourced OIDC config, `GET /admin/callback` canonical route. `ServerConfigReader` interface for testability. 7 unit tests. Zero regressions.
-- 2026-04-01: Code review — added `TestLoginStartHandler_CookieSecureTLS` test (AC 5: Secure flag verification over TLS). Fixed Completion Notes count (was "6", now "8"). Total: 8 unit tests.
-- 2026-04-02: Code review (beyond-scope changes) — 5 PATCH fixes applied (2 MAJOR, 3 MINOR), 3 deferred, 11 dismissed. Fixed: build-broken test doubles, CompleteBootstrap idempotency + privilege replay guard, double LoadOIDCConfig, CallbackHandler nil guard. All 11 Go packages pass.
+- 2026-04-01: Story 3.9 implemented - Admin OIDC Login Flow (PKCE + State). Added `GET /admin/login` HTML page, `GET /admin/login/start` PKCE redirect with DB-sourced OIDC config, `GET /admin/callback` canonical route. `ServerConfigReader` interface for testability. 7 unit tests. Zero regressions.
+- 2026-04-01: Code review - added `TestLoginStartHandler_CookieSecureTLS` test (AC 5: Secure flag verification over TLS). Fixed Completion Notes count (was "6", now "8"). Total: 8 unit tests.
+- 2026-04-02: Code review (beyond-scope changes) - 5 PATCH fixes applied (2 MAJOR, 3 MINOR), 3 deferred, 11 dismissed. Fixed: build-broken test doubles, CompleteBootstrap idempotency + privilege replay guard, double LoadOIDCConfig, CallbackHandler nil guard. All 11 Go packages pass.

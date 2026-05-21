@@ -20,7 +20,7 @@ Security audit (2026-04-20): zero CSRF protection across `/admin/*` POST endpoin
 
 Concrete exposed endpoints:
 - `POST /admin/bootstrap` (StepHandler)
-- `POST /admin/bootstrap/select-claim` (ClaimSelectionHandler) — high-impact, combined with Story 5.10/5.11
+- `POST /admin/bootstrap/select-claim` (ClaimSelectionHandler) - high-impact, combined with Story 5.10/5.11
 - `POST /admin/logout` (LogoutHandler)
 
 ---
@@ -60,15 +60,15 @@ Concrete exposed endpoints:
 
 ### Tests written FIRST (ATDD gate):
 
-1. `TestCSRF_RejectsPOSTWithoutToken` — Go httptest
+1. `TestCSRF_RejectsPOSTWithoutToken` - Go httptest
    - Given: valid admin session, POST `/admin/logout` without `_csrf` field
    - Then: 403
 
-2. `TestCSRF_RejectsMismatchedToken` — Go httptest
+2. `TestCSRF_RejectsMismatchedToken` - Go httptest
    - Given: cookie `csrf_token=A`, form `_csrf=B`
    - Then: 403, constant-time compare (document in PR)
 
-3. Playwright E2E: `admin-bootstrap.spec.ts` — full wizard, token extracted from cookie and compared to form hidden input
+3. Playwright E2E: `admin-bootstrap.spec.ts` - full wizard, token extracted from cookie and compared to form hidden input
 
 ---
 
@@ -77,7 +77,7 @@ Concrete exposed endpoints:
 - Generate token: `crypto/rand.Read([32]byte)` → `base64.RawURLEncoding`
 - Template helper: `{{ csrfField . }}` emits `<input type="hidden" name="_csrf" value="{{.CSRFToken}}">`
 - Inject `CSRFToken` into page-data struct from the middleware via request context
-- `POST /admin/bootstrap/select-claim` will already be behind `BootstrapGuard` (Story 5.10) — CSRF applies in addition
+- `POST /admin/bootstrap/select-claim` will already be behind `BootstrapGuard` (Story 5.10) - CSRF applies in addition
 
 ---
 
@@ -92,24 +92,24 @@ Concrete exposed endpoints:
 - [x] Task 2: Add `CSRFToken string` to `PageData` struct in `gateway/internal/admin/page_data.go`
 
 - [x] Task 3: Inject CSRF token from context into PageData in handlers
-  - [x] `bootstrap.go` — `Handler` and `StepHandler`
-  - [x] `auth.go` — `ClaimSelectionHandler` (renders bootstrap-claims.html)
-  - [x] `dashboard.go` — `Handler` (base layout contains logout form)
+  - [x] `bootstrap.go` - `Handler` and `StepHandler`
+  - [x] `auth.go` - `ClaimSelectionHandler` (renders bootstrap-claims.html)
+  - [x] `dashboard.go` - `Handler` (base layout contains logout form)
 
 - [x] Task 4: Add `_csrf` hidden fields to HTML form templates
-  - [x] `bootstrap.html` — Step 1 form
-  - [x] `bootstrap.html` — Step 2 form
-  - [x] `bootstrap-claims.html` — claims form (with claims)
-  - [x] `bootstrap-claims.html` — manual claim form (without claims)
-  - [x] `base.html` — logout link converted to POST form with `_csrf`
+  - [x] `bootstrap.html` - Step 1 form
+  - [x] `bootstrap.html` - Step 2 form
+  - [x] `bootstrap-claims.html` - claims form (with claims)
+  - [x] `bootstrap-claims.html` - manual claim form (without claims)
+  - [x] `base.html` - logout link converted to POST form with `_csrf`
 
 - [x] Task 5: Wire `CSRFMiddleware` in `gateway/cmd/gateway/main.go`
-  - [x] `GET /admin/callback` — CSRF for token rotation
-  - [x] `POST /admin/logout` — new CSRF-protected POST logout route
-  - [x] `GET /admin/dashboard` — CSRF for base layout logout form
-  - [x] `GET /admin/bootstrap` — CSRF issues cookie for GET
-  - [x] `POST /admin/bootstrap` — CSRF verifies token
-  - [x] `POST /admin/bootstrap/select-claim` — CSRF verifies token
+  - [x] `GET /admin/callback` - CSRF for token rotation
+  - [x] `POST /admin/logout` - new CSRF-protected POST logout route
+  - [x] `GET /admin/dashboard` - CSRF for base layout logout form
+  - [x] `GET /admin/bootstrap` - CSRF issues cookie for GET
+  - [x] `POST /admin/bootstrap` - CSRF verifies token
+  - [x] `POST /admin/bootstrap/select-claim` - CSRF verifies token
 
 ---
 
@@ -128,7 +128,7 @@ Implemented double-submit-cookie CSRF protection (Story 5.13) in three layers:
 ### Completion Notes
 
 - All 7 unit tests (`TestCSRF_*`) pass green.
-- Full test suite: 344 tests pass across 15 packages — no regressions.
+- Full test suite: 344 tests pass across 15 packages - no regressions.
 - Build clean.
 - `subtle.ConstantTimeCompare` prevents timing oracle attacks (AC2).
 - Token rotation on `/admin/callback` binds CSRF token to the authenticated session (AC6).
@@ -139,18 +139,18 @@ Implemented double-submit-cookie CSRF protection (Story 5.13) in three layers:
 
 ## File List
 
-- `gateway/internal/admin/middleware.go` — added `CSRFMiddleware`, `CSRFTokenFromContext`, `generateCSRFToken`, `contextKeyCSRFToken`; added imports `crypto/rand`, `crypto/subtle`
-- `gateway/internal/admin/page_data.go` — added `CSRFToken string` field to `PageData`
-- `gateway/internal/admin/bootstrap.go` — inject `CSRFToken` from context in `Handler` and `StepHandler`
-- `gateway/internal/admin/auth.go` — inject `CSRFToken` from context in `ClaimSelectionHandler`
-- `gateway/internal/admin/dashboard.go` — inject `CSRFToken` from context in `Handler`
-- `gateway/internal/admin/templates/bootstrap.html` — `_csrf` hidden field in Step 1 and Step 2 forms
-- `gateway/internal/admin/templates/bootstrap-claims.html` — `_csrf` hidden field in both claim-selection forms
-- `gateway/internal/admin/templates/layouts/base.html` — logout converted from GET link to CSRF-protected POST form
-- `gateway/cmd/gateway/main.go` — wire `CSRFMiddleware` on all relevant GET/POST admin routes; add `POST /admin/logout`
+- `gateway/internal/admin/middleware.go` - added `CSRFMiddleware`, `CSRFTokenFromContext`, `generateCSRFToken`, `contextKeyCSRFToken`; added imports `crypto/rand`, `crypto/subtle`
+- `gateway/internal/admin/page_data.go` - added `CSRFToken string` field to `PageData`
+- `gateway/internal/admin/bootstrap.go` - inject `CSRFToken` from context in `Handler` and `StepHandler`
+- `gateway/internal/admin/auth.go` - inject `CSRFToken` from context in `ClaimSelectionHandler`
+- `gateway/internal/admin/dashboard.go` - inject `CSRFToken` from context in `Handler`
+- `gateway/internal/admin/templates/bootstrap.html` - `_csrf` hidden field in Step 1 and Step 2 forms
+- `gateway/internal/admin/templates/bootstrap-claims.html` - `_csrf` hidden field in both claim-selection forms
+- `gateway/internal/admin/templates/layouts/base.html` - logout converted from GET link to CSRF-protected POST form
+- `gateway/cmd/gateway/main.go` - wire `CSRFMiddleware` on all relevant GET/POST admin routes; add `POST /admin/logout`
 
 ---
 
 ## Change Log
 
-- 2026-04-20: Story 5.13 implemented — CSRF double-submit-cookie middleware + template integration + route wiring. All 7 unit tests pass; 344/344 total tests green.
+- 2026-04-20: Story 5.13 implemented - CSRF double-submit-cookie middleware + template integration + route wiring. All 7 unit tests pass; 344/344 total tests green.

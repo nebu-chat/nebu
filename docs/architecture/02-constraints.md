@@ -5,7 +5,7 @@
 | Constraint | Rationale |
 |---|---|
 | Three runtime components only: Go binary, Elixir release, PostgreSQL | Eliminates Redis, NATS, Kafka; reduces ops surface |
-| OIDC-only authentication | No local auth path, no password hashing, no brute-force guards at app level — IdP owns identity |
+| OIDC-only authentication | No local auth path, no password hashing, no brute-force guards at app level - IdP owns identity |
 | Docker Compose as sole supported deployment target | Kubernetes is possible but unsupported; reduces target complexity for primary audience |
 | Matrix Client-Server API compatibility | Incompatibilities with Element/FluffyChat are treated as bugs (NFR-M1, NFR-M2) |
 | Apache 2.0 license for all dependencies | No AGPLv3, BSL, or SSPL dependencies permitted |

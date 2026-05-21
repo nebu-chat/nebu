@@ -5,7 +5,7 @@ security_review: not-needed
 created: 2026-04-30
 ---
 
-# Story 7.21: Profile Einzelfelder — GET /profile/{userId}/displayname + /avatar_url
+# Story 7.21: Profile Einzelfelder - GET /profile/{userId}/displayname + /avatar_url
 
 Status: review
 
@@ -23,11 +23,11 @@ returns both `displayname` and `avatar_url`. Matrix spec also defines two sub-re
 that return only one field each. Many clients (particularly mobile) use these endpoints to fetch
 individual fields on demand.
 
-Both endpoints are **unauthenticated** per the Matrix spec — anyone can look up a user's public
+Both endpoints are **unauthenticated** per the Matrix spec - anyone can look up a user's public
 profile. They are already partially covered by the existing `ProfileDB` interface and profile lookup
 logic in `profile.go`. This story adds thin wrapper methods to the existing `ProfileHandler`.
 
-No gRPC calls are needed — profile reads go directly to PostgreSQL via `ProfileDB.GetProfile`.
+No gRPC calls are needed - profile reads go directly to PostgreSQL via `ProfileDB.GetProfile`.
 No proto changes.
 
 **Response shapes:**
@@ -51,7 +51,7 @@ GET /profile/{userId}/avatar_url
 
 3. Both endpoints return `404 M_NOT_FOUND` when the `userId` does not exist in the database.
 
-4. Both endpoints are registered without `jwtMiddleware` — unauthenticated access is allowed.
+4. Both endpoints are registered without `jwtMiddleware` - unauthenticated access is allowed.
 
 5. Both endpoints are wrapped with `looseRL` (consistent with other unauthenticated Matrix
    endpoints) to prevent enumeration abuse.
@@ -63,27 +63,27 @@ GET /profile/{userId}/avatar_url
 
 ### Tests written FIRST (before implementation code):
 
-1. [GetDisplayname_ReturnsValue] — Godog
+1. [GetDisplayname_ReturnsValue] - Godog
    - Given: user `@alice:server` exists with displayname "Alice Wonderland"
    - When: unauthenticated `GET /_matrix/client/v3/profile/@alice:server/displayname`
    - Then: HTTP 200; body `{"displayname":"Alice Wonderland"}`
 
-2. [GetAvatarURL_ReturnsValue] — Godog
+2. [GetAvatarURL_ReturnsValue] - Godog
    - Given: user `@alice:server` exists with avatar_url "mxc://server/abc123"
    - When: unauthenticated `GET /_matrix/client/v3/profile/@alice:server/avatar_url`
    - Then: HTTP 200; body `{"avatar_url":"mxc://server/abc123"}`
 
-3. [GetAvatarURL_ReturnsNull_WhenNotSet] — Go unit test (httptest)
+3. [GetAvatarURL_ReturnsNull_WhenNotSet] - Go unit test (httptest)
    - Given: ProfileDB returns `ProfileData{DisplayName:"Alice", AvatarURL:""}` (no avatar)
    - When: `GET /profile/@alice:server/avatar_url`
    - Then: HTTP 200; body `{"avatar_url":null}`
 
-4. [GetDisplayname_NotFound] — Godog
+4. [GetDisplayname_NotFound] - Godog
    - Given: no user `@ghost:server` in the database
    - When: unauthenticated `GET /_matrix/client/v3/profile/@ghost:server/displayname`
    - Then: HTTP 404 `{"errcode":"M_NOT_FOUND","error":"User not found"}`
 
-5. [GetAvatarURL_NotFound] — Go unit test (httptest)
+5. [GetAvatarURL_NotFound] - Go unit test (httptest)
    - Given: ProfileDB returns `ErrProfileNotFound`
    - When: `GET /profile/@ghost:server/avatar_url`
    - Then: HTTP 404 `{"errcode":"M_NOT_FOUND",...}`
@@ -92,7 +92,7 @@ GET /profile/{userId}/avatar_url
 
 **Files to modify:**
 
-- `gateway/internal/matrix/profile.go` — Add two methods to the existing `ProfileHandler`:
+- `gateway/internal/matrix/profile.go` - Add two methods to the existing `ProfileHandler`:
   ```go
   func (h *ProfileHandler) GetDisplayname(w http.ResponseWriter, r *http.Request)
   func (h *ProfileHandler) GetAvatarURL(w http.ResponseWriter, r *http.Request)
@@ -105,7 +105,7 @@ GET /profile/{userId}/avatar_url
 
   Reuse the existing `writeMatrixError` helper (already used in `profile.go`).
 
-- `gateway/cmd/gateway/main.go` (~line 404+) — Register two routes **without** `jwtMiddleware`:
+- `gateway/cmd/gateway/main.go` (~line 404+) - Register two routes **without** `jwtMiddleware`:
   ```
   GET /_matrix/client/v3/profile/{userId}/displayname  → looseRL(profileHandler.GetDisplayname)
   GET /_matrix/client/v3/profile/{userId}/avatar_url   → looseRL(profileHandler.GetAvatarURL)
@@ -113,10 +113,10 @@ GET /profile/{userId}/avatar_url
   Place them **before** the existing `GET /profile/{userId}` route to avoid path conflicts with
   Go's `net/http` ServeMux (more specific paths must be registered first).
 
-- `gateway/internal/matrix/profile_test.go` — Add unit tests for the two new methods using
+- `gateway/internal/matrix/profile_test.go` - Add unit tests for the two new methods using
   `httptest` and a mock `ProfileDB`.
 
-- `gateway/features/profile_subfields.feature` — Godog feature file (written first, red phase).
+- `gateway/features/profile_subfields.feature` - Godog feature file (written first, red phase).
 
-**No proto changes.** No gRPC calls. No new DB methods — `ProfileDB.GetProfile` returns both
+**No proto changes.** No gRPC calls. No new DB methods - `ProfileDB.GetProfile` returns both
 fields; the handler just projects the relevant field into the response.

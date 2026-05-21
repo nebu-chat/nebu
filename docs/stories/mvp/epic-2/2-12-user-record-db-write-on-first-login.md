@@ -16,7 +16,7 @@ so that subsequent requests have a persistent user identity to reference.
 
 2. **Given** a `ValidateToken` gRPC call with a `user_id` that already exists,
    **When** processed,
-   **Then** `last_seen_at` is updated and the existing record is returned — no duplicate INSERT
+   **Then** `last_seen_at` is updated and the existing record is returned - no duplicate INSERT
 
 3. **Given** an INSERT that conflicts on `user_id` (concurrent first-login race condition),
    **When** processed,
@@ -30,8 +30,8 @@ so that subsequent requests have a persistent user identity to reference.
 
 - [x] Create `core/apps/nebu_db/` umbrella app (AC: #1, #2, #3)
   - [x] Create `core/apps/nebu_db/mix.exs` with `ecto_sql` and `postgrex` deps
-  - [x] Create `core/apps/nebu_db/lib/nebu/repo.ex` — `Nebu.Repo` using `Ecto.Repo`
-  - [x] Create `core/apps/nebu_db/lib/nebu/db_helpers.ex` — `now_ms/0` helper
+  - [x] Create `core/apps/nebu_db/lib/nebu/repo.ex` - `Nebu.Repo` using `Ecto.Repo`
+  - [x] Create `core/apps/nebu_db/lib/nebu/db_helpers.ex` - `now_ms/0` helper
 
 - [x] Wire `nebu_db` into the umbrella (AC: #1)
   - [x] Add `nebu_db` to releases in `core/mix.exs`
@@ -62,14 +62,14 @@ so that subsequent requests have a persistent user identity to reference.
 ### Scope
 
 This story does **two things**:
-1. Creates the `nebu_db` umbrella app — the first Elixir DB access infrastructure
-2. Implements `Nebu.Session.UserStore.upsert_user/2` — the user-record upsert on login
+1. Creates the `nebu_db` umbrella app - the first Elixir DB access infrastructure
+2. Implements `Nebu.Session.UserStore.upsert_user/2` - the user-record upsert on login
 
 **NOT in this story:**
 - Calling `upsert_user` from the `ValidateToken` gRPC handler (Story 2.14)
 - Keypair generation + PII encryption on provisioning (Story 2.13)
 - Bootstrap mode / auto instance_admin assignment (Story 2.15)
-- Any changes to the `users` schema — it was created in Story 2.1 migration
+- Any changes to the `users` schema - it was created in Story 2.1 migration
 
 ### The `users` Table Schema (Already Exists)
 
@@ -175,7 +175,7 @@ end
 
 ### Step 2: Update Umbrella `mix.exs`
 
-**`core/mix.exs`** — add `nebu_db` to releases and umbrella deps:
+**`core/mix.exs`** - add `nebu_db` to releases and umbrella deps:
 
 ```elixir
 defmodule Nebu.MixProject do
@@ -219,7 +219,7 @@ end
 Add to `core/config/runtime.exs` (after existing PII key block):
 
 ```elixir
-# DB configuration — required for all environments (nebu_db app)
+# DB configuration - required for all environments (nebu_db app)
 if config_env() in [:prod, :dev] do
   config :nebu_db, Nebu.Repo,
     url: System.get_env("NEBU_DB_URL") || raise("NEBU_DB_URL is not set"),
@@ -227,7 +227,7 @@ if config_env() in [:prod, :dev] do
 end
 ```
 
-**Do NOT add a test env DB config** — Story 2.12 unit tests use a fake DB, not a real Postgrex connection.
+**Do NOT add a test env DB config** - Story 2.12 unit tests use a fake DB, not a real Postgrex connection.
 
 ### Step 4: Create `Nebu.Session.UserStore`
 
@@ -294,7 +294,7 @@ end
 
 **Why raw SQL, not Ecto.Schema?** Go gateway owns all schema migrations. Elixir has no schema-write access. Defining Ecto.Schema in Elixir would duplicate the schema definition and create drift risk. Raw SQL via `Ecto.Adapters.SQL.query/3` is intentional.
 
-**Why `ON CONFLICT ... SET last_seen_at = EXCLUDED.created_at`?** The `EXCLUDED` table references the value that WOULD have been inserted. Since we pass `now_ms` as `$3` (mapped to `created_at` in the INSERT), we reuse that same timestamp for `last_seen_at` in the UPDATE path. This is idiomatic PostgreSQL — no separate UPDATE needed.
+**Why `ON CONFLICT ... SET last_seen_at = EXCLUDED.created_at`?** The `EXCLUDED` table references the value that WOULD have been inserted. Since we pass `now_ms` as `$3` (mapped to `created_at` in the INSERT), we reuse that same timestamp for `last_seen_at` in the UPDATE path. This is idiomatic PostgreSQL - no separate UPDATE needed.
 
 **Why `RETURNING user_id`?** Confirms the row was actually written/updated. Pattern-matches on `[[^user_id]]` to verify the result.
 
@@ -317,11 +317,11 @@ end
 ```elixir
 defmodule Nebu.Session.UserStoreTest do
   use ExUnit.Case, async: false
-  # async: false required — Application.put_env is process-global
+  # async: false required - Application.put_env is process-global
 
   alias Nebu.Session.UserStore
 
-  # ETS-backed fake DB — no Postgrex connection needed for unit tests
+  # ETS-backed fake DB - no Postgrex connection needed for unit tests
   defmodule FakeUserDB do
     @behaviour Nebu.Session.UserStore
 
@@ -390,82 +390,82 @@ defmodule Nebu.Session.UserStoreTest do
 end
 ```
 
-**Why `async: false`?** `Application.put_env/3` is process-global — running concurrent tests with different `:db_module` configs would cause flakiness.
+**Why `async: false`?** `Application.put_env/3` is process-global - running concurrent tests with different `:db_module` configs would cause flakiness.
 
 **Why ETS, not Mox?** No external dep needed. The ETS table perfectly models the `ON CONFLICT` idempotency semantics (`[:set]` ETS table allows only one entry per key, exactly like PostgreSQL's `ON CONFLICT (user_id)`).
 
 ### Step 7: Remove Placeholder Test
 
-The existing `core/apps/session_manager/test/nebu_session_test.exs` has a placeholder test. **REMOVE IT** entirely — the new `user_store_test.exs` replaces it.
+The existing `core/apps/session_manager/test/nebu_session_test.exs` has a placeholder test. **REMOVE IT** entirely - the new `user_store_test.exs` replaces it.
 
 Replace content of `core/apps/session_manager/test/nebu_session_test.exs` with just:
 ```elixir
 # Tests for session_manager are in test/nebu/session/user_store_test.exs
 ```
 
-OR delete the file entirely. Either is fine — just don't leave conflicting placeholder tests.
+OR delete the file entirely. Either is fine - just don't leave conflicting placeholder tests.
 
 ### Architecture Compliance
 
-**AI-Constraint #1:** `created_at` stored as `BIGINT` (milliseconds) — `System.system_time(:millisecond)` → `$3` in SQL → `BIGINT NOT NULL` column ✓
+**AI-Constraint #1:** `created_at` stored as `BIGINT` (milliseconds) - `System.system_time(:millisecond)` → `$3` in SQL → `BIGINT NOT NULL` column ✓
 
-**AI-Constraint #2:** Auth token NEVER forwarded to Elixir. This story deals only with `user_id` + `system_role` from gRPC metadata — both are safe derived values, not the raw JWT ✓
+**AI-Constraint #2:** Auth token NEVER forwarded to Elixir. This story deals only with `user_id` + `system_role` from gRPC metadata - both are safe derived values, not the raw JWT ✓
 
-**AI-Constraint #6:** All fallible operations return `{:ok, result}` / `{:error, reason}` — no throw/raise for business logic ✓
+**AI-Constraint #6:** All fallible operations return `{:ok, result}` / `{:error, reason}` - no throw/raise for business logic ✓
 
 **AI-Constraint #4:** Env var follows `NEBU_{COMPONENT}_{KEY}` pattern → `NEBU_DB_URL` ✓
 
 ### Critical Anti-Patterns to Avoid
 
-**NEVER define `Ecto.Schema` in Elixir** — Go owns the schema, Elixir uses raw SQL only:
+**NEVER define `Ecto.Schema` in Elixir** - Go owns the schema, Elixir uses raw SQL only:
 ```elixir
-# ❌ WRONG — schema duplication, Go owns migrations
+# ❌ WRONG - schema duplication, Go owns migrations
 defmodule Nebu.User do
   use Ecto.Schema
   schema "users" do ...
 end
 
-# ✅ CORRECT — raw SQL via Ecto.Adapters.SQL.query
+# ✅ CORRECT - raw SQL via Ecto.Adapters.SQL.query
 Ecto.Adapters.SQL.query(Nebu.Repo, "INSERT INTO users ...", params)
 ```
 
-**NEVER use `Repo.insert/2` or `Repo.update/2`** — these require Ecto.Schema which we don't have:
+**NEVER use `Repo.insert/2` or `Repo.update/2`** - these require Ecto.Schema which we don't have:
 ```elixir
-# ❌ WRONG — requires Ecto.Schema
+# ❌ WRONG - requires Ecto.Schema
 Nebu.Repo.insert(%User{user_id: id})
 
-# ✅ CORRECT — raw SQL
+# ✅ CORRECT - raw SQL
 Ecto.Adapters.SQL.query(Nebu.Repo, @sql, [user_id, system_role, now_ms])
 ```
 
-**NEVER use `DateTime.utc_now()`** for timestamps — all timestamps are `BIGINT` milliseconds:
+**NEVER use `DateTime.utc_now()`** for timestamps - all timestamps are `BIGINT` milliseconds:
 ```elixir
-# ❌ WRONG — wrong type for BIGINT column
+# ❌ WRONG - wrong type for BIGINT column
 created_at = DateTime.utc_now()
 
-# ✅ CORRECT — milliseconds since epoch
+# ✅ CORRECT - milliseconds since epoch
 created_at = System.system_time(:millisecond)
 ```
 
-**NEVER raise or throw on DB error in business logic** — always return error tuple:
+**NEVER raise or throw on DB error in business logic** - always return error tuple:
 ```elixir
-# ❌ WRONG — raises on failure
+# ❌ WRONG - raises on failure
 Ecto.Adapters.SQL.query!(Nebu.Repo, @sql, params)
 
-# ✅ CORRECT — returns {:error, reason}
+# ✅ CORRECT - returns {:error, reason}
 case Ecto.Adapters.SQL.query(Nebu.Repo, @sql, params) do
   {:ok, _} -> {:ok, user_id}
   {:error, reason} -> {:error, reason}
 end
 ```
 
-**NEVER test against a real PostgreSQL in unit tests** — unit tests use the FakeDB. Integration tests (Story 2.21) will test against real DB.
+**NEVER test against a real PostgreSQL in unit tests** - unit tests use the FakeDB. Integration tests (Story 2.21) will test against real DB.
 
 ### Previous Story Intelligence (2.11)
 
 - **Test module structure:** `use ExUnit.Case, async: true` is the default in this project. **However, Story 2.12 must use `async: false`** because `Application.put_env` is global state (deviates from previous stories).
 - **`--warnings-as-errors` discipline:** All unused variables must be prefixed with `_`. In the ETS-based FakeDB mock, check that all function args are used or prefixed.
-- **`@behaviour`:** The `@behaviour Nebu.Session.UserStore` annotation on `Postgres` and `FakeUserDB` gets compiler-checked — correct callback signatures are enforced at compile time.
+- **`@behaviour`:** The `@behaviour Nebu.Session.UserStore` annotation on `Postgres` and `FakeUserDB` gets compiler-checked - correct callback signatures are enforced at compile time.
 
 ### Build & Test Commands
 
@@ -512,28 +512,28 @@ core/apps/session_manager/test/nebu_session_test.exs      ← remove placeholder
 ```
 
 **DO NOT TOUCH:**
-- `core/apps/signature/` — no changes
-- `core/apps/event_dispatcher/` — no changes (ValidateToken wiring is Story 2.14)
-- Any gateway files or migrations — Go owns migrations
-- `core/apps/session_manager/lib/nebu/session/application.ex` — no changes needed
+- `core/apps/signature/` - no changes
+- `core/apps/event_dispatcher/` - no changes (ValidateToken wiring is Story 2.14)
+- Any gateway files or migrations - Go owns migrations
+- `core/apps/session_manager/lib/nebu/session/application.ex` - no changes needed
 - Any `*_test.exs` in other apps
 
 ### Project Structure Notes
 
-- `nebu_db` is an umbrella app — its `mix.exs` must reference umbrella's `build_path`, `config_path`, `deps_path`, and `lockfile` (same pattern as all other apps in `core/apps/`)
-- `Nebu.Repo` starts under `Nebu.DB.Application`'s supervisor — add `nebu_db: :permanent` BEFORE dependent apps in the umbrella release definition so it starts first
-- `Application.get_env(:session_manager, :db_module, ...)` — `compile_env` is NOT used here because the db_module must be swappable at test runtime via `put_env`
+- `nebu_db` is an umbrella app - its `mix.exs` must reference umbrella's `build_path`, `config_path`, `deps_path`, and `lockfile` (same pattern as all other apps in `core/apps/`)
+- `Nebu.Repo` starts under `Nebu.DB.Application`'s supervisor - add `nebu_db: :permanent` BEFORE dependent apps in the umbrella release definition so it starts first
+- `Application.get_env(:session_manager, :db_module, ...)` - `compile_env` is NOT used here because the db_module must be swappable at test runtime via `put_env`
 
 ### References
 
 - [Source: epics.md#Story-2.12] Authoritative user story, acceptance criteria
-- [Source: epics.md#Story-2.13] Scope boundary — keypair + PII encryption is next story
-- [Source: epics.md#Story-2.14] Scope boundary — ValidateToken gRPC wiring is that story
+- [Source: epics.md#Story-2.13] Scope boundary - keypair + PII encryption is next story
+- [Source: epics.md#Story-2.14] Scope boundary - ValidateToken gRPC wiring is that story
 - [Source: architecture.md#Project-Structure] `nebu_db` app in directory tree (line ~996)
-- [Source: architecture.md#Enforcement rule 1] BIGINT timestamps — `System.system_time(:millisecond)`
+- [Source: architecture.md#Enforcement rule 1] BIGINT timestamps - `System.system_time(:millisecond)`
 - [Source: architecture.md#Enforcement rule 6] `{:ok, result}` / `{:error, reason}` for all fallible ops
 - [Source: architecture.md#Resolved-Migrations] Go owns schema, Elixir has no schema-write access → raw SQL only
-- [Source: architecture.md#Daten-Grenze] `Elixir Core → [TLS] → PostgreSQL — Business-Logic-Writes`
+- [Source: architecture.md#Daten-Grenze] `Elixir Core → [TLS] → PostgreSQL - Business-Logic-Writes`
 - [Source: gateway/migrations/000004_users.up.sql] `users` table schema (Story 2.1 created it)
 - [Source: implementation-artifacts/2-11-*.md] Umbrella dep pattern, `--warnings-as-errors`, `@behaviour`
 
@@ -549,11 +549,11 @@ claude-sonnet-4-6 (1M context)
 
 - Created `nebu_db` umbrella app with `Nebu.Repo` (Ecto.Repo/Postgres), `Nebu.DB.Helpers.now_ms/0`, and `Nebu.DB.Application` supervisor.
 - Added `ecto_sql ~> 3.12` and `postgrex ~> 0.19` to umbrella `mix.exs` deps; `nebu_db: :permanent` first in releases list for correct startup order.
-- Added `NEBU_DB_URL` runtime config block for `:prod` and `:dev` envs only (no test-env DB config — unit tests use FakeUserDB).
-- Implemented `Nebu.Session.UserStore` (behaviour + delegation via `Application.get_env`) and `Nebu.Session.UserStore.Postgres` (raw SQL `INSERT ... ON CONFLICT DO UPDATE` — no Ecto.Schema by design).
+- Added `NEBU_DB_URL` runtime config block for `:prod` and `:dev` envs only (no test-env DB config - unit tests use FakeUserDB).
+- Implemented `Nebu.Session.UserStore` (behaviour + delegation via `Application.get_env`) and `Nebu.Session.UserStore.Postgres` (raw SQL `INSERT ... ON CONFLICT DO UPDATE` - no Ecto.Schema by design).
 - 3 unit tests (ETS-backed FakeUserDB, `async: false`): insert on first login, idempotent upsert (exactly 1 record), `last_seen_at` updated on second call.
 - Placeholder test in `nebu_session_test.exs` replaced with comment.
-- `make test-unit-elixir`: all apps green — 3 tests (session_manager), 0 failures; no regressions.
+- `make test-unit-elixir`: all apps green - 3 tests (session_manager), 0 failures; no regressions.
 
 ### File List
 
@@ -573,4 +573,4 @@ core/mix.lock
 ## Change Log
 
 - 2026-03-27: Created `nebu_db` umbrella app (Ecto.Repo, db_helpers, Application supervisor). Wired into umbrella mix.exs (releases + deps). Added NEBU_DB_URL runtime config. Implemented `Nebu.Session.UserStore` behaviour + Postgres implementation (raw SQL upsert, ON CONFLICT). Added 3 ETS-backed unit tests. Removed placeholder session_manager test.
-- 2026-03-27: **Code Review (claude-opus-4-6)** — 2 fixes applied: (1) `Nebu.DB.Application` now conditionally starts `Nebu.Repo` only when config is present (eliminates 10 Postgrex error lines in test env); (2) `postgres.ex` now uses `Nebu.DB.Helpers.now_ms/0` instead of direct `System.system_time(:millisecond)` call. Added `core/mix.lock` to File List. All 38 tests pass, 0 failures.
+- 2026-03-27: **Code Review (claude-opus-4-6)** - 2 fixes applied: (1) `Nebu.DB.Application` now conditionally starts `Nebu.Repo` only when config is present (eliminates 10 Postgrex error lines in test env); (2) `postgres.ex` now uses `Nebu.DB.Helpers.now_ms/0` instead of direct `System.system_time(:millisecond)` call. Added `core/mix.lock` to File List. All 38 tests pass, 0 failures.

@@ -8,7 +8,7 @@ ui: false
 atdd: not-applicable
 ---
 
-# Story 13.8: Managed Database Services — AWS Aurora Serverless v2 + Stackit Managed PostgreSQL (PostgresFlex)
+# Story 13.8: Managed Database Services - AWS Aurora Serverless v2 + Stackit Managed PostgreSQL (PostgresFlex)
 
 Status: review
 
@@ -24,7 +24,7 @@ So that both deployments have lower baseline cost, operational overhead is reduc
 
 ## Background & Motivation
 
-### AWS — Why Aurora Serverless v2 over RDS Multi-AZ
+### AWS - Why Aurora Serverless v2 over RDS Multi-AZ
 
 The current `deploy/tofu/modules/nebu-aws/database.tf` uses `aws_db_instance` with `multi_az = true` and `instance_class = "db.t3.medium"`. This always-on instance bills ~$50–100/month regardless of load.
 
@@ -32,7 +32,7 @@ Aurora Serverless v2 (`engine_mode = "provisioned"` + `serverlessv2_scaling_conf
 
 **Key difference from Aurora Serverless v1:** Serverless v2 uses `engine_mode = "provisioned"` (NOT `"serverless"`). It requires both an `aws_rds_cluster` resource AND at least one `aws_rds_cluster_instance` with `instance_class = "db.serverless"`.
 
-### Stackit — Why PostgresFlex over bundled Docker PostgreSQL
+### Stackit - Why PostgresFlex over bundled Docker PostgreSQL
 
 The current `deploy/tofu/examples/stackit/cloud-init.tftpl` starts a `postgres:16-alpine` container inside docker-compose on the VM alongside Keycloak, core, and gateway. This bundles the database with the application VM:
 
@@ -41,7 +41,7 @@ The current `deploy/tofu/examples/stackit/cloud-init.tftpl` starts a `postgres:1
 - Snapshot/PITR requires manual pg_dump cron
 - Keycloak and Nebu data share a single Postgres process
 
-`stackit_postgresflex_instance` provisions a dedicated managed PostgreSQL instance (PostgresFlex) in the Stackit platform with automated daily backups, PITR, and HA replication. The VM then connects via the instance's private endpoint — the postgres container is removed from docker-compose.
+`stackit_postgresflex_instance` provisions a dedicated managed PostgreSQL instance (PostgresFlex) in the Stackit platform with automated daily backups, PITR, and HA replication. The VM then connects via the instance's private endpoint - the postgres container is removed from docker-compose.
 
 **Important:** The Stackit provider resource is `stackit_postgresflex_instance` (NOT `stackit_postgresql_instance`). The user resource is `stackit_postgresflex_user`. The provider version `~> 0.95` (already in the lock file) supports these resources.
 
@@ -49,7 +49,7 @@ The current `deploy/tofu/examples/stackit/cloud-init.tftpl` starts a `postgres:1
 
 ## Acceptance Criteria
 
-**AC1 — AWS: `aws_rds_cluster` replaces `aws_db_instance` in `database.tf`:**
+**AC1 - AWS: `aws_rds_cluster` replaces `aws_db_instance` in `database.tf`:**
 Given `deploy/tofu/modules/nebu-aws/database.tf`,
 When the file is inspected,
 Then:
@@ -58,21 +58,21 @@ Then:
 - `aws_rds_cluster_instance.this` is present with `instance_class = "db.serverless"`
 - `aws_db_subnet_group.this` is retained (Aurora clusters also use DB subnet groups)
 
-**AC2 — AWS: Serverless v2 scaling configuration is present:**
+**AC2 - AWS: Serverless v2 scaling configuration is present:**
 Given `aws_rds_cluster.this`,
 When the `serverlessv2_scaling_configuration` block is inspected,
 Then:
 - `min_capacity = 0` (scales to zero when idle, for dev/staging)
-- `max_capacity = 4` (sufficient for expected Nebu load — 2 vCPU equivalent)
+- `max_capacity = 4` (sufficient for expected Nebu load - 2 vCPU equivalent)
 - `seconds_until_auto_pause = 3600` (auto-pause after 1 hour idle)
 - A comment explains that operators should set `min_capacity = 0.5` for production to avoid cold starts
 
-**AC3 — AWS: `db_endpoint` output updated to Aurora cluster endpoint:**
+**AC3 - AWS: `db_endpoint` output updated to Aurora cluster endpoint:**
 Given `deploy/tofu/modules/nebu-aws/outputs.tf`,
 When the `db_endpoint` output is inspected,
 Then it references `aws_rds_cluster.this.endpoint` instead of the removed `aws_db_instance.this.endpoint`
 
-**AC4 — AWS: Variables cleaned up — `db_instance_class` and `enable_performance_insights` removed:**
+**AC4 - AWS: Variables cleaned up - `db_instance_class` and `enable_performance_insights` removed:**
 Given `deploy/tofu/modules/nebu-aws/variables.tf`,
 When it is inspected,
 Then:
@@ -80,19 +80,19 @@ Then:
 - `var.enable_performance_insights` is removed (Performance Insights is enabled by default on Aurora; not a relevant input)
 - Two new variables added: `var.aurora_min_capacity` (default `0`) and `var.aurora_max_capacity` (default `4`), both of type `number`
 
-**AC5 — AWS: `examples/aws/main.tf` module call updated:**
+**AC5 - AWS: `examples/aws/main.tf` module call updated:**
 Given `deploy/tofu/examples/aws/main.tf`,
 When the `module "nebu_aws"` block is inspected,
 Then:
 - `db_instance_class` and `enable_performance_insights` arguments are removed
 - `aurora_min_capacity` and `aurora_max_capacity` arguments are present (wired from variables or defaults)
 
-**AC6 — AWS: `examples/aws/variables.tf` updated accordingly:**
+**AC6 - AWS: `examples/aws/variables.tf` updated accordingly:**
 Given `deploy/tofu/examples/aws/variables.tf`,
 When it is inspected,
 Then `db_instance_class` and `enable_performance_insights` variables are removed and `aurora_min_capacity` / `aurora_max_capacity` variables are added with appropriate descriptions and defaults.
 
-**AC7 — Stackit: `stackit_postgresflex_instance` added to `examples/stackit/main.tf`:**
+**AC7 - Stackit: `stackit_postgresflex_instance` added to `examples/stackit/main.tf`:**
 Given `deploy/tofu/examples/stackit/main.tf`,
 When the file is inspected,
 Then:
@@ -101,7 +101,7 @@ Then:
 - `stackit_postgresflex_database.nebu` is present with `name = "nebu"` and the user as owner
 - `stackit_postgresflex_database.keycloak` is present with `name = "keycloak"` (Keycloak still runs in docker-compose and needs its own DB in the managed instance)
 
-**AC8 — Stackit: postgres container removed from cloud-init:**
+**AC8 - Stackit: postgres container removed from cloud-init:**
 Given `deploy/tofu/examples/stackit/cloud-init.tftpl`,
 When the rendered docker-compose section is inspected,
 Then:
@@ -112,7 +112,7 @@ Then:
 - `keycloak` service `KC_DB_URL` points to the PostgresFlex host (not `postgres:5432`)
 - `core` and `gateway` `depends_on: postgres` conditions are removed (replaced with a readiness comment)
 
-**AC9 — Stackit: New variables for PostgresFlex connection added:**
+**AC9 - Stackit: New variables for PostgresFlex connection added:**
 Given `deploy/tofu/examples/stackit/variables.tf`,
 When it is inspected,
 Then the following variables are added:
@@ -120,21 +120,21 @@ Then the following variables are added:
 - `var.postgres_cpu` (number, default `1`)
 - `var.postgres_ram` (number, default `4`, in GB)
 - `var.postgres_storage_size` (number, default `20`, in GB)
-And `var.db_password` is REMOVED (it was used only for the self-hosted postgres container — the managed instance auto-generates credentials via `stackit_postgresflex_user`)
+And `var.db_password` is REMOVED (it was used only for the self-hosted postgres container - the managed instance auto-generates credentials via `stackit_postgresflex_user`)
 
-**AC10 — Stackit: Outputs include PostgresFlex connection details:**
+**AC10 - Stackit: Outputs include PostgresFlex connection details:**
 Given `deploy/tofu/examples/stackit/outputs.tf`,
 When it is inspected,
-Then outputs `postgres_instance_id` and `postgres_host` are added (the password is sensitive and intentionally not outputted — operators read it from `stackit_postgresflex_user.nebu.password` in state or via the STACKIT portal).
+Then outputs `postgres_instance_id` and `postgres_host` are added (the password is sensitive and intentionally not outputted - operators read it from `stackit_postgresflex_user.nebu.password` in state or via the STACKIT portal).
 
-**AC11 — Stackit: `terraform.tfvars.example` updated:**
+**AC11 - Stackit: `terraform.tfvars.example` updated:**
 Given `deploy/tofu/examples/stackit/terraform.tfvars.example`,
 When it is inspected,
 Then:
 - `db_password` variable is removed
 - PostgresFlex sizing variables (`postgres_replicas`, `postgres_cpu`, `postgres_ram`, `postgres_storage_size`) are added with example values and production guidance comments
 
-**AC12 — `tofu validate` passes on both examples:**
+**AC12 - `tofu validate` passes on both examples:**
 Given `deploy/tofu/examples/aws/` and `deploy/tofu/examples/stackit/`,
 When `tofu validate` runs in each directory,
 Then exit code 0 (no schema errors)
@@ -145,33 +145,33 @@ Then exit code 0 (no schema errors)
 
 ### Tests written FIRST (before implementation code):
 
-Infrastructure-only story — ATDD is not applicable. There is no application logic, Matrix API, or observable UI behavior. The acceptance gates are OpenTofu static validation and the file inspection checks below.
+Infrastructure-only story - ATDD is not applicable. There is no application logic, Matrix API, or observable UI behavior. The acceptance gates are OpenTofu static validation and the file inspection checks below.
 
-**1. Static validation — AWS module**
+**1. Static validation - AWS module**
 - Given: `deploy/tofu/modules/nebu-aws/database.tf` still contains `aws_db_instance`
 - When: `tofu validate` runs in `deploy/tofu/examples/aws/`
-- Then: exits 0 today (existing state); after removal of `aws_db_instance` and addition of `aws_rds_cluster` — must also exit 0
+- Then: exits 0 today (existing state); after removal of `aws_db_instance` and addition of `aws_rds_cluster` - must also exit 0
 - Verification command: `docker run --rm -v $(pwd)/deploy/tofu/examples/aws:/workspace -w /workspace ghcr.io/opentofu/opentofu:1.9 validate`
 
-**2. Static validation — Stackit example**
+**2. Static validation - Stackit example**
 - Given: `deploy/tofu/examples/stackit/main.tf` contains `stackit_postgresflex_instance`
 - When: `tofu validate` runs in `deploy/tofu/examples/stackit/`
 - Then: exit 0
 - Verification command: `docker run --rm -v $(pwd)/deploy/tofu/examples/stackit:/workspace -w /workspace ghcr.io/opentofu/opentofu:1.9 init -backend=false && tofu validate`
 
-**3. Security gate — no plaintext credentials in template**
+**3. Security gate - no plaintext credentials in template**
 - Given: updated `cloud-init.tftpl`
 - When: grep for literal password strings or connection strings with embedded passwords
-- Then: only `${variable_name}` template references found — no hardcoded values
+- Then: only `${variable_name}` template references found - no hardcoded values
 
-**4. Regression check — no postgres container in cloud-init**
+**4. Regression check - no postgres container in cloud-init**
 - Given: updated `cloud-init.tftpl`
 - When: grep for `image: postgres` or `postgres_data:`
 - Then: zero matches
 
 ---
 
-## Dev Notes — Implementation Guide
+## Dev Notes - Implementation Guide
 
 ### File Change Map
 
@@ -189,7 +189,7 @@ Infrastructure-only story — ATDD is not applicable. There is no application lo
 | `deploy/tofu/examples/stackit/cloud-init.tftpl` | UPDATE | Remove postgres service + volume; update DB URL to managed instance |
 | `deploy/tofu/examples/stackit/terraform.tfvars.example` | UPDATE | Remove `db_password`; add PostgresFlex vars |
 
-### AWS Aurora Serverless v2 — Exact Resource Shape
+### AWS Aurora Serverless v2 - Exact Resource Shape
 
 The canonical provider schema (from context7 docs, AWS provider `~> 5.0`):
 
@@ -197,7 +197,7 @@ The canonical provider schema (from context7 docs, AWS provider `~> 5.0`):
 # deploy/tofu/modules/nebu-aws/database.tf
 
 resource "aws_db_subnet_group" "this" {
-  # KEEP AS-IS — Aurora uses DB subnet groups too
+  # KEEP AS-IS - Aurora uses DB subnet groups too
   name       = "nebu-${var.environment}-db-subnet-group"
   subnet_ids = aws_subnet.private[*].id
   tags       = merge(var.common_tags, { Name = "nebu-${var.environment}-db-subnet-group" })
@@ -207,7 +207,7 @@ resource "aws_rds_cluster" "this" {
   cluster_identifier = "nebu-${var.environment}-aurora"
 
   engine         = "aurora-postgresql"
-  engine_mode    = "provisioned"   # Serverless v2 uses "provisioned" — NOT "serverless"
+  engine_mode    = "provisioned"   # Serverless v2 uses "provisioned" - NOT "serverless"
   engine_version = "16.6"
 
   database_name   = "nebu"
@@ -219,7 +219,7 @@ resource "aws_rds_cluster" "this" {
   db_subnet_group_name   = aws_db_subnet_group.this.name
   vpc_security_group_ids = [aws_security_group.rds.id]
 
-  # Serverless v2 scaling — min=0 allows scale-to-zero (auto-pause) for dev.
+  # Serverless v2 scaling - min=0 allows scale-to-zero (auto-pause) for dev.
   # For production, set min_capacity = 0.5 to avoid cold-start latency.
   serverlessv2_scaling_configuration {
     min_capacity             = var.aurora_min_capacity
@@ -286,7 +286,7 @@ variable "aurora_max_capacity" {
 }
 ```
 
-### Stackit PostgresFlex — Exact Resource Shape
+### Stackit PostgresFlex - Exact Resource Shape
 
 The Stackit provider uses `stackit_postgresflex_instance` (confirmed via context7 docs). The resource is available in provider `~> 0.95` (already locked).
 
@@ -303,7 +303,7 @@ resource "stackit_postgresflex_instance" "nebu" {
   backup_schedule = "0 2 * * *"  # Daily at 02:00 UTC
 
   # ACL: restrict to the VM's private network CIDR only.
-  # The VM connects via its private network interface — no public exposure.
+  # The VM connects via its private network interface - no public exposure.
   acl = [var.network_cidr]
 
   flavor = {
@@ -354,7 +354,7 @@ output "postgres_host" {
 }
 ```
 
-Note: `stackit_postgresflex_user.nebu.password` is sensitive — do NOT output it. Operators retrieve it from Terraform state or via the STACKIT portal.
+Note: `stackit_postgresflex_user.nebu.password` is sensitive - do NOT output it. Operators retrieve it from Terraform state or via the STACKIT portal.
 
 ### Stackit cloud-init Changes
 
@@ -364,7 +364,7 @@ Remove `db_password` from the template variables. Add PostgresFlex connection de
 
 ```hcl
 user_data = base64encode(templatefile("${path.module}/cloud-init.tftpl", {
-  # db_password removed — managed by PostgresFlex, not cloud-init
+  # db_password removed - managed by PostgresFlex, not cloud-init
   internal_secret    = var.internal_secret
   oidc_client_secret = var.oidc_client_secret
   oidc_issuer        = var.oidc_issuer
@@ -403,7 +403,7 @@ user_data = base64encode(templatefile("${path.module}/cloud-init.tftpl", {
 ### Stackit Variables to Add/Remove
 
 **Remove from `variables.tf`:**
-- `variable "db_password"` — completely removed; managed DB auto-generates credentials
+- `variable "db_password"` - completely removed; managed DB auto-generates credentials
 
 **Add to `variables.tf`:**
 ```hcl
@@ -434,22 +434,22 @@ variable "postgres_storage_size" {
 
 ### Security Considerations (Required Review)
 
-This story touches database credentials and connection strings — `security_review: required` applies.
+This story touches database credentials and connection strings - `security_review: required` applies.
 
 Key security invariants the reviewer must verify:
 
 1. **No credentials in cloud-init template output:** `pg_password` appears only inside the `.env` file block (mode `0600`), never in environment variables passed directly to a service or in log output.
-2. **`pg_password` not emitted as a Tofu output:** Sensitive password must use `sensitive = true` if ever added to outputs — current plan does NOT output it.
-3. **ACL on PostgresFlex:** `acl` must be set to `[var.network_cidr]` — never `["0.0.0.0/0"]`.
-4. **Aurora cluster not publicly accessible:** `aws_rds_cluster` has no `publicly_accessible` attribute (unlike `aws_db_instance`) — Aurora clusters are inherently VPC-only. Verify the cluster is in private subnets only.
-5. **State file encryption:** The Stackit state backend (`backend "s3"`) must use server-side encryption. The `stackit_postgresflex_user.nebu.password` is stored in the Terraform state — this must be documented in RUNBOOK or README.
-6. **`master_password` in Aurora cluster:** `var.db_password` (for Aurora) remains sensitive — do not log or output it.
+2. **`pg_password` not emitted as a Tofu output:** Sensitive password must use `sensitive = true` if ever added to outputs - current plan does NOT output it.
+3. **ACL on PostgresFlex:** `acl` must be set to `[var.network_cidr]` - never `["0.0.0.0/0"]`.
+4. **Aurora cluster not publicly accessible:** `aws_rds_cluster` has no `publicly_accessible` attribute (unlike `aws_db_instance`) - Aurora clusters are inherently VPC-only. Verify the cluster is in private subnets only.
+5. **State file encryption:** The Stackit state backend (`backend "s3"`) must use server-side encryption. The `stackit_postgresflex_user.nebu.password` is stored in the Terraform state - this must be documented in RUNBOOK or README.
+6. **`master_password` in Aurora cluster:** `var.db_password` (for Aurora) remains sensitive - do not log or output it.
 
-### Impact Analysis — What Must NOT Break
+### Impact Analysis - What Must NOT Break
 
 **AWS module callers (`examples/aws/main.tf`):**
-- The `db_endpoint` output changes format slightly: previously `host:port` from `aws_db_instance.this.endpoint` (which includes port in the endpoint string already), now explicitly `"${aws_rds_cluster.this.endpoint}:${aws_rds_cluster.this.port}"`. Verify the format matches what `secrets.tf` sets for `db_url` — the placeholder `"PLACEHOLDER_postgres://nebu:ROTATE_ME@hostname:5432/nebu"` suggests port 5432. Aurora PostgreSQL uses port 5432.
-- The `aws_security_group.rds` name stays the same — no rename needed, rename would destroy/recreate it.
+- The `db_endpoint` output changes format slightly: previously `host:port` from `aws_db_instance.this.endpoint` (which includes port in the endpoint string already), now explicitly `"${aws_rds_cluster.this.endpoint}:${aws_rds_cluster.this.port}"`. Verify the format matches what `secrets.tf` sets for `db_url` - the placeholder `"PLACEHOLDER_postgres://nebu:ROTATE_ME@hostname:5432/nebu"` suggests port 5432. Aurora PostgreSQL uses port 5432.
+- The `aws_security_group.rds` name stays the same - no rename needed, rename would destroy/recreate it.
 
 **Stackit cloud-init dependent behaviors that must NOT break:**
 - Keycloak container must still start and connect to its database (now via PostgresFlex)
@@ -479,7 +479,7 @@ docker run --rm \
 
 The `init -backend=false` flag skips backend initialization (state bucket credentials not needed for validate).
 
-If the Docker image tag `1.9` is not available, use `latest` or `1.8` — the `tofu validate` command is stable across these versions.
+If the Docker image tag `1.9` is not available, use `latest` or `1.8` - the `tofu validate` command is stable across these versions.
 
 ### Pattern Consistency
 
@@ -490,21 +490,21 @@ Follow the patterns established in existing IaC files:
 - Descriptions on variables always use full sentences with a trailing period
 - Comments above resources follow the `# ── Section Name ──────` separator style
 - `sensitive = true` on all credential variables (password, secrets)
-- `lifecycle { ignore_changes = [secret_string] }` on Secrets Manager versions (existing pattern in `secrets.tf` — do NOT apply to Aurora password directly)
+- `lifecycle { ignore_changes = [secret_string] }` on Secrets Manager versions (existing pattern in `secrets.tf` - do NOT apply to Aurora password directly)
 
 ---
 
 ## Checklist
 
-- [ ] `deploy/tofu/modules/nebu-aws/database.tf` — `aws_db_instance` replaced with `aws_rds_cluster` + `aws_rds_cluster_instance`
-- [ ] `deploy/tofu/modules/nebu-aws/outputs.tf` — `db_endpoint` references Aurora cluster endpoint
-- [ ] `deploy/tofu/modules/nebu-aws/variables.tf` — `db_instance_class` and `enable_performance_insights` removed; `aurora_min_capacity` and `aurora_max_capacity` added
-- [ ] `deploy/tofu/examples/aws/main.tf` — module call updated
-- [ ] `deploy/tofu/examples/aws/variables.tf` — variables aligned with module changes
-- [ ] `deploy/tofu/examples/stackit/main.tf` — `stackit_postgresflex_instance`, `stackit_postgresflex_user`, two `stackit_postgresflex_database` resources added; `user_data` template call updated
-- [ ] `deploy/tofu/examples/stackit/variables.tf` — `db_password` removed; PostgresFlex sizing vars added
-- [ ] `deploy/tofu/examples/stackit/outputs.tf` — `postgres_instance_id` and `postgres_host` added
-- [ ] `deploy/tofu/examples/stackit/cloud-init.tftpl` — postgres service + volume removed; DB URLs use `${pg_host}/${pg_port}/${pg_user}/${pg_password}`; Keycloak DB URL updated
-- [ ] `deploy/tofu/examples/stackit/terraform.tfvars.example` — `db_password` removed; PostgresFlex vars added
+- [ ] `deploy/tofu/modules/nebu-aws/database.tf` - `aws_db_instance` replaced with `aws_rds_cluster` + `aws_rds_cluster_instance`
+- [ ] `deploy/tofu/modules/nebu-aws/outputs.tf` - `db_endpoint` references Aurora cluster endpoint
+- [ ] `deploy/tofu/modules/nebu-aws/variables.tf` - `db_instance_class` and `enable_performance_insights` removed; `aurora_min_capacity` and `aurora_max_capacity` added
+- [ ] `deploy/tofu/examples/aws/main.tf` - module call updated
+- [ ] `deploy/tofu/examples/aws/variables.tf` - variables aligned with module changes
+- [ ] `deploy/tofu/examples/stackit/main.tf` - `stackit_postgresflex_instance`, `stackit_postgresflex_user`, two `stackit_postgresflex_database` resources added; `user_data` template call updated
+- [ ] `deploy/tofu/examples/stackit/variables.tf` - `db_password` removed; PostgresFlex sizing vars added
+- [ ] `deploy/tofu/examples/stackit/outputs.tf` - `postgres_instance_id` and `postgres_host` added
+- [ ] `deploy/tofu/examples/stackit/cloud-init.tftpl` - postgres service + volume removed; DB URLs use `${pg_host}/${pg_port}/${pg_user}/${pg_password}`; Keycloak DB URL updated
+- [ ] `deploy/tofu/examples/stackit/terraform.tfvars.example` - `db_password` removed; PostgresFlex vars added
 - [ ] `tofu validate` exits 0 in both `examples/aws/` and `examples/stackit/`
 - [ ] Security: no `pg_password` in plain output; ACL not `0.0.0.0/0`; state encryption note in docs

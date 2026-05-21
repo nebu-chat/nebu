@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted — 2026-03-18
+Accepted - 2026-03-18
 
 ## Context
 
@@ -32,7 +32,7 @@ We use **OpenAPI 3.1 spec-first** with `oapi-codegen`.
 Workflow:
 ```
 1. Edit openapi.yaml (PR review happens here)
-2. make gen-api  (codegen via Docker container — no local Go toolchain needed)
+2. make gen-api  (codegen via Docker container - no local Go toolchain needed)
 3. Implement/update gateway/internal/api/*.go to satisfy the generated ServerInterface
 4. openapi.yaml served via go:embed at GET /api/v1/openapi.yaml
 ```
@@ -52,7 +52,7 @@ The generated `api_gen.go` is committed to the repository (generated but tracked
 ## Consequences
 
 **Positive:**
-- Spec is always authoritative — no spec/implementation drift
+- Spec is always authoritative - no spec/implementation drift
 - API changes require spec changes first (enforced by PR review)
 - Type safety: generated structs prevent `map[string]interface{}` soup
 - Free validation middleware from oapi-codegen's `StrictServerInterface`

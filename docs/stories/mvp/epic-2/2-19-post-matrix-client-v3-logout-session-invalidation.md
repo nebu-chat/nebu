@@ -1,4 +1,4 @@
-# Story 2.19: POST /_matrix/client/v3/logout — Session Invalidation
+# Story 2.19: POST /_matrix/client/v3/logout - Session Invalidation
 
 Status: done
 
@@ -33,7 +33,7 @@ So that my access token can no longer be used after I explicitly log out.
   - [x] 2.2 Change `JWTMiddleware` signature to accept `denylist *Denylist` as 4th param (nil = disabled)
   - [x] 2.3 Add denylist check after token extraction, before OIDC verification: if `denylist != nil && denylist.Contains(rawToken)` → 401 `M_UNKNOWN_TOKEN` "Token has been logged out"
   - [x] 2.4 Put `idToken.Expiry` in context: `context.WithValue(ctx, ContextKeyTokenExpiry, idToken.Expiry)`
-  - [x] 2.5 Update all `auth_test.go` calls to `JWTMiddleware(...)` — add `nil` as 4th argument (6 existing test functions)
+  - [x] 2.5 Update all `auth_test.go` calls to `JWTMiddleware(...)` - add `nil` as 4th argument (6 existing test functions)
   - [x] 2.6 Add `TestJWTMiddleware_DenylistedToken` test case in `auth_test.go`
 - [x] Task 3: Create LogoutHandler (AC: 1, 3)
   - [x] 3.1 Create `gateway/internal/matrix/logout.go`
@@ -49,19 +49,19 @@ So that my access token can no longer be used after I explicitly log out.
 
 ## Dev Notes
 
-### Architecture — Key Design Decisions
+### Architecture - Key Design Decisions
 
-**In-memory denylist, no Redis (ADR-002):** No Redis, no NATS per architecture decision. The denylist MUST be `sync.Map` keyed by `sha256(rawToken)` hex string with TTL = token expiry. This is intentionally in-memory — TTL is bounded by the OIDC token lifetime (typically ≤1h), so memory pressure is negligible.
+**In-memory denylist, no Redis (ADR-002):** No Redis, no NATS per architecture decision. The denylist MUST be `sync.Map` keyed by `sha256(rawToken)` hex string with TTL = token expiry. This is intentionally in-memory - TTL is bounded by the OIDC token lifetime (typically ≤1h), so memory pressure is negligible.
 
-**Horizontal scalability trade-off:** NFR-SC1 says "no session affinity". An in-memory denylist breaks strict statelessness — logged-out tokens are only denied on the same gateway instance. This is the accepted MVP trade-off; the AC explicitly specifies "short-lived server-side denylist" — do NOT attempt to use a shared store. The denylist is cleared on restart (acceptable since tokens are short-lived).
+**Horizontal scalability trade-off:** NFR-SC1 says "no session affinity". An in-memory denylist breaks strict statelessness - logged-out tokens are only denied on the same gateway instance. This is the accepted MVP trade-off; the AC explicitly specifies "short-lived server-side denylist" - do NOT attempt to use a shared store. The denylist is cleared on restart (acceptable since tokens are short-lived).
 
-**NFR-S4 compliance:** Stateless JWT validation per request is preserved. The denylist is an additive check BEFORE OIDC verification — it does not create session state.
+**NFR-S4 compliance:** Stateless JWT validation per request is preserved. The denylist is an additive check BEFORE OIDC verification - it does not create session state.
 
 **Denylist check position in JWTMiddleware:** Check AFTER extracting `rawToken` from the Authorization header, BEFORE calling `verifier.Verify()`. Order: (1) missing token check → (2) denylist check → (3) OIDC provider nil check → (4) OIDC verify → (5) claims extraction.
 
 **`ContextKeyTokenExpiry`:** JWTMiddleware puts `idToken.Expiry` (a `time.Time`) in context after successful verification. The LogoutHandler reads this to set the denylist TTL. This avoids a second `verifier.Verify()` call in the handler.
 
-**No import cycle:** `matrix` package imports `middleware` (for `*Denylist`) — this is fine. `middleware` does NOT import `matrix`.
+**No import cycle:** `matrix` package imports `middleware` (for `*Denylist`) - this is fine. `middleware` does NOT import `matrix`.
 
 **AC 3 is handled automatically:** The logout route is behind JWTMiddleware. JWTMiddleware already returns `401 M_MISSING_TOKEN` for missing Authorization header. The handler never sees requests without a valid token.
 
@@ -156,7 +156,7 @@ if err != nil {
 ctx = context.WithValue(ctx, ContextKeyTokenExpiry, idToken.Expiry)
 ```
 
-**2.5 Test call update** — ALL 6 existing `JWTMiddleware(...)` calls in `auth_test.go` must add `nil`:
+**2.5 Test call update** - ALL 6 existing `JWTMiddleware(...)` calls in `auth_test.go` must add `nil`:
 ```go
 // Before:
 middleware.JWTMiddleware(provider, "nebu-gateway", "nebu_role")
@@ -286,10 +286,10 @@ mux.Handle("POST /_matrix/client/v3/logout", jwtMiddleware(http.HandlerFunc(logo
 ```
 
 **CRITICAL NOTES for main.go:**
-1. `denylist` is shared between `JWTMiddleware` (checks it) and `LogoutHandler` (writes to it) — same pointer
-2. The `jwtMiddleware` variable is a local variable wrapping the middleware function — this is a convenience pattern for readability
+1. `denylist` is shared between `JWTMiddleware` (checks it) and `LogoutHandler` (writes to it) - same pointer
+2. The `jwtMiddleware` variable is a local variable wrapping the middleware function - this is a convenience pattern for readability
 3. Future Matrix API routes that require authentication will also use `jwtMiddleware(http.HandlerFunc(handler.Method))`
-4. The `loginHandler.PostLogin` route remains unchanged — it is NOT behind JWTMiddleware (token arrives in body, not header)
+4. The `loginHandler.PostLogin` route remains unchanged - it is NOT behind JWTMiddleware (token arrives in body, not header)
 
 ### Project Structure Notes
 
@@ -312,27 +312,27 @@ func TestDenylist_ContainsMissingToken(t *testing.T) { /* false for unknown toke
 func TestDenylist_AddAndContains(t *testing.T) { /* true after Add */ }
 func TestDenylist_ExpiredEntry(t *testing.T) { /* false and cleaned up after expiry */ }
 func TestDenylist_TwoDistinctTokens(t *testing.T) { /* adding token A doesn't deny token B */ }
-func TestDenylist_RepeatedAdd(t *testing.T) { /* idempotent — repeated Add doesn't error */ }
+func TestDenylist_RepeatedAdd(t *testing.T) { /* idempotent - repeated Add doesn't error */ }
 ```
 
 ### Previous Story Intelligence
 
-**From Story 2-18 (POST /login — immediate predecessor):**
-- `writeMatrixError` is already defined in `matrix/login.go` (unexported in that package) — NOT needed in `logout.go`; logout handler only returns success
-- `LoginHandler` in `login.go` uses `go-oidc` verifier — LogoutHandler does NOT verify (middleware already did it)
-- Test pattern: `httptest.NewRequest` + `httptest.NewRecorder` — use same pattern for `logout_test.go`
-- Route NOT behind JWTMiddleware for login (user isn't authenticated yet) — OPPOSITE for logout: MUST be behind JWTMiddleware
-- Matrix error format: `{"errcode": "...", "error": "..."}` — logout handler never needs to return errors (JWTMiddleware handles them all)
+**From Story 2-18 (POST /login - immediate predecessor):**
+- `writeMatrixError` is already defined in `matrix/login.go` (unexported in that package) - NOT needed in `logout.go`; logout handler only returns success
+- `LoginHandler` in `login.go` uses `go-oidc` verifier - LogoutHandler does NOT verify (middleware already did it)
+- Test pattern: `httptest.NewRequest` + `httptest.NewRecorder` - use same pattern for `logout_test.go`
+- Route NOT behind JWTMiddleware for login (user isn't authenticated yet) - OPPOSITE for logout: MUST be behind JWTMiddleware
+- Matrix error format: `{"errcode": "...", "error": "..."}` - logout handler never needs to return errors (JWTMiddleware handles them all)
 
-**From Story 2-4 (JWT Middleware — original middleware):**
-- `middleware/auth.go` has existing `writeMatrixError` helper (same name as in matrix package — intentional duplication, different packages)
-- Context keys use `contextKey` type (not exported string) — new `ContextKeyTokenExpiry` must use same type
+**From Story 2-4 (JWT Middleware - original middleware):**
+- `middleware/auth.go` has existing `writeMatrixError` helper (same name as in matrix package - intentional duplication, different packages)
+- Context keys use `contextKey` type (not exported string) - new `ContextKeyTokenExpiry` must use same type
 - Tests use `context.Background()` + `auth.NewProvider()` + mock OIDC server pattern
 
 **From Story 2-2 (Sessions Schema):**
-- `sessions` table exists with `device_id`, `since_token` etc. — but logout does NOT write to sessions table in this story
+- `sessions` table exists with `device_id`, `since_token` etc. - but logout does NOT write to sessions table in this story
 - Session DB invalidation (`invalidate_session`) is deferred to Story 4.6 (Elixir side)
-- This story only implements the gateway-side denylist — no DB writes, no gRPC calls
+- This story only implements the gateway-side denylist - no DB writes, no gRPC calls
 
 ### Architecture Enforcement Rules
 
@@ -352,14 +352,14 @@ func TestDenylist_RepeatedAdd(t *testing.T) { /* idempotent — repeated Add doe
 
 ### References
 
-- [Source: _bmad-output/planning-artifacts/epics.md#Story 2.19 — Session Invalidation acceptance criteria]
-- [Source: _bmad-output/planning-artifacts/architecture.md — ADR-002: No Redis, no NATS]
-- [Source: _bmad-output/planning-artifacts/architecture.md — NFR-S4: stateless JWT validation]
-- [Source: _bmad-output/planning-artifacts/architecture.md — NFR-SC1: horizontal scalability without session affinity]
-- [Source: gateway/internal/middleware/auth.go — JWTMiddleware full implementation to extend]
-- [Source: gateway/internal/middleware/auth_test.go — OIDC test server setup pattern + existing test signatures]
-- [Source: gateway/internal/matrix/login.go — LogoutHandler struct pattern reference]
-- [Source: gateway/cmd/gateway/main.go:130-139 — LoginHandler setup and route registration pattern]
+- [Source: _bmad-output/planning-artifacts/epics.md#Story 2.19 - Session Invalidation acceptance criteria]
+- [Source: _bmad-output/planning-artifacts/architecture.md - ADR-002: No Redis, no NATS]
+- [Source: _bmad-output/planning-artifacts/architecture.md - NFR-S4: stateless JWT validation]
+- [Source: _bmad-output/planning-artifacts/architecture.md - NFR-SC1: horizontal scalability without session affinity]
+- [Source: gateway/internal/middleware/auth.go - JWTMiddleware full implementation to extend]
+- [Source: gateway/internal/middleware/auth_test.go - OIDC test server setup pattern + existing test signatures]
+- [Source: gateway/internal/matrix/login.go - LogoutHandler struct pattern reference]
+- [Source: gateway/cmd/gateway/main.go:130-139 - LoginHandler setup and route registration pattern]
 
 ## Dev Agent Record
 
@@ -374,7 +374,7 @@ claude-sonnet-4-6[1m]
 - Implemented thread-safe in-memory denylist using `sync.Map` + SHA-256 token hash + lazy TTL expiry (ADR-002 compliant, no Redis)
 - Extended `JWTMiddleware` with optional 4th `*Denylist` param; denylist check runs AFTER header extraction, BEFORE OIDC verification
 - Added `ContextKeyTokenExpiry` to pass `idToken.Expiry` downstream; `LogoutHandler` reads this to set denylist TTL
-- Route `POST /_matrix/client/v3/logout` is behind `JWTMiddleware` — AC 3 (missing token → 401) handled automatically by middleware
+- Route `POST /_matrix/client/v3/logout` is behind `JWTMiddleware` - AC 3 (missing token → 401) handled automatically by middleware
 - All 7 existing `JWTMiddleware(...)` calls in `auth_test.go` updated to pass `nil` as 4th arg; `TestJWTMiddleware_DenylistedToken` added
 - `make test-unit-go` passes all packages with `-race` flag
 
@@ -390,4 +390,4 @@ claude-sonnet-4-6[1m]
 
 ## Change Log
 
-- 2026-03-30: Story implemented — in-memory denylist, JWTMiddleware extended with denylist check + ContextKeyTokenExpiry, LogoutHandler, route registered; all unit tests pass
+- 2026-03-30: Story implemented - in-memory denylist, JWTMiddleware extended with denylist check + ContextKeyTokenExpiry, LogoutHandler, route registered; all unit tests pass

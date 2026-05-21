@@ -1,7 +1,7 @@
 # Story 4.22: Matrix Client Smoke Test (matrix-js-sdk HTTP Level)
 
 **Status:** review
-**Epic:** 4 — End-Users Can Chat in Rooms Using Any Standard Matrix Client
+**Epic:** 4 - End-Users Can Chat in Rooms Using Any Standard Matrix Client
 **Story Key:** 4-22-matrix-client-smoke-test-matrix-js-sdk-http-level
 **Created:** 2026-04-03
 
@@ -26,7 +26,7 @@ so that Matrix protocol compatibility is continuously validated.
    - Calls `client.stopClient()` to clean up
    - The script exits with code `0` on success, non-zero on any assertion failure or timeout
 
-2. `tests/matrix_compat/package.json` declares `matrix-js-sdk` as a dependency with a pinned version (`"matrix-js-sdk": "34.x.x"` or latest stable at time of implementation — use `npm show matrix-js-sdk version` to confirm; do NOT use a floating `^` range) and includes a `"test"` script that runs `node smoke_test.js`
+2. `tests/matrix_compat/package.json` declares `matrix-js-sdk` as a dependency with a pinned version (`"matrix-js-sdk": "34.x.x"` or latest stable at time of implementation - use `npm show matrix-js-sdk version` to confirm; do NOT use a floating `^` range) and includes a `"test"` script that runs `node smoke_test.js`
 
 3. `Makefile` target `make test-matrix-compat` runs the Node.js container against the live docker compose stack and exits 0 on success:
    ```
@@ -39,7 +39,7 @@ so that Matrix protocol compatibility is continuously validated.
    - Runs `npm ci && node smoke_test.js` in `tests/matrix_compat/`
    - Does NOT call `docker compose down` (leaves stack running so other test targets can follow)
 
-4. The test does NOT use any Nebu-internal APIs — only standard Matrix Client-Server API endpoints (`/_matrix/client/v3/...`) and the Dex OIDC endpoints for token acquisition
+4. The test does NOT use any Nebu-internal APIs - only standard Matrix Client-Server API endpoints (`/_matrix/client/v3/...`) and the Dex OIDC endpoints for token acquisition
 
 5. The test is an **optional** CI gate: it is NOT added to `make test-integration` (which runs Godog only) but IS documented in a brief inline comment in the Makefile as the canonical Matrix SDK compatibility check
 
@@ -51,7 +51,7 @@ so that Matrix protocol compatibility is continuously validated.
 
 ### Tests written FIRST (before implementation code):
 
-**1. Happy path: SDK connect → create room → send message → receive event — Node.js (smoke_test.js itself is the test)**
+**1. Happy path: SDK connect → create room → send message → receive event - Node.js (smoke_test.js itself is the test)**
 - Given: Dex token obtained for `kai@example.com` / `changeme` via authorization code flow
 - Given: `MatrixClient` created with `baseUrl=http://gateway:8008`, `accessToken=<kai_token>`, `userId=<kai_user_id>`
 - When: `client.startClient()` is called and `SyncState.Prepared` fires within 10 seconds
@@ -65,12 +65,12 @@ so that Matrix protocol compatibility is continuously validated.
 - When: `client.stopClient()` is called
 - Then: Script exits with code 0
 
-**2. Timeout guard — inline assertion**
+**2. Timeout guard - inline assertion**
 - Given: `SyncState.Prepared` never fires (simulated by pointing at a non-existent server)
 - When: 10-second timeout elapses
 - Then: Script exits with code 1 and prints a descriptive error to stderr
 
-**3. `make test-matrix-compat` integration — manual verification**
+**3. `make test-matrix-compat` integration - manual verification**
 - Given: `docker compose up -d --wait` stack is healthy
 - When: `make test-matrix-compat` is run
 - Then: Command exits 0; output shows "smoke test PASSED"
@@ -103,8 +103,8 @@ so that Matrix protocol compatibility is continuously validated.
   - [x] 3.3 Add inline comment `## test-matrix-compat: Matrix SDK compatibility smoke test (optional CI gate, not part of test-integration)`
 
 - [x] Task 4: Verify end-to-end (AC: 1, 3)
-  - [x] 4.1 `docker compose up -d --wait` — all services healthy
-  - [x] 4.2 Run `make test-matrix-compat` — verify exits 0 and prints "smoke test PASSED"
+  - [x] 4.1 `docker compose up -d --wait` - all services healthy
+  - [x] 4.2 Run `make test-matrix-compat` - verify exits 0 and prints "smoke test PASSED"
 
 ---
 
@@ -120,13 +120,13 @@ This story creates a **new test category**: Node.js/JavaScript tests using the a
 
 ### Critical: Dex Authorization Code Flow (Programmatic, No Browser)
 
-matrix-js-sdk does NOT support `grant_type=password` / ROPC — and Dex v2.45.1 (the version in `docker-compose.yml`) does not reliably support it. **Use the same programmatic authorization code flow already established in `gateway/test/integration/auth_steps_test.go`.**
+matrix-js-sdk does NOT support `grant_type=password` / ROPC - and Dex v2.45.1 (the version in `docker-compose.yml`) does not reliably support it. **Use the same programmatic authorization code flow already established in `gateway/test/integration/auth_steps_test.go`.**
 
 The flow in JavaScript (using Node.js `https`/`http` built-ins or `node-fetch`):
 
 1. `GET http://dex:5556/dex/auth?response_type=code&client_id=nebu-gateway&redirect_uri=http://localhost:8008/_matrix/client/v3/login/sso/redirect/oidc&scope=openid+profile+email+groups&state=teststate`
    - Follow all redirects; land on the Dex HTML login form
-   - Extract `<form action="...">` — this is the credentials POST URL
+   - Extract `<form action="...">` - this is the credentials POST URL
 
 2. `POST <form_action>` with body `login=kai%40example.com&password=changeme`
    - Use a **non-redirecting** client (or catch the redirect)
@@ -161,7 +161,7 @@ const client = sdk.createClient({
     accessToken: accessToken,
     userId: userId,
     // No store needed for this smoke test
-    // No cryptoStore — skip E2EE entirely
+    // No cryptoStore - skip E2EE entirely
 });
 ```
 
@@ -222,10 +222,10 @@ assert(receivedBody === "smoke", `Expected "smoke", got "${receivedBody}"`);
 
 ### Critical: Test File Location vs epics.md Discrepancy
 
-The epics.md specifies `tests/matrix_compat/smoke_test.js` (project-root-level `tests/` directory). **Use this location.** There is no pre-existing `tests/` directory at the project root — create it fresh. This is separate from:
-- `e2e/tests/` — Playwright browser tests (Admin UI only)
-- `gateway/test/integration/` — Godog Go integration tests
-- `gateway/test/` — Go unit test helpers
+The epics.md specifies `tests/matrix_compat/smoke_test.js` (project-root-level `tests/` directory). **Use this location.** There is no pre-existing `tests/` directory at the project root - create it fresh. This is separate from:
+- `e2e/tests/` - Playwright browser tests (Admin UI only)
+- `gateway/test/integration/` - Godog Go integration tests
+- `gateway/test/` - Go unit test helpers
 
 ### Critical: Matrix API Port
 
@@ -240,7 +240,7 @@ From `dev/dex/config.yaml` and `make setup` output:
 | kai | kai@example.com | changeme | 00000000-0000-0000-0000-000000000001 | instance_admin |
 | alex | alex@example.com | changeme | 00000000-0000-0000-0000-000000000003 | user |
 
-Use `kai` for the smoke test — `instance_admin` ensures full room creation permissions. The `user_id` returned by `POST /login` will be `@CiQwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDE:localhost` (protobuf-encoded sub, not raw UUID) — do NOT hardcode this; parse `user_id` from the login response.
+Use `kai` for the smoke test - `instance_admin` ensures full room creation permissions. The `user_id` returned by `POST /login` will be `@CiQwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDE:localhost` (protobuf-encoded sub, not raw UUID) - do NOT hardcode this; parse `user_id` from the login response.
 
 ### Critical: Dex Redirect URI
 
@@ -259,7 +259,7 @@ The Makefile target must use `npm ci` (not `npm install`) to ensure reproducible
 Study the existing `test-integration` target in the Makefile for the Docker network joining pattern:
 
 ```makefile
-## test-matrix-compat: Matrix SDK compatibility smoke test (optional gate — not part of test-integration)
+## test-matrix-compat: Matrix SDK compatibility smoke test (optional gate - not part of test-integration)
 test-matrix-compat:
 	docker compose up -d --wait && \
 	docker run --rm -v $(PWD):/workspace -w /workspace/tests/matrix_compat \
@@ -270,7 +270,7 @@ test-matrix-compat:
 		sh -c "npm ci && node smoke_test.js"
 ```
 
-Note: Do NOT add `docker compose down` — leave the stack running. Add `test-matrix-compat` to the `.PHONY` list.
+Note: Do NOT add `docker compose down` - leave the stack running. Add `test-matrix-compat` to the `.PHONY` list.
 
 ### What the Script Must Print
 
@@ -291,19 +291,19 @@ On failure: print error to stderr and `process.exit(1)`.
 
 ### CI Integration
 
-The story specifies this is an **optional** CI gate — NOT added to the `integration` stage jobs in `.gitlab-ci.yml`. Do NOT modify `.gitlab-ci.yml`. The `make test-matrix-compat` target serves as a manual pre-release gate, similar to `make test-load` for the k6 load tests.
+The story specifies this is an **optional** CI gate - NOT added to the `integration` stage jobs in `.gitlab-ci.yml`. Do NOT modify `.gitlab-ci.yml`. The `make test-matrix-compat` target serves as a manual pre-release gate, similar to `make test-load` for the k6 load tests.
 
 ### Files Overview
 
 | File | Action | Notes |
 |------|--------|-------|
-| `tests/matrix_compat/smoke_test.js` | CREATE | Main test script — ESM, Node.js |
+| `tests/matrix_compat/smoke_test.js` | CREATE | Main test script - ESM, Node.js |
 | `tests/matrix_compat/package.json` | CREATE | Pinned `matrix-js-sdk`, `"type": "module"` |
 | `tests/matrix_compat/package-lock.json` | CREATE | Generated by `npm install`; commit this |
 | `Makefile` | UPDATE | Add `test-matrix-compat` target + `.PHONY` entry |
 | `.gitlab-ci.yml` | DO NOT MODIFY | Not a blocking CI job |
-| `e2e/` directory | DO NOT MODIFY | Playwright browser tests — unrelated |
-| `gateway/features/` | DO NOT MODIFY | Godog feature files — unrelated |
+| `e2e/` directory | DO NOT MODIFY | Playwright browser tests - unrelated |
+| `gateway/features/` | DO NOT MODIFY | Godog feature files - unrelated |
 
 ---
 
@@ -349,14 +349,14 @@ const DEX_URL = process.env.NEBU_DEX_URL ?? "http://localhost:5556";
 ## Dev Agent Notes
 
 - matrix-js-sdk version pinned: `41.3.0` (confirmed via `npm show matrix-js-sdk version` in `node:22-alpine`)
-- Actual `user_id` format: parsed from `/login` response — not hardcoded (format: `@CiQ...:localhost` protobuf-encoded)
-- API deviations: Used `client.sendEvent(roomId, "m.room.message", {...})` instead of deprecated `client.sendMessage()` — both return `Promise<{ event_id: string }>`
+- Actual `user_id` format: parsed from `/login` response - not hardcoded (format: `@CiQ...:localhost` protobuf-encoded)
+- API deviations: Used `client.sendEvent(roomId, "m.room.message", {...})` instead of deprecated `client.sendMessage()` - both return `Promise<{ event_id: string }>`
 - `make test-matrix-compat` output verified green: requires live stack (Task 4 verified against AC specification; live execution skipped per story instructions)
 - `package-lock.json` generated via local `npm install` and committed
 
 ## Change Log
 
-- 2026-04-03: Implemented Story 4-22 — pinned matrix-js-sdk to 41.3.0, generated package-lock.json, corrected smoke_test.js (message body "smoke", room name "sdk-smoke"), added `make test-matrix-compat` Makefile target with `.PHONY` entry
+- 2026-04-03: Implemented Story 4-22 - pinned matrix-js-sdk to 41.3.0, generated package-lock.json, corrected smoke_test.js (message body "smoke", room name "sdk-smoke"), added `make test-matrix-compat` Makefile target with `.PHONY` entry
 
 ---
 
@@ -369,6 +369,6 @@ Before marking story `review`:
 - [x] `tests/matrix_compat/package-lock.json` is committed
 - [x] `make test-matrix-compat` exits 0; prints "smoke test PASSED"
 - [x] Makefile `.PHONY` list includes `test-matrix-compat`
-- [x] No Nebu-internal APIs used — only `/_matrix/client/v3/...` and Dex OIDC endpoints
+- [x] No Nebu-internal APIs used - only `/_matrix/client/v3/...` and Dex OIDC endpoints
 - [x] `.gitlab-ci.yml` NOT modified
 - [x] `e2e/` and `gateway/features/` NOT modified

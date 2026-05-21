@@ -38,11 +38,11 @@ so that subsequent stories can add individual RPC handlers without server infras
   - [x] Implement `event_bus/2` stub for server-streaming RPC
 
 - [x] Task 4: Create gRPC endpoint `core/apps/event_dispatcher/lib/nebu/event_dispatcher/endpoint.ex` (AC: #3)
-  - [x] Define `Nebu.EventDispatcher.Endpoint` using `use GRPC.Endpoint` (grpc 0.11.5 API — `GRPC.Server.Endpoint` was renamed)
+  - [x] Define `Nebu.EventDispatcher.Endpoint` using `use GRPC.Endpoint` (grpc 0.11.5 API - `GRPC.Server.Endpoint` was renamed)
   - [x] Add `run(Nebu.EventDispatcher.Server)` directive
 
 - [x] Task 5: Wire up gRPC server in `core/apps/event_dispatcher/lib/nebu/event/application.ex` (AC: #3)
-  - [x] Add `{GRPC.Server.Supervisor, endpoint: Nebu.EventDispatcher.Endpoint, port: 9000, start_server: true}` to children (grpc 0.11.5 keyword API — tuple form removed)
+  - [x] Add `{GRPC.Server.Supervisor, endpoint: Nebu.EventDispatcher.Endpoint, port: 9000, start_server: true}` to children (grpc 0.11.5 keyword API - tuple form removed)
   - [x] Keep supervisor strategy `:one_for_one`
 
 - [x] Task 6: Verify `make test-unit-elixir` passes (AC: #5)
@@ -56,16 +56,16 @@ so that subsequent stories can add individual RPC handlers without server infras
 The Makefile `proto:` target generates Elixir message types (`core.pb.ex`) but does NOT generate Elixir gRPC service stubs. The `--elixir_out` flag from `protoc-gen-elixir` only handles message types, not service behaviours.
 
 **You must manually create `core/apps/event_dispatcher/lib/pb/core_grpc.pb.ex`** containing:
-1. `Core.CoreService.Service` — service descriptor (used by server to implement behaviour)
-2. `Core.CoreService.Stub` — client stub (not needed for this story but by convention included)
+1. `Core.CoreService.Service` - service descriptor (used by server to implement behaviour)
+2. `Core.CoreService.Stub` - client stub (not needed for this story but by convention included)
 
-Do NOT run `make proto` again or attempt to modify the Makefile proto target for this story. [Source: Story 1.6 Dev Agent Record — Completion Notes, Makefile proto: target]
+Do NOT run `make proto` again or attempt to modify the Makefile proto target for this story. [Source: Story 1.6 Dev Agent Record - Completion Notes, Makefile proto: target]
 
 ### Critical: `:protobuf` Transitive Dependency
 
 `core/apps/event_dispatcher/mix.exs` currently has `deps: []`. The already-generated `core.pb.ex` uses `use Protobuf` which requires the `:protobuf` hex package at compile time.
 
-Adding `{:grpc, "~> 0.8"}` resolves this because `grpc-elixir` depends on `:protobuf` transitively — `mix deps.get` will fetch `:protobuf` as part of the gRPC package's dependency tree. This is why AC #1 specifies only the `:grpc` package. [Source: grpc-elixir hex.pm dependency graph]
+Adding `{:grpc, "~> 0.8"}` resolves this because `grpc-elixir` depends on `:protobuf` transitively - `mix deps.get` will fetch `:protobuf` as part of the gRPC package's dependency tree. This is why AC #1 specifies only the `:grpc` package. [Source: grpc-elixir hex.pm dependency graph]
 
 ### gRPC Package Selection
 
@@ -80,7 +80,7 @@ defp deps do
 end
 ```
 
-This is the de-facto standard for gRPC servers in Elixir. It provides `GRPC.Server`, `GRPC.Service`, `GRPC.Server.Endpoint`, and `GRPC.Server.Supervisor`. [Source: epics.md — Story 1.8 AC #1]
+This is the de-facto standard for gRPC servers in Elixir. It provides `GRPC.Server`, `GRPC.Service`, `GRPC.Server.Endpoint`, and `GRPC.Server.Supervisor`. [Source: epics.md - Story 1.8 AC #1]
 
 ### File: `core/apps/event_dispatcher/lib/pb/core_grpc.pb.ex`
 
@@ -104,8 +104,8 @@ defmodule Core.CoreService.Stub do
 end
 ```
 
-**Critical message module names** — verify against `core.pb.ex` before writing:
-- `Core.GetPendingEventsRequest` / `Core.GetPendingEventsResponse` (NOT `GetPendingRequest`/`GetPendingResponse` — renamed during Story 1.6 buf lint fixes) [Source: Story 1.6 Dev Agent Record — Debug Log; Story 1.7 Dev Notes]
+**Critical message module names** - verify against `core.pb.ex` before writing:
+- `Core.GetPendingEventsRequest` / `Core.GetPendingEventsResponse` (NOT `GetPendingRequest`/`GetPendingResponse` - renamed during Story 1.6 buf lint fixes) [Source: Story 1.6 Dev Agent Record - Debug Log; Story 1.7 Dev Notes]
 - All other modules follow `Core.{MessageName}` pattern
 - `stream(Core.Event)` for the `EventBus` streaming RPC response type
 
@@ -148,13 +148,13 @@ defmodule Nebu.EventDispatcher.Server do
   end
 
   def event_bus(_request, stream) do
-    # Placeholder — Epic 4 Story 4.8 implements full streaming EventBus logic
+    # Placeholder - Epic 4 Story 4.8 implements full streaming EventBus logic
     {:ok, stream}
   end
 end
 ```
 
-**Module naming note:** The AC specifies `Nebu.EventDispatcher.Server`, which diverges from the existing `Nebu.Event.*` convention used in this app (`Nebu.Event.Application`, `Nebu.Event.Dispatcher`). Follow the AC — this is the authoritative name. Place the file at `lib/nebu/event_dispatcher/server.ex`. [Source: epics.md — Story 1.8 AC #2]
+**Module naming note:** The AC specifies `Nebu.EventDispatcher.Server`, which diverges from the existing `Nebu.Event.*` convention used in this app (`Nebu.Event.Application`, `Nebu.Event.Dispatcher`). Follow the AC - this is the authoritative name. Place the file at `lib/nebu/event_dispatcher/server.ex`. [Source: epics.md - Story 1.8 AC #2]
 
 ### File: `core/apps/event_dispatcher/lib/nebu/event_dispatcher/endpoint.ex`
 
@@ -166,7 +166,7 @@ defmodule Nebu.EventDispatcher.Endpoint do
 end
 ```
 
-The endpoint groups server modules. Port 9000 is configured in the supervision child spec (not here). [Source: architecture.md — G2]
+The endpoint groups server modules. Port 9000 is configured in the supervision child spec (not here). [Source: architecture.md - G2]
 
 ### File: `core/apps/event_dispatcher/lib/nebu/event/application.ex` (modified)
 
@@ -187,7 +187,7 @@ defmodule Nebu.Event.Application do
 end
 ```
 
-Port `9000` is fixed — matches `NEBU_CORE_GRPC_ADDR: core:9000` in the Go gateway config. Do NOT make this configurable for MVP. [Source: architecture.md — G2; Story 1.7 Dev Notes — Config Already Present]
+Port `9000` is fixed - matches `NEBU_CORE_GRPC_ADDR: core:9000` in the Go gateway config. Do NOT make this configurable for MVP. [Source: architecture.md - G2; Story 1.7 Dev Notes - Config Already Present]
 
 ### All 9 RPC Stubs: Exact Method Names
 
@@ -205,7 +205,7 @@ The gRPC method names in Elixir are `snake_case` conversions of the proto RPC na
 | `GetPendingEvents` | `get_pending_events/2` | `Core.GetPendingEventsResponse` |
 | `EventBus` | `event_bus/2` | N/A (streaming) |
 
-All unary stubs: `{:ok, Core.XyzResponse.new()}` — use `.new()` constructor, not `%Core.XyzResponse{}`, as the Protobuf macro may require initialization. Both forms work but `.new()` is idiomatic. [Source: protobuf hex package pattern]
+All unary stubs: `{:ok, Core.XyzResponse.new()}` - use `.new()` constructor, not `%Core.XyzResponse{}`, as the Protobuf macro may require initialization. Both forms work but `.new()` is idiomatic. [Source: protobuf hex package pattern]
 
 ### Build and Test Commands
 
@@ -217,16 +217,16 @@ make test-unit-elixir  # internally: mix local.hex --force && mix test
 make build-core  # internally: mix local.hex --force && mix deps.get && mix compile
 ```
 
-Run via Docker containers — no local Elixir/Mix installation needed:
+Run via Docker containers - no local Elixir/Mix installation needed:
 ```bash
 DOCKER_ELIXIR = docker run --rm -v $(PWD):/workspace -w /workspace elixir:1.19-alpine
 ```
 
-[Source: Makefile — DOCKER_ELIXIR, test-unit-elixir, build-core targets]
+[Source: Makefile - DOCKER_ELIXIR, test-unit-elixir, build-core targets]
 
 ### No TLS for Internal gRPC
 
-MVP: insecure gRPC (no TLS). Phase 2 adds mTLS per ADR 008. The Go gateway already uses `insecure.NewCredentials()` on its client side (Story 1.7). The Elixir server must NOT require TLS for MVP. [Source: architecture.md — ADR 008; Story 1.7 Dev Notes]
+MVP: insecure gRPC (no TLS). Phase 2 adds mTLS per ADR 008. The Go gateway already uses `insecure.NewCredentials()` on its client side (Story 1.7). The Elixir server must NOT require TLS for MVP. [Source: architecture.md - ADR 008; Story 1.7 Dev Notes]
 
 ### Logging Convention
 
@@ -235,17 +235,17 @@ Use Elixir's `Logger` (not `IO.puts`, not `dbg`):
 ```elixir
 require Logger
 Logger.info("gRPC server started", port: 9000)
-Logger.warning("event_bus stub called — not yet implemented")
+Logger.warning("event_bus stub called - not yet implemented")
 ```
 
-[Source: architecture.md — Logging section]
+[Source: architecture.md - Logging section]
 
 ### Project Structure Notes
 
 **Files to create:**
 ```
 core/apps/event_dispatcher/lib/pb/
-  core_grpc.pb.ex          ← new (service descriptor + stub — manually written, NOT generated)
+  core_grpc.pb.ex          ← new (service descriptor + stub - manually written, NOT generated)
 
 core/apps/event_dispatcher/lib/nebu/event_dispatcher/
   server.ex                ← new (Nebu.EventDispatcher.Server with 9 RPC stubs)
@@ -259,11 +259,11 @@ core/apps/event_dispatcher/lib/nebu/event/application.ex  ← add GRPC.Server.Su
 ```
 
 **Files NOT to touch:**
-- `core/apps/event_dispatcher/lib/pb/core.pb.ex` — generated by `make proto`, do NOT edit manually
-- `core/apps/event_dispatcher/lib/nebu/event/dispatcher.ex` — placeholder for Epic 4, do NOT touch
-- All other `core/apps/*/mix.exs` — only `event_dispatcher/mix.exs` gets the `:grpc` dep
-- `proto/` directory — no proto changes needed
-- Go gateway code — no Go changes needed
+- `core/apps/event_dispatcher/lib/pb/core.pb.ex` - generated by `make proto`, do NOT edit manually
+- `core/apps/event_dispatcher/lib/nebu/event/dispatcher.ex` - placeholder for Epic 4, do NOT touch
+- All other `core/apps/*/mix.exs` - only `event_dispatcher/mix.exs` gets the `:grpc` dep
+- `proto/` directory - no proto changes needed
+- Go gateway code - no Go changes needed
 
 **Why `core_grpc.pb.ex` in `lib/pb/`:** Co-locating service descriptor with message types follows the protobuf convention for generated files. Even though it's manually written, it logically belongs with the proto-derived types. [Source: grpc-elixir project structure conventions]
 
@@ -271,13 +271,13 @@ core/apps/event_dispatcher/lib/nebu/event/application.ex  ← add GRPC.Server.Su
 
 - CoreService RPC list: [Source: proto/core.proto]
 - Message type module names: [Source: core/apps/event_dispatcher/lib/pb/core.pb.ex]
-- `GetPendingEventsRequest` naming: [Source: Story 1.6 Dev Agent Record — Debug Log; Story 1.7 Dev Notes]
-- Port 9000 requirement: [Source: architecture.md — G2; CLAUDE.md — NEBU_CORE_GRPC_ADDR default]
-- No TLS for MVP: [Source: architecture.md — ADR 008]
-- Elixir logging with Logger: [Source: architecture.md — Logging section]
-- Supervision strategy: [Source: architecture.md — G11 OTP Supervisor Trees]
-- Build containers: [Source: Makefile — DOCKER_ELIXIR, build-core, test-unit-elixir]
-- Go gRPC client uses `core:9000`: [Source: Story 1.7 Dev Notes — Config Already Present]
+- `GetPendingEventsRequest` naming: [Source: Story 1.6 Dev Agent Record - Debug Log; Story 1.7 Dev Notes]
+- Port 9000 requirement: [Source: architecture.md - G2; CLAUDE.md - NEBU_CORE_GRPC_ADDR default]
+- No TLS for MVP: [Source: architecture.md - ADR 008]
+- Elixir logging with Logger: [Source: architecture.md - Logging section]
+- Supervision strategy: [Source: architecture.md - G11 OTP Supervisor Trees]
+- Build containers: [Source: Makefile - DOCKER_ELIXIR, build-core, test-unit-elixir]
+- Go gRPC client uses `core:9000`: [Source: Story 1.7 Dev Notes - Config Already Present]
 
 ## Dev Agent Record
 
@@ -289,22 +289,22 @@ claude-sonnet-4-6
 
 - grpc 0.11.5 (resolved from `~> 0.8`) has renamed `GRPC.Server.Endpoint` → `GRPC.Endpoint`. Endpoint was updated accordingly.
 - grpc 0.11.5 no longer accepts tuple form `{GRPC.Server.Supervisor, {Endpoint, port}}`. Now requires keyword list: `endpoint: ..., port: ..., start_server: true`.
-- Elixir 1.19 type checker reports `Core.XyzResponse.new/0` as "undefined or private" (macro-generated functions not visible to type checker). Switched to struct literals `%Core.XyzResponse{}` to eliminate warnings — both forms work at runtime.
+- Elixir 1.19 type checker reports `Core.XyzResponse.new/0` as "undefined or private" (macro-generated functions not visible to type checker). Switched to struct literals `%Core.XyzResponse{}` to eliminate warnings - both forms work at runtime.
 
 ### Completion Notes List
 
-- Task 1: Added `{:grpc, "~> 0.8"}` dep — resolved to grpc 0.11.5 with protobuf 0.16.0 transitively. `mix deps.get` succeeded.
+- Task 1: Added `{:grpc, "~> 0.8"}` dep - resolved to grpc 0.11.5 with protobuf 0.16.0 transitively. `mix deps.get` succeeded.
 - Task 2: Created `core/apps/event_dispatcher/lib/pb/core_grpc.pb.ex` manually with `Core.CoreService.Service` (9 RPCs incl. streaming EventBus) and `Core.CoreService.Stub`.
 - Task 3: Created `Nebu.EventDispatcher.Server` with 8 unary stubs (struct literals) + `event_bus/2` streaming stub.
 - Task 4: Created `Nebu.EventDispatcher.Endpoint` using `use GRPC.Endpoint` (corrected from story spec).
 - Task 5: Wired `GRPC.Server.Supervisor` in `Nebu.Event.Application` using keyword API with `start_server: true`.
-- Task 6: `make test-unit-elixir` — all 6 umbrella apps: 1 test each, 0 failures. `mix compile` 0 errors 0 warnings in our code.
+- Task 6: `make test-unit-elixir` - all 6 umbrella apps: 1 test each, 0 failures. `mix compile` 0 errors 0 warnings in our code.
 
 ### File List
 
-- `core/apps/event_dispatcher/mix.exs` (modified — added `:grpc` dependency)
-- `core/apps/event_dispatcher/lib/pb/core_grpc.pb.ex` (new — service descriptor + stub)
-- `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` (new — gRPC server with 9 RPC stubs)
-- `core/apps/event_dispatcher/lib/nebu/event_dispatcher/endpoint.ex` (new — gRPC endpoint)
-- `core/apps/event_dispatcher/lib/nebu/event/application.ex` (new — wired GRPC.Server.Supervisor; listed as "modified" in story spec but file was never committed in Story 1.2)
-- `core/mix.lock` (modified — new dependencies resolved)
+- `core/apps/event_dispatcher/mix.exs` (modified - added `:grpc` dependency)
+- `core/apps/event_dispatcher/lib/pb/core_grpc.pb.ex` (new - service descriptor + stub)
+- `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` (new - gRPC server with 9 RPC stubs)
+- `core/apps/event_dispatcher/lib/nebu/event_dispatcher/endpoint.ex` (new - gRPC endpoint)
+- `core/apps/event_dispatcher/lib/nebu/event/application.ex` (new - wired GRPC.Server.Supervisor; listed as "modified" in story spec but file was never committed in Story 1.2)
+- `core/mix.lock` (modified - new dependencies resolved)

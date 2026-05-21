@@ -22,8 +22,8 @@ Status: ready-for-dev
 
 The original story title was "GitHub Issue/PR-Templates + .github/-Infrastructure". With the dual-host sovereign-OSS strategy (GitHub Actions + GitLab CI, established in Story 8.6), template infrastructure must cover both platforms:
 
-- `github.com/innoq/nebu` — GitHub issue templates (`.github/ISSUE_TEMPLATE/*.yml`) + PR template (`.github/pull_request_template.md`)
-- `gitlab.opencode.de/nebu/nebu-server` — GitLab issue templates (`.gitlab/issue_templates/*.md`) + MR template (`.gitlab/merge_request_templates/*.md`)
+- `github.com/innoq/nebu` - GitHub issue templates (`.github/ISSUE_TEMPLATE/*.yml`) + PR template (`.github/pull_request_template.md`)
+- `gitlab.opencode.de/nebu/nebu-server` - GitLab issue templates (`.gitlab/issue_templates/*.md`) + MR template (`.gitlab/merge_request_templates/*.md`)
 
 GitLab does not support YAML form-field templates for issue templates (only Markdown). GitHub supports both YAML form-fields and Markdown; this story uses YAML form-fields for GitHub issue templates for richer UX, while GitLab templates mirror the same content as Markdown.
 
@@ -31,16 +31,16 @@ GitLab does not support YAML form-field templates for issue templates (only Mark
 
 Beyond templates, this story delivers:
 
-- `.github/CODEOWNERS` — ensures every PR is automatically reviewed by the global maintainer (`@philippbeyerlein`). Other owners can be added later as the contributor base grows.
-- `.github/dependabot.yml` — automated dependency updates for all package ecosystems used by this project: Go modules, Elixir/Mix, GitHub Actions, and Docker base images. Weekly cadence to avoid alert fatigue.
+- `.github/CODEOWNERS` - ensures every PR is automatically reviewed by the global maintainer (`@philippbeyerlein`). Other owners can be added later as the contributor base grows.
+- `.github/dependabot.yml` - automated dependency updates for all package ecosystems used by this project: Go modules, Elixir/Mix, GitHub Actions, and Docker base images. Weekly cadence to avoid alert fatigue.
 
 ### Connections to Other Stories
 
-- Story 8.3 (CONTRIBUTING.md) — forward-references issue templates ("see `.github/ISSUE_TEMPLATE/`"); this story resolves that reference.
-- Story 8.4 (SECURITY.md) — `config.yml` links to SECURITY.md's "Report a vulnerability" flow; the link must resolve.
-- Story 8.6 (CI) — `dependabot.yml` updates GitHub Actions workflow dependencies on a `github-actions` schedule.
-- Story 8.8 (Badges/Metadata) — CODEOWNERS is part of repo infrastructure referenced by the release readiness gate.
-- Story 8.9 (Release-Readiness-Gate) — verifies this story's artefacts via `scripts/verify-issue-pr-templates.sh`.
+- Story 8.3 (CONTRIBUTING.md) - forward-references issue templates ("see `.github/ISSUE_TEMPLATE/`"); this story resolves that reference.
+- Story 8.4 (SECURITY.md) - `config.yml` links to SECURITY.md's "Report a vulnerability" flow; the link must resolve.
+- Story 8.6 (CI) - `dependabot.yml` updates GitHub Actions workflow dependencies on a `github-actions` schedule.
+- Story 8.8 (Badges/Metadata) - CODEOWNERS is part of repo infrastructure referenced by the release readiness gate.
+- Story 8.9 (Release-Readiness-Gate) - verifies this story's artefacts via `scripts/verify-issue-pr-templates.sh`.
 
 ### No `FUNDING.yml`
 
@@ -82,59 +82,59 @@ The epics.md originally listed `.github/FUNDING.yml` as optional. Since no spons
 
 All tests are implemented as Bash test functions in `scripts/verify-issue-pr-templates.sh`. The script uses `REPO_ROOT` (set via `cd "$(git rev-parse --show-toplevel)"` and all file paths are relative to that root). It uses `mktemp -d` + `trap cleanup EXIT` for any temp-file operations. No external test framework is required. Exit 0 on all-pass, 1 on any failure, with per-test PASS/FAIL summary.
 
-1. **`test_bug_report_yml_valid_yaml`** — Python3 YAML parse check
+1. **`test_bug_report_yml_valid_yaml`** - Python3 YAML parse check
    - Given: `.github/ISSUE_TEMPLATE/bug_report.yml` exists
    - When: `python3 -c "import yaml, sys; yaml.safe_load(sys.stdin)" < .github/ISSUE_TEMPLATE/bug_report.yml`
    - Then: Exit code 0; no YAML parse error
 
-2. **`test_feature_request_yml_valid_yaml`** — Python3 YAML parse check
+2. **`test_feature_request_yml_valid_yaml`** - Python3 YAML parse check
    - Given: `.github/ISSUE_TEMPLATE/feature_request.yml` exists
    - When: `python3 -c "import yaml, sys; yaml.safe_load(sys.stdin)" < .github/ISSUE_TEMPLATE/feature_request.yml`
    - Then: Exit code 0; no YAML parse error
 
-3. **`test_config_yml_blank_issues_disabled`** — Python3 YAML parse + key check
+3. **`test_config_yml_blank_issues_disabled`** - Python3 YAML parse + key check
    - Given: `.github/ISSUE_TEMPLATE/config.yml` exists
    - When: `python3 -c "import yaml, sys; d=yaml.safe_load(sys.stdin); sys.exit(0 if d.get('blank_issues_enabled') is False else 1)" < .github/ISSUE_TEMPLATE/config.yml`
    - Then: Exit code 0 (i.e., `blank_issues_enabled` is exactly `false`)
 
-4. **`test_pr_template_required_sections`** — grep checks against `.github/pull_request_template.md`
+4. **`test_pr_template_required_sections`** - grep checks against `.github/pull_request_template.md`
    - Given: `.github/pull_request_template.md` exists
    - When (4a): `grep -q "Acceptance Criteria" .github/pull_request_template.md`
    - Then (4a): Match found
    - When (4b): `grep -q "DCO\|git commit -s" .github/pull_request_template.md`
    - Then (4b): Match found
    - When (4c): `grep -q "Co-Authored-By.*Claude\|Co-Authored-By: Claude" .github/pull_request_template.md`
-   - Then (4c): Match found (the trailer name is mentioned in the prohibition; the test verifies the phrase is present, not that it is absent — the _content_ of the template instructs not to use it)
+   - Then (4c): Match found (the trailer name is mentioned in the prohibition; the test verifies the phrase is present, not that it is absent - the _content_ of the template instructs not to use it)
 
-5. **`test_codeowners_has_global_owner`** — grep check
+5. **`test_codeowners_has_global_owner`** - grep check
    - Given: `.github/CODEOWNERS` exists
    - When: `grep -qE "^\* +@" .github/CODEOWNERS`
    - Then: Match found (anchored `*` followed by at least one GitHub handle)
 
-6. **`test_dependabot_yml_valid_yaml_and_four_ecosystems`** — Python3 check
+6. **`test_dependabot_yml_valid_yaml_and_four_ecosystems`** - Python3 check
    - Given: `.github/dependabot.yml` exists
    - When: Parse YAML and count entries in `updates[]`; assert count equals 4
    - Then: Exit code 0; exactly four update entries present
    - Ecosystems verified: `gomod`, `mix` (or `hex`), `github-actions`, `docker`
 
-7. **`test_gitlab_bug_md_exists`** — filesystem check
+7. **`test_gitlab_bug_md_exists`** - filesystem check
    - Given: `.gitlab/issue_templates/Bug.md` created
    - When: `[[ -f .gitlab/issue_templates/Bug.md ]]`
    - Then: True
 
-8. **`test_gitlab_feature_md_exists`** — filesystem check
+8. **`test_gitlab_feature_md_exists`** - filesystem check
    - Given: `.gitlab/issue_templates/Feature.md` created
    - When: `[[ -f .gitlab/issue_templates/Feature.md ]]`
    - Then: True
 
-9. **`test_gitlab_default_mr_template_required_sections`** — grep checks against `.gitlab/merge_request_templates/Default.md`
+9. **`test_gitlab_default_mr_template_required_sections`** - grep checks against `.gitlab/merge_request_templates/Default.md`
    - Given: `.gitlab/merge_request_templates/Default.md` exists
    - When (9a): `grep -q "Acceptance Criteria" .gitlab/merge_request_templates/Default.md`
    - Then (9a): Match found
    - When (9b): `grep -q "DCO\|git commit -s" .gitlab/merge_request_templates/Default.md`
    - Then (9b): Match found
 
-10. **`test_required_fields_parity_github_gitlab_bug`** — grep checks for shared required fields
+10. **`test_required_fields_parity_github_gitlab_bug`** - grep checks for shared required fields
     - Given: `.github/ISSUE_TEMPLATE/bug_report.yml` and `.gitlab/issue_templates/Bug.md` both exist
     - When (10a): GitHub template contains "version" (case-insensitive)
     - Then (10a): Match found
@@ -149,23 +149,23 @@ All tests are implemented as Bash test functions in `scripts/verify-issue-pr-tem
     - When (10f): GitLab template contains "steps" (case-insensitive)
     - Then (10f): Match found
 
-11. **`test_no_emojis_in_any_template`** — Python3 Unicode range scan
+11. **`test_no_emojis_in_any_template`** - Python3 Unicode range scan
     - Given: All ten files created by this story
     - When: Python3 scans each file for characters in ranges U+1F000–U+1FFFF and U+2600–U+27BF
     - Then: Zero matches across all files
 
-12. **`test_md_templates_markdownlint_clean`** — markdownlint delta check
+12. **`test_md_templates_markdownlint_clean`** - markdownlint delta check
     - Given: The four `.md` files: `pull_request_template.md`, `Bug.md`, `Feature.md`, `Default.md`
     - When: `cd ${REPO_ROOT} && npx --yes markdownlint-cli <file>` for each
     - Then: Exit code 0, zero errors per file
     - Note: If `npx` is not available, test prints a SKIP message and exits 0 for that sub-check only
 
-13. **`test_verify_script_shellcheck_clean`** — shellcheck
+13. **`test_verify_script_shellcheck_clean`** - shellcheck
     - Given: `scripts/verify-issue-pr-templates.sh` exists
     - When: `shellcheck --severity=error scripts/verify-issue-pr-templates.sh` (SKIP with exit 0 if shellcheck not in PATH)
     - Then: Exit code 0; no errors
 
-**Persistenz-Strategie:** Not applicable — static configuration files and a shell script; no application state, no crash/restart test required.
+**Persistenz-Strategie:** Not applicable - static configuration files and a shell script; no application state, no crash/restart test required.
 
 ---
 
@@ -173,18 +173,18 @@ All tests are implemented as Bash test functions in `scripts/verify-issue-pr-tem
 
 | Risk | Severity | Mitigation |
 |---|---|---|
-| **GitHub YAML form-field syntax changes** — GitHub's issue form schema evolves | LOW | YAML is validated via python3 parse (tests 1/2/3). Fields use documented `type: textarea`/`type: checkboxes` syntax; review GitHub docs before implementation. |
-| **GitLab-GitHub content drift over time** — templates diverge as one platform gets updates | LOW | Test 10 (parity check on required fields) catches drift for the most critical fields. Content should be kept in sync manually on each update. |
-| **CODEOWNERS handle mismatch** — wrong username blocks auto-review assignment | LOW | Handle `@philippbeyerlein` is the GitHub username of the maintainer. Test 5 checks the format, not the handle validity — a comment in CODEOWNERS advises updating on handle change. |
-| **`dependabot.yml` ecosystem key names** — `mix` vs `hex` naming varies in docs | LOW | Verified: GitHub Dependabot uses `mix` as the ecosystem key for Elixir projects. Test 6 checks for either `mix` or `hex` to be resilient. |
-| **Markdownlint MD041 (first line must be heading)** — PR templates often start with a comment | LOW | PR/MR templates should start with a Markdown heading. If a comment block is needed before content, use an HTML comment `<!-- -->` which markdownlint ignores. |
-| **`contact_links` SECURITY.md URL** — must point to the correct relative path | LOW | SECURITY.md lives in the repo root; GitHub resolves relative URLs in `contact_links` from repo root. Use the full GitHub URL for the `url:` field to be safe. |
+| **GitHub YAML form-field syntax changes** - GitHub's issue form schema evolves | LOW | YAML is validated via python3 parse (tests 1/2/3). Fields use documented `type: textarea`/`type: checkboxes` syntax; review GitHub docs before implementation. |
+| **GitLab-GitHub content drift over time** - templates diverge as one platform gets updates | LOW | Test 10 (parity check on required fields) catches drift for the most critical fields. Content should be kept in sync manually on each update. |
+| **CODEOWNERS handle mismatch** - wrong username blocks auto-review assignment | LOW | Handle `@philippbeyerlein` is the GitHub username of the maintainer. Test 5 checks the format, not the handle validity - a comment in CODEOWNERS advises updating on handle change. |
+| **`dependabot.yml` ecosystem key names** - `mix` vs `hex` naming varies in docs | LOW | Verified: GitHub Dependabot uses `mix` as the ecosystem key for Elixir projects. Test 6 checks for either `mix` or `hex` to be resilient. |
+| **Markdownlint MD041 (first line must be heading)** - PR templates often start with a comment | LOW | PR/MR templates should start with a Markdown heading. If a comment block is needed before content, use an HTML comment `<!-- -->` which markdownlint ignores. |
+| **`contact_links` SECURITY.md URL** - must point to the correct relative path | LOW | SECURITY.md lives in the repo root; GitHub resolves relative URLs in `contact_links` from repo root. Use the full GitHub URL for the `url:` field to be safe. |
 
 ---
 
 ## Implementation Notes
 
-### `.github/ISSUE_TEMPLATE/bug_report.yml` — Outline
+### `.github/ISSUE_TEMPLATE/bug_report.yml` - Outline
 
 ```yaml
 name: Bug Report
@@ -195,7 +195,7 @@ body:
     attributes:
       value: |
         Before submitting, please search existing issues to avoid duplicates.
-        For security vulnerabilities, do NOT use this form — see SECURITY.md.
+        For security vulnerabilities, do NOT use this form - see SECURITY.md.
   - type: textarea
     id: description
     attributes:
@@ -249,7 +249,7 @@ body:
       required: true
 ```
 
-### `.github/ISSUE_TEMPLATE/feature_request.yml` — Outline
+### `.github/ISSUE_TEMPLATE/feature_request.yml` - Outline
 
 ```yaml
 name: Feature Request
@@ -287,7 +287,7 @@ body:
         - label: I am willing to submit a pull request for this feature.
 ```
 
-### `.github/ISSUE_TEMPLATE/config.yml` — Outline
+### `.github/ISSUE_TEMPLATE/config.yml` - Outline
 
 ```yaml
 blank_issues_enabled: false
@@ -302,7 +302,7 @@ contact_links:
     about: Ask questions or discuss ideas in GitHub Discussions.
 ```
 
-### `.github/pull_request_template.md` — Outline
+### `.github/pull_request_template.md` - Outline
 
 ```markdown
 ## What / Why / How
@@ -329,13 +329,13 @@ contact_links:
 
 - [ ] `git commit -s` (DCO sign-off) applied to all commits in this PR.
 - [ ] `Co-Authored-By: Claude` trailers are NOT present in any commit message.
-  Adding AI-attribution trailers is prohibited — see CONTRIBUTING.md.
+  Adding AI-attribution trailers is prohibited - see CONTRIBUTING.md.
 ```
 
-### `.github/CODEOWNERS` — Outline
+### `.github/CODEOWNERS` - Outline
 
 ```
-# CODEOWNERS — initial global ownership
+# CODEOWNERS - initial global ownership
 # All files are owned by the primary maintainer.
 # Ownership can be narrowed by path as the contributor base grows.
 # See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
@@ -343,7 +343,7 @@ contact_links:
 * @philippbeyerlein
 ```
 
-### `.github/dependabot.yml` — Outline
+### `.github/dependabot.yml` - Outline
 
 ```yaml
 version: 2
@@ -375,7 +375,7 @@ updates:
 
 Note: `mix` uses `/core` as the directory since Elixir code lives under `core/`. Adjust if the `mix.exs` entrypoint moves.
 
-### `.gitlab/issue_templates/Bug.md` — Outline
+### `.gitlab/issue_templates/Bug.md` - Outline
 
 GitLab Markdown issue templates use section headers and prompt text (no form fields):
 
@@ -412,7 +412,7 @@ Elixir: 1.19 / OTP 27
 OS: Ubuntu 24.04 -->
 ```
 
-### `.gitlab/issue_templates/Feature.md` — Outline
+### `.gitlab/issue_templates/Feature.md` - Outline
 
 ```markdown
 ## Motivation
@@ -432,7 +432,7 @@ OS: Ubuntu 24.04 -->
 <!-- Are you willing to submit a merge request for this feature? (yes / no) -->
 ```
 
-### `.gitlab/merge_request_templates/Default.md` — Outline
+### `.gitlab/merge_request_templates/Default.md` - Outline
 
 ```markdown
 ## What / Why / How
@@ -459,10 +459,10 @@ OS: Ubuntu 24.04 -->
 
 - [ ] `git commit -s` (DCO sign-off) applied to all commits in this MR.
 - [ ] `Co-Authored-By: Claude` trailers are NOT present in any commit message.
-  Adding AI-attribution trailers is prohibited — see CONTRIBUTING.md.
+  Adding AI-attribution trailers is prohibited - see CONTRIBUTING.md.
 ```
 
-### `scripts/verify-issue-pr-templates.sh` — Design Notes
+### `scripts/verify-issue-pr-templates.sh` - Design Notes
 
 Follow the established pattern from `scripts/verify-ci-config.sh` (Story 8.6) and `scripts/verify-contributing.sh` (Story 8.3):
 
@@ -470,7 +470,7 @@ Follow the established pattern from `scripts/verify-ci-config.sh` (Story 8.6) an
 - `run_test` helper function: accepts test name + exit-code variable; increments pass/fail counters.
 - `cleanup` function registered via `trap cleanup EXIT`; uses `mktemp -d` for temp sandboxes.
 - Python3 YAML validation via `-c "import yaml, sys; yaml.safe_load(sys.stdin)"` (lesson from 8.6 test_1/2/3).
-- Python3 emoji scan: `python3 -c "import sys; data=open(f).read(); bad=[c for c in data if ord(c) in range(0x1F000,0x20000) or ord(c) in range(0x2600,0x27C0)]; sys.exit(1 if bad else 0)"` — same pattern as 8.2/8.3.
+- Python3 emoji scan: `python3 -c "import sys; data=open(f).read(); bad=[c for c in data if ord(c) in range(0x1F000,0x20000) or ord(c) in range(0x2600,0x27C0)]; sys.exit(1 if bad else 0)"` - same pattern as 8.2/8.3.
 - markdownlint check uses `cd ${REPO_ROOT}` before `npx` invocation (lesson from 8.3 AC10 false-negative).
 - `shellcheck` check includes SKIP fallback: `if ! command -v shellcheck &>/dev/null; then echo "SKIP: shellcheck not found"; return 0; fi` (lesson from 8.5/8.6).
 - All grep patterns are anchored where intent is anchored (lesson from 8.4 code review).
@@ -497,8 +497,8 @@ Follow the established pattern from `scripts/verify-ci-config.sh` (Story 8.6) an
 
 **Explicitly NOT part of this story:**
 
-- `.github/FUNDING.yml` — no active sponsoring programme; deferred indefinitely.
-- Any `security_disclosure.yml` issue template — SECURITY.md (Story 8.4) and `config.yml`'s `contact_links` already route security reporters to GitHub Security Advisories. A separate form template is redundant.
+- `.github/FUNDING.yml` - no active sponsoring programme; deferred indefinitely.
+- Any `security_disclosure.yml` issue template - SECURITY.md (Story 8.4) and `config.yml`'s `contact_links` already route security reporters to GitHub Security Advisories. A separate form template is redundant.
 - Any changes to existing CI workflows, README, CONTRIBUTING.md, or SECURITY.md.
 - Any changes to source code, migrations, or application logic.
 
@@ -510,8 +510,8 @@ Epic 8 prepares Nebu for public release on GitHub and the opencode.de GitLab mir
 
 Dependencies:
 
-- **Story 8.3** (CONTRIBUTING.md) — forward-references issue templates; this story resolves those references.
-- **Story 8.4** (SECURITY.md) — `config.yml` contact link points to the GitHub Security Advisories flow; SECURITY.md must exist.
-- **Story 8.6** (CI) — `dependabot.yml` manages GitHub Actions workflow updates; CI workflows must exist for Dependabot to track them.
-- **Story 8.8** (Badges/Metadata) — CODEOWNERS is part of repo infrastructure.
-- **Story 8.9** (Release-Readiness-Gate) — `scripts/verify-issue-pr-templates.sh` must exit 0 before the gate can pass green.
+- **Story 8.3** (CONTRIBUTING.md) - forward-references issue templates; this story resolves those references.
+- **Story 8.4** (SECURITY.md) - `config.yml` contact link points to the GitHub Security Advisories flow; SECURITY.md must exist.
+- **Story 8.6** (CI) - `dependabot.yml` manages GitHub Actions workflow updates; CI workflows must exist for Dependabot to track them.
+- **Story 8.8** (Badges/Metadata) - CODEOWNERS is part of repo infrastructure.
+- **Story 8.9** (Release-Readiness-Gate) - `scripts/verify-issue-pr-templates.sh` must exit 0 before the gate can pass green.

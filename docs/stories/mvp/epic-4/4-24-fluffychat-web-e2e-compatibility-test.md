@@ -6,7 +6,7 @@ Status: done
 
 Originally planned as a FluffyChat Flutter-web sidecar. Pivoted to Element Web during implementation:
 - FluffyChat required Rust/Flutter compilation (complex multi-stage build, vodozemac WASM stubs needed)
-- Element Web requires only `docker pull vectorim/element-web` — trivial 5s build
+- Element Web requires only `docker pull vectorim/element-web` - trivial 5s build
 - `docker/Dockerfile.fluffychat-e2e` remains as backup artifact
 - Primary delivery is Element Web (`docker/Dockerfile.element-e2e` + `element_e2e.spec.ts`)
 
@@ -30,7 +30,7 @@ During Epic 4, manual testing with the FluffyChat macOS app revealed compatibili
 
 2. A `docker/nginx-fluffychat-e2e.conf` configures nginx to:
    - Serve FluffyChat static assets on the root path
-   - Proxy `/_matrix/*` requests to `gateway:8008` (no CORS header injection needed — same-origin from browser perspective since nginx is the origin)
+   - Proxy `/_matrix/*` requests to `gateway:8008` (no CORS header injection needed - same-origin from browser perspective since nginx is the origin)
 
 3. A `docker/fluffychat-config.json` sets:
    ```json
@@ -41,7 +41,7 @@ During Epic 4, manual testing with the FluffyChat macOS app revealed compatibili
    - Port mapping `7070:80`
    - `context: .`, `dockerfile: docker/Dockerfile.element-e2e`
    - Does NOT start with `make dev` (profile-gated)
-   - (FluffyChat `Dockerfile.fluffychat-e2e` exists as backup — no compose service required)
+   - (FluffyChat `Dockerfile.fluffychat-e2e` exists as backup - no compose service required)
 
 5. `e2e/tests/element_e2e.spec.ts` contains Playwright scenarios (primary) and `e2e/tests/fluffychat_e2e.spec.ts` (secondary, auto-skip if unreachable) against `http://localhost:7070`:
    - **SSO Login**: Element/FluffyChat loads → SSO button → Dex form → `loginToken` → room list visible, no error toast
@@ -54,13 +54,13 @@ During Epic 4, manual testing with the FluffyChat macOS app revealed compatibili
    - Runs `docker compose --profile e2e up -d --wait`
    - Runs `element_e2e.spec.ts` Playwright tests against `http://localhost:7070`
    - Does NOT call `docker compose down`
-   - `test-e2e-fluffychat` also present (non-functional without FluffyChat compose service — intentional, FluffyChat pivoted out)
+   - `test-e2e-fluffychat` also present (non-functional without FluffyChat compose service - intentional, FluffyChat pivoted out)
 
 8. `dev/dex/config.yaml` has a new `redirectURIs` entry for the FluffyChat `auth.html` callback:
    ```
    http://localhost:7070/auth.html
    ```
-   Added to the `nebu-gateway` static client (the existing client — no new client needed).
+   Added to the `nebu-gateway` static client (the existing client - no new client needed).
 
 ---
 
@@ -68,7 +68,7 @@ During Epic 4, manual testing with the FluffyChat macOS app revealed compatibili
 
 ### Tests written FIRST (before implementation code):
 
-**1. SSO Login Happy Path — Playwright**
+**1. SSO Login Happy Path - Playwright**
 - Given: `make docker compose --profile e2e up -d --wait` has completed (gateway, dex, fluffychat all healthy)
 - When: Playwright navigates to `http://localhost:7070` and clicks the SSO button
 - Then: Browser redirects to Dex login page (URL contains `dex:5556/dex/auth` or `localhost:5556/dex/auth`)
@@ -76,12 +76,12 @@ During Epic 4, manual testing with the FluffyChat macOS app revealed compatibili
 - Then: Browser redirects back to `http://localhost:7070/auth.html?loginToken=...`
 - Then: FluffyChat shows room list (no error toast, no "could not connect" banner)
 
-**2. Create Room — Playwright**
+**2. Create Room - Playwright**
 - Given: User is logged in to FluffyChat (SSO login completed)
 - When: Playwright clicks the "New Room" / create room button and enters name `e2e-test-room`
 - Then: Room `e2e-test-room` appears in the room list sidebar
 
-**3. Send and Receive Message — Playwright**
+**3. Send and Receive Message - Playwright**
 - Given: User is in the `e2e-test-room` room
 - When: Playwright types `hello from playwright` in the message input and presses Enter (or clicks send)
 - Then: Message `hello from playwright` appears in the room timeline
@@ -95,8 +95,8 @@ During Epic 4, manual testing with the FluffyChat macOS app revealed compatibili
 
 - [x] Task 2: Create nginx config `docker/nginx-fluffychat-e2e.conf` (AC: 2)
   - [x] 2.1 `server` block listening on port 80
-  - [x] 2.2 `location / { root /usr/share/nginx/html; try_files $uri $uri/ /index.html; }` — SPA routing
-  - [x] 2.3 `location /_matrix/ { proxy_pass http://gateway:8008; proxy_set_header Host $host; }` — Matrix proxy
+  - [x] 2.2 `location / { root /usr/share/nginx/html; try_files $uri $uri/ /index.html; }` - SPA routing
+  - [x] 2.3 `location /_matrix/ { proxy_pass http://gateway:8008; proxy_set_header Host $host; }` - Matrix proxy
 
 - [x] Task 3: Create `docker/fluffychat-config.json` (AC: 3)
   - [x] 3.1 Write JSON: `{"defaultHomeserver":"localhost:7070","presetHomeserver":"localhost:7070","noEncryptionWarningShown":true}`
@@ -105,7 +105,7 @@ During Epic 4, manual testing with the FluffyChat macOS app revealed compatibili
   - [x] 4.1 Stage 1 (`builder`): Use `ghcr.io/cirruslabs/flutter:3.22.3` (Dart SDK >=3.11.1 required per FluffyChat pubspec.yaml)
   - [x] 4.2 `COPY tmp/fluffychat/ /app`
   - [x] 4.3 Create stub files to skip Rust/WASM compilation: minimal valid WASM binary for vodozemac, no-op Imaging.js for native_imaging
-  - [x] 4.4 `RUN flutter build web --web-renderer html --release` (null-safe — Dart SDK >=3.11.1 is fully null-safe)
+  - [x] 4.4 `RUN flutter build web --web-renderer html --release` (null-safe - Dart SDK >=3.11.1 is fully null-safe)
   - [x] 4.5 Stage 2: `FROM nginx:stable-alpine`
   - [x] 4.6 `COPY --from=builder /app/build/web /usr/share/nginx/html`
   - [x] 4.7 `COPY docker/fluffychat-config.json /usr/share/nginx/html/config.json`
@@ -134,7 +134,7 @@ During Epic 4, manual testing with the FluffyChat macOS app revealed compatibili
 
 ## Dev Notes
 
-### Critical: Dex redirect_uri — New Entry Required
+### Critical: Dex redirect_uri - New Entry Required
 
 The FluffyChat web SSO flow redirects the browser to `http://localhost:7070/auth.html?loginToken=...`. This URL does NOT currently exist in `dev/dex/config.yaml`. **The gateway's SSO redirect handler** (`GET /_matrix/client/v3/login/sso/redirect`) receives a `redirectUrl` parameter from FluffyChat, validates it (if any validation is present), and after code exchange redirects the browser to it.
 
@@ -142,9 +142,9 @@ The Dex client is `nebu-gateway`. Its `redirectURIs` currently has only:
 ```
 http://localhost:8008/_matrix/client/v3/login/sso/redirect/oidc
 ```
-This is the gateway's own callback URI where Dex redirects after authentication — this does NOT need to change. However, Dex's redirect validation operates on the configured URIs list. The gateway's Matrix SSO handler calls Dex with `redirect_uri=http://localhost:8008/_matrix/client/v3/login/sso/redirect/oidc` (fixed, not the FluffyChat URL). After the gateway exchanges the code, it redirects the browser to the `redirectUrl` parameter from the original `/sso/redirect` request. This means the Dex `redirectURIs` does NOT need `http://localhost:7070/auth.html` — Dex only validates `http://localhost:8008/_matrix/client/v3/login/sso/redirect/oidc`.
+This is the gateway's own callback URI where Dex redirects after authentication - this does NOT need to change. However, Dex's redirect validation operates on the configured URIs list. The gateway's Matrix SSO handler calls Dex with `redirect_uri=http://localhost:8008/_matrix/client/v3/login/sso/redirect/oidc` (fixed, not the FluffyChat URL). After the gateway exchanges the code, it redirects the browser to the `redirectUrl` parameter from the original `/sso/redirect` request. This means the Dex `redirectURIs` does NOT need `http://localhost:7070/auth.html` - Dex only validates `http://localhost:8008/_matrix/client/v3/login/sso/redirect/oidc`.
 
-**Verify this flow carefully before editing `dev/dex/config.yaml`.** If the gateway passes `redirectUrl` as-is to Dex (it should not — standard Matrix SSO uses a fixed gateway callback), then Dex does need the auth.html URI. Check `gateway/internal/matrix/sso_handler.go` (or similar) for how `redirectUrl` is handled. If in doubt, add the entry to `dev/dex/config.yaml` anyway (AC 8) — it's low-risk and ensures compatibility.
+**Verify this flow carefully before editing `dev/dex/config.yaml`.** If the gateway passes `redirectUrl` as-is to Dex (it should not - standard Matrix SSO uses a fixed gateway callback), then Dex does need the auth.html URI. Check `gateway/internal/matrix/sso_handler.go` (or similar) for how `redirectUrl` is handled. If in doubt, add the entry to `dev/dex/config.yaml` anyway (AC 8) - it's low-risk and ensures compatibility.
 
 ### Critical: FluffyChat SSO Flow on Web (Step-by-Step)
 
@@ -170,9 +170,9 @@ FluffyChat → shows room list
 
 **Key insight**: The browser sees `dex` hostname during the redirect only if `/etc/hosts` has `127.0.0.1 dex`. Without this, the Dex redirect from the gateway will point to `dex:5556` which the browser cannot resolve. This is already documented in the `make test-e2e` comment in the Makefile. The same requirement applies here.
 
-### Critical: nginx Proxy for /_matrix/ — Host Header
+### Critical: nginx Proxy for /_matrix/ - Host Header
 
-When FluffyChat calls `/_matrix/client/v3/login/sso/redirect?redirectUrl=...`, nginx must proxy this to `gateway:8008`. The gateway checks the `redirectUrl` parameter. The Host header seen by the gateway will be `gateway:8008` (set by nginx) — this is correct.
+When FluffyChat calls `/_matrix/client/v3/login/sso/redirect?redirectUrl=...`, nginx must proxy this to `gateway:8008`. The gateway checks the `redirectUrl` parameter. The Host header seen by the gateway will be `gateway:8008` (set by nginx) - this is correct.
 
 ```nginx
 server {
@@ -208,13 +208,13 @@ FluffyChat web loads `config.json` from the same origin on startup. The homeserv
 
 `noEncryptionWarningShown: true` prevents the E2E encryption setup modal from blocking the tests.
 
-### Critical: Flutter Build — Skipping Rust/WASM (flutter_vodozemac)
+### Critical: Flutter Build - Skipping Rust/WASM (flutter_vodozemac)
 
 FluffyChat uses `flutter_vodozemac` for E2E encryption, which requires Rust and cargo to compile. Since we skip E2E encryption (`noEncryptionWarningShown: true` and no key exchange), we can stub this dependency.
 
 **Approach**: Create stub Dart files before running `flutter build web`. The flutter_vodozemac package provides a web stub when its platform-specific implementation is absent. Check `tmp/fluffychat/` for the actual pubspec.yaml to confirm the exact dependency name and version.
 
-**Alternative approach** (simpler): If flutter_vodozemac has a conditional import or a `web` platform target that provides stubs, just running `flutter build web` may already work. Try `flutter build web --web-renderer html` first — if it fails with a Rust/cargo error, then create the stub.
+**Alternative approach** (simpler): If flutter_vodozemac has a conditional import or a `web` platform target that provides stubs, just running `flutter build web` may already work. Try `flutter build web --web-renderer html` first - if it fails with a Rust/cargo error, then create the stub.
 
 **Stub approach** (if needed):
 ```dockerfile
@@ -224,7 +224,7 @@ RUN find /app -name 'vodozemac*' -exec echo "Skipping vodozemac" \; && \
     flutter build web --web-renderer html 2>&1
 ```
 
-**Concrete stub path** (check if present): `tmp/fluffychat/packages/flutter_vodozemac/lib/flutter_vodozemac_web.dart` — if this stub file exists, the web build already handles it. If not, create a stub:
+**Concrete stub path** (check if present): `tmp/fluffychat/packages/flutter_vodozemac/lib/flutter_vodozemac_web.dart` - if this stub file exists, the web build already handles it. If not, create a stub:
 ```dart
 // lib/flutter_vodozemac_stub.dart
 class Vodozemac {
@@ -238,14 +238,14 @@ class Vodozemac {
 
 The Flutter build image must match the Flutter version used in `tmp/fluffychat/`. Check `tmp/fluffychat/pubspec.yaml` for SDK constraints. Use `ghcr.io/cirruslabs/flutter:stable` or a pinned version like `ghcr.io/cirruslabs/flutter:3.22.0` (check the FluffyChat repo version). Mismatched Flutter SDK versions will cause build failures.
 
-### Critical: Playwright Test — FluffyChat DOM Selectors
+### Critical: Playwright Test - FluffyChat DOM Selectors
 
-FluffyChat web (Flutter HTML renderer) renders actual DOM elements. However, Flutter-generated DOM is not semantic — elements use `flt-*` custom elements. Use these strategies in order:
+FluffyChat web (Flutter HTML renderer) renders actual DOM elements. However, Flutter-generated DOM is not semantic - elements use `flt-*` custom elements. Use these strategies in order:
 
 1. **`data-testid`**: Flutter web does NOT add test IDs. Avoid.
 2. **`text` / `getByText`**: Most reliable for Flutter HTML output. Use `page.getByText('Sign in with SSO')`.
 3. **`locator` with class**: Less stable but acceptable for MVP. Inspect the DOM via `playwright show-trace` or `--headed` mode to find actual selectors.
-4. **`page.waitForURL`**: Critical for SSO redirect flow — wait for `**/auth.html**` before asserting room list.
+4. **`page.waitForURL`**: Critical for SSO redirect flow - wait for `**/auth.html**` before asserting room list.
 
 **Recommended test structure**:
 ```typescript
@@ -254,7 +254,7 @@ test('SSO login', async ({ page }) => {
   // Wait for FluffyChat to load (Flutter apps can take 5-10s on first load)
   await page.waitForLoadState('networkidle');
 
-  // Click SSO button (text may vary — inspect actual render)
+  // Click SSO button (text may vary - inspect actual render)
   await page.getByText(/sign in with sso|sso|single sign/i).click();
 
   // Dex login form (rendered by Dex at localhost:5556)
@@ -275,14 +275,14 @@ test('SSO login', async ({ page }) => {
 
 **Timeout settings**: Flutter web apps render slowly. Set `timeout: 60_000` in `playwright.config.ts` for the FluffyChat tests, or override per-test with `test.setTimeout(60000)`.
 
-### Critical: Playwright Config — baseURL vs. FluffyChat URL
+### Critical: Playwright Config - baseURL vs. FluffyChat URL
 
 The existing `playwright.config.ts` uses `baseURL: process.env.NEBU_BASE_URL ?? 'http://localhost:8008'` and applies to all tests. The FluffyChat tests target `http://localhost:7070`. Options:
 
-1. **Override per test**: Use explicit `page.goto('http://localhost:7070')` instead of relative paths — simplest, no config change needed.
+1. **Override per test**: Use explicit `page.goto('http://localhost:7070')` instead of relative paths - simplest, no config change needed.
 2. **Separate Playwright project**: Add a `fluffychat` project to `playwright.config.ts` with its own `baseURL`.
 
-**Recommendation**: Use option 1 (explicit URL in test) — no config change needed, consistent with the existing pattern for cross-origin tests.
+**Recommendation**: Use option 1 (explicit URL in test) - no config change needed, consistent with the existing pattern for cross-origin tests.
 
 ### Critical: Playwright Test `--profile e2e` Dependency
 
@@ -292,11 +292,11 @@ docker compose --profile e2e up -d --wait
 ```
 Without `--profile e2e`, the `fluffychat` service won't start.
 
-The regular `make dev` (which runs `docker compose up`) must NOT start `fluffychat` — the profile gate ensures this.
+The regular `make dev` (which runs `docker compose up`) must NOT start `fluffychat` - the profile gate ensures this.
 
 ### Critical: `test-e2e` vs `test-e2e-fluffychat`
 
-The existing `test-e2e` target runs the Admin UI Playwright tests. The new `test-e2e-fluffychat` target is a separate entry point. Do NOT modify `test-e2e`. The two targets can coexist — they use the same `e2e/` directory but run different spec files.
+The existing `test-e2e` target runs the Admin UI Playwright tests. The new `test-e2e-fluffychat` target is a separate entry point. Do NOT modify `test-e2e`. The two targets can coexist - they use the same `e2e/` directory but run different spec files.
 
 ### Critical: Makefile `.PHONY` Update
 
@@ -322,19 +322,19 @@ Per the established pattern (same as `test-matrix-compat` and `test-load-silber`
 | `docker-compose.yml` | UPDATE | Add `fluffychat` service with `profiles: [e2e]` |
 | `e2e/tests/fluffychat_e2e.spec.ts` | CREATE | 3 Playwright scenarios |
 | `Makefile` | UPDATE | Add `build-fluffychat-e2e`, `test-e2e-fluffychat` + .PHONY |
-| `tmp/fluffychat/` | READ ONLY | Flutter source — do not modify |
+| `tmp/fluffychat/` | READ ONLY | Flutter source - do not modify |
 | `e2e/tests/bootstrap*.spec.ts` | DO NOT MODIFY | Existing E2E tests |
 | `gateway/` | DO NOT MODIFY | No gateway code changes needed |
 
 ### Previous Story Learnings (from Story 4-23)
 
 - Docker network is `nebu_default` (Compose `name: nebu`)
-- No `docker compose down` after optional test targets — established policy
+- No `docker compose down` after optional test targets - established policy
 - `dex` hostname requires `/etc/hosts` entry `127.0.0.1 dex` for browser-level flows (already in `make test-e2e` docs)
 - Matrix API port is **8008**, not 8080
-- Dex credentials: `alex@example.com` / `changeme` (group: `user`) — sufficient for Matrix client login; `kai@example.com` (group: `instance_admin`) if room creation permission requires it
-- `user_id` is protobuf-encoded: `@CiQ...:localhost` — but for Playwright tests we don't need to parse it directly
-- The existing `e2e/playwright.config.ts` uses `baseURL: http://localhost:8008` — FluffyChat tests navigate to `http://localhost:7070` explicitly
+- Dex credentials: `alex@example.com` / `changeme` (group: `user`) - sufficient for Matrix client login; `kai@example.com` (group: `instance_admin`) if room creation permission requires it
+- `user_id` is protobuf-encoded: `@CiQ...:localhost` - but for Playwright tests we don't need to parse it directly
+- The existing `e2e/playwright.config.ts` uses `baseURL: http://localhost:8008` - FluffyChat tests navigate to `http://localhost:7070` explicitly
 
 ### Dex Static Clients (Reference)
 
@@ -378,20 +378,20 @@ The new `fluffychat_e2e.spec.ts` goes in `e2e/tests/` alongside existing specs. 
 - `docker/` directory already exists: `docker/Dockerfile.ci.elixir`, `docker/Dockerfile.ci.go`. New files add to this directory cleanly.
 - `docker-compose.yml` is at project root (not inside `gateway/`).
 - `e2e/` is at project root with its own `package.json` and `playwright.config.ts`.
-- `tests/` at project root contains `tests/load/` (k6) and `tests/matrix_compat/` (Node.js). This is separate from `e2e/` — do not confuse them.
+- `tests/` at project root contains `tests/load/` (k6) and `tests/matrix_compat/` (Node.js). This is separate from `e2e/` - do not confuse them.
 - New Playwright spec goes in `e2e/tests/`, not in `tests/`.
 
 ---
 
 ## References
 
-- [Source: docker-compose.yml] — existing service definitions, network `nebu_default`
-- [Source: dev/dex/config.yaml] — Dex static clients, redirect URIs, user credentials
-- [Source: Makefile] — existing `.PHONY`, `test-e2e`, `test-matrix-compat`, `test-load-silber` patterns
-- [Source: e2e/playwright.config.ts] — Playwright config: baseURL, testDir, worker count
-- [Source: e2e/tests/bootstrap-happy-path.spec.ts] — OIDC Playwright flow pattern
-- [Source: docker/Dockerfile.ci.go] — docker/ directory convention
-- [Source: _bmad-output/implementation-artifacts/4-23-load-test-silber-tier-500-concurrent-k6-setup-run.md#File Overview] — DO NOT MODIFY list for test-related targets
+- [Source: docker-compose.yml] - existing service definitions, network `nebu_default`
+- [Source: dev/dex/config.yaml] - Dex static clients, redirect URIs, user credentials
+- [Source: Makefile] - existing `.PHONY`, `test-e2e`, `test-matrix-compat`, `test-load-silber` patterns
+- [Source: e2e/playwright.config.ts] - Playwright config: baseURL, testDir, worker count
+- [Source: e2e/tests/bootstrap-happy-path.spec.ts] - OIDC Playwright flow pattern
+- [Source: docker/Dockerfile.ci.go] - docker/ directory convention
+- [Source: _bmad-output/implementation-artifacts/4-23-load-test-silber-tier-500-concurrent-k6-setup-run.md#File Overview] - DO NOT MODIFY list for test-related targets
 
 ---
 
@@ -403,13 +403,13 @@ claude-sonnet-4-6[1m]
 
 ### Debug Log References
 
-None — implementation was straightforward with no blocking issues.
+None - implementation was straightforward with no blocking issues.
 
 ### Completion Notes List
 
 1. **Dex redirect URI (AC 8)**: Added `http://localhost:7070/auth.html` to `nebu-gateway` redirectURIs in `dev/dex/config.yaml`. Although the gateway uses a fixed callback URI (Dex only redirects to `http://localhost:8008/.../sso/redirect/oidc`) and Dex technically does not need the `auth.html` entry, AC 8 explicitly requires it and the story Dev Notes confirm it is low-risk. Added for compliance with the acceptance criteria.
 
-2. **Flutter build — vodozemac stubs**: The `assets/vodozemac/` directory is gitignored (contains only `.gitignore`). `prepare-web.sh` requires Rust+cargo to compile the WASM. Stub approach used: a minimal 8-byte valid WASM magic header file (`vodozemac_bindings_dart_bg.wasm`) and a no-op JS stub (`vodozemac_bindings_dart.js`). These are sufficient for the Flutter asset bundler to include the directory without crash at runtime; E2E encryption simply does not initialize.
+2. **Flutter build - vodozemac stubs**: The `assets/vodozemac/` directory is gitignored (contains only `.gitignore`). `prepare-web.sh` requires Rust+cargo to compile the WASM. Stub approach used: a minimal 8-byte valid WASM magic header file (`vodozemac_bindings_dart_bg.wasm`) and a no-op JS stub (`vodozemac_bindings_dart.js`). These are sufficient for the Flutter asset bundler to include the directory without crash at runtime; E2E encryption simply does not initialize.
 
 3. **native_imaging (Imaging.js) stub**: `index.html` references `<script src="Imaging.js">` which is generated by downloading a GitHub release artifact. Replaced with a no-op stub comment file. The Flutter HTML renderer falls back to its own Dart image processing.
 
@@ -425,11 +425,11 @@ None — implementation was straightforward with no blocking issues.
 
 ### File List
 
-- `dev/dex/config.yaml` — updated: added `http://localhost:7070/auth.html` to nebu-gateway redirectURIs
-- `docker/nginx-fluffychat-e2e.conf` — created: nginx config with SPA routing + /_matrix/ proxy
-- `docker/fluffychat-config.json` — created: FluffyChat homeserver config pointing to localhost:7070
-- `docker/Dockerfile.fluffychat-e2e` — created: 2-stage Docker build (Flutter→nginx), with vodozemac + native_imaging stubs
-- `docker-compose.yml` — updated: added `fluffychat` service under `profiles: [e2e]`
-- `Makefile` — updated: added `build-fluffychat-e2e` and `test-e2e-fluffychat` targets + .PHONY entries
-- `_bmad-output/implementation-artifacts/sprint-status.yaml` — updated: 4-24 status → review
-- `e2e/tests/fluffychat_e2e.spec.ts` — pre-existing (failing acceptance tests, no changes needed)
+- `dev/dex/config.yaml` - updated: added `http://localhost:7070/auth.html` to nebu-gateway redirectURIs
+- `docker/nginx-fluffychat-e2e.conf` - created: nginx config with SPA routing + /_matrix/ proxy
+- `docker/fluffychat-config.json` - created: FluffyChat homeserver config pointing to localhost:7070
+- `docker/Dockerfile.fluffychat-e2e` - created: 2-stage Docker build (Flutter→nginx), with vodozemac + native_imaging stubs
+- `docker-compose.yml` - updated: added `fluffychat` service under `profiles: [e2e]`
+- `Makefile` - updated: added `build-fluffychat-e2e` and `test-e2e-fluffychat` targets + .PHONY entries
+- `_bmad-output/implementation-artifacts/sprint-status.yaml` - updated: 4-24 status → review
+- `e2e/tests/fluffychat_e2e.spec.ts` - pre-existing (failing acceptance tests, no changes needed)

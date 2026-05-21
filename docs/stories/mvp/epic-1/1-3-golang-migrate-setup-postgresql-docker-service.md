@@ -30,12 +30,12 @@ so that the database schema is always in sync with the application without manua
 
 - [x] Task 2: Create migration embed package + initial migration SQL (AC: #4)
   - [x] Create `gateway/migrations/migrations.go` with `//go:embed *.sql` and `var FS embed.FS`
-  - [x] Create `gateway/migrations/000001_init.up.sql` — enable `pgcrypto` + `uuid-ossp` extensions
-  - [x] Create `gateway/migrations/000001_init.down.sql` — no-op or drop extensions
+  - [x] Create `gateway/migrations/000001_init.up.sql` - enable `pgcrypto` + `uuid-ossp` extensions
+  - [x] Create `gateway/migrations/000001_init.down.sql` - no-op or drop extensions
   - [x] Remove `gateway/migrations/.gitkeep`
 
-- [x] Task 3: Create `gateway/internal/db/db.go` — DB connection + migration runner (AC: #3, #5)
-  - [x] `RunMigrations(dbURL string) error` — runs pending migrations via iofs source driver
+- [x] Task 3: Create `gateway/internal/db/db.go` - DB connection + migration runner (AC: #3, #5)
+  - [x] `RunMigrations(dbURL string) error` - runs pending migrations via iofs source driver
   - [x] Handle `migrate.ErrNoChange` as success (not an error)
   - [x] On failure: return error with message matching `"database connection failed: <error>"` pattern
   - [x] Export `CheckDB(dbURL string) error` for use by future /ready endpoint (Story 1.11)
@@ -91,7 +91,7 @@ import (
 )
 ```
 
-The pgx database driver for golang-migrate is the `pgx/v5` subpackage — NOT `database/postgres` (which uses `lib/pq`). The architecture uses pgx throughout.
+The pgx database driver for golang-migrate is the `pgx/v5` subpackage - NOT `database/postgres` (which uses `lib/pq`). The architecture uses pgx throughout.
 
 golang-migrate URL format for pgx: `postgres://user:password@host:5432/dbname?sslmode=disable`
 
@@ -118,9 +118,9 @@ import "github.com/nebu/nebu/migrations"
 src, err := iofs.New(migrations.FS, ".")
 ```
 
-**Why embed instead of filesystem path?** The binary is self-contained in Docker — no need to ensure migration files are mounted separately at runtime. This avoids runtime path issues.
+**Why embed instead of filesystem path?** The binary is self-contained in Docker - no need to ensure migration files are mounted separately at runtime. This avoids runtime path issues.
 
-**IMPORTANT:** Do NOT use `embed.FS` inside `cmd/gateway/` — `//go:embed` cannot use `../..` relative paths. The `migrations` package at `gateway/migrations/` is the correct location.
+**IMPORTANT:** Do NOT use `embed.FS` inside `cmd/gateway/` - `//go:embed` cannot use `../..` relative paths. The `migrations` package at `gateway/migrations/` is the correct location.
 
 ### Migration File Naming
 
@@ -130,7 +130,7 @@ golang-migrate expects format: `{version}_{title}.up.sql` / `{version}_{title}.d
 - `gateway/migrations/000001_init.up.sql`
 - `gateway/migrations/000001_init.down.sql`
 
-**NOT** the architecture draft naming `001_initial_schema.up.sql` — epics AC is authoritative.
+**NOT** the architecture draft naming `001_initial_schema.up.sql` - epics AC is authoritative.
 
 ### 000001_init.up.sql Content
 
@@ -150,9 +150,9 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 SELECT 1;
 ```
 
-golang-migrate auto-creates the `schema_migrations` table — the AC "schema_migrations tracking table is created" refers to this automatic behavior.
+golang-migrate auto-creates the `schema_migrations` table - the AC "schema_migrations tracking table is created" refers to this automatic behavior.
 
-### db.go — Full Implementation Pattern
+### db.go - Full Implementation Pattern
 
 ```go
 // gateway/internal/db/db.go
@@ -204,7 +204,7 @@ func CheckDB(dbURL string) error {
 }
 ```
 
-### main.go — Updated Startup Sequence
+### main.go - Updated Startup Sequence
 
 ```go
 // gateway/cmd/gateway/main.go
@@ -239,7 +239,7 @@ func main() {
 }
 ```
 
-**CRITICAL:** The error log message MUST be `"database connection failed: " + err.Error()` — this exact format is required by AC #5. Do NOT use `slog.Error("database connection failed", "error", err)` for this message.
+**CRITICAL:** The error log message MUST be `"database connection failed: " + err.Error()` - this exact format is required by AC #5. Do NOT use `slog.Error("database connection failed", "error", err)` for this message.
 
 ### docker-compose.yml at Project Root
 
@@ -267,23 +267,23 @@ volumes:
   postgres_data:
 ```
 
-This is a PARTIAL docker-compose.yml — Story 1.9 (`docker-compose-stack-make-setup-psk-node-security`) will add `gateway`, `core`, `dex` services. Structure this file so Story 1.9 can extend it cleanly (use separate service blocks, not inline configs).
+This is a PARTIAL docker-compose.yml - Story 1.9 (`docker-compose-stack-make-setup-psk-node-security`) will add `gateway`, `core`, `dex` services. Structure this file so Story 1.9 can extend it cleanly (use separate service blocks, not inline configs).
 
 ### What NOT to Implement in This Story
 
-- **`/ready` HTTP endpoint** — Deferred to Story 1.11 (`health-readiness-endpoints-go-gateway`). The `CheckDB` function exported from `db.go` will be called by Story 1.11.
-- **`/health` HTTP endpoint** — Same, Story 1.11.
-- **`server_config` table + RLS policy** — Story 1.5 (`server-config-table-postgresql-rls-policy`).
-- **`message_buffer` table** — Story 1.4 (`message-buffer-message-dead-letter-schema-migration`).
-- **`gateway`, `core`, `dex` Docker services** — Story 1.9.
-- **Ecto/PostgreSQL on Elixir side** — Story 1.3 note in `core/mix.exs` refers to future work; do NOT modify `core/` in this story.
+- **`/ready` HTTP endpoint** - Deferred to Story 1.11 (`health-readiness-endpoints-go-gateway`). The `CheckDB` function exported from `db.go` will be called by Story 1.11.
+- **`/health` HTTP endpoint** - Same, Story 1.11.
+- **`server_config` table + RLS policy** - Story 1.5 (`server-config-table-postgresql-rls-policy`).
+- **`message_buffer` table** - Story 1.4 (`message-buffer-message-dead-letter-schema-migration`).
+- **`gateway`, `core`, `dex` Docker services** - Story 1.9.
+- **Ecto/PostgreSQL on Elixir side** - Story 1.3 note in `core/mix.exs` refers to future work; do NOT modify `core/` in this story.
 
 ### Do NOT Modify
 
-- `gateway/internal/config/config.go` — already has `DBURL string // NEBU_DB_URL` — use as-is
-- `gateway/internal/auth/.gitkeep`, `gateway/internal/matrix/.gitkeep`, etc. — all other `.gitkeep` files
-- `core/` — untouched in this story
-- `Makefile` — no changes needed; `dev: docker compose up` and `test-integration` already reference docker-compose
+- `gateway/internal/config/config.go` - already has `DBURL string // NEBU_DB_URL` - use as-is
+- `gateway/internal/auth/.gitkeep`, `gateway/internal/matrix/.gitkeep`, etc. - all other `.gitkeep` files
+- `core/` - untouched in this story
+- `Makefile` - no changes needed; `dev: docker compose up` and `test-integration` already reference docker-compose
 
 ### Go Import Path
 
@@ -304,24 +304,24 @@ Add these lines to `.gitignore` if not already present:
 
 ### Architecture References
 
-- golang-migrate decision: [Source: architecture.md — "Resolved: Migrations (G10)"]
-- Schema ownership: [Source: architecture.md — "Go Gateway: alleiniger Schema-Owner via golang-migrate"]
-- File location: [Source: architecture.md — `gateway/migrations/` directory listing]
-- Migration naming format: [Source: epics.md — Story 1.3 AC, `000001_init.up.sql`]
+- golang-migrate decision: [Source: architecture.md - "Resolved: Migrations (G10)"]
+- Schema ownership: [Source: architecture.md - "Go Gateway: alleiniger Schema-Owner via golang-migrate"]
+- File location: [Source: architecture.md - `gateway/migrations/` directory listing]
+- Migration naming format: [Source: epics.md - Story 1.3 AC, `000001_init.up.sql`]
 - PostgreSQL version: PostgreSQL 16+ [Source: CLAUDE.md tech stack table]
 - Docker Compose location: root `docker-compose.yml` [Source: architecture.md directory tree]
-- Config struct: [Source: `gateway/internal/config/config.go:8` — `DBURL string`]
+- Config struct: [Source: `gateway/internal/config/config.go:8` - `DBURL string`]
 
 ### Previous Story Intelligence
 
 From Story 1.2 (done) dev notes:
-- `core/config/runtime.exs` has a placeholder comment: "Story 1.3 adds database URL" — add `NEBU_DB_URL` to Elixir runtime config in this story? **NO** — Elixir does not own the schema (ADR). Story 1.3 is Go-only. The Elixir DB connection (for reads) comes in Epic 4.
+- `core/config/runtime.exs` has a placeholder comment: "Story 1.3 adds database URL" - add `NEBU_DB_URL` to Elixir runtime config in this story? **NO** - Elixir does not own the schema (ADR). Story 1.3 is Go-only. The Elixir DB connection (for reads) comes in Epic 4.
 - Module `github.com/nebu/nebu` confirmed from `gateway/go.mod`
-- `DOCKER_GO = docker run --rm -v $(PWD):/workspace -w /workspace golang:1.26-alpine` — use this for all Go commands
+- `DOCKER_GO = docker run --rm -v $(PWD):/workspace -w /workspace golang:1.26-alpine` - use this for all Go commands
 
 From Story 1.1 (done):
-- `gateway/migrations/.gitkeep` exists — delete it when creating the first `.sql` files
-- `gateway/go.sum` exists (empty) — will be updated by `go mod tidy`
+- `gateway/migrations/.gitkeep` exists - delete it when creating the first `.sql` files
+- `gateway/go.sum` exists (empty) - will be updated by `go mod tidy`
 
 ### Verification Steps
 
@@ -351,7 +351,7 @@ NEBU_DB_URL="postgres://nebu:wrong@localhost:9999/nebu" ./gateway
 
 Files created by this story:
 ```
-docker-compose.yml          ← new (partial — Story 1.9 adds more services)
+docker-compose.yml          ← new (partial - Story 1.9 adds more services)
 .env.example                ← new
 gateway/
   go.mod                    ← modified (add golang-migrate + pgx deps)
@@ -379,23 +379,23 @@ claude-sonnet-4-6
 
 - golang-migrate v4.19.1 used (upgraded from v4.18.1 after Go 1.23→1.26 upgrade)
 - pgx/v5 v5.8.0 used (upgraded from v5.7.1 after Go 1.23→1.26 upgrade)
-- golang-migrate pgx/v5 driver registers as `pgx5` — URL scheme must be `pgx5://` not `postgres://`. Added `pgx5URL()` helper in db.go to convert standard postgres:// URLs.
+- golang-migrate pgx/v5 driver registers as `pgx5` - URL scheme must be `pgx5://` not `postgres://`. Added `pgx5URL()` helper in db.go to convert standard postgres:// URLs.
 
 ### Completion Notes List
 
 - Implemented golang-migrate setup with pgx/v5 driver for PostgreSQL schema migrations
 - All 5 ACs verified: build passes, postgres healthcheck works, migrations run synchronously, schema_migrations version=1 dirty=false, error log + exit 1 on unreachable DB
 - Added `pgx5URL()` helper to convert postgres:// → pgx5:// (required by golang-migrate pgx/v5 driver)
-- 9 unit tests added across migrations, db, and config packages — all passing
-- docker-compose.yml created (partial — Story 1.9 adds gateway/core/dex services)
+- 9 unit tests added across migrations, db, and config packages - all passing
+- docker-compose.yml created (partial - Story 1.9 adds gateway/core/dex services)
 
 ### File List
 
 - docker-compose.yml (new)
 - .env.example (new)
-- .gitignore (modified — added .env)
-- gateway/go.mod (modified — added golang-migrate v4.19.1, pgx/v5 v5.8.0, go 1.23→1.26)
-- gateway/go.sum (modified — auto-generated)
+- .gitignore (modified - added .env)
+- gateway/go.mod (modified - added golang-migrate v4.19.1, pgx/v5 v5.8.0, go 1.23→1.26)
+- gateway/go.sum (modified - auto-generated)
 - gateway/migrations/migrations.go (new)
 - gateway/migrations/000001_init.up.sql (new)
 - gateway/migrations/000001_init.down.sql (new)
@@ -403,14 +403,14 @@ claude-sonnet-4-6
 - gateway/migrations/migrations_test.go (new)
 - gateway/internal/db/db.go (new)
 - gateway/internal/db/db_test.go (new)
-- gateway/cmd/gateway/main.go (modified — migration startup sequence)
-- Makefile (modified — golang:1.23→1.26, elixir:1.18→1.19 version bumps)
-- gateway/Dockerfile (modified — golang:1.23→1.26)
-- media/go.mod (modified — go 1.23→1.26)
-- core/Dockerfile (modified — elixir:1.18→1.19)
-- core/apps/event_dispatcher/mix.exs (modified — elixir ~>1.18→~>1.19)
-- core/apps/permissions/mix.exs (modified — elixir ~>1.18→~>1.19)
-- core/apps/presence/mix.exs (modified — elixir ~>1.18→~>1.19)
-- core/apps/room_manager/mix.exs (modified — elixir ~>1.18→~>1.19)
-- core/apps/session_manager/mix.exs (modified — elixir ~>1.18→~>1.19)
-- core/apps/signature/mix.exs (modified — elixir ~>1.18→~>1.19)
+- gateway/cmd/gateway/main.go (modified - migration startup sequence)
+- Makefile (modified - golang:1.23→1.26, elixir:1.18→1.19 version bumps)
+- gateway/Dockerfile (modified - golang:1.23→1.26)
+- media/go.mod (modified - go 1.23→1.26)
+- core/Dockerfile (modified - elixir:1.18→1.19)
+- core/apps/event_dispatcher/mix.exs (modified - elixir ~>1.18→~>1.19)
+- core/apps/permissions/mix.exs (modified - elixir ~>1.18→~>1.19)
+- core/apps/presence/mix.exs (modified - elixir ~>1.18→~>1.19)
+- core/apps/room_manager/mix.exs (modified - elixir ~>1.18→~>1.19)
+- core/apps/session_manager/mix.exs (modified - elixir ~>1.18→~>1.19)
+- core/apps/signature/mix.exs (modified - elixir ~>1.18→~>1.19)

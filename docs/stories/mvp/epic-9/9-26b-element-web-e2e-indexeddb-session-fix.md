@@ -1,6 +1,6 @@
 ---
 story_id: 9-26b
-title: "Element Web E2E — Fix IndexedDB Session Restoration"
+title: "Element Web E2E - Fix IndexedDB Session Restoration"
 type: bugfix
 severity: critical
 epic: 9
@@ -12,10 +12,10 @@ created: 2026-05-07
 
 ## Summary
 
-Sub-story of 9-26. Fixes BUG-E2E-01 and BUG-E2E-02, both caused by the same architectural gap: Element Web 1.11+ stores `mx_access_token` AES-encrypted in **IndexedDB**, not localStorage. Playwright's `storageState()` captures localStorage + cookies only — NOT IndexedDB. This means:
+Sub-story of 9-26. Fixes BUG-E2E-01 and BUG-E2E-02, both caused by the same architectural gap: Element Web 1.11+ stores `mx_access_token` AES-encrypted in **IndexedDB**, not localStorage. Playwright's `storageState()` captures localStorage + cookies only - NOT IndexedDB. This means:
 
-1. `ensureStorageState()` caches a state file that looks valid but is missing the actual token — Element Web on next load shows the welcome screen instead of the room list (BUG-E2E-01, 6 failing scenarios).
-2. `extractTokenFromStorageState()` searches `state.origins[].localStorage` for `mx_access_token` — it doesn't exist there, so `getApiSession()` always throws "No mx_access_token found" (BUG-E2E-02, 2 failing scenarios + all room-setup steps).
+1. `ensureStorageState()` caches a state file that looks valid but is missing the actual token - Element Web on next load shows the welcome screen instead of the room list (BUG-E2E-01, 6 failing scenarios).
+2. `extractTokenFromStorageState()` searches `state.origins[].localStorage` for `mx_access_token` - it doesn't exist there, so `getApiSession()` always throws "No mx_access_token found" (BUG-E2E-02, 2 failing scenarios + all room-setup steps).
 
 ## Root Cause
 
@@ -46,25 +46,25 @@ During `loginViaOidc()`, intercept the `/_matrix/client/v3/login` POST response 
 
 The simplest correct fix that doesn't over-engineer:
 - **For API calls** (`getApiSession`): Use `loginViaOidc()` headlessly once per test session and capture the token from the Matrix login response. Store in sidecar.
-- **For UI tests** (`ensureStorageState`, context fixture): Do a full `loginViaOidc()` per context creation — cached per test run by globalSetup, fresh per suite. Accept the 15–20s cost for the first login.
+- **For UI tests** (`ensureStorageState`, context fixture): Do a full `loginViaOidc()` per context creation - cached per test run by globalSetup, fresh per suite. Accept the 15–20s cost for the first login.
 
 ## Files to Change
 
-- `e2e/fixtures/dex-auth.ts` — primary change:
+- `e2e/fixtures/dex-auth.ts` - primary change:
   - `loginViaOidcBrowser()`: intercept `/_matrix/client/v3/login` response to capture token
   - `ensureStorageState()`: write token sidecar after login
   - Replace `extractTokenFromStorageState()` with `readTokenSidecar(user)`
   - `getApiSession()`: use `readTokenSidecar()` instead of `extractTokenFromStorageState()`
-- `e2e/fixtures/nebu-fixtures.ts` — if context strategy changes
-- `e2e/global-setup.ts` — may need adjustment for sidecar warmup
-- `e2e/.gitignore` — add `auth-state/*.token.json` if sidecar files contain real tokens
+- `e2e/fixtures/nebu-fixtures.ts` - if context strategy changes
+- `e2e/global-setup.ts` - may need adjustment for sidecar warmup
+- `e2e/.gitignore` - add `auth-state/*.token.json` if sidecar files contain real tokens
 
 ## Acceptance Tests
 
-1. **BUG-E2E-01 fix** — `login.feature` all 3 scenarios pass: SSO Login shows room list, Logout shows welcome screen, Cached session no redirect.
-2. **BUG-E2E-02 fix** — `getApiSession(request, NEBU_USERS.kai, browser)` returns a valid access token without throwing "No mx_access_token found".
-3. **Room-setup steps** — `messages/send.feature` and `messages/receive.feature` pass end-to-end.
-4. **Double run** — suite still passes twice in a row (M-1 regression test still green).
+1. **BUG-E2E-01 fix** - `login.feature` all 3 scenarios pass: SSO Login shows room list, Logout shows welcome screen, Cached session no redirect.
+2. **BUG-E2E-02 fix** - `getApiSession(request, NEBU_USERS.kai, browser)` returns a valid access token without throwing "No mx_access_token found".
+3. **Room-setup steps** - `messages/send.feature` and `messages/receive.feature` pass end-to-end.
+4. **Double run** - suite still passes twice in a row (M-1 regression test still green).
 
 ## DoD
 

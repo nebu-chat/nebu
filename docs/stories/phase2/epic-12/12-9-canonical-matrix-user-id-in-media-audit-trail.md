@@ -23,14 +23,14 @@ so that upload audit records can be correlated with room events and user profile
 
 ## Context
 
-Currently in `media/internal/upload/upload.go`, the `OIDCTokenVerifier.VerifyToken` method returns the raw claim value from the OIDC token (`sub` or `name` — whichever is non-empty). This raw value (e.g., `alice`) is stored as `uploader_user_id` in `media_files`.
+Currently in `media/internal/upload/upload.go`, the `OIDCTokenVerifier.VerifyToken` method returns the raw claim value from the OIDC token (`sub` or `name` - whichever is non-empty). This raw value (e.g., `alice`) is stored as `uploader_user_id` in `media_files`.
 
-The gateway already constructs canonical Matrix user IDs (`@alice:localhost`) via `FormatUserIDFromClaims` in `gateway/internal/grpc/metadata.go`. The media gateway has no equivalent logic, so all media upload audit records contain plain OIDC claims instead of Matrix user IDs — making cross-correlation with room events impossible without manual mapping.
+The gateway already constructs canonical Matrix user IDs (`@alice:localhost`) via `FormatUserIDFromClaims` in `gateway/internal/grpc/metadata.go`. The media gateway has no equivalent logic, so all media upload audit records contain plain OIDC claims instead of Matrix user IDs - making cross-correlation with room events impossible without manual mapping.
 
 This story:
-1. Adds `NEBU_SERVER_NAME` as a mandatory env var to the media gateway (already present in `mediaConfig.serverName` but currently defaulting to `"localhost"` — make it required with a fatal exit if unset).
+1. Adds `NEBU_SERVER_NAME` as a mandatory env var to the media gateway (already present in `mediaConfig.serverName` but currently defaulting to `"localhost"` - make it required with a fatal exit if unset).
 2. In `OIDCTokenVerifier.VerifyToken` (or in the upload handler), constructs `uploaderUserID = "@" + sanitise(localpart) + ":" + serverName`.
-3. Adds migration `000047` — a `COMMENT ON COLUMN` to document the canonical format (no data migration needed — historical rows are grandfathered).
+3. Adds migration `000047` - a `COMMENT ON COLUMN` to document the canonical format (no data migration needed - historical rows are grandfathered).
 4. Adds `NEBU_SERVER_NAME` to `docker-compose.yml` media service env section.
 
 ---
@@ -49,7 +49,7 @@ This story:
 **When** the upload is accepted,
 **Then** `media_files.uploader_user_id` contains `@alice:<server_name>` where `server_name` is read from `NEBU_SERVER_NAME` env var.
 
-### AC-3: NEBU_SERVER_NAME is required — fatal exit if unset
+### AC-3: NEBU_SERVER_NAME is required - fatal exit if unset
 
 **Given** `NEBU_SERVER_NAME` is unset or empty,
 **When** the media gateway starts,
@@ -59,18 +59,18 @@ This story:
 
 **Given** an existing row in `media_files` with a raw claim value (pre-migration),
 **When** migration 000047 runs,
-**Then** the column comment is updated to document the canonical format (no data migration required — historical rows are grandfathered).
+**Then** the column comment is updated to document the canonical format (no data migration required - historical rows are grandfathered).
 
 ---
 
 ## Tasks / Subtasks
 
-- [ ] T1 — Make `NEBU_SERVER_NAME` mandatory in `main()` (AC-3)
+- [ ] T1 - Make `NEBU_SERVER_NAME` mandatory in `main()` (AC-3)
   - [ ] Remove the default `"localhost"` from `getenv("NEBU_SERVER_NAME", "localhost")`
   - [ ] Add early check: if `os.Getenv("NEBU_SERVER_NAME") == ""` → `slog.Error("FATAL: NEBU_SERVER_NAME is required")` + `os.Exit(1)`
 
-- [ ] T2 — Construct canonical Matrix user ID in upload handler (AC-1, AC-2)
-  - [ ] Add `ServerName` field to `HandlerConfig` and `Handler` (already present — verify it's wired through)
+- [ ] T2 - Construct canonical Matrix user ID in upload handler (AC-1, AC-2)
+  - [ ] Add `ServerName` field to `HandlerConfig` and `Handler` (already present - verify it's wired through)
   - [ ] In `Handler.ServeHTTP`, after `uploaderUserID = subject`, format it:
     ```go
     uploaderUserID = formatMatrixUserID(subject, h.serverName)
@@ -79,22 +79,22 @@ This story:
     - Mirrors gateway's `sanitiseLocalpart` (lowercase, keep `[a-z0-9._-]`, spaces → `_`, drop others)
     - Returns `"@" + sanitise(localpart) + ":" + serverName`
 
-- [ ] T3 — Add `formatMatrixUserID` helper (AC-1, AC-2)
-  - [ ] Location: `media/internal/upload/upload.go` (keep it self-contained — no import from gateway)
+- [ ] T3 - Add `formatMatrixUserID` helper (AC-1, AC-2)
+  - [ ] Location: `media/internal/upload/upload.go` (keep it self-contained - no import from gateway)
   - [ ] Edge case: if `sanitise(localpart)` is empty, return `"@unknown:" + serverName`
 
-- [ ] T4 — Add migration 000047 (AC-4)
+- [ ] T4 - Add migration 000047 (AC-4)
   - [ ] Create `gateway/migrations/000047_media_files_uploader_user_id_comment.up.sql`
-  - [ ] SQL: `COMMENT ON COLUMN media_files.uploader_user_id IS 'Canonical Matrix user ID (@localpart:server). Historical rows pre-12.9 may contain raw OIDC sub/name claims — grandfathered.';`
+  - [ ] SQL: `COMMENT ON COLUMN media_files.uploader_user_id IS 'Canonical Matrix user ID (@localpart:server). Historical rows pre-12.9 may contain raw OIDC sub/name claims - grandfathered.';`
   - [ ] Create matching `.down.sql`: `COMMENT ON COLUMN media_files.uploader_user_id IS NULL;`
 
-- [ ] T5 — Add `NEBU_SERVER_NAME` to docker-compose.yml (AC-2, AC-3)
+- [ ] T5 - Add `NEBU_SERVER_NAME` to docker-compose.yml (AC-2, AC-3)
   - [ ] In the `media` service env section, add `NEBU_SERVER_NAME: ${NEBU_SERVER_NAME:-localhost}`
 
-- [ ] T6 — Write ATDD tests before any implementation (tests first)
-  - [ ] `media/cmd/media/main_test.go`: AT-12-9-3 — subprocess test for missing `NEBU_SERVER_NAME`
-  - [ ] `media/internal/upload/upload_test.go`: AT-12-9-1 — verify `uploader_user_id` gets `@alice:localhost`
-  - [ ] `media/internal/upload/upload_test.go`: AT-12-9-2 — verify `NEBU_SERVER_NAME` used as server part
+- [ ] T6 - Write ATDD tests before any implementation (tests first)
+  - [ ] `media/cmd/media/main_test.go`: AT-12-9-3 - subprocess test for missing `NEBU_SERVER_NAME`
+  - [ ] `media/internal/upload/upload_test.go`: AT-12-9-1 - verify `uploader_user_id` gets `@alice:localhost`
+  - [ ] `media/internal/upload/upload_test.go`: AT-12-9-2 - verify `NEBU_SERVER_NAME` used as server part
 
 ---
 
@@ -171,20 +171,20 @@ func sanitiseLocalpart(s string) string {
 
 Note: `unicode` import will need to be added to upload.go.
 
-### OIDCTokenVerifier.VerifyToken — No Change Needed
+### OIDCTokenVerifier.VerifyToken - No Change Needed
 
-The `VerifyToken` method already returns the raw sub/name claim as the `subject`. The canonical format construction happens in the handler after calling `VerifyToken`. This is the correct separation — the verifier is responsible for authentication, the handler is responsible for identity formatting.
+The `VerifyToken` method already returns the raw sub/name claim as the `subject`. The canonical format construction happens in the handler after calling `VerifyToken`. This is the correct separation - the verifier is responsible for authentication, the handler is responsible for identity formatting.
 
 ### Migration 000047
 
 **File:** `gateway/migrations/000047_media_files_uploader_user_id_comment.up.sql`
 ```sql
--- Story 12.9 — document canonical Matrix user ID format for media_files.uploader_user_id.
+-- Story 12.9 - document canonical Matrix user ID format for media_files.uploader_user_id.
 -- No data migration: historical rows pre-12.9 may contain raw OIDC sub/name claims.
 -- These are grandfathered. Only rows inserted after Story 12.9 deployment contain
 -- canonical @localpart:server format.
 COMMENT ON COLUMN media_files.uploader_user_id
-    IS 'Canonical Matrix user ID (@localpart:server). Historical rows pre-12.9 may contain raw OIDC sub/name claims — grandfathered.';
+    IS 'Canonical Matrix user ID (@localpart:server). Historical rows pre-12.9 may contain raw OIDC sub/name claims - grandfathered.';
 ```
 
 **File:** `gateway/migrations/000047_media_files_uploader_user_id_comment.down.sql`
@@ -204,7 +204,7 @@ This uses the same env var as the gateway, so both services are configured consi
 
 ### Testing Strategy
 
-**AT-12-9-3 — `NEBU_SERVER_NAME` fatal exit** (`media/cmd/media/main_test.go`):
+**AT-12-9-3 - `NEBU_SERVER_NAME` fatal exit** (`media/cmd/media/main_test.go`):
 Use the same subprocess pattern already established in Story 12.8 (CRASH_EXPECTED env var):
 ```go
 func TestMain_MissingServerName_FatalExit(t *testing.T) {
@@ -228,7 +228,7 @@ func TestMain_MissingServerName_FatalExit(t *testing.T) {
 }
 ```
 
-**AT-12-9-1 + AT-12-9-2 — canonical format** (`media/internal/upload/upload_test.go`):
+**AT-12-9-1 + AT-12-9-2 - canonical format** (`media/internal/upload/upload_test.go`):
 - Create handler with `ServerName: "localhost"` and a mock verifier returning `"alice"`
 - POST upload → verify that `db.InsertMediaFile` was called with `UploaderUserID: "@alice:localhost"`
 - Use the existing `fakeMediaStore` (it's already in upload_test.go) to capture the `InsertMediaFile` call
@@ -253,21 +253,21 @@ Check if this already exists from Story 12.8's tests before adding it.
 
 ### Files To Modify
 
-- `media/cmd/media/main.go` — make `NEBU_SERVER_NAME` mandatory (remove default)
-- `media/internal/upload/upload.go` — add `formatMatrixUserID` + `sanitiseLocalpart`, call in `ServeHTTP`
-- `media/cmd/media/main_test.go` — add AT-12-9-3 subprocess test
-- `media/internal/upload/upload_test.go` — add AT-12-9-1 and AT-12-9-2 tests
-- `gateway/migrations/000047_media_files_uploader_user_id_comment.up.sql` — new file
-- `gateway/migrations/000047_media_files_uploader_user_id_comment.down.sql` — new file
-- `docker-compose.yml` — add `NEBU_SERVER_NAME` to media service env
+- `media/cmd/media/main.go` - make `NEBU_SERVER_NAME` mandatory (remove default)
+- `media/internal/upload/upload.go` - add `formatMatrixUserID` + `sanitiseLocalpart`, call in `ServeHTTP`
+- `media/cmd/media/main_test.go` - add AT-12-9-3 subprocess test
+- `media/internal/upload/upload_test.go` - add AT-12-9-1 and AT-12-9-2 tests
+- `gateway/migrations/000047_media_files_uploader_user_id_comment.up.sql` - new file
+- `gateway/migrations/000047_media_files_uploader_user_id_comment.down.sql` - new file
+- `docker-compose.yml` - add `NEBU_SERVER_NAME` to media service env
 
 ### Do NOT Touch
 
-- `media/internal/upload/upload.go` — `OIDCTokenVerifier.VerifyToken` — the verifier returns the raw claim; formatting happens in the handler
-- `gateway/internal/grpc/metadata.go` — do not import or use `FormatUserIDFromClaims` from the gateway package in the media gateway (separate binaries, avoid cross-package coupling)
-- Any download/thumbnail handlers — not affected
-- Any gRPC/core code — not affected
-- Existing rows in `media_files` — no data migration
+- `media/internal/upload/upload.go` - `OIDCTokenVerifier.VerifyToken` - the verifier returns the raw claim; formatting happens in the handler
+- `gateway/internal/grpc/metadata.go` - do not import or use `FormatUserIDFromClaims` from the gateway package in the media gateway (separate binaries, avoid cross-package coupling)
+- Any download/thumbnail handlers - not affected
+- Any gRPC/core code - not affected
+- Existing rows in `media_files` - no data migration
 
 ### Previous Story Context (12.8)
 
@@ -284,17 +284,17 @@ This story directly resolves that advisory by canonicalising the format.
 
 ### Tests written FIRST (before implementation code):
 
-1. **AT-12-9-1: TestUploadHandler_StoresCanonicalMatrixUserID** — `media/internal/upload/upload_test.go` (Go httptest)
+1. **AT-12-9-1: TestUploadHandler_StoresCanonicalMatrixUserID** - `media/internal/upload/upload_test.go` (Go httptest)
    - Given: upload Handler with `ServerName: "localhost"`, mock verifier returning subject `"alice"`
    - When: POST `/_matrix/media/v3/upload` with `Authorization: Bearer <token>`
    - Then: `fakeMediaStore.InsertMediaFile` is called with `UploaderUserID == "@alice:localhost"`
 
-2. **AT-12-9-2: TestUploadHandler_UsesServerNameEnvVar** — `media/internal/upload/upload_test.go` (Go httptest)
+2. **AT-12-9-2: TestUploadHandler_UsesServerNameEnvVar** - `media/internal/upload/upload_test.go` (Go httptest)
    - Given: upload Handler with `ServerName: "myserver.example.com"`, mock verifier returning subject `"alice"`
    - When: POST `/_matrix/media/v3/upload` with `Authorization: Bearer <token>`
    - Then: `fakeMediaStore.InsertMediaFile` is called with `UploaderUserID == "@alice:myserver.example.com"`
 
-3. **AT-12-9-3: TestMain_MissingServerName_FatalExit** — `media/cmd/media/main_test.go` (Go subprocess test)
+3. **AT-12-9-3: TestMain_MissingServerName_FatalExit** - `media/cmd/media/main_test.go` (Go subprocess test)
    - Given: `NEBU_SERVER_NAME` is unset
    - When: subprocess calls the startup check
    - Then: process exits with non-zero code

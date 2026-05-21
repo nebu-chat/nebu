@@ -2,7 +2,7 @@
 security_review: required
 ---
 
-# Story 8.5: Secret-Scan-Gate — gitleaks History-Scan + CI-Integration
+# Story 8.5: Secret-Scan-Gate - gitleaks History-Scan + CI-Integration
 
 Status: ready-for-dev
 
@@ -18,15 +18,15 @@ Status: ready-for-dev
 
 ## Background
 
-Before any public push to GitHub, the full Git history must be clean of secrets. Even after the Co-Authored-By trailer rewrite (Story 8.1), any secrets that were accidentally committed — API tokens, private keys, PSKs, `.env` file contents — would be permanently visible on a public repo once pushed.
+Before any public push to GitHub, the full Git history must be clean of secrets. Even after the Co-Authored-By trailer rewrite (Story 8.1), any secrets that were accidentally committed - API tokens, private keys, PSKs, `.env` file contents - would be permanently visible on a public repo once pushed.
 
 This story delivers two complementary protection layers:
 
-1. **History-Scan** — a one-shot `gitleaks detect` run over the full Git history, to be executed before Story 8.10 (Initial Public Push). The scan must exit 0 (or document all allow-listed False-Positives with justification) before the public push proceeds.
+1. **History-Scan** - a one-shot `gitleaks detect` run over the full Git history, to be executed before Story 8.10 (Initial Public Push). The scan must exit 0 (or document all allow-listed False-Positives with justification) before the public push proceeds.
 
-2. **CI Gate** — a `gitleaks protect --staged` check for ongoing protection after the public push. This runs on every `feature/*` and `main` push via GitHub Actions (Story 8.6) and can be installed as a local pre-push Git hook.
+2. **CI Gate** - a `gitleaks protect --staged` check for ongoing protection after the public push. This runs on every `feature/*` and `main` push via GitHub Actions (Story 8.6) and can be installed as a local pre-push Git hook.
 
-**Tool choice:** `gitleaks` — Apache-2.0 licensed, well-maintained Go binary, industry standard for Open-Source repos. Not committed to the repo; installed separately (`brew install gitleaks` / `go install`).
+**Tool choice:** `gitleaks` - Apache-2.0 licensed, well-maintained Go binary, industry standard for Open-Source repos. Not committed to the repo; installed separately (`brew install gitleaks` / `go install`).
 
 **Known False-Positives to allow-list (identified before implementation):**
 
@@ -37,7 +37,7 @@ This story delivers two complementary protection layers:
 
 **Dependency chain:**
 
-- Story 8.1 delivers `scripts/rewrite-coauthored-trailer.sh` — history rewrite runs before this story's `--history` scan
+- Story 8.1 delivers `scripts/rewrite-coauthored-trailer.sh` - history rewrite runs before this story's `--history` scan
 - Story 8.5 (this story) must be green before Story 8.10 (Initial Public Push) starts
 - Story 8.6 (GitHub Actions CI) will reference the `scripts/scan-secrets.sh --ci` script as the `secret-scan` job
 
@@ -48,8 +48,8 @@ This story delivers two complementary protection layers:
 1. **`.gitleaks.toml` exists** in the repository root, contains gitleaks default rules (via `useDefault = true`) and a documented allow-list (`[[allowlist]]` entries) for each known False-Positive in this repository. Every allow-list entry has an inline comment explaining why it is safe to skip.
 
 2. **`scripts/scan-secrets.sh` exists**, is executable, and supports three explicit modes:
-   - `--history`: full history scan via `gitleaks detect --source .` — intended for pre-push one-shot verification
-   - `--staged`: staged-only scan via `gitleaks protect --staged` — intended for pre-push hook
+   - `--history`: full history scan via `gitleaks detect --source .` - intended for pre-push one-shot verification
+   - `--staged`: staged-only scan via `gitleaks protect --staged` - intended for pre-push hook
    - `--ci`: CI-optimised scan (non-interactive, no banner, JSON report written to `gitleaks-report.json`, exits 0 on clean / 1 on findings)
    Without a recognised argument: print usage and exit 1.
 
@@ -80,49 +80,49 @@ This story delivers two complementary protection layers:
 
 ### Tests written FIRST (before implementation code):
 
-All tests run in isolated `mktemp -d` sandbox Git repos — no writes to the host repository. Tests are implemented as Bash test functions in `scripts/scan-secrets.sh.test.sh` (or `scripts/scan-secrets.test.sh`) with explicit exit codes. No external test framework required.
+All tests run in isolated `mktemp -d` sandbox Git repos - no writes to the host repository. Tests are implemented as Bash test functions in `scripts/scan-secrets.sh.test.sh` (or `scripts/scan-secrets.test.sh`) with explicit exit codes. No external test framework required.
 
-1. **`test_history_detects_aws_key_in_sandbox_commit`** — Bash, isolated mktemp repo
-   - Given: A sandbox Git repo with a commit containing the string `AKIAIOSFODNN7EXAMPLE` (synthetic AWS Access Key ID — format matches gitleaks default rule, not a real credential)
+1. **`test_history_detects_aws_key_in_sandbox_commit`** - Bash, isolated mktemp repo
+   - Given: A sandbox Git repo with a commit containing the string `AKIAIOSFODNN7EXAMPLE` (synthetic AWS Access Key ID - format matches gitleaks default rule, not a real credential)
    - When: `scripts/scan-secrets.sh --history` runs in the sandbox repo
    - Then: Exit code 1; stdout or stderr references the finding; `gitleaks-report.json` is NOT written (non-CI mode)
 
-2. **`test_staged_blocks_secret_before_commit`** — Bash, isolated mktemp repo
+2. **`test_staged_blocks_secret_before_commit`** - Bash, isolated mktemp repo
    - Given: A sandbox Git repo with a staged (but not yet committed) file containing `AKIAIOSFODNN7EXAMPLE`
    - When: `scripts/scan-secrets.sh --staged` runs in the sandbox repo
    - Then: Exit code 1; output references the staged finding
 
-3. **`test_staged_allows_whitelisted_pattern`** — Bash, isolated mktemp repo
+3. **`test_staged_allows_whitelisted_pattern`** - Bash, isolated mktemp repo
    - Given: A sandbox Git repo with a staged file at path `_bmad-output/test-example.md` containing a token that matches a gitleaks default rule AND is covered by an allow-list path pattern in `.gitleaks.toml` (e.g., `_bmad-output/`)
    - When: `scripts/scan-secrets.sh --staged` runs in the sandbox repo (with the project `.gitleaks.toml` present)
    - Then: Exit code 0; the whitelisted path is not reported as a finding
 
-4. **`test_ci_produces_valid_json_on_finding`** — Bash, isolated mktemp repo
+4. **`test_ci_produces_valid_json_on_finding`** - Bash, isolated mktemp repo
    - Given: A sandbox Git repo with a commit containing `AKIAIOSFODNN7EXAMPLE`
    - When: `scripts/scan-secrets.sh --ci` runs in the sandbox repo
    - Then: Exit code 1; `gitleaks-report.json` exists and is parseable as JSON (verified via `python3 -m json.tool` or `jq .`); the file contains a non-empty array
 
-5. **`test_ci_exits_zero_on_clean_repo`** — Bash, isolated mktemp repo
+5. **`test_ci_exits_zero_on_clean_repo`** - Bash, isolated mktemp repo
    - Given: A sandbox Git repo with commits containing no secret patterns
    - When: `scripts/scan-secrets.sh --ci` runs in the sandbox repo
    - Then: Exit code 0; `gitleaks-report.json` exists and contains `[]` or is an empty JSON array
 
-6. **`test_preflight_fails_when_gitleaks_missing`** — Bash, isolated mktemp repo
+6. **`test_preflight_fails_when_gitleaks_missing`** - Bash, isolated mktemp repo
    - Given: A sandbox environment where `gitleaks` is NOT present in `PATH` (achieved via `PATH=/usr/bin:/bin` override)
    - When: `scripts/scan-secrets.sh --history` is invoked
    - Then: Exit code != 0; stderr contains an installation hint (`brew install gitleaks` or `go install`)
 
-7. **`test_allowlist_entry_suppresses_known_false_positive`** — Bash, isolated mktemp repo
+7. **`test_allowlist_entry_suppresses_known_false_positive`** - Bash, isolated mktemp repo
    - Given: A sandbox Git repo with a commit in a path matching the allow-list pattern (e.g., `gateway/internal/auth/testdata/`) containing a test key string
    - When: `scripts/scan-secrets.sh --history` runs with the project `.gitleaks.toml`
    - Then: Exit code 0; the test-key path is not reported as a finding
 
-8. **`test_shellcheck_clean`** — Bash, direct shellcheck invocation (no sandbox needed)
+8. **`test_shellcheck_clean`** - Bash, direct shellcheck invocation (no sandbox needed)
    - Given: `scripts/scan-secrets.sh` exists
    - When: `shellcheck --severity=error scripts/scan-secrets.sh` is run
    - Then: Exit code 0; no errors printed
 
-**Persistenz-Strategie:** Not applicable — shell script with no application state. No crash/restart test required.
+**Persistenz-Strategie:** Not applicable - shell script with no application state. No crash/restart test required.
 
 ---
 
@@ -130,7 +130,7 @@ All tests run in isolated `mktemp -d` sandbox Git repos — no writes to the hos
 
 | Risiko | Schwere | Mitigation |
 |---|---|---|
-| **Over-broad allow-list** — an allow-list regex that is too wide suppresses real secrets silently | HOCH | Every allow-list entry must be path-scoped (`paths`) or regex-scoped to the minimum required pattern. Justification comment required (AC 8). Allow-list reviewed in security review gate. |
+| **Over-broad allow-list** - an allow-list regex that is too wide suppresses real secrets silently | HOCH | Every allow-list entry must be path-scoped (`paths`) or regex-scoped to the minimum required pattern. Justification comment required (AC 8). Allow-list reviewed in security review gate. |
 | **Real secret in history not caught because gitleaks rule does not cover it** | MITTEL | gitleaks default ruleset covers ~170 patterns. For custom PSKs and internal tokens (which have no standard pattern), the Runbook instructs the maintainer to do an additional manual `git log -p` grep before Story 8.10. |
 | **gitleaks not installed on CI runner** | NIEDRIG | Story 8.6 (GitHub Actions) installs gitleaks via `brew` or the official Docker image. The `--ci` mode script is self-contained and only requires the binary in PATH. |
 | **`gitleaks-report.json` accidentally committed** | NIEDRIG | `.gitignore` must include `gitleaks-report.json`. Verified in AC 5 test setup. |
@@ -140,7 +140,7 @@ All tests run in isolated `mktemp -d` sandbox Git repos — no writes to the hos
 
 ## Implementation Notes
 
-### `.gitleaks.toml` — Outline
+### `.gitleaks.toml` - Outline
 
 ```toml
 # .gitleaks.toml
@@ -158,7 +158,7 @@ useDefault = true  # include all default detection rules
 #   (c) which file/path it lives in
 
 [[allowlist]]
-description = "BMAD story files — example tokens used in documentation only"
+description = "BMAD story files - example tokens used in documentation only"
 paths = [
   '''_bmad-output/.*'''
 ]
@@ -186,7 +186,7 @@ paths = [
 # (c) gateway/features/ and *_test.go files throughout gateway/
 ```
 
-### `scripts/scan-secrets.sh` — Outline
+### `scripts/scan-secrets.sh` - Outline
 
 ```bash
 #!/usr/bin/env bash
@@ -292,7 +292,7 @@ ln -sf ../../scripts/scan-secrets.sh .git/hooks/pre-push
 2. Open `.gitleaks.toml`.
 3. Add a new `[[allowlist]]` entry scoped to the minimum required path or regex.
 4. Add an inline comment with three statements: what the pattern matches, why it is safe, where it lives.
-5. Re-run `scripts/scan-secrets.sh --history` — verify the finding is suppressed and exit code is 0.
+5. Re-run `scripts/scan-secrets.sh --history` - verify the finding is suppressed and exit code is 0.
 6. Commit `.gitleaks.toml` with a commit message explaining the allow-list addition.
 
 ### `.gitignore` addition
@@ -331,11 +331,11 @@ Story 8.5 is a **prerequisite for Story 8.10** (Initial Public Push): the histor
 
 **Dependencies:**
 
-- **Story 8.1** (History Rewrite Tooling) — the rewrite runs before this story's `--history` scan; a post-rewrite history is cleaner and may need fewer allow-list entries
-- **Story 8.6** (GitHub Actions CI) — will reference `scripts/scan-secrets.sh --ci` as the `secret-scan` CI job; the script interface defined here is the contract
+- **Story 8.1** (History Rewrite Tooling) - the rewrite runs before this story's `--history` scan; a post-rewrite history is cleaner and may need fewer allow-list entries
+- **Story 8.6** (GitHub Actions CI) - will reference `scripts/scan-secrets.sh --ci` as the `secret-scan` CI job; the script interface defined here is the contract
 
 **Downstream dependency:**
 
-- **Story 8.10** (Initial Public Push) — gated on `--history` exit 0
+- **Story 8.10** (Initial Public Push) - gated on `--history` exit 0
 
-**BMad Method (BMAD — Build More Architect Dreams):** This story follows the standard BMAD TDD cycle: failing tests in `scripts/scan-secrets.test.sh` are written first (Gate 1), implementation brings them green (Gate 2), code review + test review (Gate 3), security review required (Gate 4 — `security_review: required`).
+**BMad Method (BMAD - Build More Architect Dreams):** This story follows the standard BMAD TDD cycle: failing tests in `scripts/scan-secrets.test.sh` are written first (Gate 1), implementation brings them green (Gate 2), code review + test review (Gate 3), security review required (Gate 4 - `security_review: required`).

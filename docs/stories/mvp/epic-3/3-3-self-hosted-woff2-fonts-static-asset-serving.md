@@ -13,8 +13,8 @@ so that the Admin UI loads correctly in air-gapped environments with no external
 1. WOFF2 font files for Inter (Regular, Medium, SemiBold) and JetBrains Mono (Regular) are placed in `gateway/internal/admin/static/fonts/`
 2. All font files are embedded via `//go:embed static/fonts` (by expanding the directive in `static.go`)
 3. Font files are served at `GET /admin/static/fonts/<filename>` with `Content-Type: font/woff2` and `Cache-Control: public, max-age=31536000, immutable`
-4. A `@font-face` declaration in the base CSS (compiled `admin.css`) references `/admin/static/fonts/<filename>` — not an external URL
-5. Tailwind config maps `fontFamily.sans` to `Inter` and `fontFamily.mono` to `JetBrains Mono` (**already done in Story 3.2** — no change needed)
+4. A `@font-face` declaration in the base CSS (compiled `admin.css`) references `/admin/static/fonts/<filename>` - not an external URL
+5. Tailwind config maps `fontFamily.sans` to `Inter` and `fontFamily.mono` to `JetBrains Mono` (**already done in Story 3.2** - no change needed)
 6. `go build ./...` succeeds with fonts embedded; binary size increase is acceptable (fonts < 1 MB total)
 7. No browser request to `fonts.googleapis.com` or any CDN appears when loading the Admin UI
 
@@ -43,16 +43,16 @@ so that the Admin UI loads correctly in air-gapped environments with no external
   - [x] 5.1 Add `TestServeFontFile` to `gateway/internal/admin/static_test.go` (same file, same package)
   - [x] 5.2 Test: each of the 4 font files → HTTP 200, `Content-Type: font/woff2`, `Cache-Control` immutable, non-empty body
   - [x] 5.3 Test: non-`.woff2` filename → HTTP 404
-  - [x] 5.4 Run `make test-unit-go` — all tests green, zero regressions
+  - [x] 5.4 Run `make test-unit-go` - all tests green, zero regressions
 
 ## Dev Notes
 
 ### CRITICAL: Expand embed directive in static.go (NOT a new file)
 
-`static.go` currently has `//go:embed static/admin.css`. Story 3.3 **modifies this same file** — it does NOT create a new file. Change the embed directive to include the fonts directory:
+`static.go` currently has `//go:embed static/admin.css`. Story 3.3 **modifies this same file** - it does NOT create a new file. Change the embed directive to include the fonts directory:
 
 ```go
-// gateway/internal/admin/static.go — MODIFIED
+// gateway/internal/admin/static.go - MODIFIED
 package admin
 
 import (
@@ -65,7 +65,7 @@ import (
 //go:embed static/admin.css static/fonts
 var staticFS embed.FS
 
-// ServeCSS serves the embedded admin.css — unchanged from Story 3.2.
+// ServeCSS serves the embedded admin.css - unchanged from Story 3.2.
 func ServeCSS(w http.ResponseWriter, r *http.Request) {
     data, err := staticFS.ReadFile("static/admin.css")
     if err != nil {
@@ -104,7 +104,7 @@ func ServeFontFile(w http.ResponseWriter, r *http.Request) {
 
 **Why `.woff2` check:** Ensures only font files are served from this handler; no executable or sensitive file can be served even if the embed were expanded later.
 
-### CRITICAL: Embed directive syntax — `static/fonts` not `static/fonts/*`
+### CRITICAL: Embed directive syntax - `static/fonts` not `static/fonts/*`
 
 The `//go:embed` directive embeds an entire directory tree when given a directory path without glob:
 
@@ -115,7 +115,7 @@ var staticFS embed.FS
 
 This embeds `static/admin.css` AND everything inside `static/fonts/`. Files accessed as `staticFS.ReadFile("static/fonts/Inter-Regular.woff2")`.
 
-Do NOT use `static/fonts/*` in the embed directive — the `*` glob does NOT recurse and would miss subdirectories. Use the directory path directly.
+Do NOT use `static/fonts/*` in the embed directive - the `*` glob does NOT recurse and would miss subdirectories. Use the directory path directly.
 
 ### Font File Acquisition (Makefile target)
 
@@ -141,7 +141,7 @@ Bunny Fonts (bunny.net) hosts the same font families as Google Fonts from a GDPR
 - Inter: https://github.com/rsms/inter/releases (look for `Inter-*.woff2` in the release assets)
 - JetBrains Mono: https://github.com/JetBrains/JetBrainsMono/releases (look under `fonts/webfonts/`)
 
-**COMMIT the font files.** Add to `.PHONY` but NOT to `.gitignore`. The `//go:embed` directive requires the files to exist in the source tree at compile time. There is no "placeholder" pattern for binary WOFF2 files (unlike the CSS placeholder in Story 3.2 — a minimal text comment satisfies the embed, but an empty WOFF2 is invalid binary).
+**COMMIT the font files.** Add to `.PHONY` but NOT to `.gitignore`. The `//go:embed` directive requires the files to exist in the source tree at compile time. There is no "placeholder" pattern for binary WOFF2 files (unlike the CSS placeholder in Story 3.2 - a minimal text comment satisfies the embed, but an empty WOFF2 is invalid binary).
 
 Update `.PHONY` line:
 ```makefile
@@ -153,7 +153,7 @@ Update `.PHONY` line:
 Replace the contents of `gateway/internal/admin/tailwind.input.css` with:
 
 ```css
-/* Self-hosted WOFF2 fonts — no CDN requests (AC: Story 3.3) */
+/* Self-hosted WOFF2 fonts - no CDN requests (AC: Story 3.3) */
 @font-face {
   font-family: 'Inter';
   font-style: normal;
@@ -192,7 +192,7 @@ Replace the contents of `gateway/internal/admin/tailwind.input.css` with:
 
 The URL `/admin/static/fonts/Inter-Regular.woff2` is an absolute path (not relative). This is correct: the Admin UI is served under `/admin/`, and the browser will resolve this to the gateway root. Relative paths from the CSS file location would resolve incorrectly.
 
-After editing, run `make build-admin-css` to recompile. The compiled `admin.css` placeholder file should NOT be manually edited — it is generated output.
+After editing, run `make build-admin-css` to recompile. The compiled `admin.css` placeholder file should NOT be manually edited - it is generated output.
 
 ### Route Registration in `main.go`
 
@@ -284,19 +284,19 @@ You do NOT need to test all 4 fonts exhaustively. Testing 2 (Inter-Regular and J
 | `gateway/internal/admin/static/fonts/Inter-Medium.woff2` | DOWNLOAD + COMMIT |
 | `gateway/internal/admin/static/fonts/Inter-SemiBold.woff2` | DOWNLOAD + COMMIT |
 | `gateway/internal/admin/static/fonts/JetBrainsMono-Regular.woff2` | DOWNLOAD + COMMIT |
-| `gateway/internal/admin/static.go` | MODIFY — expand `//go:embed`, add `ServeFontFile`, add `path`/`strings` imports |
-| `gateway/internal/admin/static_test.go` | MODIFY — add `TestServeFontFile` |
-| `gateway/internal/admin/tailwind.input.css` | MODIFY — prepend `@font-face` rules |
-| `gateway/internal/admin/static/admin.css` | REGENERATE — run `make build-admin-css`; commit updated placeholder |
-| `Makefile` | MODIFY — add `download-fonts` target, update `.PHONY` |
-| `gateway/cmd/gateway/main.go` | MODIFY — add `GET /admin/static/fonts/{filename}` route |
+| `gateway/internal/admin/static.go` | MODIFY - expand `//go:embed`, add `ServeFontFile`, add `path`/`strings` imports |
+| `gateway/internal/admin/static_test.go` | MODIFY - add `TestServeFontFile` |
+| `gateway/internal/admin/tailwind.input.css` | MODIFY - prepend `@font-face` rules |
+| `gateway/internal/admin/static/admin.css` | REGENERATE - run `make build-admin-css`; commit updated placeholder |
+| `Makefile` | MODIFY - add `download-fonts` target, update `.PHONY` |
+| `gateway/cmd/gateway/main.go` | MODIFY - add `GET /admin/static/fonts/{filename}` route |
 
 **Do NOT modify:**
-- `gateway/internal/admin/handler.go` — `//go:embed templates` unchanged
-- `gateway/internal/admin/tailwind.config.js` — `fontFamily` already set correctly (Story 3.2)
+- `gateway/internal/admin/handler.go` - `//go:embed templates` unchanged
+- `gateway/internal/admin/tailwind.config.js` - `fontFamily` already set correctly (Story 3.2)
 - Any existing `*_test.go` files beyond adding the new test function
 
-**Do NOT add fonts to `.gitignore`** — they must be committed for the embed to work.
+**Do NOT add fonts to `.gitignore`** - they must be committed for the embed to work.
 
 ### Context from Story 3.2 Completion Notes
 
@@ -312,11 +312,11 @@ fontFamily: {
 },
 ```
 
-This means AC #5 ("Tailwind config maps fontFamily.sans to Inter...") is **already satisfied** — no change to `tailwind.config.js` is needed.
+This means AC #5 ("Tailwind config maps fontFamily.sans to Inter...") is **already satisfied** - no change to `tailwind.config.js` is needed.
 
 ### Story 3.4 Awareness (Do NOT implement now)
 
-Story 3.4 adds the full nav shell layout in `base.html`. That template will reference `/admin/static/fonts/inter.woff2` via `@font-face` in the compiled CSS — which this story provides. Story 3.4 also adds `data-theme="obsidian"` to `<html>`, activating the DaisyUI Obsidian theme.
+Story 3.4 adds the full nav shell layout in `base.html`. That template will reference `/admin/static/fonts/inter.woff2` via `@font-face` in the compiled CSS - which this story provides. Story 3.4 also adds `data-theme="obsidian"` to `<html>`, activating the DaisyUI Obsidian theme.
 
 ### References
 
@@ -324,11 +324,11 @@ Story 3.4 adds the full nav shell layout in `base.html`. That template will refe
 - [Source: _bmad-output/planning-artifacts/architecture.md#Enforcement] Rule #9: go:embed mandatory, no runtime filesystem access
 - [Source: _bmad-output/implementation-artifacts/3-2-tailwind-css-daisyui-build-pipeline.md#Future-Story-Awareness] "Story 3.3 expands embed to static/admin.css static/fonts"
 - [Source: _bmad-output/implementation-artifacts/3-2-tailwind-css-daisyui-build-pipeline.md#File-List] `static.go` current embed: `//go:embed static/admin.css`
-- [Source: gateway/internal/admin/static.go] Current file — `//go:embed static/admin.css`, `ServeCSS` handler
+- [Source: gateway/internal/admin/static.go] Current file - `//go:embed static/admin.css`, `ServeCSS` handler
 - [Source: gateway/internal/admin/static_test.go] Test pattern: table-driven, `httptest.NewRequest`+`NewRecorder`, `package admin`
-- [Source: gateway/internal/admin/tailwind.input.css] Current file — only 3 `@tailwind` directives, no `@font-face`
-- [Source: gateway/internal/admin/tailwind.config.js] `fontFamily.sans: ['Inter', ...]`, `fontFamily.mono: ['JetBrains Mono', ...]` — already set
-- [Source: gateway/cmd/gateway/main.go:129] `mux.HandleFunc("GET /admin/static/admin.css", admin.ServeCSS)` — add font route after this line
+- [Source: gateway/internal/admin/tailwind.input.css] Current file - only 3 `@tailwind` directives, no `@font-face`
+- [Source: gateway/internal/admin/tailwind.config.js] `fontFamily.sans: ['Inter', ...]`, `fontFamily.mono: ['JetBrains Mono', ...]` - already set
+- [Source: gateway/cmd/gateway/main.go:129] `mux.HandleFunc("GET /admin/static/admin.css", admin.ServeCSS)` - add font route after this line
 - [Source: Makefile:8] `DOCKER_NODE` already defined; `download-fonts` uses alpine (no Node needed)
 
 ## Dev Agent Record
@@ -346,23 +346,23 @@ No debug issues encountered. Straight-forward implementation following story spe
 - Downloaded 4 WOFF2 font files via `make download-fonts` (alpine:3.19 + curl from bunny.net): Inter-Regular, Inter-Medium, Inter-SemiBold, JetBrainsMono-Regular. Total size: 96K (well under 1 MB limit).
 - Expanded `//go:embed` in `static.go` from `static/admin.css` to `static/admin.css static/fonts`; added `path` and `strings` imports; added `ServeFontFile` handler with `path.Base` traversal protection and `.woff2` extension guard.
 - Prepended 4 `@font-face` blocks to `tailwind.input.css` (before `@tailwind base`) using absolute paths `/admin/static/fonts/<filename>` and `font-display: swap`.
-- Ran `make build-admin-css` — all 4 `@font-face` rules confirmed in minified `admin.css` output.
+- Ran `make build-admin-css` - all 4 `@font-face` rules confirmed in minified `admin.css` output.
 - Added `GET /admin/static/fonts/{filename}` route in `main.go` after CSS route.
 - Added `TestServeFontFile` to `static_test.go`: 4 test cases (2 positive font serves, 1 non-woff2 rejection, 1 path traversal rejection). All pass.
 - `make test-unit-go`: all 11 packages pass, zero regressions.
 
 ### File List
 
-- `gateway/internal/admin/static/fonts/Inter-Regular.woff2` — ADDED (23664 bytes)
-- `gateway/internal/admin/static/fonts/Inter-Medium.woff2` — ADDED (24272 bytes)
-- `gateway/internal/admin/static/fonts/Inter-SemiBold.woff2` — ADDED (24452 bytes)
-- `gateway/internal/admin/static/fonts/JetBrainsMono-Regular.woff2` — ADDED (21168 bytes)
-- `gateway/internal/admin/static.go` — MODIFIED (embed directive expanded, `ServeFontFile` added, `path`/`strings` imports added)
-- `gateway/internal/admin/static_test.go` — MODIFIED (`TestServeFontFile` added)
-- `gateway/internal/admin/tailwind.input.css` — MODIFIED (`@font-face` blocks prepended)
-- `gateway/internal/admin/static/admin.css` — REGENERATED (`make build-admin-css`)
-- `gateway/cmd/gateway/main.go` — MODIFIED (font route registered)
-- `Makefile` — MODIFIED (`download-fonts` target added, `.PHONY` updated)
+- `gateway/internal/admin/static/fonts/Inter-Regular.woff2` - ADDED (23664 bytes)
+- `gateway/internal/admin/static/fonts/Inter-Medium.woff2` - ADDED (24272 bytes)
+- `gateway/internal/admin/static/fonts/Inter-SemiBold.woff2` - ADDED (24452 bytes)
+- `gateway/internal/admin/static/fonts/JetBrainsMono-Regular.woff2` - ADDED (21168 bytes)
+- `gateway/internal/admin/static.go` - MODIFIED (embed directive expanded, `ServeFontFile` added, `path`/`strings` imports added)
+- `gateway/internal/admin/static_test.go` - MODIFIED (`TestServeFontFile` added)
+- `gateway/internal/admin/tailwind.input.css` - MODIFIED (`@font-face` blocks prepended)
+- `gateway/internal/admin/static/admin.css` - REGENERATED (`make build-admin-css`)
+- `gateway/cmd/gateway/main.go` - MODIFIED (font route registered)
+- `Makefile` - MODIFIED (`download-fonts` target added, `.PHONY` updated)
 
 ## Change Log
 

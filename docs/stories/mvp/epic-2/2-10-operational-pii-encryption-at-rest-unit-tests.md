@@ -16,11 +16,11 @@ so that Tier 1 PII (Operational PII) is protected at rest and can be anonymised 
 
 2. **Given** `Nebu.Signature.decrypt_operational_pii/3` taking `ciphertext`, `nonce`, and `server_key`,
    **When** called with values from a prior encryption,
-   **Then** it returns the original plaintext (as `{:ok, plaintext}` — per architecture rule #6)
+   **Then** it returns the original plaintext (as `{:ok, plaintext}` - per architecture rule #6)
 
 3. **Given** `NEBU_PII_ENCRYPTION_KEY` env var (32-byte hex string = 64 hex chars),
    **When** the `signature` app starts in prod/dev,
-   **Then** it reads and validates the key length — exits with a clear error if missing or wrong length
+   **Then** it reads and validates the key length - exits with a clear error if missing or wrong length
 
 4. **Given** a unit test `encrypt_decrypt_roundtrip`,
    **When** the same plaintext is encrypted twice with the same key,
@@ -39,13 +39,13 @@ so that Tier 1 PII (Operational PII) is protected at rest and can be anonymised 
 - [x] Add `encrypt_operational_pii/2` to `core/apps/signature/lib/nebu/signature.ex` (AC: #1)
   - [x] Add `@spec encrypt_operational_pii(binary(), binary()) :: {binary(), binary()}`
   - [x] Generate 12-byte nonce via `:crypto.strong_rand_bytes(12)`
-  - [x] Encrypt with `:crypto.crypto_one_time_aead(:aes_256_gcm, key, nonce, plaintext, <<>>, 16, true)` — returns `{ciphertext, tag}`
+  - [x] Encrypt with `:crypto.crypto_one_time_aead(:aes_256_gcm, key, nonce, plaintext, <<>>, 16, true)` - returns `{ciphertext, tag}`
   - [x] Return `{ciphertext <> tag, nonce}` (tag appended to ciphertext, nonce returned separately)
 
 - [x] Add `decrypt_operational_pii/3` to `core/apps/signature/lib/nebu/signature.ex` (AC: #2, #5)
   - [x] Add `@spec decrypt_operational_pii(binary(), binary(), binary()) :: {:ok, binary()} | {:error, :decryption_failed}`
   - [x] Split last 16 bytes of `ciphertext` as auth tag: `<<ct::binary-size(n), tag::binary-size(16)>> = ciphertext`
-  - [x] Decrypt with `:crypto.crypto_one_time_aead(:aes_256_gcm, key, nonce, ct, <<>>, tag, false)` — raises on auth failure
+  - [x] Decrypt with `:crypto.crypto_one_time_aead(:aes_256_gcm, key, nonce, ct, <<>>, tag, false)` - raises on auth failure
   - [x] Wrap in try/rescue: return `{:ok, plaintext}` on success, `{:error, :decryption_failed}` on any exception
 
 - [x] Add `NEBU_PII_ENCRYPTION_KEY` validation to `core/config/runtime.exs` (AC: #3)
@@ -58,21 +58,21 @@ so that Tier 1 PII (Operational PII) is protected at rest and can be anonymised 
   - [x] Add `describe "encrypt_operational_pii/2 and decrypt_operational_pii/3"` block
   - [x] Add `test "encrypt_decrypt_roundtrip: random nonces, both decrypt correctly"`
   - [x] Add `test "wrong_key_fails: different server key returns {:error, :decryption_failed}"`
-  - [x] Verify `mix test --warnings-as-errors` passes — no unused variables (prefix with `_`)
+  - [x] Verify `mix test --warnings-as-errors` passes - no unused variables (prefix with `_`)
   - [x] Confirm all 9 tests pass (7 existing + 2 new)
 
 ## Dev Notes
 
 ### Scope
 
-Adds symmetric AES-256-GCM encryption for **Tier 1 (Operational) PII** — display names and avatar URLs — protected by a **server-side key** (`NEBU_PII_ENCRYPTION_KEY`).
+Adds symmetric AES-256-GCM encryption for **Tier 1 (Operational) PII** - display names and avatar URLs - protected by a **server-side key** (`NEBU_PII_ENCRYPTION_KEY`).
 
 **This story only:** `encrypt_operational_pii/2` and `decrypt_operational_pii/3` + env var validation.
 
 **NOT in this story:**
-- X25519 ECDH encryption (Story 2.11) — Sensitive PII uses a different scheme entirely
+- X25519 ECDH encryption (Story 2.11) - Sensitive PII uses a different scheme entirely
 - DB writes or user provisioning (Story 2.13)
-- Do NOT use `derive_aes_key/1` (X25519 ECDH helper) — this story uses direct server key, no ECDH
+- Do NOT use `derive_aes_key/1` (X25519 ECDH helper) - this story uses direct server key, no ECDH
 
 ### Architecture Context
 
@@ -90,31 +90,31 @@ Adds symmetric AES-256-GCM encryption for **Tier 1 (Operational) PII** — displ
 
 ```
 core/apps/signature/
-  lib/nebu/signature.ex                        ← MODIFY — add 2 new functions
-  test/nebu_signature_test.exs                 ← MODIFY — add 1 new describe block
+  lib/nebu/signature.ex                        ← MODIFY - add 2 new functions
+  test/nebu_signature_test.exs                 ← MODIFY - add 1 new describe block
   mix.exs                                      ← DO NOT TOUCH (no new deps)
   lib/nebu/signature/application.ex            ← DO NOT TOUCH (no changes needed)
 core/config/
-  runtime.exs                                  ← MODIFY — add NEBU_PII_ENCRYPTION_KEY validation
-  test.exs                                     ← MODIFY — add test PII key config
+  runtime.exs                                  ← MODIFY - add NEBU_PII_ENCRYPTION_KEY validation
+  test.exs                                     ← MODIFY - add test PII key config
 ```
 
 ### OTP AES-256-GCM API (exact)
 
 ```elixir
-# ENCRYPT — 7-arg form, EncFlag = true
+# ENCRYPT - 7-arg form, EncFlag = true
 # Returns {ciphertext, auth_tag}
 {ciphertext, tag} = :crypto.crypto_one_time_aead(
   :aes_256_gcm,    # cipher
   server_key,      # 32-byte binary key
   nonce,           # 12-byte binary nonce
   plaintext,       # binary plaintext
-  <<>>,            # AAD (Additional Authenticated Data) — empty binary
+  <<>>,            # AAD (Additional Authenticated Data) - empty binary
   16,              # tag length in bytes (16 = 128-bit tag)
   true             # EncFlag: true = encrypt
 )
 
-# DECRYPT — 7-arg form, EncFlag = false
+# DECRYPT - 7-arg form, EncFlag = false
 # Returns plaintext on success, RAISES on authentication failure (OTP 24+)
 plaintext = :crypto.crypto_one_time_aead(
   :aes_256_gcm,
@@ -131,8 +131,8 @@ plaintext = :crypto.crypto_one_time_aead(
 - `nonce`: 12 bytes (96-bit) is the GCM standard; use `:crypto.strong_rand_bytes(12)`
 - `server_key`: must be exactly 32 bytes for AES-256; validated via `NEBU_PII_ENCRYPTION_KEY`
 - `AAD` (`<<>>`): empty here; no additional data to authenticate (no context in this story)
-- Auth tag: 16 bytes (128-bit) — maximum GCM tag size, strongest security
-- Decryption raises `ErlangError` / `:error` class exception on authentication failure — catch with `rescue`
+- Auth tag: 16 bytes (128-bit) - maximum GCM tag size, strongest security
+- Decryption raises `ErlangError` / `:error` class exception on authentication failure - catch with `rescue`
 
 ### Implementation: signature.ex additions
 
@@ -247,29 +247,29 @@ config :signature, pii_encryption_key: :crypto.strong_rand_bytes(32)
 
 ### Critical Anti-Patterns to Avoid
 
-**NEVER use X25519/ECDH for Operational PII** — this is a direct server key encryption:
+**NEVER use X25519/ECDH for Operational PII** - this is a direct server key encryption:
 ```elixir
-# ❌ WRONG — Operational PII does NOT use ECDH
+# ❌ WRONG - Operational PII does NOT use ECDH
 shared = :crypto.compute_key(:ecdh, pub, priv, :x25519)
 key = derive_aes_key(shared)
 
-# ✅ CORRECT — Operational PII uses server_key directly
+# ✅ CORRECT - Operational PII uses server_key directly
 :crypto.crypto_one_time_aead(:aes_256_gcm, server_key, nonce, plaintext, <<>>, 16, true)
 ```
 
-**NEVER reuse nonces** — always generate fresh via `:crypto.strong_rand_bytes(12)`.
+**NEVER reuse nonces** - always generate fresh via `:crypto.strong_rand_bytes(12)`.
 
-**NEVER store nonce inside ciphertext** — the story returns `{ciphertext_with_tag, nonce}` as a tuple; both must be persisted separately in the DB (Stories 2.12/2.13 will handle the DB columns `display_name_encrypted` and `display_name_nonce`).
+**NEVER store nonce inside ciphertext** - the story returns `{ciphertext_with_tag, nonce}` as a tuple; both must be persisted separately in the DB (Stories 2.12/2.13 will handle the DB columns `display_name_encrypted` and `display_name_nonce`).
 
-**Return `{:ok, plaintext}` not bare `plaintext`** — Architecture rule #6 mandates `{:ok, result}` / `{:error, reason}` for fallible operations. The AC says "returns the original plaintext" as description language; use the tuple form. [Source: architecture.md#AI-Constraints rule 6]
+**Return `{:ok, plaintext}` not bare `plaintext`** - Architecture rule #6 mandates `{:ok, result}` / `{:error, reason}` for fallible operations. The AC says "returns the original plaintext" as description language; use the tuple form. [Source: architecture.md#AI-Constraints rule 6]
 
 ### Previous Story Intelligence (2.8, 2.9)
 
-- **Test pattern:** `async: true` on ExUnit.Case — all pure unit tests; follow same for new describe block
-- **Module alias:** `alias Nebu.Signature` at top of test file — already present, don't add again
+- **Test pattern:** `async: true` on ExUnit.Case - all pure unit tests; follow same for new describe block
+- **Module alias:** `alias Nebu.Signature` at top of test file - already present, don't add again
 - **Unused variable warning prevention:** Prefix with `_` any variable not used (e.g., `_nonce2` if only checking inequality). `--warnings-as-errors` will fail the test run otherwise
-- **OTP :crypto API shapes vary by algorithm:** Ed25519 sign/verify uses `[key, :ed25519]` list form; X25519 ECDH uses 4th arg; AES-256-GCM uses `:crypto.crypto_one_time_aead/7` — do not mix these up
-- **No external deps:** `mix.exs` stays with `deps: []` — everything in OTP `:crypto`
+- **OTP :crypto API shapes vary by algorithm:** Ed25519 sign/verify uses `[key, :ed25519]` list form; X25519 ECDH uses 4th arg; AES-256-GCM uses `:crypto.crypto_one_time_aead/7` - do not mix these up
+- **No external deps:** `mix.exs` stays with `deps: []` - everything in OTP `:crypto`
 - **Quality gate:** `mix test --warnings-as-errors` must pass with ALL existing tests still green
 
 From Story 2.9 debug log:
@@ -291,8 +291,8 @@ make test-unit-elixir
 
 ### Project Structure Notes
 
-- All additions go into existing `Nebu.Signature` module — no new files, no new modules, no new Elixir apps
-- Test file adds one new `describe` block after `derive_aes_key/1` describe block — consistent ordering (Ed25519 → X25519 keypair → X25519 ECDH → AES-GCM)
+- All additions go into existing `Nebu.Signature` module - no new files, no new modules, no new Elixir apps
+- Test file adds one new `describe` block after `derive_aes_key/1` describe block - consistent ordering (Ed25519 → X25519 keypair → X25519 ECDH → AES-GCM)
 - Config changes are minimal: `runtime.exs` guard + `test.exs` key stub
 - No changes to umbrella `mix.exs` or any app's `mix.exs`
 
@@ -302,7 +302,7 @@ make test-unit-elixir
 - [Source: architecture.md#NFR-S2] Operational PII at-rest encryption requirement
 - [Source: architecture.md#V1] Two-keypair architecture; Operational PII = server key AES-256-GCM
 - [Source: architecture.md#AI-Constraints rule 6] `{:ok, result}` / `{:error, reason}` mandate
-- [Source: architecture.md#Anti-pattern #10] PII encryption via X25519 encryption key only — story 2.10 is the exception: Operational PII uses server key, not X25519
+- [Source: architecture.md#Anti-pattern #10] PII encryption via X25519 encryption key only - story 2.10 is the exception: Operational PII uses server key, not X25519
 - [Source: implementation-artifacts/2-9-x25519-keypair-generation-unit-tests.md] Patterns for tests, `async: true`, `--warnings-as-errors` discipline
 - [Source: core/apps/signature/lib/nebu/signature.ex] Current module (3 functions: generate_signing_keypair, generate_encryption_keypair, derive_aes_key)
 - [Source: core/apps/signature/test/nebu_signature_test.exs] Current test file (7 tests in 3 describe blocks)
@@ -320,7 +320,7 @@ claude-sonnet-4-6 (1M context)
 
 ### Completion Notes List
 
-- Implemented `encrypt_operational_pii/2`: AES-256-GCM with 12-byte random nonce, returns `{ciphertext <> tag, nonce}` tuple. No ECDH — direct server key as specified.
+- Implemented `encrypt_operational_pii/2`: AES-256-GCM with 12-byte random nonce, returns `{ciphertext <> tag, nonce}` tuple. No ECDH - direct server key as specified.
 - Implemented `decrypt_operational_pii/3`: splits 16-byte auth tag from end of ciphertext, uses `case` to handle OTP 28's `:error` return value on auth failure, also catches exceptions via `rescue`.
 - Added `NEBU_PII_ENCRYPTION_KEY` env var validation to `runtime.exs` (gated to `:prod, :dev` only); `Base.decode16/2` with `:mixed` case for flexible hex input; length assertion for exactly 32 bytes.
 - Added `config :signature, pii_encryption_key: :crypto.strong_rand_bytes(32)` to `test.exs` for test environment.
@@ -337,7 +337,7 @@ claude-sonnet-4-6 (1M context)
 
 **Reviewer:** Phil (adversarial code review via claude-opus-4-6)
 **Date:** 2026-03-27
-**Outcome:** Approved — clean review, no issues found.
+**Outcome:** Approved - clean review, no issues found.
 
 **Checklist:**
 - [x] Story file loaded
@@ -349,7 +349,7 @@ claude-sonnet-4-6 (1M context)
 - [x] File List reviewed and validated for completeness (4/4 match git)
 - [x] Tests identified and mapped to ACs; no gaps
 - [x] Code quality review performed on changed files
-- [x] Security review performed — correct crypto usage confirmed
+- [x] Security review performed - correct crypto usage confirmed
 - [x] Outcome: Approved
 - [x] Review notes appended
 - [x] Change Log updated
@@ -363,5 +363,5 @@ claude-sonnet-4-6 (1M context)
 
 ## Change Log
 
-- 2026-03-27: Code review passed — approved with 0 issues. Story status → done.
-- 2026-03-27: Implemented `encrypt_operational_pii/2` and `decrypt_operational_pii/3` in `Nebu.Signature` — AES-256-GCM Tier-1-PII-Verschlüsselung mit server-seitigem Schlüssel. `NEBU_PII_ENCRYPTION_KEY` Env-Var-Validierung in `runtime.exs` (prod/dev) und Test-Key-Stub in `test.exs`. 9 tests, 0 failures.
+- 2026-03-27: Code review passed - approved with 0 issues. Story status → done.
+- 2026-03-27: Implemented `encrypt_operational_pii/2` and `decrypt_operational_pii/3` in `Nebu.Signature` - AES-256-GCM Tier-1-PII-Verschlüsselung mit server-seitigem Schlüssel. `NEBU_PII_ENCRYPTION_KEY` Env-Var-Validierung in `runtime.exs` (prod/dev) und Test-Key-Stub in `test.exs`. 9 tests, 0 failures.

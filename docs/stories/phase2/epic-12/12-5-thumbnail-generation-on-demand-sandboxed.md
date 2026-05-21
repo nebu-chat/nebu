@@ -7,7 +7,7 @@ matrix: true
 ui: false
 ---
 
-# Story 12.5: Thumbnail Generation — On-Demand, Sandboxed
+# Story 12.5: Thumbnail Generation - On-Demand, Sandboxed
 
 Status: review
 
@@ -23,46 +23,46 @@ So that avatars and image previews display correctly in Element Web and other cl
 
 ## Acceptance Criteria
 
-**AC1 — Scale method returns aspect-ratio-preserved thumbnail ≤ requested dimensions:**
+**AC1 - Scale method returns aspect-ratio-preserved thumbnail ≤ requested dimensions:**
 
 Given a JPEG image is stored in MinIO (encrypted AES-256-GCM, as stored by upload handler),
 When `GET /_matrix/media/v3/thumbnail/{serverName}/{mediaId}?width=100&height=100&method=scale` is called,
 Then the response is a JPEG image with aspect-ratio-preserved dimensions ≤ 100×100 and `Content-Type: image/jpeg`.
 
-**AC2 — Crop method returns exactly the requested dimensions:**
+**AC2 - Crop method returns exactly the requested dimensions:**
 
 Given `method=crop` is specified with `width=100&height=100`,
 When the thumbnail is generated,
 Then the output is exactly 100×100 pixels (center-cropped, not aspect-ratio-preserved).
 
-**AC3 — Rejected MIME types return 400 M_BAD_JSON (magic bytes detection):**
+**AC3 - Rejected MIME types return 400 M_BAD_JSON (magic bytes detection):**
 
 Given an SVG, PDF, PS, or EPS file is stored and a thumbnail is requested,
 When the request is processed,
 Then the server returns `400 M_BAD_JSON` with `{"errcode":"M_BAD_JSON","error":"Unsupported media type for thumbnail generation"}`.
 The MIME type is determined from the first 512 bytes of the decrypted file (magic bytes), NOT from the `Content-Type` header stored at upload time.
 
-**AC4 — Image processing is sandboxed (no network, no shell exec):**
+**AC4 - Image processing is sandboxed (no network, no shell exec):**
 
 Given the thumbnail service processes an uploaded image,
 When the image processing runs,
-Then it executes using a pure Go library (no cgo, no shell exec, no external process) — sandboxed by construction.
+Then it executes using a pure Go library (no cgo, no shell exec, no external process) - sandboxed by construction.
 Library: `github.com/disintegration/imaging` (MIT, pure Go, no cgo).
 
-**AC5 — Cache-Control header is set on thumbnail responses:**
+**AC5 - Cache-Control header is set on thumbnail responses:**
 
 Given a thumbnail is generated successfully,
 When the response headers are inspected,
 Then `Cache-Control: max-age=86400` is present.
 
-**AC6 — Animated GIF with animated=true returns animated GIF:**
+**AC6 - Animated GIF with animated=true returns animated GIF:**
 
 Given `animated=true` is passed and the source is a GIF (detected via magic bytes),
 When the thumbnail is generated,
-Then the response is an animated GIF (all frames preserved) — not a static first frame.
+Then the response is an animated GIF (all frames preserved) - not a static first frame.
 `Content-Type: image/gif`.
 
-**AC7 — Missing width or height returns 400 M_BAD_JSON:**
+**AC7 - Missing width or height returns 400 M_BAD_JSON:**
 
 Given `GET /_matrix/media/v3/thumbnail/{serverName}/{mediaId}` is called without `width` or `height` query params,
 When the request is processed,
@@ -74,42 +74,42 @@ Then the server returns `400 M_BAD_JSON` with `{"errcode":"M_BAD_JSON","error":"
 
 ### Tests written FIRST (before implementation code):
 
-**AT-1** — `TestThumbnailHandler_Scale_ReturnsThumbnail` in `media/internal/thumbnail/thumbnail_test.go` [Go unit test]
+**AT-1** - `TestThumbnailHandler_Scale_ReturnsThumbnail` in `media/internal/thumbnail/thumbnail_test.go` [Go unit test]
 - Given: A 200×300 JPEG image bytes (synthetic, created programmatically)
 - When: `GenerateThumbnail(ctx, imgBytes, ThumbnailParams{Width: 100, Height: 100, Method: "scale"})` is called
 - Then: Returns JPEG bytes with dimensions ≤ 100×100 and aspect ratio preserved (200×300 → 67×100)
 
-**AT-2** — `TestThumbnailHandler_Crop_ReturnsExactDimensions` in `media/internal/thumbnail/thumbnail_test.go` [Go unit test]
+**AT-2** - `TestThumbnailHandler_Crop_ReturnsExactDimensions` in `media/internal/thumbnail/thumbnail_test.go` [Go unit test]
 - Given: A 200×300 JPEG image bytes
 - When: `GenerateThumbnail(ctx, imgBytes, ThumbnailParams{Width: 100, Height: 100, Method: "crop"})` is called
 - Then: Returns JPEG bytes with exactly 100×100 dimensions
 
-**AT-3** — `TestThumbnailHandler_RejectedMimeType_ReturnsBadJSON` in `media/internal/thumbnail/thumbnail_test.go` [Go unit test]
+**AT-3** - `TestThumbnailHandler_RejectedMimeType_ReturnsBadJSON` in `media/internal/thumbnail/thumbnail_test.go` [Go unit test]
 - Given: SVG bytes starting with `<svg` (magic bytes), PDF bytes starting with `%PDF`
 - When: `DetectMIMEType(bytes)` is called on each
 - Then: Returns `"image/svg+xml"` for SVG and `"application/pdf"` for PDF (not an image type → rejected)
 
-**AT-4** — `TestThumbnailHTTPHandler_MissingParams_Returns400` in `media/internal/thumbnail/handler_test.go` [Go HTTP unit test]
+**AT-4** - `TestThumbnailHTTPHandler_MissingParams_Returns400` in `media/internal/thumbnail/handler_test.go` [Go HTTP unit test]
 - Given: A registered thumbnail handler
 - When: `GET /_matrix/media/v3/thumbnail/test.local/abc123` (no width/height params)
 - Then: HTTP 400 with `{"errcode":"M_BAD_JSON","error":"width and height query parameters are required"}`
 
-**AT-5** — `TestThumbnailHTTPHandler_CacheControl` in `media/internal/thumbnail/handler_test.go` [Go HTTP unit test]
+**AT-5** - `TestThumbnailHTTPHandler_CacheControl` in `media/internal/thumbnail/handler_test.go` [Go HTTP unit test]
 - Given: A valid JPEG stored under `test.local/abc123`, thumbnail handler wired
 - When: `GET /_matrix/media/v3/thumbnail/test.local/abc123?width=100&height=100&method=scale`
 - Then: Response has `Cache-Control: max-age=86400` header
 
-**AT-6** — `TestThumbnailHTTPHandler_UnsupportedType_Returns400` in `media/internal/thumbnail/handler_test.go` [Go HTTP unit test]
+**AT-6** - `TestThumbnailHTTPHandler_UnsupportedType_Returns400` in `media/internal/thumbnail/handler_test.go` [Go HTTP unit test]
 - Given: SVG bytes stored under `test.local/svg-file` (encrypted in storage)
 - When: `GET /_matrix/media/v3/thumbnail/test.local/svg-file?width=100&height=100`
 - Then: HTTP 400 with `{"errcode":"M_BAD_JSON","error":"Unsupported media type for thumbnail generation"}`
 
-**AT-7** — `TestThumbnailHTTPHandler_NotFound_Returns404` in `media/internal/thumbnail/handler_test.go` [Go HTTP unit test]
+**AT-7** - `TestThumbnailHTTPHandler_NotFound_Returns404` in `media/internal/thumbnail/handler_test.go` [Go HTTP unit test]
 - Given: `mediaId` not in DB
 - When: `GET /_matrix/media/v3/thumbnail/test.local/notexist?width=100&height=100`
 - Then: HTTP 404 with `{"errcode":"M_NOT_FOUND","error":"Media not found"}`
 
-**AT-8** — `TestThumbnailHTTPHandler_AnimatedGIF_Returns200` in `media/internal/thumbnail/handler_test.go` [Go HTTP unit test]
+**AT-8** - `TestThumbnailHTTPHandler_AnimatedGIF_Returns200` in `media/internal/thumbnail/handler_test.go` [Go HTTP unit test]
 - Given: A synthetic 2-frame GIF stored under `test.local/animated-gif`
 - When: `GET /_matrix/media/v3/thumbnail/test.local/animated-gif?width=100&height=100&animated=true`
 - Then: HTTP 200 with `Content-Type: image/gif`
@@ -125,16 +125,16 @@ ADR-013 deferred the thumbnail generation library choice to Story 12.5.
 **Decision: `github.com/disintegration/imaging` (MIT, pure Go)**
 
 Rationale:
-- Pure Go — no cgo, no shell exec, no external process = sandboxed by construction (AC4)
+- Pure Go - no cgo, no shell exec, no external process = sandboxed by construction (AC4)
 - Handles JPEG, PNG, GIF decode/encode natively
 - Supports `Fit` (scale with aspect-ratio) and `Fill` (crop) operations directly
-- MIT license — compatible with Apache 2.0 project license
+- MIT license - compatible with Apache 2.0 project license
 - No network access needed (no external process)
 - Alpine-compatible (no glibc dependency)
 
-**Alternative considered: `golang.org/x/image`** — stdlib extension but no high-level resize/crop API; requires more code. Rejected.
+**Alternative considered: `golang.org/x/image`** - stdlib extension but no high-level resize/crop API; requires more code. Rejected.
 
-**Alternative considered: `h2non/bimg` (libvips binding)** — high-performance but requires cgo + libvips + Alpine apk install. Security concern: external C library. Rejected for sandboxing requirement.
+**Alternative considered: `h2non/bimg` (libvips binding)** - high-performance but requires cgo + libvips + Alpine apk install. Security concern: external C library. Rejected for sandboxing requirement.
 
 ### Endpoint Registration Change
 
@@ -159,10 +159,10 @@ Remove `thumbnailStub` from both `main.go` and `download/handler.go`.
 ### New Package: `media/internal/thumbnail`
 
 Create `media/internal/thumbnail/` with:
-- `handler.go` — HTTP handler for `GET /_matrix/media/v3/thumbnail/{serverName}/{mediaId}`
-- `thumbnail.go` — `GenerateThumbnail` function + `DetectMIMEType` function
-- `handler_test.go` — HTTP-level tests (AT-4 through AT-8)
-- `thumbnail_test.go` — pure image processing unit tests (AT-1 through AT-3)
+- `handler.go` - HTTP handler for `GET /_matrix/media/v3/thumbnail/{serverName}/{mediaId}`
+- `thumbnail.go` - `GenerateThumbnail` function + `DetectMIMEType` function
+- `handler_test.go` - HTTP-level tests (AT-4 through AT-8)
+- `thumbnail_test.go` - pure image processing unit tests (AT-1 through AT-3)
 
 ### DB Interface for Thumbnail Handler
 
@@ -188,7 +188,7 @@ type MediaFileRow struct {
 
 ### MIME Type Detection (Magic Bytes)
 
-**Do NOT trust `row.ContentType`** — this is what the client sent at upload time and may be wrong or `application/octet-stream`.
+**Do NOT trust `row.ContentType`** - this is what the client sent at upload time and may be wrong or `application/octet-stream`.
 
 Detect MIME type from the first 512 bytes of the **decrypted** plaintext:
 
@@ -322,10 +322,10 @@ GET /_matrix/media/v3/thumbnail/{serverName}/{mediaId}?width=W&height=H&method=M
 
 ### Files NOT to Modify
 
-- `media/internal/storage/` — no changes; Storer interface is consumed as-is
-- `media/internal/upload/` — no changes
-- `media/internal/crypto/` — no changes (Decrypt is called via `mediacrypto.Decrypt`)
-- `media/cmd/media/main_test.go` — no changes (unless thumbnailStub is tested there)
+- `media/internal/storage/` - no changes; Storer interface is consumed as-is
+- `media/internal/upload/` - no changes
+- `media/internal/crypto/` - no changes (Decrypt is called via `mediacrypto.Decrypt`)
+- `media/cmd/media/main_test.go` - no changes (unless thumbnailStub is tested there)
 
 ### go.mod Change
 
@@ -373,7 +373,7 @@ func makeSyntheticJPEG(t *testing.T, w, h int) []byte {
 
 **AT-4 through AT-8 (HTTP handler tests):**
 
-Use a `fakeThumbStore` + `fakeThumbnailStorer` (similar to download tests). The storage fake stores decrypted bytes (no real encryption needed for thumbnail tests — store plaintext directly as the "encrypted" bytes, use a known key/nonce, or bypass crypto by injecting an in-memory storer with pre-encrypted fixtures).
+Use a `fakeThumbStore` + `fakeThumbnailStorer` (similar to download tests). The storage fake stores decrypted bytes (no real encryption needed for thumbnail tests - store plaintext directly as the "encrypted" bytes, use a known key/nonce, or bypass crypto by injecting an in-memory storer with pre-encrypted fixtures).
 
 Simplest approach: store the raw JPEG bytes as plaintext, but encrypt them first in the test setup using `mediacrypto.Encrypt`, then store the ciphertext. The handler will decrypt them. This mirrors the real flow.
 
@@ -390,7 +390,7 @@ func writeError(w http.ResponseWriter, statusCode int, errcode, message string) 
 }
 ```
 
-Define this locally in `thumbnail/handler.go` (do not import from download — packages must not depend on sibling packages).
+Define this locally in `thumbnail/handler.go` (do not import from download - packages must not depend on sibling packages).
 
 ---
 
@@ -402,7 +402,7 @@ Every handler package defines its own minimal interface for DB and Storage acces
 
 ### Pattern: `writeError` Helper
 
-Define `writeError` locally in each handler package. It's a 5-line helper — do not create a shared helper package.
+Define `writeError` locally in each handler package. It's a 5-line helper - do not create a shared helper package.
 
 ### Pattern: Error Classification via `errors.Is`
 
@@ -414,7 +414,7 @@ otherwise → 502 M_UNKNOWN (log full error, never expose to client)
 
 ### Pattern: `fakeStore` in Tests
 
-All handler tests use a `fakeStore` struct that implements the consumer-defined interface. The struct has fields for controlling return values. See `media/internal/download/download_test.go` for the pattern — replicate it in `thumbnail/handler_test.go`.
+All handler tests use a `fakeStore` struct that implements the consumer-defined interface. The struct has fields for controlling return values. See `media/internal/download/download_test.go` for the pattern - replicate it in `thumbnail/handler_test.go`.
 
 ### Pattern: MinIO Storer via `ClassifyMinIOError`
 
@@ -433,22 +433,22 @@ After adding `github.com/disintegration/imaging`, run:
 cd media && go mod tidy
 ```
 
-This ensures `go.sum` is updated. The build container runs `go mod download` — new modules must be in `go.sum` before the Docker build step.
+This ensures `go.sum` is updated. The build container runs `go mod download` - new modules must be in `go.sum` before the Docker build step.
 
 ---
 
 ## Definition of Done
 
-- [x] `media/internal/thumbnail/thumbnail.go` — `GenerateThumbnail`, `DetectMIMEType`, `ThumbnailParams` defined
-- [x] `media/internal/thumbnail/handler.go` — full HTTP handler for thumbnail endpoint
-- [x] AT-1: `TestThumbnailHandler_Scale_ReturnsThumbnail` — green (scale, ≤100×100)
-- [x] AT-2: `TestThumbnailHandler_Crop_ReturnsExactDimensions` — green (crop, exactly 100×100)
-- [x] AT-3: `TestThumbnailHandler_RejectedMimeType_ReturnsBadJSON` — green (SVG/PDF → 400)
-- [x] AT-4: `TestThumbnailHTTPHandler_MissingParams_Returns400` — green
-- [x] AT-5: `TestThumbnailHTTPHandler_CacheControl` — green (Cache-Control: max-age=86400)
-- [x] AT-6: `TestThumbnailHTTPHandler_UnsupportedType_Returns400` — green
-- [x] AT-7: `TestThumbnailHTTPHandler_NotFound_Returns404` — green
-- [x] AT-8: `TestThumbnailHTTPHandler_AnimatedGIF_Returns200` — green
+- [x] `media/internal/thumbnail/thumbnail.go` - `GenerateThumbnail`, `DetectMIMEType`, `ThumbnailParams` defined
+- [x] `media/internal/thumbnail/handler.go` - full HTTP handler for thumbnail endpoint
+- [x] AT-1: `TestThumbnailHandler_Scale_ReturnsThumbnail` - green (scale, ≤100×100)
+- [x] AT-2: `TestThumbnailHandler_Crop_ReturnsExactDimensions` - green (crop, exactly 100×100)
+- [x] AT-3: `TestThumbnailHandler_RejectedMimeType_ReturnsBadJSON` - green (SVG/PDF → 400)
+- [x] AT-4: `TestThumbnailHTTPHandler_MissingParams_Returns400` - green
+- [x] AT-5: `TestThumbnailHTTPHandler_CacheControl` - green (Cache-Control: max-age=86400)
+- [x] AT-6: `TestThumbnailHTTPHandler_UnsupportedType_Returns400` - green
+- [x] AT-7: `TestThumbnailHTTPHandler_NotFound_Returns404` - green
+- [x] AT-8: `TestThumbnailHTTPHandler_AnimatedGIF_Returns200` - green
 - [x] `thumbnailStub` removed from `main.go` and `download/handler.go`
 - [x] `main.go` wires `thumbnail.NewHandler` into the mux
 - [x] `go.mod` + `go.sum` updated with `github.com/disintegration/imaging`
@@ -464,9 +464,9 @@ This ensures `go.sum` is updated. The build container runs `go mod download` —
 
 **Implementation approach:**
 - Created `media/internal/thumbnail/` package with `thumbnail.go` (core image processing) and `handler.go` (HTTP handler)
-- Used `github.com/disintegration/imaging v1.6.2` (pure Go, MIT, no cgo) — satisfies AC4 sandbox requirement by construction
+- Used `github.com/disintegration/imaging v1.6.2` (pure Go, MIT, no cgo) - satisfies AC4 sandbox requirement by construction
 - `DetectMIMEType` uses `net/http.DetectContentType` with first 512 bytes (magic bytes)
-- `AllowedMIMETypes` map: `{image/jpeg, image/png, image/gif, image/webp}` — deny-by-default (SVG, PDF, PS, EPS all rejected)
+- `AllowedMIMETypes` map: `{image/jpeg, image/png, image/gif, image/webp}` - deny-by-default (SVG, PDF, PS, EPS all rejected)
 - Animated GIF path: `gif.DecodeAll` → per-frame `imaging.Resize` → Floyd-Steinberg re-palettization → `gif.EncodeAll`
 - Static path: `imaging.Decode` (AutoOrientation) → `imaging.Fill` (crop) or `imaging.Fit` (scale) → JPEG quality=85
 
@@ -479,22 +479,22 @@ This ensures `go.sum` is updated. The build container runs `go mod download` —
 - M-2: Path traversal test strengthened to assert exactly `400 M_BAD_JSON`
 - M-3: Added `TestThumbnailHandler_UnsupportedPS_Returns400` with PostScript magic bytes `%!PS`
 - M-4: `download_test.go` thumbnailStub references replaced with inline 501 handlers
-- M-5: `TestDownload_ThumbnailStub` updated — removed JSON errcode check (stub no longer emits JSON)
+- M-5: `TestDownload_ThumbnailStub` updated - removed JSON errcode check (stub no longer emits JSON)
 
 **All 70 tests pass. Zero regressions across 6 packages.**
 
 ### File List
 
-- `media/internal/thumbnail/thumbnail.go` — NEW
-- `media/internal/thumbnail/handler.go` — NEW
-- `media/internal/thumbnail/thumbnail_test.go` — NEW
-- `media/internal/thumbnail/handler_test.go` — NEW
-- `media/cmd/media/main.go` — MODIFIED (added pgThumbnailStore adapter, wired thumbnail.NewHandler, removed thumbnailStub, added thumbnail import, removed json import)
-- `media/internal/download/handler.go` — MODIFIED (removed thumbnailStub function)
-- `media/internal/download/download_test.go` — MODIFIED (replaced thumbnailStub references with inline 501, updated TestDownload_ThumbnailStub)
-- `media/go.mod` — MODIFIED (added disintegration/imaging v1.6.2, golang.org/x/image)
-- `media/go.sum` — MODIFIED
+- `media/internal/thumbnail/thumbnail.go` - NEW
+- `media/internal/thumbnail/handler.go` - NEW
+- `media/internal/thumbnail/thumbnail_test.go` - NEW
+- `media/internal/thumbnail/handler_test.go` - NEW
+- `media/cmd/media/main.go` - MODIFIED (added pgThumbnailStore adapter, wired thumbnail.NewHandler, removed thumbnailStub, added thumbnail import, removed json import)
+- `media/internal/download/handler.go` - MODIFIED (removed thumbnailStub function)
+- `media/internal/download/download_test.go` - MODIFIED (replaced thumbnailStub references with inline 501, updated TestDownload_ThumbnailStub)
+- `media/go.mod` - MODIFIED (added disintegration/imaging v1.6.2, golang.org/x/image)
+- `media/go.sum` - MODIFIED
 
 ### Change Log
 
-- 2026-05-12: Implemented Story 12.5 — thumbnail generation on-demand with disintegration/imaging
+- 2026-05-12: Implemented Story 12.5 - thumbnail generation on-demand with disintegration/imaging

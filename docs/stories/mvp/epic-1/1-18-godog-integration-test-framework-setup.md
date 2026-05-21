@@ -45,12 +45,12 @@ so that Gherkin scenarios can be executed in CI without manual stack management.
 
 ## Dev Notes
 
-### Current State — What Exists vs What's Missing
+### Current State - What Exists vs What's Missing
 
 | Item | State | Action |
 |---|---|---|
-| `Makefile` `test-integration` | EXISTS — placeholder: `docker compose -f docker-compose.test.yml up --abort-on-container-exit` | **REPLACE** with working implementation |
-| `docker-compose.test.yml` | MISSING — referenced by placeholder but not created | **NOT NEEDED** — drop this approach; use `docker compose up -d --wait` instead |
+| `Makefile` `test-integration` | EXISTS - placeholder: `docker compose -f docker-compose.test.yml up --abort-on-container-exit` | **REPLACE** with working implementation |
+| `docker-compose.test.yml` | MISSING - referenced by placeholder but not created | **NOT NEEDED** - drop this approach; use `docker compose up -d --wait` instead |
 | `gateway/features/` | MISSING | **CREATE** directory + `health.feature` |
 | `gateway/test/integration/` | MISSING | **CREATE** directory + `main_test.go` |
 | `github.com/cucumber/godog` | NOT IN `gateway/go.mod` | **ADD** via `go get` |
@@ -69,7 +69,7 @@ This updates `gateway/go.mod` and `gateway/go.sum`. Commit both files.
 
 **Expected addition to `gateway/go.mod`:** `github.com/cucumber/godog v0.14.x` plus its indirect deps (primarily `github.com/cucumber/messages`, `github.com/cucumber/gherkin-go`, `github.com/spf13/pflag`).
 
-### `gateway/features/health.feature` — Placeholder Gherkin
+### `gateway/features/health.feature` - Placeholder Gherkin
 
 Create `gateway/features/health.feature`:
 
@@ -93,7 +93,7 @@ Feature: Stack Health Smoke Test
     And the response body contains "UP"
 ```
 
-**Why `@pending`?** Story 1.18 sets up the framework only — step definitions come in Story 1.19. Without step definitions, godog reports all steps as undefined. With `Strict: false`, undefined steps do not fail the suite (exit 0). The `@pending` tag is a conventional marker for Story 1.19 to filter on — it has no built-in meaning in godog. This satisfies AC3 ("skipped scenarios without panicking").
+**Why `@pending`?** Story 1.18 sets up the framework only - step definitions come in Story 1.19. Without step definitions, godog reports all steps as undefined. With `Strict: false`, undefined steps do not fail the suite (exit 0). The `@pending` tag is a conventional marker for Story 1.19 to filter on - it has no built-in meaning in godog. This satisfies AC3 ("skipped scenarios without panicking").
 
 **Why these exact steps?** They match the Story 1.19 AC verbatim. Writing them now ensures story 1.18 creates a valid, parseable file and story 1.19 can implement the steps without modifying the feature file.
 
@@ -213,7 +213,7 @@ docker run --rm -v $(PWD):/workspace -w /workspace/gateway golang:1.26-alpine \
   sh -c "go build ./..."
 ```
 
-Must exit 0. The `main_test.go` is in a `_test` package (`integration_test`) so it's excluded from `go build ./...` — only verified by `go test ./...`.
+Must exit 0. The `main_test.go` is in a `_test` package (`integration_test`) so it's excluded from `go build ./...` - only verified by `go test ./...`.
 
 To verify the test compiles without a live stack:
 ```bash
@@ -225,10 +225,10 @@ Expected output: scenarios reported as pending, exit code 0.
 
 ### No Regression Risk
 
-- `gateway/internal/admin/api_gen.go` and `metrics.go` are in `package admin` — no interference
+- `gateway/internal/admin/api_gen.go` and `metrics.go` are in `package admin` - no interference
 - Adding godog to `go.mod` only adds test-time dependencies; `go build` of production binaries is unaffected
 - Existing `make test-unit-go` continues to work unchanged (tests in `gateway/...` excluding `_test` files with build tags)
-- The `go test -race ./...` in `test-unit-go` will NOT pick up `./test/integration/...` files automatically — integration tests have a separate `go test ./test/integration/...` invocation
+- The `go test -race ./...` in `test-unit-go` will NOT pick up `./test/integration/...` files automatically - integration tests have a separate `go test ./test/integration/...` invocation
 
 ### Project Structure Notes
 
@@ -236,13 +236,13 @@ Expected output: scenarios reported as pending, exit code 0.
 
 | File | Action |
 |---|---|
-| `gateway/go.mod` | UPDATE — add `github.com/cucumber/godog` |
-| `gateway/go.sum` | UPDATE — updated by `go mod tidy` |
-| `gateway/features/health.feature` | CREATE — valid Gherkin placeholder with `@pending` |
-| `gateway/test/integration/main_test.go` | CREATE — Godog TestSuite config |
-| `Makefile` | UPDATE — replace `test-integration` target |
+| `gateway/go.mod` | UPDATE - add `github.com/cucumber/godog` |
+| `gateway/go.sum` | UPDATE - updated by `go mod tidy` |
+| `gateway/features/health.feature` | CREATE - valid Gherkin placeholder with `@pending` |
+| `gateway/test/integration/main_test.go` | CREATE - Godog TestSuite config |
+| `Makefile` | UPDATE - replace `test-integration` target |
 
-**Nothing else to touch.** Do NOT create `docker-compose.test.yml` — this story drops that approach.
+**Nothing else to touch.** Do NOT create `docker-compose.test.yml` - this story drops that approach.
 
 ### References
 
@@ -253,9 +253,9 @@ Expected output: scenarios reported as pending, exit code 0.
 - [Source: architecture.md#Testing-Patterns] Gherkin feature file format and fixture locations
 - [Source: architecture.md#Health-Readiness-Endpoints] Response format: `{"status": "UP"}` for gateway, `{"status": "UP"}` for core
 - [Source: docker-compose.yml:healthcheck] Gateway healthcheck uses `/healthcheck` binary; Core healthcheck uses `curl http://localhost:4000/health`
-- [Source: Makefile:test-integration] Current placeholder: `docker compose -f docker-compose.test.yml up --abort-on-container-exit` — REPLACE
+- [Source: Makefile:test-integration] Current placeholder: `docker compose -f docker-compose.test.yml up --abort-on-container-exit` - REPLACE
 - [Source: gateway/go.mod:1] Module name: `github.com/nebu/nebu`, Go version: `go 1.26`
-- [Source: 1-17-make-gen-api-oapi-codegen-build-target.md#Dev-Notes] Previous story used `@latest` for tool invocation from project root — godog is added as a module dep, not a tool runner
+- [Source: 1-17-make-gen-api-oapi-codegen-build-target.md#Dev-Notes] Previous story used `@latest` for tool invocation from project root - godog is added as a module dep, not a tool runner
 - [Source: 1-15-go-unit-test-target.md] Pattern: `apk add -q --no-cache gcc musl-dev` needed for CGO in Go Alpine containers
 
 ## Dev Agent Record
@@ -266,25 +266,25 @@ claude-sonnet-4-6[1m]
 
 ### Debug Log References
 
-First `go get` run did not persist to go.mod because the Docker volume was not being checked correctly after run. Re-ran with `"$(PWD)"` quoting — persisted correctly on second run. Both `go build ./...` and `go test -race ./...` pass after the fix.
+First `go get` run did not persist to go.mod because the Docker volume was not being checked correctly after run. Re-ran with `"$(PWD)"` quoting - persisted correctly on second run. Both `go build ./...` and `go test -race ./...` pass after the fix.
 
 ### Completion Notes List
 
 - Added `github.com/cucumber/godog v0.15.1` (plus indirect deps: gherkin/go/v26, messages/go/v21, gofrs/uuid, hashicorp/go-memdb, hashicorp/go-immutable-radix, hashicorp/golang-lru, spf13/pflag) to `gateway/go.mod` via `go get` + `go mod tidy` in DOCKER_GO container
-- Created `gateway/features/health.feature` with `@pending`-tagged scenario using exact step names from Story 1.19 spec — godog parses and reports 1 undefined scenario, exit 0
+- Created `gateway/features/health.feature` with `@pending`-tagged scenario using exact step names from Story 1.19 spec - godog parses and reports 1 undefined scenario, exit 0
 - Created `gateway/test/integration/main_test.go` in package `integration_test` with `TestMain` (reads `NEBU_TEST_GATEWAY_URL`, defaults to `http://localhost:8080`), `TestIntegrationSuite` (`Strict: false`, `NoColors: true`, `Paths: []string{"../../features"}`), and empty `InitializeScenario`
 - Updated `Makefile` `test-integration` target: drops `docker-compose.test.yml` approach, uses `docker compose up -d --wait` + inline `docker run` with `--add-host=host.docker.internal:host-gateway` + guaranteed `docker compose down` via `EXIT=$$?` pattern
 - All existing unit tests pass with no regressions (`go test -race ./...`)
 
 ### File List
 
-- `gateway/go.mod` — updated (added godog v0.15.1 + indirect deps)
-- `gateway/go.sum` — updated by go mod tidy
-- `gateway/features/health.feature` — created
-- `gateway/test/integration/main_test.go` — created
-- `Makefile` — updated (test-integration target)
+- `gateway/go.mod` - updated (added godog v0.15.1 + indirect deps)
+- `gateway/go.sum` - updated by go mod tidy
+- `gateway/features/health.feature` - created
+- `gateway/test/integration/main_test.go` - created
+- `Makefile` - updated (test-integration target)
 
 ## Change Log
 
 - 2026-03-25: Added godog v0.15.1 to gateway/go.mod; created gateway/features/health.feature placeholder; created gateway/test/integration/main_test.go Godog TestSuite; replaced Makefile test-integration target with working docker compose + godog runner implementation (Story 1.18)
-- 2026-03-25: Code review fixes — Makefile: joined `docker compose up` and test run into single shell command so `docker compose down` runs even if stack startup fails; Dev Notes: corrected inaccurate claim about `@pending` tag behavior in godog
+- 2026-03-25: Code review fixes - Makefile: joined `docker compose up` and test run into single shell command so `docker compose down` runs even if stack startup fails; Dev Notes: corrected inaccurate claim about `@pending` tag behavior in godog

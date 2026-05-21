@@ -1,7 +1,7 @@
 # Story 4.21: Gherkin: Room Create + Send + Receive (End-to-End)
 
 **Status:** review
-**Epic:** 4 — End-Users Can Chat in Rooms Using Any Standard Matrix Client
+**Epic:** 4 - End-Users Can Chat in Rooms Using Any Standard Matrix Client
 **Story Key:** 4-21-gherkin-room-create-send-receive-end-to-end
 **Created:** 2026-04-03
 
@@ -46,12 +46,12 @@ so that regressions in the core messaging path are caught automatically in CI.
 
 ### Tests written FIRST (before implementation code):
 
-**1. Full room flow: create → invite → join → send → messages — Godog**
+**1. Full room flow: create → invite → join → send → messages - Godog**
 - Given: `kai` obtains Dex token (authorization code flow, same as auth.feature); `alex` obtains Dex token
 - When: `kai` creates room → `kai` invites `alex` → `alex` joins → `kai` sends message "hello"
 - Then: `GET /rooms/{room_id}/messages` as `alex` returns `200` with body containing `"hello"`
 
-**2. txnId idempotency — Godog**
+**2. txnId idempotency - Godog**
 - Given: `kai` is authenticated and in a room (scenario can reuse the room created in the previous scenario if run in order, OR create a new room)
 - When: `kai` PUT /send/m.room.message/{txnId} twice with the same `txnId` and same body
 - Then: both responses return `200` with identical `event_id` values
@@ -69,30 +69,30 @@ so that regressions in the core messaging path are caught automatically in CI.
 - [x] Task 2: Create `gateway/test/integration/room_flow_steps_test.go` (AC: 3)
   - [x] 2.1 Add `//go:build integration` tag, `package integration_test`
   - [x] 2.2 Add package-level state vars: `lastRoomID`, `lastEventID`, `kaiAccessToken`, `alexAccessToken`, `kaiUserID`, `alexUserID`, `lastTxnID`, `lastSecondEventID`
-  - [x] 2.3 Implement `kaiIsAuthenticated()` — Dex auth code flow for `kai@example.com` / `changeme`, then POST /login, store `kaiAccessToken` and `kaiUserID`
-  - [x] 2.4 Implement `alexIsAuthenticated()` — Dex auth code flow for `alex@example.com` / `changeme`, then POST /login, store `alexAccessToken` and `alexUserID`
-  - [x] 2.5 Implement `kaiCreatesARoom(name string)` — POST `/createRoom`, store `lastRoomID`
-  - [x] 2.6 Implement `kaiInvitesAlex()` — POST `/rooms/{lastRoomID}/invite` with `alexUserID`
-  - [x] 2.7 Implement `alexJoinsTheRoom()` — POST `/join/{lastRoomID}` as `alex`
-  - [x] 2.8 Implement `kaiSendsMessage(body string)` — PUT `/rooms/{lastRoomID}/send/m.room.message/{txnId}`, store `lastEventID`; generate `txnId` as `fmt.Sprintf("txn-%d", time.Now().UnixNano())`
-  - [x] 2.9 Implement `alexRetrievesMessagesFromTheRoom()` — GET `/rooms/{lastRoomID}/messages` as `alex`, store `lastStatusCode` and `lastBody`
-  - [x] 2.10 Implement `kaiSendsTheSameMessageAgain()` — PUT same txnId as before, store response as `lastSecondEventID`
-  - [x] 2.11 Implement `bothSendsReturnedTheSameEventID()` — assert `lastEventID == lastSecondEventID`
-  - [x] 2.12 Implement `theBodyContainsExactlyOnce(substr string)` — count occurrences of `substr` in `lastBody`, assert == 1
+  - [x] 2.3 Implement `kaiIsAuthenticated()` - Dex auth code flow for `kai@example.com` / `changeme`, then POST /login, store `kaiAccessToken` and `kaiUserID`
+  - [x] 2.4 Implement `alexIsAuthenticated()` - Dex auth code flow for `alex@example.com` / `changeme`, then POST /login, store `alexAccessToken` and `alexUserID`
+  - [x] 2.5 Implement `kaiCreatesARoom(name string)` - POST `/createRoom`, store `lastRoomID`
+  - [x] 2.6 Implement `kaiInvitesAlex()` - POST `/rooms/{lastRoomID}/invite` with `alexUserID`
+  - [x] 2.7 Implement `alexJoinsTheRoom()` - POST `/join/{lastRoomID}` as `alex`
+  - [x] 2.8 Implement `kaiSendsMessage(body string)` - PUT `/rooms/{lastRoomID}/send/m.room.message/{txnId}`, store `lastEventID`; generate `txnId` as `fmt.Sprintf("txn-%d", time.Now().UnixNano())`
+  - [x] 2.9 Implement `alexRetrievesMessagesFromTheRoom()` - GET `/rooms/{lastRoomID}/messages` as `alex`, store `lastStatusCode` and `lastBody`
+  - [x] 2.10 Implement `kaiSendsTheSameMessageAgain()` - PUT same txnId as before, store response as `lastSecondEventID`
+  - [x] 2.11 Implement `bothSendsReturnedTheSameEventID()` - assert `lastEventID == lastSecondEventID`
+  - [x] 2.12 Implement `theBodyContainsExactlyOnce(substr string)` - count occurrences of `substr` in `lastBody`, assert == 1
   - [x] 2.13 Expose `initializeRoomFlowSteps(sc *godog.ScenarioContext)` registering all steps
 
 - [x] Task 3: Update `gateway/test/integration/steps_test.go` (AC: 4)
   - [x] 3.1 Add `initializeRoomFlowSteps(sc)` call at end of `InitializeScenario`
 
 - [ ] Task 4: Verify `make test-integration` passes (AC: 5)
-  - [ ] 4.1 `docker compose up -d --wait` — all services healthy
+  - [ ] 4.1 `docker compose up -d --wait` - all services healthy
   - [ ] 4.2 Confirm godog reports all scenarios (health + auth + admin + room_flow), all steps pass, exit 0
 
 ---
 
 ## Dev Notes
 
-### Current State — What Exists
+### Current State - What Exists
 
 | File | State | Action |
 |------|-------|--------|
@@ -100,8 +100,8 @@ so that regressions in the core messaging path are caught automatically in CI.
 | `gateway/features/auth.feature` | EXISTS, passing | Do NOT modify |
 | `gateway/features/admin_bootstrap.feature` | EXISTS, passing | Do NOT modify |
 | `gateway/features/room_flow.feature` | MISSING | CREATE |
-| `gateway/test/integration/main_test.go` | EXISTS — all URL vars initialized | Do NOT modify |
-| `gateway/test/integration/steps_test.go` | EXISTS — calls `initializeAuthSteps`, `initializeAdminBootstrapSteps` | UPDATE — add `initializeRoomFlowSteps(sc)` call only |
+| `gateway/test/integration/main_test.go` | EXISTS - all URL vars initialized | Do NOT modify |
+| `gateway/test/integration/steps_test.go` | EXISTS - calls `initializeAuthSteps`, `initializeAdminBootstrapSteps` | UPDATE - add `initializeRoomFlowSteps(sc)` call only |
 | `gateway/test/integration/auth_steps_test.go` | EXISTS | Do NOT modify |
 | `gateway/test/integration/admin_bootstrap_steps_test.go` | EXISTS | Do NOT modify |
 | `gateway/test/integration/room_flow_steps_test.go` | MISSING | CREATE |
@@ -126,7 +126,7 @@ Available URL variables (from `main_test.go`):
 
 ### Critical: State Variables Are Package-Level
 
-All state variables (`lastStatusCode`, `lastBody`, `lastLocationHeader`, `lastDexIDToken`, `lastAccessToken`) in `steps_test.go` and `auth_steps_test.go` are package-level — they are shared across all step files in `package integration_test`. `room_flow_steps_test.go` can read and write `lastStatusCode` and `lastBody` directly. Declare new vars for room flow state in `room_flow_steps_test.go`:
+All state variables (`lastStatusCode`, `lastBody`, `lastLocationHeader`, `lastDexIDToken`, `lastAccessToken`) in `steps_test.go` and `auth_steps_test.go` are package-level - they are shared across all step files in `package integration_test`. `room_flow_steps_test.go` can read and write `lastStatusCode` and `lastBody` directly. Declare new vars for room flow state in `room_flow_steps_test.go`:
 
 ```go
 var lastRoomID string
@@ -142,7 +142,7 @@ var lastSecondEventID string
 ### Critical: Dex Authorization Code Flow (Copy from auth_steps_test.go)
 
 Dex v2.41 does NOT support `grant_type=password` (ROPC) in practice. The implementation in `auth_steps_test.go` uses a programmatic authorization code flow that:
-1. GET `/dex/auth?response_type=code&client_id=nebu-gateway&redirect_uri=...&scope=openid+profile+email+groups&state=teststate` — follows redirects to the HTML form
+1. GET `/dex/auth?response_type=code&client_id=nebu-gateway&redirect_uri=...&scope=openid+profile+email+groups&state=teststate` - follows redirects to the HTML form
 2. Extracts `<form action="...">` from HTML (HTML-unescape `&amp;` → `&`)
 3. POST form credentials (`login=username&password=password`) with a no-redirect client
 4. Extracts `code` from the `Location` header redirect
@@ -161,7 +161,7 @@ The Dex `sub` claim is protobuf-encoded (NOT the raw UUID). The `user_id` in the
 
 From Story 2-21 dev notes, `kai`'s `user_id` login response contains `CiQwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDE` (the protobuf-encoded sub for UUID `00000000-0000-0000-0000-000000000001`).
 
-For `alex` (UUID `00000000-0000-0000-0000-000000000003`): the protobuf-encoded sub will be similar. **Do not hardcode the sub** — parse `user_id` from the `POST /login` JSON response instead. The login response returns:
+For `alex` (UUID `00000000-0000-0000-0000-000000000003`): the protobuf-encoded sub will be similar. **Do not hardcode the sub** - parse `user_id` from the `POST /login` JSON response instead. The login response returns:
 
 ```json
 {
@@ -178,7 +178,7 @@ Parse and store this `user_id` for use in the invite step.
 
 `main_test.go` has `Strict: true`. Any step in any `.feature` file that lacks a matching `sc.Step(...)` registration will cause the entire suite to fail with an undefined step error. Register ALL steps used in `room_flow.feature` in `initializeRoomFlowSteps`.
 
-### Critical: Scenario Isolation — Clean State Per Scenario
+### Critical: Scenario Isolation - Clean State Per Scenario
 
 Each Godog scenario runs sequentially. The room created in Scenario 1 (full flow) will still exist when Scenario 2 (idempotency) starts. Design Scenario 2 to either:
 - Reuse `lastRoomID` from Scenario 1 (kai is already in the room, no re-create needed), OR
@@ -186,7 +186,7 @@ Each Godog scenario runs sequentially. The room created in Scenario 1 (full flow
 
 **Recommended**: Scenario 2 creates its own room for full isolation. This avoids ordering dependencies between scenarios.
 
-### Endpoint Reference — Matrix API (all on matrixURL port 8008)
+### Endpoint Reference - Matrix API (all on matrixURL port 8008)
 
 | Method | Path | Auth | Handler |
 |--------|------|------|---------|
@@ -245,7 +245,7 @@ For idempotency (AC 2): assert `strings.Count(lastBody, "hello") == 1` to verify
 ### Feature File: gateway/features/room_flow.feature
 
 ```gherkin
-Feature: Room Flow — Create, Send, Receive
+Feature: Room Flow - Create, Send, Receive
   As a developer
   I want to verify the full chat room lifecycle
   So that CI catches any regression in the core messaging path
@@ -443,7 +443,7 @@ func kaiSendsMessage(msgBody string) error {
 }
 
 func kaiSendsTheSameMessageAgain() error {
-    // Reuse lastTxnID — this is the idempotency test
+    // Reuse lastTxnID - this is the idempotency test
     payload := `{"msgtype":"m.text","body":"idempotent"}`
     url := fmt.Sprintf("%s/_matrix/client/v3/rooms/%s/send/m.room.message/%s", matrixURL, lastRoomID, lastTxnID)
     req, err := http.NewRequest(http.MethodPut, url, strings.NewReader(payload))
@@ -509,10 +509,10 @@ func kaiGetsMessages() error {
 
 func bothSendsReturnedTheSameEventID() error {
     if lastEventID == "" {
-        return fmt.Errorf("lastEventID is empty — first send did not return event_id")
+        return fmt.Errorf("lastEventID is empty - first send did not return event_id")
     }
     if lastSecondEventID == "" {
-        return fmt.Errorf("lastSecondEventID is empty — second send did not return event_id")
+        return fmt.Errorf("lastSecondEventID is empty - second send did not return event_id")
     }
     if lastEventID != lastSecondEventID {
         return fmt.Errorf("txnId idempotency failed: first event_id=%q, second event_id=%q", lastEventID, lastSecondEventID)
@@ -543,7 +543,7 @@ func initializeRoomFlowSteps(sc *godog.ScenarioContext) {
 }
 ```
 
-### steps_test.go Change — Add initializeRoomFlowSteps
+### steps_test.go Change - Add initializeRoomFlowSteps
 
 Add exactly one line to `InitializeScenario`:
 
@@ -562,19 +562,19 @@ func InitializeScenario(sc *godog.ScenarioContext) {
 
 ### Architecture Compliance
 
-- **No new Go production code** — test-only files, no production binary changes
-- **Feature file at `gateway/features/`** — established canonical location; NOT `test/features/` despite epics.md saying `tests/features/`
-- **Build tag `//go:build integration`** — required; matches all existing integration step files
-- **Package `integration_test`** — matches existing package declaration
-- **Real Dex tokens, not mocked** — use authorization code flow (ROPC not supported by Dex v2.41)
-- **matrixURL (port 8008)** — all Matrix API calls; NOT gatewayURL (port 8080)
-- **`Strict: true`** — already set; all steps in room_flow.feature MUST be registered
-- **Step regex anchoring** — wrap all regex patterns with `^...$` anchors
+- **No new Go production code** - test-only files, no production binary changes
+- **Feature file at `gateway/features/`** - established canonical location; NOT `test/features/` despite epics.md saying `tests/features/`
+- **Build tag `//go:build integration`** - required; matches all existing integration step files
+- **Package `integration_test`** - matches existing package declaration
+- **Real Dex tokens, not mocked** - use authorization code flow (ROPC not supported by Dex v2.41)
+- **matrixURL (port 8008)** - all Matrix API calls; NOT gatewayURL (port 8080)
+- **`Strict: true`** - already set; all steps in room_flow.feature MUST be registered
+- **Step regex anchoring** - wrap all regex patterns with `^...$` anchors
 
 ### Known Pitfalls to Avoid
 
 1. **Wrong port**: All Matrix endpoints are on `matrixURL` (port 8008), NOT `gatewayURL` (port 8080).
-2. **Reusing `lastAccessToken`** from auth steps: `auth_steps_test.go` stores the login token in `lastAccessToken`. After `kaiIsAuthenticated` calls `iPostLoginWithDexToken()`, `lastAccessToken` will be set — copy it to `kaiAccessToken` before calling `alexIsAuthenticated` (which will overwrite `lastAccessToken` with alex's token).
+2. **Reusing `lastAccessToken`** from auth steps: `auth_steps_test.go` stores the login token in `lastAccessToken`. After `kaiIsAuthenticated` calls `iPostLoginWithDexToken()`, `lastAccessToken` will be set - copy it to `kaiAccessToken` before calling `alexIsAuthenticated` (which will overwrite `lastAccessToken` with alex's token).
 3. **txnId uniqueness**: Generate `txnId` as `fmt.Sprintf("txn-%d", time.Now().UnixNano())`. This is unique per scenario run. For the idempotency test, save this value and use it BOTH times.
 4. **Scenario ordering**: Godog runs scenarios in file order. Scenario 1 leaves state in `lastRoomID`. Scenario 2 MUST create its own room to be isolated (recommended), OR explicitly re-initialize all state at the start.
 5. **user_id format in invite**: The `user_id` field in the invite body must be the full Matrix `user_id` from the login response (e.g., `@CiQw...:localhost`), NOT the email or UUID.
@@ -591,13 +591,13 @@ func InitializeScenario(sc *godog.ScenarioContext) {
 
 Use `kai` as creator/sender (has `instance_admin` rights, no permission restrictions) and `alex` as the second user (regular `user` role, can join and read).
 
-### Project Structure — Files to Create/Modify
+### Project Structure - Files to Create/Modify
 
 | File | Action |
 |------|--------|
 | `gateway/features/room_flow.feature` | CREATE |
 | `gateway/test/integration/room_flow_steps_test.go` | CREATE |
-| `gateway/test/integration/steps_test.go` | MODIFY — add `initializeRoomFlowSteps(sc)` call only |
+| `gateway/test/integration/steps_test.go` | MODIFY - add `initializeRoomFlowSteps(sc)` call only |
 
 **No changes to:** `Makefile`, `docker-compose.yml`, `dev/dex/config.yaml`, any production Go files, any Elixir files, any proto files, `main_test.go`, `auth_steps_test.go`, `admin_bootstrap_steps_test.go`.
 
@@ -608,8 +608,8 @@ Use `kai` as creator/sender (has `instance_admin` rights, no permission restrict
 - [Source: gateway/test/integration/main_test.go] URL vars: `matrixURL`, `dexURL`, `gatewayURL`; `Strict: true` constraint
 - [Source: gateway/test/integration/steps_test.go] `InitializeScenario` pattern; shared steps (`theResponseStatusIs`, `theResponseBodyContains`)
 - [Source: gateway/features/auth.feature] Established feature file format and step naming conventions
-- [Source: gateway/internal/matrix/rooms.go] `CreateRoomHandler`, `InviteUserHandler`, `JoinRoomHandler`, `SendEventHandler` — request/response shapes
-- [Source: gateway/internal/matrix/messages.go] `GetMessagesHandler` — response format with `chunk` array
+- [Source: gateway/internal/matrix/rooms.go] `CreateRoomHandler`, `InviteUserHandler`, `JoinRoomHandler`, `SendEventHandler` - request/response shapes
+- [Source: gateway/internal/matrix/messages.go] `GetMessagesHandler` - response format with `chunk` array
 - [Source: dev/dex/config.yaml] Dex users, client credentials, `redirect_uri` requirement
 - [Source: 2-21-gherkin-auth-scenario-end-to-end-oidc-login.md#Dev-Notes] Dex ROPC not supported; sub is protobuf-encoded; Matrix API on port 8008; `matrixURL` in `TestMain`
 - [Source: Makefile#test-integration] `--network=nebu_default`; env vars passed to test container; all URLs injected
@@ -626,23 +626,23 @@ claude-sonnet-4-6[1m] (Claude Code)
 
 - Verified both feature file and step definitions were already fully implemented (not pending stubs as the story prompt suggested).
 - Confirmed `steps_test.go` already contained the `initializeRoomFlowSteps(sc)` call.
-- Ran `go build -tags integration ./test/integration/...` — compiled successfully with no errors.
+- Ran `go build -tags integration ./test/integration/...` - compiled successfully with no errors.
 - Cross-checked all 14 step patterns in `room_flow.feature` against registered `sc.Step(...)` entries; every step has a matching registration.
 
 ### Completion Notes List
 
-- `gateway/features/room_flow.feature`: Feature file with two scenarios — full room create/invite/join/send/messages flow and txnId idempotency scenario.
+- `gateway/features/room_flow.feature`: Feature file with two scenarios - full room create/invite/join/send/messages flow and txnId idempotency scenario.
 - `gateway/test/integration/room_flow_steps_test.go`: Complete step definitions implementing all 11 room-flow steps. Uses `authenticateUser` helper that reuses `iObtainDexTokenFor` and `iPostLoginWithDexToken` from `auth_steps_test.go`. All Matrix API calls go to `matrixURL` (port 8008). Step implementations: `kaiIsAuthenticated`, `alexIsAuthenticated`, `kaiCreatesARoom`, `kaiInvitesAlex`, `alexJoinsTheRoom`, `kaiSendsMessage`, `kaiSendsTheSameMessageAgain`, `alexRetrievesMessagesFromTheRoom`, `kaiRetrievesMessagesFromTheRoom`, `bothSendsReturnedTheSameEventID`, `theBodyContainsExactlyOnce`.
 - `gateway/test/integration/steps_test.go`: `initializeRoomFlowSteps(sc)` call already present in `InitializeScenario`; no changes required.
-- Task 4 (live `make test-integration` run) requires the full Docker stack — cannot be executed in this environment. Code compiles cleanly and all step patterns are verified to match the feature file exactly. AC 5 is contingent on the live stack run.
+- Task 4 (live `make test-integration` run) requires the full Docker stack - cannot be executed in this environment. Code compiles cleanly and all step patterns are verified to match the feature file exactly. AC 5 is contingent on the live stack run.
 
 ### File List
 
 - `gateway/features/room_flow.feature` (CREATED)
 - `gateway/test/integration/room_flow_steps_test.go` (CREATED)
-- `gateway/test/integration/steps_test.go` (already contained `initializeRoomFlowSteps(sc)` — no modification needed)
+- `gateway/test/integration/steps_test.go` (already contained `initializeRoomFlowSteps(sc)` - no modification needed)
 
 ## Change Log
 
-- 2026-04-03: Story created by Bob (SM) — comprehensive Gherkin end-to-end room flow test for Epic 4 completion gate.
-- 2026-04-03: Implemented by Amelia (Dev) — verified feature file and step definitions complete, code compiles cleanly, all step patterns matched. Status set to review.
+- 2026-04-03: Story created by Bob (SM) - comprehensive Gherkin end-to-end room flow test for Epic 4 completion gate.
+- 2026-04-03: Implemented by Amelia (Dev) - verified feature file and step definitions complete, code compiles cleanly, all step patterns matched. Status set to review.

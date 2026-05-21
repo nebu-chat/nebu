@@ -5,7 +5,7 @@ story: 21
 security_review: not-needed
 ---
 
-# Story 9.21: GAP-STATE-POSITION — state.events shows end-state instead of pre-timeline state
+# Story 9.21: GAP-STATE-POSITION - state.events shows end-state instead of pre-timeline state
 
 Status: ready-for-dev
 
@@ -23,9 +23,9 @@ So that the SDK can correctly compute deltas, detect changes like power-level up
 
 From `tmp/sync-issues.md` (agent-oracle analysis 2026-05-06).
 
-Matrix Client-Server API Spec §6.3.3 (Rooms — Incremental Sync) states:
+Matrix Client-Server API Spec §6.3.3 (Rooms - Incremental Sync) states:
 
-> `state` — Updates to the state, between the time indicated by the `since` parameter, and the start of the `timeline`. This will be an empty list if the since timestamp is more recent than the start of the timeline, i.e. the state events are not repeated.
+> `state` - Updates to the state, between the time indicated by the `since` parameter, and the start of the `timeline`. This will be an empty list if the since timestamp is more recent than the start of the timeline, i.e. the state events are not repeated.
 
 **In practice:** `state.events` must represent the room state AT THE BEGINNING of the returned timeline window, not the current state.
 
@@ -40,7 +40,7 @@ state_events = build_state_events(state, room_id)    # Built from CURRENT state
 
 `build_state_events` returns the **post-timeline** room state. For `m.room.power_levels`, `m.room.name`, `m.room.topic`, and any state type handled via `get_generic_state_events`, the returned event already reflects the change that just appeared in the timeline.
 
-`dedup_member_state_events` only removes `m.room.member` duplicates — it does not filter other state types.
+`dedup_member_state_events` only removes `m.room.member` duplicates - it does not filter other state types.
 
 ### Example
 
@@ -58,7 +58,7 @@ The SDK sees `state={users_default:0}` and `timeline=[power_levels{users_default
 
 ### Fix
 
-After building `state_events` from the current GenServer state, remove any event whose `{type, state_key}` pair already appears in `timeline_events`. Those pairs are already delivered in the timeline and must NOT be repeated in `state` (they represent the post-change value; their pre-change predecessor is not separately tracked in MVP). The net effect: `state.events` omits any type/key that changed during this timeline window, which matches spec §6.3.3 — the client processes the timeline event as the change, not as a no-op delta.
+After building `state_events` from the current GenServer state, remove any event whose `{type, state_key}` pair already appears in `timeline_events`. Those pairs are already delivered in the timeline and must NOT be repeated in `state` (they represent the post-change value; their pre-change predecessor is not separately tracked in MVP). The net effect: `state.events` omits any type/key that changed during this timeline window, which matches spec §6.3.3 - the client processes the timeline event as the change, not as a no-op delta.
 
 ```elixir
 # In fetch_delta_rooms, replace the current state_events construction:
@@ -87,19 +87,19 @@ The `dedup_member_state_events` call must run on the filtered `state_events`, no
 
 ## Acceptance Criteria
 
-**AC1 — Power-levels change: state omits current power_levels when timeline contains m.room.power_levels:**
+**AC1 - Power-levels change: state omits current power_levels when timeline contains m.room.power_levels:**
 When an incremental sync timeline includes `m.room.power_levels`, the `state.events` array must NOT contain `m.room.power_levels` for the same `state_key`. The SDK receives the power-levels change exclusively via the timeline event.
 
-**AC2 — Name/topic change: state omits changed keys:**
+**AC2 - Name/topic change: state omits changed keys:**
 When an incremental sync timeline includes `m.room.name` (or `m.room.topic`), `state.events` must NOT duplicate that event type+state_key pair.
 
-**AC3 — Unrelated state events remain in state:**
+**AC3 - Unrelated state events remain in state:**
 State events for types that do NOT appear in the current timeline window are still included in `state.events` (e.g., `m.room.create`, `m.room.join_rules` when only a power-levels change is in the timeline).
 
-**AC4 — m.room.member dedup still works:**
+**AC4 - m.room.member dedup still works:**
 The existing `dedup_member_state_events` behaviour is preserved: `m.room.member` entries for users who appear in the timeline are excluded from `state.events`. The new general filter covers this case too, but the existing code path must not regress.
 
-**AC5 — No regression for initial sync:**
+**AC5 - No regression for initial sync:**
 The initial sync code path (`build_initial_sync_room` / `get_room_state_for_user`) does NOT use `fetch_delta_rooms` and must not be affected. Existing initial sync tests stay green.
 
 ---
@@ -108,27 +108,27 @@ The initial sync code path (`build_initial_sync_room` / `get_room_state_for_user
 
 ### Tests written FIRST (before implementation code):
 
-1. **`test "fetch_delta_rooms/2 excludes power_levels from state when it appears in timeline"` — ExUnit**
+1. **`test "fetch_delta_rooms/2 excludes power_levels from state when it appears in timeline"` - ExUnit**
    - Given: a room GenServer whose current state has `power_levels: %{"users_default" => 0}`, and `fetch_events_since` returns `[m.room.power_levels{users_default: 0}]`
    - When: `fetch_delta_rooms([room_id], last_event_id)` is called
    - Then: the returned `SyncRoom.state_events` does NOT contain an entry with `type == "m.room.power_levels"`
 
-2. **`test "fetch_delta_rooms/2 excludes m.room.name from state when it appears in timeline"` — ExUnit**
+2. **`test "fetch_delta_rooms/2 excludes m.room.name from state when it appears in timeline"` - ExUnit**
    - Given: a room with a name change in timeline events
    - When: `fetch_delta_rooms([room_id], last_event_id)` is called
    - Then: `state_events` does NOT contain `type == "m.room.name"`
 
-3. **`test "fetch_delta_rooms/2 keeps unrelated state events in state"` — ExUnit**
+3. **`test "fetch_delta_rooms/2 keeps unrelated state events in state"` - ExUnit**
    - Given: timeline contains only a `m.room.name` event, room has `m.room.join_rules` in state
    - When: `fetch_delta_rooms([room_id], last_event_id)` is called
    - Then: `state_events` DOES contain `m.room.join_rules` and does NOT contain `m.room.name`
 
-4. **`test "fetch_delta_rooms/2 member dedup still removes m.room.member from state"` — ExUnit**
+4. **`test "fetch_delta_rooms/2 member dedup still removes m.room.member from state"` - ExUnit**
    - Given: timeline contains `m.room.member` for user `@alice:nebu.local`
    - When: `fetch_delta_rooms([room_id], last_event_id)` is called
    - Then: `state_events` does NOT contain `m.room.member` with `state_key == "@alice:nebu.local"`
 
-5. **Playwright E2E `[P1] GAP-STATE-POSITION: power-level change is applied by client`** — Playwright
+5. **Playwright E2E `[P1] GAP-STATE-POSITION: power-level change is applied by client`** - Playwright
    - Given: alice and bob are in a room; admin sets `users_default: 0` via PUT state/m.room.power_levels
    - When: bob's Element Web triggers an incremental sync that includes the power_levels change in its timeline
    - Then: bob's client shows the updated power level (not "no change") within 15 s
@@ -144,7 +144,7 @@ The initial sync code path (`build_initial_sync_room` / `get_room_state_for_user
 | `core/apps/event_dispatcher/lib/nebu/event_dispatcher/server.ex` | `fetch_delta_rooms/2`: add `timeline_state_keys` MapSet + `Enum.reject` on `state_events`; add private `state_event?/1` predicate |
 | `core/apps/event_dispatcher/test/nebu/event_dispatcher/server_test.exs` (or equivalent) | Add ExUnit tests AC1–AC4 |
 
-### Step 1 — Add `state_event?/1` private predicate
+### Step 1 - Add `state_event?/1` private predicate
 
 After the `dedup_member_state_events/2` helper (around line 1282), add:
 
@@ -160,7 +160,7 @@ defp state_event?(ev) do
 end
 ```
 
-### Step 2 — Patch `fetch_delta_rooms/2`
+### Step 2 - Patch `fetch_delta_rooms/2`
 
 Replace the current (lines 1248–1262):
 
@@ -195,7 +195,7 @@ With:
 
     # §6.3.3: state.events must reflect the room state BEFORE the timeline window.
     # Any {type, state_key} pair that appears in timeline_events is already the
-    # post-change value — exclude it from state so the SDK detects the change via
+    # post-change value - exclude it from state so the SDK detects the change via
     # the timeline event, not as a no-op delta.
     timeline_state_keys =
       timeline_events
@@ -224,7 +224,7 @@ With:
   end
 ```
 
-### Step 3 — ExUnit tests
+### Step 3 - ExUnit tests
 
 Add to the existing event_dispatcher test file (or create `fetch_delta_rooms_state_position_test.exs`):
 

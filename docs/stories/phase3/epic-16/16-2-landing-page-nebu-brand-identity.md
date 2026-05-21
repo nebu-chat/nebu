@@ -26,7 +26,7 @@ So that I immediately understand if Nebu solves my problem.
 **Given** `website/dokument/index.md` with landing page content,
 **When** the page is rendered,
 **Then** the following sections are present:
-- Hero with core message (e.g. "Self-hosted Matrix chat — your data, your rules")
+- Hero with core message (e.g. "Self-hosted Matrix chat - your data, your rules")
 - Value propositions: Matrix-compatible, data-sovereign, no Redis/NATS/Kafka, Apache 2.0
 - Tech stack overview (Go + Elixir/OTP)
 - Stakeholder personas (Operator Marcus, End User Leila, Compliance Officer, Admin Kai)
@@ -42,11 +42,11 @@ So that I immediately understand if Nebu solves my problem.
 
 **Given** a Playwright screenshot test `e2e/features/website_smoke.feature`,
 **When** `make test-integration` runs,
-**Then** the scenario "Landing page renders with Nebu logo and custom primary color" passes — catching CSS variable regressions on future changes
+**Then** the scenario "Landing page renders with Nebu logo and custom primary color" passes - catching CSS variable regressions on future changes
 
 ## Technical Notes
 
-- EasyWebsite Easy Mode — content is Markdown
+- EasyWebsite Easy Mode - content is Markdown
 - Logo: create a simple SVG placeholder if no official logo exists yet
 - Brand color decision: use `#0a2540` (deep navy) as default if not otherwise specified
 - CSS override: EasyWebsite supports CSS variable overrides via a custom CSS file
@@ -56,17 +56,17 @@ So that I immediately understand if Nebu solves my problem.
 
 ### Tests written FIRST (before implementation code):
 
-1. [Landing page content test] — Playwright+Cucumber (`e2e/features/website_smoke.feature` + `e2e/steps/website_smoke.steps.ts`)
+1. [Landing page content test] - Playwright+Cucumber (`e2e/features/website_smoke.feature` + `e2e/steps/website_smoke.steps.ts`)
    - Given: the website is running (served from `public/`)
    - When: visitor navigates to `/`
    - Then: page contains "Self-hosted Matrix chat", value proposition sections, tech stack, and persona names
 
-2. [Brand color regression test] — Playwright+Cucumber
+2. [Brand color regression test] - Playwright+Cucumber
    - Given: the website is running
    - When: visitor navigates to `/`
-   - Then: the CSS primary color variable is NOT `#1544ff` (opencode default) — brand override is applied
+   - Then: the CSS primary color variable is NOT `#1544ff` (opencode default) - brand override is applied
 
-3. [Logo presence test] — Playwright+Cucumber
+3. [Logo presence test] - Playwright+Cucumber
    - Given: `website/dokument/assets/nebu-logo.svg` exists
    - When: visitor navigates to `/`
    - Then: logo element is visible in the header

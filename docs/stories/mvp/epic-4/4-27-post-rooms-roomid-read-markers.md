@@ -1,4 +1,4 @@
-# Story 4.27: POST /rooms/{roomId}/read_markers — Retry-Loop Fix
+# Story 4.27: POST /rooms/{roomId}/read_markers - Retry-Loop Fix
 
 Status: done
 
@@ -40,15 +40,15 @@ MVP scope: accept and acknowledge without persisting (same as POST /receipt whic
 
 ### Tests written FIRST (ATDD gate):
 
-1. `TestPostReadMarkers_HappyPath` — Go httptest
+1. `TestPostReadMarkers_HappyPath` - Go httptest
    - Given: authenticated, POST `{"m.fully_read":"$event","m.read":"$event"}`
    - Then: 200 OK, response is valid JSON `{}`
 
-2. `TestPostReadMarkers_EmptyBody` — POST `{}` → 200 OK
+2. `TestPostReadMarkers_EmptyBody` - POST `{}` → 200 OK
 
-3. `TestPostReadMarkers_BadJSON` — POST malformed → 400 M_BAD_JSON
+3. `TestPostReadMarkers_BadJSON` - POST malformed → 400 M_BAD_JSON
 
-4. `TestPostReadMarkers_Unauthenticated` — no Bearer → 401
+4. `TestPostReadMarkers_Unauthenticated` - no Bearer → 401
 
 5. Browser E2E: "No read_markers retry loop when entering room"
    - Given: SSO login, room with message, navigate to room
@@ -59,6 +59,6 @@ MVP scope: accept and acknowledge without persisting (same as POST /receipt whic
 
 ## Implementation Notes
 
-- Handler: `gateway/internal/matrix/read_markers.go` — `ReadMarkersHandler`, no gRPC
-- MVP: accept body, return `{}\n` — no persistence
+- Handler: `gateway/internal/matrix/read_markers.go` - `ReadMarkersHandler`, no gRPC
+- MVP: accept body, return `{}\n` - no persistence
 - Registered in `main.go` after receipt handler

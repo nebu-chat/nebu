@@ -24,9 +24,9 @@ So that the foundation is in place for all subsequent content stories to deploy 
 **Given** the nebu-chat repository,
 **When** `ls website/` is inspected,
 **Then** the following structure exists:
-- `website/dokument/` — EasyWebsite content root
-- `website/dokument/index.md` — Placeholder home page with heading "Nebu"
-- `website/dokument/_meta.yaml` — Navigation configuration
+- `website/dokument/` - EasyWebsite content root
+- `website/dokument/index.md` - Placeholder home page with heading "Nebu"
+- `website/dokument/_meta.yaml` - Navigation configuration
 
 **Given** the EasyWebsite configuration file under `website/`,
 **When** it is inspected,
@@ -49,13 +49,13 @@ So that the foundation is in place for all subsequent content stories to deploy 
 
 **Given** the EasyWebsite build output,
 **When** inspected,
-**Then** the site is statically rendered HTML — no server-side execution required (NFR-16.3)
+**Then** the site is statically rendered HTML - no server-side execution required (NFR-16.3)
 
 ## Technical Notes
 
 - EasyWebsite Easy Mode: https://easywebsite.opencode.de
 - Theme: `opencode` (CSS-Variablen-Overrides for Nebu branding later in Story 16.2)
-- No Node.js/Next.js — EasyWebsite Easy Mode only
+- No Node.js/Next.js - EasyWebsite Easy Mode only
 - GitLab Pages convention: `public/` as output artifact directory
 - CI job name must be exactly `pages` for GitLab Pages to pick it up
 - Only run on `main` branch
@@ -64,17 +64,17 @@ So that the foundation is in place for all subsequent content stories to deploy 
 
 ### Tests written FIRST (before implementation code):
 
-1. [CI pipeline structure test] — Manual CI inspection
+1. [CI pipeline structure test] - Manual CI inspection
    - Given: `.gitlab-ci.yml` exists in repo root
    - When: file content is inspected
    - Then: `pages` job exists, runs EasyWebsite build, outputs to `public/`, restricted to `main` branch
 
-2. [EasyWebsite config test] — Manual file inspection
+2. [EasyWebsite config test] - Manual file inspection
    - Given: EasyWebsite config under `website/`
    - When: inspected
    - Then: `theme: opencode` is set, `website/dokument/index.md` exists, `website/dokument/_meta.yaml` exists
 
-3. [Static output test] — Manual build verification
+3. [Static output test] - Manual build verification
    - Given: EasyWebsite build runs
    - When: `public/` output is inspected
    - Then: `index.html` exists, is static HTML, no JS runtime required

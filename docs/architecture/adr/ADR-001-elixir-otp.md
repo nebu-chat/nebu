@@ -2,12 +2,12 @@
 
 ## Status
 
-Accepted — 2026-03-18
+Accepted - 2026-03-18
 
 ## Context
 
 Nebu requires a stateful messaging core capable of managing thousands of concurrent room processes,
-session state, presence tracking, and event dispatch — all without external middleware like Redis
+session state, presence tracking, and event dispatch - all without external middleware like Redis
 or NATS. The choice of runtime technology for this core determines the operational complexity,
 scalability ceiling, and clustering strategy.
 
@@ -40,7 +40,7 @@ Elixir version: 1.19 on Erlang/OTP 27.
 - ETS replaces Redis for session state and since-token cursors
 - pg Process Groups replace NATS/Kafka for pub/sub fanout
 - `libcluster` + `Horde` enable cluster operation with a single config change (Phase 2)
-- Erlang/OTP 27 includes native Ed25519/X25519 via `:crypto` — no external crypto packages
+- Erlang/OTP 27 includes native Ed25519/X25519 via `:crypto` - no external crypto packages
 
 **Negative:**
 - Smaller hiring pool than Go or Java for the Core

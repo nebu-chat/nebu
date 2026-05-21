@@ -1,4 +1,4 @@
-# Matrix Spaces — Vollständige Spezifikation für Nebu Phase 3
+# Matrix Spaces - Vollständige Spezifikation für Nebu Phase 3
 
 **Erstellt:** 2026-05-11  
 **Status:** Draft  
@@ -53,7 +53,7 @@ Ein Space ist ein normaler Room mit folgenden Besonderheiten:
 
 ## 3. State Events
 
-### 3.1 `m.room.create` — Room-Typ-Feld
+### 3.1 `m.room.create` - Room-Typ-Feld
 
 Um einen Space zu erstellen, muss `createRoom` das Feld `type` in `creation_content` erhalten:
 
@@ -90,7 +90,7 @@ Um einen Space zu erstellen, muss `createRoom` das Feld `type` in `creation_cont
 
 ---
 
-### 3.2 `m.space.child` — Kind-Referenz
+### 3.2 `m.space.child` - Kind-Referenz
 
 Ein Space referenziert seine Kinder über State Events vom Typ `m.space.child`. Der State-Key ist die Room-ID des Kind-Raums.
 
@@ -117,7 +117,7 @@ Ein Space referenziert seine Kinder über State Events vom Typ `m.space.child`. 
 **Wer darf `m.space.child` setzen?**
 - Nur Mitglieder des **Space-Rooms** mit ausreichendem Power Level (State-Default, typisch 50 oder 100).
 - Der Sender muss Mitglied des Kind-Raums **nicht** zwingend sein (Space-Admin verwaltet die Hierarchie).
-- Empfehlung für Default Power Levels in Spaces: `{ "state_default": 50, "events_default": 0 }` — so können Moderatoren Kinder hinzufügen, aber nur Admins Räume erstellen.
+- Empfehlung für Default Power Levels in Spaces: `{ "state_default": 50, "events_default": 0 }` - so können Moderatoren Kinder hinzufügen, aber nur Admins Räume erstellen.
 
 **Wann gilt eine Verlinkung als gültig?**
 Ein `m.space.child` Event verweist auf einen gültigen Kind-Raum, wenn:
@@ -126,7 +126,7 @@ Ein `m.space.child` Event verweist auf einen gültigen Kind-Raum, wenn:
 
 ---
 
-### 3.3 `m.space.parent` — Eltern-Rückverlinkung
+### 3.3 `m.space.parent` - Eltern-Rückverlinkung
 
 Ein Raum kann optional auf seinen Eltern-Space zurückverlinken. Dieser State Event ist optional, erhöht aber die Navigierbarkeit in Clients.
 
@@ -142,7 +142,7 @@ Ein Raum kann optional auf seinen Eltern-Space zurückverlinken. Dieser State Ev
 
 | Feld | Typ | Pflicht | Beschreibung |
 |---|---|---|---|
-| `via` | `[string]` | Ja | Wie bei `m.space.child` — lokaler Server. |
+| `via` | `[string]` | Ja | Wie bei `m.space.child` - lokaler Server. |
 | `canonical` | `boolean` | Nein | `true` = dieser Space ist der primäre/kanonische Eltern-Space. Nur ein Eltern-Space sollte `canonical: true` tragen. Default: `false`. |
 
 **Wer darf `m.space.parent` setzen?**
@@ -152,11 +152,11 @@ Entweder:
 
 **Verifikation durch Server:** Der Server SOLLTE prüfen, ob der Sender tatsächlich Zugriff auf den referenzierten Eltern-Space hat, um Spam-Verlinkungen zu verhindern. Konkret: Der Sender muss Mitglied des Eltern-Space mit ausreichendem PL sein. Schlägt die Verifikation fehl, wird der Event abgelehnt mit `M_FORBIDDEN`.
 
-> **Nebu-Entscheidung:** `m.space.parent` Validierung implementieren — ohne diese würde jeder beliebige User jeden Space als seinen "Eltern-Space" deklarieren können.
+> **Nebu-Entscheidung:** `m.space.parent` Validierung implementieren - ohne diese würde jeder beliebige User jeden Space als seinen "Eltern-Space" deklarieren können.
 
 ---
 
-### 3.4 `m.room.join_rules` — Restricted Join Rule (MSC3083)
+### 3.4 `m.room.join_rules` - Restricted Join Rule (MSC3083)
 
 Räume in einem Space können so konfiguriert werden, dass nur Mitglieder bestimmter Spaces beitreten können:
 
@@ -190,7 +190,7 @@ Räume in einem Space können so konfiguriert werden, dass nur Mitglieder bestim
 
 Andere `type`-Werte: Server ignoriert unbekannte Typen (keine Fehler, aber kein Erlaubnis-Grant).
 
-**Room Version Requirement:** `restricted` Join Rules erfordern Room Version 8 oder höher (oder Version 9 für korrekte Restricted + Knocking-Kombination). Da Nebu kein Federation betreibt, ist die Anforderung an die Room Version weniger kritisch — aber für Element Web-Kompatibilität sollten Spaces in Room Version 10 (aktuelle empfohlene Standardversion) erstellt werden.
+**Room Version Requirement:** `restricted` Join Rules erfordern Room Version 8 oder höher (oder Version 9 für korrekte Restricted + Knocking-Kombination). Da Nebu kein Federation betreibt, ist die Anforderung an die Room Version weniger kritisch - aber für Element Web-Kompatibilität sollten Spaces in Room Version 10 (aktuelle empfohlene Standardversion) erstellt werden.
 
 **Capabilities-Update:**
 `GET /_matrix/client/v3/capabilities` muss `m.room_versions` mit `restricted`-Support anzeigen:
@@ -220,7 +220,7 @@ Andere `type`-Werte: Server ignoriert unbekannte Typen (keine Fehler, aber kein 
 
 #### `GET /_matrix/client/v1/rooms/{roomId}/hierarchy`
 
-**MSC:** MSC2946 — Stable seit Matrix v1.2  
+**MSC:** MSC2946 - Stable seit Matrix v1.2  
 **Zweck:** Liefert die Raum-Hierarchie eines Space (BFS-Traversal über `m.space.child` State Events).  
 **Auth:** Bearer Token erforderlich.
 
@@ -228,7 +228,7 @@ Andere `type`-Werte: Server ignoriert unbekannte Typen (keine Fehler, aber kein 
 
 | Parameter | Typ | Default | Beschreibung |
 |---|---|---|---|
-| `from` | `string` | — | Paginierungstoken aus vorherigem Response (opaque, server-seitig). |
+| `from` | `string` | - | Paginierungstoken aus vorherigem Response (opaque, server-seitig). |
 | `limit` | `integer` | 50 | Maximale Anzahl Räume pro Seite. Server-seitiges Maximum: 1000. |
 | `max_depth` | `integer` | ∞ (server-limit) | Maximale Traversierungstiefe. `0` = nur Root-Space ohne Kinder. Server-seitiges Maximum: 10 (konfigurierbar). |
 | `suggested_only` | `boolean` | `false` | Nur Räume mit `suggested: true` in ihrem `m.space.child` Event zurückgeben. |
@@ -298,7 +298,7 @@ Ein Raum wird in `/hierarchy` zurückgegeben, wenn **mindestens eine** der folge
 2. `world_readable: true` (history_visibility = world_readable), **oder**
 3. `guest_can_join: true` (guest_access = can_join), **oder**
 4. `join_rule = "public"`, **oder**
-5. `join_rule = "restricted"` — Space-Mitglied kann sehen, aber nicht zwingend beitreten.
+5. `join_rule = "restricted"` - Space-Mitglied kann sehen, aber nicht zwingend beitreten.
 
 Räume, auf die der User keinerlei Zugriff hätte und die nicht öffentlich sichtbar sind, werden **übersprungen** (kein Error, nur not included). Die Traversierung geht trotzdem durch den Raum hindurch (seine Kinder werden geprüft).
 
@@ -404,7 +404,7 @@ message JoinRoomRequest {
   string room_id = 1;
   string user_id = 2;
   string via_server = 3;  // existing
-  // no new fields needed — Core resolves membership internally
+  // no new fields needed - Core resolves membership internally
 }
 ```
 
@@ -412,7 +412,7 @@ message JoinRoomRequest {
 
 #### `PUT /_matrix/client/v3/rooms/{roomId}/state/m.space.child/{childRoomId}`
 
-**Änderung:** Neuer State Event Type — muss im Gateway-Whitelist und Core-Handler unterstützt werden.
+**Änderung:** Neuer State Event Type - muss im Gateway-Whitelist und Core-Handler unterstützt werden.
 
 **Gateway-Whitelist:** `m.space.child` muss in `gateway/internal/middleware/` zur erlaubten State-Event-Liste hinzugefügt werden.
 
@@ -436,7 +436,7 @@ message JoinRoomRequest {
 
 #### `PUT /_matrix/client/v3/rooms/{roomId}/state/m.space.parent/{parentSpaceId}`
 
-**Änderung:** Neuer State Event Type — analog zu `m.space.child`.
+**Änderung:** Neuer State Event Type - analog zu `m.space.child`.
 
 **Core-Validierung:**
 1. Sender muss Mitglied des Kind-Raums (roomId) **oder** des Eltern-Space (parentSpaceId) mit ausreichendem Power Level sein.
@@ -454,10 +454,10 @@ message JoinRoomRequest {
 **Neu in Sync:**
 - `m.space.child` und `m.space.parent` State Events erscheinen in `rooms.join[roomId].state.events` wie alle anderen State Events.
 - `rooms.join[spaceId].timeline.events` enthält `m.space.child`-Änderungen als Timeline-Events, wenn ein Kind hinzugefügt/entfernt wird.
-- `account_data` für Spaces: Clients speichern Space-spezifische Daten über `m.direct`, `m.push_rules` etc. — keine Nebu-seitige Änderung nötig.
+- `account_data` für Spaces: Clients speichern Space-spezifische Daten über `m.direct`, `m.push_rules` etc. - keine Nebu-seitige Änderung nötig.
 
 **Space-Type in Sync-Response:**
-Im `rooms.join`-Objekt liefert Nebu für jeden Raum bei Initial-Sync seinen `m.room.create` State Event — dieser enthält `content.type: "m.space"`. Clients leiten daraus die Space-Unterscheidung ab.
+Im `rooms.join`-Objekt liefert Nebu für jeden Raum bei Initial-Sync seinen `m.room.create` State Event - dieser enthält `content.type: "m.space"`. Clients leiten daraus die Space-Unterscheidung ab.
 
 ---
 
@@ -498,7 +498,7 @@ Im `rooms.join`-Objekt liefert Nebu für jeden Raum bei Initial-Sync seinen `m.r
 
 ---
 
-## 5. Events in der Sync-Response — vollständige Felder
+## 5. Events in der Sync-Response - vollständige Felder
 
 ### 5.1 Stripped State Events (in `/hierarchy` `children_state`)
 
@@ -541,7 +541,7 @@ Stripped State Events haben **kein** `event_id`-Feld (spec-konform für Hierarch
 
 ---
 
-## 6. Power Levels — Empfehlungen für Spaces
+## 6. Power Levels - Empfehlungen für Spaces
 
 ### 6.1 Default Power Levels bei Space-Erstellung
 
@@ -580,7 +580,7 @@ Wenn kein `power_level_content_override` angegeben wird, gelten die Matrix-Defau
 
 ---
 
-## 7. Fehlercodes — vollständige Liste für Spaces
+## 7. Fehlercodes - vollständige Liste für Spaces
 
 | HTTP-Status | Matrix-Fehlercode | Beschreibung | Trigger |
 |---|---|---|---|
@@ -589,7 +589,7 @@ Wenn kein `power_level_content_override` angegeben wird, gelten die Matrix-Defau
 | 400 | `M_UNKNOWN_TOKEN` / `M_MISSING_TOKEN` | Kein gültiger Auth-Token | Alle Space-Endpunkte |
 | 403 | `M_FORBIDDEN` | Kein Zugriff | `m.space.parent` ohne PL im Eltern-Space; Join bei `restricted` ohne Space-Mitgliedschaft; `/hierarchy` auf privaten Space ohne Mitgliedschaft |
 | 404 | `M_NOT_FOUND` | Raum existiert nicht | `/hierarchy` für unbekannte Room ID; `m.space.parent` mit unbekanntem Parent |
-| 429 | `M_LIMIT_EXCEEDED` | Rate Limit | `/hierarchy` (rechenintensiv — separates Rate-Limit empfohlen) |
+| 429 | `M_LIMIT_EXCEEDED` | Rate Limit | `/hierarchy` (rechenintensiv - separates Rate-Limit empfohlen) |
 
 ---
 
@@ -612,13 +612,13 @@ var allowedStateEventTypes = map[string]bool{
 }
 ```
 
-**Handler:** `gateway/internal/matrix/spaces.go` — neues File für Space-spezifische Handler.
+**Handler:** `gateway/internal/matrix/spaces.go` - neues File für Space-spezifische Handler.
 
 **Capabilities-Update** (`gateway/internal/matrix/capabilities.go`):
 - Room Versions auf 6–10 erweitern.
 - Default auf `"10"` setzen.
 
-### 8.2 gRPC — Neuer Handler
+### 8.2 gRPC - Neuer Handler
 
 ```protobuf
 // proto/core_service.proto
@@ -661,7 +661,7 @@ service CoreService {
 
 ### 8.3 Elixir/OTP Core
 
-#### Room Manager — Space Hierarchy
+#### Room Manager - Space Hierarchy
 
 **Neues Modul:** `core/apps/room_manager/lib/nebu/room_manager/space_hierarchy.ex`
 
@@ -700,7 +700,7 @@ defmodule Nebu.RoomManager.SpaceHierarchy do
 end
 ```
 
-#### Room GenServer — Restricted Join Rule
+#### Room GenServer - Restricted Join Rule
 
 **Bestehender Join-Handler** (`handle_call({:join, user_id}, ...)`):
 
@@ -761,12 +761,12 @@ CREATE INDEX CONCURRENTLY idx_events_space_parent
 
 ---
 
-## 9. Sync-Response-Erweiterungen — Details
+## 9. Sync-Response-Erweiterungen - Details
 
 ### 9.1 Initial Sync (kein `since`-Token)
 
 Für einen Space-Room enthält `rooms.join[spaceId].state.events`:
-- `m.room.create` mit `content.type: "m.space"` — **hier erkennt der Client den Space-Typ**
+- `m.room.create` mit `content.type: "m.space"` - **hier erkennt der Client den Space-Typ**
 - Alle `m.space.child` State Events (ein Event pro Kind-Raum)
 - Alle `m.space.parent` State Events (ein Event pro Eltern-Space)
 - Alle anderen Standard-State-Events (`m.room.name`, `m.room.join_rules` etc.)
@@ -783,7 +783,7 @@ Spaces sind keine Direct-Message-Räume. `m.direct` Account Data wird durch Spac
 
 ---
 
-## 10. Element Web — Kompatibilitätsanforderungen
+## 10. Element Web - Kompatibilitätsanforderungen
 
 Element Web nutzt folgende Endpunkte und Mechanismen für Spaces:
 
@@ -801,7 +801,7 @@ Element Web nutzt folgende Endpunkte und Mechanismen für Spaces:
 
 ---
 
-## 11. FluffyChat — Kompatibilitätsanforderungen
+## 11. FluffyChat - Kompatibilitätsanforderungen
 
 FluffyChat (Flutter) unterstützt Spaces ab Version 1.8+. Anforderungen:
 
@@ -814,7 +814,7 @@ FluffyChat (Flutter) unterstützt Spaces ab Version 1.8+. Anforderungen:
 
 ---
 
-## 12. Admin UI — Erweiterungen (Phase 3)
+## 12. Admin UI - Erweiterungen (Phase 3)
 
 ### 12.1 Space-Management-Seite
 
@@ -829,10 +829,10 @@ Neue Admin-UI-Seite: `/admin/spaces`
 ### 12.2 Admin API-Erweiterung
 
 ```
-GET  /api/admin/v1/spaces               — Liste aller Spaces
-GET  /api/admin/v1/spaces/{spaceId}     — Space-Details + Children
-POST /api/admin/v1/spaces/{spaceId}/children  — Kind hinzufügen
-DELETE /api/admin/v1/spaces/{spaceId}/children/{childId}  — Kind entfernen
+GET  /api/admin/v1/spaces               - Liste aller Spaces
+GET  /api/admin/v1/spaces/{spaceId}     - Space-Details + Children
+POST /api/admin/v1/spaces/{spaceId}/children  - Kind hinzufügen
+DELETE /api/admin/v1/spaces/{spaceId}/children/{childId}  - Kind entfernen
 ```
 
 Diese Endpunkte setzen serverseitig `m.space.child` State Events im Namen eines Admin-Users.
@@ -872,10 +872,10 @@ Diese Endpunkte setzen serverseitig `m.space.child` State Events im Namen eines 
 | # | Frage | Empfehlung |
 |---|---|---|
 | F1 | **BFS-Tiefenlimit:** Was ist das server-seitige Maximum für `max_depth`? | Default 10, konfigurierbar via `NEBU_SPACE_MAX_DEPTH` |
-| F2 | **Paginierungstoken-Format:** Opaker Token (Base64-encoded State) oder Cursor (last_room_id + depth)? | Opaker Token (BFS-State serialisiert) — einfacher für Resume |
-| F3 | **`m.space.parent`-Validierung:** Hard-Reject oder Soft-Accept mit Warning-Log? | Hard-Reject (`M_FORBIDDEN`) — verhindert Spam |
-| F4 | **Capabilities Default Room Version:** `"6"` (aktuell) oder `"10"` (empfohlen für Spaces)? | `"10"` in Phase 3 — Restricted Rooms benötigen v8+ |
-| F5 | **Rate Limiting für `/hierarchy`:** Separates, strengeres Limit wegen BFS-Kosten? | Ja — empfohlen: 10 req/min pro User (vs. 300/min Standard) |
+| F2 | **Paginierungstoken-Format:** Opaker Token (Base64-encoded State) oder Cursor (last_room_id + depth)? | Opaker Token (BFS-State serialisiert) - einfacher für Resume |
+| F3 | **`m.space.parent`-Validierung:** Hard-Reject oder Soft-Accept mit Warning-Log? | Hard-Reject (`M_FORBIDDEN`) - verhindert Spam |
+| F4 | **Capabilities Default Room Version:** `"6"` (aktuell) oder `"10"` (empfohlen für Spaces)? | `"10"` in Phase 3 - Restricted Rooms benötigen v8+ |
+| F5 | **Rate Limiting für `/hierarchy`:** Separates, strengeres Limit wegen BFS-Kosten? | Ja - empfohlen: 10 req/min pro User (vs. 300/min Standard) |
 | F6 | **Space-Power-Level-Defaults:** Automatisch setzen oder nur wenn kein Override? | Automatisch setzen wenn `type: "m.space"` und kein Override |
 
 ---
@@ -888,9 +888,9 @@ Diese Endpunkte setzen serverseitig `m.space.child` State Events im Namen eines 
 | 12-2 | PostgreSQL-Index für Space-BFS (`idx_events_space_child`, `_parent`) | S | not-needed |
 | 12-3 | `m.space.child` State Event Whitelist + Core-Validierung | M | optional |
 | 12-4 | `m.space.parent` State Event Whitelist + Sicherheitscheck | M | **required** |
-| 12-5 | Restricted Join Rules (MSC3083) — Core Enforcement | L | **required** |
-| 12-6 | `GET /hierarchy` — gRPC Handler + BFS-Traversal in Core | L | optional |
-| 12-7 | `GET /hierarchy` — Go Gateway Handler + Paginierung | M | optional |
+| 12-5 | Restricted Join Rules (MSC3083) - Core Enforcement | L | **required** |
+| 12-6 | `GET /hierarchy` - gRPC Handler + BFS-Traversal in Core | L | optional |
+| 12-7 | `GET /hierarchy` - Go Gateway Handler + Paginierung | M | optional |
 | 12-8 | Capabilities Update (Room Versions 6–10, Default 10) | S | not-needed |
 | 12-9 | Element Web E2E: Space erstellen, Raum hinzufügen, beitreten | M | not-needed |
 | 12-10 | Admin UI: Space-Liste + Space-Detail + Kinder verwalten | L | optional |
@@ -901,9 +901,9 @@ Diese Endpunkte setzen serverseitig `m.space.child` State Events im Namen eines 
 ---
 
 _Quellen:_  
-_Matrix Spec v1.12 — https://spec.matrix.org/v1.12/client-server-api/#spaces_  
-_MSC1772 — https://github.com/matrix-org/matrix-spec-proposals/pull/1772_  
-_MSC2946 — https://github.com/matrix-org/matrix-spec-proposals/pull/2946_  
-_MSC3083 — https://github.com/matrix-org/matrix-spec-proposals/pull/3083_  
-_Nebu Matrix API Scope — docs/matrix-api-scope.md_  
-_Nebu Architecture — docs/architecture/_
+_Matrix Spec v1.12 - https://spec.matrix.org/v1.12/client-server-api/#spaces_  
+_MSC1772 - https://github.com/matrix-org/matrix-spec-proposals/pull/1772_  
+_MSC2946 - https://github.com/matrix-org/matrix-spec-proposals/pull/2946_  
+_MSC3083 - https://github.com/matrix-org/matrix-spec-proposals/pull/3083_  
+_Nebu Matrix API Scope - docs/matrix-api-scope.md_  
+_Nebu Architecture - docs/architecture/_

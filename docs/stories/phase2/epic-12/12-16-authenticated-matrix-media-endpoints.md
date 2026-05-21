@@ -9,7 +9,7 @@ matrix: true
 created: 2026-05-13
 ---
 
-# Story 12.16 — Authenticated Matrix Media Endpoints (/_matrix/client/v1/media/*)
+# Story 12.16 - Authenticated Matrix Media Endpoints (/_matrix/client/v1/media/*)
 
 ## User Story
 
@@ -32,42 +32,42 @@ Additionally, the existing `download` and `thumbnail` handlers are missing two S
 
 ## Acceptance Criteria
 
-**[AC-1] GET /_matrix/media/v3/config — unauthenticated deprecated config**
+**[AC-1] GET /_matrix/media/v3/config - unauthenticated deprecated config**
 Given no Authorization header,
 When `GET /_matrix/media/v3/config` is called,
 Then the response is 200 JSON `{"m.upload.size": <NEBU_MEDIA_MAX_UPLOAD_BYTES>}`.
 
-**[AC-2] GET /_matrix/client/v1/media/config — authenticated config**
+**[AC-2] GET /_matrix/client/v1/media/config - authenticated config**
 Given a valid Bearer token in Authorization header,
 When `GET /_matrix/client/v1/media/config` is called,
 Then the response is 200 JSON `{"m.upload.size": <NEBU_MEDIA_MAX_UPLOAD_BYTES>}`.
 
-**[AC-3] GET /_matrix/client/v1/media/config — 401 without token**
+**[AC-3] GET /_matrix/client/v1/media/config - 401 without token**
 Given no Authorization header,
 When `GET /_matrix/client/v1/media/config` is called,
 Then the response is 401 JSON `{"errcode":"M_MISSING_TOKEN","error":"..."}`.
 
-**[AC-4] GET /_matrix/client/v1/media/download/{serverName}/{mediaId} — authenticated download**
+**[AC-4] GET /_matrix/client/v1/media/download/{serverName}/{mediaId} - authenticated download**
 Given a valid Bearer token and an existing media item,
 When `GET /_matrix/client/v1/media/download/{serverName}/{mediaId}` is called,
 Then the response is 200 with the decrypted media bytes, correct Content-Type and Content-Disposition headers.
 
-**[AC-5] GET /_matrix/client/v1/media/download — 401 without token**
+**[AC-5] GET /_matrix/client/v1/media/download - 401 without token**
 Given no Authorization header,
 When `GET /_matrix/client/v1/media/download/{serverName}/{mediaId}` is called,
 Then the response is 401 JSON `{"errcode":"M_MISSING_TOKEN","error":"..."}`.
 
-**[AC-6] GET /_matrix/client/v1/media/download/{serverName}/{mediaId}/{fileName} — filename variant**
+**[AC-6] GET /_matrix/client/v1/media/download/{serverName}/{mediaId}/{fileName} - filename variant**
 Given a valid Bearer token and an existing media item,
 When `GET /_matrix/client/v1/media/download/{serverName}/{mediaId}/photo.jpg` is called,
 Then Content-Disposition header contains `filename="photo.jpg"` (the URL-provided filename, not the mediaId).
 
-**[AC-7] GET /_matrix/client/v1/media/thumbnail/{serverName}/{mediaId} — authenticated thumbnail**
+**[AC-7] GET /_matrix/client/v1/media/thumbnail/{serverName}/{mediaId} - authenticated thumbnail**
 Given a valid Bearer token and an existing image media item,
 When `GET /_matrix/client/v1/media/thumbnail/{serverName}/{mediaId}?width=96&height=96` is called,
 Then the response is 200 with thumbnail bytes and correct Content-Type.
 
-**[AC-8] GET /_matrix/client/v1/media/thumbnail — 401 without token**
+**[AC-8] GET /_matrix/client/v1/media/thumbnail - 401 without token**
 Given no Authorization header,
 When `GET /_matrix/client/v1/media/thumbnail/{serverName}/{mediaId}?width=96&height=96` is called,
 Then the response is 401 JSON `{"errcode":"M_MISSING_TOKEN","error":"..."}`.
@@ -83,37 +83,37 @@ Then the response includes:
 
 ### Tests written FIRST (before implementation code):
 
-1. `TestConfigHandler_Unauthenticated_ReturnsMaxBytes` — Go unit test (`media/internal/config/handler_test.go`)
+1. `TestConfigHandler_Unauthenticated_ReturnsMaxBytes` - Go unit test (`media/internal/config/handler_test.go`)
    - Given: Handler configured with MaxBytes = 52428800
    - When: `GET /_matrix/media/v3/config` (no auth)
    - Then: 200, `{"m.upload.size": 52428800}`
 
-2. `TestAuthMiddleware_MissingToken_Returns401` — Go unit test (`media/internal/auth/middleware_test.go`)
+2. `TestAuthMiddleware_MissingToken_Returns401` - Go unit test (`media/internal/auth/middleware_test.go`)
    - Given: wrapped handler that would return 200
    - When: request with no Authorization header
    - Then: 401, `{"errcode":"M_MISSING_TOKEN",...}`, inner handler NOT called
 
-3. `TestAuthMiddleware_InvalidToken_Returns401` — Go unit test (`media/internal/auth/middleware_test.go`)
+3. `TestAuthMiddleware_InvalidToken_Returns401` - Go unit test (`media/internal/auth/middleware_test.go`)
    - Given: mock verifier that returns an error
    - When: request with `Authorization: Bearer bad-token`
    - Then: 401, `{"errcode":"M_UNKNOWN_TOKEN",...}`, inner handler NOT called
 
-4. `TestAuthMiddleware_ValidToken_Passes` — Go unit test (`media/internal/auth/middleware_test.go`)
+4. `TestAuthMiddleware_ValidToken_Passes` - Go unit test (`media/internal/auth/middleware_test.go`)
    - Given: mock verifier that returns success
    - When: request with `Authorization: Bearer good-token`
    - Then: inner handler called (receives the request), response from inner handler returned
 
-5. `TestDownloadHandler_CSPandCORPHeaders` — Go unit test (`media/internal/download/download_test.go`)
+5. `TestDownloadHandler_CSPandCORPHeaders` - Go unit test (`media/internal/download/download_test.go`)
    - Given: successful download request
    - When: `GET /_matrix/media/v3/download/{serverName}/{mediaId}`
    - Then: response contains `Content-Security-Policy` and `Cross-Origin-Resource-Policy: cross-origin` headers
 
-6. `TestDownloadHandler_FileNameVariant` — Go unit test (`media/internal/download/download_test.go`)
+6. `TestDownloadHandler_FileNameVariant` - Go unit test (`media/internal/download/download_test.go`)
    - Given: successful download request with `{fileName}` path value = `"photo.jpg"`
    - When: handler is called with PathValue("fileName") = "photo.jpg"
    - Then: Content-Disposition contains `filename="photo.jpg"` (not the mediaId)
 
-7. `TestThumbnailHandler_CSPandCORPHeaders` — Go unit test (`media/internal/thumbnail/handler_test.go`)
+7. `TestThumbnailHandler_CSPandCORPHeaders` - Go unit test (`media/internal/thumbnail/handler_test.go`)
    - Given: successful thumbnail request
    - When: `GET /_matrix/media/v3/thumbnail/{serverName}/{mediaId}?width=100&height=100`
    - Then: response contains `Content-Security-Policy` and `Cross-Origin-Resource-Policy: cross-origin` headers
@@ -121,7 +121,7 @@ Then the response includes:
 ## Tasks / Subtasks
 
 - [x] Create `media/internal/auth/middleware.go` (AC-3, AC-5, AC-8)
-  - [x] Define local `TokenVerifier` interface (same signature as `upload.TokenVerifier` — no import of upload package)
+  - [x] Define local `TokenVerifier` interface (same signature as `upload.TokenVerifier` - no import of upload package)
   - [x] Implement `Middleware` struct with `Wrap(http.Handler) http.Handler`
   - [x] Missing `Authorization` header → 401 `M_MISSING_TOKEN`
   - [x] Invalid token (verifier error) → 401 `M_UNKNOWN_TOKEN`
@@ -135,7 +135,7 @@ Then the response includes:
 - [x] Create `media/internal/config/handler.go` (AC-1, AC-2)
   - [x] `Handler` struct with `MaxBytes int64`
   - [x] `ServeHTTP` returns `{"m.upload.size": h.MaxBytes}` as JSON
-  - [x] No auth logic — auth is applied via middleware at routing level
+  - [x] No auth logic - auth is applied via middleware at routing level
 
 - [x] Create `media/internal/config/handler_test.go` (AT-1)
   - [x] `TestConfigHandler_ReturnsMaxBytes`
@@ -161,7 +161,7 @@ Then the response includes:
   - [x] Register new routes (see Dev Notes below)
   - [x] Existing v3 routes remain unchanged (no regressions)
 
-- [x] Run `make test-unit-go` — all new + existing tests GREEN
+- [x] Run `make test-unit-go` - all new + existing tests GREEN
 
 ### Review Follow-ups (AI)
 
@@ -189,7 +189,7 @@ media/internal/
     handler_test.go     ← MODIFY: add 1 test
 ```
 
-### auth.Middleware — Interface Definition
+### auth.Middleware - Interface Definition
 
 **DO NOT import `media/internal/upload` in the auth package.** Define a local `TokenVerifier` interface:
 
@@ -281,7 +281,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 Add these two header lines near the top of the 200-response path in `ServeHTTP`, **before** any `WriteHeader` call (currently after the decrypt step, around line 144):
 
 ```go
-// Matrix CS API §Media Repository — SHOULD headers (v1.4+)
+// Matrix CS API §Media Repository - SHOULD headers (v1.4+)
 w.Header().Set("Content-Security-Policy",
     "sandbox; default-src 'none'; script-src 'none'; plugin-types application/pdf; style-src 'unsafe-inline'; object-src 'self';")
 w.Header().Set("Cross-Origin-Resource-Policy", "cross-origin")
@@ -340,7 +340,7 @@ mux.Handle("GET /_matrix/client/v1/media/thumbnail/{serverName}/{mediaId}",
     downloadRL(authMW.Wrap(thumbnailHandler)))
 ```
 
-**Existing v3 routes are unchanged** — no regressions.
+**Existing v3 routes are unchanged** - no regressions.
 
 ### Spec References (Matrix CS API v1.18)
 
@@ -368,7 +368,7 @@ No new external dependencies needed. `auth` and `config` packages use only stdli
 
 ### Regression Guard
 
-Existing tests in `media/internal/download/download_test.go` and `media/internal/thumbnail/handler_test.go` will break if CSP/CORP headers are not present — add assertions for these headers to the EXISTING happy-path tests as part of this story (not just new tests). This ensures future regressions are caught.
+Existing tests in `media/internal/download/download_test.go` and `media/internal/thumbnail/handler_test.go` will break if CSP/CORP headers are not present - add assertions for these headers to the EXISTING happy-path tests as part of this story (not just new tests). This ensures future regressions are caught.
 
 ### Security Note
 
@@ -388,11 +388,11 @@ This story adds OIDC token verification to previously unauthenticated download/t
 
 - Oracle session log: `_bmad/memory/nebu-agent-oracle/sessions/2026-05-13.md`
 - Matrix CS API v1.18 §Media Repository: local spec at `.claude/skills/nebu-agent-oracle/matrix-spec/v1.18/client-server-api/index.html` lines 31788–33400
-- `media/cmd/media/main.go` — route registration (lines 270–278)
-- `media/internal/upload/upload.go` — `TokenVerifier` interface (lines 28–32), `OIDCTokenVerifier` (lines 39–67)
-- `media/internal/download/handler.go` — existing CSP gap (lines 146–163)
-- `media/internal/thumbnail/handler.go` — existing CSP gap (lines 227–235)
-- Story 12.8 — fail-closed OIDC: `uploadVerifier` is never nil in production
+- `media/cmd/media/main.go` - route registration (lines 270–278)
+- `media/internal/upload/upload.go` - `TokenVerifier` interface (lines 28–32), `OIDCTokenVerifier` (lines 39–67)
+- `media/internal/download/handler.go` - existing CSP gap (lines 146–163)
+- `media/internal/thumbnail/handler.go` - existing CSP gap (lines 227–235)
+- Story 12.8 - fail-closed OIDC: `uploadVerifier` is never nil in production
 
 ## Dev Agent Record
 
@@ -402,7 +402,7 @@ claude-sonnet-4-6
 
 ### Debug Log References
 
-None — implementation followed Dev Notes spec directly.
+None - implementation followed Dev Notes spec directly.
 
 ### Completion Notes List
 
@@ -416,13 +416,13 @@ None — implementation followed Dev Notes spec directly.
 
 ### File List
 
-- `media/internal/auth/middleware.go` (MODIFIED — empty Bearer token guard)
-- `media/internal/auth/middleware_test.go` (MODIFIED — TestAuthMiddleware_EmptyBearerToken_Returns401MissingToken added)
+- `media/internal/auth/middleware.go` (MODIFIED - empty Bearer token guard)
+- `media/internal/auth/middleware_test.go` (MODIFIED - TestAuthMiddleware_EmptyBearerToken_Returns401MissingToken added)
 - `media/internal/config/handler.go` (NEW)
 - `media/internal/config/handler_test.go` (staged, ATDD pre-existing)
-- `media/internal/download/handler.go` (MODIFIED — CSP/CORP headers + fileName path value)
-- `media/internal/download/download_test.go` (MODIFIED — TestDownloadHandler_FileNameVariant expanded with disposition-type sub-cases)
-- `media/internal/thumbnail/handler.go` (MODIFIED — CSP/CORP headers)
+- `media/internal/download/handler.go` (MODIFIED - CSP/CORP headers + fileName path value)
+- `media/internal/download/download_test.go` (MODIFIED - TestDownloadHandler_FileNameVariant expanded with disposition-type sub-cases)
+- `media/internal/thumbnail/handler.go` (MODIFIED - CSP/CORP headers)
 - `media/internal/thumbnail/handler_test.go` (staged, ATDD pre-existing)
-- `media/cmd/media/main.go` (MODIFIED — new imports + 5 new routes)
-- `media/cmd/media/main_test.go` (MODIFIED — F-C tests: TestV1DownloadRoute_CSPandCORPHeaders, TestV1ThumbnailRoute_CSPandCORPHeaders)
+- `media/cmd/media/main.go` (MODIFIED - new imports + 5 new routes)
+- `media/cmd/media/main_test.go` (MODIFIED - F-C tests: TestV1DownloadRoute_CSPandCORPHeaders, TestV1ThumbnailRoute_CSPandCORPHeaders)

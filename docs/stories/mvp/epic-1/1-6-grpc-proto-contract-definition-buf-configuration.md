@@ -47,7 +47,7 @@ so that Go and Elixir can independently generate type-safe stubs from a single s
 - [x] Task 5: Run `make proto` and verify all outputs (AC: #4, #6)
   - [x] Confirm `gateway/internal/grpc/pb/*.go` files exist
   - [x] Confirm `core/apps/event_dispatcher/lib/pb/*.ex` files exist
-  - [x] Re-run `make proto` — confirm it exits 0 again (idempotent)
+  - [x] Re-run `make proto` - confirm it exits 0 again (idempotent)
 
 - [x] Task 6: Add grpc/proto Go dependencies to `gateway/go.mod` (prerequisite for Story 1.7)
   - [x] `go get google.golang.org/grpc`
@@ -59,8 +59,8 @@ so that Go and Elixir can independently generate type-safe stubs from a single s
 ### What This Story Delivers
 
 Two deliverables:
-1. **`proto/core.proto`** — the single source of truth for all Go ↔ Elixir gRPC contracts
-2. **buf tooling** (`proto/buf.yaml` + `proto/buf.gen.yaml`) — reproducible code generation
+1. **`proto/core.proto`** - the single source of truth for all Go ↔ Elixir gRPC contracts
+2. **buf tooling** (`proto/buf.yaml` + `proto/buf.gen.yaml`) - reproducible code generation
 
 Generated stubs (`gateway/internal/grpc/pb/` and `core/apps/event_dispatcher/lib/pb/`) are outputs of `make proto` and should be committed to the repo.
 
@@ -68,7 +68,7 @@ Generated stubs (`gateway/internal/grpc/pb/` and `core/apps/event_dispatcher/lib
 
 ---
 
-### Architecture Discrepancy — Important
+### Architecture Discrepancy - Important
 
 The architecture document (`architecture.md`) shows generated Go stubs at `proto/gen/go/` (a separate Go module imported via `replace` directive), with `buf.yaml`/`buf.gen.yaml` at the project root.
 
@@ -77,7 +77,7 @@ The architecture document (`architecture.md`) shows generated Go stubs at `proto
 - Generated Go stubs → `gateway/internal/grpc/pb/`
 - Generated Elixir stubs → `core/apps/event_dispatcher/lib/pb/`
 
-Story 1.7 will import the stubs as `github.com/nebu/nebu/internal/grpc/pb` — this works because `gateway/go.mod` declares `module github.com/nebu/nebu` and the stubs live under `gateway/internal/grpc/pb/`.
+Story 1.7 will import the stubs as `github.com/nebu/nebu/internal/grpc/pb` - this works because `gateway/go.mod` declares `module github.com/nebu/nebu` and the stubs live under `gateway/internal/grpc/pb/`.
 
 ---
 
@@ -103,7 +103,7 @@ service CoreService {
   rpc ValidateToken(ValidateTokenRequest)   returns (ValidateTokenResponse);
   rpc GetPendingEvents(GetPendingRequest)   returns (GetPendingResponse);
 
-  // Event Bus — server-streaming, one stream per Go instance
+  // Event Bus - server-streaming, one stream per Go instance
   rpc EventBus(EventBusRequest)             returns (stream Event);
 }
 
@@ -182,7 +182,7 @@ message SetTypingRequest {
 }
 message SetTypingResponse {}
 
-// ValidateToken — Go validates OIDC token, Elixir trusts Go fully (ADR G2)
+// ValidateToken - Go validates OIDC token, Elixir trusts Go fully (ADR G2)
 message ValidateTokenRequest {
   string token = 1;
 }
@@ -192,7 +192,7 @@ message ValidateTokenResponse {
   string system_role = 3;  // "user" | "instance_admin" | "compliance_officer"
 }
 
-// GetPendingEvents — GELB-status fallback (unary polling instead of streaming)
+// GetPendingEvents - GELB-status fallback (unary polling instead of streaming)
 message GetPendingRequest {
   string node_id     = 1;
   string since_token = 2;
@@ -202,7 +202,7 @@ message GetPendingResponse {
   string         next_token = 2;
 }
 
-// EventBus — server-streaming, one stream per Go gateway instance
+// EventBus - server-streaming, one stream per Go gateway instance
 message EventBusRequest {
   string          node_id     = 1;
   optional string since_token = 2;
@@ -210,12 +210,12 @@ message EventBusRequest {
 ```
 
 **Critical naming rules (enforced by buf lint):**
-- All field names: `snake_case` — `room_id`, `sender_id`, `origin_ts`, `event_type`
-- All message names: `PascalCase` — `SendEventRequest`, `Event`
-- Service name: `PascalCase` — `CoreService`
+- All field names: `snake_case` - `room_id`, `sender_id`, `origin_ts`, `event_type`
+- All message names: `PascalCase` - `SendEventRequest`, `Event`
+- Service name: `PascalCase` - `CoreService`
 - Package: `core` (lowercase)
 
-**Timestamp fields:** All timestamps are `int64` Unix milliseconds — NOT `google.protobuf.Timestamp`. [Source: architecture.md — Timestamps section: "Proto/gRPC: int64 ms, Proto native"]
+**Timestamp fields:** All timestamps are `int64` Unix milliseconds - NOT `google.protobuf.Timestamp`. [Source: architecture.md - Timestamps section: "Proto/gRPC: int64 ms, Proto native"]
 
 **RPCs in THIS story only:** Do NOT add RPCs listed in later epics (e.g., `WriteAuditLog`, `InvalidateUserSessions`, `GetInitialSync`). Future stories extend the proto with additional RPCs as needed.
 
@@ -237,7 +237,7 @@ breaking:
     - FILE
 ```
 
-**Why `PACKAGE_VERSION_SUFFIX` is excluded:** The architecture mandates package `core` (not `core.v1`). Buf's DEFAULT lint rules require version suffixes for BSR publishing — this project does not publish to the BSR.
+**Why `PACKAGE_VERSION_SUFFIX` is excluded:** The architecture mandates package `core` (not `core.v1`). Buf's DEFAULT lint rules require version suffixes for BSR publishing - this project does not publish to the BSR.
 
 ---
 
@@ -284,7 +284,7 @@ DOCKER_BUF = docker run --rm -v $(PWD):/workspace -w /workspace bufbuild/buf
 
 **Problem:** `buf generate` looks for `buf.gen.yaml` in the current working directory (`/workspace`). Since `buf.gen.yaml` is in `proto/`, the working dir must change.
 
-**Fix — change working directory to `/workspace/proto`:**
+**Fix - change working directory to `/workspace/proto`:**
 ```makefile
 proto:
     docker run --rm -v $(PWD):/workspace -w /workspace/proto bufbuild/buf generate
@@ -298,7 +298,7 @@ Running from `/workspace/proto`:
 
 ---
 
-### Gateway go.mod — Required Additions (Task 6)
+### Gateway go.mod - Required Additions (Task 6)
 
 The generated `core_grpc.pb.go` imports `google.golang.org/grpc` and the `.pb.go` imports `google.golang.org/protobuf`. Without these in `gateway/go.mod`, `go build ./...` fails.
 
@@ -312,11 +312,11 @@ As of Q1 2026, latest stable versions are approximately:
 - `google.golang.org/grpc v1.71.x`
 - `google.golang.org/protobuf v1.36.x`
 
-Use `go get` to resolve the exact version — do NOT hardcode version numbers.
+Use `go get` to resolve the exact version - do NOT hardcode version numbers.
 
 ---
 
-### pgx Driver Pattern (for reference — unchanged from Story 1.5)
+### pgx Driver Pattern (for reference - unchanged from Story 1.5)
 
 This story does NOT touch `gateway/internal/db/`. The pgx/grpc driver separation from Story 1.5 remains in effect:
 - `database/sql` uses `pgx` driver (for InitServerConfig, CheckDB)
@@ -359,7 +359,7 @@ gateway/go.sum            ← updated automatically by go get
 - All `core/apps/*/mix.exs` files except potentially `event_dispatcher` if Elixir grpc dep is needed
 - All `core/` source files
 
-**Note on `core/apps/event_dispatcher/mix.exs`:** Currently has empty `deps: []`. Story 1.8 will add the Elixir gRPC dependency (`grpc` hex package). This story (1.6) only generates the stubs — no Elixir deps change needed yet.
+**Note on `core/apps/event_dispatcher/mix.exs`:** Currently has empty `deps: []`. Story 1.8 will add the Elixir gRPC dependency (`grpc` hex package). This story (1.6) only generates the stubs - no Elixir deps change needed yet.
 
 ---
 
@@ -391,15 +391,15 @@ make proto && echo "idempotent: OK"
 
 ### References
 
-- CoreService RPCs: [Source: epics.md — Story 1.6 Acceptance Criteria]
-- Proto service definition: [Source: architecture.md — G2 "gRPC Interface: Server-Streaming + Unary Fallback"]
-- Generated stub paths: [Source: epics.md — Story 1.6 AC #4 (gateway/internal/grpc/pb/ and core/apps/event_dispatcher/lib/pb/)]
-- Timestamp convention (int64 ms): [Source: architecture.md — Timestamps section]
-- Proto naming conventions: [Source: architecture.md — "Proto/gRPC: Messages PascalCase, Fields snake_case"]
-- Build container pattern: [Source: Makefile (root), architecture.md — Build-Container-Strategie]
-- go_package correctness: [Source: gateway/go.mod — `module github.com/nebu/nebu`]
-- Auth token flow (ValidateToken context): [Source: architecture.md — Auth-Token-Flow]
-- GELB/ROT status (GetPendingEvents role): [Source: architecture.md — G2 and G12]
+- CoreService RPCs: [Source: epics.md - Story 1.6 Acceptance Criteria]
+- Proto service definition: [Source: architecture.md - G2 "gRPC Interface: Server-Streaming + Unary Fallback"]
+- Generated stub paths: [Source: epics.md - Story 1.6 AC #4 (gateway/internal/grpc/pb/ and core/apps/event_dispatcher/lib/pb/)]
+- Timestamp convention (int64 ms): [Source: architecture.md - Timestamps section]
+- Proto naming conventions: [Source: architecture.md - "Proto/gRPC: Messages PascalCase, Fields snake_case"]
+- Build container pattern: [Source: Makefile (root), architecture.md - Build-Container-Strategie]
+- go_package correctness: [Source: gateway/go.mod - `module github.com/nebu/nebu`]
+- Auth token flow (ValidateToken context): [Source: architecture.md - Auth-Token-Flow]
+- GELB/ROT status (GetPendingEvents role): [Source: architecture.md - G2 and G12]
 
 ## Review Follow-ups
 
@@ -435,12 +435,12 @@ claude-sonnet-4-6
 - gateway/internal/grpc/pb/core.pb.go (generated)
 - gateway/internal/grpc/pb/core_grpc.pb.go (generated)
 - core/apps/event_dispatcher/lib/pb/core.pb.ex (generated)
-- Makefile (modified — proto: target)
-- gateway/go.mod (modified — grpc + protobuf deps)
-- gateway/go.sum (modified — updated by go get)
-- .gitignore (modified — added `!lib/` negation for Elixir source, code review fix)
+- Makefile (modified - proto: target)
+- gateway/go.mod (modified - grpc + protobuf deps)
+- gateway/go.sum (modified - updated by go get)
+- .gitignore (modified - added `!lib/` negation for Elixir source, code review fix)
 
 ## Change Log
 
-- 2026-03-23: Implemented Story 1.6 — proto/core.proto (9 CoreService RPCs), buf.yaml, buf.gen.yaml, Makefile proto: target, generated Go + Elixir stubs, added grpc/protobuf Go deps. Elixir stubs via protoc + protoc-gen-elixir (protocolbuffers/protobuf) instead of unavailable buf.build remote plugin.
-- 2026-03-23: Code review (claude-opus-4-6) — HIGH fix: Elixir-Stub `core.pb.ex` war durch globale `.gitignore_global` (`lib/`) blockiert. Fix: `!lib/` Negationsregel in Projekt-`.gitignore` hinzugefügt + Datei gestaged. Action Item: Build-Container-Optimierung (LOW) als Follow-up. Status → done.
+- 2026-03-23: Implemented Story 1.6 - proto/core.proto (9 CoreService RPCs), buf.yaml, buf.gen.yaml, Makefile proto: target, generated Go + Elixir stubs, added grpc/protobuf Go deps. Elixir stubs via protoc + protoc-gen-elixir (protocolbuffers/protobuf) instead of unavailable buf.build remote plugin.
+- 2026-03-23: Code review (claude-opus-4-6) - HIGH fix: Elixir-Stub `core.pb.ex` war durch globale `.gitignore_global` (`lib/`) blockiert. Fix: `!lib/` Negationsregel in Projekt-`.gitignore` hinzugefügt + Datei gestaged. Action Item: Build-Container-Optimierung (LOW) als Follow-up. Status → done.

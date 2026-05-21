@@ -7,7 +7,7 @@ matrix: true
 ui: false
 ---
 
-# Story 14.4: GDPR Right to Erasure — End-to-End Verification
+# Story 14.4: GDPR Right to Erasure - End-to-End Verification
 
 **Status:** ready-for-dev
 
@@ -24,7 +24,7 @@ So that GDPR Article 17 (Right to Erasure) can be attested with evidence.
 
 ## Acceptance Criteria
 
-**AC1 — Full GDPR deletion flow verified in Godog:**
+**AC1 - Full GDPR deletion flow verified in Godog:**
 Given a user exists with: display name, avatar URL, Ed25519 key, X25519 key, encrypted PII, session records, compliance access requests, and sent messages,
 When `DELETE /api/v1/admin/users/{userId}` is called (orchestrating the GDPR deletion flow),
 Then the following are verified in a Godog scenario:
@@ -34,28 +34,28 @@ Then the following are verified in a Godog scenario:
   - `user_keys.x25519_public_key` (private_key in `user_keys` where key_type='encryption') → NULL / deleted
   - `operational_pii` (users table: `anonymized_at` set, encrypted PII fields nulled or set per existing anonymization) → user is anonymized
   - `sessions` → all sessions for the user invalidated and deleted
-  - `events` content NOT modified (messages remain for room history — by design, per ADR-007)
+  - `events` content NOT modified (messages remain for room history - by design, per ADR-007)
   - `audit_log` contains a `gdpr_deletion` event for the user
 
-**AC2 — Matrix profile returns anonymized data after deletion:**
+**AC2 - Matrix profile returns anonymized data after deletion:**
 Given the deleted user's Matrix User ID (`@alice:nebu.example`),
 When `GET /_matrix/client/v3/profile/@alice:nebu.example` is called,
 Then `displayname` returns `"Deleted User"` and `avatar_url` is absent from the response
 
-**AC3 — OIDC login blocked with M_USER_DEACTIVATED:**
+**AC3 - OIDC login blocked with M_USER_DEACTIVATED:**
 Given the deletion has been performed (user is deactivated: `is_active=false`),
 When the deleted user attempts to log in via OIDC (Matrix SSO login flow → `GET /_matrix/client/v3/login/sso/redirect/oidc` → callback → POST implicit token),
 Then login fails with `403 M_USER_DEACTIVATED`
 
-**AC4 — Godog integration test passes:**
+**AC4 - Godog integration test passes:**
 Given a Godog scenario `gateway/features/gdpr_deletion.feature`,
 When `make test-integration` runs,
 Then all GDPR deletion scenarios pass (including the room-history-preservation assertion)
 
-**AC5 — Compliance runbook created:**
+**AC5 - Compliance runbook created:**
 Given `docs/compliance/gdpr-deletion-runbook.md`,
 When it is read,
-Then it documents: deletion procedure, evidence items for GDPR audit, known limitations (messages in room history are not deleted — per Matrix spec design)
+Then it documents: deletion procedure, evidence items for GDPR audit, known limitations (messages in room history are not deleted - per Matrix spec design)
 
 ---
 
@@ -63,33 +63,33 @@ Then it documents: deletion procedure, evidence items for GDPR audit, known limi
 
 ### Tests written FIRST (before implementation code):
 
-1. **AT-1 — Godog: Full erasure assertions** — `gateway/features/gdpr_deletion.feature`
+1. **AT-1 - Godog: Full erasure assertions** - `gateway/features/gdpr_deletion.feature`
    - Given: user `alice` exists with profile, Ed25519/X25519 keys, sessions, messages in a room
    - When: `DELETE /api/v1/admin/users/{userId}` is called
    - Then: `profiles.displayname = 'Deleted User'`, `profiles.avatar_url = NULL`, `user_keys` private_key NULL for both key types, `users.anonymized_at` set, no active sessions, `audit_log` has `gdpr_deletion` row
    - And: `events` table rows for alice's messages are NOT deleted
 
-2. **AT-2 — Matrix profile shows anonymized data** — `gateway/features/gdpr_deletion.feature`
+2. **AT-2 - Matrix profile shows anonymized data** - `gateway/features/gdpr_deletion.feature`
    - Given: user deleted (AT-1 done)
    - When: `GET /_matrix/client/v3/profile/@alice:nebu.example`
-   - Then: `{"displayname": "Deleted User"}` — `avatar_url` key is absent
+   - Then: `{"displayname": "Deleted User"}` - `avatar_url` key is absent
 
-3. **AT-3 — OIDC login blocked with M_USER_DEACTIVATED** — `gateway/features/gdpr_deletion.feature`
+3. **AT-3 - OIDC login blocked with M_USER_DEACTIVATED** - `gateway/features/gdpr_deletion.feature`
    - Given: user deleted (is_active=false)
    - When: Matrix SSO callback attempts to provision/validate the deleted user via `ValidateToken` gRPC
    - Then: response is `403` with errcode `M_USER_DEACTIVATED`
 
-4. **AT-4 — Unit: GdprDeleteHandler calls all required steps** — `gateway/internal/compliance/gdpr_delete_test.go`
+4. **AT-4 - Unit: GdprDeleteHandler calls all required steps** - `gateway/internal/compliance/gdpr_delete_test.go`
    - Given: mock CoreClient, mock DB
    - When: `DELETE /api/v1/admin/users/{userId}` is handled
    - Then: `DeactivateUser` gRPC called → sessions deleted → `DeleteUserKeys` gRPC called → anonymize DB txn committed → audit `gdpr_deletion` emitted
 
-5. **AT-5 — Unit: non-admin returns 403** — `gateway/internal/compliance/gdpr_delete_test.go`
+5. **AT-5 - Unit: non-admin returns 403** - `gateway/internal/compliance/gdpr_delete_test.go`
    - Given: caller system_role = "user"
    - When: handler called
    - Then: 403 M_FORBIDDEN
 
-6. **AT-6 — Unit: unknown user returns 404** — `gateway/internal/compliance/gdpr_delete_test.go`
+6. **AT-6 - Unit: unknown user returns 404** - `gateway/internal/compliance/gdpr_delete_test.go`
    - Given: DeactivateUser gRPC returns NOT_FOUND
    - When: handler called
    - Then: 404 M_NOT_FOUND
@@ -109,52 +109,52 @@ This story creates a **single orchestrating endpoint** `DELETE /api/v1/admin/use
 
 **Important:** `DELETE /api/v1/admin/users/{userId}` does NOT exist yet. The individual steps exist as separate endpoints. This story adds the orchestrating endpoint and the Godog feature file proving end-to-end correctness.
 
-**Also NEW:** The Matrix login handler currently does NOT return `M_USER_DEACTIVATED` — it returns `500 M_UNKNOWN` when `ValidateToken` raises `PERMISSION_DENIED`. The login handler must map `codes.PermissionDenied` with the "deactivated" message to `403 M_USER_DEACTIVATED`.
+**Also NEW:** The Matrix login handler currently does NOT return `M_USER_DEACTIVATED` - it returns `500 M_UNKNOWN` when `ValidateToken` raises `PERMISSION_DENIED`. The login handler must map `codes.PermissionDenied` with the "deactivated" message to `403 M_USER_DEACTIVATED`.
 
-### Architecture — Existing Building Blocks
+### Architecture - Existing Building Blocks
 
-#### Key Deletion (Core Elixir — existing)
-- `gateway/internal/compliance/user_key_deletion.go` — `DeleteUserKeys` handler
-- `DELETE /api/v1/admin/users/{userId}/keys` — sends gRPC `DeleteUserKeysRequest` to Elixir Core
-- Core: `Compliance.UserDeletion.delete_user_keys/3` — atomically nulls `user_keys.private_key`
+#### Key Deletion (Core Elixir - existing)
+- `gateway/internal/compliance/user_key_deletion.go` - `DeleteUserKeys` handler
+- `DELETE /api/v1/admin/users/{userId}/keys` - sends gRPC `DeleteUserKeysRequest` to Elixir Core
+- Core: `Compliance.UserDeletion.delete_user_keys/3` - atomically nulls `user_keys.private_key`
 - Core: emits `user_keys_deleted` audit event
 
-#### Anonymization (Go Gateway — existing)
-- `gateway/internal/compliance/user_anonymization.go` — `AnonymizeUser` handler
-- `POST /api/v1/admin/users/{userId}/anonymize` — pure Go DB operation
+#### Anonymization (Go Gateway - existing)
+- `gateway/internal/compliance/user_anonymization.go` - `AnonymizeUser` handler
+- `POST /api/v1/admin/users/{userId}/anonymize` - pure Go DB operation
 - Sets `profiles.displayname = 'Deleted User'`, `profiles.avatar_url = NULL`, `users.anonymized_at = <now_ms>`
 - Emits `user_anonymized` audit event
 
-#### Deactivation (Core Elixir via gRPC — existing)
-- `gateway/internal/grpc/client.go` — `DeactivateUser` method
+#### Deactivation (Core Elixir via gRPC - existing)
+- `gateway/internal/grpc/client.go` - `DeactivateUser` method
 - Core: `server.ex deactivate_user/2` → sets `is_active=false`, calls `destroy_session/1`
 - Emits `user_deactivated` audit event
 - Sessions: invalidated in ETS + deleted from DB
 
-#### OIDC Login — Deactivated User Mapping (Gateway — **partially missing**)
-- `gateway/internal/matrix/login.go` — `PostLogin` handler
+#### OIDC Login - Deactivated User Mapping (Gateway - **partially missing**)
+- `gateway/internal/matrix/login.go` - `PostLogin` handler
 - Currently: `ValidateToken` gRPC error → `500 M_UNKNOWN` for ALL errors
 - **Must fix:** if gRPC status code is `PERMISSION_DENIED` and message contains "deactivated" → return `403 M_USER_DEACTIVATED`
 - Matrix spec v1.18: `M_USER_DEACTIVATED` is a valid error code for deactivated users at login
 
-#### Audit Writer (Core — **needs update**)
+#### Audit Writer (Core - **needs update**)
 - `core/apps/compliance/lib/compliance/audit_writer.ex`
 - `@known_actions` allowlist does NOT contain `gdpr_deletion` yet
 - **Must add** `gdpr_deletion` to `@known_actions` (before the Go handler can emit it)
 
 ### Files to CREATE
 
-1. `gateway/internal/compliance/gdpr_delete.go` — `GdprDeleteHandler` struct + `DeleteUser` method
-2. `gateway/internal/compliance/gdpr_delete_test.go` — unit tests AT-4..AT-6
-3. `gateway/features/gdpr_deletion.feature` — Godog scenarios AT-1..AT-3
-4. `gateway/test/integration/gdpr_deletion_steps_test.go` — Godog step definitions
-5. `docs/compliance/gdpr-deletion-runbook.md` — compliance runbook (AC5)
+1. `gateway/internal/compliance/gdpr_delete.go` - `GdprDeleteHandler` struct + `DeleteUser` method
+2. `gateway/internal/compliance/gdpr_delete_test.go` - unit tests AT-4..AT-6
+3. `gateway/features/gdpr_deletion.feature` - Godog scenarios AT-1..AT-3
+4. `gateway/test/integration/gdpr_deletion_steps_test.go` - Godog step definitions
+5. `docs/compliance/gdpr-deletion-runbook.md` - compliance runbook (AC5)
 
 ### Files to UPDATE
 
-6. `gateway/cmd/gateway/main.go` — register `DELETE /api/v1/admin/users/{userId}` route (wrapped in `complianceRL` + `jwtWithStatusCheck`)
-7. `gateway/internal/matrix/login.go` — map `codes.PermissionDenied` + "deactivated" message → `403 M_USER_DEACTIVATED`
-8. `core/apps/compliance/lib/compliance/audit_writer.ex` — add `gdpr_deletion` to `@known_actions`
+6. `gateway/cmd/gateway/main.go` - register `DELETE /api/v1/admin/users/{userId}` route (wrapped in `complianceRL` + `jwtWithStatusCheck`)
+7. `gateway/internal/matrix/login.go` - map `codes.PermissionDenied` + "deactivated" message → `403 M_USER_DEACTIVATED`
+8. `core/apps/compliance/lib/compliance/audit_writer.ex` - add `gdpr_deletion` to `@known_actions`
 
 ### GdprDeleteHandler Implementation Pattern
 
@@ -194,7 +194,7 @@ func (h *GdprDeleteHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 - Step 6 (Anonymize) fails → 500 M_UNKNOWN (cannot silently skip PII erasure)
 - Step 7 (Audit) fails → never-raise, log warn, return 200 (audit failure must not block the GDPR deletion response)
 
-### Login Handler Fix — M_USER_DEACTIVATED
+### Login Handler Fix - M_USER_DEACTIVATED
 
 In `gateway/internal/matrix/login.go`, the `PostLogin` function currently does:
 ```go
@@ -249,7 +249,7 @@ gdprDeleteHandler := &compliance.GdprDeleteHandler{
 
 ```gherkin
 # gateway/features/gdpr_deletion.feature
-Feature: GDPR Right to Erasure — Story 14.4
+Feature: GDPR Right to Erasure - Story 14.4
 
   Background:
     Given the docker compose stack is started
@@ -324,7 +324,7 @@ docs/compliance/gdpr-deletion-runbook.md
 Must document:
 - Step-by-step deletion procedure (endpoint, required role, request body if any)
 - What evidence is generated (audit_log rows, DB state)
-- What is NOT deleted (room history / events — by Matrix spec design)
+- What is NOT deleted (room history / events - by Matrix spec design)
 - How to verify deletion (SQL queries for audit trail)
 - GDPR Article 17 attestation template
 
@@ -334,7 +334,7 @@ Must document:
 gateway/test/integration/gdpr_deletion_steps_test.go
 ```
 
-Pattern: mirror `compliance_flow_steps_test.go` — reuse the admin auth helper, DB query helpers, and the `doctorStepDefinition` convention used by other step definition files.
+Pattern: mirror `compliance_flow_steps_test.go` - reuse the admin auth helper, DB query helpers, and the `doctorStepDefinition` convention used by other step definition files.
 
 ### DB Queries for Godog Assertions
 
@@ -369,21 +369,21 @@ db.QueryRowContext(ctx, "SELECT COUNT(*) FROM events WHERE sender=$1", "@"+local
 assert.Greater(t, eventCount, 0)  // events exist → room history preserved
 ```
 
-### Matrix CS API — Oracle Context
+### Matrix CS API - Oracle Context
 
 **Relevant endpoints and spec rules for this story (Matrix v1.18):**
 
-- `GET /_matrix/client/v3/profile/{userId}` — Public endpoint (no auth required). Returns `{"displayname": "...", "avatar_url": "..."}`. Fields with empty/NULL values MAY be omitted (spec SHOULD omit). After deletion, `avatar_url` must be absent (NULL → omit).
-- `POST /_matrix/client/v3/login` (m.login.token via SSO) — On deactivated user: HTTP 403 with `{"errcode": "M_USER_DEACTIVATED", "error": "..."}`. Matrix spec v1.18 §5.7.1.
-- `M_USER_DEACTIVATED` — Valid errcode for login failure. Servers MAY use M_FORBIDDEN instead for privacy. Story requires M_USER_DEACTIVATED explicitly.
+- `GET /_matrix/client/v3/profile/{userId}` - Public endpoint (no auth required). Returns `{"displayname": "...", "avatar_url": "..."}`. Fields with empty/NULL values MAY be omitted (spec SHOULD omit). After deletion, `avatar_url` must be absent (NULL → omit).
+- `POST /_matrix/client/v3/login` (m.login.token via SSO) - On deactivated user: HTTP 403 with `{"errcode": "M_USER_DEACTIVATED", "error": "..."}`. Matrix spec v1.18 §5.7.1.
+- `M_USER_DEACTIVATED` - Valid errcode for login failure. Servers MAY use M_FORBIDDEN instead for privacy. Story requires M_USER_DEACTIVATED explicitly.
 
 **Spec-defined behavior:**
-- Room events (messages) MUST NOT be deleted when a user is deactivated or deleted — per Matrix spec, event history is immutable. The `events` table rows remain.
-- Profile fields: spec allows servers to return 404 for non-existent users OR to return synthetic data for deleted users. Nebu returns `{"displayname": "Deleted User"}` (no 404) — this is compliant.
+- Room events (messages) MUST NOT be deleted when a user is deactivated or deleted - per Matrix spec, event history is immutable. The `events` table rows remain.
+- Profile fields: spec allows servers to return 404 for non-existent users OR to return synthetic data for deleted users. Nebu returns `{"displayname": "Deleted User"}` (no 404) - this is compliant.
 
 ### Testing Conventions
 
-- **Godog steps** in `gateway/test/integration/gdpr_deletion_steps_test.go` — use `godog.Suite` registration pattern from existing step files
+- **Godog steps** in `gateway/test/integration/gdpr_deletion_steps_test.go` - use `godog.Suite` registration pattern from existing step files
 - **DB assertions** via direct `*sql.DB` queries in step definitions (same pattern as `compliance_flow_steps_test.go`)
 - **No mocking of Core**: Godog integration tests run against the real Docker stack
 - **Admin auth**: reuse the `authenticateAdmin` helper from other step definition files
@@ -392,25 +392,25 @@ assert.Greater(t, eventCount, 0)  // events exist → room history preserved
 ### Security Considerations
 
 - **Self-deletion four-eyes guard**: `DELETE /api/v1/admin/users/{userId}` must reject callerSub == userId with 403 (same pattern as `user_anonymization.go`)
-- **GDPR audit trail**: the `gdpr_deletion` audit event must be written in a **separate** DB transaction (never inside the DeactivateUser or DeleteUserKeys TX) — never-raise policy applies
-- **Partial failure**: if `DeleteUserKeys` fails (e.g., already deleted), log warn and continue — the anonymization (PII erasure) must still proceed
+- **GDPR audit trail**: the `gdpr_deletion` audit event must be written in a **separate** DB transaction (never inside the DeactivateUser or DeleteUserKeys TX) - never-raise policy applies
+- **Partial failure**: if `DeleteUserKeys` fails (e.g., already deleted), log warn and continue - the anonymization (PII erasure) must still proceed
 - **No plaintext PII in audit metadata**: the `gdpr_deletion` audit event metadata must NOT contain display names or email addresses
-- **Rate limiting**: `complianceRL` (10 req/min) applies to this route — adequate for a deletion endpoint
+- **Rate limiting**: `complianceRL` (10 req/min) applies to this route - adequate for a deletion endpoint
 
 ### Previous Story Context (14-3c)
 
-14-3c added SCIM 2.0 support. The migration chain is now at `000049`. The next migration for this story would be `000050` IF needed. However, **no new DB migration is required** for 14-4 — all necessary DB columns already exist (`profiles.displayname`, `profiles.avatar_url`, `user_keys.private_key`, `users.anonymized_at`, `users.is_active`, `sessions`, `audit_log`).
+14-3c added SCIM 2.0 support. The migration chain is now at `000049`. The next migration for this story would be `000050` IF needed. However, **no new DB migration is required** for 14-4 - all necessary DB columns already exist (`profiles.displayname`, `profiles.avatar_url`, `user_keys.private_key`, `users.anonymized_at`, `users.is_active`, `sessions`, `audit_log`).
 
 ### Story Completion Checklist
 
-- [ ] `gateway/internal/compliance/gdpr_delete.go` — handler implementing all 7 steps
-- [ ] `gateway/internal/compliance/gdpr_delete_test.go` — unit tests AT-4..AT-6
-- [ ] `gateway/cmd/gateway/main.go` — route registered
-- [ ] `gateway/internal/matrix/login.go` — M_USER_DEACTIVATED fix
-- [ ] `core/apps/compliance/lib/compliance/audit_writer.ex` — `gdpr_deletion` in `@known_actions`
-- [ ] `gateway/features/gdpr_deletion.feature` — Godog scenarios AT-1..AT-3
-- [ ] `gateway/test/integration/gdpr_deletion_steps_test.go` — step definitions
+- [ ] `gateway/internal/compliance/gdpr_delete.go` - handler implementing all 7 steps
+- [ ] `gateway/internal/compliance/gdpr_delete_test.go` - unit tests AT-4..AT-6
+- [ ] `gateway/cmd/gateway/main.go` - route registered
+- [ ] `gateway/internal/matrix/login.go` - M_USER_DEACTIVATED fix
+- [ ] `core/apps/compliance/lib/compliance/audit_writer.ex` - `gdpr_deletion` in `@known_actions`
+- [ ] `gateway/features/gdpr_deletion.feature` - Godog scenarios AT-1..AT-3
+- [ ] `gateway/test/integration/gdpr_deletion_steps_test.go` - step definitions
 - [ ] `docs/compliance/` directory created
-- [ ] `docs/compliance/gdpr-deletion-runbook.md` — compliance runbook
+- [ ] `docs/compliance/gdpr-deletion-runbook.md` - compliance runbook
 - [ ] All Godog scenarios pass in `make test-integration`
 - [ ] All unit tests pass in `make test-unit-go`

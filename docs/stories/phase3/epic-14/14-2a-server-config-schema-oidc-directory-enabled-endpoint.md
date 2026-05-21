@@ -7,7 +7,7 @@ matrix: false
 ui: true
 ---
 
-# Story 14.2a: Server Config Schema — oidc_directory_enabled + oidc_directory_endpoint
+# Story 14.2a: Server Config Schema - oidc_directory_enabled + oidc_directory_endpoint
 
 Status: ready-for-dev
 
@@ -24,27 +24,27 @@ So that the OIDC directory integration can be toggled and configured without cod
 
 ## Acceptance Criteria
 
-**AC1 — Migration adds oidc_directory fields:**
+**AC1 - Migration adds oidc_directory fields:**
 Given a new database migration (000048),
 When it runs,
 Then `oidc_directory_enabled` (default `"false"`) and `oidc_directory_endpoint` (default `""`) rows are seeded into the `server_config` key-value table, and the RLS mutable-key policy is updated to allow updating these keys
 
-**AC2 — GET /api/v1/admin/config returns new fields:**
+**AC2 - GET /api/v1/admin/config returns new fields:**
 Given `GET /api/v1/admin/config`,
 When the endpoint is called,
 Then `oidc_directory_enabled` (boolean) and `oidc_directory_endpoint` (string) are included in the JSON response
 
-**AC3 — PATCH /api/v1/admin/config persists new fields:**
+**AC3 - PATCH /api/v1/admin/config persists new fields:**
 Given `PATCH /api/v1/admin/config` with both `oidc_directory_enabled: true` and `oidc_directory_endpoint: "https://idp.example.com/users"`,
 When the request is processed,
 Then the values are persisted and returned correctly in a subsequent GET
 
-**AC4 — Admin UI Config page shows new controls:**
+**AC4 - Admin UI Config page shows new controls:**
 Given the Admin UI Config page (`GET /admin/config`),
 When it loads,
 Then a toggle for `oidc_directory_enabled` and a text field for `oidc_directory_endpoint` are displayed; the endpoint text field is visible only when the toggle is enabled (conditional visibility via Alpine.js or DaisyUI attribute)
 
-**AC5 — Godog round-trip scenario passes:**
+**AC5 - Godog round-trip scenario passes:**
 Given a Godog scenario in `gateway/features/oidc_directory_config.feature`,
 When `make test-integration` runs,
 Then the scenario "set oidc_directory_enabled + endpoint, read back" passes
@@ -55,13 +55,13 @@ Then the scenario "set oidc_directory_enabled + endpoint, read back" passes
 
 ### Tests written FIRST (before implementation code):
 
-**1. Go unit test: `TestGetAdminConfig_IncludesOidcDirectoryFields` — httptest**
+**1. Go unit test: `TestGetAdminConfig_IncludesOidcDirectoryFields` - httptest**
 Location: `gateway/internal/api/config_handler_test.go`
 - Given: `mockServerConfigRepository` returns `OidcDirectoryEnabled: false, OidcDirectoryEndpoint: ""`
 - When: `GET /api/v1/admin/config` is called
 - Then: response JSON contains `"oidc_directory_enabled": false` and `"oidc_directory_endpoint": ""`
 
-**2. Go unit test: `TestPatchAdminConfig_OidcDirectory_PersistsAndReturns` — httptest**
+**2. Go unit test: `TestPatchAdminConfig_OidcDirectory_PersistsAndReturns` - httptest**
 Location: `gateway/internal/api/config_handler_test.go`
 - Given: `mockServerConfigRepository` with standard defaults
 - When: `PATCH /api/v1/admin/config` with `{"oidc_directory_enabled": true, "oidc_directory_endpoint": "https://idp.example.com/users"}`
@@ -69,7 +69,7 @@ Location: `gateway/internal/api/config_handler_test.go`
 - And: `UpsertServerConfigKey` was called with `("oidc_directory_enabled", "true")` and `("oidc_directory_endpoint", "https://idp.example.com/users")`
 - And: response JSON contains `"oidc_directory_enabled": true` and `"oidc_directory_endpoint": "https://idp.example.com/users"`
 
-**3. Go unit test: `TestAdminConfigHandler_OidcDirectoryToggleVisible` — httptest**
+**3. Go unit test: `TestAdminConfigHandler_OidcDirectoryToggleVisible` - httptest**
 Location: `gateway/internal/admin/config_handler_test.go` (new file for admin UI handler tests)
 - Given: `ConfigHandler` served with gRPC returning `oidc_directory_enabled: false`
 - When: `GET /admin/config` is called
@@ -141,7 +141,7 @@ Location: `gateway/features/oidc_directory_config.feature`
   - [ ] Extend `protoToStubConfig` (or `GetServerConfig` gRPC response path) to populate the new fields
   - [ ] Update `config.html` template:
     - Add toggle: `<input type="checkbox" id="oidc_directory_enabled" name="oidc_directory_enabled" class="toggle" {{ if .Config.OidcDirectoryEnabled }}checked{{ end }}>`
-    - Add text field for endpoint — conditionally visible when toggle is on (use `x-show` Alpine.js or a `data-` attribute)
+    - Add text field for endpoint - conditionally visible when toggle is on (use `x-show` Alpine.js or a `data-` attribute)
     - Follow DaisyUI patterns already used in the template (see `form-control`, `input`, `label` patterns)
   - [ ] Extend `UpdateConfigHandler` to parse `oidc_directory_enabled` (checkbox) and `oidc_directory_endpoint` (text) from form POST
   - [ ] If `h.core != nil`, call `UpdateServerConfig` gRPC with the new proto fields (see proto section below)
@@ -150,7 +150,7 @@ Location: `gateway/features/oidc_directory_config.feature`
 - [ ] Task 6: gRPC proto and generated pb (AC4)
   - [ ] Check if `UpdateServerConfigRequest` and `ServerConfigProto` already have fields for `oidc_directory_enabled` and `oidc_directory_endpoint`
   - [ ] If missing: add fields to `proto/core.proto`; run `make proto` to regenerate pb files
-  - [ ] If already present: no proto change needed — just wire the fields
+  - [ ] If already present: no proto change needed - just wire the fields
 
 - [ ] Task 7: Godog integration test (AC5)
   - [ ] Create `gateway/features/oidc_directory_config.feature` with the round-trip scenario
@@ -159,8 +159,8 @@ Location: `gateway/features/oidc_directory_config.feature`
   - [ ] Reuse: `adminAPIDoRequest`, `adminAPIAdminToken`, `lastStatusCode`, `lastBody` from `admin_api_steps_test.go`
 
 - [ ] Task 8: Run all test suites
-  - [ ] `make test-unit-go` — all unit tests pass
-  - [ ] `make test-integration` — `oidc_directory_config.feature` scenario passes
+  - [ ] `make test-unit-go` - all unit tests pass
+  - [ ] `make test-integration` - `oidc_directory_config.feature` scenario passes
 
 ---
 
@@ -170,7 +170,7 @@ Location: `gateway/features/oidc_directory_config.feature`
 
 The `server_config` table has three columns: `key TEXT PRIMARY KEY`, `value TEXT NOT NULL`, `set_at BIGINT NOT NULL`. There are NO new physical columns to add. New configuration values are stored as new **rows** with string keys. The AC wording "columns are added" is shorthand for "key-value rows are seeded".
 
-### Migration 000048 — pattern and RLS policy
+### Migration 000048 - pattern and RLS policy
 
 The new migration must:
 1. Seed default rows:
@@ -280,7 +280,7 @@ type adminConfigResponseBody struct {
 }
 ```
 
-NOTE: `omitempty` is intentionally NOT used (existing pattern — all keys always present, tests verify all keys exist).
+NOTE: `omitempty` is intentionally NOT used (existing pattern - all keys always present, tests verify all keys exist).
 
 The `getAdminConfigOKResponse` struct gains two new fields:
 ```go
@@ -309,7 +309,7 @@ return &getAdminConfigOKResponse{
 }, nil
 ```
 
-### PatchAdminConfig — new field handling
+### PatchAdminConfig - new field handling
 
 Add after the `AuditLogRetentionDays` block:
 ```go
@@ -354,7 +354,7 @@ configData: &api.ServerConfigData{
 },
 ```
 
-### Admin UI template — config.html
+### Admin UI template - config.html
 
 The current `config.html` has a simple form with `instance_name`, `allow_registration`, `max_rooms_per_user`, `retention_days`. This story adds two new fields at the bottom of the form (before the Save button):
 
@@ -366,7 +366,7 @@ The current `config.html` has a simple form with `instance_name`, `allow_registr
            class="toggle toggle-primary"
            x-model="oidcDirEnabled"
            {{ if .Config.OidcDirectoryEnabled }}checked{{ end }}>
-    <span class="label-text">Enable OIDC User Directory (Protocol A — Dex/Keycloak)</span>
+    <span class="label-text">Enable OIDC User Directory (Protocol A - Dex/Keycloak)</span>
   </label>
 
   <div x-show="oidcDirEnabled" class="mt-3">
@@ -449,7 +449,7 @@ string oidc_directory_endpoint = N+1;
 
 **New file:** `gateway/features/oidc_directory_config.feature`
 ```gherkin
-Feature: OIDC Directory Config — oidc_directory_enabled + oidc_directory_endpoint round-trip
+Feature: OIDC Directory Config - oidc_directory_enabled + oidc_directory_endpoint round-trip
   As an instance admin
   I want to enable and configure the OIDC user directory integration
   So that the Admin UI user search can include OIDC users
@@ -488,7 +488,7 @@ Feature: OIDC Directory Config — oidc_directory_enabled + oidc_directory_endpo
 | `gateway/internal/api/server.go` | UPDATE | GetAdminConfig + PatchAdminConfig + response structs |
 | `gateway/internal/api/config_handler_test.go` | UPDATE | Add AT#1 + AT#2 unit tests |
 | `gateway/internal/admin/stubs.go` | UPDATE | Add OidcDirectoryEnabled + OidcDirectoryEndpoint to StubConfig |
-| `gateway/internal/admin/page_data.go` | NONE or UPDATE | ConfigPageData embeds StubConfig — no change needed if StubConfig is extended |
+| `gateway/internal/admin/page_data.go` | NONE or UPDATE | ConfigPageData embeds StubConfig - no change needed if StubConfig is extended |
 | `gateway/internal/admin/config.go` | UPDATE | protoToStubConfig + UpdateConfigHandler to handle new fields |
 | `gateway/internal/admin/templates/config.html` | UPDATE | Add toggle + conditional endpoint field |
 | `gateway/internal/admin/config_test.go` | UPDATE | Add AT#3 unit test |
@@ -498,15 +498,15 @@ Feature: OIDC Directory Config — oidc_directory_enabled + oidc_directory_endpo
 | `gateway/test/integration/oidc_directory_config_steps_test.go` | NEW | Step definitions |
 | `gateway/test/integration/steps_test.go` | UPDATE | Register initializeOidcDirectoryConfigSteps |
 
-**Do NOT create new Go handler files** — all changes are additions to existing files.
+**Do NOT create new Go handler files** - all changes are additions to existing files.
 
 ### Preserve existing behavior
 
 - All existing `AdminConfigResponse` fields (instance_name, oidc_issuer, oidc_client_id, room_default_max_members, room_default_visibility, audit_log_retention_days) MUST remain in the response.
 - All existing `PatchAdminConfig` fields (instance_name, oidc_issuer, oidc_client_id, oidc_client_secret, audit_log_retention_days, matrix_user_id_claim) MUST continue to work.
-- The RLS down migration must re-create the policy from migration 000046 (7 mutable keys) — NOT from migration 000045 (blanket update). The policy must be exactly the 000046 set minus the new keys.
+- The RLS down migration must re-create the policy from migration 000046 (7 mutable keys) - NOT from migration 000045 (blanket update). The policy must be exactly the 000046 set minus the new keys.
 - OIDC session invalidation logic in PatchAdminConfig is NOT triggered by oidc_directory_* changes (only OIDC auth fields trigger it).
-- Existing unit tests in `config_handler_test.go` must continue to pass — they use `mockServerConfigRepository` which can be given zero-valued new fields without breaking.
+- Existing unit tests in `config_handler_test.go` must continue to pass - they use `mockServerConfigRepository` which can be given zero-valued new fields without breaking.
 
 ### Sprint Status Key
 
@@ -534,5 +534,5 @@ None.
 
 ### Review Findings
 
-- [ ] [Review][Patch] Admin UI gRPC path silently discards oidcDirectoryEnabled — form submit does not persist toggle state to DB [gateway/internal/admin/config.go:145]
-- [x] [Review][Defer] Pre-existing gatewayURL bug in admin_api_steps_test.go — admin API calls on port 8080 instead of 8008 [gateway/test/integration/admin_api_steps_test.go:64,100,112,123,236] — deferred, pre-existing
+- [ ] [Review][Patch] Admin UI gRPC path silently discards oidcDirectoryEnabled - form submit does not persist toggle state to DB [gateway/internal/admin/config.go:145]
+- [x] [Review][Defer] Pre-existing gatewayURL bug in admin_api_steps_test.go - admin API calls on port 8080 instead of 8008 [gateway/test/integration/admin_api_steps_test.go:64,100,112,123,236] - deferred, pre-existing
