@@ -1,3 +1,7 @@
+---
+title: "Getting Started"
+---
+
 # Getting Started with Nebu
 
 This guide walks you through setting up a local Nebu development environment from scratch.

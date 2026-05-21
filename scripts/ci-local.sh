@@ -107,9 +107,10 @@ _docs_preflight() {
 }
 
 _docs_prepare() {
-    echo "  Injecting docs/architecture/ → website/dokument/architecture/ ..."
+    echo "  Injecting docs/architecture/ and docs/getting-started.md ..."
     mkdir -p "${REPO_ROOT}/website/dokument/architecture"
     cp -r "${REPO_ROOT}/docs/architecture/." "${REPO_ROOT}/website/dokument/architecture/"
+    cp "${REPO_ROOT}/docs/getting-started.md" "${REPO_ROOT}/website/dokument/getting-started.md"
 }
 
 job_docs() {

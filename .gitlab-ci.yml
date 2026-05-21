@@ -42,7 +42,8 @@ pages:
   before_script:
     - mkdir -p website/dokument/architecture
     - cp -r docs/architecture/. website/dokument/architecture/
-    - echo "Injected docs/architecture/ → website/dokument/architecture/"
+    - cp docs/getting-started.md website/dokument/getting-started.md
+    - echo "Injected docs/architecture/ and docs/getting-started.md"
   script:
     - npx --yes @document-writing-tools/markdown-webbook@2.1.0
         --input website/dokument
