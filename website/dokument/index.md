@@ -57,49 +57,6 @@ No Redis. No NATS. No Kafka. No surprises.
 
 ---
 
-## Who Uses Nebu?
-
-### Marcus — IT Operations Lead
-
-*"We needed a Slack replacement that stays inside our VPC. Nebu runs on our Kubernetes cluster,
-connects to our Keycloak, and our compliance team hasn't had a single question about data residency
-since we switched."*
-
-**Marcus** represents operators who need a self-hostable, OIDC-integrated chat server that fits
-inside an existing Kubernetes or Docker Compose deployment without additional middleware dependencies.
-
----
-
-### Leila — Software Engineer
-
-*"I like that it's just Matrix — I can use Element Web today and switch to another Matrix client
-tomorrow without asking anyone's permission."*
-
-**Leila** represents end users who want freedom of client choice and the reliability of an
-open protocol, without sacrificing the UX quality of commercial chat tools.
-
----
-
-### Mia — Compliance Officer
-
-*"Apache 2.0, on-premise, with a GDPR erasure endpoint and an audit log — this is the first
-chat server our legal team approved without amendments."*
-
-**Mia** represents compliance officers who need verifiable data sovereignty, a clear license,
-and a documented right-to-erasure implementation before they can approve a tool for production use.
-
----
-
-### Kai — System Administrator
-
-*"The Bootstrap Wizard walked me through OIDC setup in under 15 minutes.
-The admin dashboard shows me what I need to know without cluttering the screen."*
-
-**Kai** represents administrators who need straightforward initial setup and a day-to-day
-admin UI that focuses on operational visibility without overwhelming detail.
-
----
-
 ## Get Started
 
 Ready to deploy Nebu?

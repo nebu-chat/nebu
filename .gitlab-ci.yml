@@ -47,10 +47,10 @@ pages:
     - npx --yes @document-writing-tools/markdown-webbook@2.1.0
         --input website/dokument
         --output out
-        --title "Nebu ${CI_COMMIT_SHORT_SHA}"
+        --title "Nebu"
         --theme opencode
         --copyright "Nebu contributors — Apache 2.0"
-        --logo-path ""
+        --logo-path "website/dokument/assets/nebu-logo.svg"
   artifacts:
     paths:
       - out
