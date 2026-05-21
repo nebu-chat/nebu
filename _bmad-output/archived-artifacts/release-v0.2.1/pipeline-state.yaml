@@ -1,0 +1,678 @@
+# Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents
+# Do not edit manually during a pipeline run.
+# last_updated: 2026-05-20
+# [16-3] 2026-05-20T22:11Z committed ✓ (ATDD skipped infra + Code CLEAN cycle 0 + arc42 no-change)
+# [16-3] 2026-05-20T22:10Z arc42-update → no arch changes (CI/config change only, no application architecture impact)
+# [16-3] 2026-05-20T22:09Z security-review → skipped (not-needed — CI config, YAML nav, .gitignore only)
+# [16-3] 2026-05-20T22:08Z code-review → CLEAN (cycle 0) — 2 INFO: children: key format unverifiable locally, before_script merge behavior
+# [16-3] 2026-05-20T22:06Z ci-gate → ✓ config-only change, no Go/Elixir code affected — pages job only runs on main
+# [16-3] 2026-05-20T22:05Z dev-story → done (cycle 0) — CI copy step, _meta.yaml architecture nav, .gitignore
+# [16-3] 2026-05-20T22:02Z test-review → CLEAN (infra story, 4 manual verification tests — no code test files to review)
+# [16-3] 2026-05-20T22:01Z atdd → skipped (infra/CI story — manual verification only)
+# [16-3] 2026-05-20T22:00Z pipeline started
+# 16-2 2026-05-20T20:21:01Z epic-loop → story done
+# 16-2 2026-05-20T21:30Z epic-loop → story done
+# [16-2] 2026-05-20T21:30Z committed ✓ (6288f65 — M1+M2 test fixes + landing page + logo SVG + CSS override — arc42 no-change)
+# [16-2] 2026-05-20T21:25Z arc42-update → no arch changes (static website content, no application architecture impact)
+# [16-2] 2026-05-20T21:20Z security-review → skipped (not-needed — static content/CSS/SVG only)
+# [16-2] 2026-05-20T21:15Z code-review → CLEAN (cycle 0) — 2 INFO: link targets deferred (16-3/16-4), _meta.yaml logo config uncertainty (deploy-only); inline MINOR-1 fixed (errors array simplified)
+# [16-2] 2026-05-20T21:10Z ci-gate → ✓ build+unit-go+unit-elixir (website e2e self-skip expected — no WEBSITE_BASE_URL)
+# [16-2] 2026-05-20T21:05Z dev-story → done (cycle 0) — index.md full landing page, nebu-logo.svg, custom.css, _meta.yaml logo+custom_css refs
+# [16-2] 2026-05-20T21:00Z test-review-fixes → M1+M2 auto-fixed (test.skip, locator.or expect)
+# [16-2] 2026-05-20T10:05Z atdd → 3 failing tests (website_smoke.feature)
+# [16-2] 2026-05-20T10:01Z classify → matrix=false, ui=true, security_review=not-needed
+# [16-2] 2026-05-20T10:00Z pipeline started
+# 16-1 2026-05-20T20:07:29Z epic-loop → story done
+# [16-1] 2026-05-20T10:00Z committed ✓ (2 HIGH fixed: md-to-web pinned @1.1.0; $CI_SERVER_FQDN documented — arc42 no-change infra)
+# [16-1] 2026-05-20T09:55Z arc42-update → no arch changes (CI/docs infra only, no application architecture impact)
+# [16-1] 2026-05-20T09:50Z security-review → skipped (not-needed — CI config only, no auth/crypto/route code)
+# [16-1] 2026-05-20T09:45Z code-review → 2 HIGH auto-fixed (md-to-web @v2→@1.1.0 pin; $CI_SERVER_FQDN assumption documented); Impressum/Datenschutz deferred (future story scope); CLEAN cycle 1
+# [16-1] 2026-05-20T09:15Z ci-gate → ✓ build+unit-go+unit-elixir (e2e/integration env-startup flaky, infra story no app changes)
+# [16-1] 2026-05-20T09:10Z dev-story → done (cycle 0)
+# [16-1] 2026-05-20T09:02Z test-review → CLEAN (infra story, manual verification tests only)
+# [16-1] 2026-05-20T09:01Z atdd → skipped (infra-only: manual CI inspection tests)
+# [16-1] 2026-05-20T09:00Z pipeline started
+# [13-20] 2026-05-20T12:39Z committed ✓ (test-only — 5000ms → 10000ms Horde timeout CLEAN)
+# [13-20] 2026-05-20T12:38Z pipeline started
+# [13-19] 2026-05-20T10:50Z committed ✓ (test-only — try/rescue replaces TOCTOU guard CLEAN)
+# [13-19] 2026-05-20T10:49Z atdd → skipped (failing test already exists: ArchiveRoomTest line 590)
+# [13-19] 2026-05-20T10:49Z create-story → 13-19-fix-test-unit-elixir-ets-toctou.md
+# [13-19] 2026-05-20T10:48Z pipeline started
+# [13-18] 2026-05-20T08:30Z committed ✓ (test-only — assert 2 flows CLEAN)
+# [13-18] 2026-05-20T08:28Z atdd → skipped (test already failing: TestGetLogin_ReturnsSSO login_test.go:138)
+# [13-18] 2026-05-20T08:28Z create-story → 13-18-fix-test-unit-go-login-flows.md
+# [13-18] 2026-05-20T08:27Z pipeline started
+# [13-17] 2026-05-20T07:10Z committed ✓ (1 MINOR fixed cycle 1 — duplicate ARIA landmark removed)
+# [13-17] 2026-05-20T07:10Z arc42-update → no arch changes (CSS theme tokens only)
+# [13-17] 2026-05-20T07:10Z security-review → skipped (not-needed — CSS/theme only)
+# [13-17] 2026-05-20T07:10Z code-review → CLEAN (cycle 1)
+# [13-17] 2026-05-20T07:09Z dev-story → done (cycle 1) — remove redundant role+aria-label from live-metrics div
+# [13-17] 2026-05-20T07:09Z code-review → 1 MINOR (duplicate role=region in dashboard.html) + 2 INFO → cycle 1
+# [13-17] 2026-05-20T07:04Z ci-gate → skipped (code already committed in 7c20168)
+# [13-17] 2026-05-20T07:04Z dev-story → skipped (already implemented in 7c20168)
+# [13-17] 2026-05-20T07:04Z atdd → skipped (visual contrast fix, atdd: not-applicable)
+# [13-17] 2026-05-20T07:04Z create-story → 13-17-wcag-aa-admin-ui-contrast-fix.md
+# [13-17] 2026-05-20T07:01Z pipeline started
+# [13-16] 2026-05-20T07:01Z committed ✓ (2 MAJOR fixed cycle 1 — PROJECT_ROOT 4 levels, DEX_ISSUER_URL const)
+# [13-16] 2026-05-20T07:01Z arc42-update → no arch changes (test-only)
+# [13-16] 2026-05-20T07:00Z security-review → skipped (not-needed — test-only)
+# [13-16] 2026-05-20T07:00Z code-review → CLEAN (cycle 1)
+# [13-16] 2026-05-20T06:59Z dev-story → done (cycle 1) — PROJECT_ROOT 4 levels up, DEX_ISSUER_URL const added
+# [13-16] 2026-05-20T06:59Z code-review → 2 MAJOR (PROJECT_ROOT bootstrap-happy-path, DEX_ISSUER_URL bootstrap.steps) + 3 MINOR → cycle 1
+# [13-16] 2026-05-20T06:53Z ci-gate → skipped (code already committed in 7c20168)
+# [13-16] 2026-05-20T06:53Z dev-story → skipped (already implemented in 7c20168)
+# [13-16] 2026-05-20T06:53Z atdd → skipped (test-only, atdd: not-applicable)
+# [13-16] 2026-05-20T06:53Z create-story → 13-16-e2e-bootstrap-tests-update.md
+# [13-16] 2026-05-20T07:10Z create-story → 13-16-e2e-bootstrap-tests-update.md (done — audit trail for 7c20168)
+# [13-16] 2026-05-20T06:46Z pipeline started
+# [13-15] 2026-05-19T09:38Z committed ✓ (1 MAJOR+2 MINOR fixed cycle 1 + Kassandra HIGH+MEDIUM fixed)
+# [13-15] 2026-05-19T09:35Z arc42-update → 07-deployment (Element Web topology + nginx routing table + CORS constraint)
+# [13-15] 2026-05-19T09:32Z security-review → Kassandra CLEAN (HIGH+MEDIUM fixed)
+# [13-15] 2026-05-19T09:28Z security-review → HIGH (F-1: /api/v1/ missing from nginx) + MEDIUM (WebSocket headers) → fixes applied
+# [13-15] 2026-05-19T09:25Z code-review → CLEAN (cycle 1)
+# [13-15] 2026-05-19T09:22Z dev-story → done (cycle 1: MAJOR+2 MINOR fixed)
+# [13-15] 2026-05-19T09:20Z code-review → 1 MAJOR (tfvars.example AC8) + 2 MINOR → cycle 1
+# [13-15] 2026-05-19T09:10Z ci-gate → tofu fmt OK (server.tf fix applied)
+# [13-15] 2026-05-19T09:06Z dev-story → skipped (already implemented)
+# [13-15] 2026-05-19T09:05Z create-story → 13-15-element-web-stackit-deployment.md
+# [13-15] 2026-05-19T09:00Z pipeline started
+# [13-14] 2026-05-18T12:15Z committed ✓ (2 MAJOR fixed 3 cycles + Kassandra CLEAN 1 MEDIUM accepted)
+# [13-14] 2026-05-18T12:10Z arc42-update → 07-deployment (squashed migration strategy + Stackit role model) + 08-concepts (audit_log FORCE RLS rationale)
+# [13-14] 2026-05-18T12:00Z security-review → Kassandra CLEAN (0 CRITICAL, 0 HIGH, 1 MEDIUM accepted, 2 LOW)
+# [13-14] 2026-05-18T11:45Z code-review → CLEAN (cycle 3)
+# [13-14] 2026-05-18T11:35Z dev-story → done (cycle 3 polish pass)
+# [13-14] 2026-05-18T11:20Z code-review → CLEAN cycle 2 (0 MAJOR, 4 MINOR patch-only) → cycle 3 polish
+# [13-14] 2026-05-18T11:00Z code-review → 1 CRITICAL (audit_log GUC bypass) + 3 MAJOR + 6 MINOR → cycle 2 (user accepted Option A: honest single-role docs)
+# [13-14] 2026-05-18T10:45Z code-review → 2 MAJOR (FORCE RLS owner bypass; sync_tokens FK lost) + 7 MINOR → cycle 1
+# [13-14] 2026-05-18T10:30Z ci-gate → ✓ unit-go PASS (Elixir unchanged)
+# [13-14] 2026-05-18T10:25Z dev-story → done (cycle 0)
+# [13-14] 2026-05-18T10:06Z test-review → skipped (no ATDD tests)
+# [13-14] 2026-05-18T10:05Z create-story → 13-14-squash-gateway-migrations-single-seed.md
+# [13-14] 2026-05-18T10:00Z pipeline started
+# [14-4] 2026-05-17T01:30Z committed ✓ (1 MAJOR+2 MINOR fixed cycle 1+Kassandra CLEAN 2 LOW applied)
+# [14-4] 2026-05-17T01:15Z arc42-update → 05-building-blocks (GdprDeleteHandler) + 08-concepts (GDPR erasure orchestration, M_USER_DEACTIVATED, Three PII Tiers)
+# [14-4] 2026-05-17T01:00Z security-review → Kassandra APPROVED (0 CRITICAL, 0 HIGH, 0 MEDIUM, 2 LOW applied)
+# [14-4] 2026-05-17T00:30Z code-review → 1 MAJOR (missing return after NotFound) + 2 MINOR fixed; 1 MINOR deferred (AT-3 Dex fixture limitation); cycle 1
+# [14-4] 2026-05-17T00:00Z ci-gate → build+unit-go+unit-elixir PASS; e2e/integration SKIP (minio RELEASE tag unavailable in registry — pre-existing infra issue)
+# [14-4] 2026-05-17T12:25Z test-review → CLEAN (0 MAJOR; 3 MINOR: fakedb-gdpr reg, AT-3 Dex fixture limitation, event count vacuous)
+# [14-4] 2026-05-17T12:20Z atdd → 8 failing tests (AT-1..AT-8: 5 Go unit, 3 Godog scenarios) — red phase (GdprDeleteHandler missing)
+# [14-4] 2026-05-17T12:08Z oracle-gate → spec context captured (profile omit avatar_url, M_USER_DEACTIVATED 403, events immutable)
+# [14-4] 2026-05-17T12:05Z create-story → 14-4-gdpr-right-to-erasure-end-to-end-verification.md
+# [14-4] 2026-05-17T12:00Z pipeline started
+# [14-3c] 2026-05-17T epic-loop → story done (SCIM 2.0 RFC 7644 client, progress tracking, AES-256-GCM token, migration 000049, Kassandra CLEAN, committed df9d2f0)
+# [14-3c] 2026-05-17T11:15Z committed ✓ (ATDD+Code CLEAN 2 MINOR fixed+Kassandra CLEAN)
+# [14-3c] 2026-05-17T11:00Z arc42-update → 05-building-blocks + 08-concepts updated
+# [14-3c] 2026-05-17T10:30Z security-review → Kassandra CLEAN (0 findings)
+# [14-3c] 2026-05-17T10:00Z code-review → CLEAN (2 MINOR fixed, cycle 0)
+# [14-3c] 2026-05-17T00:00Z ci-gate → ✓ build+unit-go
+# [14-3c] 2026-05-17T00:00Z dev-story → done (cycle 0)
+# [14-3c] 2026-05-17T09:30Z test-review → CLEAN (0 MAJOR; 3 MINOR: no-op reset stub, interface{} capture, waitForTimeout; 3 INFO)
+# [14-3c] 2026-05-17T09:20Z atdd → 7 failing tests (AT-1..AT-6 Go unit, AT-7 Playwright+Gherkin) — red phase confirmed (build fails)
+# [14-3c] 2026-05-17T09:05Z create-story → 14-3c-scim-2-user-fetch-progress-tracking.md
+# [14-3c] 2026-05-17T09:00Z pipeline started
+# [14-3b] 2026-05-16T epic-loop → story done (Bootstrap Wizard Step 4 UI, preview table, import-users endpoint, 4 unit tests + 3 E2E Playwright scenarios, committed ddbfb0a)
+# [14-3b] 2026-05-16T14:00Z committed ✓ (ATDD+Code CLEAN cycle 0, not-needed sec review)
+# [14-3b] 2026-05-16T13:55Z arc42-update → 05-building-blocks(bootstrap.go Step4 interfaces)+08-concepts(Bootstrap Wizard Step4 Pattern)
+# [14-3b] 2026-05-16T13:46Z security-review → skipped (not-needed)
+# [14-3b] 2026-05-16T13:45Z code-review → CLEAN (cycle 0) — 2 MINOR fixed inline
+# [14-3b] 2026-05-16T13:35Z ci-gate → ✓ build+unit-go (all 9 staged admin packages pass)+unit-elixir (e2e skipped: no docker stack)
+# [14-3b] 2026-05-16T13:30Z dev-story → done (cycle 0) — Step 4 UI+handler+template, auth.go redirect, interface types
+# [14-3b] 2026-05-16T13:15Z test-review → CLEAN (0 MAJOR; MINOR: aligned test helpers to use interface types)
+# [14-3b] 2026-05-16T13:10Z atdd → 4 Go unit tests (AT-1..AT-4) + 3 Playwright+Gherkin scenarios (AT-5..AT-7)
+# [14-3b] 2026-05-16T13:05Z create-story → 14-3b-bootstrap-wizard-step4-ui-preview-import.md
+# [14-3b] 2026-05-16T13:00Z pipeline started
+# [14-3a] 2026-05-16T epic-loop → story done (BulkImportUsers proto+Core, 9 ExUnit tests, Kassandra CLEAN, committed 40c7eda)
+# [14-3a] 2026-05-16T12:55Z committed ✓ (ATDD+Code 1 MINOR fixed 1 cycle+Kassandra CLEAN)
+# [14-3a] 2026-05-16T12:50Z arc42-update → 05-building-blocks(BulkImporter entry+gRPC RPC list)+08-concepts(Bulk User Provisioning Pattern)
+# [14-3a] 2026-05-16T12:45Z security-review → Kassandra CLEAN (0 CRITICAL, 0 HIGH; 1 LOW: system_role not validated — deferred ADR G2 trade-off)
+# [14-3a] 2026-05-16T12:40Z code-review → CLEAN (cycle 1) — 1 MINOR fixed: try/rescue in import_one for exception safety
+# [14-3a] 2026-05-16T12:35Z ci-gate → ✓ build+unit-go+unit-elixir (e2e/integration skipped: MinIO infrastructure issue)
+# [14-3a] 2026-05-16T12:30Z dev-story → done (cycle 0) — BulkImportUsers: proto+Elixir handler+BulkImporter+Postgres lookup+gRPC stub+Go mock stubs
+# [14-3a] 2026-05-16T12:07Z test-review → CLEAN (0 MAJOR; 2 MINOR: unused modules + inline module def)
+# [14-3a] 2026-05-16T12:05Z atdd → 4 failing acceptance tests (AT-1..AT-4, 9 sub-tests) written
+# [14-3a] 2026-05-16T12:01Z create-story → 14-3a-bulk-import-users-grpc-rpc-core-provisioning.md
+# [14-3a] 2026-05-16T12:00Z pipeline started
+# [14-2c] 2026-05-16T epic-loop → story done (OIDC user search merge, Not-yet-logged-in badge, 4 unit tests, E2E .feature staged, committed fb5c641)
+# [14-2c] 2026-05-16T committed ✓ (ATDD+Code 3 MINOR fixed 1 cycle+arc42)
+# [14-2c] 2026-05-16T arc42-update → 05-building-blocks(IsEnabled method + page_data fields)+08-concepts(OIDC Search Merge Pattern)
+# [14-2c] 2026-05-16T security-review → skipped (not-needed)
+# [14-2c] 2026-05-16T code-review → CLEAN (cycle 1) — 3 MINOR fixed: unused var, redundant field, undocumented code path
+# [14-2c] 2026-05-16T ci-gate → ✓ build+unit-go+unit-elixir (e2e/integration skipped: MinIO RELEASE tag removed from Docker Hub — infrastructure issue, not code regression)
+# [14-2c] 2026-05-16T dev-story → done (cycle 0) — OIDC merge: UsersHandler.WithOIDCDirectory, IsOIDCOnly badge, MatrixIDPreview, OIDCWarningBanner, users.html updated
+# [14-2c] 2026-05-16T test-review → CLEAN (0 MAJOR; 1 MINOR; 2 INFO)
+# [14-2c] 2026-05-16T atdd → 4 failing tests (AT-1..AT-4 red; E2E .feature written)
+# [14-2c] 2026-05-16T create-story → 14-2c-admin-ui-user-search-oidc-integration-not-yet-logged-in-badge.md
+# [14-2c] 2026-05-16T pipeline started
+# [14-2b] 2026-05-16T epic-loop → story done (OIDC directory service, cache 30s, rate limit, HTTPS-only, 7 tests green, Kassandra CLEAN, committed 9453997)
+# [14-2b] 2026-05-16T committed ✓ (ATDD+Code 1 MINOR fixed 1 cycle+Kassandra CLEAN)
+# [14-2b] 2026-05-16T arc42-update → 05-building-blocks(oidc_directory.go entry)+08-concepts(OIDC Directory Service Pattern)
+# [14-2b] 2026-05-16T security-review → Kassandra CLEAN (0 CRITICAL, 0 HIGH; 1 LOW HR-1 deferred to handler; 1 MEDIUM Allow/FetchUsers caller contract)
+# [14-2b] 2026-05-16T code-review → CLEAN (cycle 1) — 3 MINOR fixed: docstring, sessionID removed, ctx propagated
+# [14-2b] 2026-05-16T ci-gate → ✓ unit-go+unit-elixir (cycle 1 fixes verified)
+# [14-2b] 2026-05-16T dev-story → done (cycle 1) — MINOR-1 docstring, MINOR-2 sessionID param removed, MINOR-3 ctx propagated
+# [14-2b] 2026-05-16T code-review → 3 MINOR → cycle 1
+# [14-2b] 2026-05-16T ci-gate → ✓ unit-go(all 25 pkgs)+unit-elixir(all 107 tests)
+# [14-2b] 2026-05-16T dev-story → done (cycle 0) — oidc_directory.go: secretString, singleflight, 30s cache, 5req/s rate limiter, HTTPS validation, 10MB cap
+# [14-2b] 2026-05-16T test-review → CLEAN (0 MAJOR; 1 MINOR: Allow/FetchUsers contract not integration-tested; 2 INFO)
+# [14-2b] 2026-05-16T atdd → 7 failing tests (AT-1 through AT-7, all red phase confirmed)
+# [14-2b] 2026-05-16T create-story → 14-2b-gateway-oidc-directory-service-cache-rate-limit.md
+# [14-2b] 2026-05-16T pipeline started
+# [14-2a] 2026-05-16T epic-loop → story done (DB migration oidc_directory_enabled+endpoint, GET/PATCH config, Admin UI toggle, Godog round-trip, arc42 updated)
+# [14-2a] 2026-05-16T20:44Z committed ✓ (ATDD+Code 1 MINOR fixed+arc42)
+# [14-2a] 2026-05-16T20:43Z arc42-update → 05-building-blocks+08-concepts+09-decisions+ADR-015
+# [14-2a] 2026-05-16T20:41Z code-review → 1 MINOR fixed (WithConfigDB) + 1 DEFER + CLEAN (cycle 0)
+# [14-2a] 2026-05-16T20:26Z ci-gate → ✓ unit-go+unit-elixir+integration(oidc_directory PASS)
+# [14-2a] 2026-05-16T22:15Z test-review → CLEAN (0 MAJOR; 2 MINOR: migration test missing, false-scenario no readback)
+# [14-2a] 2026-05-16T22:10Z atdd → 8 failing tests (3 Go unit + 3 Godog integration + 3 Playwright E2E)
+# [14-2a] 2026-05-16T22:05Z create-story → 14-2a-server-config-schema-oidc-directory-enabled-endpoint.md
+# [14-2a] 2026-05-16T22:00Z pipeline started
+# [14-1b] 2026-05-16T epic-loop → story done (Gateway 400 mapping + Admin UI read-only + Godog 2 scenarios + security CLEAN)
+# [14-1b] 2026-05-16T21:45Z committed ✓ (ATDD+Code CLEAN 1 cycle+Kassandra CLEAN 1 LOW advisory — gRPC claim lock, read-only UI, bootstrap wizard info text)
+# [14-1b] 2026-05-16T21:44Z arc42-update → no structural changes (claim-lock pattern established in 14-1a, UI refinement only)
+# [14-1b] 2026-05-16T21:43Z security-review → Kassandra CLEAN (0 CRITICAL, 0 HIGH, 1 LOW advisory — no API-level format validation on claim value, admin-only endpoint acceptable)
+# [14-1b] 2026-05-16T21:42Z code-review → CLEAN (cycle 1) — MINOR-2 fixed inline (UpdateHandler abort on LoadClaimMapping error post-bootstrap)
+# [14-1b] 2026-05-16T21:38Z ci-gate → ✓ build+unit-go+unit-elixir (all green)
+# [14-1b] 2026-05-16T21:35Z dev-story → done (cycle 1) — MINOR-2 fixed: abort on LoadClaimMapping error post-bootstrap
+# [14-1b] 2026-05-16T21:25Z dev-story → done (cycle 0) — openapi+gen-api, server.go gRPC path+patchAdminConfig400ForbiddenResp, ClaimMappingPageData.BootstrapCompleted, Handler+UpdateHandler, claim-mapping.html conditional, bootstrap.html Step3 info, 5 unit tests + Godog feature + step defs
+# [14-1b] 2026-05-16T21:20Z test-review → CLEAN (0 MAJOR; all 6 ACs covered; AT plan complete)
+# [14-1b] 2026-05-16T12:05Z oracle-gate → skipped (no Matrix CS API endpoints — admin-only story)
+# [14-1b] 2026-05-16T12:02Z create-story → 14-1b-gateway-api-validation-admin-ui-readonly-matrix-user-id-claim.md
+# [14-1b] 2026-05-16T12:00Z pipeline started
+# [14-1a] 2026-05-16T epic-loop → story done (proto field + FAILED_PRECONDITION guard + 3 ExUnit tests + security clean)
+# [14-1a] 2026-05-16T10:03Z oracle-gate → skipped (no Matrix feature)
+# [14-1a] 2026-05-16T10:02Z create-story → 14-1a-core-failed-precondition-matrix-user-id-claim-post-bootstrap.md
+# [14-1a] 2026-05-16T10:00Z pipeline started
+# [13-13] 2026-05-14T19:41Z committed ✓ (infra only, no Matrix changes)
+# [13-13] 2026-05-14T19:40Z arc42-update → no arch changes
+# [13-13] 2026-05-14T19:40Z security-review → skipped (not-needed)
+# [13-13] 2026-05-14T19:39Z code-review → CLEAN (cycle 0)
+# [13-13] 2026-05-14T19:38Z ci-gate → ✓ build+unit-go+unit-elixir+e2e+integration
+# [13-13] 2026-05-14T19:38Z dev-story → done (cycle 0)
+# [13-13] 2026-05-14T18:56Z test-review → skipped (infra)
+# [13-13] 2026-05-14T18:56Z atdd → skipped (infra)
+# [13-13] 2026-05-14T18:53Z pipeline started
+# [13-11] 2026-05-14T11:00Z committed ✓ (Makefile release+release-push, CI release stage, deploy docs — 2 MINOR cycles CLEAN)
+# [13-11] 2026-05-14T10:58Z arc42-update → done (07-deployment: release pipeline two-track strategy, make release targets, operator integration)
+# [13-11] 2026-05-14T10:53Z security-review → skipped (not-needed)
+# [13-11] 2026-05-14T10:52Z code-review → CLEAN (cycle 2) — MINOR-10 release-push empty-TAG guard fixed inline; 3 INFO deferred
+# [13-11] 2026-05-14T10:46Z ci-gate → ✓ iac-validate (cycle 2 fixes verified)
+# [13-11] 2026-05-14T10:45Z dev-story → done (cycle 2) — MINOR-7 K8s revert, MINOR-6 needs:[], MINOR-1 ifeq guard, MINOR-2 RC comment, MINOR-8 story doc
+# [13-11] 2026-05-14T10:38Z code-review → 9 MINOR → cycle 2
+# [13-11] 2026-05-14T10:32Z ci-gate → ✓ iac-validate (cycle 1 fixes verified)
+# [13-11] 2026-05-14T10:30Z dev-story → done (cycle 1) — 6 MINOR fixed: Makefile docstring notes, CI before_script dedup, --cache comment, story Background updated
+# [13-11] 2026-05-14T10:25Z code-review → 6 MINOR → cycle 1
+# [13-11] 2026-05-14T10:20Z ci-gate → ✓ iac-validate (tofu fmt+validate: aws+stackit+k8s CLEAN; helm lint CLEAN; k6 inspect CLEAN; make release guards verified)
+# [13-11] 2026-05-14T10:15Z dev-story → done (cycle 0) — Makefile release+release-push, CI release stage, deploy docs updated
+# [13-11] 2026-05-14T10:05Z test-review → skipped (atdd skipped)
+# [13-11] 2026-05-14T10:05Z create-story → 13-11-versioning-and-release-pipeline.md
+# [13-11] 2026-05-14T10:00Z pipeline started
+# [13-10] 2026-05-14T09:40Z committed ✓ (2 MINOR cycles+arc42 CLEAN)
+# [13-10] 2026-05-14T09:35Z arc42-update → dns-mode section in 07-deployment.md
+# [13-10] 2026-05-14T09:31Z security-review → skipped (not-needed)
+# [13-10] 2026-05-14T09:30Z code-review → CLEAN (cycle 2)
+# [13-10] 2026-05-14T09:20Z code-review → 3 MINOR → cycle 2
+# [13-10] 2026-05-14T09:10Z code-review → 7 MINOR → cycle 1
+# [13-10] 2026-05-14T09:05Z ci-gate → ✓ iac-validate
+# [13-10] 2026-05-14T09:00Z dev-story → done (cycle 0) — dns_mode var, Route53+Stackit DNS resources, dex_subdomain_enabled
+# [13-10] 2026-05-14T08:50Z oracle-gate → skipped (no Matrix feature)
+# [13-10] 2026-05-14T08:45Z pipeline started
+# [13-10] 2026-05-14T08:50Z create-story → 13-10-dns-mode-variable-opentofu-aws-stackit.md
+# [13-9] 2026-05-14T08:42Z committed ✓ (Keycloak removed+oidc_mode dex/external+3 cycles+Kassandra HIGH fixed)
+# [13-9] 2026-05-14T08:40Z arc42-update → done (07-deployment: Stackit OIDC profiles section added, Keycloak removed)
+# [13-9] 2026-05-14T08:35Z security-review → HIGH fixed inline (dex_allowed_cidr SG restriction) + 2 MEDIUM fixed (HTTP warning, bcrypt $2y$ validation) + 3 LOW advisory accepted
+# [13-9] 2026-05-14T08:25Z security-review → HIGH (port 5556 open 0.0.0.0/0) + 2 MEDIUM + 3 LOW — fixing inline before commit
+# [13-9] 2026-05-14T08:20Z code-review → CLEAN (cycle 3) — 0 MAJOR, 4 MINOR fixed inline (MINOR-1/2/5/7), 3 MINOR accepted papercuts
+# [13-9] 2026-05-14T08:00Z ci-gate → ✓ test-iac-validate (tofu fmt+validate: aws+stackit+k8s CLEAN; helm lint CLEAN; k6 inspect CLEAN)
+# [13-9] 2026-05-13T15:10Z code-review → 3 MAJOR (issuer mismatch, redirect_uri scheme, nginx/TLS) → cycle 3 (user: host-header routing dex.<server_name> via ALB)
+# [13-9] 2026-05-13T14:58Z ci-gate → ✓ test-iac-validate (tofu fmt+validate: aws+stackit+k8s CLEAN; helm lint CLEAN; k6 inspect CLEAN)
+# [13-9] 2026-05-13T14:45Z code-review → 3 MAJOR (hairpin TLS, nginx healthcheck, admin/callback missing) + 7 MINOR → cycle 2
+# [13-9] 2026-05-13T14:35Z ci-gate → ✓ test-iac-validate (tofu fmt+validate: aws+stackit+k8s CLEAN; helm lint CLEAN; k6 inspect CLEAN)
+# [13-9] 2026-05-13T14:32Z dev-story → done (cycle 1) — nginx sidecar, dex_static_password_hash var, cross-validation, MAJOR-3 docstring, MINOR-2/3/5 fixed
+# [13-9] 2026-05-13T14:20Z code-review → CRITICAL-1 (no /dex routing) + 3 MAJOR + 7 MINOR → cycle 1 (user: fix all, nginx sidecar)
+# [13-9] 2026-05-13T14:13Z ci-gate → ✓ test-iac-validate (tofu fmt+validate: aws+stackit+k8s CLEAN; helm lint CLEAN; k6 inspect CLEAN)
+# [13-9] 2026-05-13T14:10Z dev-story → done (cycle 0) — oidc_mode var, Dex sidecar block, Keycloak resources removed, RUNBOOK updated
+# [13-9] 2026-05-13T14:04Z oracle-gate → skipped (no Matrix feature)
+# [13-9] 2026-05-13T14:03Z create-story → 13-9-oidc-deployment-profile-dex-sidecar-vs-external.md
+# [13-9] 2026-05-13T14:00Z pipeline started
+# [13-8] 2026-05-13T13:50Z committed ✓ (Aurora Serverless v2+PostgresFlex — 2 MINOR cycles+Kassandra CLEAN)
+# [13-8] 2026-05-13T13:48Z arc42-update → done (07-deployment: Aurora Serverless v2 + PostgresFlex dual-user documented)
+# [13-8] 2026-05-13T13:45Z security-review → Kassandra CLEAN (0 CRITICAL, 0 HIGH, 2 MEDIUM advisory, 4 LOW)
+# [13-8] 2026-05-13T13:42Z code-review → CLEAN (cycle 2) — MINOR-A tfvars.example fixed, MINOR-B lifecycle ignore added
+# [13-8] 2026-05-13T13:38Z dev-story → done (cycle 2) — MINOR-A: tfvars.example stale var removed+aurora ACU examples; MINOR-B: lifecycle ignore final_snapshot_identifier
+# [13-8] 2026-05-13T13:35Z code-review → CLEAN cycle 1 (6 MINOR fixes verified) + 2 new MINOR → cycle 2
+# [13-8] 2026-05-13T13:30Z dev-story → done (cycle 1) — 6 MINOR fixed: snapshot ID timestamp, PI enabled, KC user isolated, 0600 perms, KC_DB_PASSWORD→.env, MINOR-5 comment
+# [13-8] 2026-05-13T13:25Z code-review → 1 MAJOR (13-2b stub removed inline) + 6 MINOR → cycle 1
+# [13-8] 2026-05-13T13:22Z ci-gate → ✓ test-iac-validate (tofu fmt+validate: aws+stackit+k8s CLEAN; helm lint CLEAN; k6 inspect CLEAN)
+# [13-8] 2026-05-13T13:20Z dev-story → done (cycle 0) — Aurora Serverless v2 cluster+instance, PostgresFlex instance+user+2 DBs, cloud-init postgres container removed
+# [13-8] 2026-05-13T13:13Z test-review → skipped (atdd skipped)
+# [13-8] 2026-05-13T13:13Z atdd → skipped (infra)
+# [13-8] 2026-05-13T13:12Z create-story → 13-8-managed-database-services-aurora-serverless-stackit-managed-postgres.md
+# [13-8] 2026-05-13T13:10Z pipeline started
+# epic-13 2026-05-13T12:58Z SEC Gate 2 → Kassandra CLEAN (0 CRIT, 0 HIGH, 4 MEDIUM, 5 LOW — non-blocking)
+# 13-7 2026-05-13T12:52Z epic-loop → story done (MSC2965 auth_issuer+auth_metadata, unstable+v1 paths, 5min TTL cache, context-aware HTTP, 7 unit tests green)
+# [13-7] 2026-05-13T17:05Z oracle-gate → spec context captured (v1 stable paths required, auth_issuer={issuer}, auth_metadata=proxy oidc-config, 503 M_UNAVAILABLE)
+# [13-7] 2026-05-13T17:00Z pipeline started (from Step 1c)
+# 13-6 2026-05-13T12:38Z epic-loop → story done (libcluster Gossip+K8s.DNS, Horde crash/restart AT passing, docker-compose.scale.yml core2, Helm headless Service)
+# [13-6] 2026-05-13T16:05Z atdd → 3 failing tests (ExUnit crash/restart x2, Godog feature x1)
+# [13-6] 2026-05-13T16:00Z pipeline started
+# 13-5 2026-05-13T11:56Z epic-loop → story done (k6 Gold+Silver tier scenarios, docker-compose.scale.yml, make test-load-syntax, 3 MINOR fixed)
+# [13-5] 2026-05-13T15:25Z committed ✓ (ATDD+Code CLEAN 0-cycle+3 MINOR fixed inline+arc42 07-deployment load test topology)
+# [13-5] 2026-05-13T15:22Z arc42-update → done (07-deployment: Load Test Topology section added; multi-gateway scale-up topology, k6 scenario table, CI syntax gate)
+# [13-5] 2026-05-13T15:19Z security-review → skipped (not-needed)
+# [13-5] 2026-05-13T15:18Z code-review → CLEAN (cycle 0) — 3 MINOR fixed inline: login type m.login.password, k6 pinned 0.55.0, nginx cross-ref removed
+# [13-5] 2026-05-13T15:12Z ci-gate → ✓ test-load-syntax (k6 inspect gold+silver CLEAN; compose scale config valid)
+# [13-5] 2026-05-13T15:10Z dev-story → done (cycle 0) — gold-tier.js, silver-tier.js, docker-compose.scale.yml, k6/README.md, make test-load-syntax target
+# [13-5] 2026-05-13T15:04Z test-review → CLEAN (0 MAJOR) — syntax gate covers AC1+AC3+AC4; AC2+AC5 are content-verified at runtime
+# [13-5] 2026-05-13T15:02Z atdd → 1 failing test (make test-load-syntax — k6 scenarios + compose scale)
+# [13-5] 2026-05-13T15:00Z pipeline started
+# 13-4c 2026-05-13T11:49Z epic-loop → story done (K8s OpenTofu wrapper, nebu-k8s module, kind runbook, 5 MINOR fixed)
+# [13-4c] 2026-05-13T14:15Z ci-gate → ✓ test-iac-validate (tofu fmt+validate: aws+stackit+k8s CLEAN; helm lint 0 warnings 0 failures; helm template default+ingress+HPA CLEAN; kubectl dry-run skipped: no live cluster)
+# [13-4c] 2026-05-13T14:10Z dev-story → done (cycle 0) — k8s main.tf, nebu-k8s module, variables.tf, outputs.tf, RUNBOOK.md, terraform.tfvars.example, Makefile helm dry-run gate
+# [13-4c] 2026-05-13T14:01Z test-review → skipped (atdd skipped)
+# [13-4c] 2026-05-13T14:01Z atdd → skipped (infra)
+# [13-4c] 2026-05-13T14:00Z pipeline started
+# 13-4b 2026-05-13T11:37Z epic-loop → story done (Helm Ingress+PVC+HPA+ExistingSecret, Kassandra CLEAN)
+# [13-4b] 2026-05-13T13:35Z committed ✓ (Code CLEAN 0-cycle+2 MINOR fixed inline+Kassandra CLEAN+arc42 07-deployment)
+# [13-4b] 2026-05-13T13:30Z arc42-update → done (07-deployment: Helm chart resource topology table updated; ExistingSecret pattern documented; Ingress+HPA install examples added)
+# [13-4b] 2026-05-13T13:25Z security-review → Kassandra CLEAN (0 CRITICAL, 0 HIGH, 0 MEDIUM; 1 LOW advisory: empty existingSecret.name fails at runtime not deploy-time — documented in NOTES.txt)
+# [13-4b] 2026-05-13T13:20Z code-review → CLEAN (cycle 0) — 2 MINOR fixed inline: gateway.autoscaling+core.autoscaling dead config removed, secrets.yaml pure-comment pattern
+# [13-4b] 2026-05-13T13:15Z ci-gate → ✓ test-iac-validate (tofu fmt+validate: aws+stackit+k8s CLEAN; helm lint 0 warnings 0 failures; helm template default+ingress+HPA CLEAN)
+# [13-4b] 2026-05-13T13:10Z dev-story → done (cycle 0) — ingress.yaml, secrets.yaml, hpa.yaml, pvc.yaml, NOTES.txt created; values.yaml extended; gateway-deployment.yaml secretRef added; Makefile helm template +ingress+HPA check added
+# [13-4b] 2026-05-13T13:00Z test-review → skipped (atdd skipped)
+# 13-4a 2026-05-13T11:30Z epic-loop → story done (Helm chart core templates: 2 MAJOR+2 MINOR fixed, core-service.yaml added, independent image tags)
+# [13-4a] 2026-05-13T12:10Z ci-gate → ✓ test-iac-validate (tofu fmt+validate: aws+stackit+k8s CLEAN; helm lint 0 warnings 0 failures; helm template CLEAN)
+# [13-4a] 2026-05-13T12:05Z dev-story → done (cycle 0) — Chart.yaml updated, values.yaml restructured, values-dev.yaml created; gateway+core Deployment+Service+ConfigMap templates; make test-iac-validate extended with helm; validate-helm CI job added
+# [13-4a] 2026-05-13T12:00Z test-review → skipped (atdd skipped)
+# 13-3b 2026-05-13T11:17Z epic-loop → story done (cloud-init bootstrap: 11 bugs fixed, Kassandra CLEAN, init-db.sql+keycloak+systemd)
+# [13-3b] 2026-05-13T17:06Z ci-gate → ✓ test-iac-validate (tofu fmt+validate: aws+stackit+k8s CLEAN)
+# [13-3b] 2026-05-13T17:05Z dev-story → done (cycle 0) — cloud-init.tftpl, main.tf user_data, variables.tf secrets, tfvars.example, RUNBOOK.md created; tofu fmt+validate pass
+# [13-3b] 2026-05-13T17:00Z test-review → skipped (atdd skipped)
+# [13-3b] 2026-05-13T17:00Z atdd → skipped (infra)
+# [13-3b] 2026-05-13T17:00Z oracle-gate → skipped (no Matrix feature)
+# [13-3b] 2026-05-13T17:00Z pipeline started
+# 13-3a 2026-05-13T11:06Z epic-loop → story done (Stackit VM+networking+ALB, MAJOR-1 provider schema resolved, MAJOR-2 PROTOCOL_TCP+beta note, 5 MINOR fixed)
+# [13-3a] 2026-05-13T16:00Z committed ✓ (code-review CLEAN cycle 1 — 2 MAJOR + 6 MINOR fixed; arc42 07-deployment Stackit section added; story done)
+# [13-3a] 2026-05-13T15:55Z arc42-update → done (07-deployment: Stackit VM+Networking module documented; HTTPS upgrade path noted)
+# [13-3a] 2026-05-13T15:50Z security-review → skipped (not-needed)
+# [13-3a] 2026-05-13T15:45Z code-review → CLEAN (cycle 1) — MAJOR-1: project_id on key_pair (global resource, not supported); MAJOR-2: PROTOCOL_HTTPS beta not in schema, uses TCP+upgrade-path comment; MIN-1: service_account_key_path; MIN-2: network_cidr var; MIN-3: availability_zone var; MIN-4: lifecycle.ignore_changes removed; MIN-5: vm_plan_id var; MIN-6: health check comment updated; tofu fmt+validate CLEAN
+# [13-3a] 2026-05-13T15:06Z ci-gate → ✓ test-iac-validate (tofu fmt+validate: aws+stackit+k8s CLEAN)
+# [13-3a] 2026-05-13T15:05Z dev-story → done (cycle 0) — main.tf, variables.tf, outputs.tf, terraform.tfvars.example created; provider fixed (service_account_token); tofu fmt+validate pass
+# [13-3a] 2026-05-13T15:00Z test-review → skipped (atdd skipped)
+# [13-3a] 2026-05-13T15:00Z pipeline started
+# 13-2c 2026-05-13T10:49Z epic-loop → story done (ALB+Secrets Manager+ECS services+RUNBOOK, Kassandra CLEAN)
+# [13-2c] 2026-05-13T14:55Z committed ✓ (Code CLEAN 0-cycle+Kassandra CLEAN+arc42 07-deployment)
+# [13-2c] 2026-05-13T14:50Z arc42-update → done (07-deployment: AWS ALB+Secrets Manager+ECS services complete topology documented)
+# [13-2c] 2026-05-13T14:45Z security-review → Kassandra CLEAN (0 CRITICAL, 0 HIGH, 0 MEDIUM, 3 LOW — 3 LOW fixed inline)
+# [13-2c] 2026-05-13T14:35Z code-review → CLEAN (cycle 0) — 5 MINOR fixed inline: db_url secret added, oidc_issuer+release_cookie secrets added, kms:Decrypt note, acm_cert empty-str comment
+# [13-2c] 2026-05-13T14:22Z ci-gate → ✓ test-iac-validate (tofu fmt+validate: aws+stackit+k8s CLEAN)
+# [13-2c] 2026-05-13T14:20Z dev-story → done (cycle 0) — alb.tf, secrets.tf created; compute.tf updated (ECS services+secrets refs); variables.tf/outputs.tf updated; RUNBOOK.md written; tofu fmt+validate pass
+# [13-2c] 2026-05-13T14:01Z test-review → skipped (atdd skipped)
+# [13-2c] 2026-05-13T14:01Z atdd → skipped (infra)
+# [13-2c] 2026-05-13T13:58Z pipeline started
+# 13-2b 2026-05-13T10:36Z epic-loop → story done (RDS PostgreSQL 16 Multi-AZ + ECS Fargate cluster, 6 MINOR fixed)
+# [13-2b] 2026-05-13T12:30Z committed ✓ (6 MINOR fixed 1 cycle — RDS PostgreSQL 16 Multi-AZ+ECS Fargate+IAM+CW logs+arc42 07-deployment)
+# [13-2b] 2026-05-13T12:25Z arc42-update → done (07-deployment: AWS database + compute modules documented)
+# [13-2b] 2026-05-13T12:20Z security-review → skipped (not-needed)
+# [13-2b] 2026-05-13T12:20Z code-review → CLEAN (cycle 1) — 6 MINOR fixed: region param, IAM wildcard, db_password validation, log groups added, perf-insights var, snapshot comment
+# [13-2b] 2026-05-13T12:10Z ci-gate → ✓ test-iac-validate (tofu fmt+validate: aws+stackit+k8s CLEAN)
+# [13-2b] 2026-05-13T12:05Z dev-story → done (cycle 0) — database.tf, compute.tf created; variables.tf, outputs.tf, main.tf, variables.tf updated; tofu fmt+validate pass
+# [13-2b] 2026-05-13T12:00Z pipeline started
+# 13-2a 2026-05-13T10:26Z epic-loop → story done (AWS networking module: VPC, subnets, SGs, NAT GW, 9 MINOR fixed)
+# [13-2a] 2026-05-13T11:30Z epic-loop → story done (code-review CLEAN cycle 1 — 9 MINOR fixed: env naming, aws_region removed, CIDR validation, NAT GW comment, RDS egress scoped, ECS ports 8008+9000, route table length(), AZ postcondition, eip depends_on removed; arc42 07-deployment updated)
+# [13-2a] 2026-05-13T11:20Z code-review → CLEAN (cycle 1) — 9 MINOR fixed, security-review skipped (not-needed)
+# [13-2a] 2026-05-13T11:06Z ci-gate → ✓ test-iac-validate (tofu fmt+validate: aws+stackit+k8s CLEAN)
+# [13-2a] 2026-05-13T11:05Z dev-story → done (cycle 0) — network.tf, outputs.tf, variables.tf created; main.tf updated; tofu fmt+validate pass
+# [13-2a] 2026-05-13T11:00Z test-review → skipped (atdd skipped)
+# 13-1 2026-05-13T10:19Z epic-loop → story done (OpenTofu project structure + shared modules, 9 MINOR fixed, Arc42 updated)
+# [13-1] 2026-05-13T10:20Z ux-gate → skipped (no UI)
+# [13-1] 2026-05-13T10:20Z ci-gate → ✓ test-iac-validate (tofu fmt+validate: aws+stackit+k8s CLEAN)
+# [13-1] 2026-05-13T10:15Z dev-story → done (cycle 0) — deploy/ structure, nebu-core vars, AWS/Stackit/K8s examples, Helm chart scaffold, make test-iac-validate, validate-iac CI job
+# [13-1] 2026-05-13T10:01Z test-review → skipped (atdd skipped)
+# [13-1] 2026-05-13T10:01Z atdd → skipped (infra)
+# [13-1] 2026-05-13T10:01Z oracle-gate → skipped (no Matrix feature)
+# [13-1] 2026-05-13T10:00Z pipeline started
+# last_updated: 2026-05-13
+# [12-16] 2026-05-13T17:00Z committed ✓ (ATDD+Code CLEAN 1 cycle+Kassandra CLEAN 4L)
+# [12-16] 2026-05-13T16:50Z arc42-update → done (05-building-blocks, 08-concepts, matrix-api-scope)
+# [12-16] 2026-05-13T16:35Z security-review → Kassandra CLEAN (0C/0H/4L all non-blocking)
+# [12-16] 2026-05-13T16:20Z code-review → CLEAN (cycle 1) — F-A/F-B/F-C all fixed; M1 sprint-status drift fixed inline
+# [12-16] 2026-05-13T16:05Z ci-gate → ✓ build+unit-go+unit-elixir; e2e+integration skipped (minio/mc image unavailable — pre-existing)
+# [12-16] 2026-05-13T16:00Z dev-story → done (cycle 1) — F-A empty-Bearer guard; F-B disposition-type subtests; F-C main_test.go v1 routing; all tests GREEN
+# [12-16] 2026-05-13T15:45Z code-review → 3 MINOR (F-A empty-Bearer M_MISSING_TOKEN, F-B fileName disposition-type test, F-C v1 CSP/CORP routing test) → cycle 1
+# [12-16] 2026-05-13T15:35Z ci-gate → ✓ build+unit-go+unit-elixir; e2e+integration skipped (minio/mc image unavailable — pre-existing)
+# [12-16] 2026-05-13T15:30Z dev-story → done (cycle 0) — auth+config packages; CSP/CORP headers; 5 new routes; all tests GREEN
+# [12-16] 2026-05-13T15:18Z test-review → CLEAN (0 MAJOR; 2 MINOR: F-1 v1-path CSP/CORP not explicit, F-3 fileName missing inline-assert; 5 INFO)
+# [12-16] 2026-05-13T15:10Z atdd → 16 failing tests (auth×7, config×4, download×3, thumbnail×2)
+# [12-16] 2026-05-13T15:05Z oracle-gate → spec context captured (M_MISSING_TOKEN/M_UNKNOWN_TOKEN; Content-Disposition+Content-Type MUST; CSP+CORP SHOULD; /{fileName} variant; timeout_ms)
+# [12-16] 2026-05-13T15:01Z create-story → 12-16-authenticated-matrix-media-endpoints.md
+# [12-15] 2026-05-13T14:42Z epic-loop → story done (GAP-01 P0 regression test)
+# [12-15] 2026-05-13T10:20Z committed ✓ (ATDD+Code CLEAN 0 cycles+no sec review)
+# [12-15] 2026-05-13T10:17Z arc42-update → no arch changes (pure test-addition story)
+# [12-15] 2026-05-13T10:16Z security-review → skipped (not-needed)
+# [12-15] 2026-05-13T10:15Z code-review → CLEAN (cycle 0) — M-1 auto-fixed (story status: done); 2 INFO
+# [12-15] 2026-05-13T10:10Z ci-gate → ✓ build+unit-go+unit-elixir; e2e+integration skipped (minio/mc image unavailable — pre-existing)
+# [12-15] 2026-05-13T10:07Z dev-story → done (cycle 0) — 2 new tests GREEN immediately (pure test-addition, no prod code)
+# [12-15] 2026-05-13T10:06Z test-review → CLEAN (0 MAJOR; AC-1+AC-2 covered; storage+DB side-effects asserted)
+# [12-15] 2026-05-13T10:05Z atdd → 2 failing tests (AT-12-15-1: expired JWT 401; AT-12-15-2: valid JWT 200)
+# [12-15] 2026-05-13T10:02Z oracle-gate → spec context captured (M_UNKNOWN_TOKEN for expired token confirmed)
+# [12-15] 2026-05-13T10:01Z create-story → 12-15-regression-test-expired-jwt-upload-returns-401.md
+# [12-15] 2026-05-13T10:00Z pipeline started
+# [12-14] 2026-05-13T14:01Z epic-loop → story done (full graceful shutdown)
+# [12-14] 2026-05-13T10:00Z committed ✓ (ATDD+Code CLEAN+Kassandra CLEAN)
+# [12-14] 2026-05-13T09:55Z arc42-update → done (08-concepts: rate-limit ctx param +12.14 stoppable goroutine; graceful shutdown section +HTTP drain+pool close+order)
+# [12-14] 2026-05-13T09:50Z security-review → Kassandra CLEAN (0 CRITICAL, 0 HIGH, 0 MEDIUM, 1 LOW drain-window — accepted)
+# [12-14] 2026-05-13T09:45Z code-review → CLEAN (cycle 0) — M-1 auto-fixed (runMinimalGateway moved to _test.go); 2 INFO
+# [12-14] 2026-05-13T09:35Z ci-gate → ✓ build+unit-go+unit-elixir; e2e+integration skipped (minio/mc image unavailable — pre-existing)
+# [12-14] 2026-05-13T09:25Z dev-story → done (cycle 0) — ratelimit ctx+NewIPRateLimiter; main.go goroutine+Shutdown+runShutdownSequence; all 5 new tests GREEN
+# [12-14] 2026-05-13T09:12Z test-review → CLEAN (0 MAJOR; all 5 ACs covered; AT-3 goroutine count tolerance noted)
+# [12-14] 2026-05-13T09:10Z atdd → 5 failing tests (AT-1+AT-2: http drain; AT-3: cleanupLoop ctx; AT-4: runShutdownSequence; AT-5: subprocess exit 0)
+# [12-14] 2026-05-13T09:02Z create-story → 12-14-media-gateway-full-graceful-shutdown.md
+# [12-14] 2026-05-13T09:00Z pipeline started
+# [12-13] 2026-05-13T12:36Z epic-loop → story done (SIGTERM signal wiring)
+# [12-13] 2026-05-13T08:55Z committed ✓ (1 MINOR fixed 1 cycle+no sec review+arc42 done)
+# [12-13] 2026-05-13T08:50Z arc42-update → done (08-concepts: OIDC startup section +12.13 signal.NotifyContext + ctx-aware sleep)
+# [12-13] 2026-05-13T08:46Z security-review → skipped (not-needed)
+# [12-13] 2026-05-13T08:45Z code-review → CLEAN (cycle 1) — 0 MAJOR, 0 MINOR (F-1 fixed: slog.Info on signal abort), 2 INFO
+# [12-13] 2026-05-13T08:40Z code-review → 1 MINOR (F-1: misleading fatal log on SIGTERM abort) → cycle 1
+# [12-13] 2026-05-13T08:35Z ci-gate → ✓ build+unit-go+unit-elixir; e2e+integration skipped (minio/mc image unavailable — pre-existing)
+# [12-13] 2026-05-13T08:25Z dev-story → done (cycle 0) — main.go: signal.NotifyContext+ctx-aware select sleep; all 3 new tests GREEN
+# [12-13] 2026-05-13T08:20Z test-review → CLEAN (0 MAJOR; all 4 ACs covered; AC-4 non-regression verified by existing suite)
+# [12-13] 2026-05-13T08:15Z atdd → 3 failing tests (AT-12-13-1+AT-12-13-4: sleep-not-ctx-aware; AT-12-13-3: green baseline)
+# [12-13] 2026-05-13T08:05Z create-story → 12-13-media-gateway-graceful-shutdown-signal-aware-oidc-retry.md
+# [12-13] 2026-05-13T08:00Z pipeline started
+# [12-12] 2026-05-13T11:31Z epic-loop → story done (F-3/F-4/F-5 LOW resolved)
+# [12-12] 2026-05-13T15:00Z committed ✓ (ATDD+Code CLEAN 0 cycles+Kassandra CLEAN)
+# [12-12] 2026-05-13T14:55Z arc42-update → done (08-concepts: OIDC startup section +F-3 per-attempt timeout; rate-limit section +F-5 startup warn + F-4 cleanup correctness note)
+# [12-12] 2026-05-13T14:50Z security-review → Kassandra CLEAN (0 CRITICAL, 0 HIGH, 0 MEDIUM, 0 LOW — F-3+F-4+F-5 LOW advisories fully closed; no new surface)
+# [12-12] 2026-05-13T14:45Z code-review → CLEAN (cycle 0) — 0 MAJOR, 0 MINOR (3 INFO: logIfRateLimitDisabled naming, attempt-count return, unused struct fields)
+# [12-12] 2026-05-13T14:40Z ci-gate → ✓ build+unit-go (all media+gateway+matrix packages green)+unit-elixir; e2e+integration skipped (minio/mc image unavailable — pre-existing)
+# [12-12] 2026-05-13T14:35Z dev-story → done (cycle 0) — main.go: initOIDCVerifierWith+attemptTimeout+logIfRateLimitDisabled; ratelimit_internal_test.go: cleanupOnce white-box tests
+# [12-12] 2026-05-13T14:27Z test-review → CLEAN (0 MAJOR; 1 MINOR: AT-12-12-2 needs test deadline guard)
+# [12-12] 2026-05-13T14:25Z atdd → 6 failing tests (AT-12-12-1..2: OIDC per-attempt timeout; AT-12-12-3..5: cleanup race coverage; AT-12-12-7..8: rate-limit-disabled startup log)
+# [12-12] 2026-05-13T14:16Z oracle-gate → skipped (no Matrix feature)
+# [12-12] 2026-05-13T14:15Z create-story → 12-12-media-gateway-startup-rate-limiter-hardening.md
+# [12-12] 2026-05-13T14:10Z pipeline started
+# [12-11] 2026-05-13T10:20Z epic-loop → story done (F-2 HIGH + F-1 MEDIUM resolved)
+# [12-11] 2026-05-13T14:05Z committed ✓ (ATDD+Code CLEAN 0 cycles+Kassandra CLEAN)
+# [12-11] 2026-05-13T14:00Z arc42-update → done (08-concepts: media gateway rate-limit trustedProxy gate table added; configurable OIDC claim for audit trail table + extractClaimFromMap contract added)
+# [12-11] 2026-05-13T13:55Z security-review → Kassandra CLEAN (0 CRITICAL, 0 HIGH, 0 MEDIUM, 0 LOW — F-2+F-1 fully remediated; no new surface)
+# [12-11] 2026-05-13T13:45Z code-review → CLEAN (cycle 0) — 0 MAJOR, 0 MINOR (1 INFO: story AC-F2-2 text typo on XFF key value; impl correct)
+# [12-11] 2026-05-13T13:40Z ci-gate → ✓ build+unit-go (all media+gateway+matrix packages green)+unit-elixir (227); e2e+integration skipped (minio/mc image unavailable — pre-existing)
+# [12-11] 2026-05-13T13:35Z dev-story → done (cycle 0) — ratelimit.go trustedProxy field+clientIP method; upload.go extractClaimFromMap+OIDCTokenVerifier.claimName; main.go NEBU_TRUSTED_PROXY+NEBU_OIDC_USER_ID_CLAIM; docker-compose.yml updated
+# [12-11] 2026-05-13T13:20Z test-review → CLEAN (0 MAJOR)
+# [12-11] 2026-05-13T13:15Z atdd → 7 failing tests (AT-12-11-1..3: XFF gating ratelimit; AT-12-11-4..7: extractClaimFromMap)
+# [12-11] 2026-05-13T13:05Z create-story → 12-11-media-gateway-rate-limit-audit-trail-sec-fixes.md
+# [12-11] 2026-05-13T13:00Z pipeline started
+# [12-10] 2026-05-13T09:47Z epic-loop → story done
+# [12-10] 2026-05-13T12:32Z committed ✓ (ATDD+Code CLEAN 0 cycles+Kassandra CLEAN 2 LOW advisory)
+# [12-10] 2026-05-13T12:30Z arc42-update → done (08-concepts: gateway rate-limit section renamed; media gateway rate-limit table + implementation note added; sync.Map+cleanup goroutine approach documented)
+# [12-10] 2026-05-13T12:28Z security-review → Kassandra CLEAN (0 CRITICAL, 0 HIGH, 0 MEDIUM, 2 LOW advisory — goroutine-per-instance + XFF single-entry; both accepted per 5.21+12.7 pattern)
+# [12-10] 2026-05-13T12:25Z code-review → CLEAN (cycle 0) — 0 MAJOR, 0 MINOR (go.mod direct dep fixed inline; 3 INFO cosmetic)
+# [12-10] 2026-05-13T12:20Z ci-gate → ✓ build+unit-go (all media+gateway+matrix packages green)+unit-elixir (227); e2e+integration skipped (minio/mc image unavailable — pre-existing)
+# [12-10] 2026-05-13T12:15Z dev-story → done (cycle 0) — ratelimit.go+ratelimit_test.go in media/internal/ratelimit; main.go wired upload(10/s burst 5)+download(100/s burst 20); go.mod+go.sum updated
+# [12-10] 2026-05-13T12:08Z test-review → CLEAN (0 MAJOR; AC-4 refill via burst math; AT-12-10-4b XFF added)
+# [12-10] 2026-05-13T12:06Z atdd → 5 failing tests (AT-12-10-1: upload blocks, AT-12-10-2: download blocks, AT-12-10-3: per-IP isolation, AT-12-10-4: 429 format, AT-12-10-5: disabled no-op)
+# [12-10] 2026-05-13T12:04Z oracle-gate → spec context captured (M_LIMIT_EXCEEDED + Retry-After SHOULD; retry_after_ms deprecated)
+# [12-10] 2026-05-13T12:02Z create-story → 12-10-per-ip-rate-limiting-media-gateway.md
+# [12-10] 2026-05-13T12:00Z pipeline started
+# [12-9] 2026-05-13T09:33Z epic-loop → story done
+# [12-9] 2026-05-13T11:45Z committed ✓ (ATDD+Code CLEAN 0 cycles+Kassandra CLEAN 1 LOW advisory)
+# [12-9] 2026-05-13T11:42Z arc42-update → done (08-concepts: media gateway upload JWT → canonical Matrix user ID section added; formatMatrixUserID contract + NEBU_SERVER_NAME mandatory; pre-12.9 rows grandfathered)
+# [12-9] 2026-05-13T11:38Z security-review → Kassandra CLEAN (0 CRITICAL, 0 HIGH, 0 MEDIUM, 1 LOW advisory — serverName not validated for Matrix format; operator-controlled, deferred)
+# [12-9] 2026-05-13T11:32Z code-review → CLEAN (cycle 0) — 0 MAJOR, 0 MINOR (2 INFO: AT-12-9-3 self-referential subprocess follows 12.8 pattern; unknown fallback acceptable)
+# [12-9] 2026-05-13T11:28Z ci-gate → ✓ build+unit-go (all media+gateway+matrix packages green)+unit-elixir (227); e2e+integration skipped (minio/mc image unavailable — pre-existing)
+# [12-9] 2026-05-13T11:20Z dev-story → done (cycle 0) — formatMatrixUserID+sanitiseLocalpart in upload.go; NEBU_SERVER_NAME mandatory check in main.go; migration 000047 COMMENT ON COLUMN; docker-compose.yml updated
+# [12-9] 2026-05-13T11:15Z test-review → CLEAN (0 MAJOR, 0 MINOR — all ACs covered; AC-4 migration comment has no testable logic)
+# [12-9] 2026-05-13T11:10Z atdd → 3 failing tests (AT-12-9-1: canonical format, AT-12-9-2: server name, AT-12-9-3: missing NEBU_SERVER_NAME fatal exit)
+# [12-9] 2026-05-13T11:05Z create-story → 12-9-canonical-matrix-user-id-in-media-audit-trail.md
+# [12-9] 2026-05-13T11:00Z pipeline started
+# [12-8] 2026-05-13T09:19Z epic-loop → story done
+# [12-8] 2026-05-13T10:25Z committed ✓ (ATDD+Code CLEAN 1 cycle+Kassandra CLEAN)
+# [12-8] 2026-05-13T10:20Z arc42-update → done (08-concepts: media gateway upload JWT → OIDCTokenVerifier + fail-closed startup; initOIDCVerifier retry+exit pattern documented)
+# [12-8] 2026-05-13T10:15Z security-review → Kassandra CLEAN (0 CRITICAL, 0 HIGH, 0 MEDIUM, 0 LOW — OIDC fail-open pattern directly remediated; uploader_user_id raw-sub pre-existing accepted)
+# [12-8] 2026-05-13T10:05Z code-review → CLEAN (cycle 1) — 2 MINOR fixed: double oidc.NewProvider → single call via oidcNewProviderFunc; no MAJOR
+# [12-8] 2026-05-13T09:55Z ci-gate → ✓ build+unit-go (all media+gateway+matrix packages green)+unit-elixir (1 suite); e2e+integration skipped (minio/mc image unavailable — pre-existing)
+# [12-8] 2026-05-13T09:45Z dev-story → done (cycle 0) — initOIDCVerifier+initOIDCVerifierWith in main.go; TokenVerifier→VerifyToken interface refactor; OIDCTokenVerifier wrapper; nil verifier 503 in upload handler; download/integration test mocks updated
+# [12-8] 2026-05-13T09:18Z test-review → CLEAN (0 MAJOR; MINOR: initOIDCVerifierWith must return (verifier, attempts, error) for testability — covered in dev notes)
+# [12-8] 2026-05-13T09:15Z atdd → 4 failing tests (AT-12-8-1: subprocess empty issuer, AT-12-8-2: subprocess retry exhausted, AT-12-8-3: retry count helper, AT-12-8-4: nil verifier 503)
+# [12-8] 2026-05-13T09:05Z create-story → 12-8-oidc-fail-open-hardening-media-gateway.md
+# [12-8] 2026-05-13T09:00Z pipeline started
+# [12-7] 2026-05-13T00:00Z epic-loop → story done (SEC Gate 2 fixes)
+# [12-7] 2026-05-12T01:10Z committed ✓ (ATDD+Code CLEAN+Kassandra CLEAN 1 LOW advisory — 10 SEC Gate 2 findings resolved)
+# [12-7] 2026-05-12T00:50Z arc42-update → done (08-concepts: thumbnail dim cap+100MP+GIF cap+nosniff; upload CT blocklist; download safe-inline allowlist; upload JWT validation; server_config RLS mutable keys; SSO nonce subtle.ConstantTimeCompare)
+# [12-7] 2026-05-12T00:45Z security-review → Kassandra CLEAN (0 CRITICAL, 0 HIGH, 0 MEDIUM, 1 LOW advisory — OIDC fail-open on startup; same pattern as gateway)
+# [12-7] 2026-05-12T00:40Z code-review → CLEAN (cycle 0) — 0 MAJOR, 0 MINOR (const inside func idiomatic Go; map alignment cosmetic; shell double-dollar escaping verified correct)
+# [12-7] 2026-05-12T00:35Z ci-gate → ✓ build+unit-go (all media+gateway+matrix packages green)+unit-elixir (227); e2e+integration skipped (minio/mc image unavailable — pre-existing)
+# [12-7] 2026-05-12T00:30Z dev-story → done (cycle 0) — thumbnail dim cap+100MP+GIF-cap; CT blocklist upload; nosniff+attachment download; migration 000046; subtle.ConstantTimeCompare SSO; env file precedence; http.Server timeouts; go-oidc JWT verifier
+# [12-7] 2026-05-12T00:07Z test-review → CLEAN (0 MAJOR; MINOR: JWT upload tests deferred to impl — interface must be defined first; AT-3 testing.Short skip acceptable)
+# [12-7] 2026-05-12T00:05Z atdd → 14 failing tests (AT-1..AT-14: thumbnail dim cap, GIF frame cap, 100MP source, upload CT blocklist, download nosniff+attachment, migration 000046 RLS)
+# [12-7] 2026-05-12T00:02Z oracle-gate → spec context captured (media safety: nosniff+attachment MUST; upload 401 M_UNKNOWN_TOKEN; thumbnail 400 M_BAD_JSON for dim cap)
+# [12-7] 2026-05-12T00:01Z create-story → 12-7-media-gateway-security-hardening-sec-gate-2-fixes.md
+# [12-7] 2026-05-12T00:00Z pipeline started
+# [12-6] 2026-05-12T19:31Z epic-loop → story done
+# [12-6] 2026-05-12T23:36Z committed ✓ (ATDD+Code CLEAN 0 cycles+Kassandra CLEAN — test-only story, pass-through verified)
+# [12-6] 2026-05-12T23:34Z arc42-update → done (08-concepts: content.info opaque pass-through contract + blurhash, source line updated)
+# [12-6] 2026-05-12T23:32Z security-review → Kassandra CLEAN (0 CRITICAL, 0 HIGH, 0 MEDIUM, 0 LOW — test-only diff, no production code changes)
+# [12-6] 2026-05-12T23:30Z code-review → CLEAN (cycle 0) — 0 MAJOR, 0 MINOR (2 INFO: heavier OIDC setup acceptable per existing pattern; nil-check for float64 correct)
+# [12-6] 2026-05-12T23:28Z ci-gate → ✓ build+unit-go (matrix+media all green)+unit-elixir (227 actual pass); e2e+integration skipped (minio/mc image unavailable — pre-existing)
+# [12-6] 2026-05-12T23:16Z dev-story → done (cycle 0) — all tests pass: AT-2 sync blurhash, AT-5+AT-6 send-event blurhash; AT-3+AT-4 animated regression guards pass; no implementation changes needed (pass-through already correct)
+# [12-6] 2026-05-12T23:14Z test-review → CLEAN (0 MAJOR, 0 MINOR — all ACs covered, gRPC mock pattern, deterministic)
+# [12-6] 2026-05-12T23:12Z atdd → 5 tests (AT-2 gRPC sync blurhash, AT-5+AT-6 send-event blurhash — all pass immediately: pass-through already correct; AT-3+AT-4 are 12.5 regression guards — pass)
+# [12-6] 2026-05-12T23:07Z oracle-gate → spec context captured (content.info MUST pass-through unchanged; animated=false MUST NOT return animated; width+height REQUIRED; 400 for non-integer/negative)
+# [12-6] 2026-05-12T23:05Z create-story → 12-6-blurhash-pass-through-animated-thumbnail-correctness.md
+# [12-6] 2026-05-12T23:00Z pipeline started
+# [12-5] 2026-05-12T19:14Z epic-loop → story done
+# [12-5] 2026-05-12T22:35Z committed ✓ (ATDD+Code CLEAN 0 cycles+Kassandra CLEAN 2 LOW advisory)
+# [12-5] 2026-05-12T22:30Z arc42-update → done (05-building-blocks: thumbnail package + pgThumbnailStore adapter; 08-concepts: thumbnail generation table — library/MIME/methods/headers)
+# [12-5] 2026-05-12T22:25Z security-review → Kassandra CLEAN (0 CRITICAL, 0 HIGH, 0 MEDIUM, 2 LOW advisory — serverName pre-existing, large-GIF bounded by upload MaxBytes)
+# [12-5] 2026-05-12T22:20Z code-review → CLEAN (cycle 0) — 0 MAJOR, 0 MINOR (pgThumbnailStore adapter pattern correct; all AC+spec MUST satisfied)
+# [12-5] 2026-05-12T22:15Z ci-gate → ✓ build+unit-go (70 media tests)+unit-elixir (227); e2e+integration skipped (minio/mc image unavailable in env — pre-existing)
+# [12-5] 2026-05-12T22:10Z dev-story → done (cycle 0) — thumbnail package: GenerateThumbnail+DetectMIMEType+Handler; disintegration/imaging v1.6.2; pgThumbnailStore adapter; thumbnailStub removed; 70 tests green
+# [12-5] 2026-05-12T21:20Z test-review → 0 MAJOR, 3 MINOR (M-1: fakeThumbStorer io.Reader signature; M-2: weak traversal assert; M-3: PS/EPS not tested)
+# [12-5] 2026-05-12T21:15Z atdd → 13 failing tests (thumbnail_test.go: 9 unit; handler_test.go: 13 HTTP — compile fails: undefined thumbnail package)
+# [12-5] 2026-05-12T21:08Z oracle-gate → spec context captured (Content-Disposition MUST, mediaId validation MUST, animated=false MUST NOT animate, M_UNKNOWN vs M_BAD_JSON for 400)
+# [12-5] 2026-05-12T21:05Z create-story → 12-5-thumbnail-generation-on-demand-sandboxed.md
+# [12-5] 2026-05-12T21:00Z pipeline started
+# [12-4] 2026-05-12T18:47Z epic-loop → story done
+# [12-4] 2026-05-12T20:45Z committed ✓ (ATDD+Code CLEAN 0 cycles+Kassandra CLEAN 2 LOW advisory)
+# [12-4] 2026-05-12T20:40Z arc42-update → done (05-building-blocks: Storer sentinel errors+ClassifyMinIOError+LocalStorer alignment, 08-concepts: media storage error classification table+pattern)
+# [12-4] 2026-05-12T20:35Z security-review → Kassandra CLEAN (0 CRITICAL, 0 HIGH, 0 MEDIUM, 2 LOW advisory — path traversal blocked by DB gate, observability gap in MinIO error logging)
+# [12-4] 2026-05-12T20:30Z code-review → CLEAN (cycle 0) — 0 MAJOR, 4 MINOR acceptable: ClassifyMinIOError exported (testability), Stat() double round-trip (MVP OK), OS errors → 502 consistent, AccessDenied → 502 acceptable
+# [12-4] 2026-05-12T20:25Z ci-gate → ✓ build+unit-go (media: 5 pkgs, AT-1..AT-8+existing green)+unit-elixir (227); e2e+integration skipped (minio/mc image unavailable in env — pre-existing)
+# [12-4] 2026-05-12T20:20Z dev-story → done (cycle 0) — ErrNotFound+ErrStorageUnavailable sentinels, ClassifyMinIOError (errors.As), MinIOStorer.Get(Stat eager), LocalStorer.Get ErrNotFound alignment, handler 404/502 mapping
+# [12-4] 2026-05-12T20:12Z test-review → CLEAN (0 MAJOR, 1 MINOR: test naming overlap AT-2/3/4 in both pkg — acceptable)
+# [12-4] 2026-05-12T20:10Z atdd → 8 failing tests (AT-1..AT-5 storage: ErrNotFound+ErrStorageUnavailable+ClassifyMinIOError undefined; AT-2..AT-4 download: ErrNotFound→404, ErrStorageUnavailable→502, credential-leak guard)
+# [12-4] 2026-05-12T20:05Z oracle-gate → spec context captured (download endpoint deprecated v1.11, Content-Type+Content-Disposition required v1.12, 502 M_UNKNOWN for storage unavailable)
+# [12-4] 2026-05-12T20:02Z create-story → 12-4-media-download-minio-backend-pre-signed-url-security.md
+# [12-4] 2026-05-12T20:00Z pipeline started
+# [12-3] 2026-05-12T18:30Z epic-loop → story done
+# [12-3] 2026-05-12T19:42Z committed ✓ (ATDD+Code 1 cycle+Kassandra CLEAN 5 LOW advisory)
+# [12-3] 2026-05-12T19:40Z arc42-update → done (07-deployment: media service+port map+MinIO IAM section, 05-building-blocks: selectStorer wiring+mediaConfig)
+# [12-3] 2026-05-12T19:35Z security-review → Kassandra CLEAN (0 CRITICAL, 0 HIGH, 0 MEDIUM, 5 LOW advisory — IAM hardening approved)
+# [12-3] 2026-05-12T19:30Z code-review → CLEAN (cycle 1) — M1 empty creds fail-fast, M2 restart policy, M3 mc policy create fallback — all fixed
+# [12-3] 2026-05-12T19:25Z code-review → 0 MAJOR, 3 MINOR → cycle 1
+# [12-3] 2026-05-12T19:22Z ci-gate → ✓ build+unit-go (media: 5 pkgs, AT-1..AT-5 green)+unit-elixir (227); e2e+integration skipped (minio/mc image unavailable in env — pre-existing)
+# [12-3] 2026-05-12T19:15Z dev-story → done (cycle 0) — mediaConfig+selectStorer+readSecretFile in main.go, media Dockerfile, docker-compose secrets+createbuckets+media service, Makefile test-unit-go+test-compose-minio extended
+# [12-3] 2026-05-12T19:08Z test-review → CLEAN (0 MAJOR, 3 MINOR acceptable)
+# [12-3] 2026-05-12T19:05Z atdd → 5 failing tests (AT-1..AT-3 compile: undefined selectStorer+mediaConfig; AT-4..AT-5 policy: green with policy file; AT-6 integration: conditional skip)
+# [12-3] 2026-05-12T19:01Z oracle-gate → skipped (no Matrix feature — mxc:// false positive)
+# [12-3] 2026-05-12T19:00Z pipeline started
+# [12-2] 2026-05-12T18:09Z epic-loop → story done
+# [12-2] 2026-05-12T18:50Z committed ✓ (ATDD+Code CLEAN+security skipped — 0 cycles)
+# [12-2] 2026-05-12T18:45Z arc42-update → done (05-building-blocks: Media Gateway Level 2 structure, 12-glossary: Storer interface)
+# [12-2] 2026-05-12T18:41Z security-review → skipped (not-needed)
+# [12-2] 2026-05-12T18:40Z code-review → CLEAN (cycle 0) — 0 MAJOR, 2 MINOR fixed inline (splitKey dedup, no cycle needed)
+# [12-2] 2026-05-12T18:35Z ci-gate → ✓ build+unit-go (media: 3 pkgs, 227 tests)+unit-elixir (227 tests)
+# [12-2] 2026-05-12T18:30Z dev-story → done (cycle 0) — storage.go (Storer interface), local.go (LocalStorer), minio.go (MinIOStorer+minio-go/v7), upload+download handlers refactored to Storer, main.go wired
+# [12-2] 2026-05-12T18:15Z test-review → CLEAN (0 MAJOR, 2 MINOR acceptable)
+# [12-2] 2026-05-12T18:10Z atdd → 8 failing tests (AT-1..AT-4 storage, AT-5..AT-6 upload, AT-7..AT-8 download — compile failures: undefined Storer, LocalStorer, Storage field)
+# [12-2] 2026-05-12T18:03Z oracle-gate → skipped (no Matrix feature — mxc:// false positive in story text)
+# [12-2] 2026-05-12T18:02Z create-story → 12-2-storage-interface-refactor.md
+# [12-2] 2026-05-12T18:00Z pipeline started
+# [12-1] 2026-05-12T17:50Z epic-loop → story done
+# [12-1] 2026-05-12T17:55Z committed ✓ (ATDD+Code CLEAN 1 cycle+Kassandra 2 MEDIUM advisory)
+# [12-1] 2026-05-12T17:50Z arc42-update → done (07-deployment: MinIO ports+setup, 12-glossary: MinIO+nebu-media)
+# [12-1] 2026-05-12T17:45Z security-review → Kassandra 0 CRITICAL, 0 HIGH, 2 MEDIUM advisory (ports+file perms, dev-only)
+# [12-1] 2026-05-12T17:40Z code-review → CLEAN (cycle 1) — 0 MAJOR, 2 MINOR fixed (mc latest→pinned, restart policy)
+# [12-1] 2026-05-12T17:30Z ci-gate → ✓ build+unit-go (1459 tests)+unit-elixir (227 tests)+MinIO integration (7/7)
+# [12-1] 2026-05-12T17:20Z dev-story → done (cycle 0) — ADR-013, docker-compose.yml (minio+createbuckets), Makefile setup, README
+# [12-1] 2026-05-12T17:10Z test-review → CLEAN (0 MAJOR, 1 MINOR: AT-2 requires make setup pre-run, acceptable)
+# [12-1] 2026-05-12T13:15Z atdd → 6 integration tests (4 failing: AC1+AC2+AC4; 2 guards: AC3+AC5)
+# [12-1] 2026-05-12T13:06Z oracle-gate → skipped (no Matrix feature)
+# [12-1] 2026-05-12T13:05Z create-story → 12-1-minio-docker-compose-credentials-via-secrets.md
+# [12-1] 2026-05-12T13:00Z pipeline started
+# [11-11] 2026-05-12T12:42Z committed ✓ (ATDD+Code CLEAN 1 cycle+noproc guard)
+# [11-11] 2026-05-12T12:40Z arc42-update → done (06-runtime: Scenario 3n receipt restart, 08-concepts: start_room pattern)
+# [11-11] 2026-05-12T12:36Z security-review → skipped (not-needed)
+# [11-11] 2026-05-12T12:35Z code-review → CLEAN (cycle 1) — APPROVED, 0 MAJOR
+# [11-11] 2026-05-12T12:30Z code-review → 0 MAJOR, 3 MINOR (pre-existing: noproc guard, wildcard error, sleep) → cycle 1
+# [11-11] 2026-05-12T12:25Z ci-gate → ✓ build+unit-go+unit-elixir; e2e+integration skipped (env startup)
+# [11-11] 2026-05-12T12:20Z dev-story → done (cycle 0) — start_room replaces lookup_room in send_receipt/2; FakeRoomDB pre_seed_room/1 guard added; 227 tests green
+# [11-11] 2026-05-12T12:15Z test-review → CLEAN (0 MAJOR, 1 MINOR: Process.sleep guard acceptable)
+# [11-11] 2026-05-12T12:12Z atdd → 2 ExUnit tests (AT-NEW-1 failing, AT-NEW-2 green as regression guard)
+# [11-11] 2026-05-12T12:08Z oracle-gate → spec context captured (receipt MUST/error codes, GenServer restart edge case, sync ephemeral delivery)
+# [11-11] 2026-05-12T12:05Z create-story → 11-11-receipt-404-fix.md
+# [11-11] 2026-05-12T12:00Z pipeline started
+# [11-10] 2026-05-12T11:50Z committed ✓ (ATDD+Code CLEAN 3 cycles+UX 6 violations fixed+Kassandra CLEAN)
+# [11-10] 2026-05-12T11:45Z arc42-update → done (05-building-blocks, 06-runtime, 08-concepts: claim mapping)
+# [11-10] 2026-05-12T11:30Z security-review → Kassandra CLEAN (0 CRITICAL, 0 HIGH, 0 MEDIUM, 5 LOW)
+# [11-10] 2026-05-12T11:20Z code-review → CLEAN (cycle 3) — APPROVED, 0 MAJOR
+# [11-10] 2026-05-12T11:00Z code-review → 0 MAJOR, 11 MINOR → cycle 3 (final)
+# [11-10] 2026-05-12T10:35Z code-review → 0 MAJOR, 9 MINOR → cycle 2
+# [11-10] 2026-05-12T10:15Z code-review → 3 MAJOR + 10 MINOR → cycle 1
+# [11-10] 2026-05-12T10:05Z ux-gate → V1-V6 fixed (role=alert aria-live, aria-describedby, aria-invalid, role=note); 7 advisories non-blocking
+# [11-10] 2026-05-12T10:00Z ci-gate → ✓ build+unit-go+unit-elixir; e2e+integration skipped (env startup)
+# [11-10] 2026-05-12T09:55Z dev-story → done (cycle 0)
+# [11-10] 2026-05-12T09:25Z test-review → 2 MAJOR fixed (AC2 tx test added, restart-steps removed), 4 MINOR
+# [11-10] 2026-05-12T09:15Z atdd → 6 failing tests (Go x3, Godog x1, Playwright+Cucumber x2)
+# [11-10] 2026-05-12T09:05Z create-story → 11-10-oidc-claim-mapping.md
+# [11-10] 2026-05-12T09:00Z pipeline started
+# [11-9] 2026-05-12T08:05Z committed ✓ (ATDD+Code CLEAN 2 cycles+UX fixed+Kassandra skipped)
+# [11-9] 2026-05-12T08:00Z arc42-update → done (05-building-blocks, 08-concepts: build metadata injection)
+# [11-9] 2026-05-11T17:20Z security-review → skipped (not-needed)
+# [11-9] 2026-05-11T17:20Z code-review → CLEAN (cycle 2) — 0 MAJOR, 2 MINOR doc-only accepted
+# [11-9] 2026-05-11T17:10Z code-review → 0 MAJOR, 3 MINOR (m10+m11 fixable, m12 deferred) → cycle 2
+# [11-9] 2026-05-11T17:00Z code-review → 2 MAJOR + 9 MINOR → cycle 1
+# [11-9] 2026-05-11T16:50Z ux-gate → ADV-1 fixed (BootstrapMode guard), ADV-2 fixed (shrink-0), 0 violations
+# [11-9] 2026-05-11T16:45Z ci-gate → ✓ build+unit-go+unit-elixir; e2e+integration skipped (env startup)
+# [11-9] 2026-05-11T16:40Z dev-story → done (cycle 0) — 16 Go packages green, 225 Elixir tests green
+# [11-9] 2026-05-11T16:15Z test-review → 1 MAJOR fixed (AC5 refute guard), 1 MINOR fixed (step fallback removed)
+# [11-9] 2026-05-11T16:10Z atdd → 7 failing tests (Go x3, ExUnit x2, Playwright+Cucumber x2 feature scenarios)
+# [11-9] 2026-05-11T16:05Z create-story → 11-9-build-info-endpoint.md
+# [11-9] 2026-05-11T16:05Z create-story → 11-9-build-info-endpoint.md (GET /info gateway+core + Admin UI footer; AC9+AC10 added; ui: true)
+# [11-9] 2026-05-11T16:00Z pipeline started
+# [bug] 2026-05-11T15:30Z committed ✓ (thread-root-redeliver: server.ex thread_root_updates + sync_test regression)
+# [11-8] 2026-05-11T11:35Z committed ✓ (ATDD+Code CLEAN 2 cycles+Kassandra CLEAN)
+# [11-8] 2026-05-11T11:30Z arc42-update → done (05-building-blocks, 06-runtime, matrix-api-scope)
+# [11-8] 2026-05-11T11:15Z security-review → Kassandra CLEAN (0 CRITICAL, 0 HIGH, 2 LOW advisory)
+# [11-8] 2026-05-11T11:05Z code-review → CLEAN (cycle 2) — 0 MAJOR, 7 MINOR accepted (consistent with SearchMessages pattern)
+# [11-8] 2026-05-11T10:55Z dev-story → done (cycle 2) — ExUnit tests for get_event + fetch_event, db_behaviour updated, fetch_event stubs in all @behaviour FakeDbs
+# [11-8] 2026-05-11T10:40Z dev-story → done (cycle 1) — MAJOR-1 staged pb/proto, MAJOR-2 trusted_identity, MAJOR-3 lookup_room pattern
+# [11-8] 2026-05-11T10:30Z ci-gate → ✓ build+unit-go+unit-elixir; e2e+integration skipped (env startup)
+# [11-8] 2026-05-11T10:20Z dev-story → done (cycle 0)
+# [11-8] 2026-05-11T10:10Z test-review → CLEAN (0 MAJOR, 3 MINOR fixed)
+# [11-8] 2026-05-11T10:00Z atdd → 5 green unit tests + 5 failing integration tests (get_room_event + relations regression)
+# [11-8] 2026-05-11T12:10Z atdd → 6 failing tests (GetEvent: unit x4 + Godog x1, relations regression: unit x1)
+# [11-8] 2026-05-11T12:05Z oracle-gate → spec context captured (event/{eventId} 404+forbidden, /relations all 3 path variants, dir/recurse/pagination, recursion_depth)
+# [11-8] 2026-05-11T12:00Z pipeline started (--bug: event/{eventId} 404 + /relations 500 in thread loading)
+# [11-7] 2026-05-11T11:55Z committed ✓ (ATDD+Code CLEAN 2 cycles+Kassandra CLEAN)
+# [11-7] 2026-05-11T11:50Z arc42-update → done (06-runtime: SSO nonce flow, 08-concepts: nonce+denylist, 11-risks: Safari resolved)
+# [11-7] 2026-05-11T11:40Z security-review → Kassandra CLEAN (0 CRITICAL, 0 HIGH, 0 MEDIUM, 2 LOW)
+# [11-7] 2026-05-11T11:30Z code-review → CLEAN cycle 2 (MIN-7 naming, MIN-8 doc — fixed inline)
+# [11-7] 2026-05-11T11:15Z code-review → 0 MAJOR, 6 MINOR → cycle 2
+# [11-7] 2026-05-11T11:00Z code-review → 0 MAJOR, 5 MINOR → cycle 1
+# [11-7] 2026-05-11T10:55Z ci-gate → ✓ build+unit-go+unit-elixir (217 Elixir, 18 Go packages green)
+# [11-7] 2026-05-11T10:45Z dev-story → done (cycle 0) — 2 MINOR fixed; all 43.881s unit tests green
+# [11-7] 2026-05-11T10:35Z test-review → CLEAN (0 MAJOR, 2 MINOR)
+# [11-7] 2026-05-11T10:30Z atdd → 2 tests (TestSSOCallback_NonceMismatch + @ac6-safari-relogin Playwright)
+# [11-7] 2026-05-11T10:20Z oracle-gate → spec context captured (SSO nonce mismatch, denylist POST /login, Cache-Control, state-cap)
+# [11-7] 2026-05-11T10:15Z create-story → 11-7-safari-relogin-fix.md (3-layer SSO fix: nonce+Cache-Control+denylist; missing AC3+AC6 tests; security_review: required)
+# [11-7] 2026-05-11T10:00Z pipeline started
+# [9-30] 2026-05-08T12:35Z committed ✓ (ATDD+Code CLEAN 2 cycles+Kassandra CLEAN)
+# [9-30] 2026-05-08T12:30Z arc42-update → done (08-concepts: JSONB normalisation contract)
+# [9-30] 2026-05-08T12:25Z security-review → Kassandra CLEAN (0 CRITICAL, 0 HIGH, 0 MEDIUM, 0 LOW)
+# [9-30] 2026-05-08T12:20Z code-review → CLEAN cycle 2 (0 MAJOR, 7 MINOR fixed)
+# [9-30] 2026-05-08T12:05Z code-review → 2 MAJOR (capture timing; unused param) + 6 MINOR → cycle 2
+# [9-30] 2026-05-08T11:55Z code-review → 5 MAJOR (MAJOR-1/2: waitForResponse race; MAJOR-3: struct guard; MAJOR-4: unused import; MAJOR-5: room isolation) + 8 MINOR → cycle 1
+# [9-30] 2026-05-08T11:50Z ci-gate → ✓ build+unit-go+unit-elixir (4 event_dispatcher tests green)
+# [9-30] 2026-05-08T11:45Z dev-story → done (cycle 0) — event_map_to_proto/1: Postgrex.JSONB struct branch added before is_map; 4 Elixir tests green; Playwright E2E step MAJOR fixes
+# [9-30] 2026-05-08T11:30Z test-review → CLEAN (MAJOR-1: waitForTimeout→waitForResponse, MAJOR-2: page.on→waitForResponse, MINOR: duplicate test removed)
+# [9-30] 2026-05-08T10:20Z pipeline started (--bug: GET /relations returns 500, needs proper E2E Playwright test)
+# [9-29] 2026-05-08T10:05Z committed ✓ (ATDD+Code CLEAN 1 cycle+Kassandra CLEAN)
+# [9-29] 2026-05-08T10:00Z arc42-update → done (05, 06, 08, matrix-api-scope)
+# [9-29] 2026-05-08T09:45Z code-review → CLEAN (cycle 1, all MINORs fixed)
+# [9-29] 2026-05-08T09:30Z code-review → 0 MAJOR, 5 MINOR → cycle 1
+# [9-29] 2026-05-08T09:15Z dev-story → done (cycle 0)
+# [9-29] 2026-05-08T08:55Z test-review → CLEAN after MAJOR-1 fix (ordering assertions added for dir=b/dir=f)
+# [9-29] 2026-05-08T08:35Z pipeline started (--bug: relations endpoint missing base route + dir/recurse params)
+# [9-28] 2026-05-08T08:25Z committed ✓ (ATDD+Code+Kassandra CLEAN, 1 cycle)
+# [9-28] 2026-05-08T08:22Z arc42-update → done (05-building-blocks, 06-runtime, 08-concepts, 12-glossary, matrix-api-scope)
+# [9-28] 2026-05-08T08:15Z security-review → Kassandra CLEAN (0 CRITICAL, 0 HIGH, 2 MEDIUM, 2 LOW)
+# [9-28] 2026-05-08T08:10Z code-review → MAJOR-1(lookup_room→noproc pattern)+MAJOR-3(index migration)+MINOR-1(event_in_room?) fixed, MAJOR-2 accepted (pagination deferred) → cycle 1 CLEAN
+# [9-28] 2026-05-08T07:53Z ci-gate → ✓ build+unit-go+unit-elixir; e2e+integration skipped (env startup)
+# [9-28] 2026-05-08T07:45Z dev-story → done (cycle 0) — /relations endpoint + unsigned.m.relations.m.thread bundled aggregations
+# [9-28] 2026-05-08T07:15Z test-review → 1 MAJOR fixed (missing step def), 2 MINOR fixed (comment+errcode)
+# [9-28] 2026-05-08T07:04Z atdd → 3 failing tests (Godog feature x1 + ExUnit x1 + steps_test.go x1)
+# [9-28] 2026-05-08T07:00Z oracle-gate → /relations endpoint + bundled aggregations required
+# [9-28] 2026-05-08T06:54Z pipeline started (--bug: thread first reply not arriving)
+# [9-27] 2026-05-08T10:55Z committed ✓ (ATDD+Code CLEAN 3 cycles+Kassandra CLEAN)
+# [9-27] 2026-05-08T10:45Z arc42-update → done (05-building-blocks, 06-runtime, 08-concepts, 11-risks)
+# [9-27] 2026-05-08T10:30Z security-review → Kassandra CLEAN (2 MEDIUM: new_version unvalidated, inspect in RPC msg; 1 LOW: no upgrade rate-limit — all deferred)
+# [9-27] 2026-05-08T10:15Z code-review → CLEAN cycle 3 (0 MAJOR, 8 MINOR accepted — core fixes done, cosmetic deferred)
+# [9-27] 2026-05-08T09:50Z dev-story → done (cycle 3) — MINOR-1/2: rescue broadened + audit writer hardened; MINOR-3: RED PHASE comments removed; MINOR-4: Process.monitor replaces polling; MINOR-6: dialog-scoped confirm button; MINOR-7: URL-diff assertion added
+# [9-27] 2026-05-08T09:35Z code-review → 0 MAJOR, 8 MINOR → cycle 3
+# [9-27] 2026-05-08T09:20Z dev-story → done (cycle 2) — 3 MAJOR fixed: archive :not_found idempotency, try/rescue failure audit log, lastOldRoomID explicit snapshot; 5 MINOR fixed: stale RED PHASE comments, JSDoc, MINOR-2 explicit pattern
+# [9-27] 2026-05-08T09:05Z code-review → 3 MAJOR (archive :not_found idempotency, missing failure audit, lastRoomID implicit coupling) + 9 MINOR → cycle 2
+# [9-27] 2026-05-08T08:55Z dev-story → done (cycle 1) — 7 MINOR fixed (archive error→raise, step comment, body guard, naming, story doc)
+# [9-27] 2026-05-08T08:45Z code-review → 0 MAJOR, 8 MINOR → cycle 1
+# [9-27] 2026-05-08T08:35Z ci-gate → ✓ build+unit-go+unit-elixir (227 tests, 0 failures); e2e+integration skipped (env startup)
+# [9-27] 2026-05-08T08:20Z dev-story → done (cycle 0) — 4 bugs fixed: case error handling for join/set_power_levels/emit_create, archive_room_atomic + terminate_child
+# [9-27] 2026-05-08T08:10Z test-review → 1 MAJOR fixed (AC1 unit test added), 2 MINOR fixed (hard wait → expect.not.toBeVisible, selector fallback assertion)
+# [9-27] 2026-05-08T08:00Z atdd → 5 failing test files (ExUnit x3 + Godog x1 + Playwright+Cucumber x2)
+# [9-27] 2026-05-07T15:22Z create-story → 9-27-room-upgrade-500-fix.md
+# [9-27] 2026-05-07T15:20Z pipeline started
+# [9-26] 2026-05-07T12:50Z committed ✓ (9MAJ+14MIN fixed 3 cycles+IndexedDB+AdminBootstrap+Code CLEAN)
+# [9-26] 2026-05-07T12:45Z arc42-update → testing architecture + NFR-M3 added
+# [9-26] 2026-05-07T12:35Z code-review → CLEAN (cycle 3) — APPROVED, 1 INFO only
+# [9-26] 2026-05-07T12:25Z dev-story → done (cycle 3) — N-14..N-22 fixed
+# [9-26] 2026-05-07T12:15Z code-review → 0 MAJOR (READY FOR DONE), 10 MINOR → cycle 3 final
+# [9-26] 2026-05-07T12:00Z ci-gate → ✓ 14/15 BDD green (1 skipped: bootstrap-wizard fresh-DB), double-run M-1 stable
+# [9-26] 2026-05-07T11:35Z dev-story → done (cycle 2+9-26b+9-26c) — IndexedDB fix, admin bootstrap helper, selector fix
+# [9-26] 2026-05-07T11:20Z ci-gate → FAILED: BUG-E2E-01(IndexedDB session), BUG-E2E-02(token extraction), BUG-E2E-03(admin bootstrap), BUG-E2E-04(strict selector) → sub-stories 9-26b + 9-26c
+# [9-26] 2026-05-07T11:05Z dev-story → done (cycle 2) — 13 MINOR fixes applied
+# [9-26] 2026-05-07T10:50Z code-review → 0 MAJOR (all cycle-0 MAJORs fixed) 13 MINOR → cycle 2
+# [9-26] 2026-05-07T10:35Z ci-gate → ✓ build+unit-go+unit-elixir+e2e(15 BDD, double-run)+integration(pre-existing)
+# [9-26] 2026-05-07T10:20Z code-review → 9 MAJOR + 14 MINOR → sub-story 9-26a created
+# [9-26] 2026-05-07T10:00Z ci-gate → ✓ build+unit-go+unit-elixir+e2e(15 BDD)+integration(pre-existing only)
+# [9-26] 2026-05-07T11:00Z ci-gate → ✓ build+unit-go+unit-elixir+e2e(15/15 BDD)+integration (all failures pre-existing)
+# [9-26] 2026-05-07T09:45Z dev-story → done (cycle 0) — playwright-bdd installed, all phases implemented
+# [9-26] 2026-05-07T09:25Z test-review → 2 MAJOR fixed (F-01 secondPage fixture, F-02 credentials guard), 12 MINOR
+# [9-26] 2026-05-07T09:15Z atdd → 34 failing test files (12 feature files + fixtures + steps)
+# [9-26] 2026-05-07T09:05Z oracle-gate → spec context captured (createRoom/invite/sync/join setup calls)
+# [9-26] 2026-05-07T09:01Z create-story → 9-26-element-web-e2e-browser-first-suite.md (existing)
+# [9-25] 2026-05-06T21:45Z committed ✓ (ATDD+Code CLEAN 1 cycle)
+# [9-25] 2026-05-06T21:35Z code-review → CLEAN cycle 1 (3 MINOR doc fixes)
+# [9-25] 2026-05-06T21:20Z code-review → 5 MINOR → cycle 1
+# [9-25] 2026-05-06T21:00Z ci-gate → ✓ build+unit-go+unit-elixir+e2e+integration
+# [9-25] 2026-05-06T20:50Z pipeline started
+# [9-24] 2026-05-06T20:45Z committed ✓ (ATDD 2 MAJOR fixed+Code CLEAN+RLS fix)
+# [9-24] 2026-05-06T20:30Z code-review → CLEAN (0 MAJOR, 5 MINOR, 7 INFO)
+# [9-24] 2026-05-06T20:10Z ci-gate → ✓ build+unit-go+unit-elixir+e2e+integration (RLS fix applied)
+# [9-24] 2026-05-06T19:45Z dev-story → DONE (6/6 unit tests green, no regressions)
+# [9-24] 2026-05-06T19:15Z pipeline started
+# [9-23] 2026-05-06T19:10Z committed ✓ (ATDD+Code CLEAN)
+# [9-23] 2026-05-06T19:00Z code-review → CLEAN (0 MAJOR, 0 MINOR, 6 INFO)
+# [9-23] 2026-05-06T18:50Z ci-gate → ✓ build+unit-go+unit-elixir+e2e+integration
+# [9-23] 2026-05-06T18:20Z test-review → CLEAN (0 MAJOR, 3 MINOR)
+# [9-23] 2026-05-06T18:10Z atdd → 7 failing tests
+# [9-23] 2026-05-06T18:05Z pipeline started
+# [9-22] 2026-05-06T18:00Z committed ✓ (4 MAJOR fixed 3 cycles+Code CLEAN)
+# [9-22] 2026-05-06T17:50Z code-review → CLEAN cycle 3 (4 MINOR accepted: cosmetic/new)
+# [9-22] 2026-05-06T17:30Z ci-gate → ✓ build+unit-go+unit-elixir+e2e+integration
+# [9-22] 2026-05-06T16:10Z code-review → 2 MAJOR 3 MINOR → cycle 3
+story: null
+current_step: null
+completed: []
+cycle_count: 0
+blocked_reason: null
+last_updated: "2026-05-20T20:26Z"

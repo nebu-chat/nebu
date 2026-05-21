@@ -1,0 +1,208 @@
+# generated: 2026-03-20
+# last_updated: 2026-05-20
+# story 16-3 done (pipeline: ATDD skipped (infra) + Dev cycle 0 + Code CLEAN — CI cp step, _meta.yaml arc42 nav, .gitignore): 2026-05-20
+# story 13-18 done (pipeline: ATDD existing failing test+Code CLEAN (test-only)): 2026-05-20
+# story 13-17 done (pipeline: 1 MINOR fixed cycle 1 (duplicate ARIA landmark in dashboard.html)): 2026-05-20
+# story 13-17 done (implementation already committed in 7c20168; story file created as documentation/audit trail): 2026-05-20
+# story 13-16 done (pipeline: 2 MAJOR fixed cycle 1 (PROJECT_ROOT path, DEX_ISSUER_URL import)): 2026-05-20
+# story 13-15 done (pipeline: 1 MAJOR+2 MINOR fixed cycle 1 + Kassandra HIGH+MEDIUM fixed): 2026-05-19
+# story 13-15 done (implementation already complete; story file created as documentation/audit trail): 2026-05-19
+# story 13-14 done (pipeline: 2 MAJOR fixed 3 cycles + Kassandra CLEAN (1 MEDIUM accepted)): 2026-05-18
+# story 14-4 done (pipeline: 1 MAJOR+2 MINOR fixed cycle 1+Kassandra CLEAN (2 LOW applied)): 2026-05-17
+# story 14-4 done (pipeline: ready-for-dev): 2026-05-17
+# story 14-3c done (pipeline: ATDD+Dev+Code CLEAN (2 MINOR fixed)+Kassandra CLEAN): 2026-05-17
+# story 14-3c created (ready-for-dev): SCIM 2.0 User Fetch + Progress Tracking: 2026-05-17
+# story 14-3b done (pipeline: ATDD+Code CLEAN (cycle 0)): 2026-05-17
+# story 14-3a done (pipeline: ATDD+Code 1 MINOR fixed 1 cycle+Kassandra CLEAN): 2026-05-16
+# story 14-2c done (pipeline: ATDD+Dev+Code 3 MINOR fixed 1 cycle — OIDC user search merge, Not yet logged in badge, warning banner): 2026-05-16
+# story 14-2b done (pipeline: ATDD+Code 1 MINOR cycle+Kassandra CLEAN): 2026-05-16
+# story 14-2a done (pipeline: ATDD+Dev+Code CLEAN (1 MINOR fixed+1 DEFER)+arc42): 2026-05-16
+# story 13-11 done (pipeline: Makefile release+release-push, CI release stage (Kaniko SemVer tags), deploy docs — 2 MINOR cycles CLEAN): 2026-05-14
+# story 13-11 created (ready-for-dev): Versioning and Release Pipeline (make release + GitLab CI release stage): 2026-05-14
+# story 13-10 done (pipeline: 2 MINOR cycles fixed — dns_mode var, Route53+Stackit DNS, dex_subdomain_enabled): 2026-05-14
+# story 13-10 created (ready-for-dev): DNS Mode — dns_mode variable for OpenTofu deployments (AWS + Stackit)
+# story 13-9 done (pipeline: Keycloak removed; oidc_mode=dex (Dex sidecar port 5556) + external profile; 3 cycles+Kassandra HIGH fixed): 2026-05-14
+# story 13-8 done (pipeline: Aurora Serverless v2 + PostgresFlex — 2 MINOR cycles + Kassandra CLEAN): 2026-05-13
+# story 13-8 created (ready-for-dev): Aurora Serverless v2 + Stackit PostgresFlex managed DB
+# story 13-5 done (pipeline: ATDD+Code CLEAN 0-cycle+3 MINOR fixed inline+arc42 07-deployment load test topology): 2026-05-13
+# story 13-4b done (pipeline: Code CLEAN 0-cycle+Kassandra CLEAN+arc42 07-deployment): 2026-05-13
+# story 13-2c done (pipeline: Code CLEAN 0-cycle + Kassandra CLEAN — ALB+Secrets Manager+ECS services+RUNBOOK): 2026-05-13
+# story 13-2b done (pipeline: 6 MINOR fixed 1 cycle — RDS PostgreSQL 16 Multi-AZ + ECS Fargate cluster + task def skeletons + CloudWatch logs + IAM execution role): 2026-05-13
+# history: archived to _bmad-output/archived-artifacts/sprint-history.md
+project: open-chat
+project_key: NOKEY
+tracking_system: file-system
+story_location: _bmad-output/implementation-artifacts
+
+development_status:
+  # ─────────────────────────────────────────────────────────────────────────
+  # Epic 1: Operators Can Deploy and Observe a Running Nebu Instance — DONE (19 stories)
+  # ─────────────────────────────────────────────────────────────────────────
+  epic-1: done
+  epic-1-retrospective: done
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Epic 2: Users Can Authenticate with SSO and Have a Verified Cryptographic Identity — DONE (21 stories)
+  # ─────────────────────────────────────────────────────────────────────────
+  epic-2: done
+  epic-2-retrospective: done
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Epic 3: Operators Have a Minimal Admin UI for Bootstrap and Debugging — DONE (15 stories)
+  # ─────────────────────────────────────────────────────────────────────────
+  epic-3: done
+  epic-3-retrospective: done
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Epic 4: End-Users Can Chat in Rooms Using Any Standard Matrix Client — DONE (29 stories)
+  # ─────────────────────────────────────────────────────────────────────────
+  epic-4: done
+  epic-4-retrospective: done
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Epic 5: Compliance Officers Can Securely Request and Export Audited Communication Data
+  #         + Gateway Security Hardening — DONE (34 stories)
+  # ─────────────────────────────────────────────────────────────────────────
+  epic-5: done
+  epic-5-retrospective: skipped  # skipped by user decision 2026-04-29: jumping to Epic 7 (MVP priority); SEC Gate 2 was CLEAN
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Epic 6: Instance Admins Can Manage the Instance Programmatically via Admin API — DONE (12 stories)
+  # Note: story 6-9b is open (SEC Gate 2 HIGH-2 follow-up)
+  # ─────────────────────────────────────────────────────────────────────────
+  epic-6: done
+  6-9b-archive-race-core-send-event: ready-for-dev  # SEC Gate 2 HIGH-2 follow-up; created 2026-05-02
+  epic-6-retrospective: optional
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Epic 7: Instance Admins Have a Full Admin UI for Day-to-Day Operations — DONE (40 stories)
+  # Note: story 7-31 is backlog (blocked: ADR-010 required first)
+  # ─────────────────────────────────────────────────────────────────────────
+  epic-7: done
+  7-31-search-api-post-search-adr-required: backlog  # blocked: ADR-010 (FTS strategy) required first
+  epic-7-retrospective: pending  # SEC Gate 2 done; retro blocked until 7-17 (CSRF HIGH) is done
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Epic 8: Project Is Published as a Public Open-Source Repository on GitHub — DONE (12 stories)
+  # ─────────────────────────────────────────────────────────────────────────
+  epic-8: done
+  epic-8-retrospective: optional
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Epic 9: Post-MVP API & Admin Completeness — DONE (28 stories)
+  # Note: story 9-29 is in review
+  # ─────────────────────────────────────────────────────────────────────────
+  epic-9: done
+  9-29-matrix-relations-api-base-route-query-params: review  # story 9-29: 2026-05-08 (Bug Fix: Matrix Relations API base route + query params; security_review: not-needed)
+  epic-9-retrospective: optional
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Epic 10: Managed E2EE — Key Escrow
+  # Pre-Epic-TODO: ADR-011 finalisieren (Threat Model, Key-Escrow-Architektur,
+  #   DB-Schema, Security Assumptions) — vor Sprint-Start
+  # ─────────────────────────────────────────────────────────────────────────
+  epic-10: backlog
+  10-1-key-material-memory-hygiene: backlog
+  10-2-escrow-audit-log-immutability: backlog
+  10-3-keys-upload-device-key-persistence: backlog
+  10-4-keys-query-device-keys-from-database: backlog
+  10-5-keys-claim-one-time-key-claiming: backlog
+  10-6-keys-changes-key-change-tracking: backlog
+  10-7-cross-signing-keys-device-signing-upload-signatures-upload: backlog
+  10-8-room-keys-key-backup-endpoints: backlog
+  10-9-escrow-compliance-integration: backlog
+  10-10-otk-rotation-one-time-key-replenishment: backlog
+  epic-10-retrospective: optional
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Epic 11: Full-Text Search — DONE (10 stories)
+  # Note: story 11-11 is in review
+  # ─────────────────────────────────────────────────────────────────────────
+  epic-11: done
+  11-11-receipt-404-fix: review  # story file: 11-11-receipt-404-fix.md (Bug: send_receipt returns 404 after stack restart — replace lookup_room with start_room; security_review: not-needed)
+  epic-11-retrospective: optional
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Epic 12: Media Gateway Phase 2 — Object Storage & Thumbnails
+  # Pre-Epic-TODO: ADR-013 finalisieren (MinIO, Thumbnail-Library, Pre-Signed-URL-Policy)
+  #   — vor Sprint-Start
+  # ─────────────────────────────────────────────────────────────────────────
+  epic-12: backlog
+  12-1-minio-docker-compose-credentials-via-secrets: backlog
+  12-2-storage-interface-refactor: backlog
+  12-3-media-upload-minio-backend-iam-hardening: backlog
+  12-4-media-download-minio-backend-pre-signed-url-security: backlog
+  12-5-thumbnail-generation-on-demand-sandboxed: backlog
+  12-6-blurhash-pass-through-animated-thumbnail-correctness: backlog
+  epic-12-retrospective: optional
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Epic 13: Operators Can Deploy Nebu to Production and Validate Scalability
+  # Pre-Epic-TODO: ADR-014 erstellen (OpenTofu Layout, Secrets-Management pro Platform)
+  # ─────────────────────────────────────────────────────────────────────────
+  epic-13: backlog
+  13-1-opentofu-project-structure-shared-modules: backlog
+  13-2a-aws-networking-module-vpc-subnets-security-groups: backlog
+  13-2b-aws-rds-postgresql-ecs-cluster: done
+  13-2c-aws-ecs-task-definitions-gateway-core-alb-secrets-runbook: done
+  13-3a-stackit-vm-provisioning-networking: backlog
+  13-3b-stackit-cloud-init-docker-compose-runbook: backlog
+  13-4a-helm-chart-core-templates-deployment-service-configmap: backlog
+  13-4b-helm-chart-ingress-pvc-secrets-hpa: done
+  13-4c-opentofu-k8s-provider-kind-smoke-test-runbook: backlog
+  13-5-load-test-gold-tier-1000-concurrent-users-multi-gateway: done
+  13-6-horizontal-scaling-validation-core-clustering-libcluster-horde: backlog
+  13-7-msc2965-oidc-discovery-endpoints-auth-issuer-auth-metadata: backlog
+  13-8-managed-database-services-aurora-serverless-stackit-managed-postgres: done
+  13-9-oidc-deployment-profile-dex-sidecar-vs-external: done
+  13-10-dns-mode-variable-opentofu-aws-stackit: done
+  13-11-versioning-and-release-pipeline: done
+  13-14-squash-gateway-migrations-single-seed: done
+  13-15-element-web-stackit-deployment: done
+  13-16-e2e-bootstrap-tests-update: done
+  13-17-wcag-aa-admin-ui-contrast-fix: done
+  13-18-fix-test-unit-go-login-flows: done
+  13-19-fix-test-unit-elixir-ets-toctou: done
+  13-20-fix-horde-restart-timeout: done
+  epic-13-retrospective: optional
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Epic 14: Admin — Claim Lock, OIDC User Import, and GDPR Compliance
+  # Pre-Epic-TODO: ADR-015 (OIDC User Directory Integration Strategy: SCIM vs. OIDC-API-Direkt)
+  # ─────────────────────────────────────────────────────────────────────────
+  epic-14: in-progress
+  14-1a-core-matrix-user-id-claim-lock-failed-precondition: done
+  14-1b-gateway-api-validation-admin-ui-readonly-display: done
+  14-2a-server-config-schema-oidc-directory-enabled-endpoint: done
+  14-2b-gateway-oidc-directory-service-cache-rate-limit: done
+  14-2c-admin-ui-user-search-oidc-integration-not-yet-logged-in: done
+  14-3a-bulk-import-users-grpc-rpc-core-provisioning: done
+  14-3b-bootstrap-wizard-step4-ui-preview-import: done
+  14-3c-scim-2-user-fetch-progress-tracking: done
+  14-4-gdpr-right-to-erasure-end-to-end-verification: done
+  epic-14-retrospective: optional
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Epic 15: Matrix Spaces and Room Moderator Feature Completeness
+  # Pre-Epic-TODO: /agent-oracle Audit der Room Moderator Features (Story 15-0) — vor Sprint-Start
+  # ─────────────────────────────────────────────────────────────────────────
+  epic-15: backlog
+  15-0-oracle-audit-room-moderator-feature-completeness: backlog
+  15-1-createroom-extension-creation-content-type-m-space: backlog
+  15-2-postgresql-index-for-space-bfs: backlog
+  15-3-m-space-child-state-event-whitelist-core-validation: backlog
+  15-4-m-space-parent-state-event-whitelist-security-check: backlog
+  15-5a-core-restricted-join-rule-enforcement-exunit: backlog
+  15-5b-integration-test-restricted-join-godog: backlog
+  15-6a-proto-getspacehierarchy-rpc-message-types: backlog
+  15-6b-core-spacehierarchy-bfs-module-exunit: backlog
+  15-6c-core-grpc-handler-pagination-token: backlog
+  15-7-get-hierarchy-go-gateway-handler-pagination: backlog
+  15-8-capabilities-update-room-versions-6-10: backlog
+  15-9a-playwright-e2e-space-create-sidebar: backlog
+  15-9b-playwright-e2e-child-room-restricted-join: backlog
+  15-10a-admin-ui-spaces-list-page: backlog
+  15-10b-admin-ui-space-detail-child-management: backlog
+  15-11-admin-api-spaces-crud: backlog
+  15-12-room-moderator-gap-fixes-oracle-driven: backlog
+  epic-15-retrospective: optional
