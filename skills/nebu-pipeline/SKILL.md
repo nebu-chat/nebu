@@ -14,6 +14,28 @@ Orchestrates the complete Nebu development lifecycle. Thin and deterministic —
 - **Cyclic:** Code-review findings below MAJOR threshold go back to dev-story. The dev agent fixes, not the reviewer.
 - **Declarative:** This workflow calls agents and TEA skills. It decides the sequence; they carry the domain intelligence.
 
+## Path Configuration
+
+Resolved at pipeline start from the `--epic` flag. All step commands use these variables — they override any hardcoded paths shown in the steps below.
+
+**Named epic (`--epic <name>`, e.g. `--epic matrix-presence`):**
+- `STATE_FILE` = `_bmad-output/nebu/epics/<name>/pipeline-state.yaml`
+- `STEP_RESULTS_DIR` = `_bmad-output/nebu/epics/<name>/step-results/`
+- `SPRINT_STATUS` = `_bmad-output/nebu/epics/<name>/sprint-status.yaml`
+- `STORY_DIR` = `docs/stories/<name>/`
+
+**Legacy numbered epic (no `--epic` flag, story ID like `"14-4"`):**
+- `STATE_FILE` = `_bmad-output/nebu/pipeline-state.yaml`
+- `STEP_RESULTS_DIR` = `_bmad-output/nebu/step-results/`
+- `SPRINT_STATUS` = `_bmad-output/implementation-artifacts/sprint-status.yaml`
+- `STORY_DIR` = `docs/stories/mvp/epic-{N}/` or `docs/stories/phase2/` (derived from story ID prefix)
+
+Ensure the configured directories exist before writing state:
+```bash
+mkdir -p $(dirname $STATE_FILE)
+mkdir -p $STEP_RESULTS_DIR
+```
+
 ## Pipeline State File
 
 `{project-root}/_bmad-output/nebu/pipeline-state.yaml` — written before and after every step.
@@ -46,7 +68,7 @@ last_updated: "2026-05-06T14:23Z"
 
 ```bash
 python3 skills/nebu-pipeline/scripts/pipeline_state.py \
-  --file _bmad-output/nebu/pipeline-state.yaml \
+  --file $STATE_FILE \
   --step NEXT_STEP --done COMPLETED_STEP \
   --log "[STORY_ID] TIMESTAMP step → outcome"
 ```
@@ -65,15 +87,21 @@ The log is **permanent and additive** — every step adds one line. Lines are ne
 
 ## Activation
 
-**`nebu-pipeline`** (no args) — New story. Ask the user for the story description or story file. Then:
+**`nebu-pipeline`** (no args) — New story (legacy numbered epic). Ask for story description or file. Resolves paths to legacy state locations.
+
+**`nebu-pipeline --epic <name>`** — New story in named epic. Resolves paths to `_bmad-output/nebu/epics/<name>/`. Ask for story description.
+
+Then initialize state:
 ```bash
 python3 skills/nebu-pipeline/scripts/pipeline_state.py \
-  --file _bmad-output/nebu/pipeline-state.yaml \
+  --file $STATE_FILE \
   --story STORY_ID --step create-story \
   --log "[STORY_ID] TIMESTAMP pipeline started"
 ```
 
-**`nebu-pipeline --resume`** — Read `pipeline-state.yaml`. Print current state (story, step, cycle count). Ask user to confirm. Skip all completed steps and continue from `current_step`.
+**`nebu-pipeline --resume`** — Read `$STATE_FILE` (from `--epic` flag or legacy location). Print current state (story, step, cycle count). Ask user to confirm. Skip completed steps and continue from `current_step`.
+
+**`nebu-pipeline --epic <name> --resume`** — Resume a named-epic pipeline.
 
 **`nebu-pipeline --from <step>`** — Start at the named step. Ask for story context if needed.
 
@@ -87,18 +115,24 @@ Valid step names: `create-story` `atdd` `test-review` `dev-story` `ci-gate` `cod
 
 ```
 docs/stories/
-  mvp/
-    epic-1/   ← epics 1–9
-    ...
-    epic-9/
-  phase2/
-    epic-10/  ← epics 10+
-    ...
+  mvp/                     ← legacy numbered epics 1–9 (do not move)
+    epic-1/ ... epic-9/
+  phase2/                  ← legacy numbered epics 10+ (do not move)
+    epic-10/ ... epic-15/
+  phase3/                  ← legacy numbered epics 16+ (do not move)
+  <epic-name>/             ← new named epics (one dir per feature domain)
+    story-slug.md
 ```
 
-**When creating a story** (Step 1): verify the file landed in `docs/stories/mvp/epic-{N}/` (or `phase2/` for epic 10+). If it was written elsewhere, move it with `git mv` before continuing.
+**Named epic stories** (`--epic <name>`): `docs/stories/<name>/<story-slug>.md`
 
-**`STORY_FILE`** throughout the pipeline: `docs/stories/mvp/epic-{N}/[STORY_ID]-slug.md` (or `phase2/`).
+Story slug is lowercase, hyphen-separated, describes the behavior: `typing-indicators.md`, `gdpr-erasure.md`.
+
+**When creating a story** (Step 1):
+- Named epic: verify the file landed in `$STORY_DIR`. If not, move with `git mv`.
+- Legacy epic: verify in `docs/stories/mvp/epic-{N}/` or `phase2/`.
+
+**`STORY_FILE`** throughout the pipeline resolves to `$STORY_DIR/<slug>.md` for named epics, or the legacy path for numbered epics.
 
 ---
 
@@ -136,10 +170,10 @@ Note the created story file as `STORY_FILE`.
 
 ```bash
 # Create step-results directory for this story — all step outputs persist here
-mkdir -p _bmad-output/nebu/step-results/[STORY_ID]/
+mkdir -p $STEP_RESULTS_DIR/[STORY_ID]/
 
 python3 skills/nebu-pipeline/scripts/pipeline_state.py \
-  --file _bmad-output/nebu/pipeline-state.yaml \
+  --file $STATE_FILE \
   --step atdd --done create-story \
   --log "[STORY_ID] TIMESTAMP create-story → [STORY_FILE basename]"
 ```
@@ -181,12 +215,12 @@ Inject `[STEP_DESC]` into subagent, substituting `[ORACLE_INPUT]`.
 Write output to disk (authoritative source for subsequent steps):
 ```bash
 # [paste oracle-gate output here — the sub-agent's full response]
-tee _bmad-output/nebu/step-results/[STORY_ID]/oracle-context.md
+tee $STEP_RESULTS_DIR/[STORY_ID]/oracle-context.md
 ```
 
 ```bash
 python3 skills/nebu-pipeline/scripts/pipeline_state.py \
-  --file _bmad-output/nebu/pipeline-state.yaml \
+  --file $STATE_FILE \
   --log "[STORY_ID] TIMESTAMP oracle-gate → spec context captured"
 # or: --log "[STORY_ID] TIMESTAMP oracle-gate → skipped (no Matrix feature)"
 ```
@@ -206,7 +240,7 @@ ATDD_INPUT=$(python3 skills/nebu-pipeline/scripts/extract_story_section.py \
   --story [STORY_FILE] --sections "Story" "Acceptance Criteria" "Acceptance Tests")
 
 # Read oracle context from file (written by Step 1b — empty string if gate was skipped)
-ORACLE_CONTEXT=$(cat _bmad-output/nebu/step-results/[STORY_ID]/oracle-context.md 2>/dev/null || echo "")
+ORACLE_CONTEXT=$(cat $STEP_RESULTS_DIR/[STORY_ID]/oracle-context.md 2>/dev/null || echo "")
 
 STEP_DESC=$(python3 skills/nebu-pipeline/scripts/select_pipeline_step.py --step atdd)
 ```
@@ -215,7 +249,7 @@ Inject `[STEP_DESC]` into subagent, substituting `[ATDD_INPUT]`; `[ORACLE_CONTEX
 
 ```bash
 python3 skills/nebu-pipeline/scripts/pipeline_state.py \
-  --file _bmad-output/nebu/pipeline-state.yaml \
+  --file $STATE_FILE \
   --step test-review --done atdd \
   --log "[STORY_ID] TIMESTAMP atdd → N failing tests"
 # or: --log "[STORY_ID] TIMESTAMP atdd → skipped (infra)"
@@ -242,7 +276,7 @@ Inject `[STEP_DESC]` into subagent, substituting `[AC_SECTION]`.
 
 Write output to disk:
 ```bash
-tee _bmad-output/nebu/step-results/[STORY_ID]/test-review-findings.md
+tee $STEP_RESULTS_DIR/[STORY_ID]/test-review-findings.md
 ```
 
 **If MAJOR findings:**
@@ -255,7 +289,7 @@ Stop and wait.
 
 ```bash
 python3 skills/nebu-pipeline/scripts/pipeline_state.py \
-  --file _bmad-output/nebu/pipeline-state.yaml \
+  --file $STATE_FILE \
   --step dev-story --done test-review \
   --log "[STORY_ID] TIMESTAMP test-review → CLEAN (0 MAJOR)"
 # or: --log "[STORY_ID] TIMESTAMP test-review → N MAJOR [user continued]"
@@ -271,9 +305,9 @@ Show: `✓ Step 3: Pre-dev test quality verified.`
 
 ```bash
 # Read step results from disk — authoritative, survives context compression
-TEST_REVIEW_FINDINGS=$(cat _bmad-output/nebu/step-results/[STORY_ID]/test-review-findings.md 2>/dev/null || echo "")
-ORACLE_CONTEXT=$(cat _bmad-output/nebu/step-results/[STORY_ID]/oracle-context.md 2>/dev/null || echo "")
-CODE_REVIEW_FINDINGS=$(cat _bmad-output/nebu/step-results/[STORY_ID]/code-review-findings.md 2>/dev/null || echo "")
+TEST_REVIEW_FINDINGS=$(cat $STEP_RESULTS_DIR/[STORY_ID]/test-review-findings.md 2>/dev/null || echo "")
+ORACLE_CONTEXT=$(cat $STEP_RESULTS_DIR/[STORY_ID]/oracle-context.md 2>/dev/null || echo "")
+CODE_REVIEW_FINDINGS=$(cat $STEP_RESULTS_DIR/[STORY_ID]/code-review-findings.md 2>/dev/null || echo "")
 
 STEP_DESC=$(python3 skills/nebu-pipeline/scripts/select_pipeline_step.py --step dev-story)
 ```
@@ -295,7 +329,7 @@ rtk git status
 
 ```bash
 python3 skills/nebu-pipeline/scripts/pipeline_state.py \
-  --file _bmad-output/nebu/pipeline-state.yaml \
+  --file $STATE_FILE \
   --step ci-gate --done dev-story \
   --log "[STORY_ID] TIMESTAMP dev-story → done (cycle [CYCLE_COUNT])"
 ```
@@ -329,7 +363,7 @@ Stop and wait.
 
 ```bash
 python3 skills/nebu-pipeline/scripts/pipeline_state.py \
-  --file _bmad-output/nebu/pipeline-state.yaml \
+  --file $STATE_FILE \
   --step code-review --done ci-gate \
   --log "[STORY_ID] TIMESTAMP ci-gate → ✓ build+unit-go+unit-elixir+e2e+integration"
 # or: --log "[STORY_ID] TIMESTAMP ci-gate → FAILED: [failing suite]"
@@ -370,7 +404,7 @@ Stop and wait.
 
 ```bash
 python3 skills/nebu-pipeline/scripts/pipeline_state.py \
-  --file _bmad-output/nebu/pipeline-state.yaml \
+  --file $STATE_FILE \
   --log "[STORY_ID] TIMESTAMP ux-gate → CLEAN"
 # or: --log "[STORY_ID] TIMESTAMP ux-gate → skipped (no UI)"
 # or: --log "[STORY_ID] TIMESTAMP ux-gate → N violations [user continued]"
@@ -391,8 +425,8 @@ AC_SECTION=$(python3 skills/nebu-pipeline/scripts/extract_story_section.py \
   --story [STORY_FILE] --sections "Story" "Acceptance Criteria")
 
 # Read findings from disk
-TEST_REVIEW_FINDINGS=$(cat _bmad-output/nebu/step-results/[STORY_ID]/test-review-findings.md 2>/dev/null || echo "")
-ORACLE_CONTEXT=$(cat _bmad-output/nebu/step-results/[STORY_ID]/oracle-context.md 2>/dev/null || echo "")
+TEST_REVIEW_FINDINGS=$(cat $STEP_RESULTS_DIR/[STORY_ID]/test-review-findings.md 2>/dev/null || echo "")
+ORACLE_CONTEXT=$(cat $STEP_RESULTS_DIR/[STORY_ID]/oracle-context.md 2>/dev/null || echo "")
 
 STEP_DESC=$(python3 skills/nebu-pipeline/scripts/select_pipeline_step.py --step code-review)
 ```
@@ -405,7 +439,7 @@ Inject `[STEP_DESC]` into subagent, substituting:
 
 Write output to disk (overwritten each cycle — always the latest review):
 ```bash
-tee _bmad-output/nebu/step-results/[STORY_ID]/code-review-findings.md
+tee $STEP_RESULTS_DIR/[STORY_ID]/code-review-findings.md
 ```
 
 ```bash
@@ -445,13 +479,13 @@ Stop and wait.
 ```bash
 # CLEAN path:
 python3 skills/nebu-pipeline/scripts/pipeline_state.py \
-  --file _bmad-output/nebu/pipeline-state.yaml \
+  --file $STATE_FILE \
   --step security-review --done code-review \
   --log "[STORY_ID] TIMESTAMP code-review → CLEAN (cycle [CYCLE_COUNT])"
 
 # MINOR path (cycle back to dev-story):
 python3 skills/nebu-pipeline/scripts/pipeline_state.py \
-  --file _bmad-output/nebu/pipeline-state.yaml \
+  --file $STATE_FILE \
   --step dev-story --cycles [CYCLE_COUNT+1] \
   --log "[STORY_ID] TIMESTAMP code-review → N MINOR → cycle [CYCLE_COUNT+1]"
 
@@ -501,7 +535,7 @@ Show: `✓ Step 7: Kassandra — clean.`
 
 ```bash
 python3 skills/nebu-pipeline/scripts/pipeline_state.py \
-  --file _bmad-output/nebu/pipeline-state.yaml \
+  --file $STATE_FILE \
   --step arc42-update --done security-review \
   --log "[STORY_ID] TIMESTAMP security-review → Kassandra CLEAN"
 # or: --log "[STORY_ID] TIMESTAMP security-review → skipped (not-needed)"
@@ -549,7 +583,7 @@ rtk git add docs/
 
 ```bash
 python3 skills/nebu-pipeline/scripts/pipeline_state.py \
-  --file _bmad-output/nebu/pipeline-state.yaml \
+  --file $STATE_FILE \
   --step commit --done arc42-update \
   --log "[STORY_ID] TIMESTAMP arc42-update → done"
 # or: --log "[STORY_ID] TIMESTAMP arc42-update → no arch changes"
@@ -565,7 +599,7 @@ Show: `✓ Step 8: Arc42 documentation updated.`
 
 ```bash
 python3 skills/nebu-pipeline/scripts/update_sprint_status.py \
-  --file _bmad-output/implementation-artifacts/sprint-status.yaml \
+  --file $SPRINT_STATUS \
   --story [STORY_ID] \
   --summary "[SUMMARY]"
 ```
@@ -573,7 +607,7 @@ python3 skills/nebu-pipeline/scripts/update_sprint_status.py \
 Summary examples: `ATDD+Dev+Code CLEAN`, `2 MINOR fixed — 1 cycle`, `HIGH fixed, Kassandra 2 rounds`
 
 ```bash
-rtk git add _bmad-output/implementation-artifacts/sprint-status.yaml
+rtk git add $SPRINT_STATUS
 ```
 
 **Commit:**
@@ -590,7 +624,7 @@ No `Co-Authored-By` line.
 
 ```bash
 python3 skills/nebu-pipeline/scripts/pipeline_state.py \
-  --file _bmad-output/nebu/pipeline-state.yaml \
+  --file $STATE_FILE \
   --commit \
   --log "[STORY_ID] TIMESTAMP committed ✓ ([COMPACT_SUMMARY])"
 ```
@@ -603,10 +637,16 @@ Show: `✓ Step 9: Committed. Pipeline state cleared.`
 
 ### Step 10: epic-check
 
+**Named epic:** count stories in `$STORY_DIR` and check `Status:` in each file:
 ```bash
-rtk read _bmad-output/implementation-artifacts/sprint-status.yaml
+find $STORY_DIR -name "*.md" | sort | while read f; do grep "^Status:" "$f"; done
 ```
+Epic is complete when all story files have `Status: done`.
 
+**Legacy numbered epic:** read the sprint-status.yaml:
+```bash
+rtk read $SPRINT_STATUS
+```
 Check if the story just committed is the last story of the epic (entry immediately before `epic-{N}-retrospective` in the YAML).
 
 **If epic complete → SEC Gate 2 (mandatory):**
@@ -675,7 +715,7 @@ Pass `[FULL_STORY]` in place of the narrower variable. The `--all` flag extracts
 |---|---|
 | Agent fails | Show full error. Stop, user decides. |
 | git command fails | Show git error. Stop, wait for user. |
-| `sprint-status.yaml` missing | `ℹ sprint-status.yaml not found — epic check skipped.` |
+| `$SPRINT_STATUS` missing | `ℹ sprint-status.yaml not found — epic check skipped.` |
 | `select_pipeline_step.py` returns error | Report missing step name and stop. |
 | ATDD skill unavailable | `⚠ ATDD skill not found — TEA Gate skipped. Acceptance tests must exist manually before dev starts.` |
 | `bmad-testarch-test-review` unavailable | `⚠ Test-review skill not found — pre-dev quality check skipped.` |

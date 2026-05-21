@@ -13,20 +13,42 @@ Thin coordinator. For each pending story it spawns an isolated `nebu-pipeline` s
 
 ## Activation
 
-**`nebu-pipeline-epic`** — ask user for epic number, then start.
+**`nebu-pipeline-epic`** — ask user for epic name or number, then start.
 
-**`nebu-pipeline-epic --epic N`** — start or resume epic N.
+**`nebu-pipeline-epic --epic <name>`** — start or resume named epic (e.g. `--epic matrix-presence`).
 
-**`nebu-pipeline-epic --epic N --from STORY_ID`** — skip all stories before STORY_ID.
+**`nebu-pipeline-epic --epic N`** — legacy: start or resume numbered epic N.
+
+**`nebu-pipeline-epic --epic <name> --from <story-slug>`** — skip all stories before the given slug.
+
+---
+
+## Path Resolution
+
+Resolve before Step 0 based on whether the epic is named or numbered.
+
+**Named epic (`--epic <name>`):**
+- `EPIC_ID` = `<name>` (e.g. `matrix-presence`)
+- `STORY_DIR` = `docs/stories/<name>/`
+- `STATE_FILE` = `_bmad-output/nebu/epics/<name>/pipeline-state.yaml`
+- `SPRINT_STATUS` = `_bmad-output/nebu/epics/<name>/sprint-status.yaml`
+- `STEP_RESULTS_DIR` = `_bmad-output/nebu/epics/<name>/step-results/`
+
+**Legacy numbered epic (`--epic N`):**
+- `EPIC_ID` = `N`
+- `STORY_DIR` = `docs/stories/mvp/epic-N/` (or `phase2/` for N ≥ 10)
+- `STATE_FILE` = `_bmad-output/nebu/pipeline-state.yaml`
+- `SPRINT_STATUS` = `_bmad-output/implementation-artifacts/sprint-status.yaml`
+- `STEP_RESULTS_DIR` = `_bmad-output/nebu/step-results/`
+
+Pass `--epic <name>` to all `nebu-pipeline` sub-agent invocations so they resolve paths consistently.
 
 ---
 
 ## Step 0: Discover Pending Stories
 
 ```bash
-# Find all story files for the epic (mvp or phase2)
-find docs/stories/mvp/epic-[N]/ docs/stories/phase2/epic-[N]/ \
-  -name "*.md" 2>/dev/null | sort
+find $STORY_DIR -name "*.md" 2>/dev/null | sort
 ```
 
 For each file, check its status:
@@ -40,14 +62,14 @@ grep "^Status:" [STORY_FILE]
 
 Show the pending list with index and title (H1 line of each file):
 ```
-Pending stories for epic [N]:
+Pending stories for epic [EPIC_ID]:
   1. [STORY_FILE] — [H1 title]
   2. ...
 
 Total: [N] stories pending. Start? [Y/n]
 ```
 
-If `--from STORY_ID` was given: skip all stories whose ID comes before STORY_ID in the sorted list.
+If `--from <story-slug>` was given: skip all stories before that slug in the sorted list.
 
 ---
 
@@ -66,9 +88,17 @@ Read and follow skills/nebu-pipeline/SKILL.md.
 
 Story file: [STORY_FILE]
 Story ID: [STORY_ID]
+Epic: [EPIC_ID]
 
 The story file already exists. Start from Step 1c (classify).
 Skip Step 1 (create-story) — the story is already written.
+
+[IF NAMED EPIC: Path configuration — use these values throughout all steps:]
+[  STATE_FILE       = _bmad-output/nebu/epics/[EPIC_ID]/pipeline-state.yaml]
+[  STEP_RESULTS_DIR = _bmad-output/nebu/epics/[EPIC_ID]/step-results/]
+[  SPRINT_STATUS    = _bmad-output/nebu/epics/[EPIC_ID]/sprint-status.yaml]
+[  STORY_DIR        = docs/stories/[EPIC_ID]/]
+[IF LEGACY EPIC: omit the path configuration block — use legacy default paths]
 
 Run all pipeline steps: 1c → 1b → 2 → 3 → 4 → 5 → 5b → 6 → 7 → 8 → 9.
 For each step, use select_pipeline_step.py and extract_story_section.py as defined in the pipeline.
@@ -80,8 +110,7 @@ Stop and surface to user only for:
   - CI gate failure
   - Pre-dev test-review MAJOR gaps
 
-Step results are written to:
-  _bmad-output/nebu/step-results/[STORY_ID]/
+Step results are written to $STEP_RESULTS_DIR/[STORY_ID]/.
 Use these files — not in-memory variables — as the authoritative source when
 passing findings between steps. This ensures no stale context bleeds between steps.
 
@@ -96,7 +125,7 @@ On completion return exactly:
 **`DONE`:**
 ```bash
 python3 skills/nebu-pipeline/scripts/pipeline_state.py \
-  --file _bmad-output/nebu/pipeline-state.yaml \
+  --file $STATE_FILE \
   --log "[STORY_ID] TIMESTAMP epic-loop → story done"
 ```
 Print: `✓ [[INDEX]/[TOTAL]] Story [STORY_ID] done — [summary]`
@@ -128,11 +157,15 @@ After all stories are done:
 ### SEC Gate 2 — Mandatory Epic Security Review
 
 Determine the epic base commit:
-```bash
-rtk git log --grep="epic-[N-1]-retrospective\|retrospektive\|epic-[N-1]" --oneline | head -3
-```
-
-If unclear: ask "Epic base commit SHA or tag for `git diff [BASE]..HEAD`?"
+- **Named epic:** look for the feature branch start commit or the first story commit:
+  ```bash
+  rtk git log --oneline docs/stories/[EPIC_ID]/ | tail -1
+  ```
+  Or ask: "Epic base commit SHA or tag for `git diff [BASE]..HEAD`?"
+- **Legacy numbered epic:**
+  ```bash
+  rtk git log --grep="epic-[N-1]-retrospective\|retrospektive\|epic-[N-1]" --oneline | head -3
+  ```
 
 ```bash
 STEP_DESC=$(python3 skills/nebu-pipeline/scripts/select_pipeline_step.py --step epic-security-review)
@@ -142,7 +175,7 @@ Spawn Kassandra sub-agent (model: opus, fresh context):
 ```
 [STEP_DESC]
 ```
-Substituting `[EPIC_BASE]` → base commit SHA, `[DATE]` → today, `{N}` → epic number.
+Substituting `[EPIC_BASE]` → base commit SHA, `[DATE]` → today, `{EPIC_ID}` → epic name or number.
 
 **If CRITICAL or HIGH:**
 ```
@@ -160,13 +193,14 @@ Print: `✓ Epic [N] SEC Gate 2 — Kassandra clean.`
 ### Epic Wrap-Up
 
 ```
-🏁 Epic [N] complete!
+🏁 Epic [EPIC_ID] complete!
 
 Next steps (run these yourself):
-  /bmad-testarch-trace   — requirements-to-tests traceability matrix
-  /bmad-retrospective    — epic retrospective
+  /bmad-testarch-trace           — requirements-to-tests traceability matrix
+  /bmad-retrospective            — epic retrospective
+  /nebu-release close            — if this epic completes a release, close and tag
 
-Security review artifact: _bmad-output/implementation-artifacts/epic-[N]-security-review-[DATE].md
+Security review artifact: _bmad-output/implementation-artifacts/epic-[EPIC_ID]-security-review-[DATE].md
 ```
 
 Stop and wait for user.
@@ -180,7 +214,7 @@ Stop and wait for user.
 | Story file not found | Warn, ask user to confirm path, stop if unresolved |
 | Sub-agent times out | Treat as BLOCKED, surface to user |
 | pipeline-state.yaml conflict | Read current state, show to user, ask how to proceed |
-| `find` returns no files | "No story files found for epic [N] — check docs/stories/ structure" |
+| `find` returns no files | "No story files found for epic [EPIC_ID] — check docs/stories/ structure" |
 | SEC Gate 2 sub-agent fails | Stop, surface error, user decides |
 
 ---
