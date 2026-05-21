@@ -113,29 +113,31 @@ _docs_prepare() {
 }
 
 job_docs() {
-    echo "==> docs (static build → /tmp/nebu-website-out)"
+    echo "==> docs (static build → ${REPO_ROOT}/out)"
     _docs_preflight
     _docs_prepare
-    npx @document-writing-tools/markdown-webbook \
-        -i "${REPO_ROOT}/website/dokument" \
-        -o /tmp/nebu-website-out \
-        --theme opencode \
+    # Mirrors .gitlab-ci.yml pages job (public 2.1.0 — CI used private 1.3.15
+    # from opencode registry which is not available locally and uses old children: API)
+    cd "${REPO_ROOT}" && npx --yes @document-writing-tools/markdown-webbook@2.1.0 \
+        --input website/dokument \
+        --output out \
         --title "Nebu" \
+        --theme opencode \
         --copyright "Nebu contributors — Apache 2.0" \
-        --logo-path "${REPO_ROOT}/website/dokument/assets/nebu-logo.svg"
-    echo "  Output: /tmp/nebu-website-out/index.html"
+        --logo-path ""
+    echo "  Output: ${REPO_ROOT}/out/index.html"
 }
 
 job_docs_watch() {
     echo "==> docs-watch (dev server — http://localhost:3000)"
     _docs_preflight
     _docs_prepare
-    npx @document-writing-tools/markdown-webbook \
-        -i "${REPO_ROOT}/website/dokument" \
-        --theme opencode \
+    cd "${REPO_ROOT}" && npx --yes @document-writing-tools/markdown-webbook@2.1.0 \
+        --input website/dokument \
         --title "Nebu" \
+        --theme opencode \
         --copyright "Nebu contributors — Apache 2.0" \
-        --logo-path "${REPO_ROOT}/website/dokument/assets/nebu-logo.svg" \
+        --logo-path "" \
         --watch
 }
 
