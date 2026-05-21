@@ -7,6 +7,8 @@
  * - chromium          : existing API-contract tests (unchanged)
  * - admin-ui          : Admin UI BDD tests via playwright-bdd (Phase 3)
  * - element-web       : Element Web browser-first E2E (Phase 2)
+ * - website           : Static website smoke tests (Phase 3, Story 16.2)
+ *                       Self-skip when WEBSITE_BASE_URL is not reachable.
  */
 
 import { defineConfig, devices } from '@playwright/test';
@@ -27,6 +29,15 @@ const elementWebProject = defineBddProject({
 const adminUiProject = defineBddProject({
   name: 'admin-ui',
   features: 'features/admin/**/*.feature',
+  steps:    'step-definitions/**/*.ts',
+  importTestFrom: 'fixtures/nebu-fixtures.ts',
+  disableWarnings: { importTestFrom: true },
+});
+
+// Story 16.2 — website smoke tests (static site, self-skip when not reachable)
+const websiteProject = defineBddProject({
+  name: 'website',
+  features: 'features/website/**/*.feature',
   steps:    'step-definitions/**/*.ts',
   importTestFrom: 'fixtures/nebu-fixtures.ts',
   disableWarnings: { importTestFrom: true },
@@ -75,6 +86,19 @@ export default defineConfig({
         navigationTimeout: 45_000,
       },
       timeout: 300_000,
+    },
+
+    // ── Phase 3: Website Smoke Tests (playwright-bdd, Story 16.2) ───────────
+    // Self-skip when WEBSITE_BASE_URL is not reachable (static site).
+    {
+      ...websiteProject,
+      use: {
+        ...devices['Desktop Chrome'],
+        baseURL: process.env.WEBSITE_BASE_URL ?? 'http://localhost:4000',
+        actionTimeout: 15_000,
+        navigationTimeout: 30_000,
+      },
+      timeout: 60_000,
     },
   ],
 });

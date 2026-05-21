@@ -1,5 +1,25 @@
 ---
-stepsCompleted: ['step-01-validate-prerequisites', 'step-02-design-epics', 'step-03-epic-1', 'step-03-epic-2', 'step-03-epic-3', 'step-03-epic-4', 'step-03-epic-5', 'step-03-epic-6', 'step-03-epic-7', 'step-03-epic-8', 'step-03-epic-9', 'step-03-epic-10', 'step-03-epic-11', 'step-03-epic-12']
+stepsCompleted: ['step-01-validate-prerequisites', 'step-02-design-epics', 'step-03-epic-1', 'step-03-epic-2', 'step-03-epic-3', 'step-03-epic-4', 'step-03-epic-5', 'step-03-epic-6', 'step-03-epic-7', 'step-03-epic-8', 'step-03-epic-9', 'step-03-epic-10', 'step-03-epic-11', 'step-03-epic-12', 'step-01-epic-16-requirements-validated', 'step-03-epic-16']
+epic16_requirements:
+  fr:
+    - 'FR-16.1: GitLab CI-Pipeline baut die Website mit EasyWebsite aus MD-Files und deployt auf GitLab Pages'
+    - 'FR-16.2: Landing Page präsentiert Nebu (Value Proposition, Tech Stack, Stakeholder-Personas)'
+    - 'FR-16.3: arc42 Dokumentation (Sektionen 01–12 aus docs/architecture/) ist als Website-Bereich integriert'
+    - 'FR-16.4: Alle ADRs (ADR-001 bis ADR-015) sind als eigener Bereich browsebar'
+    - 'FR-16.5: Navigation ermöglicht schnelles Auffinden von Architecture Docs, ADRs und Betreiber-Infos'
+    - 'FR-16.6: Operator Getting-Started Guide (Docker Compose, OIDC-Setup, First Login) ist Teil der Site'
+    - 'FR-16.7: Die Website ist unter der Custom Domain nebuchat.eu mit TLS erreichbar'
+  nfr:
+    - 'NFR-16.1: Website baut in GitLab CI in < 5 Minuten'
+    - 'NFR-16.2: Docs-Inhalte werden direkt aus docs/ bezogen — keine Inhalts-Duplikation im Repo'
+    - 'NFR-16.3: Website ist ohne JavaScript navigierbar (statisches HTML)'
+    - 'NFR-16.4: TLS-Zertifikat für nebuchat.eu via GitLab Pages Let Encrypt'
+  technical:
+    - 'EasyWebsite (https://easywebsite.opencode.de) als Generator-Tool'
+    - 'GitLab Pages als Hosting-Plattform'
+    - '.gitlab-ci.yml Pipeline-Definition erforderlich'
+    - 'Custom Domain nebuchat.eu mit DNS CNAME auf GitLab Pages Endpunkt'
+    - 'Basis: bestehende arc42 Docs aus docs/architecture/'
 inputDocuments:
   - '_bmad-output/planning-artifacts/prd.md'
   - '_bmad-output/planning-artifacts/architecture.md'
@@ -1212,5 +1232,193 @@ So that room moderation works fully with Element Web and FluffyChat.
 **Then** the scenario is green in CI
 
 **Note:** Concrete acceptance criteria for this story are defined after Story 15-0 is complete.
+
+---
+
+## Epic 16: Nebu Project Website — nebuchat.eu
+
+**Goal:** Eine öffentlich zugängliche Projekt-Website unter `nebuchat.eu`, gebaut mit EasyWebsite Easy Mode (`opencode`-Theme + CSS-Variablen-Overrides für Nebu-Branding), die Nebu präsentiert, die arc42-Architektur-Dokumentation zugänglich macht und Betreibern den Einstieg ermöglicht. Die Website lebt unter `website/` im Haupt-Repo (nebu-chat). Kein Node.js/Next.js — EasyWebsite Easy Mode.
+
+**Pre-Epic-TODO:** Nebu Brand-Farbe(n) für CSS-Variable-Overrides festlegen — muss vor Story 16.2 entschieden sein.
+
+**Technology Decision:** EasyWebsite Easy Mode + `opencode`-Theme. CSS-Variablen-Overrides für Logo und Primärfarbe. Kein Developer Mode (kein Next.js-Projekt im Repo). Separates Repo erst wenn eine eigenständige Nebu-Chat-App entsteht.
+
+---
+
+### Story 16.1: EasyWebsite Setup + GitLab CI Pipeline
+
+As a developer,
+I want EasyWebsite configured with the `opencode` theme under `website/` in the monorepo, with a `pages` job in `.gitlab-ci.yml`,
+So that the foundation is in place for all subsequent content stories to deploy without pipeline changes.
+
+**Size:** S
+**security_review:** not-needed
+
+**Acceptance Criteria:**
+
+**Given** the nebu-chat repository,
+**When** `ls website/` is inspected,
+**Then** the following structure exists:
+- `website/dokument/` — EasyWebsite content root
+- `website/dokument/index.md` — Placeholder home page with heading "Nebu"
+- `website/dokument/_meta.yaml` — Navigation configuration
+
+**Given** the EasyWebsite configuration file under `website/`,
+**When** it is inspected,
+**Then** `theme: opencode` is configured
+
+**Given** `.gitlab-ci.yml` at the repo root,
+**When** it is inspected,
+**Then** a `pages` job is defined that:
+- builds EasyWebsite from `website/`
+- writes output to `public/` (GitLab Pages convention)
+- only runs on the `main` branch
+
+**Given** a commit to `main`,
+**When** the CI pipeline completes,
+**Then** the GitLab Pages URL returns HTTP 200, the placeholder page renders with the opencode theme, and there are no browser console errors
+
+**Given** the `pages` job in CI,
+**When** it completes,
+**Then** total job duration is < 5 minutes (NFR-16.1)
+
+**Given** the EasyWebsite build output,
+**When** inspected,
+**Then** the site is statically rendered HTML — no server-side execution required (NFR-16.3)
+
+---
+
+### Story 16.2: Landing Page + Nebu Brand Identity
+
+As a visitor to nebuchat.eu,
+I want a landing page that clearly presents what Nebu is and why it matters, styled with Nebu's logo and brand colors,
+So that I immediately understand if Nebu solves my problem.
+
+**Size:** M
+**security_review:** not-needed
+
+**Acceptance Criteria:**
+
+**Given** `website/dokument/index.md` with landing page content,
+**When** the page is rendered,
+**Then** the following sections are present:
+- Hero with core message (e.g. "Self-hosted Matrix chat — your data, your rules")
+- Value propositions: Matrix-compatible, data-sovereign, no Redis/NATS/Kafka, Apache 2.0
+- Tech stack overview (Go + Elixir/OTP)
+- Stakeholder personas (Operator Marcus, End User Leila, Compliance Officer, Admin Kai)
+- Links to Getting Started guide and Architecture documentation
+
+**Given** `website/dokument/assets/nebu-logo.svg` exists,
+**When** the site renders,
+**Then** the Nebu logo appears in the header (via the `logo` property in the theme configuration)
+
+**Given** a CSS override file (e.g. `website/dokument/custom.css`) with Nebu brand color variables,
+**When** the site renders,
+**Then** the primary color is no longer `#1544ff` (opencode default) but reflects the defined Nebu brand color
+
+**Given** a Playwright screenshot test `e2e/features/website_smoke.feature`,
+**When** `make test-integration` runs,
+**Then** the scenario "Landing page renders with Nebu logo and custom primary color" passes — catching CSS variable regressions on future changes
+
+---
+
+### Story 16.3: Architecture Documentation — arc42 + ADRs
+
+As a developer or architect evaluating Nebu,
+I want all arc42 sections (01–12) and ADRs (ADR-001 to ADR-015) browseable on the website,
+So that I can understand Nebu's architecture and key decisions without digging through the Git repo.
+
+**Size:** M
+**security_review:** not-needed
+
+**Acceptance Criteria:**
+
+**Given** the `pages` CI job in `.gitlab-ci.yml`,
+**When** it is inspected,
+**Then** it copies `docs/architecture/` to `website/dokument/architecture/` before running the EasyWebsite build — no committed copy under `website/`, `docs/architecture/` remains the single source of truth (NFR-16.2)
+
+**Given** `website/dokument/_meta.yaml`,
+**When** the site renders,
+**Then** an "Architecture" section appears in the sidebar with:
+- sub-entries for arc42 sections 01–12
+- a dedicated "Architecture Decision Records" sub-section listing all 15 ADRs
+
+**Given** a visitor navigates to `/architecture/`,
+**When** the page renders,
+**Then** all 12 arc42 sections are linked and render without 404 errors
+
+**Given** a visitor navigates to `/architecture/adr/`,
+**When** the page renders,
+**Then** all 15 ADRs (ADR-001 to ADR-015) are listed and each opens without 404 errors
+
+**Given** `docs/architecture/adr/ADR-001-elixir-otp.md` is updated in the repo,
+**When** the CI pipeline runs on `main`,
+**Then** the updated content appears on the website — no manual copy required
+
+---
+
+### Story 16.4: Operator Getting-Started Guide
+
+As an operator wanting to self-host Nebu,
+I want a step-by-step Getting Started guide on the website,
+So that I can get Nebu running with Docker Compose and OIDC and complete my first login in under 30 minutes.
+
+**Size:** S
+**security_review:** not-needed
+
+**Acceptance Criteria:**
+
+**Given** `website/dokument/getting-started/index.md`,
+**When** it is rendered,
+**Then** it contains the following sections:
+- Prerequisites (Docker, Docker Compose, OIDC provider or Keycloak)
+- Clone + Setup (`git clone`, `make setup`)
+- Configuration (OIDC_ISSUER, DB_URL, secrets)
+- First Start (`make dev`)
+- Verification (health check URL, first Matrix client login)
+- Common Troubleshooting (≥ 3 common failure scenarios with resolution steps)
+
+**Given** `website/dokument/_meta.yaml`,
+**When** the site renders,
+**Then** "Getting Started" appears as a top-level navigation entry
+
+**Given** a new operator with no prior Nebu knowledge,
+**When** they follow the guide end-to-end,
+**Then** they can reach the Admin UI and complete the first OIDC login without consulting additional documentation — validated via a manual usability pass by Phil before the story is marked done
+
+---
+
+### Story 16.5: Custom Domain nebuchat.eu + TLS
+
+As a visitor,
+I want the Nebu project website to be reachable at https://nebuchat.eu,
+So that the site has a professional, memorable URL with valid TLS.
+
+**Size:** S
+**security_review:** not-needed
+
+**Acceptance Criteria:**
+
+**Given** the GitLab Pages Custom Domain configuration for the project,
+**When** it is inspected,
+**Then** `nebuchat.eu` is listed as a verified custom domain with a Let's Encrypt TLS certificate (NFR-16.4)
+
+**Given** the DNS configuration for nebuchat.eu,
+**When** a DNS lookup for `nebuchat.eu` is performed,
+**Then** a CNAME record points to the GitLab Pages endpoint (or an A record if CNAME is not permitted at the apex)
+
+**Given** the site is deployed and DNS has propagated,
+**When** `https://nebuchat.eu` is visited in a browser,
+**Then** the Nebu landing page renders with a valid TLS certificate and no certificate warnings
+
+**Given** `http://nebuchat.eu` (without TLS),
+**When** visited,
+**Then** the request redirects to `https://nebuchat.eu`
+
+**Given** the GitLab Pages deployment,
+**When** the CI pipeline completes,
+**Then** the website is accessible at both the GitLab Pages default URL and `https://nebuchat.eu`
+
+**Note:** DNS configuration (CNAME/A record) must be set by the domain owner in the nebuchat.eu registrar. Story acceptance requires DNS propagation to complete.
 
 ---

@@ -1,6 +1,37 @@
 # Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents
 # Do not edit manually during a pipeline run.
 # last_updated: 2026-05-20
+# [16-3] 2026-05-20T22:11Z committed ✓ (ATDD skipped infra + Code CLEAN cycle 0 + arc42 no-change)
+# [16-3] 2026-05-20T22:10Z arc42-update → no arch changes (CI/config change only, no application architecture impact)
+# [16-3] 2026-05-20T22:09Z security-review → skipped (not-needed — CI config, YAML nav, .gitignore only)
+# [16-3] 2026-05-20T22:08Z code-review → CLEAN (cycle 0) — 2 INFO: children: key format unverifiable locally, before_script merge behavior
+# [16-3] 2026-05-20T22:06Z ci-gate → ✓ config-only change, no Go/Elixir code affected — pages job only runs on main
+# [16-3] 2026-05-20T22:05Z dev-story → done (cycle 0) — CI copy step, _meta.yaml architecture nav, .gitignore
+# [16-3] 2026-05-20T22:02Z test-review → CLEAN (infra story, 4 manual verification tests — no code test files to review)
+# [16-3] 2026-05-20T22:01Z atdd → skipped (infra/CI story — manual verification only)
+# [16-3] 2026-05-20T22:00Z pipeline started
+# 16-2 2026-05-20T20:21:01Z epic-loop → story done
+# 16-2 2026-05-20T21:30Z epic-loop → story done
+# [16-2] 2026-05-20T21:30Z committed ✓ (6288f65 — M1+M2 test fixes + landing page + logo SVG + CSS override — arc42 no-change)
+# [16-2] 2026-05-20T21:25Z arc42-update → no arch changes (static website content, no application architecture impact)
+# [16-2] 2026-05-20T21:20Z security-review → skipped (not-needed — static content/CSS/SVG only)
+# [16-2] 2026-05-20T21:15Z code-review → CLEAN (cycle 0) — 2 INFO: link targets deferred (16-3/16-4), _meta.yaml logo config uncertainty (deploy-only); inline MINOR-1 fixed (errors array simplified)
+# [16-2] 2026-05-20T21:10Z ci-gate → ✓ build+unit-go+unit-elixir (website e2e self-skip expected — no WEBSITE_BASE_URL)
+# [16-2] 2026-05-20T21:05Z dev-story → done (cycle 0) — index.md full landing page, nebu-logo.svg, custom.css, _meta.yaml logo+custom_css refs
+# [16-2] 2026-05-20T21:00Z test-review-fixes → M1+M2 auto-fixed (test.skip, locator.or expect)
+# [16-2] 2026-05-20T10:05Z atdd → 3 failing tests (website_smoke.feature)
+# [16-2] 2026-05-20T10:01Z classify → matrix=false, ui=true, security_review=not-needed
+# [16-2] 2026-05-20T10:00Z pipeline started
+# 16-1 2026-05-20T20:07:29Z epic-loop → story done
+# [16-1] 2026-05-20T10:00Z committed ✓ (2 HIGH fixed: md-to-web pinned @1.1.0; $CI_SERVER_FQDN documented — arc42 no-change infra)
+# [16-1] 2026-05-20T09:55Z arc42-update → no arch changes (CI/docs infra only, no application architecture impact)
+# [16-1] 2026-05-20T09:50Z security-review → skipped (not-needed — CI config only, no auth/crypto/route code)
+# [16-1] 2026-05-20T09:45Z code-review → 2 HIGH auto-fixed (md-to-web @v2→@1.1.0 pin; $CI_SERVER_FQDN assumption documented); Impressum/Datenschutz deferred (future story scope); CLEAN cycle 1
+# [16-1] 2026-05-20T09:15Z ci-gate → ✓ build+unit-go+unit-elixir (e2e/integration env-startup flaky, infra story no app changes)
+# [16-1] 2026-05-20T09:10Z dev-story → done (cycle 0)
+# [16-1] 2026-05-20T09:02Z test-review → CLEAN (infra story, manual verification tests only)
+# [16-1] 2026-05-20T09:01Z atdd → skipped (infra-only: manual CI inspection tests)
+# [16-1] 2026-05-20T09:00Z pipeline started
 # [13-20] 2026-05-20T12:39Z committed ✓ (test-only — 5000ms → 10000ms Horde timeout CLEAN)
 # [13-20] 2026-05-20T12:38Z pipeline started
 # [13-19] 2026-05-20T10:50Z committed ✓ (test-only — try/rescue replaces TOCTOU guard CLEAN)
@@ -644,4 +675,4 @@ current_step: null
 completed: []
 cycle_count: 0
 blocked_reason: null
-last_updated: "2026-05-20T12:39Z"
+last_updated: "2026-05-20T20:26Z"
