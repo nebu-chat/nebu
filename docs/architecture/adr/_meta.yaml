@@ -1,0 +1,32 @@
+ADR-001-elixir-otp:
+  title: "ADR-001 — Elixir/OTP"
+ADR-002-no-redis-nats:
+  title: "ADR-002 — No Redis / No NATS"
+ADR-003-content-hash-event-id:
+  title: "ADR-003 — Content-Hash Event-ID"
+ADR-004-horde-registry:
+  title: "ADR-004 — Horde Registry"
+ADR-005-grpc-eventbus:
+  title: "ADR-005 — gRPC EventBus"
+ADR-006-message-buffer-drain:
+  title: "ADR-006 — Message Buffer Drain"
+ADR-007-ed25519-x25519-keypairs:
+  title: "ADR-007 — Ed25519 / X25519 Key Pairs"
+ADR-008-node-registration-psk:
+  title: "ADR-008 — Node Registration PSK"
+ADR-009-openapi-spec-first:
+  title: "ADR-009 — OpenAPI Spec-First"
+ADR-010-fts-strategy:
+  title: "ADR-010 — Full-Text Search Strategy"
+ADR-011-managed-e2ee-key-escrow:
+  title: "ADR-011 — Managed E2EE Key Escrow"
+ADR-012-upstream-repo-no-deployments-example-credentials:
+  title: "ADR-012 — Upstream Repo & Example Credentials"
+ADR-013-minio-object-storage:
+  title: "ADR-013 — MinIO Object Storage"
+ADR-014-deployment-strategy-iac:
+  title: "ADR-014 — Deployment Strategy & IaC"
+ADR-015-oidc-user-directory-integration:
+  title: "ADR-015 — OIDC User Directory Integration"
+ADR-016-git-branching-release-strategy:
+  title: "ADR-016 — Git Branching & Release Strategy"

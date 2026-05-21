@@ -13,11 +13,15 @@
 #   scripts/ci-local.sh --test-elixir  # run test-unit-elixir only
 #   scripts/ci-local.sh --scan         # run secret-scan only
 #   scripts/ci-local.sh --verify       # run verify-docs only
+#   scripts/ci-local.sh --docs         # build documentation website (static)
+#   scripts/ci-local.sh --docs-watch   # start docs dev server with live-reload
 #   scripts/ci-local.sh --all          # run all jobs (same as no args)
 #
 # Jobs: lint-go  test-unit-go  test-unit-elixir  secret-scan  verify-docs
+# Docs: --docs / --docs-watch require Node.js + npx (not Docker)
 #
-# Requires: Docker in PATH
+# Requires: Docker in PATH (all jobs except --docs / --docs-watch)
+#           Node.js + npx in PATH (--docs / --docs-watch only)
 # =============================================================================
 
 set -euo pipefail
@@ -91,6 +95,50 @@ job_verify_docs() {
     "${SCRIPT_DIR}/verify-security-policy.sh"
 }
 
+# ---------------------------------------------------------------------------
+# docs helpers — require Node.js / npx, not Docker
+# ---------------------------------------------------------------------------
+_docs_preflight() {
+    if ! command -v npx >/dev/null 2>&1; then
+        echo "ERROR: npx not found in PATH." >&2
+        echo "  Install Node.js (https://nodejs.org/) and ensure npx is available." >&2
+        exit 1
+    fi
+}
+
+_docs_prepare() {
+    echo "  Injecting docs/architecture/ → website/dokument/architecture/ ..."
+    mkdir -p "${REPO_ROOT}/website/dokument/architecture"
+    cp -r "${REPO_ROOT}/docs/architecture/." "${REPO_ROOT}/website/dokument/architecture/"
+}
+
+job_docs() {
+    echo "==> docs (static build → /tmp/nebu-website-out)"
+    _docs_preflight
+    _docs_prepare
+    npx @document-writing-tools/markdown-webbook \
+        -i "${REPO_ROOT}/website/dokument" \
+        -o /tmp/nebu-website-out \
+        --theme opencode \
+        --title "Nebu" \
+        --copyright "Nebu contributors — Apache 2.0" \
+        --logo-path "${REPO_ROOT}/website/dokument/assets/nebu-logo.svg"
+    echo "  Output: /tmp/nebu-website-out/index.html"
+}
+
+job_docs_watch() {
+    echo "==> docs-watch (dev server — http://localhost:3000)"
+    _docs_preflight
+    _docs_prepare
+    npx @document-writing-tools/markdown-webbook \
+        -i "${REPO_ROOT}/website/dokument" \
+        --theme opencode \
+        --title "Nebu" \
+        --copyright "Nebu contributors — Apache 2.0" \
+        --logo-path "${REPO_ROOT}/website/dokument/assets/nebu-logo.svg" \
+        --watch
+}
+
 run_all() {
     job_lint_go
     job_test_unit_go
@@ -108,17 +156,22 @@ usage() {
 Usage: $(basename "$0") [MODE]
 
 Modes:
-  (no args)        run all jobs sequentially
-  --all            run all jobs sequentially
+  (no args)        run all jobs sequentially (excludes docs)
+  --all            run all jobs sequentially (excludes docs)
   --lint           run lint-go
   --test-go        run test-unit-go
   --test-elixir    run test-unit-elixir
   --scan           run secret-scan
   --verify         run verify-docs
+  --docs           build documentation website (static, output: /tmp/nebu-website-out)
+  --docs-watch     start docs dev server with live-reload (http://localhost:3000)
   --help, -h       show this message
 
-Requires Docker in PATH. Uses Docker images that mirror the Makefile
-(public docker.io: golang:1.26-alpine, elixir:1.19-alpine).
+CI jobs (--all, --lint, --test-*, --scan, --verify): require Docker in PATH.
+  Uses public docker.io images: golang:1.26-alpine, elixir:1.19-alpine.
+
+Docs jobs (--docs, --docs-watch): require Node.js + npx in PATH.
+  Uses @document-writing-tools/markdown-webbook via npx (no Docker needed).
 EOF
     exit "${rc}"
 }
@@ -155,6 +208,12 @@ case "${MODE}" in
         ;;
     --verify)
         job_verify_docs
+        ;;
+    --docs)
+        job_docs
+        ;;
+    --docs-watch)
+        job_docs_watch
         ;;
     *)
         echo "Unknown mode: ${MODE}" >&2
