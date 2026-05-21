@@ -99,13 +99,23 @@ defmodule Nebu.Room.RoomServerClusteringTest do
 
   # ─── Setup ──────────────────────────────────────────────────────────────────
 
-  setup do
-    if :ets.whereis(:cluster_fake_db) == :undefined do
-      :ets.new(:cluster_fake_db, [:named_table, :set, :public])
-    else
-      :ets.delete_all_objects(:cluster_fake_db)
-    end
+  # setup_all owns the ETS table for the entire module lifetime, preventing a
+  # race where a per-test owner process dies between setup and the test body,
+  # which would delete the table and cause :badarg in load_members.
+  setup_all do
+    :ets.new(:cluster_fake_db, [:named_table, :set, :public])
 
+    on_exit(fn ->
+      if :ets.whereis(:cluster_fake_db) != :undefined do
+        :ets.delete(:cluster_fake_db)
+      end
+    end)
+
+    :ok
+  end
+
+  setup do
+    :ets.delete_all_objects(:cluster_fake_db)
     Application.put_env(:room_manager, :db_module, ClusterFakeDB)
 
     on_exit(fn ->
