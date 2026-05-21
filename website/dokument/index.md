@@ -1,3 +1,7 @@
+---
+title: "Nebu — Self-hosted Matrix Chat"
+---
+
 # Nebu — Self-hosted Matrix Chat
 
 **Self-hosted Matrix chat — your data, your rules.**
@@ -7,7 +11,7 @@ Matrix Client-Server API compatible chat server.
 Apache 2.0 licensed. No federation. Horizontally scalable.
 Designed to replace Slack/Teams with full data sovereignty.
 
-* * *
+---
 
 ## Why Nebu?
 
@@ -34,7 +38,7 @@ no Redis, no NATS, no Kafka. Fewer moving parts. Simpler operations. Lower cost.
 Nebu is released under the Apache 2.0 license. Use it, fork it, embed it in your product.
 No "open core" licensing, no paid enterprise tier for basic features.
 
-* * *
+---
 
 ## Tech Stack
 
@@ -51,7 +55,7 @@ Nebu is built on a proven combination of fast, reliable, and battle-tested techn
 
 No Redis. No NATS. No Kafka. No surprises.
 
-* * *
+---
 
 ## Who Uses Nebu?
 
@@ -64,7 +68,7 @@ since we switched."*
 **Marcus** represents operators who need a self-hostable, OIDC-integrated chat server that fits
 inside an existing Kubernetes or Docker Compose deployment without additional middleware dependencies.
 
-* * *
+---
 
 ### Leila — Software Engineer
 
@@ -74,7 +78,7 @@ tomorrow without asking anyone's permission."*
 **Leila** represents end users who want freedom of client choice and the reliability of an
 open protocol, without sacrificing the UX quality of commercial chat tools.
 
-* * *
+---
 
 ### Mia — Compliance Officer
 
@@ -84,7 +88,7 @@ chat server our legal team approved without amendments."*
 **Mia** represents compliance officers who need verifiable data sovereignty, a clear license,
 and a documented right-to-erasure implementation before they can approve a tool for production use.
 
-* * *
+---
 
 ### Kai — System Administrator
 
@@ -94,7 +98,7 @@ The admin dashboard shows me what I need to know without cluttering the screen."
 **Kai** represents administrators who need straightforward initial setup and a day-to-day
 admin UI that focuses on operational visibility without overwhelming detail.
 
-* * *
+---
 
 ## Get Started
 
@@ -103,7 +107,7 @@ Ready to deploy Nebu?
 - [Getting Started Guide](getting-started/) — step-by-step operator setup
 - [Architecture Documentation](architecture/) — arc42-based system design
 
-* * *
+---
 
 ## Source Code
 
