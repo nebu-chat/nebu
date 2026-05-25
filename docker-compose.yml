@@ -59,6 +59,9 @@ services:
       NEBU_OIDC_CLIENT_ID: "nebu-gateway"
       NEBU_OIDC_CLIENT_SECRET: "nebu-dev-secret"
       NEBU_OIDC_CLAIM_ROLE: "groups"
+      # Story 5-30: Dex-specific extra OIDC scopes (groups + offline_access).
+      # Leave unset for external providers (e.g. Keycloak) to avoid invalid_grant errors.
+      NEBU_OIDC_EXTRA_SCOPES: "groups offline_access"
       # Fail-closed environment label. The gateway treats anything other than
       # {dev,development,test,staging} as production, so dev-only escape hatches
       # (NEBU_ALLOW_INSECURE_OIDC_ISSUER, NEBU_ALLOW_INSECURE_KEK) only apply

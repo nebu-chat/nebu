@@ -289,7 +289,7 @@ func attemptTokenRefresh(ctx context.Context, cfg SessionRefreshConfig, sess *Ad
 		return time.Time{}, "", fmt.Errorf("session refresh: no config reader available")
 	}
 
-	issuer, clientID, clientSecret, err := cfg.ConfigReader.LoadOIDCConfig(ctx)
+	issuer, clientID, clientSecret, _, err := cfg.ConfigReader.LoadOIDCConfig(ctx)
 	if err != nil {
 		return time.Time{}, "", fmt.Errorf("session refresh: failed to load OIDC config: %w", err)
 	}

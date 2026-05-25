@@ -450,6 +450,13 @@ A new `deploy/tofu/examples/aws/outputs.tf` exports `dns_name = module.nebu_aws.
 - `/opt/nebu/element-config.json` write_files block added (conditional on `enable_element_web`)
 - nginx routing updated: added `/api/v1/` → gateway and `location /` → Element blocks; WebSocket `Upgrade`/`Connection` headers added to the Element location
 
+**Changes in Bug 5-30 (OIDC extra scopes configurable):**
+- `NEBU_OIDC_EXTRA_SCOPES` env var added to `.env` in the cloud-init template with profile-conditional values:
+  - `oidc_mode = "dex"`: `groups offline_access` (required for Dex group claims + refresh tokens)
+  - `oidc_mode = "external"`: `""` (empty — external providers such as Keycloak may reject non-standard scopes)
+- `docker-compose.yml` (local dev): `NEBU_OIDC_EXTRA_SCOPES=groups offline_access` added for the dev Dex environment
+- The gateway reads `NEBU_OIDC_EXTRA_SCOPES` as the env-var fallback; a `server_config` / `bootstrap_draft` DB key `oidc_extra_scopes` takes unconditional precedence when present (see §8 Cross-Cutting Concepts — "Configurable OIDC Extra Scopes")
+
 **Security invariants:**
 - `pg_password` appears only inside `.env` (mode `0600`), never in plain environment variables or log output
 - `dex_static_password_hash` is written only to `/opt/nebu/dex/config.yaml` (mode `0600`)

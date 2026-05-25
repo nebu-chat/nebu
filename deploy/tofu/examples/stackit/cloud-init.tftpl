@@ -47,6 +47,11 @@ write_files:
       NEBU_ENV=${nebu_env}
       NEBU_KEY_ENCRYPTION_KEY=${key_encryption_key}
       NEBU_TRUSTED_PROXY=${enable_tls ? "true" : "false"}
+%{ if oidc_mode == "dex" ~}
+      NEBU_OIDC_EXTRA_SCOPES=groups offline_access
+%{ else ~}
+      NEBU_OIDC_EXTRA_SCOPES=
+%{ endif ~}
 
 %{ if oidc_mode == "dex" ~}
   # ── /opt/nebu/dex/config.yaml ──────────────────────────────────────────────

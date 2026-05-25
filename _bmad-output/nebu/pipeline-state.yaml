@@ -8,11 +8,29 @@
 #   _bmad-output/nebu/epics/<epic-name>/pipeline-state.yaml
 # This file is no longer used for named-epic pipeline runs.
 #
-# last_updated: 2026-05-21
+# last_updated: 2026-05-24
+# [5-30] 2026-05-24T21:28Z committed ✓ (2 MAJOR + 3 MINOR fixed, 3 cycles, Kassandra skipped)
+# [5-30] 2026-05-24T21:25Z arc42-update → done (07-deployment, 08-concepts)
+# [5-30] 2026-05-24T21:20Z security-review → skipped (not-needed)
+# [5-30] 2026-05-24T21:20Z code-review → CLEAN at cycle-limit (4 MINOR deferred)
+# [5-30] 2026-05-24T21:12Z ci-gate → ✓ unit-go (25 packages)
+# [5-30] 2026-05-24T21:10Z dev-story → done (cycle 3)
+# [5-30] 2026-05-24T21:00Z code-review → 5 MINOR → cycle 3 (MINOR-3/4 deferred)
+# [5-30] 2026-05-24T20:53Z ci-gate → ✓ unit-go (25 packages)
+# [5-30] 2026-05-24T20:52Z dev-story → done (cycle 2)
+# [5-30] 2026-05-24T20:45Z code-review → 3 MINOR → cycle 2
+# [5-30] 2026-05-24T20:38Z ci-gate → ✓ unit-go (27 packages)
+# [5-30] 2026-05-24T20:35Z dev-story → done (cycle 1)
+# [5-30] 2026-05-24T20:30Z code-review → 2 MAJOR → cycle 1
+# [5-30] 2026-05-24T20:11Z ci-gate → ✓ unit-go (25 packages)
+# [5-30] 2026-05-24T20:07Z dev-story → done (cycle 0)
+# [5-30] 2026-05-24T19:52Z test-review → CLEAN (0 MAJOR, 3 MINOR)
+# [5-30] 2026-05-24T19:49Z atdd → 4 failing tests (auth_extra_scopes_test.go)
+# [5-30] 2026-05-24T19:38Z pipeline started (story pre-created)
 
-story: ""
-current_step: ""
+story: null
+current_step: null
 completed: []
 cycle_count: 0
 blocked_reason: null
-last_updated: "2026-05-21"
+last_updated: "2026-05-24T20:56Z"

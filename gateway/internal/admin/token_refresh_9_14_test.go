@@ -448,6 +448,10 @@ func TestNoRefreshTokenRedirectsToLogin(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestOfflineAccessScopeInCallback(t *testing.T) {
+	// offline_access is now configurable via NEBU_OIDC_EXTRA_SCOPES (story 5-30).
+	// Set it so this test continues to verify the Dex offline-session behaviour.
+	t.Setenv("NEBU_OIDC_EXTRA_SCOPES", "offline_access")
+
 	var discoveryServerURL string
 	discoveryMux := http.NewServeMux()
 	discoveryMux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {

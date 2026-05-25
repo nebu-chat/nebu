@@ -23,6 +23,33 @@ Auth token never forwarded to Elixir - only user_id + system_role
 **Bootstrap mode:** First OIDC login automatically receives `instance_admin`. Bootstrap mode is
 permanently disabled after the first admin setup. No default password, no insecure fallback.
 
+**Configurable OIDC Extra Scopes (Bug 5-30):**
+
+The OIDC authorization request scope list is configurable per deployment. The standard base scopes
+`openid profile email` are always requested. Additional scopes (e.g. `groups offline_access` for Dex,
+`openid profile email` for Keycloak/external providers) are resolved at login time via a two-level
+precedence chain:
+
+1. **DB key `oidc_extra_scopes`** (in `server_config` or `bootstrap_draft`) - present value wins,
+   even when empty (explicit "no extra scopes" override for providers that reject non-standard scopes).
+2. **`NEBU_OIDC_EXTRA_SCOPES` env var** - fallback when the DB key is absent (`sql.ErrNoRows`).
+3. **`""`** (empty string) - default when neither source is configured (standard scopes only).
+
+`buildScopeList(extraScopes string) []string` deduplicates extra tokens against the base set before
+appending. `resolveExtraScopes(dbVal string, dbAbsent bool) string` encodes the precedence logic.
+
+**Deployment-specific defaults (injected by cloud-init / docker-compose):**
+
+| Environment | `NEBU_OIDC_EXTRA_SCOPES` value | Reason |
+|---|---|---|
+| Local dev (Dex) | `groups offline_access` | Dex group claim + refresh token support |
+| Stackit prod (`oidc_mode = "dex"`) | `groups offline_access` | Same as local dev |
+| Stackit prod (`oidc_mode = "external"`) | `""` (empty) | External providers (Keycloak, Azure AD) may reject unknown scopes |
+
+An operator can always override the env var default by inserting the `oidc_extra_scopes` key into
+`server_config` via the Bootstrap Wizard or direct DB update — the DB value takes unconditional
+precedence over the env var.
+
 **SSO Nonce-Based Replay Prevention (Story 11-7, hardened Story 12.7):**
 
 `GetSSORedirect` generates a 16-byte cryptographically random nonce (32 hex chars) per SSO
