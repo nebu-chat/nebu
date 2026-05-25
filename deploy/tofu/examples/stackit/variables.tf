@@ -105,22 +105,41 @@ variable "ubuntu_image_id" {
   # Example (eu01, 2024): "59838a89-51b1-4892-b57f-b3caf598ee2f"
 }
 
-variable "enable_tls" {
-  description = "When true, provisions a Let's Encrypt certificate via ACME DNS-01 challenge and configures nginx on the VM for TLS termination. Requires dns_mode = 'default' (Stackit DNS zone must exist for the DNS-01 challenge). Set acme_staging = true during testing to avoid LE rate limits."
-  type        = bool
-  default     = false
+variable "tls_mode" {
+  description = "TLS termination strategy. 'none': no TLS, gateway exposed directly on port 8008 via NLB TCP passthrough. 'acme': nginx on VM terminates TLS with a Let's Encrypt cert provisioned by certbot (HTTP-01 challenge). 'alb': Stackit Application Load Balancer terminates TLS using a certificate provided via tls_certificate_pem/tls_private_key_pem — no nginx on the VM."
+  type        = string
+  default     = "none"
+
+  validation {
+    condition     = contains(["none", "acme", "alb"], var.tls_mode)
+    error_message = "tls_mode must be 'none', 'acme', or 'alb'."
+  }
 }
 
 variable "acme_email" {
-  description = "Email address for Let's Encrypt ACME account registration. Required when enable_tls = true. Used for certificate expiry notifications."
+  description = "Email address for Let's Encrypt ACME account registration. Required when tls_mode = 'acme'. Used for certificate expiry notifications."
   type        = string
   default     = ""
 }
 
 variable "acme_staging" {
-  description = "When true, passes --test-cert to certbot (Let's Encrypt staging). Staging certs are not trusted by browsers but have no rate limits — use for initial testing. Switch to false for production certs."
+  description = "When true, passes --test-cert to certbot (Let's Encrypt staging). Staging certs are not trusted by browsers but have no rate limits — use for initial testing. Switch to false for production certs. Only relevant when tls_mode = 'acme'."
   type        = bool
   default     = false
+}
+
+variable "tls_certificate_pem" {
+  description = "PEM-encoded TLS certificate (fullchain) for the Nebu domain. Required when tls_mode = 'alb'. Obtain externally (e.g. via certbot with DNS-01 challenge against your domain hoster). Example: file('/etc/letsencrypt/live/chat.example.com/fullchain.pem')"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "tls_private_key_pem" {
+  description = "PEM-encoded TLS private key for the Nebu domain. Required when tls_mode = 'alb'. Must match the public key in tls_certificate_pem. Example: file('/etc/letsencrypt/live/chat.example.com/privkey.pem')"
+  type        = string
+  sensitive   = true
+  default     = ""
 }
 
 # ── PostgresFlex sizing variables ─────────────────────────────────────────────
@@ -186,6 +205,22 @@ variable "oidc_client_secret" {
   validation {
     condition     = !strcontains(var.oidc_client_secret, "\"") && !strcontains(var.oidc_client_secret, "\\")
     error_message = "oidc_client_secret must not contain double-quote or backslash characters (YAML interpolation constraint)."
+  }
+}
+
+variable "oidc_client_id" {
+  description = "Required. When oidc_mode = 'dex': embedded into Dex staticClients config (same value used by both gateway and Dex). When oidc_mode = 'external': must match the client secret registered in your external OIDC provider. Minimum 8 characters."
+  type        = string
+  sensitive   = true
+
+  validation {
+    condition     = length(var.oidc_client_id) >= 8
+    error_message = "oidc_client_id must be at least 8 characters."
+  }
+
+  validation {
+    condition     = !strcontains(var.oidc_client_id, "\"") && !strcontains(var.oidc_client_id, "\\")
+    error_message = "oidc_client_id must not contain double-quote or backslash characters (YAML interpolation constraint)."
   }
 }
 
@@ -346,7 +381,7 @@ variable "logs_retention_days" {
 }
 
 variable "enable_element_web" {
-  description = "When true, deploys the Element Web Matrix client as a Docker service and configures nginx to serve it at the root path (/). Matrix API paths (/_matrix/, /.well-known/matrix/, /admin/) continue to route to the gateway. Requires enable_tls = true: without nginx, Element runs on port 7070 while the gateway is on port 8008 — different origins cause CORS preflight failures."
+  description = "When true, deploys the Element Web Matrix client as a Docker service and configures nginx to serve it at the root path (/). Matrix API paths (/_matrix/, /.well-known/matrix/, /admin/) continue to route to the gateway. Requires tls_mode = 'acme': without nginx, Element runs on port 7070 while the gateway is on port 8008 — different origins cause CORS preflight failures."
   type        = bool
   default     = false
 }

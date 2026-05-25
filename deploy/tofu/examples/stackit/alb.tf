@@ -1,20 +1,120 @@
-# ── Application Load Balancer ─────────────────────────────────────────────────
-# Stackit native ALB (per ADR-014). TCP passthrough — TLS is terminated on the VM by nginx.
-# beta feature: enable_beta_resources = true required in provider block (main.tf).
-#
-# enable_tls = false: port 443 → gateway:8008 (direct, no TLS)
-# enable_tls = true:  port 443 → nginx:443 (TLS termination) + port 80 → nginx:80 (HTTP redirect)
+# ── TLS Certificate (tls_mode = "alb") ────────────────────────────────────────
+# Stored in Stackit ALB Certificate Service.
+# Operator obtains the certificate externally (e.g. via certbot with DNS-01 on the
+# external domain hoster) and provides tls_certificate_pem + tls_private_key_pem.
+
+resource "stackit_alb_certificate" "nebu" {
+  count       = var.tls_mode == "alb" ? 1 : 0
+  project_id  = var.stackit_project_id
+  name        = "nebu-${var.environment}-cert"
+  public_key  = file(var.tls_certificate_pem)
+  private_key = file(var.tls_private_key_pem)
+}
+
+# ── Application Load Balancer (tls_mode = "alb") ──────────────────────────────
+# L7 ALB with TLS termination at the load balancer — no nginx on the VM.
+# Port 443 HTTPS → gateway:8008
+# Port 80  HTTP  → gateway:8008 (gateway responsible for redirect if needed)
+
+resource "stackit_application_load_balancer" "nebu" {
+  count            = var.tls_mode == "alb" ? 1 : 0
+  project_id       = var.stackit_project_id
+  name             = "nebu-${var.environment}-alb"
+  plan_id          = var.alb_plan_id
+  external_address = stackit_public_ip.nebu-alb.ip
+
+  networks = [
+    {
+      network_id = stackit_network.nebu.network_id
+      role       = "ROLE_LISTENERS_AND_TARGETS"
+    }
+  ]
+
+  target_pools = [
+    {
+      name        = "matrix-api"
+      target_port = 80
+      targets = [
+        {
+          display_name = stackit_server.nebu.name
+          ip           = stackit_network_interface.nebu.ipv4
+        }
+      ]
+      active_health_check = {
+        interval            = "10s"
+        interval_jitter     = "3s"
+        timeout             = "5s"
+        healthy_threshold   = 3
+        unhealthy_threshold = 3
+        http_health_checks = {
+          ok_status = ["200"]
+          path      = "/_matrix/client/versions"
+        }
+      }
+    }
+  ]
+
+  listeners = [
+    {
+      name     = "https-443"
+      port     = 443
+      protocol = "PROTOCOL_HTTPS"
+      http = {
+        hosts = [{
+          host = var.server_name
+          rules = [{
+            target_pool = "matrix-api"
+            web_socket  = true
+            path = {
+              prefix = "/"
+            }
+          }]
+        }]
+      }
+      https = {
+        certificate_config = {
+          certificate_ids = [stackit_alb_certificate.nebu[0].cert_id]
+        }
+      }
+    },
+    {
+      name     = "http-80"
+      port     = 80
+      protocol = "PROTOCOL_HTTP"
+      http = {
+        hosts = [{
+          host = var.server_name
+          rules = [{
+            target_pool = "matrix-api"
+            web_socket  = false
+            path = {
+              prefix = "/"
+            }
+          }]
+        }]
+      }
+    }
+  ]
+
+  options = {
+    private_network_only = false
+    acl                  = ["0.0.0.0/0"]
+  }
+}
+
+# ── Network Load Balancer / TCP passthrough (tls_mode = "none" | "acme") ──────
+# tls_mode = "none": port 443 → gateway:8008 (direct, no TLS)
+# tls_mode = "acme": port 443 → nginx:443 (TLS termination) + port 80 → nginx:80 (HTTP redirect)
 
 locals {
-  _alb_vm_targets = [
+  _nlb_vm_targets = [
     {
       display_name = stackit_server.nebu.name
       ip           = stackit_network_interface.nebu.ipv4
     },
   ]
 
-  # Stackit ALB health checks are TCP-based only.
-  _alb_health_check = {
+  _nlb_health_check = {
     healthy_threshold   = 3
     interval            = "10s"
     interval_jitter     = "3s"
@@ -22,7 +122,7 @@ locals {
     unhealthy_threshold = 3
   }
 
-  alb_listeners = concat(
+  nlb_listeners = concat(
     [
       {
         display_name = "https-443"
@@ -31,7 +131,7 @@ locals {
         target_pool  = "matrix-api"
       },
     ],
-    var.enable_tls ? [
+    var.tls_mode == "acme" ? [
       {
         display_name = "http-80"
         port         = 80
@@ -41,31 +141,32 @@ locals {
     ] : []
   )
 
-  alb_target_pools = concat(
+  nlb_target_pools = concat(
     [
       {
         name                = "matrix-api"
-        target_port         = var.enable_tls ? 443 : 8008
-        targets             = local._alb_vm_targets
-        active_health_check = local._alb_health_check
+        target_port         = var.tls_mode == "acme" ? 443 : 8008
+        targets             = local._nlb_vm_targets
+        active_health_check = local._nlb_health_check
       },
     ],
-    var.enable_tls ? [
+    var.tls_mode == "acme" ? [
       {
         name                = "http-redirect"
         target_port         = 80
-        targets             = local._alb_vm_targets
-        active_health_check = local._alb_health_check
+        targets             = local._nlb_vm_targets
+        active_health_check = local._nlb_health_check
       },
     ] : []
   )
 }
 
 resource "stackit_loadbalancer" "nebu" {
+  count            = var.tls_mode != "alb" ? 1 : 0
   project_id       = var.stackit_project_id
   name             = "nebu-${var.environment}-alb"
   plan_id          = var.alb_plan_id
-  external_address = stackit_public_ip.nebu.ip
+  external_address = stackit_public_ip.nebu-alb.ip
 
   networks = [
     {
@@ -74,10 +175,18 @@ resource "stackit_loadbalancer" "nebu" {
     },
   ]
 
-  listeners    = local.alb_listeners
-  target_pools = local.alb_target_pools
+  listeners    = local.nlb_listeners
+  target_pools = local.nlb_target_pools
 
   options = {
     private_network_only = false
   }
+}
+
+
+# ── Floating IP ───────────────────────────────────────────────────────────────
+
+resource "stackit_public_ip" "nebu-alb" {
+  project_id           = var.stackit_project_id
+  network_interface_id = stackit_network_interface.nebu.network_interface_id
 }

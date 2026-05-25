@@ -20,7 +20,7 @@ resource "stackit_dns_record_set" "nebu" {
   zone_id    = stackit_dns_zone.nebu[0].zone_id
   name       = "${var.server_name}." # Record set names require trailing dot (FQDN format).
   type       = "A"
-  records    = [stackit_public_ip.nebu.ip]
+  records    = [stackit_public_ip.nebu-alb.ip]
   ttl        = 300
 }
 
@@ -32,6 +32,6 @@ resource "stackit_dns_record_set" "dex" {
   zone_id    = stackit_dns_zone.nebu[0].zone_id
   name       = "dex.${var.server_name}."
   type       = "A"
-  records    = [stackit_public_ip.nebu.ip]
+  records    = [stackit_public_ip.nebu-alb.ip]
   ttl        = 300
 }
