@@ -312,6 +312,59 @@ build-core-image:
     - if: '$CI_COMMIT_BRANCH == "main"'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
 
+# ─── Pre-release Image Builds (dev branch) ───────────────────────────────────
+# Pushes preview images on every commit to the `dev` branch.
+# Tags: dev-<CI_PIPELINE_ID> (immutable per run) + dev-latest (mutable pointer).
+# These images reflect development state and are NOT intended for production.
+
+prerelease-gateway-image:
+  <<: *build_ci_image
+  stage: build
+  script:
+    - /kaniko/executor
+      --context "${CI_PROJECT_DIR}/gateway"
+      --dockerfile gateway/Dockerfile
+      --destination "${CI_REGISTRY_IMAGE}/nebu-gateway:dev-${CI_PIPELINE_ID}"
+      --destination "${CI_REGISTRY_IMAGE}/nebu-gateway:dev-latest"
+      --build-arg "GIT_COMMIT=${CI_COMMIT_SHA}"
+      --build-arg "BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      --cache=true
+      --cache-ttl=24h
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "dev"'
+
+prerelease-core-image:
+  <<: *build_ci_image
+  stage: build
+  script:
+    - /kaniko/executor
+      --context "${CI_PROJECT_DIR}/core"
+      --dockerfile core/Dockerfile
+      --destination "${CI_REGISTRY_IMAGE}/nebu-core:dev-${CI_PIPELINE_ID}"
+      --destination "${CI_REGISTRY_IMAGE}/nebu-core:dev-latest"
+      --build-arg "GIT_COMMIT=${CI_COMMIT_SHA}"
+      --build-arg "BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      --cache=true
+      --cache-ttl=24h
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "dev"'
+
+prerelease-media-image:
+  <<: *build_ci_image
+  stage: build
+  script:
+    - /kaniko/executor
+      --context "${CI_PROJECT_DIR}/media"
+      --dockerfile media/Dockerfile
+      --destination "${CI_REGISTRY_IMAGE}/nebu-media:dev-${CI_PIPELINE_ID}"
+      --destination "${CI_REGISTRY_IMAGE}/nebu-media:dev-latest"
+      --build-arg "GIT_COMMIT=${CI_COMMIT_SHA}"
+      --build-arg "BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      --cache=true
+      --cache-ttl=24h
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "dev"'
+
 # ─── Integration Test ─────────────────────────────────────────────────────────
 # Requires DinD: starts docker compose stack, runs Gherkin tests, tears down.
 # Test runner joins nebu_default network → reaches gateway:8080 and core:4000
