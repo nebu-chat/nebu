@@ -10,6 +10,7 @@ package admin
 
 import (
 	"context"
+	"database/sql"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -29,8 +30,8 @@ type recordingServerConfigReader struct {
 	bootstrapCompleted bool
 }
 
-func (r *recordingServerConfigReader) LoadOIDCConfig(_ context.Context) (string, string, string, error) {
-	return "", "", "", nil
+func (r *recordingServerConfigReader) LoadOIDCConfig(_ context.Context) (string, string, string, string, error) {
+	return "", "", "", "", nil
 }
 
 func (r *recordingServerConfigReader) CompleteBootstrap(_ context.Context) error { return nil }
@@ -59,7 +60,9 @@ func (r *recordingServerConfigReader) LoadServerConfigKey(_ context.Context, key
 	if key == "bootstrap_completed" && r.bootstrapCompleted {
 		return "true", nil
 	}
-	return "", nil
+	// Return sql.ErrNoRows for unknown/unset keys — mirrors fakeServerConfigReader behaviour.
+	// This ensures the env-var fallback triggers correctly in handlers that use this double.
+	return "", sql.ErrNoRows
 }
 
 // newClaimMappingHandlerForTest creates a ClaimMappingHandler backed by a

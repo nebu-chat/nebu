@@ -8,7 +8,8 @@
 #   _bmad-output/nebu/epics/<epic-name>/sprint-status.yaml
 # ═══════════════════════════════════════════════════════════════════════════════
 # generated: 2026-03-20
-# last_updated: 2026-05-21 (archived)
+# last_updated: 2026-05-24
+# story 5-30 done (pipeline: 2 MAJOR + 3 MINOR fixed — 3 cycles, arc42 updated): 2026-05-24
 # story 16-3 done (pipeline: ATDD skipped (infra) + Dev cycle 0 + Code CLEAN — CI cp step, _meta.yaml arc42 nav, .gitignore): 2026-05-20
 # story 13-18 done (pipeline: ATDD existing failing test+Code CLEAN (test-only)): 2026-05-20
 # story 13-17 done (pipeline: 1 MINOR fixed cycle 1 (duplicate ARIA landmark in dashboard.html)): 2026-05-20

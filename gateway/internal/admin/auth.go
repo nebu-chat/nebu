@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -46,7 +47,7 @@ type sqlQuerier interface {
 
 // ServerConfigReader reads and writes config from/to server_config.
 type ServerConfigReader interface {
-	LoadOIDCConfig(ctx context.Context) (issuer, clientID, clientSecret string, err error)
+	LoadOIDCConfig(ctx context.Context) (issuer, clientID, clientSecret, extraScopes string, err error)
 	CompleteBootstrap(ctx context.Context) error
 	// LoadAdminGroupClaim returns the configured admin group claim value (e.g. "instance_admin").
 	// Returns the default "instance_admin" if not set.
@@ -71,11 +72,17 @@ type postgresServerConfigReader struct {
 }
 
 // LoadOIDCConfig queries server_config for OIDC settings and decrypts the client secret.
-func (r *postgresServerConfigReader) LoadOIDCConfig(ctx context.Context) (issuer, clientID, clientSecret string, err error) {
+// The extraScopes (4th) return value is always "" from this implementation — callers
+// resolve extra scopes via LoadServerConfigKey("oidc_extra_scopes"), which correctly
+// distinguishes an absent key (sql.ErrNoRows → env-var fallback) from a present-but-empty
+// key (explicit "no extra scopes" override). The 4th position is kept in the interface
+// signature for stability; all callers discard it with _ and assign extraScopesFromSource
+// separately inside the LoadServerConfigKey switch.
+func (r *postgresServerConfigReader) LoadOIDCConfig(ctx context.Context) (issuer, clientID, clientSecret, extraScopes string, err error) {
 	rows, err := r.db.QueryContext(ctx,
 		"SELECT key, value FROM server_config WHERE key IN ('oidc_issuer', 'oidc_client_id', 'oidc_client_secret')")
 	if err != nil {
-		return "", "", "", err
+		return "", "", "", "", err
 	}
 	defer rows.Close()
 
@@ -83,12 +90,12 @@ func (r *postgresServerConfigReader) LoadOIDCConfig(ctx context.Context) (issuer
 	for rows.Next() {
 		var k, v string
 		if err := rows.Scan(&k, &v); err != nil {
-			return "", "", "", err
+			return "", "", "", "", err
 		}
 		vals[k] = v
 	}
 	if err := rows.Err(); err != nil {
-		return "", "", "", err
+		return "", "", "", "", err
 	}
 
 	issuer = vals["oidc_issuer"]
@@ -96,45 +103,55 @@ func (r *postgresServerConfigReader) LoadOIDCConfig(ctx context.Context) (issuer
 	encSecret := vals["oidc_client_secret"]
 
 	if issuer == "" || clientID == "" || encSecret == "" {
-		return "", "", "", ErrOIDCConfigMissing
+		return "", "", "", "", ErrOIDCConfigMissing
 	}
 
 	plain, err := decryptAES256GCM(r.secret, encSecret)
 	if err != nil {
-		return "", "", "", fmt.Errorf("decrypting oidc_client_secret: %w", err)
+		return "", "", "", "", fmt.Errorf("decrypting oidc_client_secret: %w", err)
 	}
-	return issuer, clientID, plain, nil
+	// extraScopes is always "" here; callers use LoadServerConfigKey("oidc_extra_scopes").
+	return issuer, clientID, plain, "", nil
 }
 
-// loadOIDCConfigFromDraft reads issuer, client ID and (decrypted) client secret
-// from the bootstrap_draft table — the wizard's holding area before bootstrap
-// completion writes the values into server_config. Returns ("", "", "", nil) if
-// the draft does not contain a complete OIDC config (caller falls back to
-// server_config).
-func (a *AdminAuth) loadOIDCConfigFromDraft(ctx context.Context) (issuer, clientID, clientSecret string, err error) {
+// loadOIDCConfigFromDraft reads issuer, client ID, (decrypted) client secret, extra scopes,
+// and extra-scopes-absent flag from the bootstrap_draft table — the wizard's holding area
+// before bootstrap completion writes the values into server_config.
+// Returns ("", "", "", "", true, nil) if the draft does not contain a complete OIDC config
+// (caller falls back to server_config).
+// extraScopesAbsent is true when oidc_extra_scopes is not present in the draft (env-var
+// fallback applies); false when the key exists (even if its value is empty — explicit override).
+func (a *AdminAuth) loadOIDCConfigFromDraft(ctx context.Context) (issuer, clientID, clientSecret, extraScopes string, extraScopesAbsent bool, err error) {
 	if a.draftStore == nil {
-		return "", "", "", nil
+		return "", "", "", "", true, nil
 	}
 	issuer, ok1, err := a.draftStore.LoadDraft(ctx, "oidc_issuer")
 	if err != nil {
-		return "", "", "", fmt.Errorf("load draft oidc_issuer: %w", err)
+		return "", "", "", "", true, fmt.Errorf("load draft oidc_issuer: %w", err)
 	}
 	clientID, ok2, err := a.draftStore.LoadDraft(ctx, "oidc_client_id")
 	if err != nil {
-		return "", "", "", fmt.Errorf("load draft oidc_client_id: %w", err)
+		return "", "", "", "", true, fmt.Errorf("load draft oidc_client_id: %w", err)
 	}
 	encSecret, ok3, err := a.draftStore.LoadDraft(ctx, "oidc_client_secret")
 	if err != nil {
-		return "", "", "", fmt.Errorf("load draft oidc_client_secret: %w", err)
+		return "", "", "", "", true, fmt.Errorf("load draft oidc_client_secret: %w", err)
 	}
 	if !ok1 || !ok2 || !ok3 {
-		return "", "", "", nil
+		return "", "", "", "", true, nil
 	}
 	plain, err := decryptAES256GCM(a.secret, encSecret)
 	if err != nil {
-		return "", "", "", fmt.Errorf("decrypt draft oidc_client_secret: %w", err)
+		return "", "", "", "", true, fmt.Errorf("decrypt draft oidc_client_secret: %w", err)
 	}
-	return issuer, clientID, plain, nil
+	// oidc_extra_scopes is optional in the draft; absence means env-var fallback should apply.
+	var extraScopesOk bool
+	extraScopes, extraScopesOk, err = a.draftStore.LoadDraft(ctx, "oidc_extra_scopes")
+	if err != nil {
+		return "", "", "", "", true, fmt.Errorf("load draft oidc_extra_scopes: %w", err)
+	}
+	// extraScopesAbsent = true when the key was not found, so env-var fallback applies.
+	return issuer, clientID, plain, extraScopes, !extraScopesOk, nil
 }
 
 // LoadAdminGroupClaim returns the configured admin group claim value from server_config.
@@ -434,6 +451,46 @@ func (a *AdminAuth) buildOAuth2Config(r *http.Request) *oauth2.Config {
 	}
 }
 
+// buildScopeList constructs the final OAuth2 scope list from the standard base scopes
+// and the configured extra scopes. extraScopes is a space-separated string; each
+// non-empty token is appended to []string{"openid", "profile", "email"} if not already
+// present — duplicates are silently dropped, preserving order (base scopes first, then
+// extra scopes not already in the base list).
+// When extraScopes is empty (neither DB key nor env var set), only the standard scopes
+// are returned — correct for providers like Keycloak that do not support Dex-specific scopes.
+func buildScopeList(extraScopes string) []string {
+	base := []string{oidc.ScopeOpenID, "profile", "email"}
+	seen := make(map[string]bool, len(base))
+	for _, s := range base {
+		seen[s] = true
+	}
+	for _, tok := range strings.Fields(extraScopes) {
+		if !seen[tok] {
+			base = append(base, tok)
+			seen[tok] = true
+		}
+	}
+	return base
+}
+
+// resolveExtraScopes returns the effective extra scopes for the OIDC auth request.
+// Precedence (highest first):
+//  1. dbVal — the value returned by LoadServerConfigKey("oidc_extra_scopes") or LoadDraft("oidc_extra_scopes").
+//     Used when the key is present in the DB, even if the value is empty (explicit override).
+//  2. NEBU_OIDC_EXTRA_SCOPES env var — fallback when no DB key is set (dbAbsent == true).
+//  3. "" (empty) — default when neither is configured.
+//
+// dbAbsent must be true when the DB key was absent (sql.ErrNoRows), false when the key
+// existed (even with an empty value).
+func resolveExtraScopes(dbVal string, dbAbsent bool) string {
+	if !dbAbsent {
+		// DB key is present (may be empty — that is an explicit "no extra scopes").
+		return dbVal
+	}
+	// DB key absent — fall back to env var (default: "").
+	return os.Getenv("NEBU_OIDC_EXTRA_SCOPES")
+}
+
 // LoginPageHandler handles GET /admin/login.
 // Renders the login page with an SSO button. Accepts an optional ?error= query parameter.
 func (a *AdminAuth) LoginPageHandler(w http.ResponseWriter, r *http.Request) {
@@ -456,21 +513,28 @@ func (a *AdminAuth) LoginStartHandler(w http.ResponseWriter, r *http.Request) {
 	mode := r.URL.Query().Get("mode") // "bootstrap" during initial setup
 
 	var issuer, clientID, clientSecret string
+	var extraScopesAbsent bool
 	var err error
 
 	// Bootstrap mode: OIDC config lives in bootstrap_draft (not yet in server_config).
 	// Try draft first; only fall back to server_config if all draft keys are absent.
+	var extraScopesFromSource string
 	if mode == "bootstrap" && a.draftStore != nil {
-		issuer, clientID, clientSecret, err = a.loadOIDCConfigFromDraft(r.Context())
+		issuer, clientID, clientSecret, extraScopesFromSource, extraScopesAbsent, err = a.loadOIDCConfigFromDraft(r.Context())
 		if err != nil {
 			slog.Error("failed to load bootstrap OIDC draft", "err", err)
 			http.Redirect(w, r, "/admin/bootstrap", http.StatusFound)
 			return
 		}
+		// extraScopesAbsent is set correctly by loadOIDCConfigFromDraft:
+		// false when oidc_extra_scopes key is present in draft (even if empty — explicit override),
+		// true when the key is absent from draft (env-var fallback applies).
 	}
 
 	if issuer == "" {
-		issuer, clientID, clientSecret, err = a.configReader.LoadOIDCConfig(r.Context())
+		// The 4th return value of LoadOIDCConfig is always "" (see its doc comment).
+		// extraScopesFromSource is assigned below, inside the LoadServerConfigKey switch.
+		issuer, clientID, clientSecret, _, err = a.configReader.LoadOIDCConfig(r.Context())
 		if err != nil {
 			if errors.Is(err, ErrOIDCConfigMissing) {
 				http.Redirect(w, r, "/admin/bootstrap", http.StatusFound)
@@ -480,7 +544,23 @@ func (a *AdminAuth) LoginStartHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Server error: OIDC configuration unavailable. Try again later.", http.StatusServiceUnavailable)
 			return
 		}
+		// LoadServerConfigKey distinguishes absent-key (ErrNoRows → env-var fallback)
+		// from present-but-empty (explicit "no extra scopes" override).
+		rawExtra, keyErr := a.configReader.LoadServerConfigKey(r.Context(), "oidc_extra_scopes")
+		switch {
+		case keyErr == nil:
+			extraScopesAbsent = false
+			extraScopesFromSource = rawExtra
+		case errors.Is(keyErr, sql.ErrNoRows):
+			extraScopesAbsent = true
+		default:
+			// DB error — log warning, fall back to env var so the auth flow is not blocked.
+			slog.WarnContext(r.Context(), "failed to load oidc_extra_scopes from server_config, falling back to env var", "error", keyErr)
+			extraScopesAbsent = true
+		}
 	}
+
+	extraScopes := resolveExtraScopes(extraScopesFromSource, extraScopesAbsent)
 
 	if err := validateIssuerURL(issuer); err != nil {
 		slog.Error("invalid OIDC issuer in config, reconfigure to HTTPS", "issuer", issuer, "err", err)
@@ -509,7 +589,7 @@ func (a *AdminAuth) LoginStartHandler(w http.ResponseWriter, r *http.Request) {
 		ClientID:     clientID,
 		ClientSecret: clientSecret,
 		RedirectURL:  scheme + "://" + r.Host + "/admin/callback",
-		Scopes:       []string{oidc.ScopeOpenID, "profile", "email", "groups", "offline_access"},
+		Scopes:       buildScopeList(extraScopes),
 		Endpoint:     provider.Endpoint(),
 	}
 
@@ -664,23 +744,44 @@ func (a *AdminAuth) CallbackHandler(w http.ResponseWriter, r *http.Request) {
 	// has not yet promoted config to server_config); regular login reads from
 	// server_config. The state cookie carries the mode set at login/start time.
 	var issuer, clientID, clientSecret string
+	var extraScopesAbsent bool
+	var extraScopesFromSource string
 	if sc.Mode == "bootstrap" && a.draftStore != nil {
-		issuer, clientID, clientSecret, err = a.loadOIDCConfigFromDraft(r.Context())
+		issuer, clientID, clientSecret, extraScopesFromSource, extraScopesAbsent, err = a.loadOIDCConfigFromDraft(r.Context())
 		if err != nil {
 			slog.Error("callback: failed to load bootstrap OIDC draft", "err", err)
 			http.Redirect(w, r, "/admin/login?error=auth_failed", http.StatusFound)
 			return
 		}
+		// extraScopesAbsent is set correctly by loadOIDCConfigFromDraft.
 	}
 
 	if issuer == "" {
-		issuer, clientID, clientSecret, err = a.configReader.LoadOIDCConfig(r.Context())
+		// The 4th return value of LoadOIDCConfig is always "" (see its doc comment).
+		// extraScopesFromSource is assigned below, inside the LoadServerConfigKey switch.
+		issuer, clientID, clientSecret, _, err = a.configReader.LoadOIDCConfig(r.Context())
 		if err != nil {
 			slog.Error("callback: failed to load OIDC config", "err", err)
 			http.Redirect(w, r, "/admin/login?error=auth_failed", http.StatusFound)
 			return
 		}
+		// LoadServerConfigKey distinguishes absent-key (ErrNoRows → env-var fallback)
+		// from present-but-empty (explicit "no extra scopes" override).
+		rawExtra, keyErr := a.configReader.LoadServerConfigKey(r.Context(), "oidc_extra_scopes")
+		switch {
+		case keyErr == nil:
+			extraScopesAbsent = false
+			extraScopesFromSource = rawExtra
+		case errors.Is(keyErr, sql.ErrNoRows):
+			extraScopesAbsent = true
+		default:
+			// DB error — log warning, fall back to env var so the auth flow is not blocked.
+			slog.WarnContext(r.Context(), "failed to load oidc_extra_scopes from server_config, falling back to env var", "error", keyErr)
+			extraScopesAbsent = true
+		}
 	}
+
+	extraScopes := resolveExtraScopes(extraScopesFromSource, extraScopesAbsent)
 
 	if err := validateIssuerURL(issuer); err != nil {
 		slog.Error("callback: invalid OIDC issuer in config, reconfigure to HTTPS", "issuer", issuer, "err", err)
@@ -706,15 +807,14 @@ func (a *AdminAuth) CallbackHandler(w http.ResponseWriter, r *http.Request) {
 	if isRequestSecure(r) {
 		scheme = "https"
 	}
-	// Scopes must match the original auth request so that Dex includes the groups claim
-	// in the token exchange response. The Go oauth2 library sends the scope parameter
-	// on exchange; omitting "groups" here causes Dex to strip it from the returned tokens.
-	// offline_access is required to receive a refresh token (AC2, Story 9.14).
+	// Scopes in CallbackHandler must match the original auth request so that Dex includes
+	// the configured extra claims in the token exchange response (e.g. the groups claim
+	// when using Dex). The scope list is derived from the same source as LoginStartHandler.
 	oauth2Config := &oauth2.Config{
 		ClientID:     clientID,
 		ClientSecret: clientSecret,
 		RedirectURL:  scheme + "://" + r.Host + "/admin/callback",
-		Scopes:       []string{oidc.ScopeOpenID, "profile", "email", "groups", "offline_access"},
+		Scopes:       buildScopeList(extraScopes),
 		Endpoint:     provider.Endpoint(),
 	}
 

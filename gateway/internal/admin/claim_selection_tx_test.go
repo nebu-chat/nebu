@@ -187,8 +187,8 @@ func (s *txAwareConfigStore) ClearDraft(_ context.Context) error {
 
 // --- ServerConfigReader interface ---
 
-func (s *txAwareConfigStore) LoadOIDCConfig(_ context.Context) (string, string, string, error) {
-	return s.committedIssuer, "test-client-id", "encrypted-secret", nil
+func (s *txAwareConfigStore) LoadOIDCConfig(_ context.Context) (string, string, string, string, error) {
+	return s.committedIssuer, "test-client-id", "encrypted-secret", "", nil
 }
 
 func (s *txAwareConfigStore) SaveAdminGroupClaim(_ context.Context, _ string) error {
@@ -212,7 +212,9 @@ func (s *txAwareConfigStore) SaveClaimMapping(_ context.Context, _, _, _ string)
 }
 
 func (s *txAwareConfigStore) LoadServerConfigKey(_ context.Context, _ string) (string, error) {
-	return "", nil
+	// Return sql.ErrNoRows for any key — mirrors fakeServerConfigReader behaviour.
+	// Ensures the env-var fallback triggers correctly for any handler using this double.
+	return "", sql.ErrNoRows
 }
 
 // newTestAdminAuthForTX builds an AdminAuth wired for ClaimSelectionHandler tests.

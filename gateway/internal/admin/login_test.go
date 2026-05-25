@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"crypto/tls"
+	"database/sql"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -21,8 +22,8 @@ type fakeServerConfigReader struct {
 	bootstrapErr error
 }
 
-func (f *fakeServerConfigReader) LoadOIDCConfig(_ context.Context) (string, string, string, error) {
-	return f.issuer, f.clientID, f.clientSecret, f.err
+func (f *fakeServerConfigReader) LoadOIDCConfig(_ context.Context) (string, string, string, string, error) {
+	return f.issuer, f.clientID, f.clientSecret, "", f.err
 }
 
 func (f *fakeServerConfigReader) CompleteBootstrap(_ context.Context) error {
@@ -46,7 +47,9 @@ func (f *fakeServerConfigReader) SaveClaimMapping(_ context.Context, _, _, _ str
 }
 
 func (f *fakeServerConfigReader) LoadServerConfigKey(_ context.Context, _ string) (string, error) {
-	return "", nil
+	// Default: simulate a missing key (not configured in server_config).
+	// Tests that need a present key use scopedFakeConfigReader or a custom implementation.
+	return "", sql.ErrNoRows
 }
 
 // newTestAdminAuthWithReader creates an AdminAuth with a fake ServerConfigReader and optional TemplateHandler.
