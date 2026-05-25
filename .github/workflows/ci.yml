@@ -20,8 +20,9 @@ on:
   push:
     branches:
       - main
-      - dev
+      - develop
       - "feature/**"
+      - "bugfix/**"
   pull_request:
 
 # Default permissions: read-only access to repository contents.
