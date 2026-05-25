@@ -1,8 +1,3 @@
-output "floating_ip" {
-  description = "Public (floating) IP address assigned to the Nebu VM."
-  value       = stackit_public_ip.nebu.ip
-}
-
 output "postgres_instance_id" {
   description = "STACKIT PostgresFlex instance ID."
   value       = stackit_postgresflex_instance.nebu.instance_id
@@ -19,23 +14,27 @@ output "vm_id" {
 }
 
 output "load_balancer_id" {
-  description = "Internal resource ID of the Stackit Application Load Balancer."
-  value       = stackit_loadbalancer.nebu.id
+  description = "Internal resource ID of the active load balancer (ALB when tls_mode = 'alb', NLB otherwise)."
+  value       = var.tls_mode == "alb" ? stackit_application_load_balancer.nebu[0].id : stackit_loadbalancer.nebu[0].id
 }
 
 output "load_balancer_private_address" {
-  description = "Transient private IP address of the Stackit ALB (used for internal routing). The public entry point is floating_ip."
-  value       = stackit_loadbalancer.nebu.private_address
+  description = "Transient private IP address of the active load balancer. The public entry point is dns_name."
+  value       = var.tls_mode == "alb" ? stackit_application_load_balancer.nebu[0].private_address : stackit_loadbalancer.nebu[0].private_address
 }
 
 output "dns_name" {
   description = "Floating IP address to register in your external DNS server when dns_mode = 'external'. Create an A-record pointing your domain to this IP address. When dns_mode = 'default', Stackit DNS is managing this automatically."
-  value       = stackit_public_ip.nebu.ip
+  value       = stackit_public_ip.nebu-alb.ip
 }
 
 output "tls_info" {
-  description = "TLS status. When enable_tls = true, certbot manages cert renewal automatically via its systemd timer. Check cert expiry on the VM: sudo certbot certificates"
-  value       = var.enable_tls ? "certbot-managed (HTTP-01, auto-renews via systemd timer)" : "disabled"
+  description = "TLS status and certificate management approach."
+  value = (
+    var.tls_mode == "alb" ? "alb-managed (TLS termination at Stackit ALB, cert via stackit_alb_certificate)" :
+    var.tls_mode == "acme" ? "certbot-managed (HTTP-01, auto-renews via systemd timer — check: sudo certbot certificates)" :
+    "disabled"
+  )
 }
 
 output "nebu_migrate_password" {
@@ -50,6 +49,10 @@ output "logs_ingest_url" {
 }
 
 output "element_url" {
-  description = "Element Web client URL. When enable_element_web = true and enable_tls = true, Element is served at the root path. When enable_tls = false, Element is on port 7070. 'disabled' when enable_element_web = false."
-  value       = var.enable_element_web ? (var.enable_tls ? "https://${var.server_name}/" : "http://${var.server_name}:7070/") : "disabled"
+  description = "Element Web client URL. Available when enable_element_web = true and tls_mode != 'none'."
+  value = (
+    !var.enable_element_web ? "disabled" :
+    var.tls_mode != "none" ? "https://${var.server_name}/" :
+    "http://${var.server_name}:7070/"
+  )
 }

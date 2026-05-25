@@ -42,14 +42,24 @@ network_cidr = "10.0.0.0/24"
 # g2i.2 = 4 vCPU / 8 GB RAM — sufficient for a small production deployment
 vm_plan_id = "g2i.2"
 
-# ── TLS (Let's Encrypt via certbot) ──────────────────────────────────────────
-# When enable_tls = true, certbot provisions a Let's Encrypt certificate via
-# HTTP-01 challenge on first boot. nginx handles TLS termination and renewal.
-# Requires the domain to resolve to the VM's floating IP before `tofu apply`.
+# ── TLS mode ──────────────────────────────────────────────────────────────────
+# "none": no TLS, gateway exposed on port 8008 via NLB TCP passthrough.
+# "acme": nginx on VM + certbot Let's Encrypt (HTTP-01 challenge on first boot).
+#         Requires dns_mode = "default". Use acme_staging = true to avoid rate limits.
+# "alb":  Stackit Application Load Balancer terminates TLS — no nginx on the VM.
+#         Provide the certificate + private key below (obtain externally, e.g. via
+#         certbot DNS-01 challenge against your domain hoster).
 
-enable_tls   = true
+tls_mode     = "alb"            # or: "acme", "none"
 acme_email   = "ops@example.com"
-acme_staging = true   # set to false once the cert is verified working
+acme_staging = true             # only relevant when tls_mode = "acme"
+
+# Required when tls_mode = "alb": PEM certificate (fullchain) and private key.
+# Example (after obtaining via certbot):
+#   tls_certificate_pem = file("/etc/letsencrypt/live/chat.example.com/fullchain.pem")
+#   tls_private_key_pem = file("/etc/letsencrypt/live/chat.example.com/privkey.pem")
+tls_certificate_pem = "<REPLACE: PEM certificate fullchain>"
+tls_private_key_pem = "<REPLACE: PEM private key>"
 
 # ── PostgresFlex managed database ────────────────────────────────────────────
 
@@ -89,12 +99,17 @@ nebu_env = "production"
 # Choose 'dex' to deploy a bundled Dex IdP sidecar (test/demo environments).
 # Choose 'external' to use an external OIDC provider (production).
 #
-# WARNING (dex mode): Dex runs on plain HTTP (port 5556) unless enable_tls = true.
+# WARNING (dex mode): Dex runs on plain HTTP (port 5556) unless tls_mode != "none".
 # Use dex mode ONLY in isolated test/demo environments — NEVER for production.
 oidc_mode = "external"  # or: "dex"
 
 # Required only when oidc_mode = "external".
 oidc_issuer = "https://auth.example.com/realms/nebu"
+
+# Required: OIDC client secret.
+# dex mode:      embedded into Dex staticClients (same value used by gateway and Dex)
+# external mode: must match the client secret registered in your OIDC provider
+oidc_client_id = "<REPLACE_WITH_OIDC_CLIENT_SECRET>"
 
 # Required: OIDC client secret.
 # dex mode:      embedded into Dex staticClients (same value used by gateway and Dex)
@@ -113,7 +128,7 @@ dex_static_password_hash = "<REPLACE_WITH_BCRYPT_HASH>"
 # dex_user2_password_hash      = "<REPLACE_WITH_BCRYPT_HASH>"   # bob@example.com   (group: users)
 # dex_compliance_password_hash = "<REPLACE_WITH_BCRYPT_HASH>"   # compliance@example.com (group: compliance_officer)
 
-# Optional: CIDR allowed to reach Dex on port 5556 (dex mode, enable_tls = false only).
+# Optional: CIDR allowed to reach Dex on port 5556 (dex mode, tls_mode = "none" only).
 # Restrict to your IP or VPN CIDR — default 0.0.0.0/0 is only safe for isolated envs.
 # dex_allowed_cidr = "0.0.0.0/0"
 
@@ -139,7 +154,7 @@ nebu_version = "0.2.1"
 #     tofu import stackit_dns_zone.nebu <zone_id>
 # dns_mode = "external": skips DNS creation — register the 'dns_name' output as an
 #   A-record in your own DNS provider.
-dns_mode = "external"  # or: "default" (required for enable_tls with HTTP-01 challenge)
+dns_mode = "external"  # or: "default" (required for tls_mode = "acme" HTTP-01 challenge)
 
 # When dns_mode = "default": optionally create a dex.<server_name> A-record.
 # Only useful when oidc_mode = "dex" and using host-based routing for Dex.
@@ -149,7 +164,7 @@ dns_mode = "external"  # or: "default" (required for enable_tls with HTTP-01 cha
 # dns_contact_email = ""
 
 # ── Element Web client ────────────────────────────────────────────────────────
-# Requires enable_tls = true (lifecycle precondition enforced by tofu apply).
+# Requires tls_mode = "acme" (lifecycle precondition enforced by tofu apply).
 # Without nginx, Element (port 7070) and gateway (port 8008) are different origins
 # and all Matrix API requests from Element fail with CORS preflight errors.
 # enable_element_web = false

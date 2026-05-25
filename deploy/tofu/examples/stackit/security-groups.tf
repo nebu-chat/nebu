@@ -1,0 +1,99 @@
+# ── Security Group ────────────────────────────────────────────────────────────
+
+resource "stackit_security_group" "nebu" {
+  project_id = var.stackit_project_id
+  name       = "nebu-${var.environment}-sg"
+  stateful   = true
+}
+
+# Inbound: HTTPS from anywhere
+resource "stackit_security_group_rule" "inbound_https" {
+  project_id        = var.stackit_project_id
+  security_group_id = stackit_security_group.nebu.security_group_id
+  direction         = "ingress"
+  protocol = {
+    name = "tcp"
+  }
+  port_range = {
+    min = 443
+    max = 443
+  }
+}
+
+# Inbound: HTTP (port 80) for HTTP→HTTPS redirect.
+# tls_mode = "acme": nginx handles redirect.
+# tls_mode = "alb": ALB port-80 listener routes to gateway (gateway handles redirect).
+resource "stackit_security_group_rule" "inbound_http" {
+  count             = var.tls_mode != "none" ? 1 : 0
+  project_id        = var.stackit_project_id
+  security_group_id = stackit_security_group.nebu.security_group_id
+  direction         = "ingress"
+  protocol = {
+    name = "tcp"
+  }
+  port_range = {
+    min = 80
+    max = 80
+  }
+}
+
+# Inbound: Matrix API port from ALB → VM.
+# tls_mode = "none": ALB targets port 8008 directly.
+# tls_mode = "acme": ALB targets port 443 (nginx), 8008 stays internal. No rule needed.
+# tls_mode = "alb" + no element_web: ALB targets port 8008 directly.
+# tls_mode = "alb" + element_web: ALB targets port 80 (Docker Compose nginx proxy),
+#   gateway on 8008 is internal-only (Docker network). No rule needed.
+resource "stackit_security_group_rule" "inbound_matrix" {
+  count             = var.tls_mode != "acme" && !(var.tls_mode == "alb" && var.enable_element_web) ? 1 : 0
+  project_id        = var.stackit_project_id
+  security_group_id = stackit_security_group.nebu.security_group_id
+  direction         = "ingress"
+  protocol = {
+    name = "tcp"
+  }
+  port_range = {
+    min = 8008
+    max = 8008
+  }
+}
+
+# Inbound: Dex OIDC port (dex mode only, tls_mode = "none" only).
+# tls_mode = "acme": nginx proxies /dex/ → localhost:5556, port 5556 stays internal.
+# tls_mode = "alb":  ALB routes /dex/ → gateway which proxies to Dex, port 5556 stays internal.
+# tls_mode = "none": browser follows OIDC redirects directly to port 5556.
+# Restricted to dex_allowed_cidr (default 0.0.0.0/0 for demo; restrict in shared environments).
+resource "stackit_security_group_rule" "inbound_dex" {
+  count             = var.oidc_mode == "dex" && var.tls_mode == "none" ? 1 : 0
+  project_id        = var.stackit_project_id
+  security_group_id = stackit_security_group.nebu.security_group_id
+  direction         = "ingress"
+  ip_range          = var.dex_allowed_cidr
+  protocol = {
+    name = "tcp"
+  }
+  port_range = {
+    min = 5556
+    max = 5556
+  }
+}
+
+# Inbound: SSH from anywhere (restrict to a bastion CIDR in production)
+resource "stackit_security_group_rule" "inbound_ssh" {
+  project_id        = var.stackit_project_id
+  security_group_id = stackit_security_group.nebu.security_group_id
+  direction         = "ingress"
+  protocol = {
+    name = "tcp"
+  }
+  port_range = {
+    min = 22
+    max = 22
+  }
+}
+
+# Outbound: allow all
+# resource "stackit_security_group_rule" "outbound_all" {
+#   project_id        = var.stackit_project_id
+#   security_group_id = stackit_security_group.nebu.security_group_id
+#   direction         = "egress"
+# }

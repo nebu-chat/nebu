@@ -12,7 +12,7 @@ resource "stackit_postgresflex_instance" "nebu" {
   # ACL: Docker containers on the VM reach PostgresFlex via the floating IP (not via internal
   # Stackit routing), so the public IP must be explicitly allowed. The /16 covers the VPC
   # in case internal routing applies to future VM-native (non-containerised) workloads.
-  acl = [var.network_cidr, "${stackit_public_ip.nebu.ip}/32"]
+  acl = [var.network_cidr, "${stackit_network.nebu.public_ip}/32", "193.148.160.0/19", "45.129.40.0/21"]
 
   flavor = {
     cpu = var.postgres_cpu
@@ -43,19 +43,10 @@ resource "stackit_postgresflex_user" "nebu_migrate" {
   roles       = ["login"]
 }
 
-# nebu (legacy role): placeholder required by migrations 18, 25, 28 which issue
-# `GRANT EXECUTE ON FUNCTION audit_log_purge(INT) TO nebu` for backward compat.
-# This user does not connect to the database at runtime.
-resource "stackit_postgresflex_user" "nebu_legacy" {
-  project_id  = var.stackit_project_id
-  instance_id = stackit_postgresflex_instance.nebu.instance_id
-  username    = "nebu"
-  roles       = ["login"]
-}
 
 resource "stackit_postgresflex_database" "nebu" {
   project_id  = var.stackit_project_id
   instance_id = stackit_postgresflex_instance.nebu.instance_id
   name        = "nebu"
-  owner = stackit_postgresflex_user.nebu.username
+  owner       = stackit_postgresflex_user.nebu_migrate.username
 }
