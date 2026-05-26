@@ -135,6 +135,26 @@ func (s *loginTokenStore) pop(opaqueToken string) (string, bool) {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+// buildSSOScopeList returns [openid, profile, email] plus any non-duplicate extra scopes.
+// Empty strings and scopes already in the base list are silently dropped.
+// NOTE: gateway/internal/admin/auth.go has a parallel buildScopeList helper with the same
+// algorithm (different signature: takes a space-separated string). They cannot be unified
+// without creating a circular import. Update both if the scope-building policy changes.
+func buildSSOScopeList(extra []string) []string {
+	base := []string{oidc.ScopeOpenID, "profile", "email"}
+	seen := make(map[string]bool, len(base))
+	for _, s := range base {
+		seen[s] = true
+	}
+	for _, s := range extra {
+		if s != "" && !seen[s] {
+			base = append(base, s)
+			seen[s] = true
+		}
+	}
+	return base
+}
+
 // ssoCallbackURL returns the redirect_uri registered with Dex for Matrix SSO.
 func ssoCallbackURL(r *http.Request) string {
 	scheme := "http"
@@ -300,7 +320,7 @@ func (h *LoginHandler) GetSSORedirect(w http.ResponseWriter, r *http.Request) {
 		ClientID:     h.clientID,
 		ClientSecret: h.clientSecret,
 		RedirectURL:  ssoCallbackURL(r),
-		Scopes:       []string{oidc.ScopeOpenID, "profile", "email", "groups"},
+		Scopes:       buildSSOScopeList(h.extraScopes),
 		Endpoint:     inner.Endpoint(),
 	}
 	// prompt=login forces Dex to re-authenticate the user even if an active Dex
@@ -325,13 +345,38 @@ func (h *LoginHandler) GetSSORedirect(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetSSOCallback handles GET /_matrix/client/v3/login/sso/redirect/oidc.
-// Dual purpose:
+// Handles three cases:
 //   - Dex callback: ?code=...&state=... — exchanges code for id_token, generates a
 //     short-lived opaque loginToken (MAJOR-2 fix), redirects client to redirectUrl.
 //   - IDP-specific initiation: ?redirectUrl=... — same as GetSSORedirect.
+//   - IdP error response: ?error=...&error_description=...&state=... (RFC 6749 §4.1.2.1)
 func (h *LoginHandler) GetSSOCallback(w http.ResponseWriter, r *http.Request) {
 	code := r.URL.Query().Get("code")
 	state := r.URL.Query().Get("state")
+
+	// IdP returned an authorization error (e.g. invalid_scope, access_denied).
+	// RFC 6749 §4.1.2.1: error responses carry ?error=...&state=... but no code.
+	// Without this check the handler would delegate to GetSSORedirect, which requires
+	// redirectUrl and returns M_MISSING_PARAM — a confusing and misleading error.
+	if idpErr := r.URL.Query().Get("error"); idpErr != "" {
+		idpErrDesc := r.URL.Query().Get("error_description")
+		if len([]rune(idpErrDesc)) > 256 {
+			idpErrDesc = string([]rune(idpErrDesc)[:256])
+		}
+		slog.Warn("matrix SSO: IdP returned authorization error",
+			"error", idpErr,
+			"error_description", idpErrDesc,
+		)
+		if state != "" {
+			globalSSOState.pop(state) // consume the state entry to prevent replay
+		}
+		msg := "SSO provider rejected the authorization request: " + idpErr
+		if idpErrDesc != "" {
+			msg += " — " + idpErrDesc
+		}
+		writeMatrixError(w, http.StatusForbidden, "M_FORBIDDEN", msg)
+		return
+	}
 
 	// No code → treat as initiation for the "oidc" IDP.
 	if code == "" || state == "" {
@@ -360,7 +405,7 @@ func (h *LoginHandler) GetSSOCallback(w http.ResponseWriter, r *http.Request) {
 		ClientID:     h.clientID,
 		ClientSecret: h.clientSecret,
 		RedirectURL:  ssoCallbackURL(r),
-		Scopes:       []string{oidc.ScopeOpenID, "profile", "email", "groups"},
+		Scopes:       buildSSOScopeList(h.extraScopes),
 		Endpoint:     inner.Endpoint(),
 	}
 

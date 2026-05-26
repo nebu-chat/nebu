@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-05-24T00:00:00Z",
-  "generator": "bmad-maintain-arc42 skill (Bug 5-30 delta)",
+  "generated_at": "2026-05-26T00:00:00Z",
+  "generator": "bmad-maintain-arc42 skill (Bug 5-31 delta)",
   "source_artifacts": [
     "_bmad-output/planning-artifacts/architecture.md",
     "_bmad-output/planning-artifacts/prd.md",
@@ -55,7 +55,7 @@
     },
     "docs/architecture/08-concepts.md": {
       "editable": false,
-      "generated_at": "2026-05-24T00:00:00Z",
+      "generated_at": "2026-05-26T00:00:00Z",
       "source": "_bmad-output/planning-artifacts/architecture.md",
       "arc42_section": "08 Cross-cutting Concepts"
     },
