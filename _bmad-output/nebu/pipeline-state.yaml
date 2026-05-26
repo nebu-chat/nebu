@@ -8,7 +8,34 @@
 #   _bmad-output/nebu/epics/<epic-name>/pipeline-state.yaml
 # This file is no longer used for named-epic pipeline runs.
 #
-# last_updated: 2026-05-24
+# last_updated: 2026-05-26
+# [5-32] 2026-05-26T11:05Z committed ✓ (ATDD+Code CLEAN, 2 cycles)
+# [5-32] 2026-05-26T11:02Z arc42-update → no arch changes (error handling only)
+# [5-32] 2026-05-26T11:00Z security-review → skipped (not-needed)
+# [5-32] 2026-05-26T11:00Z code-review → CLEAN (cycle 2)
+# [5-32] 2026-05-26T10:51Z ci-gate → ✓ unit-go (all packages)
+# [5-32] 2026-05-26T10:50Z dev-story → done (cycle 2)
+# [5-32] 2026-05-26T10:40Z code-review → 5 MINOR → cycle 2
+# [5-32] 2026-05-26T10:31Z ci-gate → ✓ unit-go (all packages)
+# [5-32] 2026-05-26T10:30Z dev-story → done (cycle 1)
+# [5-32] 2026-05-26T10:20Z code-review → 4 MINOR → cycle 1
+# [5-32] 2026-05-26T10:12Z ci-gate → ✓ unit-go (all packages)
+# [5-32] 2026-05-26T10:12Z dev-story → done (cycle 0)
+# [5-32] 2026-05-26T10:11Z test-review → CLEAN
+# [5-32] 2026-05-26T10:10Z atdd → 3 sub-tests (TestMatrixSSOCallbackIdPError)
+# [5-32] 2026-05-26T10:10Z pipeline started (impl pre-done)
+# [5-31] 2026-05-26T09:58Z committed ✓ (ATDD+Code CLEAN, 1 cycle)
+# [5-31] 2026-05-26T09:55Z arc42-update → done (08-concepts expanded)
+# [5-31] 2026-05-26T09:50Z security-review → skipped (not-needed)
+# [5-31] 2026-05-26T09:50Z code-review → CLEAN (cycle 1)
+# [5-31] 2026-05-26T09:42Z ci-gate → ✓ unit-go (all packages)
+# [5-31] 2026-05-26T09:40Z dev-story → done (cycle 1)
+# [5-31] 2026-05-26T09:30Z code-review → 5 MINOR → cycle 1
+# [5-31] 2026-05-26T09:22Z ci-gate → ✓ unit-go (all packages)
+# [5-31] 2026-05-26T09:20Z dev-story → done (cycle 0)
+# [5-31] 2026-05-26T09:10Z test-review → CLEAN (0 MAJOR, 2 MINOR)
+# [5-31] 2026-05-26T09:05Z atdd → 4 failing tests (sso_extra_scopes_test.go)
+# [5-31] 2026-05-26T09:00Z pipeline started (story pre-created)
 # [5-30] 2026-05-24T21:28Z committed ✓ (2 MAJOR + 3 MINOR fixed, 3 cycles, Kassandra skipped)
 # [5-30] 2026-05-24T21:25Z arc42-update → done (07-deployment, 08-concepts)
 # [5-30] 2026-05-24T21:20Z security-review → skipped (not-needed)
@@ -33,4 +60,4 @@ current_step: null
 completed: []
 cycle_count: 0
 blocked_reason: null
-last_updated: "2026-05-24T20:56Z"
+last_updated: "2026-05-26T07:44Z"

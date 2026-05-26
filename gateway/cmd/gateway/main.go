@@ -604,6 +604,7 @@ func main() {
 		ClientSecret:           cfg.OIDCClientSecret,
 		RoleClaimName:          cfg.OIDCClaimRole,
 		SSORedirectSchemes:     cfg.SSORedirectSchemes,
+		ExtraScopes:            cfg.OIDCExtraScopes,
 		UserIDClaimLoader:      userIDClaimLoader,
 		DisplaynameClaimLoader: displaynameClaimLoader,
 		EmailClaimLoader:       emailClaimLoader,

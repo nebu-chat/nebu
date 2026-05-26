@@ -86,6 +86,7 @@ type LoginHandler struct {
 	clientSecret           string
 	roleClaimName          string
 	ssoRedirectSchemes     []string          // extra deep-link schemes from NEBU_SSO_REDIRECT_SCHEMES
+	extraScopes            []string          // extra OIDC scopes from NEBU_OIDC_EXTRA_SCOPES
 	userIDClaimLoader      UserIDClaimLoader // nil = fall back to legacy "name" claim (AC7)
 	displaynameClaimLoader UserIDClaimLoader // nil = use hardcoded preferred_username→name→email chain
 	emailClaimLoader       UserIDClaimLoader // nil = use hardcoded "email" claim
@@ -101,6 +102,11 @@ type LoginConfig struct {
 	ClientSecret       string
 	RoleClaimName      string
 	SSORedirectSchemes []string          // extra deep-link schemes from NEBU_SSO_REDIRECT_SCHEMES
+	// ExtraScopes holds additional OIDC scopes beyond [openid, profile, email].
+	// Populated from NEBU_OIDC_EXTRA_SCOPES at startup. NOTE: unlike the admin auth
+	// flow (story 5-30), this value is startup-only — there is no live DB override
+	// via server_config. A gateway restart is required to pick up env-var changes.
+	ExtraScopes        []string
 	UserIDClaimLoader  UserIDClaimLoader // nil = fall back to legacy "name" claim behavior (AC7)
 	// DisplaynameClaimLoader returns the configured oidc_displayname_claim from server_config.
 	// nil = use hardcoded preferred_username→name→email fallback chain (backward compat).
@@ -124,6 +130,7 @@ func NewLoginHandler(cfg LoginConfig) *LoginHandler {
 		clientSecret:           cfg.ClientSecret,
 		roleClaimName:          cfg.RoleClaimName,
 		ssoRedirectSchemes:     cfg.SSORedirectSchemes,
+		extraScopes:            cfg.ExtraScopes,
 		userIDClaimLoader:      cfg.UserIDClaimLoader,
 		displaynameClaimLoader: cfg.DisplaynameClaimLoader,
 		emailClaimLoader:       cfg.EmailClaimLoader,

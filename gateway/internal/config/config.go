@@ -21,6 +21,7 @@ type Config struct {
 	TLSClientCAFile    string // NEBU_TLS_CLIENT_CA_FILE (mTLS Phase 2 — not wired up in MVP)
 	OIDCClaimRole         string   // NEBU_OIDC_CLAIM_ROLE (default: "nebu_role")
 	OIDCDisplayName       string   // NEBU_OIDC_DISPLAY_NAME (default: "SSO")
+	OIDCExtraScopes       []string // NEBU_OIDC_EXTRA_SCOPES (whitespace-split; admin flow also reads this + DB override)
 	SSORedirectSchemes    []string // NEBU_SSO_REDIRECT_SCHEMES (comma-separated extra deep-link schemes)
 	BufferCapacity        int      // NEBU_BUFFER_CAPACITY (default: 500)
 	BufferBaseRate        float64  // NEBU_BUFFER_BASE_RATE (default: 100.0)
@@ -45,6 +46,7 @@ func Load() Config {
 		TLSClientCAFile:    os.Getenv("NEBU_TLS_CLIENT_CA_FILE"),
 		OIDCClaimRole:         getEnvOrDefault("NEBU_OIDC_CLAIM_ROLE", "nebu_role"),
 		OIDCDisplayName:       getEnvOrDefault("NEBU_OIDC_DISPLAY_NAME", "SSO"),
+		OIDCExtraScopes:       strings.Fields(os.Getenv("NEBU_OIDC_EXTRA_SCOPES")), // space-split: consistent with admin flow
 		SSORedirectSchemes:    getEnvStringSlice("NEBU_SSO_REDIRECT_SCHEMES"),
 		BufferCapacity:        getEnvInt("NEBU_BUFFER_CAPACITY", 500),
 		BufferBaseRate:        getEnvFloat("NEBU_BUFFER_BASE_RATE", 100.0),

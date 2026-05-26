@@ -23,12 +23,13 @@ Auth token never forwarded to Elixir - only user_id + system_role
 **Bootstrap mode:** First OIDC login automatically receives `instance_admin`. Bootstrap mode is
 permanently disabled after the first admin setup. No default password, no insecure fallback.
 
-**Configurable OIDC Extra Scopes (Bug 5-30):**
+**Configurable OIDC Extra Scopes (Bug 5-30 + Bug 5-31):**
 
 The OIDC authorization request scope list is configurable per deployment. The standard base scopes
-`openid profile email` are always requested. Additional scopes (e.g. `groups offline_access` for Dex,
-`openid profile email` for Keycloak/external providers) are resolved at login time via a two-level
-precedence chain:
+`openid profile email` are always requested. Additional scopes (e.g. `groups offline_access` for Dex)
+are appended at runtime. Two flows use this mechanism with different precedence chains:
+
+**Admin auth flow (Bug 5-30) — two-level precedence, live DB override:**
 
 1. **DB key `oidc_extra_scopes`** (in `server_config` or `bootstrap_draft`) - present value wins,
    even when empty (explicit "no extra scopes" override for providers that reject non-standard scopes).
@@ -37,18 +38,30 @@ precedence chain:
 
 `buildScopeList(extraScopes string) []string` deduplicates extra tokens against the base set before
 appending. `resolveExtraScopes(dbVal string, dbAbsent bool) string` encodes the precedence logic.
+An operator can override the env var default by inserting the `oidc_extra_scopes` key into
+`server_config` via the Bootstrap Wizard or direct DB update — the DB value takes unconditional
+precedence without a gateway restart.
 
-**Deployment-specific defaults (injected by cloud-init / docker-compose):**
+**Matrix SSO flow (Bug 5-31) — startup-only, env var only:**
+
+`GetSSORedirect` and `GetSSOCallback` also request configurable extra scopes, but the Matrix SSO
+flow has **no live DB override**. The scope list is resolved once at gateway startup:
+
+1. **`NEBU_OIDC_EXTRA_SCOPES` env var** — read by `config.Load()` via `strings.Fields()` (whitespace-split).
+2. Passed as `Config.OIDCExtraScopes → LoginConfig.ExtraScopes → LoginHandler.extraScopes`.
+3. Applied by `buildSSOScopeList(extra []string) []string` in `sso.go` — deduplicates against `[openid, profile, email]` before appending.
+
+A gateway restart is required to pick up env-var changes for the SSO flow. The `buildSSOScopeList`
+helper in `sso.go` is intentionally parallel to `buildScopeList` in `admin/auth.go` — they cannot
+be unified without creating a circular import between packages.
+
+**Deployment-specific defaults (injected by cloud-init / docker-compose, apply to both flows):**
 
 | Environment | `NEBU_OIDC_EXTRA_SCOPES` value | Reason |
 |---|---|---|
 | Local dev (Dex) | `groups offline_access` | Dex group claim + refresh token support |
 | Stackit prod (`oidc_mode = "dex"`) | `groups offline_access` | Same as local dev |
 | Stackit prod (`oidc_mode = "external"`) | `""` (empty) | External providers (Keycloak, Azure AD) may reject unknown scopes |
-
-An operator can always override the env var default by inserting the `oidc_extra_scopes` key into
-`server_config` via the Bootstrap Wizard or direct DB update — the DB value takes unconditional
-precedence over the env var.
 
 **SSO Nonce-Based Replay Prevention (Story 11-7, hardened Story 12.7):**
 
