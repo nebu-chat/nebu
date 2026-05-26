@@ -84,12 +84,34 @@ type LoginHandler struct {
 	serverName             string
 	clientID               string
 	clientSecret           string
+	clientIDLoader         func(ctx context.Context) string // nil = use static clientID field
+	clientSecretLoader     func(ctx context.Context) string // nil = use static clientSecret field
 	roleClaimName          string
 	ssoRedirectSchemes     []string          // extra deep-link schemes from NEBU_SSO_REDIRECT_SCHEMES
 	extraScopes            []string          // extra OIDC scopes from NEBU_OIDC_EXTRA_SCOPES
 	userIDClaimLoader      UserIDClaimLoader // nil = fall back to legacy "name" claim (AC7)
 	displaynameClaimLoader UserIDClaimLoader // nil = use hardcoded preferred_username→name→email chain
 	emailClaimLoader       UserIDClaimLoader // nil = use hardcoded "email" claim
+}
+
+// resolveClientID returns the OIDC client ID for the current request.
+// When clientIDLoader is set, it delegates to the loader (DB-backed, TTL-cached).
+// Falls back to the static clientID field when the loader is nil (pre-bootstrap state).
+func (h *LoginHandler) resolveClientID(ctx context.Context) string {
+	if h.clientIDLoader != nil {
+		return h.clientIDLoader(ctx)
+	}
+	return h.clientID
+}
+
+// resolveClientSecret returns the OIDC client secret for the current request.
+// When clientSecretLoader is set, it delegates to the loader (DB-backed, TTL-cached, decrypted).
+// Falls back to the static clientSecret field when the loader is nil (pre-bootstrap state).
+func (h *LoginHandler) resolveClientSecret(ctx context.Context) string {
+	if h.clientSecretLoader != nil {
+		return h.clientSecretLoader(ctx)
+	}
+	return h.clientSecret
 }
 
 type LoginConfig struct {
@@ -100,6 +122,12 @@ type LoginConfig struct {
 	ServerName         string
 	ClientID           string
 	ClientSecret       string
+	// ClientIDLoader returns the OIDC client_id from server_config (DB-backed, TTL-cached).
+	// When set, it overrides the static ClientID field. nil = use ClientID (pre-bootstrap fallback).
+	ClientIDLoader func(ctx context.Context) string
+	// ClientSecretLoader returns the decrypted OIDC client_secret from server_config.
+	// When set, it overrides the static ClientSecret field. nil = use ClientSecret (pre-bootstrap fallback).
+	ClientSecretLoader func(ctx context.Context) string
 	RoleClaimName      string
 	SSORedirectSchemes []string          // extra deep-link schemes from NEBU_SSO_REDIRECT_SCHEMES
 	// ExtraScopes holds additional OIDC scopes beyond [openid, profile, email].
@@ -128,6 +156,8 @@ func NewLoginHandler(cfg LoginConfig) *LoginHandler {
 		serverName:             cfg.ServerName,
 		clientID:               cfg.ClientID,
 		clientSecret:           cfg.ClientSecret,
+		clientIDLoader:         cfg.ClientIDLoader,
+		clientSecretLoader:     cfg.ClientSecretLoader,
 		roleClaimName:          cfg.RoleClaimName,
 		ssoRedirectSchemes:     cfg.SSORedirectSchemes,
 		extraScopes:            cfg.ExtraScopes,
@@ -164,7 +194,7 @@ func (h *LoginHandler) PostLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	verifier := inner.Verifier(&oidc.Config{
-		ClientID:             h.clientID,
+		ClientID:             h.resolveClientID(r.Context()),
 		SupportedSigningAlgs: validate.SupportedAlgs(),
 	})
 	idToken, err := verifier.Verify(r.Context(), rawJWT)

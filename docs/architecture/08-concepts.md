@@ -55,6 +55,56 @@ A gateway restart is required to pick up env-var changes for the SSO flow. The `
 helper in `sso.go` is intentionally parallel to `buildScopeList` in `admin/auth.go` — they cannot
 be unified without creating a circular import between packages.
 
+**OIDC Client Credential Source Hierarchy (bugfix-sso-bootstrap-credentials):**
+
+The Bootstrap Admin Wizard stores `oidc_client_id` and `oidc_client_secret` in `server_config`
+(AES-256-GCM encrypted for the secret). Prior to this fix, `LoginHandler` ignored these values and
+always used static environment variables. The fix introduces two TTL-cached loaders in `main.go`:
+
+| Loader | Key read from `server_config` | Fallback |
+|---|---|---|
+| `newServerConfigClientIDLoader` | `oidc_client_id` | `NEBU_OIDC_CLIENT_ID` env var |
+| `newServerConfigClientSecretLoader` | `oidc_client_secret` (encrypted) | `NEBU_OIDC_CLIENT_SECRET` env var |
+
+**Precedence chain (both loaders):**
+
+1. **`server_config.oidc_client_id` / `oidc_client_secret`** (Bootstrap-configured) — DB value wins when present.
+2. **`NEBU_OIDC_CLIENT_ID` / `NEBU_OIDC_CLIENT_SECRET` env vars** — fallback for pre-bootstrap deployments or when the DB key is absent.
+
+The secret loader calls `admin.DecryptAES256GCM(internalSecret, encryptedValue)`. If decryption
+fails (corrupted or tampered value), a `slog.Warn` is emitted and the env-var fallback is used —
+no panic, no 500 error (AC5). The 60-second TTL cache (`claimLoader`) ensures at most one DB read
+per minute per credential (AC4). A gateway restart is **not** required when credentials are
+updated via the Bootstrap Wizard: the new values are visible within 60 seconds.
+
+**Differs from the claim-loader precedence (Story 11-10):** For OIDC claims, the env var
+(`NEBU_OIDC_USER_ID_CLAIM`) bypasses the DB entirely. For client credentials, DB takes unconditional
+precedence over the env var — Bootstrap-configured values always override the env var, which is
+treated purely as a pre-bootstrap fallback.
+
+**Startup observability check:** At gateway startup, before the `LoginHandler` is constructed,
+`main.go` performs a one-shot check:
+
+```
+if NEBU_OIDC_CLIENT_ID == "" && server_config.oidc_client_id == "" →
+    slog.Warn("OIDC client_id not configured: set NEBU_OIDC_CLIENT_ID or complete the Bootstrap wizard")
+```
+
+A matching warning is emitted for `client_secret`. This ensures operators can detect a misconfigured
+SSO flow immediately from startup logs before the first login attempt.
+
+**`LoginHandler` API change:** `LoginConfig` gains two optional loader fields:
+
+```go
+ClientIDLoader     func(ctx context.Context) string  // nil = use static ClientID field
+ClientSecretLoader func(ctx context.Context) string  // nil = use static ClientSecret field
+```
+
+`resolveClientID(ctx)` and `resolveClientSecret(ctx)` methods on `LoginHandler` delegate to the
+loader when set, otherwise return the static fields. All usages in `sso.go` (`GetSSORedirect`,
+`GetSSOCallback`) and `login.go` (`PostLogin` verifier) call these methods — the static-field
+fallback preserves backward compatibility for test setups and deployments without a Bootstrap DB.
+
 **Deployment-specific defaults (injected by cloud-init / docker-compose, apply to both flows):**
 
 | Environment | `NEBU_OIDC_EXTRA_SCOPES` value | Reason |
@@ -825,4 +875,4 @@ native Elixir terms, not ETF-deserialised arbitrary structs).
 `GetRelations` (Story 9-29) and `GetMessages`. No new endpoints, migrations, gRPC handlers, or
 schema changes were introduced.
 
-_Source: `_bmad-output/planning-artifacts/architecture.md`, §Cross-Cutting Concerns, §Auth-Token-Flow, §Enforcement; `_bmad-output/planning-artifacts/prd.md`, §Cryptographic Identity Architecture; Story 9-22 (per-device sync token isolation, logout cleanup); Story 9-26 (Browser-First E2E layer, playwright-bdd, token sidecar pattern); Story 9-27 (gRPC error surface rule - GRPC.RPCError vs MatchError; failure audit trail pattern for multi-step operations); Story 9-28 (Thread aggregations in sync, bundled m.thread via unsigned_relations, GetRelations RPC, migration 000042 expression index); Story 9-29 (Relations API query params: dir, recurse, from; base and three-segment routes; prev_batch response field; fetch_events_by_relation/5 dynamic WHERE builder with rel_type + event_type + dir opts); Story 9-30 (JSONB content normalisation bug fix - %Postgrex.JSONB{decoded} struct guard in event_map_to_proto/1; resolves /relations HTTP 500 on JSONB-typed content columns); Story 11-7 (SSO nonce-based replay prevention; Cache-Control: no-store on SSO 302 redirect; denylist check in PostLogin with 403 M_FORBIDDEN; ssoStateStore capacity cap at 10,000; Safari re-login bugfix); Story 11-9 (build metadata injection - ldflags for Go, ARG→ENV for Elixir; NewInfoHandler static pre-marshalled response; Nebu.BuildInfo.get/0; Admin UI footer via SetBuildInfo/newPageData/ErrorMode; make redeploy GIT_COMMIT/BUILD_TIME exports); Story 11-10 (configurable OIDC claim mapping - FormatUserIDFromClaims refactored signature, TTL-cached claimLoader, oidcClaimNameRe validation, migration 000044 defaults seed, identity-stability warning, audit log with previous values, Bootstrap Wizard Step 3, ClaimMappingHandler admin settings page); Story 11-11 (Room GenServer start-on-demand concept - send_receipt/2 lookup_room → start_room fix; {:error,_} wildcard trade-off; :noproc guard pattern; handler inventory for start_room vs lookup_room); Story 12-6 (blurhash pass-through contract - content.info is opaque JSONB, client extension fields preserved verbatim; animated=false MUST NOT return animated thumbnail regression test; explicit traceability tests for AC1+AC2); Story 12.16 (Authenticated media endpoints - auth.Middleware TokenVerifier interface, M_MISSING_TOKEN/M_UNKNOWN_TOKEN error codes, fail-closed nil-verifier guard; config.Handler media config endpoint; CSP + Cross-Origin-Resource-Policy headers on all download/thumbnail 200 responses; v3 unauthenticated + v1 authenticated routing pattern in main.go; {fileName} path value for Content-Disposition); Story 13-14 (squashed seed migration - FORCE RLS intentionally absent on audit_log in single-role model; append-only enforced at application layer; audit_log_purge SECURITY DEFINER bypasses RLS as table owner without BYPASSRLS)_
+_Source: `_bmad-output/planning-artifacts/architecture.md`, §Cross-Cutting Concerns, §Auth-Token-Flow, §Enforcement; `_bmad-output/planning-artifacts/prd.md`, §Cryptographic Identity Architecture; Story 9-22 (per-device sync token isolation, logout cleanup); Story 9-26 (Browser-First E2E layer, playwright-bdd, token sidecar pattern); Story 9-27 (gRPC error surface rule - GRPC.RPCError vs MatchError; failure audit trail pattern for multi-step operations); Story 9-28 (Thread aggregations in sync, bundled m.thread via unsigned_relations, GetRelations RPC, migration 000042 expression index); Story 9-29 (Relations API query params: dir, recurse, from; base and three-segment routes; prev_batch response field; fetch_events_by_relation/5 dynamic WHERE builder with rel_type + event_type + dir opts); Story 9-30 (JSONB content normalisation bug fix - %Postgrex.JSONB{decoded} struct guard in event_map_to_proto/1; resolves /relations HTTP 500 on JSONB-typed content columns); Story 11-7 (SSO nonce-based replay prevention; Cache-Control: no-store on SSO 302 redirect; denylist check in PostLogin with 403 M_FORBIDDEN; ssoStateStore capacity cap at 10,000; Safari re-login bugfix); Story 11-9 (build metadata injection - ldflags for Go, ARG→ENV for Elixir; NewInfoHandler static pre-marshalled response; Nebu.BuildInfo.get/0; Admin UI footer via SetBuildInfo/newPageData/ErrorMode; make redeploy GIT_COMMIT/BUILD_TIME exports); Story 11-10 (configurable OIDC claim mapping - FormatUserIDFromClaims refactored signature, TTL-cached claimLoader, oidcClaimNameRe validation, migration 000044 defaults seed, identity-stability warning, audit log with previous values, Bootstrap Wizard Step 3, ClaimMappingHandler admin settings page); Story 11-11 (Room GenServer start-on-demand concept - send_receipt/2 lookup_room → start_room fix; {:error,_} wildcard trade-off; :noproc guard pattern; handler inventory for start_room vs lookup_room); Story 12-6 (blurhash pass-through contract - content.info is opaque JSONB, client extension fields preserved verbatim; animated=false MUST NOT return animated thumbnail regression test; explicit traceability tests for AC1+AC2); Story 12.16 (Authenticated media endpoints - auth.Middleware TokenVerifier interface, M_MISSING_TOKEN/M_UNKNOWN_TOKEN error codes, fail-closed nil-verifier guard; config.Handler media config endpoint; CSP + Cross-Origin-Resource-Policy headers on all download/thumbnail 200 responses; v3 unauthenticated + v1 authenticated routing pattern in main.go; {fileName} path value for Content-Disposition); Story 13-14 (squashed seed migration - FORCE RLS intentionally absent on audit_log in single-role model; append-only enforced at application layer; audit_log_purge SECURITY DEFINER bypasses RLS as table owner without BYPASSRLS); bugfix-sso-bootstrap-credentials (OIDC client credential source hierarchy - newServerConfigClientIDLoader / newServerConfigClientSecretLoader TTL-cached loaders; DB takes precedence over env var; AES-256-GCM decryption on secret load; slog.Warn on decrypt failure; startup observability check; LoginHandler ClientIDLoader/ClientSecretLoader API; resolveClientID/resolveClientSecret methods)_

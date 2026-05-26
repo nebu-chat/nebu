@@ -132,6 +132,50 @@ func newServerConfigClaimLoader(reader admin.ServerConfigReader, key, envOverrid
 	}
 }
 
+// newServerConfigClientIDLoader returns a TTL-cached loader for oidc_client_id from
+// server_config. Falls back to envFallback when the DB has no value (pre-bootstrap state).
+// Mirrors newServerConfigClaimLoader but without the env-override bypass, so that
+// Bootstrap-configured values always take precedence over the env var.
+func newServerConfigClientIDLoader(reader admin.ServerConfigReader, envFallback string) *claimLoader {
+	return &claimLoader{
+		ttl: 60 * time.Second,
+		loadFn: func(ctx context.Context) (string, error) {
+			v, err := reader.LoadServerConfigKey(ctx, "oidc_client_id")
+			if err != nil || v == "" {
+				return envFallback, nil
+			}
+			return v, nil
+		},
+	}
+}
+
+// newServerConfigClientSecretLoader returns a TTL-cached loader for oidc_client_secret
+// from server_config. The stored value is AES-256-GCM encrypted with the gateway's
+// internal secret. On load the value is decrypted before being returned.
+//
+// Falls back to envFallback when:
+//   - The DB has no value (sql.ErrNoRows / empty string) — pre-bootstrap state.
+//   - Decryption fails (corrupted / tampered value) — a slog.Warn is emitted.
+func newServerConfigClientSecretLoader(reader admin.ServerConfigReader, secret []byte, envFallback string) *claimLoader {
+	return &claimLoader{
+		ttl: 60 * time.Second,
+		loadFn: func(ctx context.Context) (string, error) {
+			encrypted, err := reader.LoadServerConfigKey(ctx, "oidc_client_secret")
+			if err != nil || encrypted == "" {
+				return envFallback, nil
+			}
+			plaintext, err := admin.DecryptAES256GCM(secret, encrypted)
+			if err != nil {
+				slog.Warn("newServerConfigClientSecretLoader: decryption failed, falling back to env var",
+					"err", err,
+				)
+				return envFallback, nil
+			}
+			return plaintext, nil
+		},
+	}
+}
+
 func main() {
 	slog.Info("Nebu Gateway starting")
 
@@ -594,6 +638,35 @@ func main() {
 		return emailClaimCached.get(ctx)
 	}
 
+	// bugfix-sso-bootstrap-credentials: TTL-cached loaders for OIDC client credentials.
+	// Bootstrap-configured values from server_config take precedence over env vars.
+	// The client secret is stored AES-256-GCM encrypted; the loader decrypts it on read.
+	clientIDCached := newServerConfigClientIDLoader(adminAuth.ConfigReader(), cfg.OIDCClientID)
+	clientSecretCached := newServerConfigClientSecretLoader(adminAuth.ConfigReader(), []byte(internalSecret), cfg.OIDCClientSecret)
+
+	clientIDLoader := func(ctx context.Context) string {
+		return clientIDCached.get(ctx)
+	}
+	clientSecretLoader := func(ctx context.Context) string {
+		return clientSecretCached.get(ctx)
+	}
+
+	// MINOR-F: Startup observability — warn when neither env var nor server_config
+	// provides a client_id / client_secret. SSO login will fail silently without this.
+	{
+		startupCtx, startupCancel := context.WithTimeout(ctx, 5*time.Second)
+		if cfg.OIDCClientID == "" && clientIDCached.get(startupCtx) == "" {
+			slog.Warn("OIDC client_id not configured: set NEBU_OIDC_CLIENT_ID or complete the Bootstrap wizard")
+		}
+		if cfg.OIDCClientSecret == "" && clientSecretCached.get(startupCtx) == "" {
+			slog.Warn("OIDC client_secret not configured: set NEBU_OIDC_CLIENT_SECRET or complete the Bootstrap wizard")
+		}
+		// NOTE: explicit call instead of defer — defer is function-scoped, not block-scoped.
+		// Using defer here would keep the context alive until main() returns rather than
+		// releasing it immediately after the startup checks complete.
+		startupCancel()
+	}
+
 	loginHandler := matrix.NewLoginHandler(matrix.LoginConfig{
 		DisplayName:            cfg.OIDCDisplayName,
 		Provider:               oidcProvider,
@@ -602,6 +675,8 @@ func main() {
 		ServerName:             serverName,
 		ClientID:               cfg.OIDCClientID,
 		ClientSecret:           cfg.OIDCClientSecret,
+		ClientIDLoader:         clientIDLoader,
+		ClientSecretLoader:     clientSecretLoader,
 		RoleClaimName:          cfg.OIDCClaimRole,
 		SSORedirectSchemes:     cfg.SSORedirectSchemes,
 		ExtraScopes:            cfg.OIDCExtraScopes,

@@ -9,6 +9,19 @@
 # This file is no longer used for named-epic pipeline runs.
 #
 # last_updated: 2026-05-26
+# [bugfix-sso-bootstrap-credentials] 2026-05-26T10:10Z committed ✓ (ATDD+Code CLEAN 2 cycles, Kassandra CLEAN)
+# [bugfix-sso-bootstrap-credentials] 2026-05-26T10:08Z arc42-update → done (08-concepts, 06-runtime)
+# [bugfix-sso-bootstrap-credentials] 2026-05-26T10:05Z security-review → Kassandra CLEAN
+# [bugfix-sso-bootstrap-credentials] 2026-05-26T10:00Z code-review → CLEAN (cycle 2)
+# [bugfix-sso-bootstrap-credentials] 2026-05-26T09:55Z dev-story → done (cycle 2)
+# [bugfix-sso-bootstrap-credentials] 2026-05-26T09:50Z code-review → 2 MINOR → cycle 2
+# [bugfix-sso-bootstrap-credentials] 2026-05-26T09:40Z dev-story → done (cycle 1)
+# [bugfix-sso-bootstrap-credentials] 2026-05-26T09:30Z code-review → 6 MINOR → cycle 1
+# [bugfix-sso-bootstrap-credentials] 2026-05-26T09:18Z ci-gate → ✓ unit-go (alle packages)
+# [bugfix-sso-bootstrap-credentials] 2026-05-26T09:15Z dev-story → done (cycle 0)
+# [bugfix-sso-bootstrap-credentials] 2026-05-26T09:00Z test-review → CLEAN (0 MAJOR, 4 MINOR)
+# [bugfix-sso-bootstrap-credentials] 2026-05-26T08:55Z atdd → 5 failing tests (sso_bootstrap_credentials_test.go + loaders_test.go)
+# [bugfix-sso-bootstrap-credentials] 2026-05-26T08:45Z pipeline started (story created)
 # [5-32] 2026-05-26T11:05Z committed ✓ (ATDD+Code CLEAN, 2 cycles)
 # [5-32] 2026-05-26T11:02Z arc42-update → no arch changes (error handling only)
 # [5-32] 2026-05-26T11:00Z security-review → skipped (not-needed)
@@ -60,4 +73,4 @@ current_step: null
 completed: []
 cycle_count: 0
 blocked_reason: null
-last_updated: "2026-05-26T07:44Z"
+last_updated: "2026-05-26T09:39Z"
