@@ -317,8 +317,8 @@ func (h *LoginHandler) GetSSORedirect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	oauth2Config := &oauth2.Config{
-		ClientID:     h.clientID,
-		ClientSecret: h.clientSecret,
+		ClientID:     h.resolveClientID(r.Context()),
+		ClientSecret: h.resolveClientSecret(r.Context()),
 		RedirectURL:  ssoCallbackURL(r),
 		Scopes:       buildSSOScopeList(h.extraScopes),
 		Endpoint:     inner.Endpoint(),
@@ -402,8 +402,8 @@ func (h *LoginHandler) GetSSOCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	oauth2Config := &oauth2.Config{
-		ClientID:     h.clientID,
-		ClientSecret: h.clientSecret,
+		ClientID:     h.resolveClientID(r.Context()),
+		ClientSecret: h.resolveClientSecret(r.Context()),
 		RedirectURL:  ssoCallbackURL(r),
 		Scopes:       buildSSOScopeList(h.extraScopes),
 		Endpoint:     inner.Endpoint(),
@@ -438,7 +438,7 @@ func (h *LoginHandler) GetSSOCallback(w http.ResponseWriter, r *http.Request) {
 	// Note: oidc.IDTokenVerifier does NOT check the nonce claim automatically —
 	// we extract and compare it ourselves below.
 	callbackVerifier := inner.Verifier(&oidc.Config{
-		ClientID:             h.clientID,
+		ClientID:             h.resolveClientID(r.Context()),
 		SupportedSigningAlgs: validate.SupportedAlgs(),
 	})
 	parsedToken, err := callbackVerifier.Verify(r.Context(), rawIDToken)
