@@ -182,6 +182,113 @@ Implementation: `media/internal/ratelimit/ratelimit.go` - `NewIPRateLimiter(ctx 
 
 **Cleanup correctness (Story 12.12 F-4):** The background cleanup goroutine (`cleanupLoop`) evicts entries where `time.Since(entry.lastSeen) > 5 minutes`. `entry.lastSeen` is updated by `getOrCreate` on every request - before the handler executes. An in-flight request updates `lastSeen` before the handler runs, so a concurrent cleanup tick never evicts a bucket for a request that is actively being processed.
 
+## Matrix Session Lifecycle - Opaque Access Tokens (Story fix-short-oidc-sessions)
+
+**Problem:** Matrix clients connected via OIDC were force-logged-out when the OIDC `id_token` expired
+(5 minute default in Keycloak). The gateway previously returned the OIDC JWT directly as the Matrix
+`access_token`, tying the session lifetime to the OIDC provider's token expiry.
+
+**Solution:** Nebu now manages Matrix sessions server-side using opaque access tokens + refresh tokens
+(Matrix Client-Server API v1.3), decoupled from OIDC token lifetime.
+
+**Architecture:** `MatrixSessionStore` interface (implemented by `PostgresMatrixSessionStore`) maintains
+a `matrix_sessions` table with:
+
+```
+access_token (PK)  ← Opaque hex string (32 bytes = 64 hex chars, no dots)
+refresh_token      ← Opaque hex string (32 bytes), UNIQUE, rotated on each refresh
+oidc_refresh_token ← AES-256-GCM encrypted OIDC RT from Keycloak (optional, for future OIDC refresh)
+user_id            ← Matrix user ID (@user:server.name)
+device_id          ← From JWT "did" claim or SSO device registration
+expires_at         ← Absolute wall-clock time (Nebu controls expiry: NOW() + 8 hours)
+revoked_at         ← Set on logout or session invalidation (immediate, no grace)
+grace_until        ← Grace window end time for old refresh token after rotation (NOW() + 60s)
+created_at         ← Session creation timestamp
+```
+
+**Token validation:** `WithOpaqueSessionCheck` middleware in `auth.go` wraps `JWTMiddleware`:
+
+```go
+func isOpaqueToken(token string) bool {
+    return !strings.Contains(token, ".")  // JWTs always have 2 dots
+}
+```
+
+When `isOpaqueToken(rawToken)` is true:
+1. Look up in `MatrixSessionStore.GetByAccessToken(ctx, token)`
+2. If not found: `401 M_UNKNOWN_TOKEN "Invalid token"`
+3. If found but `revoked_at IS NOT NULL`: `401 M_UNKNOWN_TOKEN "Token has been logged out"`
+4. If found but `expires_at < NOW()`: `401 M_UNKNOWN_TOKEN "Token has expired"` with `soft_logout: true`
+5. If found and valid: call `MarkAccessTokenUsed(token)` to end the old refresh token's grace window,
+   then populate request context (user_id, device_id) from session fields
+
+When `isOpaqueToken(rawToken)` is false, routing continues to existing OIDC JWT path (backward compat).
+
+**Session creation (SSO flow):**
+
+In `GetSSOCallback`:
+1. After `oauth2Config.Exchange()`, request `offline_access` scope from OIDC provider
+2. If `token.RefreshToken` is non-empty, encrypt it with AES-256-GCM using `internal_secret`
+3. Generate opaque `accessToken` and `refreshToken` (32 bytes each → hex)
+4. Compute `expiresAt = min(oidcTokenExpiry, NOW() + 8 hours)`
+5. Insert into `matrix_sessions` table; store opaque `accessToken` in `loginTokenStore`
+
+In `PostLogin` (after gRPC `ValidateToken`):
+- If client sent `refresh_token: true` in the request:
+  - Retrieve session from store by opaque `accessToken`
+  - Return `LoginTokenResponse` with `RefreshToken`, `ExpiresInMs` fields
+- If client omitted `refresh_token: true`:
+  - Return opaque `accessToken` only (no `expires_in_ms`, no `refresh_token`)
+
+**Session refresh (`POST /refresh`):**
+
+Registered OUTSIDE `jwtMiddleware` (no auth header required per spec):
+
+1. Extract `refresh_token` from request body
+2. `MatrixSessionStore.GetByRefreshToken(ctx, token)` → `session` (includes grace-window state)
+3. If session not found or grace-window expired: `401 M_UNKNOWN_TOKEN`
+4. If OIDC RT is stored and close to expiry: call OIDC provider to refresh (optional MVP)
+5. Generate new opaque `newAccessToken`, `newRefreshToken`
+6. Compute `newExpiresAt = NOW() + 8 hours`
+7. `RotateTokens(oldRefreshToken, newAccessToken, newRefreshToken, newExpiresAt)`:
+   - Insert new session row with new tokens
+   - Update old session row: `revoked_at = NOW()`, `grace_until = NOW() + 60s`
+8. Return `200 {"access_token": newAccessToken, "refresh_token": newRefreshToken, "expires_in_ms": <ms>}`
+
+**Grace period semantics (AC4, Spec MUST):**
+
+The 60-second grace window allows a client that fails to persist the `/refresh` response to retry
+the same old refresh token without error. Once the new `accessToken` is used in any authenticated
+request, `MarkAccessTokenUsed` executes:
+
+```sql
+UPDATE matrix_sessions
+SET grace_until = NOW()
+WHERE refresh_token = (
+  SELECT refresh_token FROM matrix_sessions WHERE access_token = $1 AND revoked_at IS NOT NULL
+)
+```
+
+This immediately expires the old refresh token's grace period. Subsequent `/refresh` calls with the
+old token return `401 M_UNKNOWN_TOKEN`.
+
+**Logout:** `POST /logout` calls `MatrixSessionStore.Revoke(accessToken)`, setting `revoked_at = NOW()`
+(immediate, no grace window for logout).
+
+**Cleanup:** Hourly cleanup goroutine calls `CleanupExpired(ctx)`, deleting rows where
+`expires_at < NOW() - INTERVAL '7 days'` (keep 7 days of audit history).
+
+**Comparison to Admin Sessions:**
+
+| Aspect | Admin Sessions | Matrix Sessions |
+|---|---|---|
+| Storage | `admin_sessions` table | `matrix_sessions` table |
+| Token format | Opaque hex (admin.go) | Opaque hex (matrix) |
+| Encrypted OIDC RT | Yes | Yes (future: allows Keycloak session binding) |
+| Lifetime control | Configurable per admin role | Fixed 8 hours for all Matrix clients |
+| Refresh pattern | Proactive refresh at 5-min window | On-demand via `/refresh` endpoint |
+| Grace period | None (admin must re-auth on timeout) | 60s grace after token rotation (AC4) |
+
 ## Cryptography
 
 **Two key pairs per user (ADR-007):**

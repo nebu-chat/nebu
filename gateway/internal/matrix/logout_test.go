@@ -14,6 +14,30 @@ import (
 	"google.golang.org/grpc"
 )
 
+// mockMatrixSessionStore is a minimal MatrixSessionStoreInterface for logout tests.
+type mockMatrixSessionStore struct {
+	revokedTokens []string
+	returnErr     error
+}
+
+func (m *mockMatrixSessionStore) Create(_ matrix.MatrixSessionCreateParams) error { return nil }
+func (m *mockMatrixSessionStore) GetByAccessToken(_ string) (*matrix.MatrixSession, error) {
+	return nil, matrix.ErrMatrixSessionNotFound
+}
+func (m *mockMatrixSessionStore) GetByRefreshToken(_ string) (*matrix.MatrixSession, error) {
+	return nil, matrix.ErrMatrixSessionNotFound
+}
+func (m *mockMatrixSessionStore) RotateTokens(_ matrix.MatrixSessionRotateParams) error { return nil }
+func (m *mockMatrixSessionStore) MarkAccessTokenUsed(_ string) error                    { return nil }
+func (m *mockMatrixSessionStore) Revoke(accessToken string) error {
+	if m.returnErr != nil {
+		return m.returnErr
+	}
+	m.revokedTokens = append(m.revokedTokens, accessToken)
+	return nil
+}
+func (m *mockMatrixSessionStore) CleanupExpired() (int64, error) { return 0, nil }
+
 // mockLogoutCoreClient implements matrix.LogoutCoreClient for testing.
 // It records the most recent InvalidateUserSessions call and can be configured
 // to return an error.
@@ -204,5 +228,98 @@ func TestPostLogout_WithCore_CoreErrorDoesNotReturn500(t *testing.T) {
 	// Token must still be invalidated in the local denylist
 	if !store.IsInvalidated(rawToken) {
 		t.Error("expected token to be invalidated in denylist even when Core gRPC fails")
+	}
+}
+
+// ─── MAJOR-A (bugfix/fix-short-oidc-sessions): Tests for opaque token revocation ──
+//
+// Verifies that PostLogout calls MatrixSessionStore.Revoke when the token is
+// opaque (no ".") and MatrixSessions is configured. This closes the auth bypass
+// where opaque tokens remained valid for up to 8h after logout.
+
+// TestPostLogout_OpaqueToken_CallsRevoke verifies that an opaque Nebu access token
+// (no "." in the token string) is revoked via MatrixSessionStore on logout, not
+// via the denylist (which does not track opaque tokens).
+func TestPostLogout_OpaqueToken_CallsRevoke(t *testing.T) {
+	store := middleware.NewDenylist()
+	mockSessions := &mockMatrixSessionStore{}
+
+	handler := matrix.NewLogoutHandlerWithCore(matrix.LogoutConfig{
+		Store:          store,
+		MatrixSessions: mockSessions,
+	})
+
+	// Opaque tokens are 64-char lowercase hex strings with no dots.
+	opaqueToken := "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
+
+	req := httptest.NewRequest("POST", "/_matrix/client/v3/logout", nil)
+	req.Header.Set("Authorization", "Bearer "+opaqueToken)
+	// NOTE: ContextKeyTokenExpiry is NOT set — simulates WithOpaqueSessionCheck behavior.
+	rr := httptest.NewRecorder()
+	handler.PostLogout(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rr.Code)
+	}
+
+	// Opaque token must be revoked via MatrixSessionStore.Revoke, not via denylist.
+	if len(mockSessions.revokedTokens) != 1 || mockSessions.revokedTokens[0] != opaqueToken {
+		t.Errorf("expected Revoke called with opaque token, got revokedTokens=%v", mockSessions.revokedTokens)
+	}
+
+	// The denylist must NOT be used for opaque tokens (MINOR-5: zero-time expiry would be wrong).
+	if store.IsInvalidated(opaqueToken) {
+		t.Error("opaque token must NOT be added to denylist — use MatrixSessionStore.Revoke instead")
+	}
+}
+
+// TestPostLogout_OpaqueToken_NoMatrixStore_FallsBackToDenylist verifies that when
+// MatrixSessions is nil (backward compat, pre-wired state), opaque-looking tokens
+// still fall through to the denylist so existing behavior is preserved.
+func TestPostLogout_OpaqueToken_NoMatrixStore_FallsBackToDenylist(t *testing.T) {
+	store := middleware.NewDenylist()
+	handler := matrix.NewLogoutHandler(store) // no MatrixSessions
+
+	opaqueToken := "test-token-12345" // no dots, but no MatrixSessionStore configured
+	expiry := time.Now().Add(time.Hour)
+
+	req := httptest.NewRequest("POST", "/_matrix/client/v3/logout", nil)
+	req.Header.Set("Authorization", "Bearer "+opaqueToken)
+	ctx := context.WithValue(req.Context(), middleware.ContextKeyTokenExpiry, expiry)
+	req = req.WithContext(ctx)
+
+	rr := httptest.NewRecorder()
+	handler.PostLogout(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rr.Code)
+	}
+
+	// Without MatrixSessions, fall back to denylist (backward compat).
+	if !store.IsInvalidated(opaqueToken) {
+		t.Error("expected denylist fallback when MatrixSessions is nil")
+	}
+}
+
+// TestPostLogout_OpaqueToken_RevokeError_Returns200 verifies that a Revoke failure
+// does not cause a 500 — the client is still returned 200 (best-effort non-fatal).
+func TestPostLogout_OpaqueToken_RevokeError_Returns200(t *testing.T) {
+	store := middleware.NewDenylist()
+	mockSessions := &mockMatrixSessionStore{returnErr: errors.New("db: connection lost")}
+
+	handler := matrix.NewLogoutHandlerWithCore(matrix.LogoutConfig{
+		Store:          store,
+		MatrixSessions: mockSessions,
+	})
+
+	opaqueToken := "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
+	req := httptest.NewRequest("POST", "/_matrix/client/v3/logout", nil)
+	req.Header.Set("Authorization", "Bearer "+opaqueToken)
+	rr := httptest.NewRecorder()
+	handler.PostLogout(rr, req)
+
+	// Even on Revoke error, the response must be 200.
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200 even on Revoke error, got %d; body: %s", rr.Code, rr.Body.String())
 	}
 }

@@ -606,7 +606,109 @@ activates the backward-compat `"name"` claim path.
 same OIDC principals, breaking all room memberships. The Admin UI settings page and the Bootstrap
 Wizard Step 3 both display a prominent stability warning.
 
-## Scenario 3m: Bootstrap Wizard - Step 3 Claim Mapping (Story 11-10)
+## Scenario 3m: Matrix Client Session Refresh - Opaque Tokens (Story fix-short-oidc-sessions)
+
+Matrix users on Element Web and FluffyChat previously faced force-logout within minutes when the OIDC
+`id_token` expired (Keycloak default: 5 minutes). The fix implements Matrix v1.3 opaque session tokens
+with server-side storage, matching the admin UI session refresh pattern.
+
+```
+Matrix Client      Go Gateway (login.go)                 PostgreSQL (matrix_sessions)
+     │                     │                                        │
+     │  POST /login        │                                        │
+     │  {type:m.login.     │                                        │
+     │   token,            │                                        │
+     │   refresh_token:true}                                        │
+     │────────────────────►│                                        │
+     │                     │  gRPC ValidateToken (OIDC verify)      │
+     │                     │  ← {user_id, oidc_refresh_token}       │
+     │                     │  Generate opaque AT + RT (32 bytes)     │
+     │                     │  Encrypt OIDC RT with AES-256-GCM      │
+     │                     │  INSERT into matrix_sessions            │
+     │                     │─────────────────────────────────────────►
+     │                     │  ◄── (success or conflict-ignore)       │
+     │  200 {              │                                        │
+     │    access_token: <hex>, (opaque, no dots)                    │
+     │    refresh_token: <hex>, (opaque, no dots)                   │
+     │    expires_in_ms: 28800000, (8 hours)                        │
+     │    user_id, device_id                                        │
+     │  }                  │                                        │
+     │◄────────────────────│                                        │
+```
+
+**AC1 — Opaque token format:** access_token and refresh_token are 32 random bytes → 64 hex chars,
+no `.` characters (distinguishable from JWTs). `expires_in_ms` is present only when client sends
+`refresh_token: true`.
+
+**AC7 — Backward compatibility:** Clients omitting `refresh_token: true` receive the OIDC JWT directly
+(old behavior), no `expires_in_ms`, no `refresh_token` field. Existing non-SSO clients unaffected.
+
+```
+Matrix Client      Go Gateway (refresh.go)                PostgreSQL (matrix_sessions)
+     │                     │                                        │
+     │  POST /refresh      │                                        │
+     │  {refresh_token:<hex>}                                       │
+     │────────────────────►│  (NO auth header required)             │
+     │                     │  SELECT BY refresh_token               │
+     │                     │─────────────────────────────────────────►
+     │                     │  ◄── {access_token, expires_at, ...}   │
+     │                     │  AC4: Check grace period window        │
+     │                     │  Generate new opaque AT + RT           │
+     │                     │  INSERT new session row                │
+     │                     │  UPDATE old row: revoked_at=NOW(),     │
+     │                     │    grace_until=NOW()+60s                │
+     │                     │─────────────────────────────────────────►
+     │  200 {              │                                        │
+     │    access_token: <new_hex>,                                  │
+     │    refresh_token: <new_hex>,                                 │
+     │    expires_in_ms: 28800000                                   │
+     │  }                  │                                        │
+     │◄────────────────────│                                        │
+     │                     │                                        │
+     │  [client uses new AT for subsequent requests]                │
+     │  GET /sync          │                                        │
+     │  Authorization: Bearer <new_hex>                             │
+     │────────────────────►│  WithOpaqueSessionCheck                │
+     │                     │  SELECT FROM matrix_sessions           │
+     │                     │  WHERE access_token=$1 (opaque)        │
+     │                     │─────────────────────────────────────────►
+     │                     │  ◄── {user_id, device_id, expires_at}  │
+     │                     │  If not found: 401 M_UNKNOWN_TOKEN      │
+     │                     │  If expires_at < NOW(): 401 + soft_logout │
+     │                     │  If valid: MarkAccessTokenUsed(AT)      │
+     │                     │─────────────────────────────────────────►
+     │                     │    (expiry grace window for old RT)     │
+     │  200 {sync response}│                                        │
+     │◄────────────────────│                                        │
+```
+
+**AC4 — Grace period (Spec MUST):** The old refresh token remains valid for 60 seconds after
+`/refresh` returns, covering the case where a client fails to persist the new tokens. Once the new AT
+is used in any authenticated request, the grace window expires immediately via `MarkAccessTokenUsed`.
+A subsequent `/refresh` call with the old RT returns `401 M_UNKNOWN_TOKEN`.
+
+**AC5 — Expired opaque token soft logout:** When an opaque AT in the DB has `expires_at < NOW()`,
+the gateway returns `401 M_UNKNOWN_TOKEN` with `soft_logout: true` (Matrix spec v1.3 semantics).
+
+**AC8 — Session persistence across OIDC expiry:** Nebu refreshes the session independent of the OIDC
+provider's token lifetime. A session with `expires_at = NOW() + 8 hours` persists even if Keycloak's
+token expires after 5 minutes (the OIDC RT is refreshed transparently if configured, but the Nebu AT
+lifetime is decoupled from OIDC).
+
+**Database:** New table `matrix_sessions` (migration 000001 squash) with columns:
+- `access_token` (PK), `refresh_token` (UNIQUE), `oidc_refresh_token` (encrypted AES-256-GCM),
+  `user_id`, `device_id`, `expires_at`, `revoked_at`, `grace_until`, `created_at`.
+- Indexes on `refresh_token`, `user_id`, `expires_at`.
+
+**Middleware dispatch:** `WithOpaqueSessionCheck` middleware wrapper in `auth.go` detects opaque tokens
+(no `.` character) and routes them to `MatrixSessionStore` lookup instead of OIDC JWT validation.
+
+**Logout:** `POST /logout` calls `MatrixSessionStore.Revoke(opaque_token)` for opaque tokens,
+setting `revoked_at = NOW()` (immediate revocation, no grace period on logout).
+
+**Cleanup:** Periodic goroutine deletes expired `matrix_sessions` rows (7+ days old) hourly.
+
+## Scenario 3n: Bootstrap Wizard - Step 3 Claim Mapping (Story 11-10)
 
 The Bootstrap Wizard now has four steps. Step 3 (Claim Mapping) is inserted between the OIDC
 credentials step and the OIDC redirect:

@@ -20,11 +20,4 @@
 - [ ] New unit tests added (or N/A with reason)
 - [ ] Integration tests updated (or N/A with reason)
 - [ ] All tests pass locally (`make test-unit-go`,
-      `make test-unit-elixir`)
-
-## Checklist
-
-- [ ] `git commit -s` (DCO sign-off) applied to all commits in this MR.
-- [ ] `Co-Authored-By: Claude` trailers are NOT present in any commit
-  message. Adding AI-attribution trailers is prohibited — do not
-  include them. See CONTRIBUTING.md for details.
+      `make test-unit-elixir`

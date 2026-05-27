@@ -53,6 +53,19 @@ First reply in thread not visible in Element Web because:
 1. Bundled aggregations on thread root not sent in non-limited sync (spec: only when `limited: true`, but Element Web needs them to discover threads)
 2. `GET /_matrix/client/v1/rooms/{roomId}/relations/{eventId}/m.thread` endpoint (v1 prefix) required to populate thread timeline — see session 2026-05-08.
 
+### Token Refresh — `POST /_matrix/client/v3/refresh` (Added in v1.3)
+Key rules for Nebu implementation:
+- **Old refresh token grace (MUST):** Old RT remains valid until the new access token or new refresh token is _used_. Ensures clients that fail to persist new tokens can retry the refresh.
+- **Old access token:** Server MAY invalidate immediately or leave until natural expiry. Clients MUST NOT assume it's still valid.
+- **soft_logout SHOULD accompany expired token 401s:** `{"errcode":"M_UNKNOWN_TOKEN","soft_logout":true}` for expired-but-session-intact sessions; omit `soft_logout` (or `false`) for sessions that are destroyed.
+- **Client signals refresh support:** `"refresh_token": true` boolean in `POST /login` request body. Server MAY issue non-expiring tokens to clients that don't signal this.
+- **Login response extras (v1.3):** `expires_in_ms` (integer, optional) + `refresh_token` (string, optional) — only return when client sent `refresh_token: true`.
+- **Token format:** Spec mandates opaque bytes — Nebu can use 32-byte random hex, identical to admin sessions.
+- **Device binding:** New tokens from refresh remain bound to the same device_id as the initial tokens.
+
+### Known Non-Compliance: Matrix User Sessions
+Current implementation returns OIDC `id_token` directly as Matrix `access_token`. No `POST /refresh` endpoint. No `expires_in_ms` in login response. This causes sessions to expire after Keycloak's access token TTL (default 5 min). Story `oidc-session-refresh` in epic `bugfix/fix-short-oidc-sessions` will fix this.
+
 ## Open Questions
 
 - Is `GET /_matrix/client/v1/rooms/{roomId}/relations/{eventId}/m.thread` implemented? (threading endpoint, v1 prefix — see session 2026-05-08)

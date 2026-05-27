@@ -89,11 +89,13 @@ func (s *ssoStateStore) pop(state string) (ssoStateEntry, bool) {
 // for a token that passes through browser history, Referer headers, and proxy logs.
 const loginTokenTTL = 30 * time.Second
 
-// loginTokenEntry maps a short-lived opaque loginToken to the real OIDC id_token.
+// loginTokenEntry maps a short-lived opaque loginToken to the real OIDC id_token
+// and optional OIDC refresh token (for creating a MatrixSession in PostLogin).
 // TTL is 30 seconds — single-use (popped on first read).
 type loginTokenEntry struct {
-	idToken string
-	exp     time.Time
+	idToken          string
+	oidcRefreshToken string // non-empty when offline_access was granted by the IdP
+	exp              time.Time
 }
 
 type loginTokenStore struct {
@@ -106,6 +108,13 @@ type loginTokenStore struct {
 var globalLoginTokens = &loginTokenStore{store: make(map[string]loginTokenEntry)}
 
 func (s *loginTokenStore) save(opaqueToken, idToken string, ttl time.Duration) {
+	s.saveWithOIDCRT(opaqueToken, idToken, "", ttl)
+}
+
+// saveWithOIDCRT stores an opaque loginToken mapped to the OIDC id_token and
+// an optional OIDC refresh token. The OIDC RT is passed to PostLogin so it can
+// encrypt and store it in the MatrixSession row (story: oidc-session-refresh).
+func (s *loginTokenStore) saveWithOIDCRT(opaqueToken, idToken, oidcRefreshToken string, ttl time.Duration) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now()
@@ -114,34 +123,40 @@ func (s *loginTokenStore) save(opaqueToken, idToken string, ttl time.Duration) {
 			delete(s.store, k)
 		}
 	}
-	s.store[opaqueToken] = loginTokenEntry{idToken: idToken, exp: now.Add(ttl)}
+	s.store[opaqueToken] = loginTokenEntry{
+		idToken:          idToken,
+		oidcRefreshToken: oidcRefreshToken,
+		exp:              now.Add(ttl),
+	}
 }
 
-// pop returns the id_token for opaqueToken and removes the entry (single-use).
-// Returns ("", false) if the token is unknown or expired.
-func (s *loginTokenStore) pop(opaqueToken string) (string, bool) {
+// pop returns the loginTokenEntry for opaqueToken and removes it (single-use).
+// Returns zero value and false if the token is unknown or expired.
+func (s *loginTokenStore) pop(opaqueToken string) (loginTokenEntry, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	entry, ok := s.store[opaqueToken]
 	if !ok {
-		return "", false
+		return loginTokenEntry{}, false
 	}
 	delete(s.store, opaqueToken)
 	if time.Now().After(entry.exp) {
-		return "", false
+		return loginTokenEntry{}, false
 	}
-	return entry.idToken, true
+	return entry, true
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-// buildSSOScopeList returns [openid, profile, email] plus any non-duplicate extra scopes.
+// buildSSOScopeList returns [openid, profile, email, offline_access] plus any non-duplicate
+// extra scopes. offline_access is always included to request a refresh_token from Keycloak/Dex
+// (required for the Nebu session refresh feature, story: oidc-session-refresh).
 // Empty strings and scopes already in the base list are silently dropped.
 // NOTE: gateway/internal/admin/auth.go has a parallel buildScopeList helper with the same
 // algorithm (different signature: takes a space-separated string). They cannot be unified
 // without creating a circular import. Update both if the scope-building policy changes.
 func buildSSOScopeList(extra []string) []string {
-	base := []string{oidc.ScopeOpenID, "profile", "email"}
+	base := []string{oidc.ScopeOpenID, "profile", "email", oidc.ScopeOfflineAccess}
 	seen := make(map[string]bool, len(base))
 	for _, s := range base {
 		seen[s] = true
@@ -477,7 +492,10 @@ func (h *LoginHandler) GetSSOCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opaqueToken := hex.EncodeToString(tokenBytes)
-	globalLoginTokens.save(opaqueToken, rawIDToken, loginTokenTTL)
+
+	// Store the OIDC refresh_token alongside the id_token so PostLogin can
+	// create a MatrixSession with the encrypted OIDC RT when matrixSessions is configured.
+	globalLoginTokens.saveWithOIDCRT(opaqueToken, rawIDToken, token.RefreshToken, loginTokenTTL)
 
 	// Redirect to the Matrix client with the opaque loginToken.
 	// The client calls POST /_matrix/client/v3/login with

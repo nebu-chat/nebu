@@ -18,7 +18,7 @@ Enterprise customers also require auditability as a compliance criterion: which 
 
 ## Decision
 
-Nebu uses a **simplified Git Flow strategy** with two long-lived branches (`main`, `develop`) and short-lived support branches (`feature/*`, `fix/*`, `release/*`, `hotfix/*`).
+Nebu uses a **simplified Git Flow strategy** with two long-lived branches (`main`, `develop`) and short-lived support branches (`feature/*`, `bugfix/*`, `release/*`, `hotfix/*`).
 
 ### Branch Overview
 
@@ -27,7 +27,7 @@ Nebu uses a **simplified Git Flow strategy** with two long-lived branches (`main
 | `main`       | Stable production state; root of all release tags        | permanent      |
 | `develop`    | Integration branch for the next release                  | permanent      |
 | `feature/*`  | Individual features or epics (`feature/<epic-name>`)     | until MR merge |
-| `fix/*`      | Non-critical bugfixes targeting develop                  | until MR merge |
+| `bugfix/*`   | Non-critical bugfixes targeting develop                  | until MR merge |
 | `release/*`  | Release preparation (RC phase, bugfixes only)            | until release  |
 | `hotfix/*`   | Critical fixes applied directly to main                  | until release  |
 

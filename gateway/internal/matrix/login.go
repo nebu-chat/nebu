@@ -7,10 +7,11 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-
 	"strings"
+	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
+	"github.com/nebu/nebu/internal/admin"
 	"github.com/nebu/nebu/internal/auth"
 	coregrpc "github.com/nebu/nebu/internal/grpc"
 	pb "github.com/nebu/nebu/internal/grpc/pb"
@@ -46,15 +47,18 @@ type LoginResponse struct {
 }
 
 type LoginRequest struct {
-	Type  string `json:"type"`
-	Token string `json:"token"`
+	Type         string `json:"type"`
+	Token        string `json:"token"`
+	RefreshToken bool   `json:"refresh_token"` // v1.3: client supports refresh tokens
 }
 
 type LoginTokenResponse struct {
-	AccessToken string `json:"access_token"`
-	DeviceID    string `json:"device_id"`
-	UserID      string `json:"user_id"`
-	TokenType   string `json:"token_type"`
+	AccessToken  string  `json:"access_token"`
+	DeviceID     string  `json:"device_id"`
+	UserID       string  `json:"user_id"`
+	TokenType    string  `json:"token_type"`
+	ExpiresInMs  *int64  `json:"expires_in_ms,omitempty"`  // v1.3, only when RefreshToken=true
+	RefreshToken *string `json:"refresh_token,omitempty"`  // v1.3, only when RefreshToken=true
 }
 
 type matrixError struct {
@@ -81,6 +85,8 @@ type LoginHandler struct {
 	provider               *auth.Provider
 	coreClient             CoreClient
 	store                  middleware.TokenStore // optional; nil = skip denylist check in PostLogin
+	matrixSessions         MatrixSessionStoreInterface // optional; nil = refresh not supported
+	internalSecret         []byte // AES-256-GCM key for encrypting OIDC refresh tokens; nil = no encryption
 	serverName             string
 	clientID               string
 	clientSecret           string
@@ -119,6 +125,13 @@ type LoginConfig struct {
 	Provider           *auth.Provider
 	CoreClient         CoreClient
 	Store              middleware.TokenStore // optional; when set, PostLogin rejects invalidated JWTs
+	// MatrixSessions enables opaque token issuance and refresh support.
+	// When set, PostLogin returns opaque AT+RT when client sends refresh_token:true.
+	// nil = refresh not supported (backward compat).
+	MatrixSessions     MatrixSessionStoreInterface
+	// InternalSecret is the AES-256-GCM key used to encrypt OIDC refresh tokens
+	// stored in matrix_sessions. Required when MatrixSessions is set.
+	InternalSecret     []byte
 	ServerName         string
 	ClientID           string
 	ClientSecret       string
@@ -153,6 +166,8 @@ func NewLoginHandler(cfg LoginConfig) *LoginHandler {
 		provider:               cfg.Provider,
 		coreClient:             cfg.CoreClient,
 		store:                  cfg.Store,
+		matrixSessions:         cfg.MatrixSessions,
+		internalSecret:         cfg.InternalSecret,
 		serverName:             cfg.ServerName,
 		clientID:               cfg.ClientID,
 		clientSecret:           cfg.ClientSecret,
@@ -189,8 +204,10 @@ func (h *LoginHandler) PostLogin(w http.ResponseWriter, r *http.Request) {
 	// raw JWT. Try the opaque store first (single-use, 30s TTL). Fall back to
 	// treating it as a raw JWT for any client that calls POST /login directly.
 	rawJWT := req.Token
-	if idTokenFromStore, found := globalLoginTokens.pop(req.Token); found {
-		rawJWT = idTokenFromStore
+	var oidcRefreshTokenFromSSO string // non-empty when GetSSOCallback stored an OIDC refresh token
+	if entry, found := globalLoginTokens.pop(req.Token); found {
+		rawJWT = entry.idToken
+		oidcRefreshTokenFromSSO = entry.oidcRefreshToken
 	}
 
 	verifier := inner.Verifier(&oidc.Config{
@@ -295,14 +312,93 @@ func (h *LoginHandler) PostLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	deviceID := generateDeviceID()
+
+	// v1.3: Create a MatrixSession when matrixSessions is configured AND the login
+	// came via SSO (so we have the OIDC refresh token). This produces opaque AT+RT.
+	// AC7: clients without refresh_token:true still get the raw JWT (backward compat).
+	// The session is always created (not just when req.RefreshToken==true) so that
+	// subsequent requests via JWTMiddleware can validate the opaque token.
+	//
+	// MINOR-3: Warn admins when the OIDC refresh token is absent despite MatrixSessions
+	// being configured. This indicates a Keycloak misconfiguration (e.g. missing
+	// offline_access scope or the OIDC client lacks offline access capability).
+	var nebuOpaqueAT, nebuOpaqueRT string
+	var nebuExpiresAt time.Time
+	if h.matrixSessions != nil && oidcRefreshTokenFromSSO == "" {
+		slog.Warn("PostLogin: OIDC refresh token missing — opaque session cannot be created; "+
+			"check that the Keycloak client has 'offline_access' scope enabled and offline access is granted",
+			"user_id", userID)
+	}
+	if h.matrixSessions != nil && oidcRefreshTokenFromSSO != "" {
+		at, err := generateOpaqueToken()
+		if err == nil {
+			rt, err := generateOpaqueToken()
+			if err == nil {
+				// Encrypt OIDC RT if we have an internal secret.
+				// Note: oidcRefreshTokenFromSSO is guaranteed non-empty here because
+				// the outer guard (line above) already checks oidcRefreshTokenFromSSO != "".
+				var encOIDCRT string
+				if len(h.internalSecret) > 0 {
+					var encErr error
+					encOIDCRT, encErr = encryptOIDCRefreshToken(h.internalSecret, oidcRefreshTokenFromSSO)
+					if encErr != nil {
+						// MINOR-4: log encryption failure so admins notice the misconfiguration
+						// (e.g. internal_secret too short for AES-256-GCM).
+						slog.Warn("PostLogin: failed to encrypt OIDC refresh token — session created without encrypted RT",
+							"err", encErr, "user_id", userID)
+					}
+				}
+				nebuExpiresAt = time.Now().Add(8 * time.Hour)
+				createErr := h.matrixSessions.Create(MatrixSessionCreateParams{
+					AccessToken:               at,
+					RefreshToken:              rt,
+					EncryptedOIDCRefreshToken: encOIDCRT,
+					UserID:                    userID,
+					DeviceID:                  deviceID,
+					ExpiresAt:                 nebuExpiresAt,
+				})
+				if createErr != nil {
+					slog.Error("PostLogin: failed to create MatrixSession — falling back to JWT", "err", createErr)
+				} else {
+					nebuOpaqueAT = at
+					nebuOpaqueRT = rt
+				}
+			}
+		}
+	}
+
+	// Determine which access_token to return.
+	// When a MatrixSession was created, use the opaque Nebu AT.
+	// Otherwise fall back to the raw JWT (AC7 backward compat for direct POST /login clients).
+	accessToken := rawJWT
+	if nebuOpaqueAT != "" {
+		accessToken = nebuOpaqueAT
+	}
+
 	resp := LoginTokenResponse{
-		AccessToken: rawJWT, // always the real JWT, never the opaque loginToken
-		DeviceID:    generateDeviceID(),
+		AccessToken: accessToken,
+		DeviceID:    deviceID,
 		UserID:      userID,
 		TokenType:   "Bearer",
 	}
+
+	// v1.3: include refresh_token and expires_in_ms only when the client requested
+	// refresh_token:true AND we successfully created a MatrixSession (AC1).
+	if req.RefreshToken && nebuOpaqueRT != "" {
+		expiresInMs := time.Until(nebuExpiresAt).Milliseconds()
+		resp.ExpiresInMs = &expiresInMs
+		resp.RefreshToken = &nebuOpaqueRT
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// encryptOIDCRefreshToken encrypts the OIDC refresh token using AES-256-GCM.
+// Uses the same encryption as the admin package.
+func encryptOIDCRefreshToken(secret []byte, refreshToken string) (string, error) {
+	return admin.EncryptAES256GCM(secret, refreshToken)
 }
 
 func (h *LoginHandler) GetLogin(w http.ResponseWriter, r *http.Request) {

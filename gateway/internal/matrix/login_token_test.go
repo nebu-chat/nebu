@@ -78,12 +78,12 @@ func TestLoginToken_ExpiresAfter30s(t *testing.T) {
 		exp:     time.Now().Add(-1 * time.Second),
 	}
 
-	idToken, ok := store.pop(opaque)
+	entry, ok := store.pop(opaque)
 	if ok {
-		t.Errorf("pop() returned ok=true for expired token, want false\nreturned idToken: %q", idToken)
+		t.Errorf("pop() returned ok=true for expired token, want false\nreturned entry: %+v", entry)
 	}
-	if idToken != "" {
-		t.Errorf("pop() returned idToken=%q for expired token, want empty string", idToken)
+	if entry.idToken != "" {
+		t.Errorf("pop() returned entry.idToken=%q for expired token, want empty string", entry.idToken)
 	}
 
 	// The entry must have been removed even though it was expired (single-use).
@@ -116,12 +116,12 @@ func TestLoginToken_ValidWithin30s(t *testing.T) {
 		exp:     time.Now().Add(29 * time.Second),
 	}
 
-	idToken, ok := store.pop(opaque)
+	entry, ok := store.pop(opaque)
 	if !ok {
 		t.Error("pop() returned ok=false for a valid (non-expired) token, want true")
 	}
-	if idToken != storedIDToken {
-		t.Errorf("pop() returned idToken=%q, want %q", idToken, storedIDToken)
+	if entry.idToken != storedIDToken {
+		t.Errorf("pop() returned entry.idToken=%q, want %q", entry.idToken, storedIDToken)
 	}
 
 	// Single-use guarantee: the entry must be gone after a successful pop.

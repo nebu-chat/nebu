@@ -46,13 +46,30 @@ be added in a future story (Story 8.7).
 
 ## Submitting a Pull Request
 
+### Git Flow overview
+
+Nebu follows a simplified Git Flow with two long-lived branches (see
+[ADR-016](docs/architecture/adr/ADR-016-git-branching-release-strategy.md)):
+
+| Branch      | Purpose                                                       |
+|-------------|---------------------------------------------------------------|
+| `main`      | Stable production state; source of all release tags           |
+| `develop`   | Integration branch for the next release                       |
+| `feature/*` | Feature epics — branches from and merges to `develop`         |
+| `bugfix/*`  | Non-critical bugfixes — branches from and merges to `develop` |
+| `hotfix/*`  | Critical fixes — branches from `main` (maintainers only)      |
+| `release/*` | Release preparation — managed by maintainers                  |
+
+**External contributors always target `develop`**, never `main` directly.
+
 ### Branch naming
 
 ```text
-feat/<topic>   — new feature or capability
-fix/<topic>    — bug fix
-docs/<topic>   — documentation only
-chore/<topic>  — maintenance, tooling
+feature/<epic-name>          — new feature or capability (e.g. feature/admin-room-api)
+bugfix/<topic>               — bugfix targeting develop (e.g. bugfix/sync-leave-event)
+docs/<topic>                 — documentation only
+chore/<topic>                — maintenance, tooling
+hotfix/<version>-<desc>      — critical fix from main (maintainers only)
 ```
 
 ### Commit messages
@@ -87,7 +104,8 @@ Allow approximately five business days for initial review.
 
 ### PR checklist
 
-1. **Fork** the repository and create a feature branch from `main`.
+1. **Fork** the repository and create your branch from `develop` (not
+   `main`). Use the naming conventions above.
 2. **Make your changes.** Follow the conventions below.
 3. **Add tests.** Every new behaviour needs a test. Bug fixes need a
    regression test.
@@ -97,7 +115,7 @@ Allow approximately five business days for initial review.
    make test-unit-go && make test-unit-elixir
    ```
 
-5. **Open a PR** against `main`. Fill out the PR template. Link related
+5. **Open a PR** against `develop`. Fill out the PR template. Link related
    issues (`Fixes #123`).
 6. **Respond to review feedback.** Push additional commits; we squash on
    merge.
@@ -155,12 +173,16 @@ Full setup walkthrough including the Bootstrap Wizard and dev users:
 
 ### Rebuilding images
 
+After committing code changes, use `make redeploy` — not `make build-gateway`
+or `make build-core` in isolation:
+
 ```bash
-make build-gateway        # rebuild gateway image
-make build-core           # rebuild core image
-# Or, preferred for local iteration:
-docker compose up --build
+make redeploy             # rebuild gateway + core images and restart containers
 ```
+
+`make build-gateway` produces a `:dev` tag that docker compose does not use.
+`make build-core` only runs `mix compile` and produces no Docker image.
+`make redeploy` rebuilds the correct images and restarts the containers.
 
 ### Resetting local state
 
