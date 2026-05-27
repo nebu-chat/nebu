@@ -17,13 +17,16 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"reflect"
 	"strings"
 	"sync"
 	"syscall"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/coreos/go-oidc/v3/oidc"
+	minio "github.com/minio/minio-go/v7"
 	"github.com/nebu/nebu/media/internal/auth"
 	mediacrypto "github.com/nebu/nebu/media/internal/crypto"
 	"github.com/nebu/nebu/media/internal/download"
@@ -1185,5 +1188,109 @@ func TestV1ThumbnailRoute_CSPandCORPHeaders(t *testing.T) {
 	corp := w.Header().Get("Cross-Origin-Resource-Policy")
 	if corp != "cross-origin" {
 		t.Errorf("[F-C-2] Cross-Origin-Resource-Policy: expected 'cross-origin', got %q", corp)
+	}
+}
+
+// ─── AC1 — TestSelectStorer_BucketLookupPath ──────────────────────────────────
+//
+// Story: media-gateway-support-for-stackit-objectstore
+// AC1  — minio.New() must use BucketLookup: minio.BucketLookupPath to eliminate
+//         DNS-based virtual-hosted-style URL probing on StackIT Object Store.
+//
+// RED: selectStorer currently calls minio.New without BucketLookup, so the
+// client's private `lookup` field is BucketLookupAuto (0). This test will FAIL
+// until selectStorer is changed to set BucketLookup: minio.BucketLookupPath.
+//
+// Strategy: call selectStorer with a real httptest server as the endpoint, cast
+// the returned storer to *storage.MinIOStorer, and use reflect+unsafe to read
+// the private `lookup` field on *minio.Client. Assert it equals
+// minio.BucketLookupPath (2).
+//
+// Why reflect+unsafe: the minio.Client.lookup field is unexported. There is no
+// public accessor. Reflection is the only way to verify the Options setting
+// without changing production code. This is intentionally a test-only concern.
+func TestSelectStorer_BucketLookupPath(t *testing.T) {
+	// Spin up a minimal httptest server so selectStorer can construct a real
+	// minio.Client pointing at a valid (if non-functional) endpoint.
+	// The server never receives real S3 requests — it only satisfies the
+	// minio.New() hostname resolution requirement. All assertions are on the
+	// client's internal lookup field, not on any HTTP exchange.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	// Strip the "http://" scheme — minio.New expects host:port only.
+	endpoint := strings.TrimPrefix(srv.URL, "http://")
+
+	cfg := mediaConfig{
+		storageBackend: "minio",
+		minioEndpoint:  endpoint,
+		minioAccessKey: "testkey",
+		minioSecretKey: "testsecret",
+		minioBucket:    "nebu-media",
+		minioUseSSL:    false,
+	}
+
+	storer, err := selectStorer(cfg)
+	if err != nil {
+		t.Fatalf("selectStorer returned unexpected error: %v", err)
+	}
+
+	ms, ok := storer.(*storage.MinIOStorer)
+	if !ok {
+		t.Fatalf("expected *storage.MinIOStorer, got %T", storer)
+	}
+	if ms.Client == nil {
+		t.Fatal("expected non-nil MinIO Client")
+	}
+
+	// Read the unexported `lookup` field via reflect+unsafe.
+	// minio.Client is a struct; ms.Client is *minio.Client.
+	//
+	// Robustness note: to guard against the SDK renaming the field, we also create a
+	// reference client with BucketLookupAuto (the default) and compare the two values.
+	// If the field name ever changes, both reads will fail equally — no false negative.
+	clientVal := reflect.ValueOf(ms.Client).Elem() // dereference pointer → struct
+	lookupField := clientVal.FieldByName("lookup")
+	if !lookupField.IsValid() {
+		t.Fatal("reflect: field 'lookup' not found on minio.Client — SDK struct may have changed")
+	}
+
+	// unsafe.Pointer allows reading unexported fields.
+	lookupPtr := reflect.NewAt(lookupField.Type(), unsafe.Pointer(lookupField.UnsafeAddr())).Elem()
+	gotLookup := lookupPtr.Interface().(minio.BucketLookupType)
+
+	// Build a reference client with BucketLookupAuto (the SDK default) and read its field.
+	// If gotLookup == autoLookup, selectStorer is NOT setting BucketLookupPath.
+	autoClient, err := minio.New(endpoint, &minio.Options{
+		Creds:        nil, // credentials not needed for comparison
+		BucketLookup: minio.BucketLookupAuto,
+	})
+	if err != nil {
+		t.Fatalf("failed to create reference minio.Client for comparison: %v", err)
+	}
+	autoVal := reflect.ValueOf(autoClient).Elem()
+	autoField := autoVal.FieldByName("lookup")
+	if !autoField.IsValid() {
+		t.Fatal("reflect: field 'lookup' not found on reference minio.Client — SDK struct may have changed")
+	}
+	autoLookupPtr := reflect.NewAt(autoField.Type(), unsafe.Pointer(autoField.UnsafeAddr())).Elem()
+	autoLookup := autoLookupPtr.Interface().(minio.BucketLookupType)
+
+	if gotLookup == autoLookup {
+		t.Errorf(
+			"[AC1] minio.Client.lookup = %v (%d) matches the default BucketLookupAuto — "+
+				"BucketLookupPath was not set.\n"+
+				"Fix: set BucketLookup: minio.BucketLookupPath in minio.Options inside selectStorer.",
+			gotLookup, int(gotLookup),
+		)
+	}
+	if gotLookup != minio.BucketLookupPath {
+		t.Errorf(
+			"[AC1] minio.Client.lookup = %v (%d), want BucketLookupPath (%d)\n"+
+				"Fix: set BucketLookup: minio.BucketLookupPath in minio.Options inside selectStorer.",
+			gotLookup, int(gotLookup), int(minio.BucketLookupPath),
+		)
 	}
 }

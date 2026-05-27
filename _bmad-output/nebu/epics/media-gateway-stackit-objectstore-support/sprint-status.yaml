@@ -1,0 +1,7 @@
+epic: media-gateway-stackit-objectstore-support
+last_updated: "2026-05-26"
+stories:
+  - id: stackit-objectstore
+    slug: stackit-objectstore-integration
+    status: done
+    summary: "ATDD+Dev+Code CLEAN+Kassandra CLEAN"

@@ -374,8 +374,9 @@ func selectStorer(cfg mediaConfig) (storage.Storer, error) {
 			return nil, fmt.Errorf("NEBU_MINIO_SECRET_KEY (or NEBU_MINIO_SECRET_KEY_FILE) required when NEBU_STORAGE_BACKEND=minio")
 		}
 		client, err := minio.New(cfg.minioEndpoint, &minio.Options{
-			Creds:  credentials.NewStaticV4(cfg.minioAccessKey, cfg.minioSecretKey, ""),
-			Secure: cfg.minioUseSSL,
+			Creds:        credentials.NewStaticV4(cfg.minioAccessKey, cfg.minioSecretKey, ""),
+			Secure:       cfg.minioUseSSL,
+			BucketLookup: minio.BucketLookupPath,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("minio client init: %w", err)

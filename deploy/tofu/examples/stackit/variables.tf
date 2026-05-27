@@ -92,6 +92,50 @@ variable "element_memory_limit" {
   default     = "128m"
 }
 
+variable "enable_media_gateway" {
+  description = "When true, deploys the Media Gateway as a Docker service. Requires s3_access_key, s3_secret_key, s3_bucket."
+  type        = bool
+  default     = false
+}
+
+variable "s3_access_key" {
+  description = "Access key for the S3-compatible object store (StackIT Object Store or MinIO). Required when enable_media_gateway = true."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "s3_secret_key" {
+  description = "Secret key for the S3-compatible object store. Required when enable_media_gateway = true."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "s3_endpoint" {
+  description = "S3-compatible object store endpoint (without https://, e.g. 'object.storage.eu01.onstackit.cloud'). Required when enable_media_gateway = true."
+  type        = string
+  default     = "object.storage.eu01.onstackit.cloud"
+}
+
+variable "s3_bucket" {
+  description = "S3 bucket name for media storage. Required when enable_media_gateway = true."
+  type        = string
+  default     = "nebu-media"
+}
+
+variable "media_cpu_limit" {
+  description = "CPU limit for the media gateway container."
+  type        = string
+  default     = "0.50"
+}
+
+variable "media_memory_limit" {
+  description = "Memory limit for the media gateway container."
+  type        = string
+  default     = "256m"
+}
+
 variable "alb_plan_id" {
   description = "STACKIT load balancer plan ID. Run `stackit load-balancer plans list` to find available plans. p10 is the smallest billable plan."
   type        = string
