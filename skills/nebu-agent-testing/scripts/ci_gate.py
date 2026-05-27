@@ -131,7 +131,7 @@ def env_reset(no_reset, timeout):
 def wait_healthy(timeout):
     checks = [
         ("Gateway", "http://localhost:8008/_matrix/client/versions"),
-        ("Keycloak", "http://localhost:8080/"),
+        ("Dex", "http://localhost:5556/dex/.well-known/openid-configuration"),
     ]
     deadline = time.time() + timeout
     log(f"Waiting up to {timeout}s for services to be healthy...")

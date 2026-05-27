@@ -458,3 +458,119 @@ func TestJWTMiddleware_DenylistedToken(t *testing.T) {
 		t.Errorf("expected 'Token has been logged out', got %q", body["error"])
 	}
 }
+
+// ─── WithOpaqueSessionCheck — HasGraceWindow unit tests (MINOR-1) ───────────
+
+// stubOpaqueSessionLookup is a minimal OpaqueSessionLookup implementation for
+// unit-testing WithOpaqueSessionCheck without any real DB interaction.
+type stubOpaqueSessionLookup struct {
+	result         *middleware.OpaqueSessionLookupResult
+	err            error
+	markUsedCalled bool
+	markUsedToken  string
+}
+
+func (s *stubOpaqueSessionLookup) LookupOpaqueToken(accessToken string) (*middleware.OpaqueSessionLookupResult, error) {
+	return s.result, s.err
+}
+
+func (s *stubOpaqueSessionLookup) MarkTokenUsed(accessToken string) error {
+	s.markUsedCalled = true
+	s.markUsedToken = accessToken
+	return nil
+}
+
+// TestWithOpaqueSessionCheck_HasGraceWindowFalse verifies that MarkTokenUsed is NOT
+// called when HasGraceWindow=false (no open grace window — common path, avoids DB write).
+func TestWithOpaqueSessionCheck_HasGraceWindowFalse(t *testing.T) {
+	opaqueToken := "aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899" // 64 hex, no dots
+
+	stub := &stubOpaqueSessionLookup{
+		result: &middleware.OpaqueSessionLookupResult{
+			UserID:         "@alice:test.local",
+			DeviceID:       "DEV1",
+			ExpiresAt:      time.Now().Add(8 * time.Hour),
+			Revoked:        false,
+			HasGraceWindow: false, // <-- no open grace window
+		},
+	}
+
+	// Wrap a no-op inner JWT middleware (opaque path short-circuits before reaching it).
+	innerCalled := false
+	inner := func(h http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			innerCalled = true
+			h.ServeHTTP(w, r)
+		})
+	}
+
+	handlerCalled := false
+	wrapped := middleware.WithOpaqueSessionCheck(inner, stub)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handlerCalled = true
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/sync", nil)
+	req.Header.Set("Authorization", "Bearer "+opaqueToken)
+	rr := httptest.NewRecorder()
+	wrapped.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rr.Code)
+	}
+	if !handlerCalled {
+		t.Error("downstream handler was not called for valid opaque token")
+	}
+	if innerCalled {
+		t.Error("inner JWT middleware should NOT be called for opaque token path")
+	}
+	if stub.markUsedCalled {
+		t.Errorf("MarkTokenUsed must NOT be called when HasGraceWindow=false (avoids unnecessary DB write)")
+	}
+}
+
+// TestWithOpaqueSessionCheck_HasGraceWindowTrue verifies that MarkTokenUsed IS
+// called (with the correct token) when HasGraceWindow=true (open grace window must be closed).
+func TestWithOpaqueSessionCheck_HasGraceWindowTrue(t *testing.T) {
+	opaqueToken := "ff00112233445566778899aabbccddeeff00112233445566778899aabbccddee" // 64 hex, no dots
+
+	stub := &stubOpaqueSessionLookup{
+		result: &middleware.OpaqueSessionLookupResult{
+			UserID:         "@bob:test.local",
+			DeviceID:       "DEV2",
+			ExpiresAt:      time.Now().Add(8 * time.Hour),
+			Revoked:        false,
+			HasGraceWindow: true, // <-- open grace window — MarkTokenUsed must be called
+		},
+	}
+
+	inner := func(h http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			h.ServeHTTP(w, r)
+		})
+	}
+
+	handlerCalled := false
+	wrapped := middleware.WithOpaqueSessionCheck(inner, stub)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handlerCalled = true
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/sync", nil)
+	req.Header.Set("Authorization", "Bearer "+opaqueToken)
+	rr := httptest.NewRecorder()
+	wrapped.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rr.Code)
+	}
+	if !handlerCalled {
+		t.Error("downstream handler was not called for valid opaque token")
+	}
+	if !stub.markUsedCalled {
+		t.Error("MarkTokenUsed MUST be called when HasGraceWindow=true to close the old RT grace window (AC4)")
+	}
+	if stub.markUsedToken != opaqueToken {
+		t.Errorf("MarkTokenUsed called with wrong token: got %q, want %q", stub.markUsedToken, opaqueToken)
+	}
+}

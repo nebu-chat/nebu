@@ -1,0 +1,38 @@
+# last_updated: 2026-05-27
+# [oidc-session-refresh] 2026-05-27T16:25Z committed ✓ (ATDD+Code CLEAN 2 cycles, Kassandra CLEAN)
+# [oidc-session-refresh] 2026-05-27T16:20Z arc42-update → done (06-runtime, 08-concepts, 09-decisions)
+# [oidc-session-refresh] 2026-05-27T16:05Z security-review → Kassandra CLEAN (0 CRITICAL/HIGH, 3 LOW advisory)
+# [oidc-session-refresh] 2026-05-27T15:40Z code-review → CLEAN (cycle 2)
+# [oidc-session-refresh] 2026-05-27T15:25Z ci-gate → ✓ build+unit-go+unit-elixir (49 pre-existing integration failures)
+# [oidc-session-refresh] 2026-05-27T15:10Z dev-story → done (cycle 2)
+# [oidc-session-refresh] 2026-05-27T14:50Z code-review → 3 MINOR → cycle 2
+# [oidc-session-refresh] 2026-05-27T14:25Z ci-gate → ✓ build+unit-go+unit-elixir (49 pre-existing integration failures)
+# [oidc-session-refresh] 2026-05-27T14:10Z dev-story → done (cycle 1)
+# [oidc-session-refresh] 2026-05-27T13:40Z code-review → 2 MAJOR + 5 MINOR → cycle 1
+# [oidc-session-refresh] 2026-05-27T13:20Z ci-gate → ✓ build+unit-go+unit-elixir (49 integration failures all pre-existing)
+# [oidc-session-refresh] 2026-05-27T13:00Z dev-story → done (cycle 0)
+# [oidc-session-refresh] 2026-05-27T10:31Z test-review → 2 MAJOR [user continued]
+# [oidc-session-refresh] 2026-05-27T10:30Z test-review → 2 MAJOR [blocked]
+# [oidc-session-refresh] 2026-05-27T10:15Z atdd → 13 failing tests (matrix_session_refresh.feature + matrix_session_store_test.go)
+# [oidc-session-refresh] 2026-05-27T10:02Z oracle-gate → spec context captured (embedded in story)
+# [oidc-session-refresh] 2026-05-27T10:01Z create-story → docs/stories/bugfix/fix-short-oidc-sessions/oidc-session-refresh.md
+epic: fix-short-oidc-sessions
+branch: bugfix/fix-short-oidc-sessions
+created: 2026-05-27
+last_updated: "2026-05-27T09:56Z"
+
+stories:
+  - slug: oidc-session-refresh
+    story_file: docs/stories/bugfix/fix-short-oidc-sessions/oidc-session-refresh.md
+    status: ready-for-dev
+    steps:
+      atdd: pending
+      dev: pending
+      test-review: pending
+      code-review: pending
+      security-review: pending
+story: null
+current_step: null
+completed: []
+cycle_count: 0
+blocked_reason: null

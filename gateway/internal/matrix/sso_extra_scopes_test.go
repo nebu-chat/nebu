@@ -38,6 +38,8 @@ import (
 func TestBuildSSOScopeList(t *testing.T) {
 	t.Parallel()
 
+	// Note: offline_access is always included in the base scope list since
+	// story oidc-session-refresh — required for Keycloak/Dex to issue OIDC refresh tokens.
 	cases := []struct {
 		name  string
 		extra []string
@@ -46,42 +48,42 @@ func TestBuildSSOScopeList(t *testing.T) {
 		{
 			name:  "nil extra returns base scopes only",
 			extra: nil,
-			want:  []string{"openid", "profile", "email"},
+			want:  []string{"openid", "profile", "email", "offline_access"},
 		},
 		{
 			name:  "empty extra returns base scopes only",
 			extra: []string{},
-			want:  []string{"openid", "profile", "email"},
+			want:  []string{"openid", "profile", "email", "offline_access"},
 		},
 		{
 			name:  "non-empty extra appended after base scopes",
 			extra: []string{"groups", "offline_access"},
-			want:  []string{"openid", "profile", "email", "groups", "offline_access"},
+			want:  []string{"openid", "profile", "email", "offline_access", "groups"},
 		},
 		{
 			name:  "duplicate openid in extra is dropped",
 			extra: []string{"openid", "roles"},
-			want:  []string{"openid", "profile", "email", "roles"},
+			want:  []string{"openid", "profile", "email", "offline_access", "roles"},
 		},
 		{
 			name:  "duplicate email in extra is dropped",
 			extra: []string{"roles", "email"},
-			want:  []string{"openid", "profile", "email", "roles"},
+			want:  []string{"openid", "profile", "email", "offline_access", "roles"},
 		},
 		{
 			name:  "duplicate profile in extra is dropped",
 			extra: []string{"profile", "roles"},
-			want:  []string{"openid", "profile", "email", "roles"},
+			want:  []string{"openid", "profile", "email", "offline_access", "roles"},
 		},
 		{
 			name:  "empty strings in extra are ignored",
 			extra: []string{"", "groups", ""},
-			want:  []string{"openid", "profile", "email", "groups"},
+			want:  []string{"openid", "profile", "email", "offline_access", "groups"},
 		},
 		{
 			name:  "all three base scopes duplicated in extra are all dropped",
 			extra: []string{"openid", "roles", "email"},
-			want:  []string{"openid", "profile", "email", "roles"},
+			want:  []string{"openid", "profile", "email", "offline_access", "roles"},
 		},
 	}
 
@@ -154,10 +156,11 @@ func TestMatrixSSORedirectScopesDefault(t *testing.T) {
 	assertScopePresent(t, scopeParam, "openid", location)
 	assertScopePresent(t, scopeParam, "profile", location)
 	assertScopePresent(t, scopeParam, "email", location)
+	// offline_access is always included (story: oidc-session-refresh) to request OIDC RT.
+	assertScopePresent(t, scopeParam, "offline_access", location)
 
-	// AC1 + AC3: no extra scopes must be present when ExtraScopes is nil.
+	// AC1 + AC3: no extra scopes (beyond base + offline_access) when ExtraScopes is nil.
 	assertScopeAbsent(t, scopeParam, "groups", location)
-	assertScopeAbsent(t, scopeParam, "offline_access", location)
 }
 
 // ─── AC2: TestMatrixSSORedirectScopesFromExtraScopes ─────────────────────────
@@ -328,10 +331,11 @@ func TestMatrixSSORedirectScopesEmptyEnvVar(t *testing.T) {
 	assertScopePresent(t, scopeParam, "openid", location)
 	assertScopePresent(t, scopeParam, "profile", location)
 	assertScopePresent(t, scopeParam, "email", location)
+	// offline_access is always included (story: oidc-session-refresh) to request OIDC RT.
+	assertScopePresent(t, scopeParam, "offline_access", location)
 
-	// AC1 + AC3: no extra scopes must be present when ExtraScopes is empty.
+	// AC1 + AC3: no extra scopes (beyond base + offline_access) when ExtraScopes is empty.
 	assertScopeAbsent(t, scopeParam, "groups", location)
-	assertScopeAbsent(t, scopeParam, "offline_access", location)
 }
 
 // ─── MINOR-2 + MINOR-4: TestMatrixSSOCallbackDelegatesScopes ────────────────

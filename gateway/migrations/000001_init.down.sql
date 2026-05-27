@@ -28,6 +28,7 @@ DROP TABLE IF EXISTS room_account_data;
 DROP TABLE IF EXISTS compliance_sessions;
 DROP TABLE IF EXISTS compliance_requests;
 DROP TABLE IF EXISTS audit_log;
+DROP TABLE IF EXISTS matrix_sessions;
 DROP TABLE IF EXISTS admin_sessions;
 DROP TABLE IF EXISTS media_files;
 DROP TABLE IF EXISTS profiles;

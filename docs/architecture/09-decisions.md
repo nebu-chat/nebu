@@ -41,4 +41,17 @@ is introduced. See [`ADR-010`](adr/ADR-010-fts-strategy.md) for the full rationa
 ADR-011 (Managed E2EE) is pending because it requires additional investigation and community
 input before the design can be finalized.
 
+## Matrix Session Storage Pattern (Story fix-short-oidc-sessions)
+
+Matrix user sessions are now stored server-side in the `matrix_sessions` table, following the same
+pattern as admin sessions. Opaque access tokens are decoupled from OIDC provider token lifetime,
+allowing Matrix clients to maintain long-lived sessions (8 hours) even when the OIDC `id_token`
+expires in minutes (Keycloak default: 5 minutes).
+
+This is analogous to the existing admin session store (`AdminSessionStore` interface) and reuses the
+same AES-256-GCM encryption for the encrypted OIDC refresh token. The key architectural decision:
+Matrix session lifetime is controlled by Nebu, not by the upstream OIDC provider. The OIDC RT is
+optionally refreshed on demand (deferred to Phase 2) - for MVP, the Nebu session validity period is
+independent of OIDC token expiry.
+
 _Source: `CLAUDE.md`, §Resolved Architecture Decisions; `_bmad-output/planning-artifacts/architecture.md`, §Core Architectural Decisions_

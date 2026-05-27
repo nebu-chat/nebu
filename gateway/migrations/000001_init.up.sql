@@ -306,6 +306,25 @@ CREATE TABLE admin_sessions (
 
 CREATE INDEX idx_admin_sessions_expires_at ON admin_sessions (expires_at);
 
+-- ─── matrix_sessions ──────────────────────────────────────────────────────────
+-- Opaque access + refresh tokens for Matrix clients that request refresh_token:true.
+-- Story: oidc-session-refresh (bugfix/fix-short-oidc-sessions).
+-- Spec: Matrix Client-Server API v1.18 §refreshing-access-tokens (added v1.3).
+CREATE TABLE matrix_sessions (
+    access_token        TEXT        PRIMARY KEY,
+    refresh_token       TEXT        UNIQUE NOT NULL,
+    oidc_refresh_token  TEXT,                              -- AES-256-GCM encrypted OIDC RT; NULL if not obtained
+    user_id             TEXT        NOT NULL,
+    device_id           TEXT        NOT NULL,
+    expires_at          TIMESTAMPTZ NOT NULL,
+    revoked_at          TIMESTAMPTZ,                       -- hard revoke (logout)
+    grace_until         TIMESTAMPTZ,                       -- soft-revoke: old RT valid until this time (AC4 grace period)
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_matrix_sessions_refresh_token ON matrix_sessions (refresh_token);
+CREATE INDEX idx_matrix_sessions_user_id       ON matrix_sessions (user_id);
+CREATE INDEX idx_matrix_sessions_expires_at    ON matrix_sessions (expires_at);
+
 -- ─── audit_log ───────────────────────────────────────────────────────────────
 -- Append-only compliance event log (Story 5.1).
 --

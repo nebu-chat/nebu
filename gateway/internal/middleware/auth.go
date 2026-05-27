@@ -151,10 +151,119 @@ type matrixError struct {
 	Err     string `json:"error"`
 }
 
+type matrixErrorWithSoftLogout struct {
+	ErrCode    string `json:"errcode"`
+	Err        string `json:"error"`
+	SoftLogout bool   `json:"soft_logout,omitempty"`
+}
+
 func writeMatrixError(w http.ResponseWriter, status int, errcode, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(matrixError{ErrCode: errcode, Err: message})
+}
+
+func writeMatrixErrorWithSoftLogout(w http.ResponseWriter, status int, errcode, message string, softLogout bool) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(matrixErrorWithSoftLogout{ErrCode: errcode, Err: message, SoftLogout: softLogout})
+}
+
+// OpaqueSessionLookupResult holds the data returned for a valid opaque access token.
+type OpaqueSessionLookupResult struct {
+	UserID        string
+	DeviceID      string
+	ExpiresAt     time.Time
+	Revoked       bool
+	// HasGraceWindow is true when this session was recently refreshed and the old
+	// refresh token's grace window is still open (grace_until > NOW()). When true,
+	// MarkTokenUsed must be called to expire that grace window (AC4).
+	// When false, MarkTokenUsed is skipped (avoids a write on every authenticated request).
+	HasGraceWindow bool
+}
+
+// OpaqueSessionLookup is the interface that JWTMiddleware uses to validate opaque tokens.
+// Implemented by *db.MatrixSessionStore (passed in via WithOpaqueSessionCheck).
+type OpaqueSessionLookup interface {
+	// LookupOpaqueToken returns the session for the given opaque access token.
+	// Returns (nil, nil) when not found. Returns error on DB failure.
+	LookupOpaqueToken(accessToken string) (*OpaqueSessionLookupResult, error)
+	// MarkTokenUsed is called after a valid opaque token is accepted for the first time
+	// to expire any grace-period windows on old refresh tokens.
+	MarkTokenUsed(accessToken string) error
+}
+
+// WithOpaqueSessionCheck wraps an existing JWT middleware and adds opaque token validation.
+// When the Bearer token does NOT contain "." (i.e. it's not a JWT), the opaque path runs:
+//   1. Look up the token in the MatrixSessionStore.
+//   2. If not found → 401 M_UNKNOWN_TOKEN.
+//   3. If revoked → 401 M_UNKNOWN_TOKEN.
+//   4. If expired → 401 M_UNKNOWN_TOKEN with soft_logout:true (Matrix spec SHOULD).
+//   5. If valid → populate context (user_id, device_id) and call next handler.
+//   6. Call store.MarkTokenUsed() to expire grace-period windows on old refresh tokens (AC4).
+//
+// When the Bearer token contains "." (i.e. it IS a JWT), the inner JWT middleware runs as before.
+// lookup must not be nil.
+func WithOpaqueSessionCheck(next func(http.Handler) http.Handler, lookup OpaqueSessionLookup) func(http.Handler) http.Handler {
+	if lookup == nil {
+		// No opaque session store — pass through to JWT middleware unchanged.
+		return next
+	}
+	return func(h http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			authHeader := r.Header.Get("Authorization")
+			if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
+				// No auth header — let the inner middleware handle the 401.
+				next(h).ServeHTTP(w, r)
+				return
+			}
+			rawToken := strings.TrimPrefix(authHeader, "Bearer ")
+
+			// Opaque tokens do not contain dots; JWTs always have exactly 2 dots.
+			if strings.Contains(rawToken, ".") {
+				// JWT path: delegate to inner jwtMiddleware.
+				next(h).ServeHTTP(w, r)
+				return
+			}
+
+			// Opaque token path.
+			sess, err := lookup.LookupOpaqueToken(rawToken)
+			if err != nil {
+				slog.Error("WithOpaqueSessionCheck: LookupOpaqueToken failed", "err", err)
+				writeMatrixError(w, http.StatusInternalServerError, "M_UNKNOWN", "Internal server error")
+				return
+			}
+			if sess == nil {
+				writeMatrixError(w, http.StatusUnauthorized, "M_UNKNOWN_TOKEN", "Invalid or unknown token")
+				return
+			}
+			if sess.Revoked {
+				writeMatrixError(w, http.StatusUnauthorized, "M_UNKNOWN_TOKEN", "Token has been logged out")
+				return
+			}
+			if time.Now().After(sess.ExpiresAt) {
+				writeMatrixErrorWithSoftLogout(w, http.StatusUnauthorized, "M_UNKNOWN_TOKEN", "Token has expired", true)
+				return
+			}
+
+			// Valid opaque token — mark it as used only when there is an open grace window
+			// (i.e. the session was recently refreshed and the old RT's grace window is still
+			// open). Skipping this call on the common path avoids a write per request.
+			// AC4: MarkTokenUsed expires old RT grace windows so the old RT is no longer usable
+			// once the new AT has been used.
+			if sess.HasGraceWindow {
+				if err := lookup.MarkTokenUsed(rawToken); err != nil {
+					slog.Warn("WithOpaqueSessionCheck: MarkTokenUsed failed (non-fatal)", "err", err)
+				}
+			}
+
+			// Populate context with user_id and device_id from the MatrixSession.
+			ctx := r.Context()
+			ctx = context.WithValue(ctx, ContextKeyUserID, sess.UserID)
+			ctx = context.WithValue(ctx, ContextKeyDeviceID, sess.DeviceID)
+			h.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
 }
 
 // JWTMiddleware validates OIDC JWT tokens. On success, populates context with

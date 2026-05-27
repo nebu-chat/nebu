@@ -667,11 +667,28 @@ func main() {
 		startupCancel()
 	}
 
+	// bugfix/fix-short-oidc-sessions: MatrixSessionStore for opaque AT+RT issuance.
+	// Reuses tokenDB connection (same PostgreSQL instance, no extra connection pool).
+	matrixSessionStore := db.NewMatrixSessionStore(tokenDB)
+
+	// Cleanup goroutine: remove expired MatrixSession rows once per hour.
+	// Rows are deleted after 7 days post-expiry (matches admin session cleanup policy).
+	go func() {
+		for {
+			time.Sleep(1 * time.Hour)
+			if _, err := matrixSessionStore.CleanupExpired(); err != nil {
+				slog.Error("matrix session cleanup failed", "err", err)
+			}
+		}
+	}()
+
 	loginHandler := matrix.NewLoginHandler(matrix.LoginConfig{
 		DisplayName:            cfg.OIDCDisplayName,
 		Provider:               oidcProvider,
 		CoreClient:             coreClient,
 		Store:                  tokenStore,
+		MatrixSessions:         matrixSessionStore,
+		InternalSecret:         []byte(internalSecret),
 		ServerName:             serverName,
 		ClientID:               cfg.OIDCClientID,
 		ClientSecret:           cfg.OIDCClientSecret,
@@ -687,16 +704,30 @@ func main() {
 	mux.Handle("GET /_matrix/client/v3/login", looseRL(http.HandlerFunc(loginHandler.GetLogin)))
 	mux.Handle("POST /_matrix/client/v3/login", strictRL(bodyLimit1MiB(http.HandlerFunc(loginHandler.PostLogin))))
 
+	// POST /_matrix/client/v3/refresh — registered OUTSIDE jwtMiddleware (spec MUST: no auth header required).
+	// Rate-limited: strictRL (Matrix spec: rate-limited: yes).
+	refreshHandler := matrix.NewRefreshHandler(matrix.RefreshConfig{
+		Store: matrixSessionStore,
+	})
+	mux.Handle("POST /_matrix/client/v3/refresh", strictRL(bodyLimit1MiB(http.HandlerFunc(refreshHandler.PostRefresh))))
+
 	// Matrix SSO: initiate PKCE flow, then callback from Dex.
 	// /_matrix/client/v3/login/sso/redirect/oidc is registered in Dex redirectURIs.
 	mux.Handle("GET /_matrix/client/v3/login/sso/redirect", mediumRL(http.HandlerFunc(loginHandler.GetSSORedirect)))
 	mux.Handle("GET /_matrix/client/v3/login/sso/redirect/oidc", mediumRL(http.HandlerFunc(loginHandler.GetSSOCallback)))
 	// AC4 (Story 9-22): wire Core gRPC client to logout handler for per-device sync-token cleanup.
+	// bugfix/fix-short-oidc-sessions: also wire MatrixSessions so opaque tokens are revoked on logout.
 	logoutHandler := matrix.NewLogoutHandlerWithCore(matrix.LogoutConfig{
-		Store:      tokenStore,
-		CoreClient: coreClient.CoreServiceClient(),
+		Store:          tokenStore,
+		CoreClient:     coreClient.CoreServiceClient(),
+		MatrixSessions: matrixSessionStore,
 	})
 	jwtMiddleware := middleware.JWTMiddleware(oidcProvider, cfg.OIDCClientID, cfg.OIDCClaimRole, tokenStore, userIDClaimLoader, serverName)
+	// bugfix/fix-short-oidc-sessions: wrap jwtMiddleware with opaque token check.
+	// Opaque tokens (no ".") are validated against matrix_sessions table; expired tokens
+	// return 401 with soft_logout:true (Matrix spec SHOULD). JWT tokens pass through to
+	// the inner jwtMiddleware unchanged (AC7 backward compat).
+	jwtMiddleware = middleware.WithOpaqueSessionCheck(jwtMiddleware, matrixSessionStore)
 	// Story 6.5 (HIGH-1 fix): wrap jwtMiddleware with is_active check so ALL authenticated
 	// routes (Matrix, admin, compliance) reject tokens for deactivated users.
 	// 60s TTL cache per user; fail-open on DB error to avoid blocking on transient DB issues.
