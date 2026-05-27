@@ -106,10 +106,10 @@ oidc_mode = "external"  # or: "dex"
 # Required only when oidc_mode = "external".
 oidc_issuer = "https://auth.example.com/realms/nebu"
 
-# Required: OIDC client secret.
+# Required: OIDC client ID.
 # dex mode:      embedded into Dex staticClients (same value used by gateway and Dex)
-# external mode: must match the client secret registered in your OIDC provider
-oidc_client_id = "<REPLACE_WITH_OIDC_CLIENT_SECRET>"
+# external mode: must match the client ID registered in your OIDC provider
+oidc_client_id = "<REPLACE_WITH_OIDC_CLIENT_ID>"
 
 # Required: OIDC client secret.
 # dex mode:      embedded into Dex staticClients (same value used by gateway and Dex)
@@ -147,6 +147,10 @@ image_registry = "registry.gitlab.com/myorg/nebu-server"
 # Never use "latest" — the module validates this and will reject it.
 nebu_version = "0.2.1"
 
+# Optional: STACKIT load balancer plan ID (only used when tls_mode = "alb").
+# Run `stackit load-balancer plans list` to find available plans. p10 is the smallest billable plan.
+# alb_plan_id = "p10"
+
 # ── DNS ──────────────────────────────────────────────────────────────────────
 # dns_mode = "default": creates a Stackit DNS zone + A-record (server_name → floating IP).
 #   Requires the Stackit DNS service to be enabled in your project.
@@ -173,7 +177,7 @@ dns_mode = "external"  # or: "default" (required for tls_mode = "acme" HTTP-01 c
 # When enable_logs = true, creates a Stackit Logs instance and ships nebu.service
 # journal logs via Fluent Bit from first boot.
 # enable_logs = false
-# logs_retention_days = 30
+# logs_retention_days = 30   # default: 7 — increase for production
 
 # ── Container resource limits ─────────────────────────────────────────────────
 # Default values are tuned for a g2i.2 VM (4 vCPU / 8 GB RAM).

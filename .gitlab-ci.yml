@@ -14,7 +14,7 @@
 # GitLab Pages (EasyWebsite) — Story 16-1
 # Uses the EasyWebsite md-to-web CI component to build the project website
 # at website/dokument/ with the opencode theme and publish via GitLab Pages.
-# Only runs on the main branch (deploy-only-on: "main").
+# Only runs on release/* branches — publishes docs for each release.
 #
 # $CI_SERVER_FQDN is a standard GitLab CI predefined variable that resolves to
 # the FQDN of the GitLab instance running the pipeline. For this repository
@@ -60,8 +60,7 @@ pages:
   pages:
     publish: out
   rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH =~ /^release\//'
 
 variables:
   DOCKER_DRIVER: overlay2
@@ -69,17 +68,22 @@ variables:
   CI_ELIXIR_IMAGE: $CI_REGISTRY_IMAGE/ci-elixir:1.19
   GITLEAKS_VERSION: "8.24.3"
 
-# Suppress duplicate pipelines: when a branch has an open MR, only the MR
-# pipeline runs. Without this, every push fires both a branch and an MR pipeline.
-# Tag pipelines (v*.*.* SemVer) are always allowed — they trigger the release stage.
+# Duplicate pipeline prevention:
+# feature/* and bugfix/* branches never run branch pipelines — only MR pipelines.
+# This eliminates the race condition where a branch pipeline starts before the MR
+# exists ($CI_OPEN_MERGE_REQUESTS is empty at push time) and then the MR pipeline
+# starts on top of it. Protected branches (main, develop, release/*, hotfix/*) still
+# run branch pipelines. Tag pipelines (v*.*.* SemVer) trigger the release stage.
 workflow:
   rules:
     # RC/beta tags (v1.0.0-rc1) are intentionally excluded — only stable SemVer triggers release.
     - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-    - if: '$CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS'
-      when: never
-    - if: '$CI_COMMIT_BRANCH'
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+    - if: '$CI_COMMIT_BRANCH =~ /^release\//'
+    - if: '$CI_COMMIT_BRANCH =~ /^hotfix\//'
 
 # Defaults applied to every job unless overridden.
 # - `timeout: 30 minutes` bounds runaway jobs (Kassandra 8.6 review M-3).
@@ -93,9 +97,7 @@ stages:
   - build-ci-images
   - lint
   - unit
-  - scan
   - verify
-  - validate-iac
   - build
   - integration
   - deploy
@@ -205,6 +207,7 @@ lint-go:
     - if: '$CI_COMMIT_BRANCH == "develop"'
     - if: '$CI_COMMIT_BRANCH =~ /^feature\//'
     - if: '$CI_COMMIT_BRANCH =~ /^bugfix\//'
+    - if: '$CI_COMMIT_BRANCH =~ /^release\//'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
 
 # ─── Unit Tests ───────────────────────────────────────────────────────────────
@@ -225,6 +228,7 @@ test-unit-go:
     - if: '$CI_COMMIT_BRANCH == "develop"'
     - if: '$CI_COMMIT_BRANCH =~ /^feature\//'
     - if: '$CI_COMMIT_BRANCH =~ /^bugfix\//'
+    - if: '$CI_COMMIT_BRANCH =~ /^release\//'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
 
 test-unit-elixir:
@@ -244,12 +248,13 @@ test-unit-elixir:
     - if: '$CI_COMMIT_BRANCH == "develop"'
     - if: '$CI_COMMIT_BRANCH =~ /^feature\//'
     - if: '$CI_COMMIT_BRANCH =~ /^bugfix\//'
+    - if: '$CI_COMMIT_BRANCH =~ /^release\//'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
 
 # ─── Secret Scan ──────────────────────────────────────────────────────────────
 
 secret-scan:
-  stage: scan
+  stage: verify
   image: $CI_REGISTRY_IMAGE/ci-go:1.26
   timeout: 30 minutes
   interruptible: true
@@ -275,6 +280,7 @@ secret-scan:
     - if: '$CI_COMMIT_BRANCH == "develop"'
     - if: '$CI_COMMIT_BRANCH =~ /^feature\//'
     - if: '$CI_COMMIT_BRANCH =~ /^bugfix\//'
+    - if: '$CI_COMMIT_BRANCH =~ /^release\//'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
 
 # ─── Verify Docs ──────────────────────────────────────────────────────────────
@@ -293,6 +299,7 @@ verify-docs:
     - if: '$CI_COMMIT_BRANCH == "develop"'
     - if: '$CI_COMMIT_BRANCH =~ /^feature\//'
     - if: '$CI_COMMIT_BRANCH =~ /^bugfix\//'
+    - if: '$CI_COMMIT_BRANCH =~ /^release\//'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
 
 # ─── App Image Builds ─────────────────────────────────────────────────────────
@@ -313,6 +320,7 @@ build-gateway-image:
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
     - if: '$CI_COMMIT_BRANCH == "develop"'
+    - if: '$CI_COMMIT_BRANCH =~ /^release\//'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
 
 build-core-image:
@@ -328,6 +336,7 @@ build-core-image:
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
     - if: '$CI_COMMIT_BRANCH == "develop"'
+    - if: '$CI_COMMIT_BRANCH =~ /^release\//'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
 
 # ─── Pre-release Image Builds (develop branch) ───────────────────────────────
@@ -546,14 +555,24 @@ integration-test-k8s:
 # syntax and type correctness only, without connecting to any provider.
 
 validate-iac:
-  stage: validate-iac
+  stage: verify
   image: ghcr.io/opentofu/opentofu:1.9
   cache:
-    key: "tofu-${CI_COMMIT_REF_SLUG}"
-    paths:
-      - deploy/tofu/examples/aws/.terraform/
-      - deploy/tofu/examples/stackit/.terraform/
-      - deploy/tofu/examples/k8s/.terraform/
+    - key:
+        files:
+          - deploy/tofu/examples/aws/.terraform.lock.hcl
+      paths:
+        - deploy/tofu/examples/aws/.terraform/
+    - key:
+        files:
+          - deploy/tofu/examples/stackit/.terraform.lock.hcl
+      paths:
+        - deploy/tofu/examples/stackit/.terraform/
+    - key:
+        files:
+          - deploy/tofu/examples/k8s/.terraform.lock.hcl
+      paths:
+        - deploy/tofu/examples/k8s/.terraform/
   script:
     - echo "==> OpenTofu version"
     - tofu version
@@ -577,6 +596,7 @@ validate-iac:
     - if: '$CI_COMMIT_BRANCH =~ /^bugfix\//'
       changes:
         - deploy/**/*
+    - if: '$CI_COMMIT_BRANCH =~ /^release\//'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes:
         - deploy/**/*
@@ -585,7 +605,7 @@ validate-iac:
 # Uses alpine/helm which ships only helm — separate job from validate-iac (different image).
 # AC1: helm lint 0 warnings; AC2: helm template renders valid YAML.
 validate-helm:
-  stage: validate-iac
+  stage: verify
   image: alpine/helm:3.17
   script:
     - echo "==> Helm version"
@@ -606,6 +626,7 @@ validate-helm:
     - if: '$CI_COMMIT_BRANCH =~ /^bugfix\//'
       changes:
         - deploy/**/*
+    - if: '$CI_COMMIT_BRANCH =~ /^release\//'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes:
         - deploy/**/*
@@ -695,3 +716,36 @@ release-media-image:
       --cache=false
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
+
+# ─── Release Tag Creation ──────────────────────────────────────────────────────
+# Runs at the end of the release/* branch pipeline — after all lint, unit, scan,
+# verify, build, and integration stages have passed successfully.
+# Extracts the SemVer from the branch name (release/v1.2.3 → v1.2.3) and
+# creates the corresponding Git tag via the GitLab API.
+#
+# Requires a CI variable GITLAB_TOKEN (project/group access token with
+# write_repository scope, masked). Create one under Settings → Access Tokens.
+# The token must have at least the Developer role to create tags.
+#
+# Idempotency: if the tag already exists the API returns 400 and the job fails —
+# intentional, to prevent overwriting an existing release tag.
+
+create-release-tag:
+  stage: release
+  image: alpine:latest
+  interruptible: false
+  variables:
+    GIT_STRATEGY: none
+  before_script:
+    - apk add --no-cache curl
+  script:
+    - VERSION=$(echo "$CI_COMMIT_BRANCH" | sed 's|release/||')
+    - echo "Creating tag ${VERSION} pointing at ${CI_COMMIT_SHA}"
+    - |
+      curl --fail --silent --show-error \
+        --request POST \
+        --header "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
+        "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/repository/tags?tag_name=${VERSION}&ref=${CI_COMMIT_SHA}"
+    - echo "Tag ${VERSION} created."
+  rules:
+    - if: '$CI_COMMIT_BRANCH =~ /^release\/v\d+\.\d+\.\d+$/'
