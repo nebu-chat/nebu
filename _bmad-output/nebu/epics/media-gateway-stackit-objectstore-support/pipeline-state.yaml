@@ -1,0 +1,21 @@
+# Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents.
+# Do not edit manually during an active pipeline run.
+# last_updated: 2026-05-26
+# [stackit-objectstore] 2026-05-26T14:36Z committed ✓ (ATDD+Code CLEAN+Kassandra CLEAN, 2 cycles)
+# [stackit-objectstore] 2026-05-26T14:35Z arc42-update → deployment view updated
+# [stackit-objectstore] 2026-05-26T14:32Z security-review → Kassandra CLEAN (0 CRITICAL, 0 HIGH, 3 MEDIUM)
+# [stackit-objectstore] 2026-05-26T14:24Z code-review → CLEAN (cycle 2, 1-line polish applied)
+# [stackit-objectstore] 2026-05-26T14:22Z code-review → 1 MINOR → cycle 2
+# [stackit-objectstore] 2026-05-26T14:19Z ci-gate → ✓ unit-go (cycle 1)
+# [stackit-objectstore] 2026-05-26T14:11Z code-review → 6 MINOR → cycle 1
+# [stackit-objectstore] 2026-05-26T14:03Z ci-gate → ✓ build+unit-go+unit-elixir
+# [stackit-objectstore] 2026-05-26T13:59Z dev-story → done (cycle 0)
+# [stackit-objectstore] 2026-05-26T13:46Z test-review → CLEAN (0 MAJOR)
+# [stackit-objectstore] 2026-05-26T13:44Z atdd → 1 failing test (TestSelectStorer_BucketLookupPath)
+# [stackit-objectstore] 2026-05-26T13:32Z pipeline started
+story: null
+current_step: null
+completed: []
+cycle_count: 0
+blocked_reason: null
+last_updated: "2026-05-26T14:36Z"

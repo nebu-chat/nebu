@@ -131,6 +131,14 @@ resource "stackit_server" "nebu" {
     element_memory_limit = var.element_memory_limit
     # Element Web — optional Matrix client served at /
     enable_element_web = var.enable_element_web
+    # Media Gateway — StackIT Object Store
+    enable_media_gateway = var.enable_media_gateway
+    s3_access_key        = var.s3_access_key
+    s3_secret_key        = var.s3_secret_key
+    s3_endpoint          = var.s3_endpoint
+    s3_bucket            = var.s3_bucket
+    media_cpu_limit      = var.media_cpu_limit
+    media_memory_limit   = var.media_memory_limit
   })
 
   lifecycle {
@@ -151,6 +159,16 @@ resource "stackit_server" "nebu" {
     precondition {
       condition     = !var.enable_element_web || var.tls_mode != "none"
       error_message = "enable_element_web requires tls_mode = 'acme' or 'alb'. Without a reverse proxy, Element Web runs on port 7070 while the gateway is on port 8008 — different origins cause CORS preflight failures for all Matrix API requests."
+    }
+
+    precondition {
+      condition = !var.enable_media_gateway || (
+        length(var.s3_access_key) > 0 &&
+        length(var.s3_secret_key) > 0 &&
+        length(var.s3_bucket) > 0 &&
+        length(var.s3_endpoint) > 0
+      )
+      error_message = "s3_access_key, s3_secret_key, s3_bucket, and s3_endpoint are required when enable_media_gateway = true."
     }
   }
 }

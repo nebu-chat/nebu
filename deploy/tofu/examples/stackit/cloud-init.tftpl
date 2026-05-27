@@ -25,6 +25,18 @@ write_files:
     permissions: "0600"
     content: "${internal_secret}"
 
+%{ if enable_media_gateway ~}
+  - path: /opt/nebu/.secrets/s3_access_key
+    owner: root:root
+    permissions: "0600"
+    content: "${s3_access_key}"
+
+  - path: /opt/nebu/.secrets/s3_secret_key
+    owner: root:root
+    permissions: "0600"
+    content: "${s3_secret_key}"
+
+%{ endif ~}
   # ── /opt/nebu/.env ─────────────────────────────────────────────────────────
   # Mode 0600 — contains secrets; readable only by root / docker compose.
   # Database credentials provided by Stackit PostgresFlex managed instance.
@@ -197,6 +209,19 @@ write_files:
               proxy_set_header   X-Forwarded-Proto https;
           }
 %{ endif ~}
+%{ if enable_media_gateway ~}
+
+          # Media Gateway — proxy to media container via Docker network.
+          location /_matrix/media/ {
+              proxy_pass         http://media:8009;
+              proxy_http_version 1.1;
+              proxy_set_header   Host              $host;
+              proxy_set_header   X-Real-IP         $remote_addr;
+              proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+              proxy_set_header   X-Forwarded-Proto https;
+              client_max_body_size 50m;
+          }
+%{ endif ~}
 %{ if enable_element_web ~}
 
           location /_matrix/ {
@@ -298,6 +323,19 @@ write_files:
               proxy_set_header   X-Forwarded-Proto https;
           }
 %{ endif ~}
+%{ if enable_media_gateway ~}
+
+          # Media Gateway — proxy to media container on loopback (port published by Docker).
+          location /_matrix/media/ {
+              proxy_pass         http://127.0.0.1:8009;
+              proxy_http_version 1.1;
+              proxy_set_header   Host              $host;
+              proxy_set_header   X-Real-IP         $remote_addr;
+              proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+              proxy_set_header   X-Forwarded-Proto https;
+              client_max_body_size 50m;
+          }
+%{ endif ~}
 %{ if enable_element_web ~}
 
           # Matrix API paths — always routed to gateway.
@@ -378,6 +416,12 @@ write_files:
       secrets:
         internal_secret:
           file: .secrets/internal_secret
+%{ if enable_media_gateway ~}
+        s3_access_key:
+          file: .secrets/s3_access_key
+        s3_secret_key:
+          file: .secrets/s3_secret_key
+%{ endif ~}
 
       services:
 %{ if oidc_mode == "dex" ~}
@@ -459,6 +503,44 @@ write_files:
               limits:
                 cpus: '${gateway_cpu_limit}'
                 memory: ${gateway_memory_limit}
+%{ if enable_media_gateway ~}
+
+        media:
+          image: $${NEBU_IMAGE_REGISTRY}/nebu-media:$${NEBU_VERSION}
+          restart: unless-stopped
+          depends_on:
+            gateway:
+              condition: service_healthy
+          secrets:
+            - s3_access_key
+            - s3_secret_key
+          environment:
+            NEBU_SERVER_NAME: $${NEBU_SERVER_NAME}
+            NEBU_DB_URL: $${NEBU_DB_URL}
+            NEBU_STORAGE_BACKEND: "minio"
+            NEBU_MINIO_ENDPOINT: "${s3_endpoint}"
+            NEBU_MINIO_ACCESS_KEY_FILE: "/run/secrets/s3_access_key"
+            NEBU_MINIO_SECRET_KEY_FILE: "/run/secrets/s3_secret_key"
+            NEBU_MINIO_BUCKET: "${s3_bucket}"
+            NEBU_MINIO_USE_SSL: "true"
+            NEBU_OIDC_ISSUER: $${NEBU_OIDC_ISSUER}
+            NEBU_OIDC_CLIENT_ID: $${NEBU_OIDC_CLIENT_ID}
+            NEBU_TRUSTED_PROXY: $${NEBU_TRUSTED_PROXY}
+          ports:
+            - "127.0.0.1:8009:8009"
+          healthcheck:
+            # nebu-media is Alpine-based; wget (busybox) is available by default.
+            test: ["CMD", "wget", "-qO-", "http://localhost:8009/health"]
+            interval: 10s
+            timeout: 5s
+            retries: 3
+            start_period: 10s
+          deploy:
+            resources:
+              limits:
+                cpus: '${media_cpu_limit}'
+                memory: ${media_memory_limit}
+%{ endif ~}
 %{ if enable_element_web ~}
 
         element:

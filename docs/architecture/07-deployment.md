@@ -356,6 +356,64 @@ PostgresFlex connection details (`host`, `port`, `username`, `password`) are com
 | `postgres_ram` | `4` GB | 8+ GB |
 | `postgres_storage_size` | `20` GB | 50+ GB |
 
+### Stackit Media Gateway Support (nebu-stackit - Media Gateway StackIT ObjectStore Story)
+
+`deploy/tofu/examples/stackit/` now supports an optional Media Gateway deployment using StackIT Object Storage (S3-compatible) as the storage backend. Media Gateway is controlled by the `enable_media_gateway` variable.
+
+**Resources provisioned when `enable_media_gateway = true`:**
+
+- `stackit_objectstorage_bucket` - optionally creates an S3 bucket in StackIT Object Storage (if not already present)
+- Docker Secrets for S3 credentials (`s3_access_key`, `s3_secret_key`) written to `/opt/nebu/.secrets/` with mode `0600`
+- `media` Docker Compose service on port 8009 (exposed on loopback `127.0.0.1:8009` only)
+- nginx routing rules for `/_matrix/media/` → media service (both TLS and non-TLS modes)
+
+**Configuration Variables:**
+
+| Variable | Type | Default | Purpose |
+|---|---|---|---|
+| `enable_media_gateway` | bool | `false` | Deploy the media gateway service |
+| `s3_access_key` | string (sensitive) | `""` | Access key for StackIT Object Store (required when enabled) |
+| `s3_secret_key` | string (sensitive) | `""` | Secret key for StackIT Object Store (required when enabled) |
+| `s3_endpoint` | string | `"object.storage.eu01.onstackit.cloud"` | S3 endpoint hostname (without `https://` prefix) |
+| `s3_bucket` | string | `"nebu-media"` | S3 bucket name for media storage |
+| `media_cpu_limit` | string | `"0.50"` | CPU limit for media gateway container |
+| `media_memory_limit` | string | `"256m"` | Memory limit for media gateway container |
+
+**Media Gateway Environment Variables (set via cloud-init):**
+
+The media service receives the following configuration:
+
+```
+NEBU_SERVER_NAME           — From Stackit deployment
+NEBU_DB_URL                — PostgresFlex connection string
+NEBU_STORAGE_BACKEND       — Fixed: "minio" (StackIT Object Store is MinIO-compatible)
+NEBU_MINIO_ENDPOINT        — From s3_endpoint variable
+NEBU_MINIO_ACCESS_KEY_FILE — /run/secrets/s3_access_key (Docker Secret)
+NEBU_MINIO_SECRET_KEY_FILE — /run/secrets/s3_secret_key (Docker Secret)
+NEBU_MINIO_BUCKET          — From s3_bucket variable
+NEBU_MINIO_USE_SSL         — "true" (StackIT Object Store requires TLS)
+NEBU_OIDC_ISSUER           — From deployment configuration
+NEBU_OIDC_CLIENT_ID        — From deployment configuration
+NEBU_TRUSTED_PROXY         — For X-Forwarded-* header handling via nginx
+```
+
+**S3 Client Configuration (media/cmd/media/main.go):**
+
+The media gateway uses the MinIO Go client with path-style bucket lookup (`BucketLookupPath: minio.BucketLookupPath`) for StackIT Object Store compatibility. This translates bucket references to path-style S3 URLs: `https://endpoint/bucket/key` instead of virtual-hosted URLs.
+
+**nginx Routing (when `enable_media_gateway = true`):**
+
+| TLS mode | nginx behaviour |
+|---|---|
+| `enable_tls = true` (with ACME) | `https://<server_name>/_matrix/media/` → `http://media:8009` via Docker network |
+| `enable_tls = false` | `http://<server_name>:8008/_matrix/media/` → `http://127.0.0.1:8009` on loopback (no TLS termination) |
+
+Both routes set `client_max_body_size 50m` to allow large file uploads.
+
+**Lifecycle - When Media Gateway is Disabled:**
+
+When `enable_media_gateway = false` (default), no S3 buckets are created and the media service is absent from the docker-compose.yml. Operators can enable it later by setting `enable_media_gateway = true` and re-applying the Tofu configuration.
+
 ### Stackit OIDC Deployment Profiles (nebu-stackit - Story 13-9)
 
 The Stackit deployment supports two OIDC profiles selected via `var.oidc_mode`:
@@ -444,6 +502,23 @@ A new `deploy/tofu/examples/aws/outputs.tf` exports `dns_name = module.nebu_aws.
 - Conditional Dex `write_files` entry and `dex:` service block added (guarded by `%{ if oidc_mode == "dex" ~}` template directive)
 - `templatefile()` call no longer passes `kc_user`/`kc_password`; now passes `oidc_mode` and `dex_static_password_hash`
 - `local.effective_oidc_issuer` computed in `main.tf` - auto-set to `http://<server_name>:5556/dex` for dex mode; uses `var.oidc_issuer` for external mode
+
+**Changes in Media Gateway StackIT ObjectStore Story:**
+- S3 credential `write_files` blocks added (guarded by `%{ if enable_media_gateway ~}` template directive)
+  - `.secrets/s3_access_key` (mode `0600`)
+  - `.secrets/s3_secret_key` (mode `0600`)
+- Conditional `media:` service block added to `docker-compose.yml` with StackIT Object Store configuration
+  - Image: `${NEBU_IMAGE_REGISTRY}/nebu-media:${NEBU_VERSION}`
+  - Restart policy: `unless-stopped`
+  - Depends on: `gateway` service (healthy)
+  - Port binding: `127.0.0.1:8009:8009` (loopback only; gateway and nginx access via Docker network)
+  - Health check: `wget -qO- http://localhost:8009/health` (10s interval, 5s timeout, 3 retries, 10s start grace)
+  - Resource limits: CPU and memory configurable via `media_cpu_limit` and `media_memory_limit` variables
+- `media` secrets block added to the secrets section (S3 credentials)
+- nginx routing updated: conditionally adds `location /_matrix/media/` proxy blocks (both TLS and non-TLS modes)
+  - Sets `client_max_body_size 50m` for large file uploads
+  - Preserves `Host`, `X-Real-IP`, `X-Forwarded-For`, `X-Forwarded-Proto` headers
+- `templatefile()` call now passes `enable_media_gateway`, `s3_access_key`, `s3_secret_key`, `s3_endpoint`, `s3_bucket` variables
 
 **Changes in Story 13-15:**
 - Conditional `element` Docker service added (guarded by `%{ if enable_element_web ~}` template directive); see below for full details
