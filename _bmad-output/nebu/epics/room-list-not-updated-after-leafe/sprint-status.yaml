@@ -1,0 +1,6 @@
+epic: room-list-not-updated-after-leafe
+last_updated: "2026-05-28"
+stories:
+  - slug: room-list-not-updated-after-leafe
+    status: done
+    summary: "ATDD+Code CLEAN 1 cycle — all 4 MINOR fixed"

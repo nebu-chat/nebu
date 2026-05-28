@@ -126,4 +126,5 @@ func InitializeScenario(sc *godog.ScenarioContext) {
 	initializeOidcDirectoryConfigSteps(sc)    // oidc_directory_enabled + endpoint config round-trip (Story 14-2a)
 	initializeGdprDeletionSteps(sc)           // GDPR right to erasure end-to-end (Story 14-4)
 	initializeMatrixSessionRefreshSteps(sc)   // Matrix session refresh + opaque tokens (bugfix/fix-short-oidc-sessions)
+	initializeRoomLeaveSteps(sc)              // room leave persistence + sync correctness (bugfix/room-list-not-updated-after-leave)
 }

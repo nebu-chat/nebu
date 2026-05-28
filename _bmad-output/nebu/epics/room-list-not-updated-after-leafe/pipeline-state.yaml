@@ -1,0 +1,34 @@
+# last_updated: 2026-05-28
+# [room-list-not-updated-after-leafe] 2026-05-28T10:01Z ci-gate → ✓ build+unit-go+unit-elixir (cycle 1)
+# [room-list-not-updated-after-leafe] 2026-05-28T09:59Z dev-story → done (cycle 1)
+# [room-list-not-updated-after-leafe] 2026-05-28T09:53Z code-review → 4 MINOR → cycle 1
+# [room-list-not-updated-after-leafe] 2026-05-28T09:48Z ci-gate → ✓ build+unit-go+unit-elixir (integration failures all pre-existing)
+# [room-list-not-updated-after-leafe] 2026-05-28T09:42Z dev-story → done (cycle 0)
+# [room-list-not-updated-after-leafe] 2026-05-28T09:35Z test-review → CLEAN (0 MAJOR, 3 MINOR)
+# [room-list-not-updated-after-leafe] 2026-05-28T09:33Z atdd → 5 ExUnit + 3 Godog failing tests
+# [room-list-not-updated-after-leafe] 2026-05-28T09:26Z oracle-gate → spec context captured (from prior session analysis)
+# [room-list-not-updated-after-leafe] 2026-05-28T09:25Z pipeline started (bug mode)
+epic: room-list-not-updated-after-leafe
+branch: bugfix/room-list-not-updated-after-leafe
+created: 2026-05-28
+last_updated: "2026-05-28T10:01Z"
+
+stories:
+  - slug: room-list-not-updated-after-leafe
+    story_file: docs/stories/bugfix/room-list-not-updated-after-leafe/room-list-not-updated-after-leafe.md
+    status: ready-for-dev
+    steps:
+      atdd: pending
+      dev: pending
+      test-review: pending
+      code-review: pending
+      security-review: not-needed
+story: "room-list-not-updated-after-leafe"
+current_step: "code-review"
+completed:
+  - atdd
+  - test-review
+  - dev-story
+  - ci-gate
+cycle_count: 1
+blocked_reason: null
