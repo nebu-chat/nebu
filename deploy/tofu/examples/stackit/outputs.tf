@@ -56,3 +56,8 @@ output "element_url" {
     "http://${var.server_name}:7070/"
   )
 }
+
+output "media_bucket" {
+  description = "StackIT Object Storage bucket name for media files. Created by this module when enable_media_gateway = true."
+  value       = var.enable_media_gateway ? var.s3_bucket : "disabled"
+}
