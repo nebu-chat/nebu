@@ -167,6 +167,25 @@ dns_mode = "external"  # or: "default" (required for tls_mode = "acme" HTTP-01 c
 # Contact email for the Stackit DNS zone (optional, recommended for production).
 # dns_contact_email = ""
 
+# ── Media Gateway (StackIT Object Store) ─────────────────────────────────────
+# Deploys the Media Gateway alongside gateway + core and creates the S3 bucket
+# in StackIT Object Store. Handles /_matrix/media/* and /_matrix/client/v1/media/*.
+#
+# Step 1: In the STACKIT portal → Object Storage → Credentials → Create credentials.
+#         Note: Object Storage credentials are separate from the service account key.
+# Step 2: Set enable_media_gateway = true and fill in the credentials below.
+#         OpenTofu will create the bucket automatically (stackit_objectstorage_bucket).
+# Step 3: Add the media image to your release:
+#         TAG=vX.Y.Z make release release-push
+#
+# enable_media_gateway = true
+# s3_access_key        = "<REPLACE: from STACKIT Object Storage credentials>"
+# s3_secret_key        = "<REPLACE: from STACKIT Object Storage credentials>"
+# s3_endpoint          = "object.storage.eu01.onstackit.cloud"
+# s3_bucket            = "nebu-media"
+# media_cpu_limit      = "0.50"
+# media_memory_limit   = "256m"
+
 # ── Element Web client ────────────────────────────────────────────────────────
 # Requires tls_mode = "acme" (lifecycle precondition enforced by tofu apply).
 # Without nginx, Element (port 7070) and gateway (port 8008) are different origins

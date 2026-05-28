@@ -221,6 +221,17 @@ write_files:
               proxy_set_header   X-Forwarded-Proto https;
               client_max_body_size 50m;
           }
+
+          # Media Gateway — Matrix CS API 1.11+ authenticated media endpoints.
+          location /_matrix/client/v1/media/ {
+              proxy_pass         http://media:8009;
+              proxy_http_version 1.1;
+              proxy_set_header   Host              $host;
+              proxy_set_header   X-Real-IP         $remote_addr;
+              proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+              proxy_set_header   X-Forwarded-Proto https;
+              client_max_body_size 50m;
+          }
 %{ endif ~}
 %{ if enable_element_web ~}
 
@@ -327,6 +338,17 @@ write_files:
 
           # Media Gateway — proxy to media container on loopback (port published by Docker).
           location /_matrix/media/ {
+              proxy_pass         http://127.0.0.1:8009;
+              proxy_http_version 1.1;
+              proxy_set_header   Host              $host;
+              proxy_set_header   X-Real-IP         $remote_addr;
+              proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+              proxy_set_header   X-Forwarded-Proto https;
+              client_max_body_size 50m;
+          }
+
+          # Media Gateway — Matrix CS API 1.11+ authenticated media endpoints.
+          location /_matrix/client/v1/media/ {
               proxy_pass         http://127.0.0.1:8009;
               proxy_http_version 1.1;
               proxy_set_header   Host              $host;
@@ -586,6 +608,10 @@ write_files:
               condition: service_healthy
 %{ if enable_element_web ~}
             element:
+              condition: service_healthy
+%{ endif ~}
+%{ if enable_media_gateway ~}
+            media:
               condition: service_healthy
 %{ endif ~}
           healthcheck:

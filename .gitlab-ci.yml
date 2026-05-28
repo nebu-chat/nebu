@@ -198,6 +198,7 @@ lint-go:
   image: $CI_REGISTRY_IMAGE/ci-go:1.26
   script:
     - cd gateway && go vet ./...
+    - cd ../media && go vet ./...
   cache:
     key: "go-${CI_COMMIT_REF_SLUG}"
     paths:
@@ -219,6 +220,7 @@ test-unit-go:
   image: $CI_REGISTRY_IMAGE/ci-go:1.26
   script:
     - cd gateway && go test -race ./...
+    - cd ../media && go test ./...
   cache:
     key: "go-${CI_COMMIT_REF_SLUG}"
     paths:
@@ -331,6 +333,22 @@ build-core-image:
       --context "${CI_PROJECT_DIR}/core"
       --dockerfile core/Dockerfile
       --destination "${CI_REGISTRY_IMAGE}/core:${CI_COMMIT_SHA}"
+      --cache=true
+      --cache-ttl=24h
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+    - if: '$CI_COMMIT_BRANCH =~ /^release\//'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+build-media-image:
+  <<: *build_ci_image
+  stage: build
+  script:
+    - /kaniko/executor
+      --context "${CI_PROJECT_DIR}/media"
+      --dockerfile media/Dockerfile
+      --destination "${CI_REGISTRY_IMAGE}/media:${CI_COMMIT_SHA}"
       --cache=true
       --cache-ttl=24h
   rules:
@@ -677,6 +695,23 @@ release-core-image:
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
 
+release-media-image:
+  <<: *build_ci_image
+  stage: release
+  interruptible: false
+  needs: []  # run independent of branch-only build/integration jobs
+  script:
+    - RELEASE_VERSION="${CI_COMMIT_TAG#v}" && /kaniko/executor
+      --context "${CI_PROJECT_DIR}/media"
+      --dockerfile media/Dockerfile
+      --destination "${CI_REGISTRY_IMAGE}/nebu-media:${RELEASE_VERSION}"
+      --build-arg "GIT_COMMIT=${CI_COMMIT_SHA}"
+      --build-arg "BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      --build-arg "RELEASE_VERSION=${RELEASE_VERSION}"
+      --cache=false
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
+
 # ─── Renovate ─────────────────────────────────────────────────────────────────
 # Runs dependency updates via Renovate on a weekly GitLab schedule.
 # Setup:
@@ -699,23 +734,6 @@ renovate:
     - renovate
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule"'
-
-release-media-image:
-  <<: *build_ci_image
-  stage: release
-  interruptible: false
-  needs: []     # run independent of branch-only build/integration jobs
-  script:
-    - RELEASE_VERSION="${CI_COMMIT_TAG#v}" && /kaniko/executor
-      --context "${CI_PROJECT_DIR}/media"
-      --dockerfile media/Dockerfile
-      --destination "${CI_REGISTRY_IMAGE}/nebu-media:${RELEASE_VERSION}"
-      --build-arg "GIT_COMMIT=${CI_COMMIT_SHA}"
-      --build-arg "BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-      --build-arg "RELEASE_VERSION=${RELEASE_VERSION}"
-      --cache=false
-  rules:
-    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
 
 # ─── Release Tag Creation ──────────────────────────────────────────────────────
 # Runs at the end of the release/* branch pipeline — after all lint, unit, scan,
