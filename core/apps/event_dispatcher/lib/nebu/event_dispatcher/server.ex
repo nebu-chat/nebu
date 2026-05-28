@@ -349,7 +349,19 @@ defmodule Nebu.EventDispatcher.Server do
     # the leave / decline-invite semantics by operating on the DB directly.
     case Nebu.Room.RoomSupervisor.lookup_room(room_id) do
       {:error, :not_found} ->
-        # Room GenServer not running — reject the pending invitation directly in DB.
+        # Room GenServer not running — persist the membership leave first so that
+        # room_members.left_at is set before we reject the invitation or emit events.
+        # delete_member is idempotent (only updates rows where left_at IS NULL).
+        # :ok and {:error, :not_member} are both expected (invite-only user, no room_members row).
+        # Any other error is logged as a warning but does not fail the leave (best-effort).
+        case rooms_db_module().delete_member(room_id, user_id) do
+          :ok -> :ok
+          {:error, :not_member} -> :ok
+          {:error, reason} ->
+            require Logger
+            Logger.warning("[leave_room] delete_member failed for #{user_id}/#{room_id}: #{inspect(reason)}")
+        end
+        # Reject the pending invitation directly in DB.
         db_module_invite().reject_invitation(room_id, user_id)
         # Emit a proper m.room.member leave event so fetch_delta_rooms can find it
         # even if the :pg broadcast arrives between two sync cycles (race-proof).
@@ -373,6 +385,18 @@ defmodule Nebu.EventDispatcher.Server do
             %Core.LeaveRoomResponse{room_id: room_id}
 
           {:error, :not_member} ->
+            # GenServer running but user absent from in-memory state — persist the
+            # membership leave first so that room_members.left_at is set.
+            # delete_member is idempotent (only updates rows where left_at IS NULL).
+            # :ok and {:error, :not_member} are both expected (invite-only user, no room_members row).
+            # Any other error is logged as a warning but does not fail the leave (best-effort).
+            case rooms_db_module().delete_member(room_id, user_id) do
+              :ok -> :ok
+              {:error, :not_member} -> :ok
+              {:error, reason} ->
+                require Logger
+                Logger.warning("[leave_room] delete_member failed for #{user_id}/#{room_id}: #{inspect(reason)}")
+            end
             # User has a pending invite but hasn't joined — treat as "decline invite".
             db_module_invite().reject_invitation(room_id, user_id)
             emit_decline_event(room_id, user_id)
