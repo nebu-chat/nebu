@@ -438,6 +438,9 @@ defmodule Core.SyncRoom do
   field :timeline_events, 3, repeated: true, type: Core.Event, json_name: "timelineEvents"
   field :limited, 4, type: :bool
   field :prev_batch, 5, type: :string, json_name: "prevBatch"
+  field :heroes, 6, repeated: true, type: :string
+  field :joined_member_count, 7, type: :int32, json_name: "joinedMemberCount"
+  field :invited_member_count, 8, type: :int32, json_name: "invitedMemberCount"
 end
 
 defmodule Core.GetPresenceRequest do
@@ -745,6 +748,7 @@ defmodule Core.UpdateRoomSettingsRequest do
 
   field :room_id, 1, type: :string, json_name: "roomId"
   field :max_members, 2, type: :int32, json_name: "maxMembers"
+  field :is_auto_join, 3, proto3_optional: true, type: :bool, json_name: "isAutoJoin"
 end
 
 defmodule Core.UpdateRoomSettingsResponse do
@@ -983,6 +987,7 @@ defmodule Core.AdminRoomDetailProto do
   field :max_members, 5, type: :int32, json_name: "maxMembers"
   field :visibility, 6, type: :string
   field :created_at, 7, type: :int64, json_name: "createdAt"
+  field :is_auto_join, 8, type: :bool, json_name: "isAutoJoin"
 end
 
 defmodule Core.ListAdminRoomsRequest do

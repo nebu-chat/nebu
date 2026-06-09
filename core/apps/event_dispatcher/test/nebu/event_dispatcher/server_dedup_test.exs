@@ -148,6 +148,13 @@ defmodule Nebu.EventDispatcher.ServerDedupTest do
     def fetch_events_by_relation(_room_id, _event_id, _rel_type, _limit, _opts), do: {:ok, []}
     def count_thread_children(_room_id, _event_id), do: {:ok, 0}
     def event_in_room?(_event_id, _room_id), do: true
+    def fetch_event(_event_id, _room_id), do: {:error, :not_found}
+    # Story personal-self-room: personal room callbacks.
+    def get_personal_room_id(_user_id), do: {:ok, nil}
+    def set_personal_room_id(_user_id, _room_id), do: :ok
+    # Story direct-room-heroes + admin-auto-join-rooms: required stubs.
+    def get_room_heroes(_room_id, _exclude_user_id), do: {:ok, %{heroes: [], joined: 0, invited: 0}}
+    def list_auto_join_rooms(), do: {:ok, []}
   end
 
   # ─── DedupTestFakeInviteDB ────────────────────────────────────────────────────

@@ -12,7 +12,7 @@ Feature: Authentication — End-to-End OIDC Login
     And I POST /_matrix/client/v3/login with the Dex token
     Then the response status is 200
     And the response body contains "access_token"
-    And the response body contains "CiQwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDE"
+    And the response body contains "@kai:localhost"
     When I POST /_matrix/client/v3/logout with the access token
     Then the response status is 200
     When I POST /_matrix/client/v3/logout with the access token

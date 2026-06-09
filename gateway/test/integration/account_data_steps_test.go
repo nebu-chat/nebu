@@ -320,8 +320,7 @@ func initializeAccountDataSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^kai puts global account data type "([^"]*)" with body (.+)$`, kaiPutsGlobalAccountData)
 	// GET global
 	sc.Step(`^kai gets global account data type "([^"]*)"$`, kaiGetsGlobalAccountData)
-	// Assertion: response body is exactly a given string
-	sc.Step(`^the response body is "([^"]*)"$`, accountDataResponseBodyIs)
+	// Assertion: response body is exactly a given string — shared step from tags_steps_test.go
 	// Reuse existing "does not contain" step from profile_subfields_steps_test.go
 	// (theResponseBodyDoesNotContain is already registered by initializeProfileSubfieldSteps).
 	// Story 7-36: sync propagation steps

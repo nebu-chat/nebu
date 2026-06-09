@@ -382,7 +382,18 @@ type syncRooms struct {
 	Leave  map[string]interface{}    `json:"leave"`
 }
 
+// syncRoomSummary carries the m.heroes / m.joined_member_count / m.invited_member_count
+// summary block (Matrix CS API §11.2.2). Attached only when the room has no explicit name,
+// allowing clients to synthesise a display name from participant display names.
+// The pointer + omitempty on syncJoinedRoom means named rooms never emit a "summary" key.
+type syncRoomSummary struct {
+	Heroes             []string `json:"m.heroes"`
+	JoinedMemberCount  int32    `json:"m.joined_member_count"`
+	InvitedMemberCount int32    `json:"m.invited_member_count"`
+}
+
 type syncJoinedRoom struct {
+	Summary     *syncRoomSummary       `json:"summary,omitempty"`
 	State       syncStateSection       `json:"state"`
 	Timeline    syncTimelineSection    `json:"timeline"`
 	AccountData syncAccountDataSection `json:"account_data"`
@@ -777,8 +788,24 @@ func buildJoinedRooms(rooms []*pb.SyncRoom) map[string]syncJoinedRoom {
 			})
 		}
 
+		// §11.2.2: attach summary when the Elixir core set heroes or any member count.
+		// Named rooms omit heroes (proto3 zero values) so summary stays nil → omitted.
+		var summary *syncRoomSummary
+		if len(room.GetHeroes()) > 0 || room.GetJoinedMemberCount() > 0 || room.GetInvitedMemberCount() > 0 {
+			heroes := room.GetHeroes()
+			if heroes == nil {
+				heroes = []string{}
+			}
+			summary = &syncRoomSummary{
+				Heroes:             heroes,
+				JoinedMemberCount:  room.GetJoinedMemberCount(),
+				InvitedMemberCount: room.GetInvitedMemberCount(),
+			}
+		}
+
 		joinedRooms[room.GetRoomId()] = syncJoinedRoom{
-			State: syncStateSection{Events: stateEvents},
+			Summary: summary,
+			State:   syncStateSection{Events: stateEvents},
 			Timeline: syncTimelineSection{
 				Events:    timelineEvents,
 				Limited:   room.GetLimited(),

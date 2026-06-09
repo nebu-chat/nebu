@@ -218,5 +218,5 @@ func initializeModerationSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^kai posts kick without user_id$`, kaiPostsKickWithoutUserID)
 	sc.Step(`^kai bans alex from room "([^"]+)"$`, kaiBansAlexFromRoom)
 	sc.Step(`^an unauthenticated client kicks alex from the room$`, unauthenticatedClientKicksAlex)
-	sc.Step(`^the response body is "([^"]*)"$`, theResponseBodyIsEmptyObject)
+	// response body is "..." — shared step from tags_steps_test.go (avoids duplicate registration)
 }

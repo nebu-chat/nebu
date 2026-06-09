@@ -107,7 +107,7 @@
     </div>
     {{ end }}
 
-    {{/* Room settings form — max_members (Story 9.3 AC3) */}}
+    {{/* Room settings form — max_members (Story 9.3 AC3) + auto-join (admin-auto-join-rooms) */}}
     <form method="POST" action="/admin/rooms/{{ .ActiveItemID }}/settings" class="mt-4">
       <input type="hidden" name="_csrf" value="{{ .PageData.CSRFToken }}">
       <div class="form-control mb-3">
@@ -121,6 +121,18 @@
                max="1000000"
                value="{{ .ActiveRoom.MaxMembers }}"
                class="input input-bordered input-sm w-full">
+      </div>
+      {{/* Auto-join toggle — Story admin-auto-join-rooms */}}
+      <div class="form-control mb-3">
+        <label class="label cursor-pointer">
+          <span class="label-text">Auto-join for new users</span>
+          <input type="checkbox" name="is_auto_join" value="true"
+                 class="toggle toggle-primary"
+                 {{ if .ActiveRoom.IsAutoJoin }}checked{{ end }}>
+        </label>
+        <p class="text-xs text-base-content/60 mt-1">
+          New users are automatically joined to this room on first login.
+        </p>
       </div>
       <button type="submit" class="btn btn-sm btn-primary w-full">Save</button>
     </form>

@@ -58,7 +58,14 @@ defmodule Nebu.Room.DBBehaviourTest do
         # Story 9-9: check_room_status_for_update/1 — SELECT FOR UPDATE TOCTOU fix.
         {:check_room_status_for_update, 1},
         # Story 11-8: fetch_event/2 — single-event lookup by (event_id, room_id).
-        {:fetch_event, 2}
+        {:fetch_event, 2},
+        # Story personal-self-room: personal room idempotency anchor.
+        {:get_personal_room_id, 1},
+        {:set_personal_room_id, 2},
+        # Story direct-room-heroes: hero/member-count computation.
+        {:get_room_heroes, 2},
+        # Story admin-auto-join-rooms: auto-join enforcement at first login.
+        {:list_auto_join_rooms, 0}
       ]
 
       for {fun, arity} <- required do

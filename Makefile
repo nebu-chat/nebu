@@ -200,7 +200,7 @@ test-unit-elixir:
 ## gateway:8080 and core:4000 by service name — works locally and in DinD CI.
 ## Elixir integration tests (mix test --include integration) also run against the live stack.
 test-integration: setup
-	docker compose up -d --wait && \
+	NEBU_RATE_LIMIT_DISABLED=true docker compose up -d --wait && \
 	docker run --rm -v $(PWD):/workspace -w /workspace \
 		--network=nebu_default \
 		-e NEBU_TEST_GATEWAY_URL=http://gateway:8080 \

@@ -231,11 +231,13 @@ func theResponseBodyIsAJSONObject() error {
 // Called from InitializeScenario in steps_test.go.
 func initializeRoomStateSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^kai calls GET /rooms/\{roomId\}/state$`, kaiCallsGetRoomsState)
-	sc.Step(`^kai calls GET /rooms/\{roomId\}/state/m\.room\.member/\{kaiUserId\}$`, kaiCallsGetRoomsStateSingleEventByUserID)
-	sc.Step(`^kai calls GET /rooms/\{roomId\}/state/m\.room\.name$`, kaiCallsGetRoomsStateEventTypeOnly)
+	// specific sub-path patterns removed — set_room_state_full_steps_test.go registers
+	// the generic ^kai calls GET /rooms/\{roomId\}/state/([^\s]+)$ which covers these.
+	// kaiCallsGetRoomsStateSingleEventByUserID, kaiCallsGetRoomsStateEventTypeOnly,
+	// and kaiCallsGetUnknownEventType remain as functions; kaiCallsGetRoomsStateSingleEventType
+	// dispatches to them based on the captured event type.
 	sc.Step(`^marie calls GET /rooms/\{roomId\}/state$`, marieCallsGetRoomsState)
-	sc.Step(`^kai calls GET /rooms/([^/]+)/state$`, kaiCallsGetUnknownRoomState)
-	sc.Step(`^kai calls GET /rooms/\{roomId\}/state/m\.room\.nonexistent/$`, kaiCallsGetUnknownEventType)
+	sc.Step(`^kai calls GET /rooms/(!.+)/state$`, kaiCallsGetUnknownRoomState)
 	sc.Step(`^the response body is a JSON array$`, theResponseBodyIsAJSONArray)
 	// Match anywhere on the line after `has keys ` so the step argument captures
 	// every quoted key (and any "and"/comma separators in between).

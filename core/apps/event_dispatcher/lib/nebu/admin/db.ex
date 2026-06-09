@@ -227,7 +227,8 @@ defmodule Nebu.Admin.DB do
                (SELECT COUNT(*) FROM room_members m WHERE m.room_id = r.room_id AND m.left_at IS NULL) AS member_count,
                COALESCE(r.max_members, 0),
                COALESCE(r.visibility, 'private'),
-               r.created_at
+               r.created_at,
+               COALESCE(r.is_auto_join, false)
         FROM rooms r
         WHERE r.room_id = $1
         LIMIT 1
@@ -407,6 +408,21 @@ defmodule Nebu.Admin.DB do
     }
   end
 
+  defp row_to_room_detail_map([room_id, name, status, member_count, max_members, visibility, created_at, is_auto_join]) do
+    %{
+      room_id: room_id,
+      name: name || "",
+      status: status || "active",
+      member_count: member_count || 0,
+      max_members: max_members || 0,
+      visibility: visibility || "private",
+      created_at: created_at || 0,
+      is_auto_join: is_auto_join || false
+    }
+  end
+
+  # Legacy 7-column variant — kept for backward compatibility with existing tests
+  # that seed a 7-column row. Returns is_auto_join: false.
   defp row_to_room_detail_map([room_id, name, status, member_count, max_members, visibility, created_at]) do
     %{
       room_id: room_id,
@@ -415,7 +431,25 @@ defmodule Nebu.Admin.DB do
       member_count: member_count || 0,
       max_members: max_members || 0,
       visibility: visibility || "private",
-      created_at: created_at || 0
+      created_at: created_at || 0,
+      is_auto_join: false
     }
+  end
+
+  @doc """
+  Persists the is_auto_join flag for the given room_id.
+
+  Returns :ok on success.
+  Returns {:error, reason} on DB failure.
+
+  Story admin-auto-join-rooms.
+  """
+  def update_room_auto_join(room_id, is_auto_join) do
+    case Ecto.Adapters.SQL.query(Nebu.Repo,
+           "UPDATE rooms SET is_auto_join = $2 WHERE room_id = $1",
+           [room_id, is_auto_join]) do
+      {:ok, _} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
   end
 end

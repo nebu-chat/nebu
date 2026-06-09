@@ -212,7 +212,7 @@ func initializeJoinedMembersSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^kai sets his displayname to "([^"]*)"$`, kaiSetsDisplaynameTo)
 	sc.Step(`^kai calls GET /rooms/\{roomId\}/joined_members$`, kaiCallsGetJoinedMembers)
 	sc.Step(`^marie calls GET /rooms/\{roomId\}/joined_members$`, marieCallsGetJoinedMembers)
-	sc.Step(`^kai calls GET /rooms/([^/]+)/joined_members$`, kaiCallsGetJoinedMembersUnknownRoom)
+	sc.Step(`^kai calls GET /rooms/(!.+)/joined_members$`, kaiCallsGetJoinedMembersUnknownRoom)
 	sc.Step(`^an unauthenticated client calls GET /rooms/\{roomId\}/joined_members$`, unauthenticatedClientCallsGetJoinedMembers)
 	sc.Step(`^the joined map contains the key for kai$`, theJoinedMapContainsTheKeyForKai)
 	sc.Step(`^the joined map contains the key for alex$`, theJoinedMapContainsTheKeyForAlex)

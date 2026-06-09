@@ -153,6 +153,11 @@ defmodule Nebu.EventDispatcher.UpgradeRoomErrorHandlingTest do
     def count_thread_children(_room_id, _event_id), do: {:ok, 0}
     def event_in_room?(_event_id, _room_id), do: true
     def fetch_event(_event_id, _room_id), do: {:error, :not_found}
+    def get_personal_room_id(_user_id), do: {:ok, nil}
+    def set_personal_room_id(_user_id, _room_id), do: :ok
+    # Story direct-room-heroes + admin-auto-join-rooms: required stubs.
+    def get_room_heroes(_room_id, _exclude_user_id), do: {:ok, %{heroes: [], joined: 0, invited: 0}}
+    def list_auto_join_rooms(), do: {:ok, []}
   end
 
   # ─── DBJoinError ──────────────────────────────────────────────────────────────
@@ -212,6 +217,10 @@ defmodule Nebu.EventDispatcher.UpgradeRoomErrorHandlingTest do
     def count_thread_children(_room_id, _event_id), do: {:ok, 0}
     def event_in_room?(_event_id, _room_id), do: true
     def fetch_event(_event_id, _room_id), do: {:error, :not_found}
+    def get_personal_room_id(_user_id), do: {:ok, nil}
+    def set_personal_room_id(_user_id, _room_id), do: :ok
+    def get_room_heroes(room_id, exclude_user_id), do: BaseDB.get_room_heroes(room_id, exclude_user_id)
+    def list_auto_join_rooms(), do: BaseDB.list_auto_join_rooms()
   end
 
   # ─── DBSetPowerLevelsError ────────────────────────────────────────────────────
@@ -265,6 +274,10 @@ defmodule Nebu.EventDispatcher.UpgradeRoomErrorHandlingTest do
     def count_thread_children(_room_id, _event_id), do: {:ok, 0}
     def event_in_room?(_event_id, _room_id), do: true
     def fetch_event(_event_id, _room_id), do: {:error, :not_found}
+    def get_personal_room_id(_user_id), do: {:ok, nil}
+    def set_personal_room_id(_user_id, _room_id), do: :ok
+    def get_room_heroes(room_id, exclude_user_id), do: BaseDB.get_room_heroes(room_id, exclude_user_id)
+    def list_auto_join_rooms(), do: BaseDB.list_auto_join_rooms()
   end
 
   # ─── MessagesDBCreateEventError ───────────────────────────────────────────────
@@ -319,6 +332,10 @@ defmodule Nebu.EventDispatcher.UpgradeRoomErrorHandlingTest do
     def count_thread_children(_room_id, _event_id), do: {:ok, 0}
     def event_in_room?(_event_id, _room_id), do: true
     def fetch_event(_event_id, _room_id), do: {:error, :not_found}
+    def get_personal_room_id(_user_id), do: {:ok, nil}
+    def set_personal_room_id(_user_id, _room_id), do: :ok
+    def get_room_heroes(room_id, exclude_user_id), do: BaseDB.get_room_heroes(room_id, exclude_user_id)
+    def list_auto_join_rooms(), do: BaseDB.list_auto_join_rooms()
   end
 
   # ─── FakeInviteDB ─────────────────────────────────────────────────────────────

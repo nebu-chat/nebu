@@ -144,6 +144,21 @@ defmodule Nebu.Room.DBBehaviour do
               {:ok, String.t()} | {:error, :not_found | term()}
 
   @doc """
+  Returns heroes, joined count, and invited count for `room_id`, excluding `exclude_user_id`.
+
+  Heroes = up to 5 participants ordered by joined_at ASC (joined members first, then
+  pending invitations), excluding the syncing user.
+
+  Returns `{:ok, %{heroes: [user_id], joined: integer(), invited: integer()}}` on success.
+  Returns `{:error, reason}` on DB error.
+
+  Story direct-room-heroes (§11.2.2): used by attach_heroes/3 in EventDispatcher.Server.
+  """
+  @callback get_room_heroes(room_id :: String.t(), exclude_user_id :: String.t()) ::
+              {:ok, %{heroes: [String.t()], joined: integer(), invited: integer()}}
+              | {:error, term()}
+
+  @doc """
   Loads the mutable settings for `room_id` — currently only max_members.
 
   Returns `{:ok, max_members}` where `max_members` is 0 (no limit) or a positive integer.
@@ -285,4 +300,41 @@ defmodule Nebu.Room.DBBehaviour do
   """
   @callback fetch_event(event_id :: String.t(), room_id :: String.t()) ::
               {:ok, map()} | {:error, :not_found | term()}
+
+  @doc """
+  Returns the personal_room_id for `user_id`.
+
+  Returns `{:ok, room_id}` when the user has a personal self-room.
+  Returns `{:ok, nil}` when no personal self-room has been created yet.
+  Returns `{:error, reason}` on DB error.
+
+  Story personal-self-room: idempotency anchor for ensure_personal_room/1.
+  """
+  @callback get_personal_room_id(user_id :: String.t()) ::
+              {:ok, String.t() | nil} | {:error, term()}
+
+  @doc """
+  Sets `personal_room_id` for `user_id` when it is currently NULL.
+
+  The WHERE personal_room_id IS NULL guard makes concurrent logins race-safe.
+
+  Returns `:ok` on success (including the no-op case where the column was already set).
+  Returns `{:error, reason}` on DB error.
+
+  Story personal-self-room: called by ensure_personal_room/1 after room creation.
+  """
+  @callback set_personal_room_id(user_id :: String.t(), room_id :: String.t()) ::
+              :ok | {:error, term()}
+
+  @doc """
+  Returns all room IDs that have is_auto_join=true and status='active'.
+
+  Called by ensure_auto_join_memberships/1 when a new user is provisioned on first login.
+
+  Returns `{:ok, [room_id]}` — empty list when no auto-join rooms exist.
+  Returns `{:error, reason}` on DB error.
+
+  Story admin-auto-join-rooms: auto-join enforcement at login time.
+  """
+  @callback list_auto_join_rooms() :: {:ok, [String.t()]} | {:error, term()}
 end

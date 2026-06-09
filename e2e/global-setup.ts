@@ -107,7 +107,11 @@ export default async function globalSetup(): Promise<void> {
     try {
       const { token } = await getApiSession(apiCtx, NEBU_USERS.alex);
       await createRoom(apiCtx, token, 'admin-test-room');
-      console.log('[global-setup] Test room created.');
+      // Also create "e2e-autojoin" — required by auto-join E2E tests (admin-auto-join-rooms story).
+      // NOTE: "General" is used as a stub-data sentinel in rooms-api-integration.spec.ts,
+      // so the auto-join tests use a distinct room name to avoid that conflict.
+      await createRoom(apiCtx, token, 'e2e-autojoin').catch(() => { /* may already exist */ });
+      console.log('[global-setup] Test rooms created.');
     } finally {
       await apiCtx.dispose();
     }

@@ -246,6 +246,17 @@ defmodule Nebu.EventDispatcher.AdminGrpcTest do
         [{_, rows}] -> {:ok, rows}
       end
     end
+
+    # Story admin-auto-join-rooms: persists is_auto_join flag in ETS.
+    def update_room_auto_join(room_id, is_auto_join) do
+      case :ets.lookup(:admin_grpc_test_db, {:room, room_id}) do
+        [] ->
+          :ok
+        [{_, attrs}] ->
+          :ets.insert(:admin_grpc_test_db, {{:room, room_id}, Map.put(attrs, :is_auto_join, is_auto_join)})
+          :ok
+      end
+    end
   end
 
   # ─── FakeAdminDBNotFound ──────────────────────────────────────────────────────
@@ -267,6 +278,8 @@ defmodule Nebu.EventDispatcher.AdminGrpcTest do
     # Story 9.18: list_room_members/1 added to satisfy the Nebu.Admin.DB callback.
     # RED: this function does not exist in Nebu.Admin.DB yet.
     def list_room_members(_room_id), do: {:ok, []}
+    # Story admin-auto-join-rooms: no-op stub for not-found fake.
+    def update_room_auto_join(_room_id, _is_auto_join), do: :ok
   end
 
   # ─── FakeSessionSupervisor ────────────────────────────────────────────────────

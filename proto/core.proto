@@ -367,11 +367,14 @@ message GetSyncDeltaResponse {
 
 // SyncRoom represents one joined room's state in an initial sync
 message SyncRoom {
-  string                      room_id         = 1;
-  repeated SyncRoomStateEvent state_events    = 2;
-  repeated Event              timeline_events = 3;
-  bool                        limited         = 4;  // true if timeline was truncated at 20
-  string                      prev_batch      = 5;  // pagination token for GET /messages
+  string                      room_id              = 1;
+  repeated SyncRoomStateEvent state_events         = 2;
+  repeated Event              timeline_events      = 3;
+  bool                        limited              = 4;  // true if timeline was truncated at 20
+  string                      prev_batch           = 5;  // pagination token for GET /messages
+  repeated string             heroes               = 6;  // m.heroes — max 5 participant user_ids (§11.2.2)
+  int32                       joined_member_count  = 7;  // m.joined_member_count
+  int32                       invited_member_count = 8;  // m.invited_member_count
 }
 
 // GetPresence — reads from Presence.Manager ETS, never raises not_found (offline default)
@@ -521,10 +524,11 @@ message InvalidateUserSessionsResponse {
   bool ok = 1;
 }
 
-// UpdateRoomSettings — Story 6.8
+// UpdateRoomSettings — Story 6.8 + admin-auto-join-rooms
 message UpdateRoomSettingsRequest {
   string room_id     = 1;
   int32  max_members = 2;  // 0 = no limit; always sent (even if unchanged) for simplicity
+  optional bool is_auto_join = 3;  // absent = do not change; true/false = set value
 }
 message UpdateRoomSettingsResponse {
   bool ok = 1;
@@ -614,6 +618,7 @@ message AdminRoomDetailProto {
   int32  max_members  = 5;  // 0 = no limit
   string visibility   = 6;  // "public" | "private"
   int64  created_at   = 7;
+  bool   is_auto_join = 8;  // true = new users auto-joined on first login
 }
 
 // ListAdminRooms

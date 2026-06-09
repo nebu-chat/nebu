@@ -33,7 +33,13 @@ defmodule Nebu.Session.BulkImporter do
         }
 
   @type result ::
-          {:ok, %{imported: non_neg_integer(), skipped: non_neg_integer(), failed: non_neg_integer()}}
+          {:ok,
+           %{
+             imported: non_neg_integer(),
+             skipped: non_neg_integer(),
+             failed: non_neg_integer(),
+             imported_user_ids: [String.t()]
+           }}
 
   @doc """
   Provisions a list of OIDC users with the same flow as first login.
@@ -42,19 +48,28 @@ defmodule Nebu.Session.BulkImporter do
   are counted as skipped — not an error. Errors on individual users are counted as failed
   and do not abort the batch.
 
-  Returns {:ok, %{imported: N, skipped: N, failed: N}}.
+  Returns {:ok, %{imported: N, skipped: N, failed: N, imported_user_ids: [user_id]}}.
+  Only newly-provisioned users appear in imported_user_ids — skipped and failed users
+  are excluded. The caller uses this list to trigger fire-and-forget room setup tasks.
   """
   @spec import_users([claims()]) :: result()
   def import_users(users) when is_list(users) do
     server_key = Application.get_env(:signature, :pii_encryption_key)
-    init = %{imported: 0, skipped: 0, failed: 0}
+    init = %{imported: 0, skipped: 0, failed: 0, imported_user_ids: []}
 
     result =
       Enum.reduce(users, init, fn user, acc ->
         case import_one(user, server_key) do
-          :imported -> Map.update!(acc, :imported, &(&1 + 1))
-          :skipped -> Map.update!(acc, :skipped, &(&1 + 1))
-          :failed -> Map.update!(acc, :failed, &(&1 + 1))
+          {:imported, user_id} ->
+            acc
+            |> Map.update!(:imported, &(&1 + 1))
+            |> Map.update!(:imported_user_ids, &[user_id | &1])
+
+          :skipped ->
+            Map.update!(acc, :skipped, &(&1 + 1))
+
+          :failed ->
+            Map.update!(acc, :failed, &(&1 + 1))
         end
       end)
 
@@ -70,7 +85,7 @@ defmodule Nebu.Session.BulkImporter do
         :not_provisioned ->
           with {:ok, _} <- user_store_module().upsert_user(user_id, role),
                {:ok, :provisioned} <- provisioner_module().provision_user(user_id, dn, email, server_key) do
-            :imported
+            {:imported, user_id}
           else
             {:error, reason} ->
               Logger.error("BulkImporter: failed to import #{user_id}: #{inspect(reason)}")

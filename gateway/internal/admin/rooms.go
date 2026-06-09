@@ -68,6 +68,7 @@ func protoToStubRoom(r *pb.AdminRoomDetailProto) *StubRoom {
 		MemberCount: int(r.GetMemberCount()),
 		MaxMembers:  int(r.GetMaxMembers()),
 		Status:      r.GetStatus(),
+		IsAutoJoin:  r.GetIsAutoJoin(),
 	}
 }
 
@@ -369,9 +370,9 @@ func (h *RoomsHandler) UpdateRoomNameHandler(w http.ResponseWriter, r *http.Requ
 }
 
 // UpdateRoomSettingsHandler handles POST /admin/rooms/{roomId}/settings.
-// Reads max_members from the form and calls the gRPC UpdateRoomSettings RPC.
+// Reads max_members and is_auto_join from the form and calls the gRPC UpdateRoomSettings RPC.
 // When core is nil: falls back to no-op / stub path (unit-test path).
-// Note: UpdateRoomSettingsRequest only carries max_members; visibility is not in the proto.
+// Note: UpdateRoomSettingsRequest carries max_members and optional is_auto_join; visibility is not in the proto.
 func (h *RoomsHandler) UpdateRoomSettingsHandler(w http.ResponseWriter, r *http.Request) {
 	roomID := r.PathValue("roomId")
 	if err := r.ParseForm(); err != nil {
@@ -390,12 +391,20 @@ func (h *RoomsHandler) UpdateRoomSettingsHandler(w http.ResponseWriter, r *http.
 		maxMembers = int32(n)
 	}
 
+	// Story admin-auto-join-rooms: checkbox sends "true" when checked, absent when unchecked.
+	// Always send is_auto_join to gRPC (optional proto field — nil means "do not change", but
+	// here we always know the intended state from the form submission).
+	isAutoJoin := r.FormValue("is_auto_join") == "true"
+	isAutoJoinPtr := &isAutoJoin
+
 	if h.core != nil {
-		// gRPC path — enrich context with admin identity so Core audit log records actor_user_id.
+		// Pass admin identity in gRPC metadata; Core's update_room_settings/2 reads it via
+		// trusted_identity/1 and emits an audit_log entry for the is_auto_join toggle.
 		grpcCtx := contextWithAdminIdentity(r.Context(), AdminSubFromContext(r.Context()))
 		_, err := h.core.UpdateRoomSettings(grpcCtx, &pb.UpdateRoomSettingsRequest{
 			RoomId:     roomID,
 			MaxMembers: maxMembers,
+			IsAutoJoin: isAutoJoinPtr,
 		})
 		if err != nil {
 			if st, ok := status.FromError(err); ok && st.Code() == codes.NotFound {

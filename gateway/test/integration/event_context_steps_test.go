@@ -92,10 +92,5 @@ func initializeEventContextSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^an unauthenticated client calls GET /rooms/\{roomId\}/context/\{eventId\}$`, unauthenticatedClientCallsGetEventContext)
 	sc.Step(`^kai calls GET /rooms/\{roomId\}/context/\$nonexistent_event_id_7_28$`, kaiCallsGetUnknownEventContext)
 	sc.Step(`^the context response contains (.+)$`, theContextResponseContainsField)
-	sc.Step(`^the response body is a JSON object$`, func() error {
-		if len(lastBody) == 0 || lastBody[0] != '{' {
-			return fmt.Errorf("expected JSON object, got: %s", lastBody)
-		}
-		return nil
-	})
+	// response body is a JSON object — shared step from room_state_steps_test.go
 }

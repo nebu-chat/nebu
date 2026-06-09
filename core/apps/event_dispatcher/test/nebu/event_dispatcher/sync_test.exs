@@ -221,6 +221,12 @@ defmodule Nebu.EventDispatcher.SyncTest do
         [] -> {:error, :not_found}
       end
     end
+    # Story personal-self-room: personal room callbacks.
+    def get_personal_room_id(_user_id), do: {:ok, nil}
+    def set_personal_room_id(_user_id, _room_id), do: :ok
+    # Story direct-room-heroes + admin-auto-join-rooms: required stubs.
+    def get_room_heroes(_room_id, _exclude_user_id), do: {:ok, %{heroes: [], joined: 0, invited: 0}}
+    def list_auto_join_rooms(), do: {:ok, []}
   end
 
   # ─── SyncTestFakeInviteDB ────────────────────────────────────────────────────
@@ -856,6 +862,11 @@ defmodule Nebu.EventDispatcher.SyncTest do
     def event_in_room?(_event_id, _room_id), do: true
     def check_room_status_for_update(_room_id), do: {:ok, "active"}
     defdelegate fetch_event(event_id, room_id), to: SyncTestFakeDB
+    # Story personal-self-room + direct-room-heroes + admin-auto-join-rooms: required stubs.
+    defdelegate get_personal_room_id(user_id), to: SyncTestFakeDB
+    defdelegate set_personal_room_id(user_id, room_id), to: SyncTestFakeDB
+    defdelegate get_room_heroes(room_id, exclude_user_id), to: SyncTestFakeDB
+    defdelegate list_auto_join_rooms(), to: SyncTestFakeDB
   end
 
   # ─── SyncDeltaThreadFakeDB ────────────────────────────────────────────────────
@@ -928,6 +939,11 @@ defmodule Nebu.EventDispatcher.SyncTest do
 
       {:ok, count}
     end
+    # Story personal-self-room + direct-room-heroes + admin-auto-join-rooms: required stubs.
+    defdelegate get_personal_room_id(user_id), to: SyncTestFakeDB
+    defdelegate set_personal_room_id(user_id, room_id), to: SyncTestFakeDB
+    defdelegate get_room_heroes(room_id, exclude_user_id), to: SyncTestFakeDB
+    defdelegate list_auto_join_rooms(), to: SyncTestFakeDB
   end
 
   # ─── Story 4-15 AT #1: get_sync_delta — pending events returned immediately ───

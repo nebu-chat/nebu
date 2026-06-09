@@ -3,8 +3,12 @@
 package integration_test
 
 import (
+	"fmt"
+	"net/http"
 	"os"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/cucumber/godog"
 )
@@ -75,7 +79,51 @@ func TestMain(m *testing.M) {
 	if coreGRPCAddr == "" {
 		coreGRPCAddr = "core:9000"
 	}
+	// Wait for the gateway's OIDC provider to warm up (lazy JWKS fetch).
+	// The gateway healthcheck only verifies the HTTP port is open; the go-oidc
+	// library fetches JWKS on the first token verification. If the test suite
+	// starts immediately after the stack is healthy, the first verification
+	// races the JWKS fetch and fails with 403. Poll until a real OIDC login
+	// succeeds (max 30s) so all subsequent scenarios start with a warm cache.
+	waitForOIDCReady()
 	os.Exit(m.Run())
+}
+
+// waitForOIDCReady polls a lightweight OIDC login probe until the gateway's
+// OIDC provider is ready (JWKS cached) or the 30s deadline is exceeded.
+// It uses a throwaway Dex token for kai@example.com; failures are retried
+// silently — only a hard timeout causes os.Exit(1).
+func waitForOIDCReady() {
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		if probeOIDCLogin() {
+			return
+		}
+		time.Sleep(2 * time.Second)
+	}
+	fmt.Fprintln(os.Stderr, "FATAL: gateway OIDC provider did not become ready within 30s — check Dex and gateway logs")
+	os.Exit(1)
+}
+
+// probeOIDCLogin attempts one full OIDC auth-code flow + Matrix login.
+// Returns true if the login returns HTTP 200, false for any other outcome.
+func probeOIDCLogin() bool {
+	if err := iObtainDexTokenFor("kai@example.com", "changeme"); err != nil {
+		return false
+	}
+	payload := fmt.Sprintf(`{"type":"m.login.token","token":%q}`, lastDexIDToken)
+	req, err := http.NewRequest(http.MethodPost, matrixURL+"/_matrix/client/v3/login",
+		strings.NewReader(payload))
+	if err != nil {
+		return false
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
 }
 
 // TestIntegrationSuite runs all Gherkin scenarios from gateway/features/.

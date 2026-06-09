@@ -632,6 +632,50 @@ defmodule Nebu.Room.DB do
   end
 
   @spec get_room_name(String.t()) :: {:ok, String.t()} | {:error, :not_found | term()}
+  @doc """
+  Returns heroes, joined count, and invited count for `room_id`, excluding `exclude_user_id`.
+
+  Heroes = up to 5 members ordered by joined_at ASC (active joined members first, then
+  pending invitations), excluding the syncing user. Counts include all active members /
+  all pending invitations respectively (inclusive of the syncing user).
+
+  Returns `{:ok, %{heroes: [user_id], joined: integer(), invited: integer()}}` on success.
+  Returns `{:error, reason}` on DB error.
+
+  Story direct-room-heroes (§11.2.2): used by attach_heroes/3 in EventDispatcher.Server.
+  """
+  @spec get_room_heroes(String.t(), String.t()) ::
+          {:ok, %{heroes: [String.t()], joined: integer(), invited: integer()}}
+          | {:error, term()}
+  def get_room_heroes(room_id, exclude_user_id) do
+    heroes_sql = """
+    (SELECT user_id, joined_at FROM room_members
+     WHERE room_id = $1 AND user_id != $2 AND left_at IS NULL
+     ORDER BY joined_at ASC LIMIT 5)
+    UNION ALL
+    (SELECT invitee_id AS user_id, invited_at AS joined_at FROM room_invitations
+     WHERE room_id = $1 AND invitee_id != $2
+       AND accepted_at IS NULL AND rejected_at IS NULL
+     ORDER BY invited_at ASC)
+    LIMIT 5
+    """
+
+    joined_sql = "SELECT COUNT(*) FROM room_members WHERE room_id = $1 AND left_at IS NULL"
+
+    invited_sql =
+      "SELECT COUNT(*) FROM room_invitations WHERE room_id = $1 AND accepted_at IS NULL AND rejected_at IS NULL"
+
+    with {:ok, %{rows: hero_rows}} <-
+           Ecto.Adapters.SQL.query(Nebu.Repo, heroes_sql, [room_id, exclude_user_id]),
+         {:ok, %{rows: [[joined]]}} <-
+           Ecto.Adapters.SQL.query(Nebu.Repo, joined_sql, [room_id]),
+         {:ok, %{rows: [[invited]]}} <-
+           Ecto.Adapters.SQL.query(Nebu.Repo, invited_sql, [room_id]) do
+      heroes = Enum.map(hero_rows, fn [user_id, _joined_at] -> user_id end)
+      {:ok, %{heroes: heroes, joined: joined, invited: invited}}
+    end
+  end
+
   def get_room_name(room_id) do
     sql = """
     SELECT CASE
@@ -765,6 +809,58 @@ defmodule Nebu.Room.DB do
     end
   end
 
+  # ─── Story personal-self-room: personal_room_id helpers ─────────────────────
+
+  @sql_get_personal_room_id """
+  SELECT personal_room_id FROM users WHERE user_id = $1
+  """
+
+  @doc """
+  Returns the personal_room_id for the given `user_id`.
+
+  Returns `{:ok, room_id}` when the column is set (non-nil).
+  Returns `{:ok, nil}` when the user exists but has no personal self-room yet.
+  Returns `{:error, reason}` on DB error.
+
+  Story personal-self-room: called by ensure_personal_room/1 to check whether
+  a self-room already exists (idempotency anchor).
+  """
+  @spec get_personal_room_id(String.t()) :: {:ok, String.t() | nil} | {:error, term()}
+  def get_personal_room_id(user_id) do
+    case Ecto.Adapters.SQL.query(Nebu.Repo, @sql_get_personal_room_id, [user_id]) do
+      {:ok, %{rows: [[room_id]]}} -> {:ok, room_id}
+      {:ok, %{rows: []}} -> {:ok, nil}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @sql_set_personal_room_id """
+  UPDATE users SET personal_room_id = $2
+  WHERE user_id = $1 AND personal_room_id IS NULL
+  """
+
+  @doc """
+  Sets the personal_room_id for `user_id` to `room_id`, but only when it is currently NULL.
+
+  The `WHERE personal_room_id IS NULL` guard prevents duplicate self-room creation in
+  a concurrent-login race: the second UPDATE simply matches zero rows.
+
+  Returns `:ok` when the row was claimed.
+  Returns `{:ok, :already_set}` when another concurrent caller won the race (0 rows updated).
+  Returns `{:error, reason}` on DB error.
+
+  Callers that receive `{:ok, :already_set}` created an orphan room (no security impact —
+  the user owns it — but it appears in /sync). Known race; see F-3 in the epic security review.
+  """
+  @spec set_personal_room_id(String.t(), String.t()) :: :ok | {:ok, :already_set} | {:error, term()}
+  def set_personal_room_id(user_id, room_id) do
+    case Ecto.Adapters.SQL.query(Nebu.Repo, @sql_set_personal_room_id, [user_id, room_id]) do
+      {:ok, %{num_rows: 1}} -> :ok
+      {:ok, %{num_rows: 0}} -> {:ok, :already_set}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
   @doc """
   Returns the most recent state event per (event_type, state_key) for `room_id`,
   excluding event types handled separately (m.room.member, m.room.power_levels,
@@ -809,6 +905,22 @@ defmodule Nebu.Room.DB do
 
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+
+  @sql_list_auto_join_rooms """
+  SELECT room_id FROM rooms WHERE is_auto_join = true AND status = 'active'
+  """
+
+  @doc """
+  Returns all room IDs with is_auto_join=true and status='active'.
+
+  Story admin-auto-join-rooms: called by ensure_auto_join_memberships/1 at first login.
+  """
+  def list_auto_join_rooms do
+    case Ecto.Adapters.SQL.query(Nebu.Repo, @sql_list_auto_join_rooms, []) do
+      {:ok, %{rows: rows}} -> {:ok, Enum.map(rows, fn [rid] -> rid end)}
+      {:error, reason} -> {:error, reason}
     end
   end
 end

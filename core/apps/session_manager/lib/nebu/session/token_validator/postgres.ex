@@ -59,11 +59,13 @@ defmodule Nebu.Session.TokenValidator.Postgres do
            Nebu.Session.BootstrapChecker.upsert_with_bootstrap(user_id, system_role),
          {:ok, :provisioned} <-
            Nebu.Session.UserProvisioner.provision_user(user_id, display_name, email, server_key) do
+      # Story admin-auto-join-rooms: is_new: true signals validate_token to trigger ensure_auto_join_memberships.
       {:ok, %{
         user_id: user_id,
         system_role: resolved_role,
         display_name: display_name,
-        is_active: true
+        is_active: true,
+        is_new: true
       }}
     else
       {:error, reason} -> {:error, reason}
@@ -95,11 +97,13 @@ defmodule Nebu.Session.TokenValidator.Postgres do
 
     case Nebu.Signature.decrypt_operational_pii(dn_enc, dn_nonce, server_key) do
       {:ok, display_name} ->
+        # Story admin-auto-join-rooms: is_new: false — existing user, no auto-join needed.
         {:ok, %{
           user_id: user_id,
           system_role: system_role,
           display_name: display_name,
-          is_active: true
+          is_active: true,
+          is_new: false
         }}
 
       {:error, reason} ->

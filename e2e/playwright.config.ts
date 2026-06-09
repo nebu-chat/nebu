@@ -4,11 +4,17 @@
  * Story 9-26 — Phase 1, AC1 + AC5.
  *
  * Projects:
- * - chromium          : existing API-contract tests (unchanged)
  * - admin-ui          : Admin UI BDD tests via playwright-bdd (Phase 3)
  * - element-web       : Element Web browser-first E2E (Phase 2)
  * - website           : Static website smoke tests (Phase 3, Story 16.2)
  *                       Self-skip when WEBSITE_BASE_URL is not reachable.
+ *
+ * NOTE: The legacy `chromium` project (tests/**\/*.spec.ts) was removed.
+ * The 34 legacy spec files in e2e/tests/ are ATDD red-phase and API-contract
+ * tests owned by individual stories (9.2, 9.3, 9.13, 9.15, etc.).
+ * Fully-skipped files have been deleted. The remaining files will be migrated
+ * to playwright-bdd .feature files as each owning story closes.
+ * To run legacy specs manually: npx playwright test --config=tests/playwright.legacy.config.ts
  */
 
 import { defineConfig, devices } from '@playwright/test';
@@ -57,13 +63,6 @@ export default defineConfig({
     screenshot: 'only-on-failure',
   },
   projects: [
-    // ── Existing: API-Contract Tests (no BDD, no change) ─────────────────────
-    {
-      name: 'chromium',
-      testDir: './tests',
-      use: { ...devices['Desktop Chrome'] },
-    },
-
     // ── Phase 3: Admin UI BDD (playwright-bdd) ───────────────────────────────
     {
       ...adminUiProject,
