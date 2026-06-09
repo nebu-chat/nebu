@@ -149,7 +149,8 @@ ADRs are tracked in `docs/architecture/adr/`:
 | 012 | Upstream repo = reference implementation only; no official deployments; example-only CI credentials |
 | 014 | Deployment strategy and IaC: OpenTofu (MPL-2.0) with AWS (ECS Fargate), Stackit (VMs + Docker Compose + ALB), Kubernetes/Helm |
 | 015 | OIDC User Directory Integration: two complementary protocols — OIDC directory endpoint (Dex/Keycloak, user search) + SCIM 2.0 RFC 7644 (Azure AD/Okta, bulk import) |
-| 016 | Git Branching and Release Strategy: simplified Git Flow (`main` + `develop` + `feature/*` / `fix/*` / `release/*` / `hotfix/*`), named feature branches per epic, SemVer tags on `main` only |
+| 016 | Git Branching and Release Strategy: simplified Git Flow (`main` + `develop` + …) — **Superseded by ADR-017** |
+| 017 | Simplified main-only branching: `main` is the single long-lived branch; `feature/*`, `bugfix/*`, `release/*`, `hotfix/*` all branch from and merge to `main`. No `develop`. `main` builds dev-* images. |
 
 ## Named Epic Convention (from v0.3.0+)
 
@@ -166,9 +167,9 @@ Stories and epics no longer use numeric identifiers. Each feature is its own nam
 - Sprint status: `_bmad-output/nebu/epics/<epic-name>/sprint-status.yaml`
 - Step results: `_bmad-output/nebu/epics/<epic-name>/step-results/<story-slug>/`
 
-**Git branches (ADR-016):**
-- Feature epics live in `feature/<epic-name>` branches (branched from `develop`)
-- Stable releases are tagged on `main` — never on `develop` or feature branches
+**Git branches (ADR-017):**
+- Feature epics live in `feature/<epic-name>` branches (branched from `main`)
+- Stable releases are tagged on `main` — never on feature branches
 
 **Existing numbered epics 1–16** (in `docs/stories/mvp/`, `phase2/`, `phase3/`) remain unchanged. Do not renumber or move them.
 
@@ -177,7 +178,7 @@ Stories and epics no longer use numeric identifiers. Each feature is its own nam
 /nebu-release new-epic <name>     — create feature/<name> branch + scaffold dirs
 /nebu-pipeline --epic <name>      — run a single story in named epic
 /nebu-pipeline-epic --epic <name> — run all stories in named epic
-/nebu-release close               — merge release/* or hotfix/* → main + develop, tag
+/nebu-release close               — merge release/* or hotfix/* → main, tag
 ```
 
 ## BMAD Workflow
