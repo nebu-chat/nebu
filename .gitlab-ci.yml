@@ -72,7 +72,7 @@ variables:
 # feature/* and bugfix/* branches never run branch pipelines — only MR pipelines.
 # This eliminates the race condition where a branch pipeline starts before the MR
 # exists ($CI_OPEN_MERGE_REQUESTS is empty at push time) and then the MR pipeline
-# starts on top of it. Protected branches (main, develop, release/*, hotfix/*) still
+# starts on top of it. Protected branches (main, release/*, hotfix/*) still
 # run branch pipelines. Tag pipelines (v*.*.* SemVer) trigger the release stage.
 workflow:
   rules:
@@ -81,7 +81,6 @@ workflow:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: '$CI_PIPELINE_SOURCE == "schedule"'
     - if: '$CI_COMMIT_BRANCH == "main"'
-    - if: '$CI_COMMIT_BRANCH == "develop"'
     - if: '$CI_COMMIT_BRANCH =~ /^release\//'
     - if: '$CI_COMMIT_BRANCH =~ /^hotfix\//'
 
@@ -136,8 +135,6 @@ build-ci-go:
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
       changes: [docker/Dockerfile.ci.go]
-    - if: '$CI_COMMIT_BRANCH == "develop"'
-      changes: [docker/Dockerfile.ci.go]
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes: [docker/Dockerfile.ci.go]
     - when: manual
@@ -155,8 +152,6 @@ build-ci-elixir:
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
       changes: [docker/Dockerfile.ci.elixir]
-    - if: '$CI_COMMIT_BRANCH == "develop"'
-      changes: [docker/Dockerfile.ci.elixir]
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes: [docker/Dockerfile.ci.elixir]
     - when: manual
@@ -173,8 +168,6 @@ build-ci-dex:
       --cache-ttl=168h
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
-      changes: [docker/Dockerfile.dex-ci, dev/dex/config.yaml]
-    - if: '$CI_COMMIT_BRANCH == "develop"'
       changes: [docker/Dockerfile.dex-ci, dev/dex/config.yaml]
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes: [docker/Dockerfile.dex-ci, dev/dex/config.yaml]
@@ -205,7 +198,6 @@ lint-go:
       - /root/go/pkg/mod
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
-    - if: '$CI_COMMIT_BRANCH == "develop"'
     - if: '$CI_COMMIT_BRANCH =~ /^feature\//'
     - if: '$CI_COMMIT_BRANCH =~ /^bugfix\//'
     - if: '$CI_COMMIT_BRANCH =~ /^release\//'
@@ -227,7 +219,6 @@ test-unit-go:
       - /root/go/pkg/mod
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
-    - if: '$CI_COMMIT_BRANCH == "develop"'
     - if: '$CI_COMMIT_BRANCH =~ /^feature\//'
     - if: '$CI_COMMIT_BRANCH =~ /^bugfix\//'
     - if: '$CI_COMMIT_BRANCH =~ /^release\//'
@@ -247,7 +238,6 @@ test-unit-elixir:
       - ~/.mix
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
-    - if: '$CI_COMMIT_BRANCH == "develop"'
     - if: '$CI_COMMIT_BRANCH =~ /^feature\//'
     - if: '$CI_COMMIT_BRANCH =~ /^bugfix\//'
     - if: '$CI_COMMIT_BRANCH =~ /^release\//'
@@ -279,7 +269,6 @@ secret-scan:
       - gitleaks-report.json
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
-    - if: '$CI_COMMIT_BRANCH == "develop"'
     - if: '$CI_COMMIT_BRANCH =~ /^feature\//'
     - if: '$CI_COMMIT_BRANCH =~ /^bugfix\//'
     - if: '$CI_COMMIT_BRANCH =~ /^release\//'
@@ -298,7 +287,6 @@ verify-docs:
   allow_failure: false
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
-    - if: '$CI_COMMIT_BRANCH == "develop"'
     - if: '$CI_COMMIT_BRANCH =~ /^feature\//'
     - if: '$CI_COMMIT_BRANCH =~ /^bugfix\//'
     - if: '$CI_COMMIT_BRANCH =~ /^release\//'
@@ -321,7 +309,6 @@ build-gateway-image:
       --cache-ttl=24h
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
-    - if: '$CI_COMMIT_BRANCH == "develop"'
     - if: '$CI_COMMIT_BRANCH =~ /^release\//'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
 
@@ -337,7 +324,6 @@ build-core-image:
       --cache-ttl=24h
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
-    - if: '$CI_COMMIT_BRANCH == "develop"'
     - if: '$CI_COMMIT_BRANCH =~ /^release\//'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
 
@@ -353,12 +339,11 @@ build-media-image:
       --cache-ttl=24h
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
-    - if: '$CI_COMMIT_BRANCH == "develop"'
     - if: '$CI_COMMIT_BRANCH =~ /^release\//'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
 
-# ─── Pre-release Image Builds (develop branch) ───────────────────────────────
-# Pushes preview images on every commit to the `develop` branch.
+# ─── Pre-release Image Builds (main branch) ───────────────────────────────
+# Pushes preview images on every commit to the `main` branch.
 # Tags: dev-<CI_PIPELINE_ID> (immutable per run) + dev-latest (mutable pointer).
 # These images reflect development state and are NOT intended for production.
 
@@ -376,7 +361,7 @@ prerelease-gateway-image:
       --cache=true
       --cache-ttl=24h
   rules:
-    - if: '$CI_COMMIT_BRANCH == "develop"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
 
 prerelease-core-image:
   <<: *build_ci_image
@@ -392,7 +377,7 @@ prerelease-core-image:
       --cache=true
       --cache-ttl=24h
   rules:
-    - if: '$CI_COMMIT_BRANCH == "develop"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
 
 prerelease-media-image:
   <<: *build_ci_image
@@ -408,7 +393,7 @@ prerelease-media-image:
       --cache=true
       --cache-ttl=24h
   rules:
-    - if: '$CI_COMMIT_BRANCH == "develop"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
 
 # ─── Integration Test ─────────────────────────────────────────────────────────
 # Requires DinD: starts docker compose stack, runs Gherkin tests, tears down.
@@ -443,9 +428,6 @@ integration-test:
     - make test-integration-ci
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
-      when: manual
-      allow_failure: true
-    - if: '$CI_COMMIT_BRANCH == "develop"'
       when: manual
       allow_failure: true
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
@@ -486,9 +468,6 @@ integration-test-podman:
     - podman-compose -f docker-compose.yml -f docker-compose.ci.yml down
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
-      when: manual
-      allow_failure: true
-    - if: '$CI_COMMIT_BRANCH == "develop"'
       when: manual
       allow_failure: true
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
@@ -560,9 +539,6 @@ integration-test-k8s:
      - if: '$CI_COMMIT_BRANCH == "main"'
        when: manual
        allow_failure: true
-     - if: '$CI_COMMIT_BRANCH == "develop"'
-       when: manual
-       allow_failure: true
      - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
        when: manual
        allow_failure: true
@@ -607,9 +583,6 @@ validate-iac:
     - if: '$CI_COMMIT_BRANCH == "main"'
       changes:
         - deploy/**/*
-    - if: '$CI_COMMIT_BRANCH == "develop"'
-      changes:
-        - deploy/**/*
     - if: '$CI_COMMIT_BRANCH =~ /^feature\//'
     - if: '$CI_COMMIT_BRANCH =~ /^bugfix\//'
       changes:
@@ -635,9 +608,6 @@ validate-helm:
     - echo "==> Helm validation passed."
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
-      changes:
-        - deploy/**/*
-    - if: '$CI_COMMIT_BRANCH == "develop"'
       changes:
         - deploy/**/*
     - if: '$CI_COMMIT_BRANCH =~ /^feature\//'
