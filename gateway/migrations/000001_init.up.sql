@@ -81,7 +81,7 @@ CREATE POLICY config_update_mutable ON server_config
 
 -- ─── users ───────────────────────────────────────────────────────────────────
 -- Core user identity, system roles, encrypted PII, key references.
--- Final column set from migrations 4, 6, 21, 22, 34.
+-- Final column set from migrations 4, 6, 21, 22, 34; plus story personal-self-room.
 CREATE TABLE users (
     user_id                   TEXT    PRIMARY KEY,
     display_name_encrypted    BYTEA,
@@ -181,6 +181,19 @@ CREATE TABLE rooms (
 
 CREATE INDEX rooms_status_idx ON rooms (status);
 CREATE INDEX rooms_created_at_id_idx ON rooms (created_at DESC, room_id);
+
+-- Story personal-self-room: personal_room_id anchor for idempotent self-room creation.
+-- NULL  → user has no personal self-room yet.
+-- Non-NULL → room_id of the user's personal self-room (idempotency anchor).
+-- Added after rooms table so the FK reference resolves correctly.
+ALTER TABLE users
+    ADD COLUMN personal_room_id TEXT REFERENCES rooms(room_id);
+
+-- Story admin-auto-join-rooms: is_auto_join flag.
+-- true  → newly provisioned users are auto-joined to this room at first login.
+-- false → default behaviour (manual join / invite only).
+ALTER TABLE rooms ADD COLUMN is_auto_join BOOLEAN NOT NULL DEFAULT false;
+CREATE INDEX rooms_auto_join_idx ON rooms (is_auto_join) WHERE is_auto_join = true;
 
 -- ─── room_members ────────────────────────────────────────────────────────────
 CREATE TABLE room_members (

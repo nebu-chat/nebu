@@ -138,7 +138,7 @@ func theAliasesArrayIsEmpty() error {
 func initializeRoomAliasesSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^kai calls GET /rooms/\{roomId\}/aliases$`, kaiCallsGetRoomAliases)
 	sc.Step(`^marie calls GET /rooms/\{roomId\}/aliases$`, marieCallsGetRoomAliases)
-	sc.Step(`^kai calls GET /rooms/([^/]+)/aliases$`, kaiCallsGetRoomAliasesUnknownRoom)
+	sc.Step(`^kai calls GET /rooms/(!.+)/aliases$`, kaiCallsGetRoomAliasesUnknownRoom)
 	sc.Step(`^an unauthenticated client calls GET /rooms/\{roomId\}/aliases$`, unauthenticatedClientCallsGetRoomAliases)
 	sc.Step(`^the aliases array is empty$`, theAliasesArrayIsEmpty)
 }

@@ -127,4 +127,7 @@ func InitializeScenario(sc *godog.ScenarioContext) {
 	initializeGdprDeletionSteps(sc)           // GDPR right to erasure end-to-end (Story 14-4)
 	initializeMatrixSessionRefreshSteps(sc)   // Matrix session refresh + opaque tokens (bugfix/fix-short-oidc-sessions)
 	initializeRoomLeaveSteps(sc)              // room leave persistence + sync correctness (bugfix/room-list-not-updated-after-leave)
+	initializePersonalSelfRoomSteps(sc)       // Personal self-room at first login (room-naming-and-default-rooms)
+	initializeAutoJoinRoomsSteps(sc)          // Admin auto-join rooms — new user auto-membership (room-naming-and-default-rooms)
+	initializeDirectRoomHeroesSteps(sc)       // DM room heroes summary (room-naming-and-default-rooms)
 }

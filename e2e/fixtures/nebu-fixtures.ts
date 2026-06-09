@@ -50,13 +50,31 @@ const test = mergeTests(bddBase).extend<NebuFixtures>({
    * Creates a new browser context, opens a setup page, runs loginViaOidcBrowser()
    * (which fills the context's IndexedDB with a live session), then closes the setup
    * page. The context is handed to the test with an active Element Web session.
+   *
+   * BUG-E2E-12 fix: admin-ui and website tests do NOT need an Element Web IndexedDB
+   * session — they navigate to the admin panel or static site directly. Skipping the
+   * Element OIDC login for these projects avoids a ~90s timeout caused by the
+   * "Continue with SSO" button flow in the background fixture.
    */
   context: async (
     { browser, credentials }: { browser: Browser; credentials: NebUser },
-    use: (ctx: BrowserContext) => Promise<void>
+    use: (ctx: BrowserContext) => Promise<void>,
+    testInfo
   ) => {
-    // Retry OIDC login up to 3 times: the SSO redirect can time out when the Dex/Nebu
-    // endpoint is under load after multiple rapid logins in previous scenarios.
+    // Admin and website tests navigate to their own URLs without needing Element Web.
+    // Skip the expensive Element OIDC login for these projects.
+    const needsElementSession = testInfo.project.name === 'element-web';
+    if (!needsElementSession) {
+      const ctx = await browser.newContext();
+      try {
+        await use(ctx);
+      } finally {
+        await ctx.close();
+      }
+      return;
+    }
+
+    // element-web tests: full OIDC login with up to 3 retries.
     let readyCtx: BrowserContext | null = null;
     let lastErr: Error | null = null;
     for (let attempt = 1; attempt <= 3 && !readyCtx; attempt++) {

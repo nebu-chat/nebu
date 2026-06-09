@@ -94,6 +94,12 @@ defmodule Nebu.EventDispatcher.JoinRoomTest do
 
     # GAP-LEAVE-UI: required by @behaviour Nebu.Room.DBBehaviour.
     def get_recently_left_rooms_for_user(_user_id), do: {:ok, []}
+    # Story personal-self-room: personal room callbacks.
+    def get_personal_room_id(_user_id), do: {:ok, nil}
+    def set_personal_room_id(_user_id, _room_id), do: :ok
+    # Story direct-room-heroes + admin-auto-join-rooms: required stubs.
+    def get_room_heroes(_room_id, _exclude_user_id), do: {:ok, %{heroes: [], joined: 0, invited: 0}}
+    def list_auto_join_rooms(), do: {:ok, []}
   end
 
   # ─── FakeInviteDB ─────────────────────────────────────────────────────────────

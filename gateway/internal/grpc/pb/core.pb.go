@@ -2016,14 +2016,17 @@ func (x *GetSyncDeltaResponse) GetFallbackToInitial() bool {
 
 // SyncRoom represents one joined room's state in an initial sync
 type SyncRoom struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	RoomId         string                 `protobuf:"bytes,1,opt,name=room_id,json=roomId,proto3" json:"room_id,omitempty"`
-	StateEvents    []*SyncRoomStateEvent  `protobuf:"bytes,2,rep,name=state_events,json=stateEvents,proto3" json:"state_events,omitempty"`
-	TimelineEvents []*Event               `protobuf:"bytes,3,rep,name=timeline_events,json=timelineEvents,proto3" json:"timeline_events,omitempty"`
-	Limited        bool                   `protobuf:"varint,4,opt,name=limited,proto3" json:"limited,omitempty"`                     // true if timeline was truncated at 20
-	PrevBatch      string                 `protobuf:"bytes,5,opt,name=prev_batch,json=prevBatch,proto3" json:"prev_batch,omitempty"` // pagination token for GET /messages
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	RoomId             string                 `protobuf:"bytes,1,opt,name=room_id,json=roomId,proto3" json:"room_id,omitempty"`
+	StateEvents        []*SyncRoomStateEvent  `protobuf:"bytes,2,rep,name=state_events,json=stateEvents,proto3" json:"state_events,omitempty"`
+	TimelineEvents     []*Event               `protobuf:"bytes,3,rep,name=timeline_events,json=timelineEvents,proto3" json:"timeline_events,omitempty"`
+	Limited            bool                   `protobuf:"varint,4,opt,name=limited,proto3" json:"limited,omitempty"`                                                   // true if timeline was truncated at 20
+	PrevBatch          string                 `protobuf:"bytes,5,opt,name=prev_batch,json=prevBatch,proto3" json:"prev_batch,omitempty"`                               // pagination token for GET /messages
+	Heroes             []string               `protobuf:"bytes,6,rep,name=heroes,proto3" json:"heroes,omitempty"`                                                      // m.heroes — max 5 participant user_ids (§11.2.2)
+	JoinedMemberCount  int32                  `protobuf:"varint,7,opt,name=joined_member_count,json=joinedMemberCount,proto3" json:"joined_member_count,omitempty"`    // m.joined_member_count
+	InvitedMemberCount int32                  `protobuf:"varint,8,opt,name=invited_member_count,json=invitedMemberCount,proto3" json:"invited_member_count,omitempty"` // m.invited_member_count
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *SyncRoom) Reset() {
@@ -2089,6 +2092,27 @@ func (x *SyncRoom) GetPrevBatch() string {
 		return x.PrevBatch
 	}
 	return ""
+}
+
+func (x *SyncRoom) GetHeroes() []string {
+	if x != nil {
+		return x.Heroes
+	}
+	return nil
+}
+
+func (x *SyncRoom) GetJoinedMemberCount() int32 {
+	if x != nil {
+		return x.JoinedMemberCount
+	}
+	return 0
+}
+
+func (x *SyncRoom) GetInvitedMemberCount() int32 {
+	if x != nil {
+		return x.InvitedMemberCount
+	}
+	return 0
 }
 
 // GetPresence — reads from Presence.Manager ETS, never raises not_found (offline default)
@@ -3463,11 +3487,12 @@ func (x *InvalidateUserSessionsResponse) GetOk() bool {
 	return false
 }
 
-// UpdateRoomSettings — Story 6.8
+// UpdateRoomSettings — Story 6.8 + admin-auto-join-rooms
 type UpdateRoomSettingsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	RoomId        string                 `protobuf:"bytes,1,opt,name=room_id,json=roomId,proto3" json:"room_id,omitempty"`
-	MaxMembers    int32                  `protobuf:"varint,2,opt,name=max_members,json=maxMembers,proto3" json:"max_members,omitempty"` // 0 = no limit; always sent (even if unchanged) for simplicity
+	MaxMembers    int32                  `protobuf:"varint,2,opt,name=max_members,json=maxMembers,proto3" json:"max_members,omitempty"`         // 0 = no limit; always sent (even if unchanged) for simplicity
+	IsAutoJoin    *bool                  `protobuf:"varint,3,opt,name=is_auto_join,json=isAutoJoin,proto3,oneof" json:"is_auto_join,omitempty"` // absent = do not change; true/false = set value
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3514,6 +3539,13 @@ func (x *UpdateRoomSettingsRequest) GetMaxMembers() int32 {
 		return x.MaxMembers
 	}
 	return 0
+}
+
+func (x *UpdateRoomSettingsRequest) GetIsAutoJoin() bool {
+	if x != nil && x.IsAutoJoin != nil {
+		return *x.IsAutoJoin
+	}
+	return false
 }
 
 type UpdateRoomSettingsResponse struct {
@@ -4476,6 +4508,7 @@ type AdminRoomDetailProto struct {
 	MaxMembers    int32                  `protobuf:"varint,5,opt,name=max_members,json=maxMembers,proto3" json:"max_members,omitempty"` // 0 = no limit
 	Visibility    string                 `protobuf:"bytes,6,opt,name=visibility,proto3" json:"visibility,omitempty"`                    // "public" | "private"
 	CreatedAt     int64                  `protobuf:"varint,7,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	IsAutoJoin    bool                   `protobuf:"varint,8,opt,name=is_auto_join,json=isAutoJoin,proto3" json:"is_auto_join,omitempty"` // true = new users auto-joined on first login
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4557,6 +4590,13 @@ func (x *AdminRoomDetailProto) GetCreatedAt() int64 {
 		return x.CreatedAt
 	}
 	return 0
+}
+
+func (x *AdminRoomDetailProto) GetIsAutoJoin() bool {
+	if x != nil {
+		return x.IsAutoJoin
+	}
+	return false
 }
 
 // ListAdminRooms
@@ -6276,14 +6316,17 @@ const file_core_proto_rawDesc = "" +
 	"\vsince_token\x18\x01 \x01(\tR\n" +
 	"sinceToken\x12$\n" +
 	"\x05rooms\x18\x02 \x03(\v2\x0e.core.SyncRoomR\x05rooms\x12.\n" +
-	"\x13fallback_to_initial\x18\x03 \x01(\bR\x11fallbackToInitial\"\xcf\x01\n" +
+	"\x13fallback_to_initial\x18\x03 \x01(\bR\x11fallbackToInitial\"\xc9\x02\n" +
 	"\bSyncRoom\x12\x17\n" +
 	"\aroom_id\x18\x01 \x01(\tR\x06roomId\x12;\n" +
 	"\fstate_events\x18\x02 \x03(\v2\x18.core.SyncRoomStateEventR\vstateEvents\x124\n" +
 	"\x0ftimeline_events\x18\x03 \x03(\v2\v.core.EventR\x0etimelineEvents\x12\x18\n" +
 	"\alimited\x18\x04 \x01(\bR\alimited\x12\x1d\n" +
 	"\n" +
-	"prev_batch\x18\x05 \x01(\tR\tprevBatch\"-\n" +
+	"prev_batch\x18\x05 \x01(\tR\tprevBatch\x12\x16\n" +
+	"\x06heroes\x18\x06 \x03(\tR\x06heroes\x12.\n" +
+	"\x13joined_member_count\x18\a \x01(\x05R\x11joinedMemberCount\x120\n" +
+	"\x14invited_member_count\x18\b \x01(\x05R\x12invitedMemberCount\"-\n" +
 	"\x12GetPresenceRequest\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\"Y\n" +
 	"\x13GetPresenceResponse\x12\x1a\n" +
@@ -6373,11 +6416,14 @@ const file_core_proto_rawDesc = "" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x1b\n" +
 	"\tdevice_id\x18\x02 \x01(\tR\bdeviceId\"0\n" +
 	"\x1eInvalidateUserSessionsResponse\x12\x0e\n" +
-	"\x02ok\x18\x01 \x01(\bR\x02ok\"U\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok\"\x8d\x01\n" +
 	"\x19UpdateRoomSettingsRequest\x12\x17\n" +
 	"\aroom_id\x18\x01 \x01(\tR\x06roomId\x12\x1f\n" +
 	"\vmax_members\x18\x02 \x01(\x05R\n" +
-	"maxMembers\",\n" +
+	"maxMembers\x12%\n" +
+	"\fis_auto_join\x18\x03 \x01(\bH\x00R\n" +
+	"isAutoJoin\x88\x01\x01B\x0f\n" +
+	"\r_is_auto_join\",\n" +
 	"\x1aUpdateRoomSettingsResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\"-\n" +
 	"\x12ArchiveRoomRequest\x12\x17\n" +
@@ -6432,7 +6478,7 @@ const file_core_proto_rawDesc = "" +
 	"\x06status\x18\x03 \x01(\tR\x06status\x12!\n" +
 	"\fmember_count\x18\x04 \x01(\x05R\vmemberCount\x12\x1d\n" +
 	"\n" +
-	"created_at\x18\x05 \x01(\x03R\tcreatedAt\"\xde\x01\n" +
+	"created_at\x18\x05 \x01(\x03R\tcreatedAt\"\x80\x02\n" +
 	"\x14AdminRoomDetailProto\x12\x17\n" +
 	"\aroom_id\x18\x01 \x01(\tR\x06roomId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
@@ -6444,7 +6490,9 @@ const file_core_proto_rawDesc = "" +
 	"visibility\x18\x06 \x01(\tR\n" +
 	"visibility\x12\x1d\n" +
 	"\n" +
-	"created_at\x18\a \x01(\x03R\tcreatedAt\"\x82\x01\n" +
+	"created_at\x18\a \x01(\x03R\tcreatedAt\x12 \n" +
+	"\fis_auto_join\x18\b \x01(\bR\n" +
+	"isAutoJoin\"\x82\x01\n" +
 	"\x15ListAdminRoomsRequest\x12\x14\n" +
 	"\x05limit\x18\x01 \x01(\x05R\x05limit\x12\x16\n" +
 	"\x06cursor\x18\x02 \x01(\tR\x06cursor\x12#\n" +
@@ -6872,6 +6920,7 @@ func file_core_proto_init() {
 	file_core_proto_msgTypes[9].OneofWrappers = []any{}
 	file_core_proto_msgTypes[11].OneofWrappers = []any{}
 	file_core_proto_msgTypes[19].OneofWrappers = []any{}
+	file_core_proto_msgTypes[60].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

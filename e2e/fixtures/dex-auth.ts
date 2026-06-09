@@ -146,13 +146,22 @@ export async function loginViaOidcBrowser(
         .waitFor({ state: 'visible', timeout: 15_000 });
       await page.getByRole('link', { name: /sign in|anmelden/i }).click();
 
-      await page.getByRole('button', { name: /continue with sso|mit sso|weiter mit sso/i })
-        .waitFor({ state: 'visible', timeout: 15_000 });
-      await page.getByRole('button', { name: /continue with sso|mit sso|weiter mit sso/i }).click();
+      // Element Web renders the SSO button with varying text across versions:
+      // v1.11: "Continue with SSO", v1.12+: "Continue with single sign-on" or provider name.
+      // Use a broad text regex + CSS-class fallback so the selector works across versions.
+      const ssoBtn = page
+        .locator('.mx_SSOButton')
+        .or(page.getByRole('button', { name: /sso|single sign.on|continue with|sign in with/i }));
+      await ssoBtn.first().waitFor({ state: 'visible', timeout: 15_000 });
+      await ssoBtn.first().click();
 
       // Dex login page (give Dex extra time under load — 4+ rapid OIDC logins can saturate it)
       await page.waitForURL(/dex.*\/auth/i, { timeout: 45_000 });
     }
+    // Dex may auto-navigate from /dex/auth to /dex/auth/local (single-connector redirect).
+    // Wait for the page load to complete then wait for the login form.
+    await page.waitForLoadState('domcontentloaded', { timeout: 30_000 }).catch(() => {});
+    await page.locator('input[name="login"]').waitFor({ state: 'visible', timeout: 60_000 });
     await page.locator('input[name="login"]').fill(email);
     await page.locator('input[name="password"]').fill(password);
     await page.locator('button[type="submit"]').click();

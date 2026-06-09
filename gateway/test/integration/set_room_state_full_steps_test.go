@@ -107,9 +107,11 @@ func marieSendsPutRoomState(eventType, rawBody string) error {
 // authenticated as kai. Used to verify that a state event set via PUT can be
 // retrieved via GET (AC1 persistence check).
 func kaiCallsGetRoomsStateSingleEventType(eventType string) error {
+	// {kaiUserId} is a Gherkin placeholder — substitute the actual kai Matrix user ID.
+	eventPath := strings.ReplaceAll(eventType, "{kaiUserId}", kaiUserID)
 	url := fmt.Sprintf(
 		"%s/_matrix/client/v3/rooms/%s/state/%s",
-		matrixURL, lastRoomID, eventType,
+		matrixURL, lastRoomID, eventPath,
 	)
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {

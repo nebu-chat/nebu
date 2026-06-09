@@ -254,6 +254,7 @@ type StubRoom struct {
 	MemberCount int
 	MaxMembers  int    // 0 = no limit; populated in detail view only
 	Status      string // "active" | "archived"
+	IsAutoJoin  bool   // Story admin-auto-join-rooms: true = new users auto-joined on first login
 }
 
 // RoomRowData is used in the Rooms list template (Story 7.8).

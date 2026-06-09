@@ -77,3 +77,40 @@ staticPasswords:
     userID: "00000000-0000-0000-0000-000000000006"
     groups:
       - compliance_officer
+
+  # Story direct-room-heroes: DM / small-room hero test users
+  - email: "alice@example.com"
+    hash: "$2a$10$E4ye88CWSgoigClMVojmGOu.gHlKe7L7RRf07QWZ60aZmZ7Rfak/6"
+    username: "alice"
+    userID: "00000000-0000-0000-0000-000000000007"
+    groups:
+      - user
+
+  - email: "bob@example.com"
+    hash: "$2a$10$E4ye88CWSgoigClMVojmGOu.gHlKe7L7RRf07QWZ60aZmZ7Rfak/6"
+    username: "bob"
+    userID: "00000000-0000-0000-0000-000000000008"
+    groups:
+      - user
+
+  - email: "charlie@example.com"
+    hash: "$2a$10$E4ye88CWSgoigClMVojmGOu.gHlKe7L7RRf07QWZ60aZmZ7Rfak/6"
+    username: "charlie"
+    userID: "00000000-0000-0000-0000-000000000009"
+    groups:
+      - user
+
+  # Story rate-limit-isolation: dedicated users for auto-join integration tests
+  - email: "carol@example.com"
+    hash: "$2a$10$E4ye88CWSgoigClMVojmGOu.gHlKe7L7RRf07QWZ60aZmZ7Rfak/6"
+    username: "carol"
+    userID: "00000000-0000-0000-0000-000000000010"
+    groups:
+      - user
+
+  - email: "anna@example.com"
+    hash: "$2a$10$E4ye88CWSgoigClMVojmGOu.gHlKe7L7RRf07QWZ60aZmZ7Rfak/6"
+    username: "anna"
+    userID: "00000000-0000-0000-0000-000000000011"
+    groups:
+      - user

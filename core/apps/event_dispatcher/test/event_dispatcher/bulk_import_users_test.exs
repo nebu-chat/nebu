@@ -1,4 +1,4 @@
-defmodule Nebu.Session.BulkImporterTest do
+defmodule Nebu.EventDispatcher.BulkImportUsersTest do
   use ExUnit.Case, async: false
   # async: false required — Application.put_env is process-global
 

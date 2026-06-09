@@ -3788,3 +3788,110 @@ func TestGetSync_BlurhashInTimelineContent_PassedThrough(t *testing.T) {
 		t.Errorf("AT-2: expected info.blurhash = %q, got %q", expectedBlurhash, blurhash)
 	}
 }
+
+// ─── Story direct-room-heroes: buildJoinedRooms unit tests ───────────────────
+//
+// These tests call buildJoinedRooms directly (no HTTP stack needed).
+// They cover AC5 of the test-coverage-gaps story (R5 remediation):
+//   1. Named room (no heroes/counts from Core) → Summary is nil (omitempty)
+//   2. DM room with 1 hero → Summary.Heroes has length 1, JoinedMemberCount correct
+//   3. m.joined_member_count value forwarded from proto to JSON output
+
+// TestBuildJoinedRooms_NamedRoom_NoSummary — AC5 test 1
+//
+// A named room where Core returns no heroes or member counts (proto3 zero
+// values) must produce a syncJoinedRoom with Summary == nil.
+// omitempty on the Summary field ensures the "summary" key is absent from JSON.
+//
+// Given: SyncRoom.Heroes is nil, JoinedMemberCount == 0, InvitedMemberCount == 0
+// When:  buildJoinedRooms is called
+// Then:  rooms["!named:test.local"].Summary == nil
+func TestBuildJoinedRooms_NamedRoom_NoSummary(t *testing.T) {
+	rooms := buildJoinedRooms([]*pb.SyncRoom{
+		{
+			RoomId: "!named:test.local",
+			StateEvents: []*pb.SyncRoomStateEvent{
+				{Type: "m.room.name", StateKey: "", Content: []byte(`{"name":"Team"}`), Sender: "@alice:test.local"},
+			},
+			TimelineEvents:     []*pb.Event{},
+			Heroes:             nil,
+			JoinedMemberCount:  0,
+			InvitedMemberCount: 0,
+		},
+	})
+	room, ok := rooms["!named:test.local"]
+	if !ok {
+		t.Fatal("expected !named:test.local in result")
+	}
+	if room.Summary != nil {
+		t.Errorf("expected Summary to be nil for named room (omitempty), got %+v", room.Summary)
+	}
+}
+
+// TestBuildJoinedRooms_DMRoom_HeroesPopulated — AC5 test 2
+//
+// A DM room where Core returns a non-empty heroes slice must produce a
+// syncJoinedRoom with Summary.Heroes having the correct length and values.
+//
+// Given: SyncRoom.Heroes = ["@alice:test.local"], JoinedMemberCount = 2
+// When:  buildJoinedRooms is called
+// Then:  Summary != nil; len(Summary.Heroes) == 1; Summary.JoinedMemberCount == 2
+func TestBuildJoinedRooms_DMRoom_HeroesPopulated(t *testing.T) {
+	rooms := buildJoinedRooms([]*pb.SyncRoom{
+		{
+			RoomId:             "!dm:test.local",
+			StateEvents:        []*pb.SyncRoomStateEvent{},
+			TimelineEvents:     []*pb.Event{},
+			Heroes:             []string{"@alice:test.local"},
+			JoinedMemberCount:  2,
+			InvitedMemberCount: 0,
+		},
+	})
+	room, ok := rooms["!dm:test.local"]
+	if !ok {
+		t.Fatal("expected !dm:test.local in result")
+	}
+	if room.Summary == nil {
+		t.Fatal("expected Summary to be non-nil for DM room with heroes")
+	}
+	if len(room.Summary.Heroes) != 1 {
+		t.Errorf("expected 1 hero, got %d: %v", len(room.Summary.Heroes), room.Summary.Heroes)
+	}
+	if room.Summary.Heroes[0] != "@alice:test.local" {
+		t.Errorf("expected hero @alice:test.local, got %q", room.Summary.Heroes[0])
+	}
+	if room.Summary.JoinedMemberCount != 2 {
+		t.Errorf("expected JoinedMemberCount=2, got %d", room.Summary.JoinedMemberCount)
+	}
+}
+
+// TestBuildJoinedRooms_Summary_JoinedMemberCountInJSON — AC5 test 3
+//
+// After JSON marshalling, the rooms.join entry for a DM room must contain the
+// "m.joined_member_count" key with the correct numeric value and an "m.heroes"
+// key — verifying the JSON field name tags are correct.
+//
+// Given: SyncRoom.Heroes = ["@bob:test.local"], JoinedMemberCount = 3
+// When:  buildJoinedRooms result is JSON-marshalled
+// Then:  JSON contains `"m.joined_member_count":3` and `"m.heroes"`
+func TestBuildJoinedRooms_Summary_JoinedMemberCountInJSON(t *testing.T) {
+	rooms := buildJoinedRooms([]*pb.SyncRoom{
+		{
+			RoomId:            "!dmjson:test.local",
+			Heroes:            []string{"@bob:test.local"},
+			JoinedMemberCount: 3,
+		},
+	})
+	room := rooms["!dmjson:test.local"]
+	b, err := json.Marshal(room)
+	if err != nil {
+		t.Fatalf("marshalling room: %v", err)
+	}
+	s := string(b)
+	if !strings.Contains(s, `"m.joined_member_count":3`) {
+		t.Errorf("expected m.joined_member_count:3 in JSON output, got: %s", s)
+	}
+	if !strings.Contains(s, `"m.heroes"`) {
+		t.Errorf("expected m.heroes key in JSON output, got: %s", s)
+	}
+}

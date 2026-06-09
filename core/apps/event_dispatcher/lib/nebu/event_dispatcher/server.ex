@@ -75,6 +75,14 @@ defmodule Nebu.EventDispatcher.Server do
     Application.get_env(:event_dispatcher, :search_db_module, Nebu.Search.DB)
   end
 
+  # ─── Configurable TokenValidator module for testability ──────────────────────
+  # Override via Application.put_env(:event_dispatcher, :token_validator_module, FakeModule) in tests.
+  # When set, validate_token/2 calls this module's validate/4 directly instead of
+  # delegating to Nebu.Session.TokenValidator (which itself delegates internally).
+  defp token_validator_module do
+    Application.get_env(:event_dispatcher, :token_validator_module, nil)
+  end
+
   # ─── Configurable BulkImporter module for testability — Story 14-3a ──────────
   # Override via Application.put_env(:event_dispatcher, :bulk_importer_module, FakeBulkImporter) in tests.
   defp bulk_importer_module do
@@ -322,7 +330,23 @@ defmodule Nebu.EventDispatcher.Server do
   # Returns UpdateRoomSettingsResponse{ok: true} always — failure to find the running
   # GenServer is non-fatal (room may not be started, or settings will be loaded on next init).
 
-  def update_room_settings(%Core.UpdateRoomSettingsRequest{} = req, _stream) do
+  def update_room_settings(%Core.UpdateRoomSettingsRequest{} = req, stream) do
+    # F-1 (SEC): extract and validate caller identity — is_auto_join is a security-relevant
+    # policy field that triggers membership changes for every future first-login.
+    {actor_id, system_role} = Nebu.Grpc.Metadata.trusted_identity(stream)
+
+    if is_nil(actor_id) or actor_id == "" do
+      raise GRPC.RPCError,
+        status: GRPC.Status.unauthenticated(),
+        message: "missing trusted identity"
+    end
+
+    unless system_role in ["instance_admin"] do
+      raise GRPC.RPCError,
+        status: GRPC.Status.permission_denied(),
+        message: "instance_admin role required"
+    end
+
     room_id = req.room_id
     max_members = req.max_members
 
@@ -335,6 +359,29 @@ defmodule Nebu.EventDispatcher.Server do
       {:error, :not_found} ->
         # Room GenServer not running — settings will be applied on next init/1.
         :ok
+    end
+
+    # Story admin-auto-join-rooms: persist is_auto_join flag when present in request.
+    # optional bool — nil means absent (not sent), so only update when explicitly set.
+    if not is_nil(req.is_auto_join) do
+      case admin_db_module().update_room_auto_join(room_id, req.is_auto_join) do
+        :ok ->
+          # F-2 (SEC): emit audit_log so operators can reconstruct who toggled is_auto_join
+          # and when. Effect is bulk (every future new user joins flagged rooms at first login).
+          audit_writer_module().log(
+            actor_id,
+            "room_auto_join_changed",
+            "room",
+            room_id,
+            %{"is_auto_join" => req.is_auto_join},
+            "success"
+          )
+
+        {:error, reason} ->
+          Logger.warning(
+            "update_room_settings: update_room_auto_join failed for #{room_id}: #{inspect(reason)}"
+          )
+      end
     end
 
     %Core.UpdateRoomSettingsResponse{ok: true}
@@ -736,12 +783,22 @@ defmodule Nebu.EventDispatcher.Server do
         message: "missing x-user-id metadata"
     end
 
-    case Nebu.Session.TokenValidator.validate(
-           user_id,
-           system_role,
-           request.display_name,
-           request.email
-         ) do
+    # Use the configurable token_validator_module when set (e.g. in tests).
+    # Fall back to the standard Nebu.Session.TokenValidator in production.
+    validate_result =
+      case token_validator_module() do
+        nil ->
+          Nebu.Session.TokenValidator.validate(
+            user_id,
+            system_role,
+            request.display_name,
+            request.email
+          )
+        mod ->
+          mod.validate(user_id, system_role, request.display_name, request.email)
+      end
+
+    case validate_result do
       {:ok, user} ->
         # Upsert profile row on every successful login so GET /profile/{userId} returns
         # 200 for OIDC-provisioned users (Bug 2a fix). Non-fatal: profile write failure
@@ -754,6 +811,17 @@ defmodule Nebu.EventDispatcher.Server do
           {:error, reason} ->
             Logger.warning("validate_token: profile upsert failed for #{user_id}: #{inspect(reason)}")
         end
+
+        # Story personal-self-room + admin-auto-join-rooms: fire-and-forget room setup.
+        # Non-blocking: the login response is not delayed.
+        # Non-fatal: any DB error inside these helpers logs a warning and returns :ok.
+        is_new = Map.get(user, :is_new, false)
+        Task.start(fn ->
+          ensure_personal_room(user_id)
+          if is_new do
+            ensure_auto_join_memberships(user_id)
+          end
+        end)
 
         %Core.ValidateTokenResponse{
           user_id: user.user_id,
@@ -1066,16 +1134,19 @@ defmodule Nebu.EventDispatcher.Server do
 
           timeline_events = attach_thread_aggregations(raw_tl_events, room_id, user_id)
           limited = length(events) >= 20
+          deduped_state = dedup_member_state_events(state_events, timeline_events)
 
-          [
+          sync_room =
             %Core.SyncRoom{
               room_id: room_id,
-              state_events: dedup_member_state_events(state_events, timeline_events),
+              state_events: deduped_state,
               timeline_events: timeline_events,
               limited: limited,
               prev_batch: prev_batch
             }
-          ]
+            |> attach_heroes(user_id, deduped_state)
+
+          [sync_room]
         catch
           # Room GenServer not running (e.g. after core restart). Start it on demand —
           # Room.init/1 reloads all state from DB, so this is always safe.
@@ -1088,13 +1159,17 @@ defmodule Nebu.EventDispatcher.Server do
                 messages_db_module().fetch_events(room_id, "b", 20, "")
               raw_tl_evs = evs |> Enum.reverse() |> Enum.map(&event_map_to_proto/1)
               tl_evs = attach_thread_aggregations(raw_tl_evs, room_id, user_id)
-              [%Core.SyncRoom{
-                room_id:        room_id,
-                state_events:   dedup_member_state_events(state_evs, tl_evs),
-                timeline_events: tl_evs,
-                limited:        length(evs) >= 20,
-                prev_batch:     prev_b
-              }]
+              deduped = dedup_member_state_events(state_evs, tl_evs)
+              sync_room =
+                %Core.SyncRoom{
+                  room_id:         room_id,
+                  state_events:    deduped,
+                  timeline_events: tl_evs,
+                  limited:         length(evs) >= 20,
+                  prev_batch:      prev_b
+                }
+                |> attach_heroes(user_id, deduped)
+              [sync_room]
             catch
               :exit, _ -> []
             end
@@ -1394,15 +1469,31 @@ defmodule Nebu.EventDispatcher.Server do
                 MapSet.member?(timeline_state_keys, {ev.type, ev.state_key})
               end)
 
-            [
+            deduped_state = dedup_member_state_events(state_events, timeline_events)
+
+            # §11.2.2: heroes/counts are attached only when membership changed
+            # (the delta contains m.room.member events). When no memberships changed,
+            # the summary is omitted (proto3 zero values) — clients use cached heroes.
+            membership_changed =
+              Enum.any?(events, fn ev -> Map.get(ev, "event_type") == "m.room.member" end)
+
+            sync_room =
               %Core.SyncRoom{
                 room_id: room_id,
-                state_events: dedup_member_state_events(state_events, timeline_events),
+                state_events: deduped_state,
                 timeline_events: timeline_events,
                 limited: limited,
                 prev_batch: prev_batch
               }
-            ]
+
+            sync_room =
+              if membership_changed do
+                attach_heroes(sync_room, user_id, deduped_state)
+              else
+                sync_room
+              end
+
+            [sync_room]
           catch
             :exit, {:noproc, _} -> []
           end
@@ -1550,6 +1641,270 @@ defmodule Nebu.EventDispatcher.Server do
       end
 
     [create_event] ++ member_events ++ [pl_event] ++ name_events ++ generic_state_events
+  end
+
+  # ─── Story direct-room-heroes: attach_heroes/3 ─────────────────────────────
+  #
+  # Attaches m.heroes / m.joined_member_count / m.invited_member_count to a
+  # SyncRoom when the room has no explicit name (m.room.name event with a
+  # non-empty name). Named rooms do not need heroes — clients use the room name.
+  #
+  # Called from get_initial_sync (always) and fetch_delta_rooms (only when
+  # membership_changed = delta contains m.room.member events) per §11.2.2.
+  #
+  # On DB error: logs a warning and returns sync_room unchanged (fail-open).
+  defp attach_heroes(%Core.SyncRoom{} = sync_room, user_id, state_events) do
+    room_id = sync_room.room_id
+
+    has_name =
+      Enum.any?(state_events, fn ev ->
+        ev.type == "m.room.name" and ev.state_key == "" and
+          case Jason.decode(ev.content) do
+            {:ok, %{"name" => name}} when is_binary(name) and name != "" -> true
+            _ -> false
+          end
+      end)
+
+    if has_name do
+      # Named room — leave proto3 zero values so Go omits Summary via omitempty.
+      sync_room
+    else
+      case messages_db_module().get_room_heroes(room_id, user_id) do
+        {:ok, %{heroes: heroes, joined: joined, invited: invited}} ->
+          %Core.SyncRoom{
+            sync_room
+            | heroes: heroes,
+              joined_member_count: joined,
+              invited_member_count: invited
+          }
+
+        {:error, reason} ->
+          Logger.warning(
+            "attach_heroes: DB error for room #{room_id}: #{inspect(reason)}"
+          )
+
+          sync_room
+      end
+    end
+  end
+
+  # ─── Story personal-self-room: ensure_personal_room/1 ───────────────────────
+
+  # Idempotently ensures a personal self-room exists for `user_id`.
+  # Called from validate_token/2 via Task.start (fire-and-forget, non-blocking).
+  #
+  # Flow:
+  #   1. Extract localpart from user_id (e.g. "alice" from "@alice:nebu.local").
+  #   2. Check messages_db_module().get_personal_room_id/1.
+  #      - {:ok, nil}       → no self-room yet → create one and set the ID.
+  #      - {:ok, _room_id}  → already exists → no-op (idempotent).
+  #      - {:error, reason} → DB down → log warning and return :ok (non-fatal).
+  #   3. Creation failure is also non-fatal (logged as warning, returns :ok).
+  #
+  # AC4: any error path returns :ok and logs a warning — login is never blocked.
+  defp ensure_personal_room(user_id) do
+    localpart =
+      user_id
+      |> String.split(":")
+      |> hd()
+      |> String.trim_leading("@")
+
+    case messages_db_module().get_personal_room_id(user_id) do
+      {:ok, nil} ->
+        # First login — create the personal room and record the ID.
+        # create_personal_room/2 is non-fatal: it logs warnings on DB errors and always
+        # returns {:ok, room_id}. set_personal_room_id/2 failure is also non-fatal.
+        {:ok, room_id} = create_personal_room(user_id, localpart)
+        case messages_db_module().set_personal_room_id(user_id, room_id) do
+          :ok ->
+            :ok
+
+          {:ok, :already_set} ->
+            # F-3 (SEC): concurrent first-login race — another Task won the claim.
+            # The room we created is now an orphan (user is sole member, not canonical).
+            # No security boundary crossed; orphan appears in /sync until a janitor removes it.
+            Logger.warning(
+              "ensure_personal_room: concurrent first-login race detected for #{user_id} — " <>
+                "orphan room #{room_id} created. Another Task won the claim."
+            )
+            :ok
+
+          {:error, reason} ->
+            Logger.warning("ensure_personal_room: set_personal_room_id failed for #{user_id}: #{inspect(reason)}")
+            :ok
+        end
+
+      {:ok, _existing_room_id} ->
+        # Already exists — idempotent no-op (AC2).
+        :ok
+
+      {:error, reason} ->
+        # DB error checking existence — non-fatal (AC4).
+        Logger.warning("ensure_personal_room: DB error for #{user_id}: #{inspect(reason)}")
+        :ok
+    end
+  end
+
+  # ─── Story admin-auto-join-rooms: ensure_auto_join_memberships/1 ─────────────
+  #
+  # Public so that ExUnit AC5/AC6 tests can call it directly in isolation.
+  # Called from validate_token/2 via Task.start for new users only (is_new: true).
+  # Non-fatal: any error logs a warning and returns :ok — login is never blocked.
+  #
+  # Flow:
+  #   1. Fetch all rooms with is_auto_join=true from messages_db_module().
+  #   2. For each room_id: start the Room GenServer (idempotent), then join.
+  #   3. {:error, :already_member} → :ok silently (idempotent AC5).
+  #   4. Other join errors → log warning, continue (non-fatal).
+  #   5. list_auto_join_rooms error → log warning, return :ok (non-fatal AC6).
+  def ensure_auto_join_memberships(user_id) do
+    # F-4 (SEC): Nebu.Room.Server.join/2 does not yet check m.room.join_rules or ban state —
+    # those subsystems are not implemented in MVP. When ban/join_rule support lands, this call
+    # site must be updated to use an :auto_join variant that respects those checks, so that
+    # previously-banned users are not re-added to restricted rooms at first login.
+    case messages_db_module().list_auto_join_rooms() do
+      {:ok, room_ids} ->
+        Enum.each(room_ids, fn room_id ->
+          _ = Nebu.Room.RoomSupervisor.start_room(room_id)
+          # Wrap in try/catch to handle GenServer.call exits (:noproc) non-fatally.
+          # GenServer.call raises an exit exception when the target process is not alive,
+          # so a bare case match is insufficient — exits must be caught explicitly.
+          try do
+            case Nebu.Room.Server.join(room_id, user_id) do
+              :ok -> :ok
+              {:error, :already_member} -> :ok
+              {:error, reason} ->
+                Logger.warning(
+                  "ensure_auto_join_memberships: join #{room_id} for #{user_id} failed: #{inspect(reason)}"
+                )
+            end
+          catch
+            :exit, reason ->
+              Logger.warning(
+                "ensure_auto_join_memberships: join #{room_id} for #{user_id} exited: #{inspect(reason)}"
+              )
+          end
+        end)
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "ensure_auto_join_memberships: list_auto_join_rooms failed for #{user_id}: #{inspect(reason)}"
+        )
+        :ok
+    end
+  end
+
+  # Creates a private personal room for `user_id` named after `localpart`.
+  #
+  # This is a direct-DB creation path — it does NOT start a Room GenServer via
+  # Nebu.Room.RoomSupervisor. Instead it writes all required rows and events
+  # directly to the database. The Room GenServer will be started on-demand when
+  # the user calls GET /sync (via get_initial_sync → start_room on :noproc catch).
+  #
+  # Event order follows Matrix spec §8.5.1:
+  #   1. m.room.create (first event — room identity)
+  #   2. m.room.member join (membership)
+  #   3. m.room.power_levels (power levels)
+  #   4. m.room.name (room name = localpart)
+  #
+  # Using only messages_db_module() makes this function fully testable via
+  # fake DB injection (no Horde / room_manager dependency in tests).
+  #
+  # Returns {:ok, room_id} on success or {:error, reason} on failure.
+  defp create_personal_room(user_id, localpart) do
+    room_id = generate_room_id()
+    now_ms = Nebu.DB.Helpers.now_ms()
+
+    # 1. Insert the room record (private visibility).
+    # Non-fatal: ON CONFLICT DO NOTHING means a concurrent race may have already succeeded.
+    # A real DB error is also non-fatal — we still attempt the member insert below.
+    case messages_db_module().insert_room(room_id) do
+      {:ok, _} ->
+        :ok
+      {:error, reason} ->
+        Logger.warning("create_personal_room: insert_room failed for #{room_id}: #{inspect(reason)}")
+    end
+
+    # 2. Insert the creator as the sole member.
+    case messages_db_module().insert_member(room_id, user_id) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("create_personal_room: insert_member failed for #{room_id}: #{inspect(reason)}")
+    end
+
+    # Helper to sign and persist an event.
+    persist_event = fn event_map ->
+      event_id = Nebu.EventId.generate(event_map)
+      event_with_id = Map.put(event_map, "event_id", event_id)
+      {_pub, priv} = :persistent_term.get(:nebu_signing_key)
+      event_json = Nebu.CanonicalJson.encode!(event_map)
+      sig = :crypto.sign(:eddsa, :none, event_json, [priv, :ed25519])
+      signed = Map.put(event_with_id, "signatures", %{"nebu" => Base.encode64(sig)})
+      case messages_db_module().insert_event(signed) do
+        :ok ->
+          Enum.each(:pg.get_local_members("room:#{room_id}"), &send(&1, {:new_event, signed}))
+          :ok
+        {:error, reason} ->
+          Logger.warning("create_personal_room: insert_event failed (#{event_map["type"]}): #{inspect(reason)}")
+          :ok
+      end
+    end
+
+    # 3. Emit m.room.create (Matrix spec §8.5.1: first event).
+    create_event = %{
+      "room_id"          => room_id,
+      "type"             => "m.room.create",
+      "state_key"        => "",
+      "sender"           => user_id,
+      "content"          => %{"creator" => user_id, "room_version" => "10"},
+      "origin_server_ts" => now_ms
+    }
+    persist_event.(create_event)
+
+    # 4. Emit m.room.member join (membership).
+    member_event = %{
+      "room_id"          => room_id,
+      "type"             => "m.room.member",
+      "state_key"        => user_id,
+      "sender"           => user_id,
+      "content"          => %{"membership" => "join"},
+      "origin_server_ts" => now_ms + 1
+    }
+    persist_event.(member_event)
+
+    # 5. Emit m.room.power_levels with creator at PL 100.
+    default_pl = Nebu.Room.Server.default_power_levels()
+    creator_pl = put_in(default_pl, ["users", user_id], 100)
+    pl_event = %{
+      "room_id"          => room_id,
+      "type"             => "m.room.power_levels",
+      "state_key"        => "",
+      "sender"           => user_id,
+      "content"          => creator_pl,
+      "origin_server_ts" => now_ms + 2
+    }
+    case messages_db_module().set_power_levels(room_id, Jason.encode!(creator_pl)) do
+      :ok -> :ok
+      {:error, reason} ->
+        Logger.warning("create_personal_room: set_power_levels failed for #{room_id}: #{inspect(reason)}")
+    end
+    persist_event.(pl_event)
+
+    # 6. Emit m.room.name with the Matrix localpart as the room name.
+    name_event = %{
+      "room_id"          => room_id,
+      "type"             => "m.room.name",
+      "state_key"        => "",
+      "sender"           => user_id,
+      "content"          => %{"name" => localpart},
+      "origin_server_ts" => now_ms + 3
+    }
+    persist_event.(name_event)
+
+    {:ok, room_id}
   end
 
   # ─── Private helpers ─────────────────────────────────────────────────────────
@@ -2229,7 +2584,8 @@ defmodule Nebu.EventDispatcher.Server do
             member_count: room.member_count || 0,
             max_members: room.max_members || 0,
             visibility: room.visibility || "private",
-            created_at: room.created_at || 0
+            created_at: room.created_at || 0,
+            is_auto_join: Map.get(room, :is_auto_join, false)
           }
         }
 
@@ -3145,7 +3501,7 @@ defmodule Nebu.EventDispatcher.Server do
       end)
 
     case bulk_importer_module().import_users(users) do
-      {:ok, %{imported: imported, skipped: skipped, failed: failed}} ->
+      {:ok, %{imported: imported, skipped: skipped, failed: failed, imported_user_ids: imported_user_ids}} ->
         # F-3: emit aggregate audit entry — never-raise (ignore return value).
         _audit_result =
           audit_writer_module().log(
@@ -3162,6 +3518,16 @@ defmodule Nebu.EventDispatcher.Server do
             },
             "success"
           )
+
+        # Story auto-join-on-user-import: fire-and-forget room setup for each newly-imported user.
+        # Identical to the validate_token/2 pattern for new first-login users.
+        # Non-blocking and non-fatal — import response is not delayed by these tasks.
+        Enum.each(imported_user_ids, fn uid ->
+          Task.start(fn ->
+            ensure_personal_room(uid)
+            ensure_auto_join_memberships(uid)
+          end)
+        end)
 
         %Core.BulkImportUsersResponse{
           imported: imported,

@@ -909,4 +909,203 @@ to the `NEBU_OIDC_CLIENT_ID` / `NEBU_OIDC_CLIENT_SECRET` env vars when the DB ha
 See §8 OIDC Client Credential Source Hierarchy for the full precedence chain and decryption
 details. No gateway restart is required after the Bootstrap Wizard stores new credentials.
 
-_Source: `_bmad-output/planning-artifacts/architecture.md`, §Implementation Patterns, §API & Kommunikation, §Resilienz & Selbst-Heilung; Story 9-19 (GAP-JOIN-PUBLIC, GAP-LEAVE-ONCE, GAP-FORGET); Story 9-22 (GAP-SINCE-IGNORED - per-device sync tokens, per-device logout cleanup); Story 9-23 (GAP-INVITE-STATE - invite_state stripped state enrichment: join_rules, avatar, create); Story 9-24 (GAP-GLOBAL-ACCOUNT-DATA - top-level account_data delivery in all 4 sync paths, RLS-aware ListGlobalAccountData); Story 9-25 (GAP-BUFFER-NEXT-BATCH - synthetic buf_<ms>_<seq> next_batch token on buffer fast-path, replaces echoed since= token); Story 9-27 (Scenario 3i - full Matrix §11.35.1 room upgrade flow, GRPC.RPCError error handling, archive_room_atomic idempotency, terminate_child, try/rescue failure audit); Story 9-28 (Scenario 3j - GetRelations RPC + bundled m.thread aggregations in sync unsigned field, attach_thread_aggregations, fetch_events_by_relation, count_thread_children, migration 000042); Story 9-29 (Scenario 3j-1 expanded - base route + three-segment route, dir/event_type/recurse/from params, prev_batch response field, fetch_events_by_relation/5 dynamic WHERE builder, 400 validation for invalid dir/recurse); Story 11-7 (Scenario 6 - SSO nonce generation + verification, Cache-Control: no-store on 302, denylist check in PostLogin, ssoStateStore capacity cap at 10,000); Story 11-8 (Scenario 3k - GET /rooms/{roomId}/event/{eventId} new route + GetEvent gRPC RPC, Horde membership guard, fetch_event/2 DB query, attach_thread_aggregations, core_grpc.pb.ex rpc :GetRelations + rpc :GetEvent bug fix); Story 11-10 (Scenario 3l - Matrix login claim mapping: claimLoader TTL-cached DB lookup, FormatUserIDFromClaims fallback chain, JWTMiddleware userIDClaimLoader param, NEBU_OIDC_USER_ID_CLAIM env override; Scenario 3m - Bootstrap Wizard Step 3 claim mapping form, draft save, atomic ClaimSelectionHandler transaction, identity-stability warning); Story 11-11 (Scenario 3n - send_receipt/2 start-on-demand fix: lookup_room → start_room, :noproc guard on get_state, 404 preserved for ghost rooms, 403 preserved for non-members); bugfix-sso-bootstrap-credentials (Scenario 6 addendum - dynamic OIDC client credentials via TTL-cached loaders; resolveClientID/resolveClientSecret in GetSSORedirect + GetSSOCallback; DB precedence over env var; no restart required)_
+## Scenario 3o: Room Summary (m.heroes) in Sync — Direct Room Hero Names (Story direct-room-heroes)
+
+Matrix CS API §11.2.2 defines a `summary` block inside each joined room's sync response:
+
+```json
+{
+  "rooms": {
+    "join": {
+      "!room:example.com": {
+        "summary": {
+          "m.heroes": ["@alice:nebu.local", "@bob:nebu.local"],
+          "m.joined_member_count": 2,
+          "m.invited_member_count": 0
+        },
+        "state": { ... },
+        "timeline": { ... }
+      }
+    }
+  }
+}
+```
+
+Clients (Element Web, FluffyChat) use `m.heroes` to derive a display name for rooms that have no explicit `m.room.name` state event. For a two-person DM, the client renders the other participant's display name instead of showing "Empty Room".
+
+### Implementation
+
+**Proto (proto/core.proto):**
+
+Three new fields were added to the `SyncRoom` message (fields 6–8):
+
+```protobuf
+repeated string heroes               = 6;  // m.heroes — max 5 participant user_ids
+int32           joined_member_count  = 7;  // m.joined_member_count
+int32           invited_member_count = 8;  // m.invited_member_count
+```
+
+**Elixir Core (event_dispatcher server.ex):**
+
+`attach_heroes/3` is a private function called from `get_initial_sync` (always) and `fetch_delta_rooms` (only when `membership_changed` — the delta contains `m.room.member` events, per §11.2.2 which permits summary omission when heroes are unchanged).
+
+`attach_heroes/3` logic:
+1. If a state event `m.room.name` with a non-empty `name` is present → leave proto3 zero values (Go omits summary via `omitempty`).
+2. Otherwise → call `messages_db_module().get_room_heroes(room_id, user_id)`.
+3. On DB error → log warning and return `sync_room` unchanged (fail-open; client retains cached heroes).
+
+**DB layer (room_manager/db.ex):**
+
+`get_room_heroes/2` runs three parameterized queries:
+- Heroes: UNION ALL of active joined members (ORDER BY joined_at ASC LIMIT 5) and pending invitations, globally limited to 5 entries, excluding the syncing user.
+- Joined count: total active members (inclusive of syncing user).
+- Invited count: total pending invitations.
+
+**Go Gateway (sync.go):**
+
+`syncRoomSummary` struct marshals the three fields with Matrix-standard JSON keys (`m.heroes`, `m.joined_member_count`, `m.invited_member_count`). The field is a pointer (`*syncRoomSummary`) on `syncJoinedRoom` with `omitempty` — named rooms never emit a `"summary"` key.
+
+```
+Matrix Client           Go Gateway           Elixir Core            PostgreSQL
+     │                      │                      │                     │
+     │  GET /sync           │                      │                     │
+     │─────────────────────►│                      │                     │
+     │                      │  GetInitialSync      │                     │
+     │                      │─────────────────────►│                     │
+     │                      │                      │ get_room_heroes      │
+     │                      │                      │────────────────────►│
+     │                      │                      │◄── {heroes, joined, invited}
+     │                      │                      │                     │
+     │                      │◄── SyncRoom{heroes:  │                     │
+     │                      │      ["@bob:..."],   │                     │
+     │                      │      joined: 2,      │                     │
+     │                      │      invited: 0}     │                     │
+     │                      │                      │                     │
+     │  200 {rooms.join.    │                      │                     │
+     │    summary: {        │                      │                     │
+     │      m.heroes: [...],│                      │                     │
+     │      m.joined_member_count: 2}}             │                     │
+     │◄─────────────────────│                      │                     │
+```
+
+**Delta sync optimization:** Heroes are only re-sent when `membership_changed` (the delta contains at least one `m.room.member` event). When no membership events are present, the `SyncRoom` proto has zero-value fields for heroes/counts, and the Go layer omits the `summary` key entirely. Clients use their previously cached heroes for display.
+
+_Source: Story direct-room-heroes (epic: room-naming-and-default-rooms); Matrix CS API §11.2.2._
+
+## Scenario 3p: Auto-Join Rooms — New User Provisioning (Story admin-auto-join-rooms)
+
+Admins can mark any room as `is_auto_join = true` in the Admin UI. Every newly provisioned user is
+automatically joined to all such rooms at first login, without manual invite.
+
+**Admin toggle flow:**
+
+1. Admin submits the settings form (`POST /admin/rooms/{roomId}/settings`) with `is_auto_join=true`.
+2. `UpdateRoomSettingsHandler` (Go) reads `r.FormValue("is_auto_join") == "true"`, creates a pointer,
+   and passes it in `UpdateRoomSettingsRequest{IsAutoJoin: &isAutoJoin}` via gRPC.
+3. `update_room_settings/2` (Elixir) checks `is_nil(req.is_auto_join)` — only updates when the optional
+   field is present. Calls `admin_db_module().update_room_auto_join(room_id, is_auto_join)`.
+4. DB: `UPDATE rooms SET is_auto_join = $2 WHERE room_id = $1` (parametrised).
+
+**New-user auto-join flow (at first login):**
+
+1. OIDC login → `validate_token` gRPC call reaches `Nebu.EventDispatcher.Server.validate_token/2`.
+2. `Nebu.Session.TokenValidator.Postgres.validate/4`:
+   - `lookup_user/1` returns `nil` (user not in DB) → `provision_new_user/4` → returns `is_new: true`.
+   - Existing user → `decrypt_and_return/1` → returns `is_new: false`.
+3. In `validate_token/2`: `is_new = Map.get(user, :is_new, false)`. A `Task.start` fire-and-forget is launched:
+   - Always: `ensure_personal_room/1` (Story personal-self-room).
+   - Only when `is_new = true`: `ensure_auto_join_memberships/1`.
+4. `ensure_auto_join_memberships/1`:
+   - `messages_db_module().list_auto_join_rooms()` → `SELECT room_id FROM rooms WHERE is_auto_join = true AND status = 'active'`.
+   - For each room_id: `Nebu.Room.RoomSupervisor.start_room(room_id)` (idempotent) + `Nebu.Room.Server.join(room_id, user_id)`.
+   - `{:error, :already_member}` → silently `:ok` (pre-invited edge case).
+   - All errors are non-fatal (warning log, `:ok` returned) — login always succeeds.
+
+```
+Client          Go Gateway          Elixir Core                  PostgreSQL
+  │  POST /login   │                     │                            │
+  │───────────────▶│  ValidateToken gRPC │                            │
+  │                │────────────────────▶│                            │
+  │                │                     │  lookup_user(@new:...)     │
+  │                │                     │───────────────────────────▶│
+  │                │                     │  nil (not found)           │
+  │                │                     │◀───────────────────────────│
+  │                │                     │  provision_user (encrypt)  │
+  │                │                     │  is_new: true              │
+  │                │                     │  Task.start:               │
+  │                │                     │   ensure_personal_room     │
+  │                │                     │   ensure_auto_join_memberships
+  │                │                     │    list_auto_join_rooms    │
+  │                │                     │───────────────────────────▶│
+  │                │                     │  [room_id1, room_id2]      │
+  │                │                     │◀───────────────────────────│
+  │                │                     │  Room.Server.join (each)   │
+  │  200 {access_token} │               │                            │
+  │◀───────────────│◀────────────────────│                            │
+```
+
+**Security notes:**
+- `is_auto_join` is admin-only (Admin UI behind `SessionGuardWithRefresh` + CSRF token).
+- `list_auto_join_rooms` results are never returned to Matrix clients.
+- `ensure_auto_join_memberships` only runs for users with `is_new: true` — set server-side only during DB provisioning.
+- Partial index `rooms_auto_join_idx ON rooms (is_auto_join) WHERE is_auto_join = true` keeps the query fast.
+
+**Bulk import provisioning path:** See Scenario 3q below for the identical fire-and-forget pattern triggered by `BulkImportUsers` gRPC call.
+
+_Source: Story admin-auto-join-rooms (epic: room-naming-and-default-rooms)._
+
+## Scenario 3q: Auto-Join Rooms — Bulk Import Provisioning Path (Story auto-join-on-user-import)
+
+The same auto-join + personal self-room behavior from Scenario 3p is extended to the
+`BulkImportUsers` gRPC path. When an admin imports users via the SCIM/bulk API, each
+newly-provisioned user receives the same room setup as a first-login user — without requiring
+a login event.
+
+**Key changes in this story:**
+
+- `BulkImporter.import_users/1` now returns `imported_user_ids: [String.t()]` in addition to
+  the existing `imported/skipped/failed` counters. Only users actually provisioned in this call
+  appear in the list (skipped and failed users are excluded).
+- `bulk_import_users/2` in `event_dispatcher/server.ex` iterates `imported_user_ids` and spawns
+  one `Task.start` per newly-imported user — identical fire-and-forget pattern to `validate_token/2`.
+- `ensure_auto_join_memberships/1` now wraps `Nebu.Room.Server.join/2` in `try/catch :exit` to
+  handle `:noproc` exits non-fatally (race between `start_room` and `join` — same guard as
+  `send_receipt/2` added in Scenario 3n).
+
+```
+Admin Client    Go Gateway     Elixir Core (bulk_import_users/2)   PostgreSQL
+    │               │                   │                               │
+    │  POST /import │                   │                               │
+    │──────────────►│  BulkImportUsers  │                               │
+    │               │──────────────────►│                               │
+    │               │                   │  BulkImporter.import_users/1  │
+    │               │                   │  → {:ok, %{imported: N,       │
+    │               │                   │      imported_user_ids: [...]}}│
+    │               │                   │                               │
+    │               │                   │  audit_writer: users_bulk_imported
+    │               │                   │                               │
+    │               │                   │  Enum.each(imported_user_ids):│
+    │               │                   │    Task.start per user:       │
+    │               │                   │      ensure_personal_room     │
+    │               │                   │      ensure_auto_join_memberships
+    │               │                   │        list_auto_join_rooms  ─►│
+    │               │                   │        Room.Server.join (each) │
+    │               │                   │        try/catch :exit         │
+    │               │                   │                               │
+    │  200 {imported, skipped, failed}  │                               │
+    │◄──────────────│◄──────────────────│                               │
+```
+
+**Non-blocking guarantee:** The gRPC response (`BulkImportUsersResponse`) is returned before any
+`Task.start` goroutines complete. Room setup happens asynchronously — the import latency is not
+affected by the number of auto-join rooms or the time taken by `Room.Server.join/2`.
+
+**Idempotency:** `ensure_auto_join_memberships/1` returns `:ok` on `{:error, :already_member}` —
+safe to call even if a previous import partially completed.
+
+**Error isolation:** Each per-user `Task.start` is independent. A crash in one user's room setup
+does not affect other users. All errors are non-fatal warning logs only.
+
+_Source: Story auto-join-on-user-import (epic: room-naming-and-default-rooms)._
+
+_Source: `_bmad-output/planning-artifacts/architecture.md`, §Implementation Patterns, §API & Kommunikation, §Resilienz & Selbst-Heilung; Story 9-19 (GAP-JOIN-PUBLIC, GAP-LEAVE-ONCE, GAP-FORGET); Story 9-22 (GAP-SINCE-IGNORED - per-device sync tokens, per-device logout cleanup); Story 9-23 (GAP-INVITE-STATE - invite_state stripped state enrichment: join_rules, avatar, create); Story 9-24 (GAP-GLOBAL-ACCOUNT-DATA - top-level account_data delivery in all 4 sync paths, RLS-aware ListGlobalAccountData); Story 9-25 (GAP-BUFFER-NEXT-BATCH - synthetic buf_<ms>_<seq> next_batch token on buffer fast-path, replaces echoed since= token); Story 9-27 (Scenario 3i - full Matrix §11.35.1 room upgrade flow, GRPC.RPCError error handling, archive_room_atomic idempotency, terminate_child, try/rescue failure audit); Story 9-28 (Scenario 3j - GetRelations RPC + bundled m.thread aggregations in sync unsigned field, attach_thread_aggregations, fetch_events_by_relation, count_thread_children, migration 000042); Story 9-29 (Scenario 3j-1 expanded - base route + three-segment route, dir/event_type/recurse/from params, prev_batch response field, fetch_events_by_relation/5 dynamic WHERE builder, 400 validation for invalid dir/recurse); Story 11-7 (Scenario 6 - SSO nonce generation + verification, Cache-Control: no-store on 302, denylist check in PostLogin, ssoStateStore capacity cap at 10,000); Story 11-8 (Scenario 3k - GET /rooms/{roomId}/event/{eventId} new route + GetEvent gRPC RPC, Horde membership guard, fetch_event/2 DB query, attach_thread_aggregations, core_grpc.pb.ex rpc :GetRelations + rpc :GetEvent bug fix); Story 11-10 (Scenario 3l - Matrix login claim mapping: claimLoader TTL-cached DB lookup, FormatUserIDFromClaims fallback chain, JWTMiddleware userIDClaimLoader param, NEBU_OIDC_USER_ID_CLAIM env override; Scenario 3m - Bootstrap Wizard Step 3 claim mapping form, draft save, atomic ClaimSelectionHandler transaction, identity-stability warning); Story 11-11 (Scenario 3n - send_receipt/2 start-on-demand fix: lookup_room → start_room, :noproc guard on get_state, 404 preserved for ghost rooms, 403 preserved for non-members); bugfix-sso-bootstrap-credentials (Scenario 6 addendum - dynamic OIDC client credentials via TTL-cached loaders; resolveClientID/resolveClientSecret in GetSSORedirect + GetSSOCallback; DB precedence over env var; no restart required); Story direct-room-heroes (Scenario 3o - m.heroes room summary in sync response: attach_heroes/3, get_room_heroes/2, syncRoomSummary+omitempty, proto fields 6-8 on SyncRoom, delta optimization via membership_changed check); Story admin-auto-join-rooms (Scenario 3p - auto-join rooms at first login: is_auto_join column+partial-index, list_auto_join_rooms, ensure_auto_join_memberships, is_new flag in TokenValidator, Task.start fire-and-forget, Admin UI toggle + CSRF, update_room_auto_join gRPC+DB); Story auto-join-on-user-import (Scenario 3q - bulk import provisioning path: BulkImporter.import_users/1 returns imported_user_ids, bulk_import_users/2 spawns Task.start per new user, ensure_auto_join_memberships + ensure_personal_room fire-and-forget, try/catch :exit guard on Room.Server.join/2)_

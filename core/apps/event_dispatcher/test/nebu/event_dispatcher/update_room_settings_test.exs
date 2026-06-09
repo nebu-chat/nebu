@@ -114,7 +114,9 @@ defmodule Nebu.EventDispatcher.UpdateRoomSettingsTest do
 
   # ─── Helpers ─────────────────────────────────────────────────────────────────
 
-  defp build_stream, do: %{http_request_headers: %{}}
+  defp build_stream do
+    %{http_request_headers: %{"x-user-id" => "@admin:nebu.local", "x-system-role" => "instance_admin"}}
+  end
 
   defp start_and_track_room(room_id) do
     case Nebu.Room.RoomSupervisor.lookup_room(room_id) do

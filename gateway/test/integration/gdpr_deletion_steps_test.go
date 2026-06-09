@@ -507,8 +507,7 @@ func initializeGdprDeletionSteps(sc *godog.ScenarioContext) {
 		eventsTableStillContainsVictimMessage)
 	sc.Step(`^GET /_matrix/client/v3/profile is called for the deleted victim user$`,
 		getMatrixProfileForDeletedVictimUser)
-	sc.Step(`^the response body does not contain "avatar_url"$`,
-		theResponseBodyDoesNotContainAvatarURL)
+	// response body does not contain "avatar_url" — shared generic step from profile_subfields_steps_test.go
 	sc.Step(`^the deleted victim user attempts Matrix OIDC login$`,
 		theDeletedVictimUserAttemptsMatrixOIDCLogin)
 }

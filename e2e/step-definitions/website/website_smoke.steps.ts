@@ -115,6 +115,21 @@ Then(
 );
 
 /**
+ * "Then the page contains a value proposition section mentioning {string}"
+ *
+ * Parameterised fallback for value proposition mentions not covered by the
+ * specific named steps above (e.g. "no Redis", "no NATS").
+ */
+Then(
+  'the page contains a value proposition section mentioning {string}',
+  async ({ page }: { page: Page }, text: string) => {
+    await expect(page.getByText(text, { exact: false })).toBeVisible({
+      timeout: 10_000,
+    });
+  }
+);
+
+/**
  * "Then the page contains a tech stack section mentioning {string}"
  *
  * AC1: tech stack overview must mention Go and Elixir.

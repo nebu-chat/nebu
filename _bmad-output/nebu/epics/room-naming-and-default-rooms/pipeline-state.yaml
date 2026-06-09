@@ -1,0 +1,76 @@
+# Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents.
+# Do not edit manually during an active pipeline run.
+# last_updated: 2026-05-30
+# auto-join-on-user-import 2026-05-30T12:00Z committed ✓ (ATDD+Dev+Code CLEAN, arc42 Scenario 3q added)
+# auto-join-on-user-import 2026-05-30T11:55Z arc42-update → Scenario 3q added (bulk import auto-join + self-room path)
+# auto-join-on-user-import 2026-05-30T11:50Z security-review → skipped (not-needed)
+# auto-join-on-user-import 2026-05-30T11:40Z ci-gate → PASS: 262 Elixir tests (0 failures), all Go packages pass
+# auto-join-on-user-import 2026-05-30T11:30Z dev-story → done (cycle 0): bulk_importer.ex+server.ex changed, 262+51 Elixir tests pass
+# auto-join-on-user-import 2026-05-30T22:10Z dev-story → DONE: import_one→{:imported,uid}, import_users/1 collects imported_user_ids, bulk_import_users/2 spawns Task.start per uid; try/catch :exit in ensure_auto_join_memberships; MAJOR-1+MINOR-4+MINOR-5 fixed; module name conflict in bulk_import_users_test.exs fixed; 262 Elixir tests pass (0 failures)
+# auto-join-on-user-import 2026-05-30T11:15Z test-review → 1 MAJOR+5 MINOR; MAJOR-1: fix AC5 test to use non-empty room list [user continued]
+# auto-join-on-user-import 2026-05-30T11:10Z atdd → 2 files, AC1-AC6 covered (bulk_importer_test + auto_join_rooms_test extensions)
+# auto-join-on-user-import 2026-05-30T11:05Z oracle-gate → skipped (no Matrix API)
+# auto-join-on-user-import 2026-05-30T12:00Z create-story → DONE: story file created at docs/stories/room-naming-and-default-rooms/auto-join-on-user-import.md
+# auto-join-on-user-import 2026-05-30T11:00Z pipeline started
+# bootstrap-integration-steps 2026-05-30T10:30Z supplemental-fixes committed ✓ (auth.feature sub-claim, OIDC warmup, auto-join room via Matrix API, oidc_client_id=nebu-gateway)
+# bootstrap-integration-steps 2026-05-30T09:32Z committed ✓ (3 bootstrap steps fixed, APPROVE cycle 0)
+# bootstrap-integration-steps 2026-05-30T09:30Z arc42-update → skipped (test-infra only)
+# bootstrap-integration-steps 2026-05-30T09:20Z dev-story → done (cycle 0)
+# bootstrap-integration-steps 2026-05-30T09:10Z test-review → skipped (test-infra story)
+# bootstrap-integration-steps 2026-05-30T20:00Z dev-story → DONE: 1 file changed — admin_bootstrap_steps_test.go: added iHaveSeededInstanceNameIntoBootstrapDraft, iPostStep2WithValidOIDCConfig, extractCSRFToken; rewrote iHaveAForgedValidAdminSessionCookie to use DB-backed sessions; go vet clean
+# bootstrap-integration-steps 2026-05-30T10:00Z create-story → DONE: story file created at docs/stories/room-naming-and-default-rooms/bootstrap-integration-steps.md
+# bootstrap-integration-steps 2026-05-30T09:00Z pipeline started
+# rate-limit-isolation 2026-05-30T08:00Z committed ✓ (carol+anna Dex users + NEBU_RATE_LIMIT_DISABLED in make test-integration)
+# rate-limit-isolation 2026-05-30T07:20Z arc42-update → skipped (test-infra only)
+# rate-limit-isolation 2026-05-30T07:10Z dev-story → done (cycle 0)
+# rate-limit-isolation 2026-05-30T19:00Z dev-story → DONE: 3 files changed — carol+anna in dex/config.yaml, carol@/anna@ in auto_join_rooms_steps_test.go, @carol:nebu.local in auto_join_rooms.feature; all 28 Go test pkgs pass
+# rate-limit-isolation 2026-05-30T07:05Z test-review → skipped (test-wiring/config story)
+# rate-limit-isolation 2026-05-30T18:35Z create-story → DONE: story file created at docs/stories/room-naming-and-default-rooms/rate-limit-isolation.md
+# rate-limit-isolation 2026-05-30T07:00Z pipeline started
+# test-coverage-gaps 2026-05-29T09:05Z committed ✓ (test-wiring: Godog+Playwright+3 unit tests, 2 review cycles)
+# test-coverage-gaps 2026-05-29T09:02Z arc42-update → skipped (test-only changes, no arch impact)
+# test-coverage-gaps 2026-05-29T09:00Z security-review → skipped (not-needed)
+# test-coverage-gaps 2026-05-29T08:50Z code-review → 1 MAJOR (charlie token mismatch), 2 MINOR → cycle 2
+# test-coverage-gaps 2026-05-29T08:35Z code-review → 1 MAJOR (duplicate step registrations), 4 MINOR → cycle 1
+# test-coverage-gaps 2026-05-29T08:20Z ci-gate → PASS: all 3 new unit tests pass, integration pkg compiles clean; 2 pre-existing failures (rate-limit/dex) unrelated
+# test-coverage-gaps 2026-05-29T08:05Z test-review → skipped (test-wiring story)
+# test-coverage-gaps 2026-05-29T08:00Z pipeline started
+# admin-auto-join-rooms 2026-05-28T13:45Z committed ✓ (ATDD+Dev+Code CLEAN, 1 MINOR fixed, Kassandra CLEAN, arc42 updated)
+# admin-auto-join-rooms 2026-05-28 DONE: committed 16423519 ✓
+# admin-auto-join-rooms 2026-05-28 arc42-update → Scenario 3p added to 06-runtime.md (admin toggle flow, new-user auto-join Task.start, list_auto_join_rooms, is_new flag, security notes)
+# admin-auto-join-rooms 2026-05-28 security-review → PASS: 0 CRITICAL, 0 HIGH, 0 MEDIUM, 0 LOW; all 9 security checks dismissed (CSRF+auth+SQL+XSS all covered by existing guardrails)
+# admin-auto-join-rooms 2026-05-28 code-review → PASS: 0 MAJOR, 1 MINOR fixed inline (user_data typespec required/optional form); security=required → passed
+# admin-auto-join-rooms 2026-05-28 ci-gate → PASS: 249 Elixir tests (0 failures), all Go tests pass
+# admin-auto-join-rooms 2026-05-28 dev-story → DONE: migration+index in 000001, list_auto_join_rooms in room/db.ex+DBBehaviour, ensure_auto_join_memberships/1 (public), validate_token Task.start is_new check, is_auto_join in proto+pb+Elixir+Go, admin/db.ex update_room_auto_join, rooms.html toggle, StubRoom.IsAutoJoin, FakeDB stubs in all test modules
+# admin-auto-join-rooms 2026-05-28 test-review → PASS (no MAJOR findings, all 6 ACs covered)
+# admin-auto-join-rooms 2026-05-28T09:00Z atdd → 4 failing test files written
+# direct-room-heroes 2026-05-28T13:15Z committed ✓ (ATDD+Dev+Code CLEAN, 1 MINOR fixed, arc42 updated)
+# personal-self-room 2026-05-28 code-review → PASS: no MAJOR findings; 2 MINOR fixed inline; security=not-needed skipped
+# personal-self-room 2026-05-28 dev-story → DONE: migration in 000001, DB helpers, ensure_personal_room/1, validate_token hook; 246 Elixir + all Go tests pass
+# personal-self-room 2026-05-28 test-review → PASS (no MAJOR findings, all 4 ACs covered)
+# personal-self-room 2026-05-28T12:00Z atdd → 3 files, 5+15+3 tests
+# [personal-self-room] 2026-05-28T09:05Z oracle-gate → spec context captured
+# [personal-self-room] 2026-05-28T09:00Z classify → matrix=true, ui=false, sec=not-needed
+# Epic: room-naming-and-default-rooms
+# Branch: feature/room-naming-and-default-rooms
+#
+# Stories (in suggested implementation order):
+#   1. personal-self-room          — ready-for-dev
+#   2. admin-auto-join-rooms       — ready-for-dev (security_review: required)
+#   3. direct-room-heroes          — ready-for-dev (oracle-reviewed 2026-05-28)
+#
+# Note: Stories 1 and 2 can be implemented independently (no dependency between them).
+# Story 3 is independent. All three can be developed in parallel by separate agents.
+# direct-room-heroes 2026-05-28 code-review → PASS: 0 MAJOR, 0 MINOR (1 fixed inline: invited_count in Go condition); security=not-needed skipped
+# direct-room-heroes 2026-05-28 ci-gate → PASS: all Go tests pass, 249 Elixir tests pass (2 pre-existing auto-join failures unrelated to this story)
+# direct-room-heroes 2026-05-28 dev-story → DONE: proto+3 fields, get_room_heroes/2 in DB, attach_heroes/3 in event_dispatcher, syncRoomSummary+omitempty in sync.go, bob+charlie+alice in dex, fake DB stubs in all test files
+# direct-room-heroes 2026-05-28 test-review → PASS (97/100, grade A): all 5 ACs covered, 0 MAJOR, 1 MEDIUM (shared dmRoomID), 4 LOW
+# direct-room-heroes 2026-05-28T12:45Z atdd → 6 Godog scenarios, 3 files
+# direct-room-heroes 2026-05-28 DONE: committed 6470e053 ✓
+# direct-room-heroes 2026-05-28 arc42-update → Scenario 3o added to 06-runtime.md (m.heroes room summary, attach_heroes, syncRoomSummary, delta optimization)
+story: null
+current_step: null
+completed: []
+cycle_count: 0
+blocked_reason: null
+last_updated: "2026-05-30T22:08Z"

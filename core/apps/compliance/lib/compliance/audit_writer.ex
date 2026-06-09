@@ -46,6 +46,7 @@ defmodule Compliance.AuditWriter do
     update_user_role
     room_archived
     room_unarchived
+    room_auto_join_changed
     server_config_updated
     room_upgraded
     gdpr_deletion

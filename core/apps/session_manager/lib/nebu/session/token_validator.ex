@@ -10,11 +10,14 @@ defmodule Nebu.Session.TokenValidator do
   Test implementation: configured via Application.put_env in test setup.
   """
 
+  # Story admin-auto-join-rooms: is_new = true on first-ever login, false on re-login.
+  # Absent (not in map) is treated as false in Server.validate_token/2.
   @type user_data :: %{
-          user_id: String.t(),
-          system_role: String.t(),
-          display_name: String.t(),
-          is_active: boolean()
+          required(:user_id) => String.t(),
+          required(:system_role) => String.t(),
+          required(:display_name) => String.t(),
+          required(:is_active) => boolean(),
+          optional(:is_new) => boolean()
         }
 
   @callback validate(

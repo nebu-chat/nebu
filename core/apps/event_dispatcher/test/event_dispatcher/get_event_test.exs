@@ -40,6 +40,7 @@ defmodule Nebu.EventDispatcher.GetEventTest do
     def fetch_events_since(_r, _l_id, _lim), do: {:ok, []}
     def get_event_timestamp(_event_id),      do: {:error, :not_found}
     def get_room_name(_room_id),             do: {:ok, nil}
+    def get_room_heroes(_room_id, _exclude), do: {:ok, %{heroes: [], joined: 0, invited: 0}}
     def load_room_settings(_room_id),        do: {:ok, 0}
     def get_room_status(_room_id),           do: {:ok, "active"}
     def check_room_status_for_update(_),     do: {:ok, "active"}
@@ -62,6 +63,7 @@ defmodule Nebu.EventDispatcher.GetEventTest do
     def fetch_events_since(_r, _l_id, _lim), do: {:ok, []}
     def get_event_timestamp(_event_id),      do: {:error, :not_found}
     def get_room_name(_room_id),             do: {:ok, nil}
+    def get_room_heroes(_room_id, _exclude), do: {:ok, %{heroes: [], joined: 0, invited: 0}}
     def load_room_settings(_room_id),        do: {:ok, 0}
     def get_room_status(_room_id),           do: {:ok, "active"}
     def check_room_status_for_update(_),     do: {:ok, "active"}
@@ -97,6 +99,7 @@ defmodule Nebu.EventDispatcher.GetEventTest do
     def fetch_events_since(_r, _l_id, _lim), do: {:ok, []}
     def get_event_timestamp(_event_id),      do: {:error, :not_found}
     def get_room_name(_room_id),             do: {:ok, nil}
+    def get_room_heroes(_room_id, _exclude), do: {:ok, %{heroes: [], joined: 0, invited: 0}}
     def load_room_settings(_room_id),        do: {:ok, 0}
     def get_room_status(_room_id),           do: {:ok, "active"}
     def check_room_status_for_update(_),     do: {:ok, "active"}

@@ -70,6 +70,10 @@ services:
       # DEV-ONLY: allow http:// OIDC issuer for the Docker-internal Dex hostname.
       # Requires NEBU_ENV=dev|development|test|staging — refused otherwise.
       NEBU_ALLOW_INSECURE_OIDC_ISSUER: "true"
+      # Integration-test escape hatch: set NEBU_RATE_LIMIT_DISABLED=true in the
+      # host environment before `docker compose up` to disable the IP rate limiter.
+      # make test-integration sets this automatically; never set in production.
+      NEBU_RATE_LIMIT_DISABLED: "${NEBU_RATE_LIMIT_DISABLED:-false}"
     ports:
       - "8008:8008"
       - "8080:8080"

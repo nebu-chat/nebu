@@ -1,0 +1,69 @@
+{
+  "schema_version": "0.1.0",
+  "evaluated_at": "2026-05-31T00:00:00.000Z",
+  "repo": "nebu-chat",
+  "target": {
+    "type": "epic",
+    "id": "room-naming-and-default-rooms",
+    "label": "Epic: room-naming-and-default-rooms"
+  },
+  "previous_decision": {
+    "date": "2026-05-29",
+    "gate_status": "FAIL",
+    "blockers": [
+      "GAP-1: auto_join_rooms_steps_test.go missing",
+      "GAP-2: initializeAutoJoinRoomsSteps not registered",
+      "GAP-3: Playwright steps all [ATDD RED PHASE]",
+      "GAP-4: initializeDirectRoomHeroesSteps not registered"
+    ]
+  },
+  "collection_status": "COLLECTED",
+  "gate_basis": "priority_thresholds",
+  "gate_status": "PASS",
+  "rationale": "All 4 P0 blockers from the 2026-05-29 FAIL verdict are resolved. P0+P1 coverage is 100% (21/21 ACs) across 4 product-feature stories. Two optional recommendations (R6 P1, R7 P2) remain but do not block epic closure.",
+  "p0_status": "MET",
+  "p1_status": "MET",
+  "overall_status": "MET",
+  "critical_open": 0,
+  "coverage_statistics": {
+    "total_requirements": 21,
+    "fully_covered": 21,
+    "partially_covered": 0,
+    "uncovered": 0,
+    "overall_coverage_percentage": 100,
+    "priority_breakdown": {
+      "P0": { "total": 18, "covered": 18, "percentage": 100 },
+      "P1": { "total": 3, "covered": 3, "percentage": 100 }
+    }
+  },
+  "gate_criteria": {
+    "p0_coverage_required": "100%",
+    "p0_coverage_actual": "100%",
+    "p0_status": "MET",
+    "p1_coverage_target": "80%",
+    "p1_coverage_actual": "100%",
+    "p1_status": "MET",
+    "overall_coverage_minimum": "80%",
+    "overall_coverage_actual": "100%",
+    "overall_status": "MET"
+  },
+  "stories": [
+    { "id": "personal-self-room",        "acs": 4, "covered": 4, "gate": "PASS" },
+    { "id": "admin-auto-join-rooms",     "acs": 6, "covered": 6, "gate": "PASS" },
+    { "id": "direct-room-heroes",        "acs": 5, "covered": 5, "gate": "PASS" },
+    { "id": "auto-join-on-user-import",  "acs": 6, "covered": 6, "gate": "PASS" }
+  ],
+  "open_recommendations": [
+    { "id": "R6", "priority": "P1", "description": "Element Web E2E: new user auto-join room visible in sidebar", "blocking": false, "suggested_location": "e2e/features/element/room/auto-join.feature" },
+    { "id": "R7", "priority": "P2", "description": "Element Web E2E: DM room shows participant name instead of Empty Room", "blocking": false, "suggested_location": "e2e/features/element/room/dm-heroes.feature" }
+  ],
+  "next_steps": [
+    "Run make test-integration against dev stack for final green-run confirmation",
+    "Epic-end security review: /bmad-code-review against git diff <epic-base>..HEAD",
+    "Epic retrospective: /bmad-retrospective",
+    "Create follow-up stories for R6 and R7 in next sprint"
+  ],
+  "links": {
+    "trace_report_path": "_bmad-output/test-artifacts/traceability/traceability-matrix.md"
+  }
+}
