@@ -829,6 +829,17 @@ On restart, Horde re-discovers Room GenServers across the cluster via CRDT regis
 Session Manager GenServer reads since-token checkpoints from PostgreSQL (no cold-sync forced on clients).
 EventBus stream re-connects to Go Gateway after exponential backoff (max 30s + jitter).
 
+**On-demand Room GenServer restart (lazy restart pattern):**
+
+Several gRPC handlers participate in lazy restart — they catch `:exit, {:noproc, _}` from a `GenServer.call` and attempt `RoomSupervisor.start_room/1` before retrying:
+
+| Handler | Added in |
+|---|---|
+| `send_receipt/2` | story direct-room-heroes |
+| `get_room_state/2` (read path used by Go Gateway sync) | bugfix/fix-room-management-error |
+
+If `start_room` returns `{:error, reason}` the handler returns gRPC `NOT_FOUND` and logs the reason at `warning` level. If the room starts but the process stops before `get_state` completes, `{:noproc, _}` → `NOT_FOUND`; `{:timeout, _}` → `UNAVAILABLE`.
+
 ## Scenario 6: SSO Login Flow with Nonce and Denylist Verification (Story 11-7)
 
 The SSO flow now enforces a three-layer security mechanism to prevent the Safari re-login bug

@@ -287,6 +287,29 @@ defmodule Nebu.Admin.DB do
     end
   end
 
+  # ─── Story admin-auto-join-rooms: update_room_auto_join/2 ───────────────────
+
+  @doc """
+  Sets rooms.is_auto_join for `room_id`.
+
+  Returns :ok on success (whether room exists or not — UPDATE may affect 0 rows).
+  Returns {:error, reason} on DB error.
+
+  Story admin-auto-join-rooms: called by update_room_settings/2 in EventDispatcher.Server
+  when the is_auto_join field is present in UpdateRoomSettingsRequest.
+  """
+  @spec update_room_auto_join(String.t(), boolean()) :: :ok | {:error, term()}
+  def update_room_auto_join(room_id, is_auto_join) do
+    case Ecto.Adapters.SQL.query(
+           Nebu.Repo,
+           "UPDATE rooms SET is_auto_join = $2 WHERE room_id = $1",
+           [room_id, is_auto_join]
+         ) do
+      {:ok, _} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
   # ─── Server config operations ─────────────────────────────────────────────────
 
   @doc """
@@ -436,20 +459,4 @@ defmodule Nebu.Admin.DB do
     }
   end
 
-  @doc """
-  Persists the is_auto_join flag for the given room_id.
-
-  Returns :ok on success.
-  Returns {:error, reason} on DB failure.
-
-  Story admin-auto-join-rooms.
-  """
-  def update_room_auto_join(room_id, is_auto_join) do
-    case Ecto.Adapters.SQL.query(Nebu.Repo,
-           "UPDATE rooms SET is_auto_join = $2 WHERE room_id = $1",
-           [room_id, is_auto_join]) do
-      {:ok, _} -> :ok
-      {:error, reason} -> {:error, reason}
-    end
-  end
 end

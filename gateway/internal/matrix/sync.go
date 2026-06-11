@@ -393,7 +393,7 @@ type syncRoomSummary struct {
 }
 
 type syncJoinedRoom struct {
-	Summary     *syncRoomSummary       `json:"summary,omitempty"`
+	Summary     *syncRoomSummary       `json:"summary,omitempty"` // nil = omitted (named rooms)
 	State       syncStateSection       `json:"state"`
 	Timeline    syncTimelineSection    `json:"timeline"`
 	AccountData syncAccountDataSection `json:"account_data"`

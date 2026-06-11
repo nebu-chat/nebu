@@ -198,6 +198,9 @@ defmodule Nebu.EventDispatcher.SyncTest do
       end
     end
 
+    # Story direct-room-heroes: returns empty heroes list for unit tests (no real DB).
+    def get_room_heroes(_room_id, _exclude_user_id), do: {:ok, %{heroes: [], joined: 0, invited: 0}}
+
     # Story 6.8: load_room_settings/1 returns {:ok, 0} (no limit) for unit tests.
     def load_room_settings(_room_id), do: {:ok, 0}
 
@@ -224,8 +227,7 @@ defmodule Nebu.EventDispatcher.SyncTest do
     # Story personal-self-room: personal room callbacks.
     def get_personal_room_id(_user_id), do: {:ok, nil}
     def set_personal_room_id(_user_id, _room_id), do: :ok
-    # Story direct-room-heroes + admin-auto-join-rooms: required stubs.
-    def get_room_heroes(_room_id, _exclude_user_id), do: {:ok, %{heroes: [], joined: 0, invited: 0}}
+    # Story admin-auto-join-rooms: required stub.
     def list_auto_join_rooms(), do: {:ok, []}
   end
 

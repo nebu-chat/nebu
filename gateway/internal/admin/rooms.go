@@ -59,7 +59,7 @@ func protoToStubRoomSummary(r *pb.AdminRoomProto) StubRoom {
 }
 
 // protoToStubRoom maps an AdminRoomDetailProto (detail view) to a *StubRoom.
-// Includes MaxMembers and Visibility which are only present in the detail proto.
+// Includes MaxMembers, Visibility, and IsAutoJoin which are only present in the detail proto.
 func protoToStubRoom(r *pb.AdminRoomDetailProto) *StubRoom {
 	return &StubRoom{
 		ID:          r.GetRoomId(),
@@ -416,7 +416,8 @@ func (h *RoomsHandler) UpdateRoomSettingsHandler(w http.ResponseWriter, r *http.
 			return
 		}
 	}
-	// stub fallback (nil client, unit-test path): no-op — max_members has no stub field to mutate
+	// stub fallback (nil client, unit-test path): no-op — gRPC path persists to DB via Elixir Core.
+	// The stub data in memory is intentionally not mutated here; the real Admin UI always uses gRPC.
 
 	http.Redirect(w, r, "/admin/rooms/"+roomID+"?flash=Settings+updated", http.StatusFound)
 }
