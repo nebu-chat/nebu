@@ -23,8 +23,6 @@ defmodule Nebu.EventDispatcher.AutoJoinRoomsTest do
   #   AC6 — Login succeeds when list_auto_join_rooms/0 fails (non-fatal)
   #   (AC3, AC4 integration behaviour covered by Godog auto_join_rooms.feature)
 
-  require Logger
-
   alias Nebu.EventDispatcher.Server
 
   @charlie_user_id "@charlie:nebu.local"

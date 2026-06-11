@@ -1,6 +1,4 @@
 defmodule Compliance.UserDeletion do
-  require Logger
-
   @moduledoc """
   Atomare DSGVO Key-Löschung für einen User (Story 5.7).
 

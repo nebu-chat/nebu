@@ -168,7 +168,7 @@ defmodule Nebu.EventDispatcher.GetEventTest do
     resp = Server.get_event(req, fake_stream(@user_id))
 
     assert %Core.GetEventResponse{} = resp
-    refute is_nil(resp.event)
+    assert is_struct(resp.event)
 
     event = resp.event
     assert event.event_id   == @event_id

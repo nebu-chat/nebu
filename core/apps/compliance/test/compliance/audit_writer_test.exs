@@ -47,10 +47,8 @@ defmodule Compliance.AuditWriterTest do
     end
 
     def insert!(struct, opts \\ []) do
-      case insert(struct, opts) do
-        {:ok, s} -> s
-        _ -> raise "FakeRepo.insert! failed"
-      end
+      {:ok, s} = insert(struct, opts)
+      s
     end
   end
 
