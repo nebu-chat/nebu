@@ -27,8 +27,6 @@ defmodule Nebu.EventDispatcher.PersonalRoomTest do
   #   - First login: get_personal_room_id called → {:ok, nil} → room created
   #   - Idempotent: get_personal_room_id called → {:ok, existing_id} → no room created
 
-  require Logger
-
   alias Nebu.EventDispatcher.Server
 
   @alice_user_id "@alice:nebu.local"

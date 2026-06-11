@@ -80,7 +80,7 @@ defmodule Nebu.Signature do
   @spec decrypt_operational_pii(binary(), binary(), binary()) :: {:ok, binary()} | {:error, :decryption_failed}
   def decrypt_operational_pii(ciphertext_with_tag, nonce, server_key) do
     ct_size = byte_size(ciphertext_with_tag) - 16
-    <<ciphertext::binary-size(ct_size), tag::binary-size(16)>> = ciphertext_with_tag
+    <<ciphertext::binary-size(^ct_size), tag::binary-size(16)>> = ciphertext_with_tag
 
     try do
       case :crypto.crypto_one_time_aead(:aes_256_gcm, server_key, nonce, ciphertext, <<>>, tag, false) do
@@ -135,7 +135,7 @@ defmodule Nebu.Signature do
     shared = :crypto.compute_key(:ecdh, ephemeral_public_key, recipient_private_key, :x25519)
     aes_key = derive_aes_key(shared)
     ct_size = byte_size(ciphertext_with_tag) - 16
-    <<ciphertext::binary-size(ct_size), tag::binary-size(16)>> = ciphertext_with_tag
+    <<ciphertext::binary-size(^ct_size), tag::binary-size(16)>> = ciphertext_with_tag
 
     try do
       case :crypto.crypto_one_time_aead(:aes_256_gcm, aes_key, nonce, ciphertext, <<>>, tag, false) do

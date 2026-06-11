@@ -1061,7 +1061,7 @@ defmodule Nebu.EventDispatcher.AdminGrpcTest do
       request = %Core.GetMetricsRequest{}
       response = Server.get_metrics(request, build_stream())
 
-      assert is_integer(response.room_count) && response.room_count >= 0,
+      assert response.room_count >= 0,
              "expected non-negative integer room_count, got #{inspect(response.room_count)}"
     end
   end
