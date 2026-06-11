@@ -631,22 +631,25 @@ defmodule Nebu.Room.DB do
     end
   end
 
-  @spec get_room_name(String.t()) :: {:ok, String.t()} | {:error, :not_found | term()}
   @doc """
-  Returns heroes, joined count, and invited count for `room_id`, excluding `exclude_user_id`.
+  Returns the hero list and member counts for `room_id`, excluding `exclude_user_id`.
 
-  Heroes = up to 5 members ordered by joined_at ASC (active joined members first, then
-  pending invitations), excluding the syncing user. Counts include all active members /
-  all pending invitations respectively (inclusive of the syncing user).
+  Hero computation rules (Matrix CS API §11.2.2.5):
+  - Pool: joined members (left_at IS NULL) + invited members (pending invitation).
+  - Syncing user is excluded from the pool.
+  - Joined members are listed first (by joined_at ASC), then invited members (by invited_at ASC).
+  - Total capped at 5.
+  - `joined` = COUNT of active members (left_at IS NULL).
+  - `invited` = COUNT of pending invitations (accepted_at IS NULL AND rejected_at IS NULL).
 
-  Returns `{:ok, %{heroes: [user_id], joined: integer(), invited: integer()}}` on success.
+  Returns `{:ok, %{heroes: [String.t()], joined: integer(), invited: integer()}}`.
   Returns `{:error, reason}` on DB error.
 
-  Story direct-room-heroes (§11.2.2): used by attach_heroes/3 in EventDispatcher.Server.
+  Story direct-room-heroes: called by event_dispatcher/server.ex to populate SyncRoom.heroes,
+  SyncRoom.joined_member_count, and SyncRoom.invited_member_count.
   """
   @spec get_room_heroes(String.t(), String.t()) ::
-          {:ok, %{heroes: [String.t()], joined: integer(), invited: integer()}}
-          | {:error, term()}
+          {:ok, %{heroes: [String.t()], joined: integer(), invited: integer()}} | {:error, term()}
   def get_room_heroes(room_id, exclude_user_id) do
     heroes_sql = """
     (SELECT user_id, joined_at FROM room_members
@@ -659,12 +662,14 @@ defmodule Nebu.Room.DB do
      ORDER BY invited_at ASC)
     LIMIT 5
     """
-
-    joined_sql = "SELECT COUNT(*) FROM room_members WHERE room_id = $1 AND left_at IS NULL"
-
-    invited_sql =
-      "SELECT COUNT(*) FROM room_invitations WHERE room_id = $1 AND accepted_at IS NULL AND rejected_at IS NULL"
-
+    joined_sql = """
+    SELECT COUNT(*) FROM room_members
+    WHERE room_id = $1 AND left_at IS NULL
+    """
+    invited_sql = """
+    SELECT COUNT(*) FROM room_invitations
+    WHERE room_id = $1 AND accepted_at IS NULL AND rejected_at IS NULL
+    """
     with {:ok, %{rows: hero_rows}} <-
            Ecto.Adapters.SQL.query(Nebu.Repo, heroes_sql, [room_id, exclude_user_id]),
          {:ok, %{rows: [[joined]]}} <-
@@ -676,6 +681,7 @@ defmodule Nebu.Room.DB do
     end
   end
 
+  @spec get_room_name(String.t()) :: {:ok, String.t()} | {:error, :not_found | term()}
   def get_room_name(room_id) do
     sql = """
     SELECT CASE
@@ -861,6 +867,29 @@ defmodule Nebu.Room.DB do
     end
   end
 
+  # ─── Story admin-auto-join-rooms: list_auto_join_rooms/0 ───────────────────
+
+  @sql_list_auto_join_rooms """
+  SELECT room_id FROM rooms WHERE is_auto_join = true AND status = 'active'
+  """
+
+  @doc """
+  Returns all room IDs that have is_auto_join=true and are active.
+
+  Called by ensure_auto_join_memberships/1 in EventDispatcher.Server when a new
+  user is provisioned on first login.
+
+  Returns `{:ok, [room_id]}` — empty list when no auto-join rooms exist.
+  Returns `{:error, reason}` on DB error.
+  """
+  @spec list_auto_join_rooms() :: {:ok, [String.t()]} | {:error, term()}
+  def list_auto_join_rooms do
+    case Ecto.Adapters.SQL.query(Nebu.Repo, @sql_list_auto_join_rooms, []) do
+      {:ok, %{rows: rows}} -> {:ok, Enum.map(rows, fn [rid] -> rid end)}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
   @doc """
   Returns the most recent state event per (event_type, state_key) for `room_id`,
   excluding event types handled separately (m.room.member, m.room.power_levels,
@@ -908,19 +937,4 @@ defmodule Nebu.Room.DB do
     end
   end
 
-  @sql_list_auto_join_rooms """
-  SELECT room_id FROM rooms WHERE is_auto_join = true AND status = 'active'
-  """
-
-  @doc """
-  Returns all room IDs with is_auto_join=true and status='active'.
-
-  Story admin-auto-join-rooms: called by ensure_auto_join_memberships/1 at first login.
-  """
-  def list_auto_join_rooms do
-    case Ecto.Adapters.SQL.query(Nebu.Repo, @sql_list_auto_join_rooms, []) do
-      {:ok, %{rows: rows}} -> {:ok, Enum.map(rows, fn [rid] -> rid end)}
-      {:error, reason} -> {:error, reason}
-    end
-  end
 end

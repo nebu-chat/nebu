@@ -1045,9 +1045,31 @@ defmodule Nebu.EventDispatcher.Server do
         mod.get_state(room_id)
       catch
         :exit, {:noproc, _} ->
-          raise GRPC.RPCError,
-            status: GRPC.Status.not_found(),
-            message: "room not found: #{room_id}"
+          # Room GenServer not running — attempt lazy restart from DB (handles Core restart).
+          # Mirrors the start_room pattern used in join_room and other write paths.
+          case Nebu.Room.RoomSupervisor.start_room(room_id) do
+            {:error, reason} ->
+              Logger.warning("get_room_state lazy restart failed for room #{room_id}: #{inspect(reason)}")
+
+              raise GRPC.RPCError,
+                status: GRPC.Status.not_found(),
+                message: "room not found: #{room_id}"
+
+            {:ok, _pid} ->
+              try do
+                mod.get_state(room_id)
+              catch
+                :exit, {:noproc, _} ->
+                  raise GRPC.RPCError,
+                    status: GRPC.Status.not_found(),
+                    message: "room not found: #{room_id}"
+
+                :exit, {:timeout, _} ->
+                  raise GRPC.RPCError,
+                    status: GRPC.Status.unavailable(),
+                    message: "room unavailable: #{room_id}"
+              end
+          end
       end
 
     # System-role callers (internal gateway fanout) skip the membership check.

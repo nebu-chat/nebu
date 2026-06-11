@@ -243,6 +243,12 @@ defmodule Nebu.Room.Server do
                max_members: max_members
              }}
 
+          {:error, :not_found} ->
+            # Stop with :normal so Horde's :transient strategy does not retry — same
+            # pattern as the archived-room guard above. The caller (start_room) gets
+            # {:error, _} and maps it to NOT_FOUND; no restart loop is triggered.
+            {:stop, :normal}
+
           {:error, reason} ->
             {:stop, reason}
         end

@@ -1,6 +1,0 @@
-# Nebu Pipeline State — legacy location (_bmad/nebu/)
-# ARCHIVED: Full log archived at:
-#   _bmad-output/archived-artifacts/release-v0.2.1/pipeline-state-legacy.yaml
-# Active pipeline state now lives at:
-#   _bmad-output/nebu/pipeline-state.yaml (legacy numbered epics)
-#   _bmad-output/nebu/epics/<epic-name>/pipeline-state.yaml (named epics, v0.3.0+)

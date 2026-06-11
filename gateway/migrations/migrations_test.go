@@ -8,11 +8,17 @@ import (
 )
 
 func TestFS_ContainsExpectedMigrationFiles(t *testing.T) {
-	// Verify the embedded FS contains the squashed migration files only.
-	// After Story 13.14 squash: all 49 migrations are combined into a single 000001_init.
+	// Verify the embedded FS contains exactly the expected migration files.
+	// 000001_init: squashed baseline (Story 13.14)
+	// 000002_add_missing_structures: idempotent catch-up for pre-squash instances (bugfix/fix-room-management-error)
+	// 000003_compliance_rls_hardening: restrict UPDATE policies on compliance tables (bugfix/fix-compliance-rls-policies)
 	files := []string{
 		"000001_init.up.sql",
 		"000001_init.down.sql",
+		"000002_add_missing_structures.up.sql",
+		"000002_add_missing_structures.down.sql",
+		"000003_compliance_rls_hardening.up.sql",
+		"000003_compliance_rls_hardening.down.sql",
 	}
 
 	for _, name := range files {
@@ -42,23 +48,28 @@ func TestFS_UpMigrationIsNotEmpty(t *testing.T) {
 }
 
 func TestFS_NoLegacyMigrationFiles(t *testing.T) {
-	// After Story 13.14 squash, the embedded FS must contain exactly two files:
-	// 000001_init.up.sql and 000001_init.down.sql.
-	// Any other file would cause golang-migrate to attempt unexpected migrations.
+	// The embedded FS must contain exactly these four files — no more, no less.
+	// 000001_init: squashed baseline (Story 13.14)
+	// 000002_add_missing_structures: idempotent catch-up for pre-squash instances
+	// Any other file would indicate an unintended legacy migration was re-introduced.
 	entries, err := fs.ReadDir(migrations.FS, ".")
 	if err != nil {
 		t.Fatalf("fs.ReadDir embedded FS root: %v", err)
 	}
 
 	want := map[string]bool{
-		"000001_init.up.sql":   true,
-		"000001_init.down.sql": true,
+		"000001_init.up.sql":                        true,
+		"000001_init.down.sql":                      true,
+		"000002_add_missing_structures.up.sql":      true,
+		"000002_add_missing_structures.down.sql":    true,
+		"000003_compliance_rls_hardening.up.sql":    true,
+		"000003_compliance_rls_hardening.down.sql":  true,
 	}
 
 	for _, e := range entries {
 		name := e.Name()
 		if !want[name] {
-			t.Errorf("unexpected file in embedded FS: %q — only 000001_init.up.sql and 000001_init.down.sql are expected after squash", name)
+			t.Errorf("unexpected file in embedded FS: %q — only the six expected migration files should be present", name)
 		}
 	}
 

@@ -13,19 +13,31 @@ defmodule Nebu.Session.TokenValidator.Postgres do
   def validate(user_id, system_role, display_name, email) do
     case lookup_user(user_id) do
       {:ok, nil} ->
-        provision_new_user(user_id, system_role, display_name, email)
+        # Brand-new user — provision and mark as new (is_new: true).
+        # Story admin-auto-join-rooms: is_new drives ensure_auto_join_memberships/1.
+        case provision_new_user(user_id, system_role, display_name, email) do
+          {:ok, user_data} -> {:ok, Map.put(user_data, :is_new, true)}
+          error -> error
+        end
 
       {:ok, %{is_active: false}} ->
         {:error, :deactivated}
 
       {:ok, %{signing_key_id: nil}} ->
         case provision_existing_user(user_id, display_name, email) do
-          {:ok, :provisioned} -> read_and_decrypt(user_id)
+          {:ok, :provisioned} ->
+            case read_and_decrypt(user_id) do
+              {:ok, user_data} -> {:ok, Map.put(user_data, :is_new, false)}
+              error -> error
+            end
           {:error, reason} -> {:error, reason}
         end
 
       {:ok, user} ->
-        decrypt_and_return(user)
+        case decrypt_and_return(user) do
+          {:ok, user_data} -> {:ok, Map.put(user_data, :is_new, false)}
+          error -> error
+        end
 
       {:error, reason} ->
         {:error, reason}
