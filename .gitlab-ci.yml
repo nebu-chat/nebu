@@ -4,8 +4,9 @@
 # build dependencies (gcc for race detector, hex/rebar for Elixir).
 #
 # Build jobs rebuild images when their Dockerfiles change.
-# Manual trigger available for initial setup (run build-ci-go + build-ci-elixir
+# Manual trigger available for initial setup (run build-ci-elixir + build-ci-dex
 # once before first pipeline run that uses them).
+# go-removal-cleanup (full-elixir-stack): the Go layer and all Go CI jobs were removed.
 #
 # CI image builds use Kaniko — no Docker daemon / DinD required, works on plain
 # K8s runners. Only the integration-test job still needs DinD (docker compose
@@ -64,7 +65,7 @@ pages:
 
 variables:
   DOCKER_DRIVER: overlay2
-  CI_GO_IMAGE: $CI_REGISTRY_IMAGE/ci-go:1.26
+  # go-removal-cleanup (full-elixir-stack): CI_GO_IMAGE removed with the Go layer.
   CI_ELIXIR_IMAGE: $CI_REGISTRY_IMAGE/ci-elixir:1.19
   GITLEAKS_VERSION: "8.24.3"
 
@@ -123,22 +124,8 @@ stages:
         "$(printf '%s:%s' "${DOCKER_REGISTRY_USER}" "${DOCKER_REGISTRY_PASS}" | base64 | tr -d '\n')" \
         > /kaniko/.docker/config.json
 
-build-ci-go:
-  <<: *build_ci_image
-  script:
-    - /kaniko/executor
-      --context "${CI_PROJECT_DIR}"
-      --dockerfile docker/Dockerfile.ci.go
-      --destination "${CI_REGISTRY_IMAGE}/ci-go:1.26"
-      --cache=true
-      --cache-ttl=168h
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
-      changes: [docker/Dockerfile.ci.go]
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-      changes: [docker/Dockerfile.ci.go]
-    - when: manual
-      allow_failure: true
+# go-removal-cleanup (full-elixir-stack): build-ci-go was removed — the Go toolchain
+# image is no longer built or used.
 
 build-ci-elixir:
   <<: *build_ci_image
@@ -174,28 +161,16 @@ build-ci-dex:
     - when: manual
       allow_failure: true
 
-# ─── Shared helpers ───────────────────────────────────────────────────────────
-
-# Downloads gitignored vendor JS files so that go:embed directives resolve.
-# Must run before any `go vet` / `go test` step that compiles gateway/internal/admin.
-.download_vendor: &download_vendor
-  before_script:
-    - mkdir -p gateway/internal/admin/static/vendor
-    - wget -q -O gateway/internal/admin/static/vendor/vue.esm-browser.prod.js 'https://cdn.jsdelivr.net/npm/vue@3.5.13/dist/vue.esm-browser.prod.js'
-
-# ─── Lint ─────────────────────────────────────────────────────────────────────
-
-lint-go:
-  <<: *download_vendor
+# ─── No-Go-Files Smoke Gate ─────────────────────────────────────────────────────
+# go-removal-cleanup (full-elixir-stack) AC1: a CI gate that fails if any *.go file
+# reappears in the tree. Toolchain-free (pure POSIX find), runs in any image.
+no-go-files:
   stage: lint
-  image: $CI_REGISTRY_IMAGE/ci-go:1.26
+  image: alpine:3.23
+  before_script:
+    - apk add --no-cache bash
   script:
-    - cd gateway && go vet ./...
-    - cd ../media && go vet ./...
-  cache:
-    key: "go-${CI_COMMIT_REF_SLUG}"
-    paths:
-      - /root/go/pkg/mod
+    - bash test/smoke/no-go-files.sh
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
     - if: '$CI_COMMIT_BRANCH =~ /^feature\//'
@@ -204,36 +179,19 @@ lint-go:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
 
 # ─── Unit Tests ───────────────────────────────────────────────────────────────
-# Run directly in custom images — no DinD, no make overhead.
-
-test-unit-go:
-  <<: *download_vendor
-  stage: unit
-  image: $CI_REGISTRY_IMAGE/ci-go:1.26
-  script:
-    - cd gateway && go test -race ./...
-    - cd ../media && go test ./...
-  cache:
-    key: "go-${CI_COMMIT_REF_SLUG}"
-    paths:
-      - /root/go/pkg/mod
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
-    - if: '$CI_COMMIT_BRANCH =~ /^feature\//'
-    - if: '$CI_COMMIT_BRANCH =~ /^bugfix\//'
-    - if: '$CI_COMMIT_BRANCH =~ /^release\//'
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+# go-removal-cleanup (full-elixir-stack): lint-go and test-unit-go were removed along
+# with the Go layer. Only the Elixir unit suite remains.
 
 test-unit-elixir:
   stage: unit
   image: $CI_REGISTRY_IMAGE/ci-elixir:1.19
   script:
-    - cd core && mix deps.get && MIX_ENV=test mix compile && mix test --warnings-as-errors
+    - cd server && mix deps.get && MIX_ENV=test mix compile && mix test --warnings-as-errors
   cache:
     key: "mix-${CI_COMMIT_REF_SLUG}"
     paths:
-      - core/deps
-      - core/_build
+      - server/deps
+      - server/_build
       - ~/.hex
       - ~/.mix
   rules:
@@ -247,10 +205,16 @@ test-unit-elixir:
 
 secret-scan:
   stage: verify
-  image: $CI_REGISTRY_IMAGE/ci-go:1.26
+  # go-removal-cleanup (full-elixir-stack): ci-go image removed; this is a shell-only job.
+  image: $CI_REGISTRY_IMAGE/ci-elixir:1.19
   timeout: 30 minutes
   interruptible: true
   before_script:
+    # ci-elixir is a bare elixir-alpine image (go-removal-cleanup repointed this
+    # shell-only job off the removed ci-go image, which had these). gitleaks is
+    # downloaded with curl and scans git history; scan-secrets.sh is bash.
+    - apk add --no-cache bash curl git
+    - git config --global --add safe.directory "${CI_PROJECT_DIR}"
     # Verify gitleaks tarball SHA256 against the upstream checksums file
     # before extracting (Kassandra 8.6 review H-1, CWE-494/829).
     - set -euo pipefail
@@ -278,7 +242,14 @@ secret-scan:
 
 verify-docs:
   stage: verify
-  image: $CI_REGISTRY_IMAGE/ci-go:1.26
+  # go-removal-cleanup (full-elixir-stack): ci-go image removed; this is a shell-only job.
+  image: $CI_REGISTRY_IMAGE/ci-elixir:1.19
+  before_script:
+    # Bare elixir-alpine image: the verify-*.sh scripts are bash and need python3
+    # (manifest validation) + npx markdownlint-cli (node/npm); git diffs the
+    # README markdownlint count against HEAD.
+    - apk add --no-cache bash python3 nodejs npm git
+    - git config --global --add safe.directory "${CI_PROJECT_DIR}"
   script:
     - scripts/verify-readme-attribution.sh
     - scripts/verify-contributing.sh
@@ -293,48 +264,20 @@ verify-docs:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
 
 # ─── App Image Builds ─────────────────────────────────────────────────────────
-# Kaniko builds the gateway and core application images and pushes them to the
-# GitLab registry tagged with the commit SHA. No DinD required.
-# These images are consumed by the integration-test job via docker-compose.ci.yml.
+# Kaniko builds the server application image and pushes it to the GitLab registry
+# tagged with the commit SHA. No DinD required.
+# This image is consumed by the integration-test job via docker-compose.ci.yml.
+# go-removal-cleanup (full-elixir-stack): build-gateway-image and build-media-image
+# were removed — the server is now the only application image.
 
-build-gateway-image:
+build-server-image:
   <<: *build_ci_image
   stage: build
   script:
     - /kaniko/executor
-      --context "${CI_PROJECT_DIR}/gateway"
-      --dockerfile gateway/Dockerfile
-      --destination "${CI_REGISTRY_IMAGE}/gateway:${CI_COMMIT_SHA}"
-      --cache=true
-      --cache-ttl=24h
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
-    - if: '$CI_COMMIT_BRANCH =~ /^release\//'
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-
-build-core-image:
-  <<: *build_ci_image
-  stage: build
-  script:
-    - /kaniko/executor
-      --context "${CI_PROJECT_DIR}/core"
-      --dockerfile core/Dockerfile
-      --destination "${CI_REGISTRY_IMAGE}/core:${CI_COMMIT_SHA}"
-      --cache=true
-      --cache-ttl=24h
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
-    - if: '$CI_COMMIT_BRANCH =~ /^release\//'
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-
-build-media-image:
-  <<: *build_ci_image
-  stage: build
-  script:
-    - /kaniko/executor
-      --context "${CI_PROJECT_DIR}/media"
-      --dockerfile media/Dockerfile
-      --destination "${CI_REGISTRY_IMAGE}/media:${CI_COMMIT_SHA}"
+      --context "${CI_PROJECT_DIR}/server"
+      --dockerfile server/Dockerfile
+      --destination "${CI_REGISTRY_IMAGE}/server:${CI_COMMIT_SHA}"
       --cache=true
       --cache-ttl=24h
   rules:
@@ -347,15 +290,17 @@ build-media-image:
 # Tags: dev-<CI_PIPELINE_ID> (immutable per run) + dev-latest (mutable pointer).
 # These images reflect development state and are NOT intended for production.
 
-prerelease-gateway-image:
+# go-removal-cleanup (full-elixir-stack): prerelease-gateway-image was removed.
+
+prerelease-server-image:
   <<: *build_ci_image
   stage: build
   script:
     - /kaniko/executor
-      --context "${CI_PROJECT_DIR}/gateway"
-      --dockerfile gateway/Dockerfile
-      --destination "${CI_REGISTRY_IMAGE}/nebu-gateway:dev-${CI_PIPELINE_ID}"
-      --destination "${CI_REGISTRY_IMAGE}/nebu-gateway:dev-latest"
+      --context "${CI_PROJECT_DIR}/server"
+      --dockerfile server/Dockerfile
+      --destination "${CI_REGISTRY_IMAGE}/nebu-server:dev-${CI_PIPELINE_ID}"
+      --destination "${CI_REGISTRY_IMAGE}/nebu-server:dev-latest"
       --build-arg "GIT_COMMIT=${CI_COMMIT_SHA}"
       --build-arg "BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
       --cache=true
@@ -363,41 +308,11 @@ prerelease-gateway-image:
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
 
-prerelease-core-image:
-  <<: *build_ci_image
-  stage: build
-  script:
-    - /kaniko/executor
-      --context "${CI_PROJECT_DIR}/core"
-      --dockerfile core/Dockerfile
-      --destination "${CI_REGISTRY_IMAGE}/nebu-core:dev-${CI_PIPELINE_ID}"
-      --destination "${CI_REGISTRY_IMAGE}/nebu-core:dev-latest"
-      --build-arg "GIT_COMMIT=${CI_COMMIT_SHA}"
-      --build-arg "BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-      --cache=true
-      --cache-ttl=24h
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
-
-prerelease-media-image:
-  <<: *build_ci_image
-  stage: build
-  script:
-    - /kaniko/executor
-      --context "${CI_PROJECT_DIR}/media"
-      --dockerfile media/Dockerfile
-      --destination "${CI_REGISTRY_IMAGE}/nebu-media:dev-${CI_PIPELINE_ID}"
-      --destination "${CI_REGISTRY_IMAGE}/nebu-media:dev-latest"
-      --build-arg "GIT_COMMIT=${CI_COMMIT_SHA}"
-      --build-arg "BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-      --cache=true
-      --cache-ttl=24h
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
+# go-removal-cleanup (full-elixir-stack): prerelease-media-image was removed.
 
 # ─── Integration Test ─────────────────────────────────────────────────────────
 # Requires DinD: starts docker compose stack, runs Gherkin tests, tears down.
-# Test runner joins nebu_default network → reaches gateway:8080 and core:4000
+# Test runner joins nebu_default network → reaches server:8080 and server:4000
 # by service name (works in DinD where host.docker.internal is not available).
 #
 # This job is intentionally pinned to runners tagged `docker` — those are the
@@ -451,19 +366,17 @@ integration-test-podman:
     - echo "$DOCKER_REGISTRY_PASS" | podman login "$DOCKER_REGISTRY" --username "$DOCKER_REGISTRY_USER" --password-stdin
     - make setup
   script:
+    # go-removal-cleanup (full-elixir-stack): runs the Elixir integration suite against
+    # the server (server:8008 Matrix, server:4000 admin) — the Go integration runner was removed.
     - podman-compose -f docker-compose.yml -f docker-compose.ci.yml up -d --wait
     - podman run --rm -v "$CI_PROJECT_DIR:/workspace" -w /workspace
         --network=nebu_default
-        -e NEBU_TEST_GATEWAY_URL=http://gateway:8080
-        -e NEBU_TEST_CORE_URL=http://core:4000
+        -e NEBU_DB_URL=postgresql://nebu_app:nebu_app_dev_pw@postgres:5432/nebu
+        -e NEBU_TEST_MATRIX_URL=http://server:8008
+        -e NEBU_TEST_SERVER_URL=http://server:4000
         -e NEBU_TEST_DEX_URL=http://dex:5556
-        -e NEBU_TEST_MATRIX_URL=http://gateway:8008
-        -e NEBU_TEST_DB_URL=postgresql://nebu_app:nebu_app_dev_pw@postgres:5432/nebu
-        -e NEBU_TEST_MIGRATION_DB_URL=postgresql://nebu_migrate:nebu_migrate_dev_pw@postgres:5432/nebu
-        -e NEBU_TEST_CORE_GRPC_ADDR=core:9000
-        -e NEBU_TEST_INTERNAL_SECRET="$(cat .secrets/internal_secret)"
-        golang:1.26-alpine
-        sh -c "apk add -q --no-cache gcc musl-dev && cd gateway && go test -v -tags integration ./test/integration/..."
+        elixir:1.19-alpine
+        sh -c "cd server && mix local.hex --force && mix deps.get && mix test --include integration --warnings-as-errors"
   after_script:
     - podman-compose -f docker-compose.yml -f docker-compose.ci.yml down
   rules:
@@ -478,9 +391,10 @@ integration-test-podman:
 # start sidecar containers in the same pod — no Docker daemon, no privilege
 # escalation needed.
 #
-# All services start in parallel (no depends_on ordering). The gateway uses
-# WaitAndRunMigrations (Story 8-11) with a 30s retry loop to survive slow DB
-# boot. The test runner waits for the full stack via wait-for-stack.sh.
+# go-removal-cleanup (full-elixir-stack): the Go gateway sidecar and the Go
+# integration runner were removed. The server now serves the public Matrix CS API
+# directly (server:4000) and runs DB migrations on startup, so the test runner
+# targets the server and executes the Elixir integration suite.
 #
 # Note: postgres init scripts (dev/postgres/init/) do NOT run in CI because
 # there are no persistent volumes. We use the `nebu` superuser for all DB
@@ -493,7 +407,7 @@ integration-test-podman:
 
 integration-test-k8s:
   stage: integration
-  image: $CI_REGISTRY_IMAGE/ci-go:1.26
+  image: $CI_REGISTRY_IMAGE/ci-elixir:1.19
   services:
      - name: postgres:16-alpine
        alias: postgres
@@ -503,38 +417,29 @@ integration-test-k8s:
          POSTGRES_HOST_AUTH_METHOD: trust
      - name: $CI_REGISTRY_IMAGE/ci-dex:v2.45.1
        alias: dex
-     - name: $CI_REGISTRY_IMAGE/core:${CI_COMMIT_SHA}
-       alias: core
-     - name: $CI_REGISTRY_IMAGE/gateway:${CI_COMMIT_SHA}
-       alias: gateway
+     - name: $CI_REGISTRY_IMAGE/server:${CI_COMMIT_SHA}
+       alias: server
   variables:
     NEBU_DB_URL: "postgresql://nebu@postgres:5432/nebu"
     NEBU_DB_URL_MIGRATE: "postgresql://nebu@postgres:5432/nebu"
-    NEBU_CORE_GRPC_ADDR: "core:9000"
+    DATABASE_URL: "ecto://nebu@postgres:5432/nebu"
     NEBU_INTERNAL_SECRET_FILE: ""
     NEBU_INTERNAL_SECRET: "ci-example-secret"
     NEBU_SERVER_NAME: "localhost"
     NEBU_OIDC_ISSUER: "http://dex:5556/dex"
-    NEBU_OIDC_CLIENT_ID: "nebu-gateway"
-    NEBU_OIDC_CLIENT_SECRET: "nebu-dev-secret"
-    NEBU_OIDC_CLAIM_ROLE: "groups"
-    NEBU_ENV: "dev"
-    NEBU_ALLOW_INSECURE_OIDC_ISSUER: "true"
+    NEBU_ADMIN_OIDC_CLIENT_ID: "nebu-admin"
+    NEBU_ADMIN_OIDC_CLIENT_SECRET: "nebu-admin-secret"
   before_script:
      - apk add --no-cache postgresql-client openssl
      - scripts/wait-for-stack.sh
   script:
      - |
-       cd gateway
-       NEBU_TEST_GATEWAY_URL=http://gateway:8008 \
-       NEBU_TEST_CORE_URL=http://core:4000 \
+       cd server
+       NEBU_DB_URL=postgresql://nebu@postgres:5432/nebu \
+       NEBU_TEST_MATRIX_URL=http://server:8008 \
+       NEBU_TEST_SERVER_URL=http://server:4000 \
        NEBU_TEST_DEX_URL=http://dex:5556 \
-       NEBU_TEST_MATRIX_URL=http://gateway:8008 \
-       NEBU_TEST_DB_URL=postgresql://nebu@postgres:5432/nebu \
-       NEBU_TEST_MIGRATION_DB_URL=postgresql://nebu@postgres:5432/nebu \
-       NEBU_TEST_CORE_GRPC_ADDR=core:9000 \
-       NEBU_TEST_INTERNAL_SECRET=ci-example-secret \
-       go test -v -tags integration ./test/integration/...
+       mix deps.get && mix test --include integration --warnings-as-errors
   rules:
      - if: '$CI_COMMIT_BRANCH == "main"'
        when: manual
@@ -602,9 +507,9 @@ validate-helm:
     - echo "==> Helm version"
     - helm version
     - echo "==> Linting deploy/helm/nebu/"
-    - helm lint deploy/helm/nebu/ --set gateway.image.tag=validate --set core.image.tag=validate --set media.image.tag=validate
+    - helm lint deploy/helm/nebu/ --set server.image.tag=validate
     - echo "==> Template render check deploy/helm/nebu/"
-    - helm template nebu deploy/helm/nebu/ --set gateway.image.tag=validate --set core.image.tag=validate --set media.image.tag=validate > /dev/null
+    - helm template nebu deploy/helm/nebu/ --set server.image.tag=validate > /dev/null
     - echo "==> Helm validation passed."
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
@@ -621,60 +526,24 @@ validate-helm:
 
 # ─── Release Image Builds ─────────────────────────────────────────────────────
 # Triggered exclusively by SemVer Git tags (e.g. git tag v1.0.0 && git push origin v1.0.0).
-# Produces versioned images: <CI_REGISTRY_IMAGE>/nebu-gateway:<semver> and nebu-core:<semver>.
-# These images are referenced by operators via nebu_version in OpenTofu variables or
-# gateway.image.tag / core.image.tag in Helm values.
+# Produces the versioned image: <CI_REGISTRY_IMAGE>/nebu-server:<semver>.
+# Referenced by operators via nebu_version in OpenTofu variables or server.image.tag in Helm.
 #
-# Image naming: nebu-gateway / nebu-core (not gateway / core as in SHA-tagged build images).
-# The SHA-tagged images (build-gateway-image / build-core-image) are kept unchanged —
-# they feed integration-test-k8s and must not be modified.
+# go-removal-cleanup (full-elixir-stack): release-gateway-image and release-media-image
+# were removed — the server is the only release image now (serves Matrix, /_matrix/media, admin).
 #
 # --cache=false: avoid reusing branch-build Kaniko cache layers in release builds (deterministic, reproducible production images).
 
-release-gateway-image:
+release-server-image:
   <<: *build_ci_image
   stage: release
   interruptible: false
   needs: []  # run independent of branch-only build/integration jobs
   script:
     - RELEASE_VERSION="${CI_COMMIT_TAG#v}" && /kaniko/executor
-      --context "${CI_PROJECT_DIR}/gateway"
-      --dockerfile gateway/Dockerfile
-      --destination "${CI_REGISTRY_IMAGE}/nebu-gateway:${RELEASE_VERSION}"
-      --build-arg "GIT_COMMIT=${CI_COMMIT_SHA}"
-      --build-arg "BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-      --build-arg "RELEASE_VERSION=${RELEASE_VERSION}"
-      --cache=false
-  rules:
-    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
-
-release-core-image:
-  <<: *build_ci_image
-  stage: release
-  interruptible: false
-  needs: []  # run independent of branch-only build/integration jobs
-  script:
-    - RELEASE_VERSION="${CI_COMMIT_TAG#v}" && /kaniko/executor
-      --context "${CI_PROJECT_DIR}/core"
-      --dockerfile core/Dockerfile
-      --destination "${CI_REGISTRY_IMAGE}/nebu-core:${RELEASE_VERSION}"
-      --build-arg "GIT_COMMIT=${CI_COMMIT_SHA}"
-      --build-arg "BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-      --build-arg "RELEASE_VERSION=${RELEASE_VERSION}"
-      --cache=false
-  rules:
-    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
-
-release-media-image:
-  <<: *build_ci_image
-  stage: release
-  interruptible: false
-  needs: []  # run independent of branch-only build/integration jobs
-  script:
-    - RELEASE_VERSION="${CI_COMMIT_TAG#v}" && /kaniko/executor
-      --context "${CI_PROJECT_DIR}/media"
-      --dockerfile media/Dockerfile
-      --destination "${CI_REGISTRY_IMAGE}/nebu-media:${RELEASE_VERSION}"
+      --context "${CI_PROJECT_DIR}/server"
+      --dockerfile server/Dockerfile
+      --destination "${CI_REGISTRY_IMAGE}/nebu-server:${RELEASE_VERSION}"
       --build-arg "GIT_COMMIT=${CI_COMMIT_SHA}"
       --build-arg "BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
       --build-arg "RELEASE_VERSION=${RELEASE_VERSION}"

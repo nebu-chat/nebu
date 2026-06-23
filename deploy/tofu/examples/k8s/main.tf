@@ -41,11 +41,10 @@ provider "helm" {
 module "nebu_k8s" {
   source = "../../modules/nebu-k8s"
 
-  chart_path        = var.chart_path
-  namespace         = var.namespace
-  gateway_image_tag = var.gateway_image_tag
-  core_image_tag    = var.core_image_tag
-  ingress_enabled   = var.ingress_enabled
+  chart_path       = var.chart_path
+  namespace        = var.namespace
+  server_image_tag = var.server_image_tag
+  ingress_enabled  = var.ingress_enabled
   # values_files paths are resolved relative to the module file (path.module).
   # Use an absolute path here to avoid CWD-dependent resolution.
   values_files = ["${path.module}/../../../helm/nebu/values-dev.yaml"]

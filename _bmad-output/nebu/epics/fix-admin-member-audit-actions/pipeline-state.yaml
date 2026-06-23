@@ -1,0 +1,13 @@
+# Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents.
+# Do not edit manually during an active pipeline run.
+# last_updated: 2026-06-21
+# [fix-admin-member-audit-actions] 2026-06-21T17:20Z committed ✓ (allowlist +2, Kassandra CLEAN)
+# [fix-admin-member-audit-actions] 2026-06-21T17:17Z dev-story+ci+review → GREEN (13 passed, allowlist +2, integration test corrected)
+# [fix-admin-member-audit-actions] 2026-06-21T17:12Z atdd → 4 failing tests (RED confirmed)
+# [fix-admin-member-audit-actions] 2026-06-21T17:05Z pipeline started (--bug, merge regression: audit allowlist)
+story: null
+current_step: null
+completed: []
+cycle_count: 0
+blocked_reason: null
+last_updated: "2026-06-21T17:18Z"

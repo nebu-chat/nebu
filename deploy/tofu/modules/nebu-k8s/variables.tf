@@ -15,13 +15,10 @@ variable "namespace" {
   default     = "nebu"
 }
 
-variable "gateway_image_tag" {
-  description = "Container image tag for the Nebu gateway component."
-  type        = string
-}
-
-variable "core_image_tag" {
-  description = "Container image tag for the Nebu core component."
+# go-removal-cleanup: gateway_image_tag was removed. server_image_tag is the only
+# required image tag — server serves the public Matrix + media + admin.
+variable "server_image_tag" {
+  description = "Container image tag for the Nebu server component."
   type        = string
 }
 

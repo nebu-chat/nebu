@@ -9,11 +9,11 @@
 #   oidc_issuer     — OIDC issuer URL, e.g. "https://auth.example.com"
 #   release_cookie  — Erlang distribution cookie for OTP cluster auth (random string, keep secret)
 
-# ── DB URL (full DSN for gateway + core) ─────────────────────────────────────
+# ── DB URL (full DSN for server) ─────────────────────────────────────────────
 
 resource "aws_secretsmanager_secret" "db_url" {
   name        = "nebu/${var.environment}/db_url"
-  description = "Full PostgreSQL DSN for Nebu gateway and core."
+  description = "Full PostgreSQL DSN for the Nebu server application."
 
   tags = merge(var.common_tags, {
     Name = "nebu-${var.environment}-db-url"
@@ -55,7 +55,7 @@ resource "aws_secretsmanager_secret_version" "db_password" {
 
 resource "aws_secretsmanager_secret" "nebu_internal_secret" {
   name        = "nebu/${var.environment}/internal_secret"
-  description = "Shared PSK for Nebu gateway ↔ core node registration (ADR-008)."
+  description = "Shared PSK for Nebu server node registration (ADR-008)."
 
   tags = merge(var.common_tags, {
     Name = "nebu-${var.environment}-internal-secret"

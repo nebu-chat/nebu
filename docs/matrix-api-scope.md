@@ -29,11 +29,12 @@ cross-referenced with the Matrix Client-Server API specification.
 | Method | Endpoint | Status | Notes |
 |---|---|---|---|
 | GET | `/_matrix/client/v3/login` | ✅ | Returns m.login.sso flow |
-| POST | `/_matrix/client/v3/login` | ✅ | OIDC token exchange → Nebu session |
-| GET | `/_matrix/client/v3/login/sso/redirect` | ✅ | Initiates PKCE flow to OIDC provider |
+| POST | `/_matrix/client/v3/login` | ✅ | OIDC token exchange → Nebu session. With `refresh_token: true` issues opaque access+refresh tokens (64-hex, backed by `matrix_sessions`); without it returns the raw OIDC JWT (backward compat) |
+| POST | `/_matrix/client/v3/refresh` | ✅ | Opaque refresh-token rotation (Matrix CS API v1.3). Unauthenticated by spec, rate-limited; 60s grace window on the old token (Story `oidc-session-refresh`) |
+| GET | `/_matrix/client/v3/login/sso/redirect` | ✅ | Initiates PKCE flow to OIDC provider. `offline_access` is requested iff the operator-configurable `matrix_oidc_refresh_mode` (`server_config`, default `offline`) is `offline` — read live by `Nebu.Matrix.SsoLogin.scope_list/0`, changeable at runtime via `/admin/config`. Note: Dex issues a refresh token only with `offline_access` (Story `oidc-refresh-mode-config`) |
 | GET | `/_matrix/client/v3/login/sso/redirect/oidc` | ✅ | OIDC callback, issues Nebu token |
-| POST | `/_matrix/client/v3/logout` | ✅ | Revokes session token |
-| GET | `/_matrix/client/v3/account/whoami` | ✅ | Returns user_id from JWT |
+| POST | `/_matrix/client/v3/logout` | ✅ | Revokes session token; deletes the user's `matrix_sessions` rows |
+| GET | `/_matrix/client/v3/account/whoami` | ✅ | Returns user_id from JWT or opaque session |
 
 ## Sync
 

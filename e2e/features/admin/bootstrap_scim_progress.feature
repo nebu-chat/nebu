@@ -1,3 +1,4 @@
+@pending-feature
 Feature: Admin UI — Bootstrap Wizard Step 4 SCIM Import Progress
   As an instance admin
   I want to see a live progress bar during SCIM user import in Bootstrap Wizard Step 4

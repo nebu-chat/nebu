@@ -13,9 +13,12 @@ import { expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import { ElementAppPage } from '../../fixtures/element-app';
 import { getActualRoomName, roomIdByScenario } from '../common/room-setup.steps';
+import { dismissKeySetupDialog } from '../common/navigation.steps';
 import { getApiSession, createRoom } from '../../fixtures/dex-auth';
 import { NEBU_USERS } from '../../fixtures/users';
 import type { APIRequestContext, Browser } from '@playwright/test';
+
+const ELEMENT_URL_ROOM = process.env.NEBU_ELEMENT_URL ?? 'http://localhost:7070';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AC7: Room Creation Steps
@@ -119,40 +122,28 @@ Then(
  * [role="option"] buttons with aria-label="Open room {name} invitation." (with "invitation."
  * suffix). There is no separate [role="group" name="Invites"] section.
  *
- * Also clicks the invite entry so the Accept/Decline panel appears in the main area.
+ * This step ONLY asserts the invite preview (with its Accept affordance) is visible.
+ * The explicit `alex clicks "Accept"` step that follows in join.feature performs the
+ * accept — clicking here too would double-accept and make that step time out.
  */
 When(
   'the invite for {string} appears in {word}\'s sidebar',
   async ({ page }: { page: Page }, roomName: string, _userName: string) => {
-    const actualName = getActualRoomName(roomName);
-
-    // Element Web 1.12.15: invitations appear in the flat room list as options
-    // aria-label="Open room {name} invitation."
-    // Use waitFor (not isVisible) so we wait for sync propagation (invite may take a few seconds).
-    const inviteByAriaLabel = page.locator(`[aria-label="Open room ${actualName} invitation."]`);
-
-    // Fallback for older versions: group role with "Invites" name
-    const inviteSection = page.getByRole('group', { name: /invites/i });
-    const inviteInSection = inviteSection.locator(`[title="${actualName}"]`);
-
-    // Wait for the invite to appear (Element sync may take several seconds)
-    try {
-      await inviteByAriaLabel.first().waitFor({ state: 'visible', timeout: 25_000 });
-      // Click the invite entry to open the Accept/Decline panel
-      await inviteByAriaLabel.first().click();
-    } catch {
-      // Fallback: older group-based pattern
-      try {
-        await expect(inviteSection).toBeVisible({ timeout: 5_000 });
-        await expect(inviteInSection).toBeVisible({ timeout: 5_000 });
-        await inviteInSection.first().click();
-      } catch {
-        // Last resort: find any invite entry for this room by text content
-        const byText = page.locator('.mx_LeftPanel').getByText(actualName, { exact: true }).first();
-        await byText.waitFor({ state: 'visible', timeout: 5_000 });
-        await byText.click();
-      }
+    // Navigate to the invited room by roomId direct-URL (known from the "kai has invited"
+    // setup) rather than waiting for the invite tile to arrive via the invitee's long-poll
+    // /sync, which is racy for a freshly-logged-in session. The direct URL renders the
+    // invite preview (with Accept) even before the sidebar tile syncs.
+    const known = roomIdByScenario.get(roomName);
+    if (!known) {
+      throw new Error(`Room "${roomName}" not in roomIdByScenario — "kai has invited" setup must run first`);
     }
+    await page.goto(`${ELEMENT_URL_ROOM}/#/room/${encodeURIComponent(known.roomId)}`);
+    await dismissKeySetupDialog(page);
+
+    // Assert the invite preview is present (Accept affordance visible) — do NOT click it.
+    const acceptBtn = page.getByRole('button', { name: /^accept$|^join the discussion$|^join$/i });
+    await expect(acceptBtn.first()).toBeVisible({ timeout: 30_000 });
+    await dismissKeySetupDialog(page);
   }
 );
 
@@ -284,11 +275,16 @@ Given(
 When(
   '{word} opens Room Settings for {string}',
   async ({ page }: { page: Page }, _userName: string, roomName: string) => {
-    const app = new ElementAppPage(page);
-    const actualName = getActualRoomName(roomName);
-
-    // Navigate to the room first
-    await app.viewRoomByName(actualName);
+    // Navigate by roomId direct-URL (known from Background) instead of a sidebar lookup
+    // by name, which races /sync delivery and is flaky.
+    const known = roomIdByScenario.get(roomName);
+    if (!known) {
+      throw new Error(`Room "${roomName}" not in roomIdByScenario — Background setup must run first`);
+    }
+    await page.goto(`${ELEMENT_URL_ROOM}/#/room/${encodeURIComponent(known.roomId)}`);
+    await dismissKeySetupDialog(page);
+    await page.locator('.mx_RoomView_body, .mx_BasicMessageComposer_input').first()
+      .waitFor({ state: 'visible', timeout: 30_000 }).catch(() => {});
 
     // Open Room Settings — try the settings/gear button in the room header
     const settingsBtn = page.locator('.mx_RoomHeader').getByRole('button', {
@@ -356,23 +352,28 @@ When(
 When(
   '{word} upgrades the room to the recommended version',
   async ({ page }: { page: Page }, _userName: string) => {
-    // Navigate to the Advanced tab in Room Settings (contains the upgrade button)
+    // Navigate to the Advanced tab in Room Settings (contains the upgrade affordance).
+    // Element 1.12.15 renders settings tabs as buttons in .mx_TabbedView_tabLabels.
     const advancedTab = page.getByRole('tab', { name: /advanced/i })
-      .or(page.getByText(/advanced/i).filter({ hasText: /^advanced$/i }));
+      .or(page.locator('.mx_TabbedView_tabLabel').filter({ hasText: /advanced/i }))
+      .or(page.getByText(/^advanced$/i));
 
-    if (await advancedTab.first().isVisible({ timeout: 5_000 }).catch(() => false)) {
+    if (await advancedTab.first().isVisible({ timeout: 8_000 }).catch(() => false)) {
       await advancedTab.first().click();
     }
 
-    // Find and click the upgrade button
-    // Element Web renders this as a button with text "Upgrade this room to the recommended room version"
-    // or similar phrasing.
+    // The upgrade control. Element 1.12.15: an "Upgrade" button under the room-version
+    // section of Advanced. Broaden the matcher (button or generic clickable) and scroll
+    // it into view (the Advanced tab is long).
     const upgradeBtn = page.getByRole('button', {
-      name: /upgrade.*room|upgrade.*version|recommended.*version/i,
+      name: /^upgrade$|upgrade.*room|upgrade.*version|recommended.*version|upgrade this room/i,
     }).or(
-      page.getByText(/upgrade.*recommended|upgrade this room/i).first()
+      page.locator('.mx_SettingsFlag, .mx_SettingsSubsection').getByText(/upgrade/i)
+    ).or(
+      page.getByText(/upgrade.*recommended|upgrade this room/i)
     );
 
+    await upgradeBtn.first().scrollIntoViewIfNeeded().catch(() => {});
     await upgradeBtn.first().waitFor({ state: 'visible', timeout: 15_000 });
     await upgradeBtn.first().click();
 

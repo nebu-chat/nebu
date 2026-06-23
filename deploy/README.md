@@ -13,7 +13,7 @@ See [ADR-014](../docs/architecture/adr/ADR-014-deployment-strategy-iac.md) for t
 deploy/
   tofu/
     modules/
-      nebu-core/       # Shared variables, validations, outputs (no provider resources)
+      nebu-shared/     # Shared variables, validations, outputs (no provider resources)
       nebu-aws/        # AWS: ECS Fargate + RDS + S3 + ACM (Story 13-2)
       nebu-stackit/    # STACKIT: VMs + Docker Compose + ALB + DBaaS (Story 13-3)
       nebu-k8s/        # Kubernetes: Helm Release wrapper (Story 13-4)

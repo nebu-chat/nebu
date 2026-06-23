@@ -17,14 +17,13 @@ resource "helm_release" "nebu" {
   # Use path.module-relative absolute paths in the calling root module to avoid CWD issues.
   values = [for f in var.values_files : file(f)]
 
+  # go-removal-cleanup: the gateway.image.tag set was removed. The Helm chart now
+  # ships a single server deployment that serves the public Matrix CS API, the
+  # /_matrix/media endpoints, and the admin LiveView. server.image.tag is the only
+  # required image tag.
   set {
-    name  = "gateway.image.tag"
-    value = var.gateway_image_tag
-  }
-
-  set {
-    name  = "core.image.tag"
-    value = var.core_image_tag
+    name  = "server.image.tag"
+    value = var.server_image_tag
   }
 
   set {

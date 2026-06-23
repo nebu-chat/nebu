@@ -1,0 +1,13 @@
+# Sprint status — epic full-elixir-stack
+# Written by nebu-pipeline (update_sprint_status.py).
+# story go-removal-cleanup done (pipeline: Go removed + admin OIDC PKCE login migrated to Elixir; code-review+security CLEAN): 2026-06-17
+# story elixir-stack-regression done (pipeline: Regression gate FIX NOW: send malformed-body parity fix; build+unit-go+unit-elixir green; code-review CLEAN): 2026-06-17
+# story admin-ui-migration done (pipeline: Phoenix LiveView admin (1 dev cycle): 2 MAJOR+4 MINOR fixed → re-review CLEAN; Kassandra MEDIUM/APPROVED, F-1/F-2 fixed in-cycle): 2026-06-17
+# story media-gateway-migration done (pipeline: ATDD 16 tests + Dev; code-review 4 MINOR fixed 1 cycle; Kassandra HIGH(rate-limit)+2 MEDIUM fixed, re-review CLEAN): 2026-06-17
+# story matrix-api-migration done (pipeline: FIX NOW: F-1 denylist + F-3 rate-limit + F-4/F-5 hardening — Kassandra re-review 0 CRIT/0 HIGH): 2026-06-17
+# story oidc-middleware-migration done (pipeline: 1 MAJOR + 6 MINOR fixed — 1 cycle; Kassandra CLEAN (0 CRIT/0 HIGH)): 2026-06-17
+epic: full-elixir-stack
+stories:
+  elixir-http-foundation:
+    status: done
+    summary: "1 MAJOR + 3 MINOR fixed — 1 cycle"

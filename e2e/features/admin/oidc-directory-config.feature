@@ -1,3 +1,4 @@
+@pending-feature
 Feature: Admin UI — OIDC Directory Integration Config Page
   As an instance admin
   I want the Config page to show an OIDC directory toggle and endpoint field

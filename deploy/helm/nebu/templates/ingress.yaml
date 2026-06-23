@@ -21,11 +21,13 @@ spec:
     - host: {{ .Values.ingress.hostname | quote }}
       http:
         paths:
+          # go-removal-cleanup (full-elixir-stack): routes to the server Service (which now
+          # serves Matrix, /_matrix/media, and admin) instead of the removed gateway.
           - path: /
             pathType: Prefix
             backend:
               service:
-                name: {{ include "nebu.fullname" . }}-gateway
+                name: {{ include "nebu.fullname" . }}-server
                 port:
                   number: {{ .Values.service.port }}
 {{- end }}

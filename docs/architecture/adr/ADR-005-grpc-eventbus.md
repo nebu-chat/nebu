@@ -4,6 +4,27 @@
 
 Accepted - 2026-03-18
 
+> **Superseded by ADR-021 (`grpc-removal` epic, 2026-06-22)**
+>
+> gRPC has been fully removed from the codebase. The server-streaming EventBus had no
+> consumer after the Go gateway was deleted and has been dropped entirely. The unary
+> command surface (`Nebu.Matrix.EventDispatcher.Server`) is now a plain Elixir module
+> called in-process by the Matrix HTTP routers — no `:grpc`/`:protobuf` dependencies,
+> no `use GRPC.Server`, no `GRPC.RPCError`/`GRPC.Status`. `Core.*` are hand-maintained
+> plain `defstruct` DTOs; errors propagate as `Nebu.Matrix.Error` with
+> `Nebu.Matrix.Status` atoms. The port-9000 listener, `make proto`, and
+> `Nebu.Matrix.Grpc.Metadata` are all gone.
+
+**Amended 2026-06-17 (ADR-021):** The Go gateway was removed and the whole stack
+consolidated onto Elixir/OTP. gRPC was therefore **no longer an inter-process boundary**:
+the Matrix HTTP layer called `Nebu.Matrix.EventDispatcher.Server` in-process. The gRPC
+**network listener** (port 9000), its `Endpoint`, the `AuthInterceptor`, and node
+registration were **removed** (story `grpc-legacy-removal`). The Server module +
+`Core.*` structs + `Nebu.Matrix.Grpc.Metadata` + `GRPC.RPCError` were retained
+temporarily as the in-process command/DTO layer pending full removal.
+
+The original decision below is preserved for historical context.
+
 ## Context
 
 The Go Gateway needs to receive new events from the Elixir Core and deliver them to waiting Matrix

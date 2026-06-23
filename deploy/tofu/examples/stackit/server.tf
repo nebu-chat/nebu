@@ -37,17 +37,20 @@ resource "stackit_key_pair" "nebu" {
 # The stackit_postgresflex_user.nebu.password is stored in state — ensure state encryption is enabled.
 # Never commit .tfstate files. See the backend "s3" block in main.tf for the recommended configuration.
 #
+# go-removal-cleanup: server is the single application container. It serves the
+# public Matrix CS API + /_matrix/media + admin on its Bandit listener (container
+# port 4000), published on host port 8008 (and 8080 for admin).
 # Traffic flow when tls_mode = "none", oidc_mode = "dex":
-#   Browser → NLB:443 (TCP passthrough) → gateway:8008 (host port, bound directly)
-#   Gateway OIDC discovery (hairpin): gateway → http://<server_name>:5556/dex (host IP → Dex container)
+#   Browser → NLB:443 (TCP passthrough) → server host port 8008 (→ container 4000)
+#   Server OIDC discovery (hairpin): server → http://<server_name>:5556/dex (host IP → Dex container)
 #   Browser OIDC redirect: browser → http://<server_name>:5556/dex/auth (SG port 5556 open)
 # Traffic flow when tls_mode = "acme":
-#   Browser → NLB:443 (TCP passthrough) → VM:443 (nginx, TLS termination) → localhost:8008 (gateway)
+#   Browser → NLB:443 (TCP passthrough) → VM:443 (nginx, TLS termination) → localhost:8008 (server)
 #   Browser → NLB:80  (TCP passthrough) → VM:80  (nginx, 301 → https://<server_name>)
 #   When oidc_mode = "dex": nginx also proxies /dex/ → localhost:5556 (Dex, plain HTTP on loopback)
 # Traffic flow when tls_mode = "alb":
-#   Browser → ALB:443 (HTTPS, TLS terminated at ALB) → VM:8008 (gateway, plain HTTP)
-#   Browser → ALB:80  (HTTP) → VM:8008 (gateway handles redirect or serves directly)
+#   Browser → ALB:443 (HTTPS, TLS terminated at ALB) → VM:80 (Docker nginx proxy) → server:4000
+#   Browser → ALB:80  (HTTP) → VM:80 (Docker nginx proxy) → server:4000
 
 # ── Network Interface ─────────────────────────────────────────────────────────
 
@@ -117,28 +120,24 @@ resource "stackit_server" "nebu" {
     logs_ingest_host   = local.logs_ingest_host
     logs_bearer_token  = try(stackit_logs_access_token.nebu[0].access_token, "")
     environment        = var.environment
-    # Runtime environment + encryption
-    nebu_env           = var.nebu_env
-    key_encryption_key = var.key_encryption_key
     # Container resource limits
-    gateway_cpu_limit    = var.gateway_cpu_limit
-    gateway_memory_limit = var.gateway_memory_limit
-    core_cpu_limit       = var.core_cpu_limit
-    core_memory_limit    = var.core_memory_limit
+    # go-removal-cleanup: gateway/media container limits removed — those containers
+    # no longer exist. Server serves the public Matrix + media + admin.
+    server_cpu_limit     = var.server_cpu_limit
+    server_memory_limit  = var.server_memory_limit
     dex_cpu_limit        = var.dex_cpu_limit
     dex_memory_limit     = var.dex_memory_limit
     element_cpu_limit    = var.element_cpu_limit
     element_memory_limit = var.element_memory_limit
     # Element Web — optional Matrix client served at /
     enable_element_web = var.enable_element_web
-    # Media Gateway — StackIT Object Store
+    # Media object storage — StackIT Object Store. When enabled, server serves
+    # /_matrix/media from the bucket (the standalone Go media container is gone).
     enable_media_gateway = var.enable_media_gateway
     s3_access_key        = var.s3_access_key
     s3_secret_key        = var.s3_secret_key
     s3_endpoint          = var.s3_endpoint
     s3_bucket            = var.s3_bucket
-    media_cpu_limit      = var.media_cpu_limit
-    media_memory_limit   = var.media_memory_limit
   })
 
   lifecycle {
@@ -155,10 +154,10 @@ resource "stackit_server" "nebu" {
     # CORS guard: Element Web needs a reverse proxy to share the same origin as the
     # Matrix API. tls_mode = "acme" uses system nginx; tls_mode = "alb" uses a Docker
     # Compose nginx proxy service. tls_mode = "none" has no proxy — different origins
-    # (Element :7070 vs gateway :8008) cause CORS preflight failures.
+    # (Element :7070 vs server :8008) cause CORS preflight failures.
     precondition {
       condition     = !var.enable_element_web || var.tls_mode != "none"
-      error_message = "enable_element_web requires tls_mode = 'acme' or 'alb'. Without a reverse proxy, Element Web runs on port 7070 while the gateway is on port 8008 — different origins cause CORS preflight failures for all Matrix API requests."
+      error_message = "enable_element_web requires tls_mode = 'acme' or 'alb'. Without a reverse proxy, Element Web runs on port 7070 while server is on port 8008 — different origins cause CORS preflight failures for all Matrix API requests."
     }
 
     precondition {

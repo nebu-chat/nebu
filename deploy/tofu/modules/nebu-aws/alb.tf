@@ -17,11 +17,14 @@ resource "aws_lb" "this" {
   })
 }
 
-# ── Target Group: gateway (port 8008) ────────────────────────────────────────
+# ── Target Group: server (port 4000) ──────────────────────────────────────────
+# go-removal-cleanup: the gateway target group (port 8008) was removed. The
+# Elixir server now serves the public Matrix CS API, /_matrix/media, and the admin
+# LiveView on its Bandit HTTP listener (container port 4000) — it is the ALB target.
 
-resource "aws_lb_target_group" "gateway" {
-  name        = "nebu-${var.environment}-gateway-tg"
-  port        = 8008
+resource "aws_lb_target_group" "server" {
+  name        = "nebu-${var.environment}-server-tg"
+  port        = 4000
   protocol    = "HTTP"
   vpc_id      = aws_vpc.this.id
   target_type = "ip"
@@ -41,11 +44,11 @@ resource "aws_lb_target_group" "gateway" {
   deregistration_delay = 30
 
   tags = merge(var.common_tags, {
-    Name = "nebu-${var.environment}-gateway-tg"
+    Name = "nebu-${var.environment}-server-tg"
   })
 }
 
-# ── Listener: port 443 (HTTPS → gateway target group) ────────────────────────
+# ── Listener: port 443 (HTTPS → server target group) ──────────────────────────
 
 resource "aws_lb_listener" "https" {
   load_balancer_arn = aws_lb.this.arn
@@ -56,7 +59,7 @@ resource "aws_lb_listener" "https" {
 
   default_action {
     type             = "forward"
-    target_group_arn = aws_lb_target_group.gateway.arn
+    target_group_arn = aws_lb_target_group.server.arn
   }
 
   tags = merge(var.common_tags, {

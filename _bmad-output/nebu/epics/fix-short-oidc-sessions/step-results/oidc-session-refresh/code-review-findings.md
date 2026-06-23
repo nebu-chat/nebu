@@ -1,33 +1,40 @@
-# Code Review — oidc-session-refresh (cycle 1, 2026-05-27)
+# Code Review — oidc-session-refresh (Elixir, cycle 0), 2026-06-22
 
-## Cycle-0 Issues: ALL FIXED
-MAJOR-A (logout revocation), MAJOR-B (withAuth param), MINOR-1 (MarkTokenUsed perf),
-MINOR-3 (slog.Warn), MINOR-4 (encryption error log), MINOR-5 (zero-value expiry) — verified.
+## Verdict: 4 MINOR (0 CRITICAL, 0 MAJOR)
 
-## MINOR Findings (new)
+Faithful, well-documented port of the security-reviewed Go reference. Every AC has passing test
+coverage (AC8 e2e = red stubs, flagged); SQL parameterized throughout; crypto via one audited
+helper; rotation atomic; JWT/admin path genuinely untouched. No correctness/security defect ≥ MAJOR.
 
-### MINOR-1 — WithOpaqueSessionCheck: HasGraceWindow branch has no unit tests
-gateway/internal/middleware/auth.go:254 — new branch `if sess.HasGraceWindow { lookup.MarkTokenUsed(...) }`
-has no unit test coverage. Also: LookupOpaqueToken sibling-query (matrix_session_store.go:313-328)
-not tested for HasGraceWindow output.
-Fix: add 2 unit tests — (a) skips MarkTokenUsed when HasGraceWindow=false; (b) calls it when true.
+## AC → test confirmation
+AC1 login_refresh_test.exs:199-233 · AC2 :264-295 · AC3 :293-294 · AC4 store 169-234 + http 315-340
+· AC5 :347-375 · AC6 store 102-104,188-203 + http 306-340 · AC7 :239-258 · AC8 feature (red stubs).
+Test-review MINOR-1 (empty body → `M_MISSING_PARAM`) + MINOR-2 (HTTP rotated-then-used RT → 401) both addressed.
 
-### MINOR-2 — LookupOpaqueToken makes 2 DB roundtrips per request
-matrix_session_store.go:316-323 adds a separate SELECT COUNT(*) for the sibling check.
-Fix: fold both SELECTs into one query using a correlated EXISTS subquery returning has_grace
-as an extra column. Single roundtrip.
+## Correctness spot-checks: all PASS
+Grace logic matches spec; `min(oidc_exp, now+8h)`; opaque vs JWT dispatch consistent; `soft_logout`
+top-level + expiry-only; `rotate_tokens/1` single transaction with `WHERE revoked_at IS NULL` +
+`num_rows: 0` rollback (closes double-rotate TOCTOU); ADR-018/019/020 clean; AC7/admin JWT path byte-identical.
 
-### MINOR-3 — Redundant condition in login.go
-login.go:340: inner `if len(h.internalSecret) > 0 && oidcRefreshTokenFromSSO != ""` —
-second clause is dead (outer guard already ensures oidcRefreshTokenFromSSO != "").
-Fix: remove `&& oidcRefreshTokenFromSSO != ""` from inner condition.
+## MINOR findings
+- **MINOR-1 — soft-revoked sibling rows never deleted (storage leak).** `matrix_session_store.ex:236-254`
+  `revoke/1` deletes only the presented AT's row; rotated old rows linger (grace closed → not an auth
+  bypass) because `cleanup_expired/0` is implemented but NOT wired to any sweeper. *Fix:* `revoke/1`
+  also deletes soft-revoked siblings for the same `(user_id, device_id)`, OR wire `cleanup_expired/0`
+  into a supervised periodic task.
+- **MINOR-2 (security-relevant) — opaque path doesn't re-check deactivation.** `oidc_plug.ex:80-99`
+  `call_jwt` re-runs `provision/2` and rejects `:deactivated` each request; `call_opaque` trusts the
+  row and never re-checks → a user deactivated mid-session keeps a working opaque session up to 8h.
+  Admin deactivation `invalidate_user_sessions` touches legacy `sessions`/`sync_tokens` only, NOT
+  `matrix_sessions` (`event_dispatcher/server.ex:1359`). *Fix:* `destroy_session/1` (device "") also
+  `DELETE FROM matrix_sessions WHERE user_id=$1`, or re-validate user in `call_opaque`. Kassandra to weigh in.
+- **MINOR-3 — `init_opts: [action: :refresh]` is dead/decorative.** `router.ex:57` — dispatch is
+  path-based (`String.ends_with?(... "/refresh")`), opt ignored. *Fix:* drop opt or add comment.
+- **MINOR-4 — benign double-write race** on `has_open_grace_window?` + `mark_access_token_used`
+  (`oidc_plug.ex:88-90`). UPDATE idempotent → no correctness impact. No fix required.
 
-## INFO Findings (not blocking)
-INFO-1: MINOR-3 cycle-0 warn not gated on req.RefreshToken (over-warns for AC7 clients — acceptable)
-INFO-2: HasGraceWindow sibling query drops gErr silently — add slog.Debug on error
-INFO-3: Concurrent rotation may miss sibling (microsecond window; combine queries fixes it)
-INFO-4: Logout test doesn't assert Warn log emission
-INFO-5: ci_gate.py Keycloak→Dex switch unrelated to story (cosmetic)
-INFO-6: cycle_count=1 semantics check (cosmetic)
+## Decision (orchestrator)
+Cycle 1 fix: MINOR-2 (wire matrix_sessions invalidation into deactivation — important), MINOR-1
+(revoke deletes siblings — cheap leak close), MINOR-3 (drop dead opt). MINOR-4 = no action.
 
-## Spec MUST compliance: ALL SATISFIED
+code-review subagent id: ac6707e8853be9129

@@ -1,74 +1,62 @@
 # 6 Runtime View
 
-## Scenario 1: Matrix Client Message Send (Happy Path - GRÜN Status)
+> **Reading the sequence diagrams (ADR-021 + `grpc-removal` epic):** Nebu is a single Elixir/OTP
+> application. The HTTP plug pipeline (`Nebu.Web` / `Nebu.Matrix.Http*`) and the domain logic
+> (`Nebu.Matrix.EventDispatcher.Server`, rooms, sessions, …) run in the same BEAM node; all
+> "request handler → domain" steps are **in-process function calls**. Several older diagrams were
+> drawn with a separate "Go Gateway" column and a "gRPC" arrow to an "Elixir Core" — read those as
+> the in-process HTTP-layer → domain dispatch. Labels such as "gRPC GetSyncDelta" or "gRPC JoinRoom"
+> in older scenarios mean "in-process call to `EventDispatcher.Server`"; the `:grpc` dep and all
+> `GRPC.*` types were removed in the `grpc-removal` epic (ADR-021, 2026-06-22). `Core.*` are plain
+> `defstruct` DTOs; errors are `Nebu.Matrix.Error` / `Nebu.Matrix.Status`.
+
+## Scenario 1: Matrix Client Message Send (Happy Path)
 
 ```
-Matrix Client      Go Gateway          Elixir Core         PostgreSQL
-     │                   │                   │                   │
-     │  PUT /rooms/send  │                   │                   │
-     │──────────────────►│                   │                   │
-     │                   │  JWT validate      │                   │
-     │                   │──────────────────►│                   │
-     │                   │  user_id, role     │                   │
-     │                   │◄──────────────────│                   │
-     │                   │  gRPC SendEvent    │                   │
-     │                   │──────────────────►│                   │
-     │                   │                   │  INSERT event      │
-     │                   │                   │──────────────────►│
-     │                   │                   │  Ed25519 sign      │
-     │                   │                   │  EventId.generate  │
-     │                   │  {event_id}        │                   │
-     │                   │◄──────────────────│                   │
-     │  200 {event_id}   │                   │                   │
-     │◄──────────────────│                   │                   │
+Matrix Client      Nebu HTTP layer        Domain (EventDispatcher)   PostgreSQL
+     │                   │                        │                     │
+     │  PUT /rooms/send  │                        │                     │
+     │──────────────────►│                        │                     │
+     │                   │  OidcPlug: verify JWT  │                     │
+     │                   │  → user_id, role       │                     │
+     │                   │  send_event/… (in-proc)│                     │
+     │                   │───────────────────────►│                     │
+     │                   │                        │  INSERT event        │
+     │                   │                        │─────────────────────►│
+     │                   │                        │  Ed25519 sign        │
+     │                   │                        │  EventId.generate    │
+     │                   │  {event_id}            │                     │
+     │                   │◄───────────────────────│                     │
+     │  200 {event_id}   │                        │                     │
+     │◄──────────────────│                        │                     │
 ```
 
-## Scenario 2: gRPC EventBus Stream (GRÜN/GELB/ROT State Machine)
-
-```
-Go Gateway Status Machine:
-
-  ┌─────┐   Stream healthy      ┌──────┐
-  │ ROT │──────────────────────►│ GRÜN │
-  └─────┘                       └──────┘
-     ▲                             │ Stream lost
-     │ Unary polling fails          │
-  ┌──────┐◄────────────────────────┘
-  │ GELB │  Stream lost, Unary OK
-  └──────┘
-     │ Unary also fails
-     └──────────────────────────►┌─────┐
-                                 │ ROT │
-                                 └─────┘
-                                    │ Writes → message_buffer
-                                    │ Drain on reconnect
-```
-
-**GRÜN:** EventBus stream healthy - direct gRPC streaming to Matrix clients.
-**GELB:** Stream lost, Unary polling succeeds - writes to message_buffer, polling continues.
-**ROT:** Stream AND Unary fail - all writes held in message_buffer, 200 OK returned to clients
-(Matrix-conformant); Docker `restart: always` heals the Elixir core.
+OIDC validation, the in-process `send_event` call, the DB INSERT and the Ed25519 signing all happen
+inside the one application. There is no inter-process boundary to fail between the HTTP layer and the
+domain, so there is no gateway-side buffering or GRÜN/GELB/ROT degradation state — the former
+`message_buffer` drain strategy existed only to bridge the gateway↔core gRPC boundary that ADR-021
+removed. Node-level resilience is provided by OTP supervision + Horde (see Scenario 5) and Docker
+`restart: always`.
 
 ## Scenario 3: Matrix Client Sync (Long-Poll)
 
 ```
-Matrix Client      Go Gateway          MessageBuffer       Elixir Core
-     │                   │                   │                   │
-     │  GET /sync        │                   │                   │
-     │──────────────────►│                   │                   │
-     │                   │  check buffer     │                   │
-     │                   │──────────────────►│                   │
-     │                   │  empty (wait)     │                   │
-     │                   │◄──────────────────│                   │
-     │                   │  (holds connection for up to 30s)     │
-     │                   │  EventBus event arrives               │
-     │                   │◄──────────────────────────────────────│
-     │  200 {events}     │                   │                   │
-     │◄──────────────────│                   │                   │
+Matrix Client      Nebu HTTP layer        Domain (sync + pg groups)
+     │                   │                        │
+     │  GET /sync        │                        │
+     │──────────────────►│                        │
+     │                   │  get_sync_delta (in-proc), subscribes to
+     │                   │  the user's pg process group; holds the
+     │                   │  connection for up to 30s
+     │                   │  new event arrives → pg fanout wakes the
+     │                   │  waiting sync process
+     │  200 {events}     │                        │
+     │◄──────────────────│                        │
 ```
 
-The Go Gateway distributes EventBus events from a single streaming connection to all waiting
-Matrix client long-poll connections via the in-memory per-user ring buffer.
+The sync handler runs inside the same node as the room/event-dispatch logic; `pg` Process Group
+fanout wakes the waiting long-poll process directly — no cross-process streaming connection and no
+ring buffer are involved.
 
 ## Scenario 3a: Public Room Join - Sync Wakeup (GAP-JOIN-PUBLIC, Story 9-19)
 
@@ -78,7 +66,7 @@ only subscribes to `:pg` groups for rooms already in `get_rooms_for_user`; the p
 broadcast goes to `room:#{roomId}` which no sync Task monitors yet.
 
 ```
-Matrix Client      Go Gateway    Elixir Core (gRPC join_room/2)
+Matrix Client      Nebu app    Domain (gRPC join_room/2)
      │                   │                   │
      │  POST /join       │                   │
      │──────────────────►│  gRPC JoinRoom    │
@@ -119,7 +107,7 @@ After `POST /rooms/{roomId}/forget`, the room must not appear in any subsequent 
 (`rooms.join`, `rooms.leave`, `rooms.invite`).
 
 ```
-Matrix Client      Go Gateway                        PostgreSQL
+Matrix Client      Nebu app                        PostgreSQL
      │                   │                                │
      │  POST /forget     │                                │
      │──────────────────►│  gRPC LeaveRoom precondition   │
@@ -142,11 +130,11 @@ Insert is idempotent (`ON CONFLICT DO NOTHING`). Cascade delete on `users` row r
 ## Scenario 3d: Per-Device Sync Token Isolation (GAP-SINCE-IGNORED, Story 9-22)
 
 When a Matrix client opens a sync long-poll, the `device_id` (extracted from the `"did"` claim
-of the JWT) is forwarded in `GetSyncDeltaRequest`. The Elixir Core looks up and persists the
+of the JWT) is forwarded in `GetSyncDeltaRequest`. The Domain looks up and persists the
 `since` token in `sync_tokens` keyed by `(user_id, device_id)` - not just `user_id`.
 
 ```
-Matrix Client A (device_id=AAAA)    Matrix Client B (device_id=BBBB)    Elixir Core
+Matrix Client A (device_id=AAAA)    Matrix Client B (device_id=BBBB)    Domain
         │                                    │                                │
         │  GET /sync?since=v1_...            │                                │
         │───────────────────────────────────────────────────────────────────►│
@@ -169,18 +157,18 @@ Matrix Client A (device_id=AAAA)    Matrix Client B (device_id=BBBB)    Elixir C
 in `sync_tokens (user_id, device_id)`. A slow or disconnected device cannot advance another
 device's token and cause it to miss events.
 
-**Fallback:** When `device_id` is empty (legacy client or test), the Core falls back to the
+**Fallback:** When `device_id` is empty (legacy client or test), the Server falls back to the
 `(user_id, '')` row (legacy arity-3/1 functions) and triggers a full initial sync on mismatch.
 
 ## Scenario 3e: Per-Device Logout - Sync Token Cleanup (Story 9-22)
 
-After `POST /logout`, the Go Gateway calls `InvalidateUserSessions` with both `user_id` and
-`device_id`. The Elixir Core deletes the `sync_tokens (user_id, device_id)` row and the
+After `POST /logout`, the Nebu app calls `InvalidateUserSessions` with both `user_id` and
+`device_id`. The Domain deletes the `sync_tokens (user_id, device_id)` row and the
 corresponding `sessions (user_id, device_id)` row in a single DB transaction, without evicting
 the in-memory ETS session (another device for the same user may still be active).
 
 ```
-Matrix Client      Go Gateway            Elixir Core               PostgreSQL
+Matrix Client      Nebu app            Domain               PostgreSQL
      │                   │                    │                         │
      │  POST /logout     │                    │                         │
      │──────────────────►│                    │                         │
@@ -198,8 +186,9 @@ Matrix Client      Go Gateway            Elixir Core               PostgreSQL
      │◄──────────────────│                    │                         │
 ```
 
-**Non-fatal on gRPC failure:** The JWT is already invalidated before the gRPC call. If the Core
-call fails, a warning is logged but the client still receives `200 {}` (Matrix spec conformance).
+**Non-fatal on domain call failure:** The JWT is already invalidated before the in-process
+`invalidate_user_sessions` call. If the call fails, a warning is logged but the client still
+receives `200 {}` (Matrix spec conformance).
 
 ## Scenario 3f: Invite Tiles - Stripped State Enrichment (GAP-INVITE-STATE, Story 9-23)
 
@@ -207,7 +196,7 @@ Matrix Client-Server API spec §4.4.4 requires `invite_state` to contain strippe
 so clients can display room context before a user accepts an invitation. Without these events,
 Element Web invite tiles show no avatar, no join-rules badge, and no creator info.
 
-`buildInviteRooms` in `gateway/internal/matrix/sync.go` queries five stripped state event types
+`buildInviteRooms` in `the Matrix sync handler (Nebu.Matrix.Http*)` queries five stripped state event types
 per pending invite room:
 
 | Event type | Content field queried | Inclusion condition |
@@ -223,7 +212,7 @@ to handle both direct JSONB objects and legacy double-encoded events. Missing ev
 omitted (spec SHOULD semantics) - no error is returned when an event type is absent for a room.
 
 ```
-Matrix Client      Go Gateway                                  PostgreSQL
+Matrix Client      Nebu app                                  PostgreSQL
      │                   │                                          │
      │  GET /sync        │                                          │
      │──────────────────►│                                          │
@@ -284,7 +273,7 @@ the next non-buffered sync cycle will deliver them. This keeps the buffer hot pa
 DB queries.
 
 ```
-Matrix Client      Go Gateway                                  PostgreSQL
+Matrix Client      Nebu app                                  PostgreSQL
      │                   │                                          │
      │  GET /sync        │                                          │
      │──────────────────►│                                          │
@@ -318,7 +307,7 @@ break `matrix-js-sdk`.
 ## Scenario 3h: Buffer Fast-Path - Synthetic next_batch Token (GAP-BUFFER-NEXT-BATCH, Story 9-25)
 
 When events are already present in the local ring buffer, `handleIncrementalSync` drains
-the buffer and returns immediately without a gRPC round-trip to Elixir Core. Prior to this
+the buffer and returns immediately without a gRPC round-trip to Domain. Prior to this
 fix, `buildResponseFromBufferedEvents` echoed the client's `since=` token back as
 `next_batch`, causing a stuck-token loop: the client re-sent the same token, the buffer
 re-delivered the same delta, and `sync_tokens.updated_at` was never advanced.
@@ -336,7 +325,7 @@ token on every buffer-path response. The token is:
   issues a safe full re-sync with a fresh real token.
 
 ```
-Matrix Client      Go Gateway (buffer fast-path)
+Matrix Client      Nebu app (sync fast-path)
      │                   │
      │  GET /sync?since=s42_1
      │──────────────────►│
@@ -364,7 +353,7 @@ safety net was already production-tested before this story.
 Matrix spec §11.35.1 sequence inside `upgrade_room/2` in `event_dispatcher/server.ex`.
 
 ```
-Matrix Client      Go Gateway          Elixir Core (upgrade_room/2)         PostgreSQL
+Matrix Client      Nebu app          Domain (upgrade_room/2)         PostgreSQL
      │                   │                        │                               │
      │  POST /upgrade    │                        │                               │
      │──────────────────►│  gRPC UpgradeRoom      │                               │
@@ -393,8 +382,8 @@ Matrix Client      Go Gateway          Elixir Core (upgrade_room/2)         Post
 **Error handling invariants (Story 9-27 fixes):**
 
 - `Room.Server.join/2` and `Room.Server.set_power_levels/3` are wrapped in `case` expressions.
-  Unexpected `{:error, reason}` tuples raise `GRPC.RPCError` with `GRPC.Status.internal()`,
-  surfacing as HTTP 500 (not MatchError → `codes.Unknown`).
+  Unexpected `{:error, reason}` tuples raise `Nebu.Matrix.Error` with `Nebu.Matrix.Status.internal()`,
+  surfacing as HTTP 500 (not MatchError → unknown error).
 - `archive_room_atomic/1` uses SELECT FOR UPDATE; `:not_found` is handled idempotently (`:ok`)
   to tolerate concurrent admin operations.
 - `terminate_child/2` failure is non-fatal: a `Logger.warning` is emitted but the upgrade
@@ -422,7 +411,7 @@ Query params added in Story 9-29: `dir` (`f`/`b`, default `b`), `recurse` (bool,
 error), `from` (pagination token). `limit` existed from Story 9-28.
 
 ```
-Matrix Client      Go Gateway                         Elixir Core         PostgreSQL
+Matrix Client      Nebu app                         Domain         PostgreSQL
      │                   │                                  │                   │
      │  GET /relations   │                                  │                   │
      │  /{eventId}[/...] │                                  │                   │
@@ -448,15 +437,15 @@ Matrix Client      Go Gateway                         Elixir Core         Postgr
      │◄──────────────────│                                  │                   │
 ```
 
-**Query param validation (Story 9-29, Go Gateway):**
+**Query param validation (Story 9-29, Nebu app):**
 - `dir` not in `{"f", "b"}` → `400 M_BAD_PARAM`
 - `recurse` not parseable as bool → `400 M_BAD_PARAM`
-- `recurse=true` is accepted without error (MVP: Core treats same as `dir=b`)
+- `recurse=true` is accepted without error (MVP: Server treats same as `dir=b`)
 
 **Error cases:**
-- Non-member → Elixir raises `GRPC.RPCError` with `PERMISSION_DENIED` → Go returns `403 M_FORBIDDEN`
-- Unknown event_id → `NOT_FOUND` → `404 M_NOT_FOUND`
-- Not authenticated → `401 M_MISSING_TOKEN` (JWT middleware, before gRPC call)
+- Non-member → raises `Nebu.Matrix.Error` with `:permission_denied` → HTTP `403 M_FORBIDDEN`
+- Unknown event_id → raises `:not_found` → `404 M_NOT_FOUND`
+- Not authenticated → `401 M_MISSING_TOKEN` (OidcPlug, before in-process call)
 
 **Ordering and pagination:**
 - `dir=b` (default): newest-first (DESC). `dir=f`: oldest-first (ASC).
@@ -471,7 +460,7 @@ JSON field. Element Web reads this to show reply count badges on parent messages
 `/relations` HTTP call.
 
 ```
-                    Elixir Core (attach_thread_aggregations/3)              PostgreSQL
+                    Domain (attach_thread_aggregations/3)              PostgreSQL
                           │                                                      │
    build_sync_response    │                                                      │
    (initial or delta)     │  -- for each timeline event:                        │
@@ -488,7 +477,7 @@ JSON field. Element Web reads this to show reply count badges on parent messages
           │               │      "current_user_participated": bool               │
           │               │    }}                                                 │
           │               │                                                      │
-   Go Gateway (sync.go)   │                                                      │
+   Nebu app (sync handler)   │                                                      │
    syncUnsigned {         │                                                      │
      Age: ...,            │                                                      │
      MRelations: <json>   │  ← from Event.unsigned_relations (field 9)          │
@@ -496,7 +485,7 @@ JSON field. Element Web reads this to show reply count badges on parent messages
 ```
 
 **Performance invariant:** Events with no thread children have `unsigned_relations = nil` (zero bytes).
-The Go gateway sets `MRelations` only when `len(te.GetUnsignedRelations()) > 0`, so `m.relations` is
+The Nebu app sets `MRelations` only when `len(te.GetUnsignedRelations()) > 0`, so `m.relations` is
 entirely omitted from the `unsigned` JSON object for non-thread events (`omitempty` on the struct field).
 
 ## Scenario 3k: Single Event Fetch - GET /rooms/{roomId}/event/{eventId} (Story 11-8)
@@ -506,7 +495,7 @@ entirely omitted from the `unsigned` JSON object for non-thread events (`omitemp
 rendering replies. Without the route, all thread views returned 404 or a 405 Method Not Allowed.
 
 ```
-Matrix Client      Go Gateway (event.go)        Elixir Core                  PostgreSQL
+Matrix Client      Nebu app (event handler)        Domain                  PostgreSQL
      │                     │                          │                           │
      │  GET /rooms/        │                          │                           │
      │  {roomId}/event/    │                          │                           │
@@ -547,20 +536,19 @@ Matrix Client      Go Gateway (event.go)        Elixir Core                  Pos
 
 **Error cases:**
 
-| Condition | gRPC code | HTTP response |
+| Condition | Error atom | HTTP response |
 |---|---|---|
-| Room not found in Horde registry | `NOT_FOUND` | `404 M_NOT_FOUND` |
-| User not in room's members MapSet | `PERMISSION_DENIED` | `403 M_FORBIDDEN` |
-| Event not found in DB | `NOT_FOUND` | `404 M_NOT_FOUND` |
-| DB error | `INTERNAL` | `500 M_UNKNOWN` |
-| Invalid roomId format | (client-side) | `400 M_INVALID_PARAM` |
-| Invalid eventId format | (client-side) | `400 M_INVALID_PARAM` |
+| Room not found in Horde registry | `:not_found` | `404 M_NOT_FOUND` |
+| User not in room's members MapSet | `:permission_denied` | `403 M_FORBIDDEN` |
+| Event not found in DB | `:not_found` | `404 M_NOT_FOUND` |
+| DB error | `:internal` | `500 M_UNKNOWN` |
+| Invalid roomId format | (HTTP layer) | `400 M_INVALID_PARAM` |
+| Invalid eventId format | (HTTP layer) | `400 M_INVALID_PARAM` |
 
-**Also fixed in Story 11-8:** `core/apps/event_dispatcher/lib/pb/core_grpc.pb.ex` was missing both
-`rpc :GetRelations` and `rpc :GetEvent` entries. The absence of `rpc :GetRelations` caused
-`GET /relations?dir=b&recurse=true` calls to return `500` from Elixir instead of the expected
-`GetRelationsResponse`. Both stubs were added manually (protoc-gen-elixir does not auto-update the
-service module when `.proto` changes).
+**Also fixed in Story 11-8:** The `get_event` and `get_relations` handler clauses were missing
+from the `EventDispatcher.Server` dispatch table. Their absence caused `GET /relations?dir=b&recurse=true`
+to return `500`. Both handlers were added. (Historically these were `rpc :GetRelations` / `rpc :GetEvent`
+entries in the generated gRPC service stub; that stub no longer exists after the `grpc-removal` epic.)
 
 ## Scenario 3l: Matrix Login - Configurable OIDC Claim Mapping (Story 11-10)
 
@@ -569,7 +557,7 @@ from the claim configured in `server_config.oidc_user_id_claim` (loaded with a 6
 via `claimLoader` in `main.go`) rather than being hardcoded to the `name` claim.
 
 ```
-Matrix Client      Go Gateway (login.go + middleware/auth.go)        PostgreSQL (server_config)
+Matrix Client      Nebu app (login + OIDC plug)        PostgreSQL (server_config)
      │                         │                                              │
      │  POST /login            │                                              │
      │  {type: m.login.token}  │                                              │
@@ -606,24 +594,31 @@ activates the backward-compat `"name"` claim path.
 same OIDC principals, breaking all room memberships. The Admin UI settings page and the Bootstrap
 Wizard Step 3 both display a prominent stability warning.
 
-## Scenario 3m: Matrix Client Session Refresh - Opaque Tokens (Story fix-short-oidc-sessions)
+## Scenario 3m: Matrix Client Session Refresh - Opaque Tokens (Story oidc-session-refresh)
+
+> **Stack note (ADR-021):** Realised in the Elixir/OTP stack. Earlier revisions referenced a Go gateway
+> (`auth.go`, gRPC ValidateToken, `WithOpaqueSessionCheck`, `MarkAccessTokenUsed`, a cleanup goroutine).
+> The current implementation is `Nebu.Web.Plugs.OidcPlug` (token-shape dispatch),
+> `Nebu.Matrix.Session.MatrixSessionStore` (inline SQL over `matrix_sessions`), and `Nebu.Web.SecretBox`
+> (AES-256-GCM). The in-process token validation replaces the former gRPC call.
 
 Matrix users on Element Web and FluffyChat previously faced force-logout within minutes when the OIDC
 `id_token` expired (Keycloak default: 5 minutes). The fix implements Matrix v1.3 opaque session tokens
-with server-side storage, matching the admin UI session refresh pattern.
+with server-side storage; the Admin UI solves the same force-logout problem with silent OIDC refresh
+(see Scenario 3m-admin).
 
 ```
-Matrix Client      Go Gateway (login.go)                 PostgreSQL (matrix_sessions)
+Matrix Client      Nebu app (login handler)                 PostgreSQL (matrix_sessions)
      │                     │                                        │
      │  POST /login        │                                        │
      │  {type:m.login.     │                                        │
      │   token,            │                                        │
      │   refresh_token:true}                                        │
      │────────────────────►│                                        │
-     │                     │  gRPC ValidateToken (OIDC verify)      │
+     │                     │  validate_token (in-process OIDC verify)│
      │                     │  ← {user_id, oidc_refresh_token}       │
      │                     │  Generate opaque AT + RT (32 bytes)     │
-     │                     │  Encrypt OIDC RT with AES-256-GCM      │
+     │                     │  Encrypt OIDC RT (Nebu.Web.SecretBox)   │
      │                     │  INSERT into matrix_sessions            │
      │                     │─────────────────────────────────────────►
      │                     │  ◄── (success or conflict-ignore)       │
@@ -644,7 +639,7 @@ no `.` characters (distinguishable from JWTs). `expires_in_ms` is present only w
 (old behavior), no `expires_in_ms`, no `refresh_token` field. Existing non-SSO clients unaffected.
 
 ```
-Matrix Client      Go Gateway (refresh.go)                PostgreSQL (matrix_sessions)
+Matrix Client      Nebu app (refresh handler)                PostgreSQL (matrix_sessions)
      │                     │                                        │
      │  POST /refresh      │                                        │
      │  {refresh_token:<hex>}                                       │
@@ -668,45 +663,115 @@ Matrix Client      Go Gateway (refresh.go)                PostgreSQL (matrix_ses
      │  [client uses new AT for subsequent requests]                │
      │  GET /sync          │                                        │
      │  Authorization: Bearer <new_hex>                             │
-     │────────────────────►│  WithOpaqueSessionCheck                │
+     │────────────────────►│  OidcPlug (opaque-token branch)        │
      │                     │  SELECT FROM matrix_sessions           │
      │                     │  WHERE access_token=$1 (opaque)        │
      │                     │─────────────────────────────────────────►
      │                     │  ◄── {user_id, device_id, expires_at}  │
      │                     │  If not found: 401 M_UNKNOWN_TOKEN      │
-     │                     │  If expires_at < NOW(): 401 + soft_logout │
-     │                     │  If valid: MarkAccessTokenUsed(AT)      │
-     │                     │─────────────────────────────────────────►
-     │                     │    (expiry grace window for old RT)     │
+     │                     │  Re-check is_active / expires_at:       │
+     │                     │  if expired: 401 + soft_logout:true     │
+     │                     │  If valid: assign user_id/device_id     │
      │  200 {sync response}│                                        │
      │◄────────────────────│                                        │
 ```
 
 **AC4 — Grace period (Spec MUST):** The old refresh token remains valid for 60 seconds after
-`/refresh` returns, covering the case where a client fails to persist the new tokens. Once the new AT
-is used in any authenticated request, the grace window expires immediately via `MarkAccessTokenUsed`.
-A subsequent `/refresh` call with the old RT returns `401 M_UNKNOWN_TOKEN`.
+`/refresh` returns, covering the case where a client fails to persist the new tokens. A subsequent
+`/refresh` call with the old RT after the window returns `401 M_UNKNOWN_TOKEN`.
+
+**Rate limiting:** `POST /_matrix/client/v3/refresh` is unauthenticated by spec but guarded by the
+per-IP `Nebu.Web.Plugs.RateLimit` token bucket.
 
 **AC5 — Expired opaque token soft logout:** When an opaque AT in the DB has `expires_at < NOW()`,
-the gateway returns `401 M_UNKNOWN_TOKEN` with `soft_logout: true` (Matrix spec v1.3 semantics).
+`OidcPlug` returns `401 M_UNKNOWN_TOKEN` with `soft_logout: true` (Matrix spec v1.3 semantics).
 
 **AC8 — Session persistence across OIDC expiry:** Nebu refreshes the session independent of the OIDC
-provider's token lifetime. A session with `expires_at = NOW() + 8 hours` persists even if Keycloak's
-token expires after 5 minutes (the OIDC RT is refreshed transparently if configured, but the Nebu AT
-lifetime is decoupled from OIDC).
+provider's token lifetime. The Nebu session `expires_at = min(oidc_exp, NOW() + 8h)` persists even if
+Keycloak's access token expires after 5 minutes — this decoupling is what fixes the "force-logout every
+5 min" regression (the OIDC RT is refreshed transparently if configured).
 
 **Database:** New table `matrix_sessions` (migration 000001 squash) with columns:
 - `access_token` (PK), `refresh_token` (UNIQUE), `oidc_refresh_token` (encrypted AES-256-GCM),
   `user_id`, `device_id`, `expires_at`, `revoked_at`, `grace_until`, `created_at`.
 - Indexes on `refresh_token`, `user_id`, `expires_at`.
 
-**Middleware dispatch:** `WithOpaqueSessionCheck` middleware wrapper in `auth.go` detects opaque tokens
-(no `.` character) and routes them to `MatrixSessionStore` lookup instead of OIDC JWT validation.
+**Plug dispatch:** `Nebu.Web.Plugs.OidcPlug` detects opaque tokens (no `.` character) and routes them to
+the `MatrixSessionStore` lookup branch instead of OIDC JWT validation; the JWT path is unchanged.
 
-**Logout:** `POST /logout` calls `MatrixSessionStore.Revoke(opaque_token)` for opaque tokens,
-setting `revoked_at = NOW()` (immediate revocation, no grace period on logout).
+**Logout:** `POST /logout` deletes the user's `matrix_sessions` rows (immediate revocation, no grace
+period on logout).
 
-**Cleanup:** Periodic goroutine deletes expired `matrix_sessions` rows (7+ days old) hourly.
+**Admin deactivation:** `deactivate_user` also deletes the target user's `matrix_sessions` rows, so a
+deactivated user's opaque sessions are killed at once.
+
+## Scenario 3m-admin: Admin UI Silent OIDC Refresh (Story admin-oidc-session-refresh)
+
+The Admin UI (Phoenix LiveView, `Nebu.Admin.Auth`) previously capped the admin session at the short
+`id_token.exp` with no refresh, so admins were force-logged-out roughly every 5 minutes against
+Keycloak. The fix keeps the admin signed in by silently refreshing the OIDC token on HTTP round-trips —
+no DB-backed session, no plaintext refresh token at rest. As of Story `oidc-refresh-mode-config` the
+refresh below is **gated on the configurable `admin_oidc_refresh_mode`** (`offline | online`, default
+`online`): `offline_access` is requested — and silent refresh active — **only** when the mode is
+`offline`. The diagram shows the `offline` path.
+
+```
+Admin Browser     Nebu app (Nebu.Admin.Auth)                IdP (Keycloak token_endpoint)
+     │                     │                                        │
+     │  GET /admin/login/start  [admin_oidc_refresh_mode = offline] │
+     │────────────────────►│  scope += offline_access               │
+     │  302 → IdP ──────────────────────────────────────────────────►
+     │  …Auth-Code + PKCE callback…                                 │
+     │  GET /admin/callback│                                        │
+     │────────────────────►│  exchange code → {id_token, refresh_token}
+     │                     │◄────────────────────────────────────────
+     │                     │  verify id_token, enforce admin-group  │
+     │                     │  Encrypt RT (Nebu.Web.SecretBox AES-GCM)│
+     │                     │  session_exp = min(id_token.exp, now+8h)│
+     │                     │  put encrypted RT + claims in signed    │
+     │                     │  Phoenix session cookie (renew:true)    │
+     │  303 → /admin/ ◄─────│                                        │
+     │                     │                                        │
+     │  [later HTTP request, now within 120s of session_exp]        │
+     │  GET /admin/…       │                                        │
+     │────────────────────►│  fetch_current_user/2:                 │
+     │                     │  session_exp - now ≤ 120s → refresh    │
+     │                     │  decrypt stored RT                     │
+     │                     │  POST token_endpoint grant=refresh_token
+     │                     │───────────────────────────────────────►
+     │                     │◄── {new id_token, new refresh_token}   │
+     │                     │  OidcPlug.verify_token(new id_token)   │
+     │                     │  RE-EVALUATE admin-group on new claims  │
+     │                     │  session_exp = min(new exp, now+8h)    │
+     │                     │  renew session, rotate encrypted RT    │
+     │  200 (page) ◄────────│                                        │
+     │                     │                                        │
+     │  [refresh fails OR admin group lost]                         │
+     │                     │  clear session                         │
+     │  302 → /admin/login ◄│                                        │
+```
+
+**Refresh window:** `fetch_current_user/2` triggers a refresh when `session_exp - now ≤ 120 s`;
+outside the window the request proceeds on the existing session with no IdP round-trip.
+
+**Group re-evaluation:** the admin-group gate is re-checked against the *refreshed* claims, so an admin
+removed from the group at the IdP loses access on the next refresh (not only at next full login).
+
+**At-rest:** the OIDC refresh token lives only inside the signed Phoenix session cookie, encrypted with
+`Nebu.Web.SecretBox` (AES-256-GCM) — there is no `admin_sessions` table row and no DB persistence.
+
+**Known limitation:** refresh occurs on HTTP round-trips, not over the live LiveView websocket; a tab
+sitting idle on a websocket-only view is refreshed on its next HTTP navigation.
+
+**Configurable refresh mode (Story oidc-refresh-mode-config):** the `offline_access` request and the
+silent-refresh path above are active only when `admin_oidc_refresh_mode = offline`. The **default is
+`online`**, in which the admin flow requests no `offline_access` (no special IdP approval needed) and
+relies on the IdP's own session — on Dex this means no refresh token at all, so the admin is logged
+out at `session_exp`; Keycloak supports session-bound online refresh. Matrix login is governed by the
+sibling key `matrix_oidc_refresh_mode` (default `offline`). Both keys are set at bootstrap and
+changeable at runtime via `/admin/config` (`Nebu.Admin.ConfigLive`), applying to subsequent logins
+with no redeploy; `Nebu.Admin.Auth.admin_oidc_scope/0` and `Nebu.Matrix.SsoLogin.scope_list/0` read
+their mode live.
 
 ## Scenario 3n: Bootstrap Wizard - Step 3 Claim Mapping (Story 11-10)
 
@@ -714,7 +779,7 @@ The Bootstrap Wizard now has four steps. Step 3 (Claim Mapping) is inserted betw
 credentials step and the OIDC redirect:
 
 ```
-Admin Browser      Go Gateway (bootstrap.go + auth.go)         PostgreSQL
+Admin Browser      Nebu app (admin bootstrap + auth)         PostgreSQL
      │                          │                                    │
      │  GET /admin/bootstrap    │                                    │
      │  (Step 1: Instance name) │                                    │
@@ -771,7 +836,7 @@ after any stack restart because `send_receipt/2` previously called `lookup_room/
 receipts with the "start on demand" pattern already used by `sync`, `unarchive_room`, and `upgrade_room`.
 
 ```
-Matrix Client      Go Gateway (receipts.go)     Elixir Core (send_receipt/2)   PostgreSQL
+Matrix Client      Nebu app (receipts handler)     Domain (send_receipt/2)   PostgreSQL
      │                        │                            │                        │
      │  POST /receipt/        │                            │                        │
      │   m.read/{eventId}     │                            │                        │
@@ -823,22 +888,23 @@ Export → Ed25519-signed JSON/PDF with event content + audit trail
 Auto-expiry → session invalidated after 24 hours
 ```
 
-## Scenario 5: Elixir Core Restart Recovery
+## Scenario 5: Node Restart Recovery
 
 On restart, Horde re-discovers Room GenServers across the cluster via CRDT registry.
-Session Manager GenServer reads since-token checkpoints from PostgreSQL (no cold-sync forced on clients).
-EventBus stream re-connects to Go Gateway after exponential backoff (max 30s + jitter).
+The Session Manager GenServer reads since-token checkpoints from PostgreSQL (no cold-sync forced on
+clients). When the cluster has more than one node, libcluster re-forms the BEAM cluster and Horde
+re-distributes Room GenServers (see Deployment View, Server Clustering).
 
 **On-demand Room GenServer restart (lazy restart pattern):**
 
-Several gRPC handlers participate in lazy restart — they catch `:exit, {:noproc, _}` from a `GenServer.call` and attempt `RoomSupervisor.start_room/1` before retrying:
+Several domain handlers participate in lazy restart — they catch `:exit, {:noproc, _}` from a `GenServer.call` and attempt `RoomSupervisor.start_room/1` before retrying:
 
 | Handler | Added in |
 |---|---|
 | `send_receipt/2` | story direct-room-heroes |
-| `get_room_state/2` (read path used by Go Gateway sync) | bugfix/fix-room-management-error |
+| `get_room_state/2` (read path used by the sync handler) | bugfix/fix-room-management-error |
 
-If `start_room` returns `{:error, reason}` the handler returns gRPC `NOT_FOUND` and logs the reason at `warning` level. If the room starts but the process stops before `get_state` completes, `{:noproc, _}` → `NOT_FOUND`; `{:timeout, _}` → `UNAVAILABLE`.
+If `start_room` returns `{:error, reason}` the handler returns `NOT_FOUND` and logs the reason at `warning` level. If the room starts but the process stops before `get_state` completes, `{:noproc, _}` → `NOT_FOUND`; `{:timeout, _}` → `UNAVAILABLE`.
 
 ## Scenario 6: SSO Login Flow with Nonce and Denylist Verification (Story 11-7)
 
@@ -846,7 +912,7 @@ The SSO flow now enforces a three-layer security mechanism to prevent the Safari
 where a cached id_token or a cached 302 redirect caused Element Web to land on `#/welcome`.
 
 ```
-Matrix Client      Go Gateway (sso.go)        Dex OIDC              PostgreSQL (token_denylist)
+Matrix Client      Nebu app (SSO handler)        Dex OIDC              PostgreSQL (token_denylist)
      │                   │                       │                           │
      │  GET /sso/redirect │                       │                           │
      │  ?redirectUrl=...  │                       │                           │
@@ -946,17 +1012,18 @@ Clients (Element Web, FluffyChat) use `m.heroes` to derive a display name for ro
 
 ### Implementation
 
-**Proto (proto/core.proto):**
+**DTO (`Core.SyncRoom` struct):**
 
-Three new fields were added to the `SyncRoom` message (fields 6–8):
+Three fields were added to the `Core.SyncRoom` struct (fields 6–8, originally protobuf — now
+plain `defstruct` keys since the `grpc-removal` epic):
 
-```protobuf
-repeated string heroes               = 6;  // m.heroes — max 5 participant user_ids
-int32           joined_member_count  = 7;  // m.joined_member_count
-int32           invited_member_count = 8;  // m.invited_member_count
+```elixir
+# heroes: [String.t()]           # m.heroes — max 5 participant user_ids
+# joined_member_count: integer   # m.joined_member_count
+# invited_member_count: integer  # m.invited_member_count
 ```
 
-**Elixir Core (event_dispatcher server.ex):**
+**Domain (event_dispatcher server.ex):**
 
 `attach_heroes/3` is a private function called from `get_initial_sync` (always) and `fetch_delta_rooms` (only when `membership_changed` — the delta contains `m.room.member` events, per §11.2.2 which permits summary omission when heroes are unchanged).
 
@@ -972,12 +1039,12 @@ int32           invited_member_count = 8;  // m.invited_member_count
 - Joined count: total active members (inclusive of syncing user).
 - Invited count: total pending invitations.
 
-**Go Gateway (sync.go):**
+**Nebu app (sync handler):**
 
 `syncRoomSummary` struct marshals the three fields with Matrix-standard JSON keys (`m.heroes`, `m.joined_member_count`, `m.invited_member_count`). The field is a pointer (`*syncRoomSummary`) on `syncJoinedRoom` with `omitempty` — named rooms never emit a `"summary"` key.
 
 ```
-Matrix Client           Go Gateway           Elixir Core            PostgreSQL
+Matrix Client           Nebu app           Domain            PostgreSQL
      │                      │                      │                     │
      │  GET /sync           │                      │                     │
      │─────────────────────►│                      │                     │
@@ -999,7 +1066,7 @@ Matrix Client           Go Gateway           Elixir Core            PostgreSQL
      │◄─────────────────────│                      │                     │
 ```
 
-**Delta sync optimization:** Heroes are only re-sent when `membership_changed` (the delta contains at least one `m.room.member` event). When no membership events are present, the `SyncRoom` proto has zero-value fields for heroes/counts, and the Go layer omits the `summary` key entirely. Clients use their previously cached heroes for display.
+**Delta sync optimization:** Heroes are only re-sent when `membership_changed` (the delta contains at least one `m.room.member` event). When no membership events are present, the `SyncRoom` proto has zero-value fields for heroes/counts, and the sync handler omits the `summary` key entirely. Clients use their previously cached heroes for display.
 
 _Source: Story direct-room-heroes (epic: room-naming-and-default-rooms); Matrix CS API §11.2.2._
 
@@ -1011,15 +1078,15 @@ automatically joined to all such rooms at first login, without manual invite.
 **Admin toggle flow:**
 
 1. Admin submits the settings form (`POST /admin/rooms/{roomId}/settings`) with `is_auto_join=true`.
-2. `UpdateRoomSettingsHandler` (Go) reads `r.FormValue("is_auto_join") == "true"`, creates a pointer,
-   and passes it in `UpdateRoomSettingsRequest{IsAutoJoin: &isAutoJoin}` via gRPC.
-3. `update_room_settings/2` (Elixir) checks `is_nil(req.is_auto_join)` — only updates when the optional
+2. The Admin LiveView handler reads the submitted value and passes it as `is_auto_join`
+   in an `UpdateRoomSettingsRequest` struct to `update_room_settings/2` in-process.
+3. `update_room_settings/2` checks `is_nil(req.is_auto_join)` — only updates when the optional
    field is present. Calls `admin_db_module().update_room_auto_join(room_id, is_auto_join)`.
 4. DB: `UPDATE rooms SET is_auto_join = $2 WHERE room_id = $1` (parametrised).
 
 **New-user auto-join flow (at first login):**
 
-1. OIDC login → `validate_token` gRPC call reaches `Nebu.EventDispatcher.Server.validate_token/2`.
+1. OIDC login → `validate_token` in-process call reaches `Nebu.Matrix.EventDispatcher.Server.validate_token/2`.
 2. `Nebu.Session.TokenValidator.Postgres.validate/4`:
    - `lookup_user/1` returns `nil` (user not in DB) → `provision_new_user/4` → returns `is_new: true`.
    - Existing user → `decrypt_and_return/1` → returns `is_new: false`.
@@ -1033,7 +1100,7 @@ automatically joined to all such rooms at first login, without manual invite.
    - All errors are non-fatal (warning log, `:ok` returned) — login always succeeds.
 
 ```
-Client          Go Gateway          Elixir Core                  PostgreSQL
+Client          Nebu app          Domain                  PostgreSQL
   │  POST /login   │                     │                            │
   │───────────────▶│  ValidateToken gRPC │                            │
   │                │────────────────────▶│                            │
@@ -1061,15 +1128,15 @@ Client          Go Gateway          Elixir Core                  PostgreSQL
 - `ensure_auto_join_memberships` only runs for users with `is_new: true` — set server-side only during DB provisioning.
 - Partial index `rooms_auto_join_idx ON rooms (is_auto_join) WHERE is_auto_join = true` keeps the query fast.
 
-**Bulk import provisioning path:** See Scenario 3q below for the identical fire-and-forget pattern triggered by `BulkImportUsers` gRPC call.
+**Bulk import provisioning path:** See Scenario 3q below for the identical fire-and-forget pattern triggered by the `bulk_import_users/2` in-process call.
 
 _Source: Story admin-auto-join-rooms (epic: room-naming-and-default-rooms)._
 
 ## Scenario 3q: Auto-Join Rooms — Bulk Import Provisioning Path (Story auto-join-on-user-import)
 
 The same auto-join + personal self-room behavior from Scenario 3p is extended to the
-`BulkImportUsers` gRPC path. When an admin imports users via the SCIM/bulk API, each
-newly-provisioned user receives the same room setup as a first-login user — without requiring
+`bulk_import_users/2` in-process call path. When an admin imports users via the SCIM/bulk API,
+each newly-provisioned user receives the same room setup as a first-login user — without requiring
 a login event.
 
 **Key changes in this story:**
@@ -1084,7 +1151,7 @@ a login event.
   `send_receipt/2` added in Scenario 3n).
 
 ```
-Admin Client    Go Gateway     Elixir Core (bulk_import_users/2)   PostgreSQL
+Admin Client    Nebu app     Domain (bulk_import_users/2)   PostgreSQL
     │               │                   │                               │
     │  POST /import │                   │                               │
     │──────────────►│  BulkImportUsers  │                               │
@@ -1107,9 +1174,10 @@ Admin Client    Go Gateway     Elixir Core (bulk_import_users/2)   PostgreSQL
     │◄──────────────│◄──────────────────│                               │
 ```
 
-**Non-blocking guarantee:** The gRPC response (`BulkImportUsersResponse`) is returned before any
-`Task.start` goroutines complete. Room setup happens asynchronously — the import latency is not
-affected by the number of auto-join rooms or the time taken by `Room.Server.join/2`.
+**Non-blocking guarantee:** The `bulk_import_users/2` response (`BulkImportUsersResponse`) is
+returned before any `Task.start` processes complete. Room setup happens asynchronously — the
+import latency is not affected by the number of auto-join rooms or the time taken by
+`Nebu.Matrix.Room.Server.join/2`.
 
 **Idempotency:** `ensure_auto_join_memberships/1` returns `:ok` on `{:error, :already_member}` —
 safe to call even if a previous import partially completed.

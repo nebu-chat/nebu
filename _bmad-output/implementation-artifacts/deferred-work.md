@@ -46,3 +46,7 @@
 
 - ~~**Dev credentials in CI YAML**~~: Resolved via ADR-012 (2026-05-04) — `POSTGRES_HOST_AUTH_METHOD: trust` ersetzt statisches Passwort; Repo-Richtlinie "nur Referenzimplementierung, keine echten Deployments" dokumentiert.
 - **`elapsed`-Drift in `wait-for-stack.sh`**: Der Counter wird um `INTERVAL=2` inkrementiert, aber jede Loop-Iteration braucht zusätzlich Zeit für die vier Probe-Calls. Bei langsamen Probes kann der reale Timeout deutlich über 120s liegen. Nicht kritisch; kann als Follow-up geglättet werden.
+
+## Deferred from: code review of bugfix-fix-matrix-sso-redirect-missing (2026-06-19)
+- SsoStore cross-node single-use is best-effort (async pg replication; sub-ms double-redeem window across nodes). Single-node deployments unaffected. Follow-up: route a key's pop to a single owner (Horde/consistent-hash) or back the store with a DB `DELETE … RETURNING` for true cluster atomicity.
+- Matrix SSO redirectUrl allows any https host (Go parity / Matrix-client tradeoff). Optional hardening: an operator-configurable host allowlist for /_matrix/client/v3/login/sso/redirect.

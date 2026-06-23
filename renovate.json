@@ -19,12 +19,6 @@
       "platformAutomerge": true
     },
     {
-      "description": "Group Go patch+minor updates",
-      "matchManagers": ["gomod"],
-      "matchUpdateTypes": ["patch", "minor"],
-      "groupName": "Go dependencies"
-    },
-    {
       "description": "Group Elixir/Mix patch+minor updates",
       "matchManagers": ["mix"],
       "matchUpdateTypes": ["patch", "minor"],

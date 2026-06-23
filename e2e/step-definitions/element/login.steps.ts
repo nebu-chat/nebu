@@ -143,10 +143,13 @@ When(
     await menuItemLocator.first().waitFor({ state: 'visible', timeout: 5_000 });
     await menuItemLocator.first().click();
 
-    // "Remove this device" may show a confirmation dialog — wait for it deterministically
-    const confirmBtn = page.getByRole('button', { name: /sign out|remove|delete|confirm|ok/i });
+    // "Remove this device" may show a confirmation dialog. Scope the confirm button to an
+    // OPEN dialog so the broad regex can't latch onto a detaching Space tile in the
+    // background (which caused a 20s timeout). Keep it truly optional with short timeouts.
+    const confirmBtn = page.locator('.mx_Dialog, [role="dialog"]')
+      .getByRole('button', { name: /sign out|remove|delete|confirm|ok/i });
     if (await confirmBtn.first().isVisible({ timeout: 3_000 }).catch(() => false)) {
-      await confirmBtn.first().click();
+      await confirmBtn.first().click({ timeout: 3_000 }).catch(() => {});
     }
   }
 );

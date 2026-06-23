@@ -99,7 +99,7 @@ PostgreSQL and object storage are **not** provisioned by the K8s module - they a
 deploy/
   tofu/
     modules/
-      nebu-core/          # Shared variables, validations, locals
+      nebu-shared/        # Shared variables, validations, locals
       nebu-aws/           # ECS Fargate + RDS + S3 + ACM
       nebu-stackit/       # VMs + Docker Compose + DBaaS + Object Storage
       nebu-k8s/           # Helm Release wrapper
@@ -127,7 +127,7 @@ deploy/
         _helpers.tpl
 ```
 
-The `nebu-core` module contains no provider resources - only:
+The `nebu-shared` module contains no provider resources - only:
 - Shared input variables (`nebu_version`, `domain_name`, `admin_email`, `postgres_db_name`, `image_registry`)
 - Validation rules (e.g. semantic version format)
 - Outputs consumed by all other modules

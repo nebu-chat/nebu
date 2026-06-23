@@ -15,6 +15,14 @@ date: '2026-03-18'
 
 # Architecture Decision Document
 
+> **⚠️ Historical planning artifact (2026-03-18).** This document records the ORIGINAL
+> three-runtime design (Go gateway + Go media gateway + Elixir/OTP core over gRPC). That
+> design has since been **superseded**: the Go stack was removed (ADR-021) and the codebase
+> consolidated into a **single Elixir/OTP application** (ADR-019) with `Nebu.Matrix` /
+> `Nebu.Media` / `Nebu.Admin` domains (ADR-020). For the current architecture see
+> [`ARCHITECTURE.md`](../../ARCHITECTURE.md), the arc42 docs under `docs/architecture/`, and
+> ADR-019/020/021. The Go-era content below is retained for historical context only.
+
 _This document builds collaboratively through step-by-step discovery. Sections are appended as we work through each architectural decision together._
 
 ## Project Context Analysis

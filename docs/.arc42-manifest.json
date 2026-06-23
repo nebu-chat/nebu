@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-05-31T09:00:00Z",
-  "generator": "bmad-maintain-arc42 skill (auto-join-on-user-import delta)",
+  "generated_at": "2026-06-22T22:44:57Z",
+  "generator": "bmad-maintain-arc42 skill (oidc-refresh-mode-config delta)",
   "source_artifacts": [
     "_bmad-output/planning-artifacts/architecture.md",
     "_bmad-output/planning-artifacts/prd.md",
@@ -37,31 +37,31 @@
     },
     "docs/architecture/05-building-blocks.md": {
       "editable": false,
-      "generated_at": "2026-05-13T14:12:53Z",
+      "generated_at": "2026-06-17T13:36:15Z",
       "source": "_bmad-output/planning-artifacts/architecture.md",
       "arc42_section": "05 Building Block View"
     },
     "docs/architecture/06-runtime.md": {
       "editable": false,
-      "generated_at": "2026-05-31T09:00:00Z",
+      "generated_at": "2026-06-22T22:44:57Z",
       "source": "_bmad-output/planning-artifacts/architecture.md",
       "arc42_section": "06 Runtime View"
     },
     "docs/architecture/07-deployment.md": {
       "editable": false,
-      "generated_at": "2026-05-26T14:34:21Z",
+      "generated_at": "2026-06-17T13:36:15Z",
       "source": "_bmad-output/planning-artifacts/architecture.md",
       "arc42_section": "07 Deployment View"
     },
     "docs/architecture/08-concepts.md": {
       "editable": false,
-      "generated_at": "2026-05-26T12:00:00Z",
+      "generated_at": "2026-06-22T22:44:57Z",
       "source": "_bmad-output/planning-artifacts/architecture.md",
       "arc42_section": "08 Cross-cutting Concepts"
     },
     "docs/architecture/09-decisions.md": {
       "editable": false,
-      "generated_at": "2026-05-08T12:00:00Z",
+      "generated_at": "2026-06-22T22:44:57Z",
       "source": "CLAUDE.md",
       "arc42_section": "09 Architecture Decisions"
     },
@@ -157,7 +157,7 @@
     },
     "docs/matrix-api-scope.md": {
       "editable": false,
-      "generated_at": "2026-05-13T14:12:53Z",
+      "generated_at": "2026-06-22T22:44:57Z",
       "source": "gateway/cmd/gateway/main.go",
       "arc42_section": "Matrix API Scope"
     },

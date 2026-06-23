@@ -1,0 +1,14 @@
+# Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents.
+# last_updated: 2026-06-19
+# [bugfix-fix-bootstrap-wizard-oidc-flow] 2026-06-19T07:08Z committed ✓ (TDD+Dev, code-review CRITICAL C1 fixed 1 cycle, Kassandra CLEAN)
+# [bugfix-fix-bootstrap-wizard-oidc-flow] 2026-06-19T07:08Z security-review → Kassandra CLEAN (C1 verified fixed)
+# [bugfix-fix-bootstrap-wizard-oidc-flow] 2026-06-19T07:03Z dev cycle1 → C1 fixed (claim validated vs stashed discovered set) + M1 tx + M2; 35 admin tests green
+# [bugfix-fix-bootstrap-wizard-oidc-flow] 2026-06-19T06:58Z code-review → CRITICAL C1 (claim-value injection) → cycle 1
+# [bugfix-fix-bootstrap-wizard-oidc-flow] 2026-06-19T06:55Z dev(TDD) → 10 new tests GREEN, admin+web suite 70 pass; ci-gate scoped to unit (E2E in final combined run)
+# [bugfix-fix-bootstrap-wizard-oidc-flow] 2026-06-19T06:42Z pipeline started (--bug: wizard missing Connect-with-OIDC/claim-discovery; Go parity)
+story: null
+current_step: null
+completed: []
+cycle_count: 0
+blocked_reason: null
+last_updated: "2026-06-19T07:08Z"

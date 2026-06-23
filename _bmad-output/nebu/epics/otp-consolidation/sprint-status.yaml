@@ -1,0 +1,34 @@
+# Sprint status — epic otp-consolidation
+# Consolidate the post-migration nine-app Mix umbrella into a single OTP application
+# with Nebu.Matrix/Media/Admin domains (ADR-019/ADR-020), then align all docs + remove Go.
+epic: otp-consolidation
+stories:
+  umbrella-to-single-app:
+    status: done
+    summary: "Umbrella → single :nebu app (stage 1) + rename to Nebu.Matrix/Media/Admin/Web/Compliance + Public-API modules (stage 2). 556 unit tests parity; warnings-as-errors clean; prod release assembles + boots."
+  docs-go-removal:
+    status: done
+    summary: "README/publiccode/website/CLAUDE.md + root ARCHITECTURE.md aligned to single-Elixir-OTP-app; arc42 (8 files) swept of Go; ADR-021 added, ADR-005 amended; stale gateway/media artefacts deleted; gRPC retained as in-process command layer (documented)."
+  deploy-ci-env-cleanup:
+    status: done
+    summary: "Dropped 9 obsolete gateway/gRPC-era ENV vars across docker-compose, .gitlab-ci.yml, helm, and OpenTofu (AWS/Stackit/K8s); OIDC client-secret mapped to NEBU_ADMIN_OIDC_* so admin login stays functional; tfstate left untouched."
+  grpc-legacy-removal:
+    status: done
+    summary: "Removed dead gRPC network transport (port-9000 listener, Endpoint, AuthInterceptor, NodeRegistration); kept in-process Server + Core.* DTOs + Metadata + :grpc dep. 548 unit tests green; release boots with no gRPC port. ADR-005/021 updated."
+sec_gate_2:
+  status: clean
+  reviewer: kassandra
+  date: 2026-06-17
+  artifact: _bmad-output/implementation-artifacts/epic-otp-consolidation-security-review-2026-06-17.md
+  result: "0 CRITICAL / 0 HIGH. 2 LOW informational (vestigial gRPC listener port 9000 internal-only+auth-intercepted; high supervisor max_restarts = availability improvement). No control weakened by the refactor."
+  unit_tests: "546 passed / 2 skipped, mix compile --warnings-as-errors clean"
+  release: "MIX_ENV=prod mix release assembles; core boots Healthy as a single release"
+  integration: "GREEN — make test-integration-elixir: 584 tests, 0 failures, 2 skipped (fresh nebu DB)."
+gate_fixes:
+  summary: "Bugs surfaced by the first-ever clean fresh-DB integration run (the migrate-runner bug had always blocked it):"
+  fixes:
+    - "PROD BUG: Nebu.Release.migrate ran multi-statement squashed SQL via the prepared (binary) protocol → 42601; fresh-install migration was broken. Fixed with query_type: :text (simple protocol)."
+    - "BOOT BUG: Nebu.Health.Server hard-bound port 4000, colliding with Bandit (masked in the umbrella by per-app start order). Removed it; /health + /info now served by the single Bandit router (Nebu.Web.Router)."
+    - "TEST-ISO: bulk_importer/bulk_import_users tests deleted the shared :signature PII key in teardown (single BEAM) → media provisioning got nil key. Restore original instead of delete."
+    - "TEST-BUG: search_membership_test's insert_message double-encoded content (Jason.encode! + ::jsonb) → JSONB string not object → search_vector empty → FTS returned 0. Pass the map directly (as production does)."
+    - "TEST/PERF: regression_sync_load_test now disables the per-IP rate limiter (200 concurrent from one peer) and gets @tag timeout: 300_000 (load test, not a 60s unit test)."

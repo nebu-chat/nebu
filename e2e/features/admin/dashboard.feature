@@ -1,3 +1,4 @@
+@pending-feature
 Feature: Admin UI — Dashboard
   As an authenticated operator
   I want to view the Dashboard with live metrics

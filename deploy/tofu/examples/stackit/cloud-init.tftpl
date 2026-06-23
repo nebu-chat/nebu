@@ -51,25 +51,19 @@ write_files:
       NEBU_DB_URL=postgresql://${pg_user}:${pg_password}@${pg_host}:${pg_port}/nebu?sslmode=require
       NEBU_DB_URL_MIGRATE=postgresql://${pg_migrate_user}:${pg_migrate_password}@${pg_host}:${pg_port}/nebu?sslmode=require
       NEBU_OIDC_ISSUER=${oidc_issuer}
-      NEBU_OIDC_CLIENT_SECRET=${oidc_client_secret}
-      NEBU_OIDC_CLIENT_ID=${oidc_client_id}
+      NEBU_ADMIN_OIDC_CLIENT_SECRET=${oidc_client_secret}
+      NEBU_ADMIN_OIDC_CLIENT_ID=${oidc_client_id}
       NEBU_SERVER_NAME=${server_name}
       NEBU_IMAGE_REGISTRY=${image_registry}
       NEBU_VERSION=${nebu_version}
       NEBU_PII_ENCRYPTION_KEY=${pii_encryption_key}
-      NEBU_ENV=${nebu_env}
-      NEBU_KEY_ENCRYPTION_KEY=${key_encryption_key}
-      NEBU_TRUSTED_PROXY=${tls_mode != "none" ? "true" : "false"}
-%{ if oidc_mode == "dex" ~}
-      NEBU_OIDC_EXTRA_SCOPES=groups offline_access
-%{ else ~}
-      NEBU_OIDC_EXTRA_SCOPES=
-%{ endif ~}
 
 %{ if oidc_mode == "dex" ~}
   # ── /opt/nebu/dex/config.yaml ──────────────────────────────────────────────
   # Dex static configuration — no database required.
-  # Static client: nebu-gateway with the oidc_client_secret from tfvars.
+  # Static OIDC client id "nebu-gateway" (registered client identifier, unchanged
+  # for backwards compatibility) with the oidc_client_secret from tfvars. Its
+  # redirect URIs point at the server service (login SSO callback + /admin/callback).
   # Static user: operator@example.com — see RUNBOOK.md 'OIDC Profiles' to rotate the password hash.
   - path: /opt/nebu/dex/config.yaml
     owner: root:root
@@ -135,8 +129,8 @@ write_files:
 %{ endif ~}
 %{ if enable_element_web ~}
   # ── /opt/nebu/element-config.json ─────────────────────────────────────────
-  # Element Web configuration. base_url points to the gateway (Matrix CS API).
-  # When TLS is enabled, the gateway is served at https://<server_name>.
+  # Element Web configuration. base_url points to the server service (Matrix CS API).
+  # When TLS is enabled, server is served at https://<server_name>.
   # When TLS is disabled, element is on its own port 7070 so the Matrix API
   # is at http://<server_name> (behind the same host, no TLS).
   - path: /opt/nebu/element-config.json
@@ -177,7 +171,7 @@ write_files:
   # ── /opt/nebu/nginx-proxy.conf ─────────────────────────────────────────────
   # Docker Compose nginx proxy — plain HTTP on port 80.
   # TLS is terminated at the Stackit ALB; this proxy only does L7 path routing.
-  # X-Forwarded-Proto: https is set explicitly so the gateway sees the correct scheme.
+  # X-Forwarded-Proto: https is set explicitly so server sees the correct scheme.
   # Always deployed for tls_mode = "alb" — the Stackit ALB does not forward
   # X-Forwarded-Proto on its own, so nginx is required for all ALB deployments
   # (not just element_web or dex) to ensure OIDC redirect_uri uses https://.
@@ -209,34 +203,12 @@ write_files:
               proxy_set_header   X-Forwarded-Proto https;
           }
 %{ endif ~}
-%{ if enable_media_gateway ~}
-
-          # Media Gateway — proxy to media container via Docker network.
-          location /_matrix/media/ {
-              proxy_pass         http://media:8009;
-              proxy_http_version 1.1;
-              proxy_set_header   Host              $host;
-              proxy_set_header   X-Real-IP         $remote_addr;
-              proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
-              proxy_set_header   X-Forwarded-Proto https;
-              client_max_body_size 50m;
-          }
-
-          # Media Gateway — Matrix CS API 1.11+ authenticated media endpoints.
-          location /_matrix/client/v1/media/ {
-              proxy_pass         http://media:8009;
-              proxy_http_version 1.1;
-              proxy_set_header   Host              $host;
-              proxy_set_header   X-Real-IP         $remote_addr;
-              proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
-              proxy_set_header   X-Forwarded-Proto https;
-              client_max_body_size 50m;
-          }
-%{ endif ~}
 %{ if enable_element_web ~}
 
+          # go-removal-cleanup: Matrix API, /_matrix/media, .well-known, admin and
+          # internal API all routed to the server container (Bandit listener on 4000).
           location /_matrix/ {
-              proxy_pass         http://gateway:8008;
+              proxy_pass         http://server:4000;
               proxy_http_version 1.1;
               proxy_set_header   Host              $host;
               proxy_set_header   X-Real-IP         $remote_addr;
@@ -244,10 +216,11 @@ write_files:
               proxy_set_header   X-Forwarded-Proto https;
               proxy_set_header   Upgrade           $http_upgrade;
               proxy_set_header   Connection        $connection_upgrade;
+              client_max_body_size 50m;
           }
 
           location /.well-known/matrix/ {
-              proxy_pass         http://gateway:8008;
+              proxy_pass         http://server:4000;
               proxy_http_version 1.1;
               proxy_set_header   Host              $host;
               proxy_set_header   X-Real-IP         $remote_addr;
@@ -256,7 +229,7 @@ write_files:
           }
 
           location /admin/ {
-              proxy_pass         http://gateway:8008;
+              proxy_pass         http://server:4000;
               proxy_http_version 1.1;
               proxy_set_header   Host              $host;
               proxy_set_header   X-Real-IP         $remote_addr;
@@ -265,7 +238,7 @@ write_files:
           }
 
           location /api/v1/ {
-              proxy_pass         http://gateway:8008;
+              proxy_pass         http://server:4000;
               proxy_http_version 1.1;
               proxy_set_header   Host              $host;
               proxy_set_header   X-Real-IP         $remote_addr;
@@ -285,8 +258,10 @@ write_files:
           }
 %{ else ~}
 
+          # go-removal-cleanup: all traffic routed to the server container (Bandit
+          # listener on 4000) — serves Matrix CS API, /_matrix/media, and admin.
           location / {
-              proxy_pass         http://gateway:8008;
+              proxy_pass         http://server:4000;
               proxy_http_version 1.1;
               proxy_set_header   Host              $host;
               proxy_set_header   X-Real-IP         $remote_addr;
@@ -294,6 +269,7 @@ write_files:
               proxy_set_header   X-Forwarded-Proto https;
               proxy_set_header   Upgrade           $http_upgrade;
               proxy_set_header   Connection        $connection_upgrade;
+              client_max_body_size 50m;
           }
 %{ endif ~}
       }
@@ -334,33 +310,11 @@ write_files:
               proxy_set_header   X-Forwarded-Proto https;
           }
 %{ endif ~}
-%{ if enable_media_gateway ~}
-
-          # Media Gateway — proxy to media container on loopback (port published by Docker).
-          location /_matrix/media/ {
-              proxy_pass         http://127.0.0.1:8009;
-              proxy_http_version 1.1;
-              proxy_set_header   Host              $host;
-              proxy_set_header   X-Real-IP         $remote_addr;
-              proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
-              proxy_set_header   X-Forwarded-Proto https;
-              client_max_body_size 50m;
-          }
-
-          # Media Gateway — Matrix CS API 1.11+ authenticated media endpoints.
-          location /_matrix/client/v1/media/ {
-              proxy_pass         http://127.0.0.1:8009;
-              proxy_http_version 1.1;
-              proxy_set_header   Host              $host;
-              proxy_set_header   X-Real-IP         $remote_addr;
-              proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
-              proxy_set_header   X-Forwarded-Proto https;
-              client_max_body_size 50m;
-          }
-%{ endif ~}
 %{ if enable_element_web ~}
 
-          # Matrix API paths — always routed to gateway.
+          # go-removal-cleanup: Matrix API, /_matrix/media, .well-known, admin and
+          # internal API all routed to the server container on the host port 8008
+          # (mapped to the Bandit listener on container port 4000).
           location /_matrix/ {
               proxy_pass         http://127.0.0.1:8008;
               proxy_http_version 1.1;
@@ -370,6 +324,7 @@ write_files:
               proxy_set_header   X-Forwarded-Proto https;
               proxy_set_header   Upgrade           $http_upgrade;
               proxy_set_header   Connection        $connection_upgrade;
+              client_max_body_size 50m;
           }
 
           location /.well-known/matrix/ {
@@ -390,7 +345,7 @@ write_files:
               proxy_set_header   X-Forwarded-Proto https;
           }
 
-          # Internal/compliance API paths — routed to gateway (not Element).
+          # Internal/compliance API paths — routed to server (not Element).
           location /api/v1/ {
               proxy_pass         http://127.0.0.1:8008;
               proxy_http_version 1.1;
@@ -413,6 +368,9 @@ write_files:
           }
 %{ else ~}
 
+          # go-removal-cleanup: all traffic routed to the server container on host
+          # port 8008 (mapped to the Bandit listener on container port 4000) —
+          # serves Matrix CS API, /_matrix/media, and admin.
           location / {
               proxy_pass         http://127.0.0.1:8008;
               proxy_http_version 1.1;
@@ -422,6 +380,7 @@ write_files:
               proxy_set_header   X-Forwarded-Proto https;
               proxy_set_header   Upgrade           $http_upgrade;
               proxy_set_header   Connection        $connection_upgrade;
+              client_max_body_size 50m;
           }
 %{ endif ~}
       }
@@ -468,19 +427,47 @@ write_files:
                 cpus: '${dex_cpu_limit}'
                 memory: ${dex_memory_limit}
 %{ endif ~}
-        core:
-          image: $${NEBU_IMAGE_REGISTRY}/nebu-core:$${NEBU_VERSION}
+        # go-removal-cleanup: the Go gateway and Go media containers were removed.
+        # The Elixir server is now the single application container — it serves the
+        # public Matrix CS API, the /_matrix/media endpoints, and the Phoenix
+        # LiveView admin on its Bandit HTTP listener (container port 4000).
+        # Host ports 8008 (Matrix) and 8080 (admin) both map to server:4000.
+        server:
+          image: $${NEBU_IMAGE_REGISTRY}/nebu-server:$${NEBU_VERSION}
           restart: unless-stopped
           # No depends_on: postgres — managed PostgresFlex is always available
+%{ if enable_media_gateway ~}
+          secrets:
+            - internal_secret
+            - s3_access_key
+            - s3_secret_key
+%{ else ~}
           secrets: [internal_secret]
+%{ endif ~}
           environment:
-            # Postgrex (Elixir) requires ?ssl=true; Go's pgx uses ?sslmode=require (set in .env).
-            # This environment override takes precedence over env_file for the core service.
+            # Postgrex (Elixir) requires ?ssl=true.
+            # This environment override takes precedence over env_file for the server service.
             NEBU_DB_URL: "postgresql://${pg_user}:${pg_password}@${pg_host}:${pg_port}/nebu?ssl=true"
+            NEBU_DB_URL_MIGRATE: $${NEBU_DB_URL_MIGRATE}
             NEBU_INTERNAL_SECRET_FILE: "/run/secrets/internal_secret"
             NEBU_SERVER_NAME: $${NEBU_SERVER_NAME}
+            # OIDC config — server now serves the public Matrix API + admin.
+            NEBU_OIDC_ISSUER: $${NEBU_OIDC_ISSUER}
+            NEBU_ADMIN_OIDC_CLIENT_SECRET: $${NEBU_ADMIN_OIDC_CLIENT_SECRET}
+            NEBU_ADMIN_OIDC_CLIENT_ID: $${NEBU_ADMIN_OIDC_CLIENT_ID}
+%{ if enable_media_gateway ~}
+            # Media object storage — server serves /_matrix/media from the S3 bucket.
+            NEBU_MINIO_ENDPOINT: "${s3_endpoint}"
+            NEBU_MINIO_ACCESS_KEY_FILE: "/run/secrets/s3_access_key"
+            NEBU_MINIO_SECRET_KEY_FILE: "/run/secrets/s3_secret_key"
+            NEBU_MINIO_BUCKET: "${s3_bucket}"
+            NEBU_MINIO_USE_SSL: "true"
+%{ endif ~}
           env_file:
             - .env
+          ports:
+            - "8008:4000"
+            - "8080:4000"
           healthcheck:
             test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
             interval: 10s
@@ -490,79 +477,8 @@ write_files:
           deploy:
             resources:
               limits:
-                cpus: '${core_cpu_limit}'
-                memory: ${core_memory_limit}
-
-        gateway:
-          image: $${NEBU_IMAGE_REGISTRY}/nebu-gateway:$${NEBU_VERSION}
-          restart: unless-stopped
-          depends_on:
-            core:
-              condition: service_healthy
-          # No depends_on: postgres — managed PostgresFlex is always available
-          secrets: [internal_secret]
-          environment:
-            NEBU_DB_URL: $${NEBU_DB_URL}
-            NEBU_DB_URL_MIGRATE: $${NEBU_DB_URL_MIGRATE}
-            NEBU_CORE_GRPC_ADDR: "core:9000"
-            NEBU_INTERNAL_SECRET_FILE: "/run/secrets/internal_secret"
-            NEBU_SERVER_NAME: $${NEBU_SERVER_NAME}
-            NEBU_OIDC_ISSUER: $${NEBU_OIDC_ISSUER}
-            NEBU_OIDC_CLIENT_SECRET: $${NEBU_OIDC_CLIENT_SECRET}
-            NEBU_OIDC_CLIENT_ID: $${NEBU_OIDC_CLIENT_ID}
-          env_file:
-            - .env
-          ports:
-            - "8008:8008"
-          healthcheck:
-            test: ["CMD", "/healthcheck"]
-            interval: 10s
-            timeout: 5s
-            retries: 3
-            start_period: 10s
-          deploy:
-            resources:
-              limits:
-                cpus: '${gateway_cpu_limit}'
-                memory: ${gateway_memory_limit}
-%{ if enable_media_gateway ~}
-
-        media:
-          image: $${NEBU_IMAGE_REGISTRY}/nebu-media:$${NEBU_VERSION}
-          restart: unless-stopped
-          depends_on:
-            gateway:
-              condition: service_healthy
-          secrets:
-            - s3_access_key
-            - s3_secret_key
-          environment:
-            NEBU_SERVER_NAME: $${NEBU_SERVER_NAME}
-            NEBU_DB_URL: $${NEBU_DB_URL}
-            NEBU_STORAGE_BACKEND: "minio"
-            NEBU_MINIO_ENDPOINT: "${s3_endpoint}"
-            NEBU_MINIO_ACCESS_KEY_FILE: "/run/secrets/s3_access_key"
-            NEBU_MINIO_SECRET_KEY_FILE: "/run/secrets/s3_secret_key"
-            NEBU_MINIO_BUCKET: "${s3_bucket}"
-            NEBU_MINIO_USE_SSL: "true"
-            NEBU_OIDC_ISSUER: $${NEBU_OIDC_ISSUER}
-            NEBU_OIDC_CLIENT_ID: $${NEBU_OIDC_CLIENT_ID}
-            NEBU_TRUSTED_PROXY: $${NEBU_TRUSTED_PROXY}
-          ports:
-            - "127.0.0.1:8009:8009"
-          healthcheck:
-            # nebu-media is Alpine-based; wget (busybox) is available by default.
-            test: ["CMD", "wget", "-qO-", "http://localhost:8009/health"]
-            interval: 10s
-            timeout: 5s
-            retries: 3
-            start_period: 10s
-          deploy:
-            resources:
-              limits:
-                cpus: '${media_cpu_limit}'
-                memory: ${media_memory_limit}
-%{ endif ~}
+                cpus: '${server_cpu_limit}'
+                memory: ${server_memory_limit}
 %{ if enable_element_web ~}
 
         element:
@@ -579,7 +495,7 @@ write_files:
             - "0.0.0.0:7070:80"
 %{ endif ~}
           depends_on:
-            gateway:
+            server:
               condition: service_healthy
           healthcheck:
             # vectorim/element-web is nginx-alpine-based and includes busybox wget.
@@ -604,14 +520,10 @@ write_files:
           ports:
             - "0.0.0.0:80:80"
           depends_on:
-            gateway:
+            server:
               condition: service_healthy
 %{ if enable_element_web ~}
             element:
-              condition: service_healthy
-%{ endif ~}
-%{ if enable_media_gateway ~}
-            media:
               condition: service_healthy
 %{ endif ~}
           healthcheck:

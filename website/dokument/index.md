@@ -46,12 +46,12 @@ Nebu is built on a proven combination of fast, reliable, and battle-tested techn
 
 | Layer | Technology |
 |---|---|
-| API Gateway | **Go** 1.26+ - fast, stateless, horizontally scalable |
-| Messaging Core | **Elixir**/OTP 1.19+ - actor model, crash-resilient GenServers |
+| Application | **Elixir**/OTP 1.19+ - single OTP app, actor model, crash-resilient GenServers |
+| HTTP / Web | Bandit + Plug (Matrix API & media), Phoenix LiveView (Admin UI) |
 | Database | PostgreSQL 16+ - append-only event log, no ORM magic |
 | Clustering | libcluster + Horde - distributed GenServer registry |
 | Auth | OIDC-only (Dex, Keycloak, or any OIDC provider) |
-| Media | Go media gateway - S3-compatible, thumbnail generation |
+| Media | Built-in media gateway (`Nebu.Media`) - S3-compatible, thumbnail generation |
 
 No Redis. No NATS. No Kafka. No surprises.
 

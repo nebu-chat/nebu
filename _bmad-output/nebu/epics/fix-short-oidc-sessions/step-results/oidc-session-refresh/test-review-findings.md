@@ -1,33 +1,28 @@
-# Test Quality Review — oidc-session-refresh (2026-05-27)
+# Pre-Dev Test-Review — oidc-session-refresh (Elixir re-target), 2026-06-22
 
-## MAJOR Findings
+## Verdict: CLEAN (0 MAJOR)
 
-### MAJOR-1 — AC8 ohne automatisierten Test
-AC8 ("Session bleibt 8h aktiv bei kurzen Keycloak-Token-Lifetimes") hat keine Testabdeckung.
-Empfehlung: Godog-Szenario `AC8_LongSession_MultipleRefreshCycles` mit 3–5 Refresh-Zyklen
-(Keycloak-Lifetime 30s); oder AC8 explizit als "exploratory only" dokumentieren.
+Every AC1–AC8 has ≥1 failing test; timing deterministic (DB UPDATEs, no sleeps); real
+`matrix_sessions` table via `Nebu.Repo`; E2E uses real Auth-Code+PKCE (no cookie forging/ROPC);
+spec-fidelity present (`^[0-9a-f]{64}$` no dots, `soft_logout: true` top-level, `/refresh` no auth header).
 
-### MAJOR-2 — AC5-Step ist dauerhafter Stub
-`gateway/test/integration/matrix_session_refresh_steps_test.go` Step
-`iHaveAnOpaqueAccessTokenThatIsAlreadyExpiredInTheDatabase()` gibt immer `return fmt.Errorf(...)` —
-AC5 kann selbst nach vollständiger Implementation nie grün werden.
-Fix: echten DB-Setup via `store.Create()` mit `ExpiresAt: time.Now().Add(-2*time.Second)`.
+## AC → test coverage
+- AC1 login_refresh_test.exs:193-227 · AC2 :258-289 · AC3 :287-288 · AC4 store test 169-234
+- AC5 login_refresh_test.exs:308-336 · AC6 store 102-104 + http 297-301 · AC7 :233-252
+- AC8 matrix-session-refresh.feature (3 scenarios) + steps
 
-## MINOR Findings
+## MINOR (address during dev or flag in post-dev review)
+- **MINOR-1** login_refresh_test.exs:294 accepts `errcode in ["M_MISSING_PARAM","M_BAD_JSON"]`.
+  Intended (Dev Notes §5): empty body → `M_MISSING_PARAM`. Tighten once handler distinguishes
+  empty-`{}` from malformed JSON. Both 400 → low risk.
+- **MINOR-2** AC6 "already-used-and-replaced RT → 401" proven only at store layer (grace-closed
+  205-227); no HTTP-level rotate-then-reuse-RT → 401. Dev should add one.
 
-### MINOR-1 — Package-Import-Pfad in matrix_session_store_test.go prüfen
-Import `github.com/nebu/nebu/internal/db` — gegen go.mod verifizieren.
+## INFO / dev awareness
+- AC8 steps are PENDING throw-stubs (correct for red). Dev MUST implement against real Element+Dex
+  with a genuinely short OIDC access-token lifetime so refresh fires in-window. Don't let AC8 pass hollow.
+- New 3-tuple seam `:matrix_sso_token_override` → `{:ok, id_token, oidc_refresh_token}` must be wired
+  while keeping the legacy 2-tuple working (AC7).
+- Crash/restart test N/A (DB-backed store).
 
-### MINOR-2 — Shared mutable globals (akzeptabel per sc.Before()-Reset)
-Kein unmittelbarer Handlungsbedarf; bekanntes Muster im Projekt.
-
-### MINOR-3 — `withAuth`-Parameter in `doPostRefresh` ungenutzt
-Entweder implementieren oder entfernen.
-
-## INFO Findings
-
-### INFO-1 — 400-Szenarien ohne errcode-Assertion (M_BAD_JSON / M_MISSING_PARAM)
-### INFO-2 — AC2-Szenario prüft `refresh_token` in Response nicht explizit
-
-## Score
-78/100 — Approve with changes. MAJOR-1 und MAJOR-2 müssen vor Merge adressiert werden.
+ATDD subagent id: ac5d425e79857fd5d · test-review subagent id: ac53c48457a330f79

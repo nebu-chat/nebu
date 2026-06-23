@@ -1,0 +1,12 @@
+# Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents.
+# last_updated: 2026-06-20
+# [bugfix-fix-missing-matrix-room-routes] 2026-06-20T20:21Z committed ✓ (TDD 5 routes, code-review APPROVED, Kassandra CLEAN)
+# [bugfix-fix-missing-matrix-room-routes] 2026-06-20T20:18Z code-review → APPROVED (1 MINOR optional)
+# [bugfix-fix-missing-matrix-room-routes] 2026-06-20T20:15Z dev(TDD) → 5 routes wired, 11 unit + 9 integration green
+# [bugfix-fix-missing-matrix-room-routes] 2026-06-20T19:58Z pipeline started (--bug: leave/forget/relations/upgrade/search HTTP routes 404, backends exist)
+story: null
+current_step: null
+completed: []
+cycle_count: 0
+blocked_reason: null
+last_updated: "2026-06-20T20:21Z"

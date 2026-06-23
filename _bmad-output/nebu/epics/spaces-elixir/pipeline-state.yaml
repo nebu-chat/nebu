@@ -1,0 +1,28 @@
+# Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents.
+# Do not edit manually during an active pipeline run.
+# last_updated: 2026-06-22
+# [s6-element-spaces-e2e] 2026-06-22T10:26Z arc42-update → no arch changes (test-only)
+# [s6-element-spaces-e2e] 2026-06-22T10:25Z security-review → skipped (not-needed, test-only)
+# [s6-element-spaces-e2e] 2026-06-22T10:20Z code-review → MINOR-only APPROVED (reviewer fixed helper-dup in place; bddgen clean) (cycle 0)
+# [s6-element-spaces-e2e] 2026-06-22T10:05Z ci-gate → ✓ e2e spaces 6 passed, bddgen clean (test-only: build/unit/integration N/A)
+# [s6-element-spaces-e2e] 2026-06-22T09:55Z dev-story → 4 GREEN, 2 @pending-feature (BUG-1 hierarchy-S3, BUG-2 restricted-join-403); 0 server changes (cycle 0)
+# [s6-element-spaces-e2e] 2026-06-22T08:42Z test-review → 2 MAJOR + 4 MINOR [user continued — dev fixes]
+# [s6-element-spaces-e2e] 2026-06-22T08:40Z test-review → 2 MAJOR (dup step regs, not coverage) + 4 MINOR; AC1-5 fully covered
+# [s6-element-spaces-e2e] 2026-06-22T08:25Z atdd → 6 scenarios (1 @pending-feature)
+# [s6-element-spaces-e2e] 2026-06-22T08:12Z oracle-gate → spec context captured
+# [s6-element-spaces-e2e] 2026-06-22T08:08Z create-story → s6-element-spaces-e2e.md
+# [s6-element-spaces-e2e] 2026-06-22T08:03Z pipeline started
+story: "s6-element-spaces-e2e"
+current_step: "commit"
+completed:
+  - create-story
+  - atdd
+  - test-review
+  - dev-story
+  - ci-gate
+  - code-review
+  - security-review
+  - arc42-update
+cycle_count: 0
+blocked_reason: null
+last_updated: "2026-06-22T11:12Z"

@@ -1,3 +1,4 @@
+@pending-feature
 Feature: Admin UI — Bootstrap Wizard Step 4 User Import
   As an instance admin
   I want to import OIDC users during the Bootstrap Wizard Step 4

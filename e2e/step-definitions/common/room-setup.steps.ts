@@ -119,6 +119,12 @@ Given(
       );
     }
     await inviteUser(request, kaiSession.token, entry.roomId, NEBU_USERS.marie.matrixId);
+
+    // Pre-join via direct API so marie is actually a *member* (not stuck "invited",
+    // which would render "Join the discussion" instead of the timeline). Mirrors the
+    // invite+join done in "a room ... exists and {word} is a member".
+    const marieSession = await getApiSession(request, NEBU_USERS.marie, browser);
+    await joinRoom(request, marieSession.token, entry.roomId);
   }
 );
 

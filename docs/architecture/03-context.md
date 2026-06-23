@@ -23,22 +23,26 @@ at the protocol level.
   ┌──────────────────┐          ┌──────────────────────────────────────────┐
   │  Matrix Clients  │◄────────►│           Nebu Instance                  │
   │  Element, Cinny  │  HTTPS   │                                          │
-  │  FluffyChat, …   │  TLS 1.3 │  ┌────────────────┐  ┌────────────────┐ │
-  └──────────────────┘          │  │  Go Gateway    │  │  Go Media GW   │ │
-                                │  │  (stateless)   │  │  AES-256-GCM   │ │
-  ┌──────────────────┐          │  └───────┬────────┘  └────────────────┘ │
-  │  OIDC Provider   │◄────────►│          │ gRPC                          │
-  │  Keycloak / Dex  │  OIDC    │  ┌───────▼────────────────────────────┐ │
-  │  Azure AD        │          │  │  Elixir/OTP Core                   │ │
-  └──────────────────┘          │  │  Horde · ETS · pg groups           │ │
-                                │  └───────┬────────────────────────────┘ │
-  ┌──────────────────┐          │          │ PostgreSQL protocol           │
-  │  Admin / Ops     │◄────────►│  ┌───────▼────────────────────────────┐ │
-  │  Browser UI      │  HTTPS   │  │  PostgreSQL 16+                    │ │
-  │  Prometheus      │  HTTP    │  │  event log · audit · migrations    │ │
-  └──────────────────┘          │  └────────────────────────────────────┘ │
+  │  FluffyChat, …   │  TLS 1.3 │  ┌────────────────────────────────────┐ │
+  └──────────────────┘          │  │  Elixir/OTP application (:nebu)     │ │
+                                │  │  Bandit/Plug HTTP · Phoenix LiveView│ │
+  ┌──────────────────┐          │  │  Nebu.Matrix · Nebu.Media           │ │
+  │  OIDC Provider   │◄────────►│  │  Nebu.Admin  · Nebu.Web             │ │
+  │  Keycloak / Dex  │  OIDC    │  │  Horde · ETS · pg groups            │ │
+  │  Azure AD        │          │  └───────┬────────────────────┬───────┘ │
+                                │          │ PostgreSQL protocol  │ S3      │
+  ┌──────────────────┐          │  ┌───────▼──────────┐  ┌────────▼──────┐ │
+  │  Admin / Ops     │◄────────►│  │  PostgreSQL 16+  │  │  MinIO / S3   │ │
+  │  Browser UI      │  HTTPS   │  │  event log ·     │  │  media blobs  │ │
+  │  Prometheus      │  HTTP    │  │  audit · schema  │  │  (encrypted)  │ │
+  └──────────────────┘          │  └──────────────────┘  └───────────────┘ │
                                 └──────────────────────────────────────────┘
 ```
+
+The whole HTTP surface (Matrix C-S API, media, Admin UI) and all stateful chat logic run
+**in-process** within the single Elixir/OTP application — there is no separate gateway process and
+no inter-process boundary. The domain namespaces (`Nebu.Matrix`, `Nebu.Media`, `Nebu.Admin`,
+`Nebu.Web`) call each other as plain function calls on one BEAM node.
 
 ## Technical Context
 
@@ -46,10 +50,15 @@ at the protocol level.
 
 | Boundary | Protocol | Direction |
 |---|---|---|
-| Go Gateway → Elixir Core | gRPC (TLS in prod) | Bidirectional; streaming EventBus + unary fallback |
-| Elixir Core → PostgreSQL | PostgreSQL wire protocol (TLS) | Read/Write for business logic |
-| Go Gateway → PostgreSQL | PostgreSQL wire protocol (TLS) | Migrations + message_buffer + admin sessions |
-| Go Media → PostgreSQL | PostgreSQL wire protocol (TLS) | Media keys storage |
+| HTTP layer (`Nebu.Web`/`Nebu.Matrix.Http*`) → domain (`Nebu.Matrix`/`Nebu.Media`/`Nebu.Admin`) | In-process function calls (one BEAM node) | Synchronous; no network hop |
+| Elixir app → PostgreSQL | PostgreSQL wire protocol (TLS) via `Nebu.Repo` (Ecto pool) | Read/Write for all business logic, sessions, media keys, migrations |
+| `Nebu.Media` → MinIO / S3 | S3 API (ExAws/Finch, TLS) | Media blob storage (encrypted at rest) |
+
+> **Historical note:** ADR-005 originally defined a gRPC streaming boundary between a stateless Go
+> gateway and the Elixir server. The Go layer was removed (ADR-021) and consolidated into the single
+> Elixir/OTP application; the former gRPC command/DTO layer survives only as an in-process module
+> (`Nebu.Matrix.EventDispatcher.Server` + generated `Core.*` structs) that the HTTP routers call
+> directly. A network gRPC listener on port 9000 still starts but nothing dials it (vestige).
 
 **Not in scope (explicit exclusions):**
 - `/_matrix/federation/*` - no Server-Server API

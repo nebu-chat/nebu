@@ -1,0 +1,180 @@
+defmodule Nebu.Admin.AdminScopeModeTest do
+  @moduledoc """
+  RED-phase ATDD tests for story `oidc-refresh-mode-config` (epic
+  `fix-short-oidc-sessions`), AC3 + AC7 (admin side).
+
+  ## What is under test
+
+  Today `Nebu.Admin.Auth.admin_oidc_scope/0` FORCE-ADDS `offline_access`
+  (`["openid", "offline_access"] ++ configured`). This story removes the force
+  and makes it configurable per the `server_config` key
+  `admin_oidc_refresh_mode` (`offline` | `online`), read LIVE so a runtime
+  change applies without a redeploy:
+
+    * `admin_oidc_refresh_mode = offline` → scope INCLUDES `offline_access`.
+    * `admin_oidc_refresh_mode = online` (or unset → DEFAULT online) → scope is
+      `openid profile email`, with NO `offline_access`.
+    * `openid` is ALWAYS present (mandatory), in every mode.
+
+  Note the DEFAULT differs from Matrix: admin defaults to `online` (no forced
+  offline_access → no special IdP approval needed), Matrix defaults to
+  `offline` (preserves refresh on Dex & Keycloak).
+
+  ## Public surface (no testing of privates)
+
+  `admin_oidc_scope/0` is `defp`. We assert the OBSERVABLE result: the `scope`
+  query-param of the 302 `Nebu.Admin.Auth.login_start/2` builds toward the IdP
+  authorize endpoint (it puts `cfg.scope` — i.e. `admin_oidc_scope/0` — into the
+  redirect). This mirrors `admin_oidc_login_test.exs`, which asserts on the same
+  redirect's params.
+
+  ## Seam the dev MUST add (mode reader)
+
+  Unit suite (no live `Nebu.Repo`) → control the mode via an INJECTABLE READER
+  SEAM the dev adds to `Auth`, mirroring `OidcClaimCache`'s `:oidc_claim_reader`
+  and the `:admin_bootstrap_store` seam (only the read point is injected; the
+  inline SQL `SELECT value FROM server_config WHERE key='admin_oidc_refresh_mode'`
+  stays in the module — ADR-018):
+
+      Application.put_env(:nebu_http, :admin_oidc_refresh_mode_reader, fn -> "offline" end)
+
+  Seam ABSENT (unset env) → default reader does the live server_config read; no
+  row → DEFAULT `online` (the new admin default; un-forces offline_access).
+
+  ## Crash/restart — NOT APPLICABLE
+
+  Pure config read on the request process (Persistenz Option C — stateless).
+  """
+  use ExUnit.Case, async: false
+  import Plug.Test
+  import Plug.Conn
+
+  alias Nebu.Admin.Auth
+
+  @issuer "https://dex.example.com/dex"
+  @authorization_endpoint "https://dex.example.com/dex/auth"
+  @token_endpoint "https://dex.example.com/dex/token"
+  @client_id "nebu-admin"
+
+  setup do
+    Application.put_env(:nebu_http, :oidc_issuer, @issuer)
+    Application.put_env(:nebu_http, :admin_oidc_client_id, @client_id)
+    Application.put_env(:nebu_http, :admin_oidc_client_secret, "client-secret")
+    Application.put_env(:nebu_http, :admin_oidc_redirect_uri, "http://localhost:8008/admin/callback")
+
+    Application.put_env(:nebu_http, :oidc_metadata_override, %{
+      "issuer" => @issuer,
+      "authorization_endpoint" => @authorization_endpoint,
+      "token_endpoint" => @token_endpoint
+    })
+
+    on_exit(fn ->
+      for k <- [
+            :oidc_issuer,
+            :admin_oidc_client_id,
+            :admin_oidc_client_secret,
+            :admin_oidc_redirect_uri,
+            :oidc_metadata_override,
+            :admin_oidc_scope,
+            :admin_oidc_refresh_mode_reader
+          ] do
+        Application.delete_env(:nebu_http, k)
+      end
+    end)
+
+    :ok
+  end
+
+  defp set_mode(mode), do: Application.put_env(:nebu_http, :admin_oidc_refresh_mode_reader, fn -> mode end)
+
+  # login_start/2 builds the admin authorize redirect and puts admin_oidc_scope/0
+  # into its `scope` query param — the public observable surface.
+  defp scope_params do
+    conn =
+      conn(:get, "/admin/login/start")
+      |> init_test_session(%{})
+      |> Auth.login_start(%{})
+
+    assert conn.status == 302
+    [loc] = get_resp_header(conn, "location")
+    assert String.starts_with?(loc, @authorization_endpoint <> "?")
+
+    %URI{query: q} = URI.parse(loc)
+    URI.decode_query(q)["scope"] |> String.split(" ", trim: true)
+  end
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # AC3 — admin scope honors admin_oidc_refresh_mode; offline_access NOT forced
+  # ════════════════════════════════════════════════════════════════════════════
+
+  describe "admin scope honors admin_oidc_refresh_mode (AC3)" do
+    test "offline mode → scope INCLUDES offline_access" do
+      set_mode("offline")
+      scopes = scope_params()
+      assert "openid" in scopes
+      assert "offline_access" in scopes
+    end
+
+    test "online mode → openid profile email, NO offline_access" do
+      set_mode("online")
+      scopes = scope_params()
+      assert "openid" in scopes
+      assert "profile" in scopes
+      assert "email" in scopes
+      refute "offline_access" in scopes
+    end
+
+    test "unset mode → DEFAULTS to online (NO offline_access) — AC1/AC3 default" do
+      # No reader seam → default reader reads server_config; no row → admin default
+      # is ONLINE: offline_access must NOT be force-added (the bug this story fixes).
+      Application.delete_env(:nebu_http, :admin_oidc_refresh_mode_reader)
+      scopes = scope_params()
+      assert "openid" in scopes
+      refute "offline_access" in scopes
+    end
+
+    test "openid is always present even with a custom configured scope in online mode" do
+      set_mode("online")
+      # An operator-configured scope WITHOUT openid must still get openid force-added.
+      Application.put_env(:nebu_http, :admin_oidc_scope, "profile email")
+      scopes = scope_params()
+      assert "openid" in scopes
+      refute "offline_access" in scopes
+    end
+  end
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # AC3/AC5 — live server_config read (integration; REAL upsert, no DB mock)
+  # ════════════════════════════════════════════════════════════════════════════
+
+  describe "admin scope reads server_config live (AC3/AC5)" do
+    @describetag :integration
+
+    setup do
+      on_exit(fn ->
+        if Process.whereis(Nebu.Repo) do
+          Ecto.Adapters.SQL.query(
+            Nebu.Repo,
+            "DELETE FROM server_config WHERE key = 'admin_oidc_refresh_mode'",
+            []
+          )
+        end
+      end)
+
+      :ok
+    end
+
+    test "offline written to server_config adds offline_access on the next login-start" do
+      :ok = Nebu.Admin.DB.upsert_server_config(%{"admin_oidc_refresh_mode" => "offline"})
+      scopes = scope_params()
+      assert "offline_access" in scopes
+    end
+
+    test "online written to server_config drops offline_access on the next login-start" do
+      :ok = Nebu.Admin.DB.upsert_server_config(%{"admin_oidc_refresh_mode" => "online"})
+      scopes = scope_params()
+      refute "offline_access" in scopes
+      assert "openid" in scopes
+    end
+  end
+end

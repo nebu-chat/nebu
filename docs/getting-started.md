@@ -14,7 +14,7 @@ This guide walks you through setting up a local Nebu development environment fro
 | `make` | Any | Runs dev targets |
 | `git` | Any | Clone the repository |
 
-**No local Go, Elixir, or buf installation is needed.** All builds run inside Docker containers.
+**No local Elixir or buf installation is needed.** All builds run inside Docker containers.
 
 ---
 
@@ -45,16 +45,15 @@ This runs `docker compose up` and starts:
 
 | Service | URL | Purpose |
 |---|---|---|
-| Go Gateway (Matrix API + Admin) | http://localhost:8008 | Main endpoint for clients |
-| Health / Metrics | http://localhost:8080 | Prometheus, `/health`, `/ready` |
-| Elixir Core | Internal | gRPC on port 9000 (not exposed) |
+| Nebu (Matrix API + Admin UI) | http://localhost:8008 | Main endpoint for clients |
 | Dex (OIDC provider) | http://localhost:5556 | Dev identity provider |
 | PostgreSQL | localhost:5432 | Database (user: `nebu`, db: `nebu`) |
+| MinIO | http://localhost:9001 | S3-compatible media storage (dev) |
 
-Wait until you see `Nebu Gateway started` in the gateway logs:
+Wait until you see `Nebu.Application started` in the server logs:
 
 ```bash
-docker compose logs -f gateway
+docker compose logs -f server
 ```
 
 ---
@@ -74,7 +73,7 @@ You only need to do this once.
 
 ## 4. Bootstrap Wizard
 
-Open http://localhost:8008/admin in your browser.
+Open http://localhost:8080/admin in your browser.
 
 If this is a fresh installation (empty database), you will be redirected to the Bootstrap Wizard.
 Complete the following steps:
@@ -134,25 +133,22 @@ window and join the same room.
 |---|---|
 | `make setup` | Generate secrets and dev credentials (run once, then again after `make clean`) |
 | `make dev` | Start full stack via docker compose |
-| `make test-unit-go` | Run Go unit tests in container |
 | `make test-unit-elixir` | Run Elixir unit tests in container |
-| `make test-integration` | Full stack + Godog Gherkin integration tests |
-| `make build-gateway` | Build Go gateway Docker image |
-| `make build-core` | Build Elixir core Docker image |
-| `make gen-api` | Regenerate Admin API types from openapi.yaml |
-| `make proto` | Regenerate gRPC stubs from core.proto |
+| `make test-integration` | Full stack + Playwright/Gherkin integration tests |
+| `make build-server` | Compile Elixir app inside the build container (`mix compile`) |
+| `make redeploy` | Rebuild the `server` Docker image and recreate the container |
 
 ---
 
 ## 7. Troubleshooting
 
-### "Gateway not ready" or 502 errors on first start
+### "Server not ready" or 502 errors on first start
 
-**Cause:** The Elixir Core takes ~30s to start (OTP release compilation + DB migrations).
+**Cause:** The Elixir server takes ~30s to start (OTP release compilation + DB migrations).
 
-**Fix:** Wait for the core health check to pass:
+**Fix:** Wait for the server health check to pass:
 ```bash
-docker compose logs -f core | grep "Nebu.Application started"
+docker compose logs -f server | grep "Nebu.Application started"
 ```
 
 ---
@@ -190,18 +186,6 @@ The UIA flow (m.login.dummy) should dismiss it automatically.
 
 ---
 
-### Go test failures in CI: "race condition detected" in NodeRegistrationTest
-
-**Cause:** Tests that mutate environment variables (`os.Setenv`) run in parallel with tests
-that read them.
-
-**Fix:** The `NodeRegistrationTest` has async tests disabled in recent versions. If you encounter
-this locally, run:
-```bash
-cd gateway && go test -race -count=1 ./...
-```
-
----
 
 ### PostgreSQL migration fails on startup
 

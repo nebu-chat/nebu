@@ -7,5 +7,3 @@ metadata:
 data:
   NEBU_OIDC_ISSUER: {{ .Values.config.oidcIssuer | quote }}
   NEBU_SERVER_NAME: {{ .Values.config.serverName | quote }}
-  # Derived from the release name — deterministic from the chart, not a values entry.
-  NEBU_CORE_GRPC_ADDR: "{{ include "nebu.fullname" . }}-core:9000"

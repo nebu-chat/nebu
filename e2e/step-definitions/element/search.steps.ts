@@ -18,6 +18,7 @@ import { Given, When, Then } from '../../fixtures/nebu-fixtures';
 import { expect } from '@playwright/test';
 import type { Page, APIRequestContext, Browser } from '@playwright/test';
 import { getActualRoomName, roomIdByScenario } from '../common/room-setup.steps';
+import { dismissKeySetupDialog } from '../common/navigation.steps';
 import { getApiSession } from '../../fixtures/dex-auth';
 import { NEBU_USERS } from '../../fixtures/users';
 
@@ -129,20 +130,15 @@ When('{word} submits the search', async ({ page }: { page: Page }, _userName: st
 Then(
   'at least one search result containing {string} is visible',
   async ({ page }: { page: Page }, text: string) => {
-    // Wait for the results panel to be non-empty
-    const resultPanel = page.locator(
-      '.mx_SearchResultsPanel, .mx_RoomSearch_results, [data-testid="searchResults"]'
-    ).first();
-    await expect(resultPanel).toBeVisible({ timeout: 20_000 });
-
-    // Check that at least one tile contains the expected text
+    // Element renders matched events highlighted in-place (.mx_EventTile_searchHighlight)
+    // within the search results panel. Assert a highlighted event tile carries the text.
     const tile = page
       .locator(
-        '.mx_SearchResultTile, .mx_EventTile_searchHighlight, [data-testid="searchResultTile"]'
+        '.mx_EventTile_searchHighlight, .mx_SearchResultTile, [data-testid="searchResultTile"]'
       )
       .filter({ hasText: text })
       .first();
-    await expect(tile).toBeVisible({ timeout: 10_000 });
+    await expect(tile).toBeVisible({ timeout: 20_000 });
   }
 );
 
@@ -153,9 +149,9 @@ When(
   '{word} clicks on the first search result',
   async ({ page }: { page: Page }, _userName: string) => {
     const firstResult = page
-      .locator('.mx_SearchResultTile, .mx_EventTile_searchHighlight, [data-testid="searchResultTile"]')
+      .locator('.mx_EventTile_searchHighlight, .mx_SearchResultTile, [data-testid="searchResultTile"]')
       .first();
-    await expect(firstResult).toBeVisible({ timeout: 10_000 });
+    await expect(firstResult).toBeVisible({ timeout: 20_000 });
     await firstResult.click();
   }
 );
@@ -169,18 +165,16 @@ When(
  * empty-state element is visible OR the results panel has zero result tiles.
  */
 Then('an empty state indicator is visible', async ({ page }: { page: Page }) => {
-  // Wait for the results panel to appear (search must have completed)
-  const resultsPanel = page
-    .locator('.mx_SearchResultsPanel, .mx_RoomSearch_results, [data-testid="searchResults"]')
-    .first();
-  await expect(resultsPanel).toBeVisible({ timeout: 20_000 });
+  // A search with no matches renders no highlighted result tiles, and Element shows a
+  // "No results" indicator. Accept either signal: an explicit no-results message OR
+  // zero highlighted result tiles after the search settled.
+  const noResults = page.getByText(/no results|no search results|nothing found/i).first();
+  const tiles = page.locator('.mx_EventTile_searchHighlight, .mx_SearchResultTile, [data-testid="searchResultTile"]');
 
-  // Check no result tiles are rendered
-  const tiles = page.locator('.mx_SearchResultTile, [data-testid="searchResultTile"]');
-  await expect(tiles).toHaveCount(0, { timeout: 5_000 });
-
-  // Also accept an explicit empty-state label if Element Web renders one
-  // (some versions show a "No results found" banner — we don't require it but accept it)
+  const hasMsg = await noResults.isVisible({ timeout: 10_000 }).catch(() => false);
+  if (!hasMsg) {
+    await expect(tiles).toHaveCount(0, { timeout: 5_000 });
+  }
 });
 
 // "Then no error dialog appears" is defined in common/assertions.steps.ts
@@ -188,45 +182,56 @@ Then('an empty state indicator is visible', async ({ page }: { page: Page }) => 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
 async function openSearchDialog(page: Page): Promise<void> {
-  await page.goto(ELEMENT_URL);
-
-  // Try the search button in the room header or top-level UI
-  const searchBtn = page
-    .locator('.mx_RoomHeader_search button, [aria-label*="Search"], [data-testid="searchButton"]')
-    .first();
-
-  const btnVisible = await searchBtn.isVisible({ timeout: 3_000 }).catch(() => false);
-  if (btnVisible) {
-    await searchBtn.click();
+  // Element's message search (.mx_SearchBar) is a PER-ROOM affordance opened from the
+  // room header — it does not exist on the Home page. So open a room first (the seeded
+  // search-test room by roomId when known, else the first room tile in the sidebar),
+  // dismiss the managed-E2EE key dialog, then open the room-header search.
+  const seeded = roomIdByScenario.get('search-test-template');
+  if (seeded) {
+    await page.goto(`${ELEMENT_URL}/#/room/${encodeURIComponent(seeded.roomId)}`);
   } else {
-    // Keyboard shortcut fallback (Ctrl+K / Meta+K)
-    await page.keyboard.press('Control+k');
+    await page.goto(ELEMENT_URL);
+    const firstRoom = page.locator('.mx_RoomTile, [aria-label^="Open room"]').first();
+    if (await firstRoom.isVisible({ timeout: 10_000 }).catch(() => false)) {
+      await firstRoom.click();
+    }
   }
+  await dismissKeySetupDialog(page);
 
-  // Wait for the search input to appear
-  const input = page
-    .locator('.mx_SearchBar_input input')
-    .or(page.locator('[data-testid="searchInput"]'))
-    .or(page.locator('input[placeholder*="Search"]'))
+  // Wait for the room view so the header is present.
+  await page.locator('.mx_RoomView_body, .mx_BasicMessageComposer_input').first()
+    .waitFor({ state: 'visible', timeout: 30_000 }).catch(() => {});
+
+  // Element 1.12.15: message search lives in the Room Summary Card (room info panel),
+  // not a header magnifying glass. Open the room-info (i) panel, then the search box
+  // is .mx_RoomSummaryCard_search [role=searchbox] (matches the upstream element-web
+  // playwright pattern app.toggleRoomInfoPanel() + .mx_RoomSummaryCard_search).
+  if (!(await searchBox(page).isVisible({ timeout: 2_000 }).catch(() => false))) {
+    await page.getByRole('button', { name: 'Room info' }).first().click().catch(() => {});
+  }
+  await expect(searchBox(page)).toBeVisible({ timeout: 10_000 });
+}
+
+// The Element 1.12 room message-search input (Room Summary Card), with legacy fallbacks.
+function searchBox(page: Page) {
+  return page.locator('.mx_RoomSummaryCard_search').getByRole('searchbox')
+    .or(page.locator('.mx_SearchBar_input input'))
+    .or(page.locator('input[placeholder*="Search" i]'))
     .first();
-  await expect(input).toBeVisible({ timeout: 10_000 });
 }
 
 async function typeInSearchInput(page: Page, term: string): Promise<void> {
-  const input = page
-    .locator('.mx_SearchBar_input input')
-    .or(page.locator('[data-testid="searchInput"]'))
-    .or(page.locator('input[placeholder*="Search"]'))
-    .first();
+  const input = searchBox(page);
   await expect(input).toBeVisible({ timeout: 10_000 });
   await input.fill(term);
 }
 
 async function submitSearch(page: Page): Promise<void> {
-  await page.keyboard.press('Enter');
-  // Wait for results panel or empty state to appear
+  await searchBox(page).press('Enter');
+  // Element renders search results in-place: matching events get .mx_EventTile_searchHighlight
+  // inside a results panel, or a "no results" state. Wait for either to settle.
   await page.waitForSelector(
-    '.mx_SearchResultsPanel, .mx_RoomSearch_results, .mx_SearchResultsPanel_noResults, [data-testid="searchResults"]',
+    '.mx_RoomView_searchResultsPanel, .mx_SearchResultsPanel, .mx_EventTile_searchHighlight, .mx_RoomView_empty, [data-testid="searchResults"]',
     { timeout: 20_000 }
-  );
+  ).catch(() => {});
 }

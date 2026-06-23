@@ -52,23 +52,24 @@ cd deploy/tofu/examples/k8s
 # Initialise providers (no backend credentials needed for local kind)
 tofu init -backend=false
 
+# go-removal-cleanup: server is now the single application image — it serves the
+# public Matrix CS API, the /_matrix/media endpoints, and the admin LiveView.
+# There is no separate gateway/media image tag.
+
 # Review what will be created
 tofu plan \
-  -var="gateway_image_tag=dev" \
-  -var="core_image_tag=dev"
+  -var="server_image_tag=dev"
 
 # Apply
 tofu apply \
-  -var="gateway_image_tag=dev" \
-  -var="core_image_tag=dev"
+  -var="server_image_tag=dev"
 ```
 
 ### Optional: enable Ingress
 
 ```bash
 tofu apply \
-  -var="gateway_image_tag=dev" \
-  -var="core_image_tag=dev" \
+  -var="server_image_tag=dev" \
   -var="ingress_enabled=true"
 ```
 
@@ -95,8 +96,7 @@ Expected output (all pods `Running`):
 
 ```
 NAME                            READY   STATUS    RESTARTS   AGE
-nebu-gateway-...                1/1     Running   0          2m
-nebu-core-...                   1/1     Running   0          2m
+nebu-server-...                 1/1     Running   0          2m
 ```
 
 ---
@@ -108,8 +108,7 @@ For quick iteration during development you can install or upgrade the chart dire
 ```bash
 helm install nebu deploy/helm/nebu/ \
   -f deploy/helm/nebu/values-dev.yaml \
-  --set gateway.image.tag=dev \
-  --set core.image.tag=dev \
+  --set server.image.tag=dev \
   --namespace nebu \
   --create-namespace
 ```
@@ -123,16 +122,14 @@ To update a running deployment with a new image tag:
 ```bash
 helm upgrade nebu deploy/helm/nebu/ \
   -f deploy/helm/nebu/values-dev.yaml \
-  --set gateway.image.tag=<NEW_TAG> \
-  --set core.image.tag=<NEW_TAG> \
+  --set server.image.tag=<NEW_TAG> \
   --namespace nebu
 ```
 
 Verify the rollout:
 
 ```bash
-kubectl rollout status deployment/nebu-gateway -n nebu
-kubectl rollout status deployment/nebu-core -n nebu
+kubectl rollout status deployment/nebu-server -n nebu
 ```
 
 ---
@@ -168,17 +165,17 @@ Enable HPA in `values.yaml` or via `--set`:
 ```bash
 helm upgrade nebu deploy/helm/nebu/ \
   -f deploy/helm/nebu/values-dev.yaml \
-  --set autoscaling.gateway.enabled=true \
-  --set autoscaling.gateway.minReplicas=1 \
-  --set autoscaling.gateway.maxReplicas=5 \
-  --set autoscaling.gateway.targetCPUUtilizationPercentage=70 \
+  --set autoscaling.server.enabled=true \
+  --set autoscaling.server.minReplicas=1 \
+  --set autoscaling.server.maxReplicas=5 \
+  --set autoscaling.server.targetCPUUtilizationPercentage=70 \
   -n nebu
 ```
 
 ### Via kubectl (imperative — for quick testing only)
 
 ```bash
-kubectl autoscale deployment nebu-gateway \
+kubectl autoscale deployment nebu-server \
   --cpu-percent=70 \
   --min=1 \
   --max=5 \
@@ -204,7 +201,6 @@ kubectl get hpa -n nebu
 ```bash
 cd deploy/tofu/examples/k8s
 tofu destroy \
-  -var="gateway_image_tag=dev" \
   -var="core_image_tag=dev"
 ```
 

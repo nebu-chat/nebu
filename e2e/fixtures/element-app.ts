@@ -27,43 +27,53 @@ export class ElementAppPage {
   }
 
   /**
-   * Open the "Create a private room" dialog.
+   * Open the "Create room" dialog.
    *
-   * Element Web 1.12.15 removed the dedicated "Add room" / "+" button from the room list header.
-   * The most reliable approach across versions is to navigate to /#/new which opens the
-   * "Create a private room" dialog directly.
+   * Element Web 1.12.15: navigating to /#/new opens the "New conversation" / start-DM
+   * flow, which has NO room-name field and creates an unnamed "Empty room". The correct
+   * path (per story 9-26) is via the Room list:
+   *   navigation[name="Room list"] → "New conversation" (add/plus) button
+   *   → "New room" menu item → real Create Room dialog (with the room-name field).
    *
-   * Fallback for older versions: try the "Add room" button first.
+   * Fallback for older versions: an "Add room" / "Create room" button in the left panel.
    */
   async openCreateRoomDialog(): Promise<void> {
-    // Element Web 1.12.15+: navigate to /#/new to open create room dialog
-    await this.page.goto('/#/new');
-    // Wait for the URL to settle before checking for the dialog
-    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+    // Make sure the room list is rendered before reaching for its controls.
+    await this.waitForRoomList().catch(() => {});
 
-    // Check if the dialog is now open
-    const dialogVisible = await this.page.locator('.mx_CreateRoomDialog, [role="dialog"]').first()
-      .isVisible({ timeout: 5_000 }).catch(() => false);
+    // Primary (Element Web 1.12.15+): the "New conversation" add button in the Room list nav.
+    const roomListNav = this.page.getByRole('navigation', { name: /room list/i });
+    const newConversationBtn = roomListNav.getByRole('button', { name: /new conversation/i })
+      .or(this.page.getByRole('button', { name: /new conversation/i }))
+      .or(this.page.locator('.mx_RoomListHeader_auxButton'));
 
-    if (!dialogVisible) {
-      // Fallback for older versions: "Add room" button in the left panel header
+    if (await newConversationBtn.first().isVisible({ timeout: 8_000 }).catch(() => false)) {
+      await newConversationBtn.first().click();
+
+      // The menu opens — choose "New room" (NOT "New message"/DM which has no name field).
+      const newRoomItem = this.page.getByRole('menuitem', { name: /new room|create.*room/i })
+        .or(this.page.getByRole('option', { name: /new room|create.*room/i }));
+      if (await newRoomItem.first().isVisible({ timeout: 5_000 }).catch(() => false)) {
+        await newRoomItem.first().click();
+      }
+    } else {
+      // Fallback for older versions: "Add room" / "Create room" button in the left panel header.
       const addRoomBtn = this.page.getByRole('button', { name: /add room|new room|create.*room|plus/i })
         .or(this.page.locator('.mx_RoomListHeader_auxButton'))
         .first();
 
-      const btnVisible = await addRoomBtn.isVisible({ timeout: 5_000 }).catch(() => false);
-      if (btnVisible) {
+      if (await addRoomBtn.isVisible({ timeout: 5_000 }).catch(() => false)) {
         await addRoomBtn.click();
-        // A context menu may appear — click "Create new room"
-        const createItem = this.page.getByRole('menuitem', { name: /create.*room|new room/i })
-          .or(this.page.getByRole('option', { name: /create.*room|new room/i }));
+        // A context menu may appear — click "New room" / "Create new room".
+        const createItem = this.page.getByRole('menuitem', { name: /new room|create.*room/i })
+          .or(this.page.getByRole('option', { name: /new room|create.*room/i }));
         if (await createItem.first().isVisible({ timeout: 3_000 }).catch(() => false)) {
           await createItem.first().click();
         }
       }
     }
 
-    // Wait for the create room dialog (either .mx_CreateRoomDialog or generic dialog)
+    // Wait for the real Create Room dialog (carries the room-name field).
     await this.page.locator('.mx_CreateRoomDialog, [role="dialog"]:has(input[placeholder="Name"])').first()
       .waitFor({ state: 'visible', timeout: 10_000 });
   }

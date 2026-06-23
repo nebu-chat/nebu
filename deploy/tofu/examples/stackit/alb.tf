@@ -12,9 +12,11 @@ resource "stackit_alb_certificate" "nebu" {
 }
 
 # ── Application Load Balancer (tls_mode = "alb") ──────────────────────────────
-# L7 ALB with TLS termination at the load balancer — no nginx on the VM.
-# Port 443 HTTPS → gateway:8008
-# Port 80  HTTP  → gateway:8008 (gateway responsible for redirect if needed)
+# L7 ALB with TLS termination at the load balancer.
+# go-removal-cleanup: targets the Docker Compose nginx proxy on the VM (port 80),
+# which forwards to the server container (Bandit listener, container port 4000).
+# Port 443 HTTPS → VM:80 (nginx proxy → server:4000)
+# Port 80  HTTP  → VM:80 (nginx proxy → server:4000)
 
 resource "stackit_application_load_balancer" "nebu" {
   count            = var.tls_mode == "alb" ? 1 : 0
@@ -103,7 +105,9 @@ resource "stackit_application_load_balancer" "nebu" {
 }
 
 # ── Network Load Balancer / TCP passthrough (tls_mode = "none" | "acme") ──────
-# tls_mode = "none": port 443 → gateway:8008 (direct, no TLS)
+# go-removal-cleanup: server publishes host port 8008 (mapped to its container port
+# 4000) and serves the public Matrix CS API + media + admin directly.
+# tls_mode = "none": port 443 → server host port 8008 (direct, no TLS)
 # tls_mode = "acme": port 443 → nginx:443 (TLS termination) + port 80 → nginx:80 (HTTP redirect)
 
 locals {

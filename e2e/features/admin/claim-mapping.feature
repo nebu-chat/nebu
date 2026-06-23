@@ -81,6 +81,13 @@ Feature: Admin UI — OIDC Claim Mapping Configuration
     And the operator clicks "Save"
     Then the page shows "Claim mapping updated"
     And the claim mapping form has "oidc_user_id_claim" pre-filled with "preferred_username"
+    # Restore the product default so this update does not leak into other scenarios
+    # on the shared (non-reset) stack — @ac10-claim-mapping-settings expects "name".
+    When the operator clears the field "oidc_user_id_claim"
+    And the operator fills in "oidc_user_id_claim" with "name"
+    And the operator clicks "Save"
+    Then the page shows "Claim mapping updated"
+    And the claim mapping form has "oidc_user_id_claim" pre-filled with "name"
 
   # ---------------------------------------------------------------------------
   # AC8 — Validation: submitting empty claim name shows per-field error in browser

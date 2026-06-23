@@ -44,26 +44,16 @@ variable "vm_plan_id" {
   default     = "g2i.2"
 }
 
-variable "gateway_cpu_limit" {
-  description = "CPU limit for the gateway container (Docker Compose deploy.resources.limits.cpus). Default suits a g2i.2 VM (4 vCPU). Go gateway is CPU-light under normal load."
-  type        = string
-  default     = "0.50"
-}
-
-variable "gateway_memory_limit" {
-  description = "Memory limit for the gateway container (Docker Compose deploy.resources.limits.memory). Default suits a g2i.2 VM (8 GB RAM). Go gateway is lean on memory."
-  type        = string
-  default     = "256m"
-}
-
-variable "core_cpu_limit" {
-  description = "CPU limit for the Elixir core container (Docker Compose deploy.resources.limits.cpus). Default suits a g2i.2 VM (4 vCPU). BEAM scheduler uses multiple cores under load."
+# go-removal-cleanup: gateway_cpu_limit / gateway_memory_limit were removed — the
+# Go gateway container no longer exists. Server is the single application container.
+variable "server_cpu_limit" {
+  description = "CPU limit for the Elixir server container (Docker Compose deploy.resources.limits.cpus). Default suits a g2i.2 VM (4 vCPU). BEAM scheduler uses multiple cores under load."
   type        = string
   default     = "1.50"
 }
 
-variable "core_memory_limit" {
-  description = "Memory limit for the Elixir core container (Docker Compose deploy.resources.limits.memory). Default suits a g2i.2 VM (8 GB RAM). BEAM VM allocates aggressively — set this to avoid OOM kills."
+variable "server_memory_limit" {
+  description = "Memory limit for the Elixir server container (Docker Compose deploy.resources.limits.memory). Default suits a g2i.2 VM (8 GB RAM). BEAM VM allocates aggressively — set this to avoid OOM kills."
   type        = string
   default     = "2g"
 }
@@ -93,7 +83,7 @@ variable "element_memory_limit" {
 }
 
 variable "enable_media_gateway" {
-  description = "When true, deploys the Media Gateway as a Docker service. Requires s3_access_key, s3_secret_key, s3_bucket."
+  description = "When true, configures the server container with S3-compatible object storage so it serves the /_matrix/media endpoints from the bucket, and creates the bucket. go-removal-cleanup: there is no longer a separate media container — server handles media. Requires s3_access_key, s3_secret_key, s3_bucket, s3_endpoint."
   type        = bool
   default     = false
 }
@@ -124,18 +114,8 @@ variable "s3_bucket" {
   default     = "nebu-media"
 }
 
-variable "media_cpu_limit" {
-  description = "CPU limit for the media gateway container."
-  type        = string
-  default     = "0.50"
-}
-
-variable "media_memory_limit" {
-  description = "Memory limit for the media gateway container."
-  type        = string
-  default     = "256m"
-}
-
+# go-removal-cleanup: media_cpu_limit / media_memory_limit were removed — the Go
+# media container no longer exists. Server serves /_matrix/media itself.
 variable "alb_plan_id" {
   description = "STACKIT load balancer plan ID. Run `stackit load-balancer plans list` to find available plans. p10 is the smallest billable plan."
   type        = string
@@ -150,7 +130,7 @@ variable "ubuntu_image_id" {
 }
 
 variable "tls_mode" {
-  description = "TLS termination strategy. 'none': no TLS, gateway exposed directly on port 8008 via NLB TCP passthrough. 'acme': nginx on VM terminates TLS with a Let's Encrypt cert provisioned by certbot (HTTP-01 challenge). 'alb': Stackit Application Load Balancer terminates TLS using a certificate provided via tls_certificate_pem/tls_private_key_pem — no nginx on the VM."
+  description = "TLS termination strategy. 'none': no TLS, server exposed directly on host port 8008 (mapped to its container port 4000) via NLB TCP passthrough. 'acme': nginx on VM terminates TLS with a Let's Encrypt cert provisioned by certbot (HTTP-01 challenge). 'alb': Stackit Application Load Balancer terminates TLS using a certificate provided via tls_certificate_pem/tls_private_key_pem — forwarded to the VM nginx proxy → server."
   type        = string
   default     = "none"
 
@@ -215,7 +195,7 @@ variable "postgres_storage_size" {
 # ── cloud-init / bootstrap variables ─────────────────────────────────────────
 
 variable "internal_secret" {
-  description = "Shared PSK used for gateway ↔ core node registration (see ADR-008). Injected into .secrets/internal_secret at first boot."
+  description = "Shared PSK used for server node registration (see ADR-008). Injected into .secrets/internal_secret at first boot."
   type        = string
   sensitive   = true
 
@@ -226,7 +206,7 @@ variable "internal_secret" {
 }
 
 variable "pii_encryption_key" {
-  description = "32-byte AES key for PII field encryption in the Elixir core (NEBU_PII_ENCRYPTION_KEY). Must be exactly 64 hex characters. Generate with: openssl rand -hex 32"
+  description = "32-byte AES key for PII field encryption in the Elixir server (NEBU_PII_ENCRYPTION_KEY). Must be exactly 64 hex characters. Generate with: openssl rand -hex 32"
   type        = string
   sensitive   = true
 
@@ -269,7 +249,7 @@ variable "oidc_client_id" {
 }
 
 variable "oidc_issuer" {
-  description = "OIDC issuer URL. Required when oidc_mode = 'external' (e.g. 'https://auth.example.com/realms/nebu'). When oidc_mode = 'dex', this value is ignored — the issuer is automatically set to 'http://<server_name>:5556/dex'. The gateway reaches Dex via Docker hairpin NAT through the VM's public IP (standard Linux SNAT/masquerade)."
+  description = "OIDC issuer URL. Required when oidc_mode = 'external' (e.g. 'https://auth.example.com/realms/nebu'). When oidc_mode = 'dex', this value is ignored — the issuer is automatically set to 'http://<server_name>:5556/dex'. Server reaches Dex via Docker hairpin NAT through the VM's public IP (standard Linux SNAT/masquerade)."
   type        = string
   default     = "" # Empty default enables `tofu validate` without providing a value
 }
@@ -293,23 +273,6 @@ variable "dex_allowed_cidr" {
   validation {
     condition     = can(cidrnetmask(var.dex_allowed_cidr))
     error_message = "dex_allowed_cidr must be a valid CIDR block (e.g. '10.0.0.0/8' or '203.0.113.1/32')."
-  }
-}
-
-variable "nebu_env" {
-  description = "Runtime environment name passed as NEBU_ENV (e.g. 'production', 'staging'). Controls KEK enforcement: non-dev values require NEBU_KEY_ENCRYPTION_KEY to be set."
-  type        = string
-  default     = "production"
-}
-
-variable "key_encryption_key" {
-  description = "64-hex-char (32-byte) master key for encrypting compliance signing keys at rest (NEBU_KEY_ENCRYPTION_KEY). Required when nebu_env is not dev/staging. Generate with: openssl rand -hex 32"
-  type        = string
-  sensitive   = true
-
-  validation {
-    condition     = length(var.key_encryption_key) == 64 && can(regex("^[0-9a-fA-F]+$", var.key_encryption_key))
-    error_message = "key_encryption_key must be exactly 64 hex characters (32 bytes). Generate with: openssl rand -hex 32"
   }
 }
 
@@ -378,7 +341,7 @@ variable "nebu_version" {
 }
 
 variable "image_registry" {
-  description = "Container image registry prefix (e.g. 'registry.gitlab.com/myorg/open-chat'). Images pulled as <image_registry>/nebu-gateway:<nebu_version> and <image_registry>/nebu-core:<nebu_version>."
+  description = "Container image registry prefix (e.g. 'registry.gitlab.com/myorg/open-chat'). go-removal-cleanup: server is the single application image — pulled as <image_registry>/nebu-server:<nebu_version>."
   type        = string
 }
 
@@ -425,7 +388,7 @@ variable "logs_retention_days" {
 }
 
 variable "enable_element_web" {
-  description = "When true, deploys the Element Web Matrix client as a Docker service and configures nginx to serve it at the root path (/). Matrix API paths (/_matrix/, /.well-known/matrix/, /admin/) continue to route to the gateway. Requires tls_mode = 'acme': without nginx, Element runs on port 7070 while the gateway is on port 8008 — different origins cause CORS preflight failures."
+  description = "When true, deploys the Element Web Matrix client as a Docker service and configures nginx to serve it at the root path (/). Matrix API paths (/_matrix/, /.well-known/matrix/, /admin/) continue to route to server. Requires tls_mode = 'acme' or 'alb': without nginx, Element runs on port 7070 while server is on port 8008 — different origins cause CORS preflight failures."
   type        = bool
   default     = false
 }
