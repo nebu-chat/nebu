@@ -1,21 +1,14 @@
 # Nebu Helm Chart values example for Kubernetes deployment.
 # Copy to values.yaml and customise before running tofu apply.
 
+# go-removal-cleanup: server is now the single application deployment — it serves
+# the public Matrix CS API, the /_matrix/media endpoints, and the admin LiveView.
+# The separate gateway block was removed.
 image:
   registry: registry.gitlab.com/myorg/open-chat
   tag: "0.3.0"
 
-gateway:
-  replicas: 2
-  resources:
-    requests:
-      cpu: "250m"
-      memory: "256Mi"
-    limits:
-      cpu: "1000m"
-      memory: "512Mi"
-
-core:
+server:
   replicas: 2
   resources:
     requests:

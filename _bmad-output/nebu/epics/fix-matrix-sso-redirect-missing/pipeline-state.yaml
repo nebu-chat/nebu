@@ -1,0 +1,13 @@
+# Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents.
+# last_updated: 2026-06-19
+# [bugfix-fix-matrix-sso-redirect-missing] 2026-06-19T07:42Z committed ✓ (TDD+Dev, code-review APPROVED 2 MAJOR managed, Kassandra CLEAN F-1 fixed)
+# [bugfix-fix-matrix-sso-redirect-missing] 2026-06-19T07:41Z security-review → Kassandra CLEAN (F-1 fixed in-story; MAJOR-1/MINOR-1 accepted)
+# [bugfix-fix-matrix-sso-redirect-missing] 2026-06-19T07:36Z code-review → APPROVED (MAJOR-1 docstring softened+deferred, MAJOR-2 AC4 via E2E, MINOR-1 accepted)
+# [bugfix-fix-matrix-sso-redirect-missing] 2026-06-19T07:27Z dev(TDD) → 11 tests GREEN (Option A opaque token, pg-replicated store); SSO suite 12/0
+# [bugfix-fix-matrix-sso-redirect-missing] 2026-06-19T07:08Z pipeline started (--bug: /login/sso/redirect 404, go-removal regression, port sso.go)
+story: null
+current_step: null
+completed: []
+cycle_count: 0
+blocked_reason: null
+last_updated: "2026-06-19T07:42Z"

@@ -40,9 +40,10 @@ description:
 
 
       **Architektur:**
-      Drei Laufzeitkomponenten - ein stateless Go-Gateway (Matrix-API + Media), ein Elixir/OTP-Core
-      (Room GenServer via Horde, Session-Manager via ETS, Presence, Event-Dispatcher) und PostgreSQL
-      als Append-only-Eventlog. Kein Redis, kein NATS, kein Kafka.
+      Zwei Laufzeitkomponenten - eine einzige Elixir/OTP-Applikation (Matrix-API, Media-Gateway und
+      Admin-UI als Modul-Namespaces Nebu.Matrix/Media/Admin; Room GenServer via Horde, Session-Manager
+      via ETS, Presence, Event-Dispatcher) und PostgreSQL als Append-only-Eventlog. Kein Go, kein Redis,
+      kein NATS, kein Kafka.
 
 
       **Sicherheit und Compliance:**
@@ -58,7 +59,7 @@ description:
 
 
       **Technologie-Stack:**
-      Go 1.26+, Elixir/OTP 1.19+, PostgreSQL 16+, gRPC (protobuf), Docker.
+      Elixir/OTP 1.19+ (Bandit, Plug, Phoenix LiveView), PostgreSQL 16+, Docker.
     features:
       - Matrix Client-Server API kompatibel (Element, Cinny, FluffyChat)
       - OIDC-Authentifizierung (Keycloak, Azure AD, Dex)
@@ -85,9 +86,10 @@ description:
 
 
       **Architecture:**
-      Three runtime components - a stateless Go gateway (Matrix API + Media), an Elixir/OTP core
-      (Room GenServers via Horde, Session Manager via ETS, Presence, Event Dispatcher) and PostgreSQL
-      as an append-only event log. No Redis, no NATS, no Kafka.
+      Two runtime components - a single Elixir/OTP application (Matrix API, media gateway and Admin UI
+      as the module namespaces Nebu.Matrix/Media/Admin; Room GenServers via Horde, Session Manager via
+      ETS, Presence, Event Dispatcher) and PostgreSQL as an append-only event log. No Go, no Redis,
+      no NATS, no Kafka.
 
 
       **Security and Compliance:**
@@ -103,7 +105,7 @@ description:
 
 
       **Tech Stack:**
-      Go 1.26+, Elixir/OTP 1.19+, PostgreSQL 16+, gRPC (protobuf), Docker.
+      Elixir/OTP 1.19+ (Bandit, Plug, Phoenix LiveView), PostgreSQL 16+, Docker.
     features:
       - Matrix Client-Server API compatible (Element, Cinny, FluffyChat)
       - OIDC authentication (Keycloak, Azure AD, Dex)

@@ -15,7 +15,10 @@
 import { When, Then, Given } from '../../fixtures/nebu-fixtures';
 import { expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { getActualRoomName } from '../common/room-setup.steps';
+import { getActualRoomName, roomIdByScenario } from '../common/room-setup.steps';
+import { dismissKeySetupDialog } from '../common/navigation.steps';
+
+const ELEMENT_URL_MSG = process.env.NEBU_ELEMENT_URL ?? 'http://localhost:7070';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AC10: Message Send Steps
@@ -160,16 +163,14 @@ Then(
     message: string,
     roomName: string
   ) => {
-    // M-1: use the actual (suffixed) room name for UI assertions
-    const actualRoomName = getActualRoomName(roomName);
-
-    // Find the room in the sidebar and click it
-    const roomEntry = secondPage.getByTestId('room-list').locator(`[title="${actualRoomName}"]`)
-      .or(secondPage.locator(`.mx_RoomTile[title="${actualRoomName}"]`))
-      .or(secondPage.locator(`[role="option"][aria-label*="${actualRoomName}"]`));
-
-    await expect(roomEntry.first()).toBeVisible({ timeout: 20_000 });
-    await roomEntry.first().click();
+    // Navigate by roomId direct-URL (the room is known from Background setup) instead of a
+    // sidebar lookup by name, which races marie's long-poll /sync and is flaky.
+    const known = roomIdByScenario.get(roomName);
+    if (!known) {
+      throw new Error(`Room "${roomName}" not in roomIdByScenario — Background setup must run first`);
+    }
+    await secondPage.goto(`${ELEMENT_URL_MSG}/#/room/${encodeURIComponent(known.roomId)}`);
+    await dismissKeySetupDialog(secondPage);
 
     // Handle invite dialog: if the room shows "Do you want to join?" accept the invite first
     // This happens when marie was invited but hasn't accepted yet in her context.
@@ -181,8 +182,16 @@ Then(
         .waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {});
     }
 
-    // Wait for the message to appear in the timeline
+    // Wait for the message to appear in the timeline. marie opened the room by direct URL
+    // (initialSync returns recent messages); if alex's message hasn't propagated to her
+    // session yet, reload once to re-trigger initialSync and pick it up.
     const tile = secondPage.locator('.mx_EventTile', { hasText: message });
-    await expect(tile.first()).toBeVisible({ timeout: 20_000 });
+    if (!(await tile.first().isVisible({ timeout: 20_000 }).catch(() => false))) {
+      await secondPage.reload();
+      await dismissKeySetupDialog(secondPage);
+      await secondPage.locator('.mx_RoomView_body').first()
+        .waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {});
+      await expect(tile.first()).toBeVisible({ timeout: 20_000 });
+    }
   }
 );

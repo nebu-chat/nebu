@@ -165,6 +165,27 @@ service CoreService {
   // Returns aggregate counts: imported + skipped + failed = len(users).
   // Partial success is allowed — an error on one user does not abort others.
   rpc BulkImportUsers(BulkImportUsersRequest) returns (BulkImportUsersResponse);
+
+  // SetRoomState — Spaces S2: generic Matrix state-event write
+  // (PUT /_matrix/client/v3/rooms/{roomId}/state/{eventType}/{stateKey}).
+  // Enforces an ALLOWLIST of writable state types (m.space.child/parent,
+  // m.room.name/topic/avatar/join_rules/canonical_alias/history_visibility/guest_access)
+  // and a power-level check (sender PL >= state_default). m.room.member /
+  // m.room.power_levels / m.room.create are rejected (403) — they have dedicated
+  // authorized paths and must NOT be forgeable here. For m.space.parent the parent
+  // space must exist (404 otherwise) and the sender must be a member of it (403 otherwise).
+  rpc SetRoomState(SetRoomStateRequest) returns (SetRoomStateResponse);
+
+  // GetSpaceHierarchy — Spaces S3: MSC2946 space hierarchy read
+  // (GET /_matrix/client/v1/rooms/{roomId}/hierarchy).
+  // Breadth-first traversal over m.space.child state events from root_room_id,
+  // applying max_depth, suggested_only and a visibility filter (rooms the user
+  // cannot see are excluded from the response but their children are still
+  // traversed). The ROOT visibility gate is enforced by the server wrapper: a
+  // non-member of a private / non-world-readable space → permission_denied (403)
+  // before any traversal. Results are deterministically ordered and paginated via
+  // an opaque from_token / next_batch_token (fail-closed on a forged token).
+  rpc GetSpaceHierarchy(GetSpaceHierarchyRequest) returns (GetSpaceHierarchyResponse);
 }
 
 // Shared event type used across multiple RPCs
@@ -201,6 +222,19 @@ message CreateRoomRequest {
   optional string name       = 2;
   optional string topic      = 3;
   bool            is_direct  = 4;
+  // Matrix Spaces (spaces-elixir s1): room_type carries the creation_content.type
+  // verbatim (e.g. "m.space"); empty string for an ordinary room. Persisted to the
+  // rooms.room_type column. creation_content_json is the raw client-supplied
+  // creation_content object (JSON), merged into m.room.create content so extra
+  // keys are forwarded (server keeps creator/room_version authoritative). "" when absent.
+  string          room_type             = 5;
+  string          creation_content_json = 6;
+  // Matrix CS POST /createRoom `initial_state`: a JSON-encoded array of
+  // { "type", "state_key", "content" } objects, applied as creator-authored
+  // state events after the base events (create → creator join → power_levels)
+  // and before name/topic. "" when absent. Cannot clobber m.room.create or
+  // forge another user's m.room.member (see EventDispatcher.Server.create_room/2).
+  string          initial_state_json    = 7;
 }
 message CreateRoomResponse {
   string room_id = 1;
@@ -529,6 +563,7 @@ message UpdateRoomSettingsRequest {
   string room_id     = 1;
   int32  max_members = 2;  // 0 = no limit; always sent (even if unchanged) for simplicity
   optional bool is_auto_join = 3;  // absent = do not change; true/false = set value
+  string visibility = 4;           // "public" | "private" | "" = no change (rm1-room-visibility)
 }
 message UpdateRoomSettingsResponse {
   bool ok = 1;
@@ -812,4 +847,64 @@ message BulkImportUsersResponse {
   int32 imported = 1;
   int32 skipped  = 2;
   int32 failed   = 3;
+}
+
+// ── Spaces S2: SetRoomState messages ─────────────────────────────────────────
+
+// SetRoomStateRequest — Spaces S2: generic state-event write.
+// sender_id is the authenticated caller (from the trusted stream / x-user-id);
+// the server builds all top-level event fields (type, room_id, event_id,
+// origin_server_ts) — only event_type, state_key and content_json come from the
+// client. content_json is the raw client-supplied content object as JSON;
+// malformed JSON is treated as {} (empty content = unlink for m.space.child).
+message SetRoomStateRequest {
+  string room_id      = 1;
+  string sender_id    = 2;  // authenticated caller (trusted identity)
+  string event_type   = 3;  // must be on the allowlist (else 403)
+  string state_key    = 4;  // may be "" (no-state-key variant)
+  string content_json = 5;  // raw client content object (JSON); malformed → {}
+}
+
+message SetRoomStateResponse {
+  string event_id = 1;
+}
+
+// ── Spaces S3: GetSpaceHierarchy messages (MSC2946) ──────────────────────────
+
+// GetSpaceHierarchyRequest — Spaces S3: space hierarchy read.
+// root_room_id + user_id are server-trusted (user_id from the authenticated
+// token, never the path/body). limit / max_depth / suggested_only / from_token
+// are the parsed-and-validated query params; the HTTP layer rejects a malformed
+// suggested_only or a negative limit (400) and clamps limit to <= 1000.
+message GetSpaceHierarchyRequest {
+  string root_room_id   = 1;
+  string user_id        = 2;  // authenticated caller (trusted identity)
+  int32  limit          = 3;  // page size (server-clamped to <= 1000)
+  int32  max_depth      = 4;  // BFS depth cap (0 = root only)
+  bool   suggested_only = 5;  // only m.space.child with content.suggested == true
+  string from_token     = 6;  // opaque pagination cursor; forged → 400 (fail closed)
+}
+
+// GetSpaceHierarchyResponse — the BFS-ordered list of visible rooms + the
+// opaque continuation token (empty when there are no further pages).
+message GetSpaceHierarchyResponse {
+  repeated HierarchyRoom rooms      = 1;
+  string  next_batch_token          = 2;
+}
+
+// HierarchyRoom — one room summary in the hierarchy response (MSC2946 shape).
+// children_state_json is the JSON array of the room's stripped m.space.child
+// state events (only present for rooms the user may see).
+message HierarchyRoom {
+  string room_id              = 1;
+  string name                 = 2;
+  string topic                = 3;
+  string canonical_alias      = 4;
+  int32  num_joined_members   = 5;
+  bool   world_readable       = 6;
+  bool   guest_can_join       = 7;
+  string join_rule            = 8;
+  string room_type            = 9;   // "m.space" for sub-spaces, "" otherwise
+  string avatar_url           = 10;
+  string children_state_json  = 11;  // JSON array of stripped m.space.child events
 }

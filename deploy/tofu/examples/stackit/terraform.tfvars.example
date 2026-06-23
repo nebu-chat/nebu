@@ -78,22 +78,13 @@ postgres_storage_size = 20
 
 # ── Secrets & Encryption ─────────────────────────────────────────────────────
 
-# Required: shared PSK for gateway ↔ core node registration (ADR-008).
+# Required: shared PSK for gateway ↔ server node registration (ADR-008).
 # Generate with: openssl rand -hex 32
 internal_secret = "<REPLACE: openssl rand -hex 32>"
 
-# Required: 32-byte AES key for PII field encryption in the Elixir core.
+# Required: 32-byte AES key for PII field encryption in the Elixir server.
 # Generate with: openssl rand -hex 32
 pii_encryption_key = "<REPLACE: openssl rand -hex 32>"
-
-# Required: 32-byte master key for encrypting compliance signing keys at rest.
-# Generate with: openssl rand -hex 32
-# IMPORTANT: keep this value — losing it makes stored compliance keys unrecoverable.
-key_encryption_key = "<REPLACE: openssl rand -hex 32>"
-
-# Optional: runtime environment name. Controls KEK enforcement.
-# Non-dev/staging values require key_encryption_key to be set.
-nebu_env = "production"
 
 # ── OIDC Profile ─────────────────────────────────────────────────────────────
 # Choose 'dex' to deploy a bundled Dex IdP sidecar (test/demo environments).
@@ -138,9 +129,8 @@ dex_static_password_hash = "<REPLACE_WITH_BCRYPT_HASH>"
 server_name = "chat.example.com"
 
 # Required: container image registry prefix.
-# Images are pushed as:
-#   <image_registry>/nebu-gateway:<nebu_version>
-#   <image_registry>/nebu-core:<nebu_version>
+# go-removal-cleanup: server is the single application image, pushed as:
+#   <image_registry>/nebu-server:<nebu_version>
 image_registry = "registry.gitlab.com/myorg/nebu-server"
 
 # Required: SemVer tag without the 'v' prefix (e.g. "0.2.1" for Git tag v0.2.1).
@@ -167,24 +157,22 @@ dns_mode = "external"  # or: "default" (required for tls_mode = "acme" HTTP-01 c
 # Contact email for the Stackit DNS zone (optional, recommended for production).
 # dns_contact_email = ""
 
-# ── Media Gateway (StackIT Object Store) ─────────────────────────────────────
-# Deploys the Media Gateway alongside gateway + core and creates the S3 bucket
-# in StackIT Object Store. Handles /_matrix/media/* and /_matrix/client/v1/media/*.
+# ── Media object storage (StackIT Object Store) ──────────────────────────────
+# go-removal-cleanup: there is no longer a separate media container. When enabled,
+# the server container is configured with S3-compatible object storage and serves
+# /_matrix/media/* (and /_matrix/client/v1/media/*) itself. The S3 bucket is still
+# created in StackIT Object Store.
 #
 # Step 1: In the STACKIT portal → Object Storage → Credentials → Create credentials.
 #         Note: Object Storage credentials are separate from the service account key.
 # Step 2: Set enable_media_gateway = true and fill in the credentials below.
 #         OpenTofu will create the bucket automatically (stackit_objectstorage_bucket).
-# Step 3: Add the media image to your release:
-#         TAG=vX.Y.Z make release release-push
 #
 # enable_media_gateway = true
 # s3_access_key        = "<REPLACE: from STACKIT Object Storage credentials>"
 # s3_secret_key        = "<REPLACE: from STACKIT Object Storage credentials>"
 # s3_endpoint          = "object.storage.eu01.onstackit.cloud"
 # s3_bucket            = "nebu-media"
-# media_cpu_limit      = "0.50"
-# media_memory_limit   = "256m"
 
 # ── Element Web client ────────────────────────────────────────────────────────
 # Requires tls_mode = "acme" (lifecycle precondition enforced by tofu apply).
@@ -201,12 +189,11 @@ dns_mode = "external"  # or: "default" (required for tls_mode = "acme" HTTP-01 c
 # ── Container resource limits ─────────────────────────────────────────────────
 # Default values are tuned for a g2i.2 VM (4 vCPU / 8 GB RAM).
 # Adjust if using a larger or smaller VM type.
-# Total defaults: 2.50 vCPU + 2.5 GB (leaves ~1.5 vCPU + 5.5 GB for OS and headroom)
+# go-removal-cleanup: gateway/media container limits removed — server is the single
+# application container (serves Matrix + media + admin).
 #
-# gateway_cpu_limit    = "0.50"   # Go gateway — lean on CPU and memory
-# gateway_memory_limit = "256m"
-# core_cpu_limit       = "1.50"   # Elixir/BEAM — benefits from multiple cores
-# core_memory_limit    = "2g"     # BEAM allocates aggressively — set this to prevent OOM
+# server_cpu_limit     = "1.50"   # Elixir/BEAM — benefits from multiple cores
+# server_memory_limit  = "2g"     # BEAM allocates aggressively — set this to prevent OOM
 # dex_cpu_limit        = "0.25"   # Dex IdP sidecar (oidc_mode = "dex" only)
 # dex_memory_limit     = "128m"
 # element_cpu_limit    = "0.25"   # Element Web (enable_element_web = true only)

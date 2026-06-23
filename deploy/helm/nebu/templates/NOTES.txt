@@ -4,20 +4,22 @@ Nebu has been deployed. Here are the next steps:
  1. Create the required Kubernetes Secret
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-The gateway requires a Kubernetes Secret with sensitive NEBU_* variables.
-Create it BEFORE deploying (or before the gateway can start):
+server requires a Kubernetes Secret with sensitive NEBU_* variables.
+Create it BEFORE deploying (or before server can start):
 
   kubectl create secret generic {{ .Values.existingSecret.name | default "nebu-sensitive" }} \
     --namespace {{ .Release.Namespace }} \
     --from-literal=NEBU_DB_URL='postgres://user:pass@host:5432/nebu' \
     --from-literal=NEBU_INTERNAL_SECRET='<64-char-random-hex>' \
-    --from-literal=NEBU_OIDC_CLIENT_SECRET='<oidc-client-secret>'
+    --from-literal=NEBU_ADMIN_OIDC_CLIENT_ID='<admin-oidc-client-id>' \
+    --from-literal=NEBU_ADMIN_OIDC_CLIENT_SECRET='<admin-oidc-client-secret>' \
+    --from-literal=NEBU_ADMIN_OIDC_REDIRECT_URI='https://<admin-host>/admin/callback'
 
 Then set the secret name in your values:
   existingSecret:
     name: {{ .Values.existingSecret.name | default "nebu-sensitive" | quote }}
 
-⚠ WARNING: If existingSecret.name is empty, the gateway will start without
+⚠ WARNING: If existingSecret.name is empty, server will start without
   secret environment variables and will fail to connect to the database.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -46,16 +48,16 @@ Create it via cert-manager, or manually:
  3. Enable HorizontalPodAutoscaler (optional)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-{{- if .Values.autoscaling.gateway.enabled }}
-HPA is enabled for the gateway ({{ .Values.autoscaling.gateway.minReplicas }}–{{ .Values.autoscaling.gateway.maxReplicas }} replicas,
-CPU target: {{ .Values.autoscaling.gateway.targetCPUUtilizationPercentage }}%).
+{{- if .Values.autoscaling.server.enabled }}
+HPA is enabled for server ({{ .Values.autoscaling.server.minReplicas }}–{{ .Values.autoscaling.server.maxReplicas }} replicas,
+CPU target: {{ .Values.autoscaling.server.targetCPUUtilizationPercentage }}%).
 {{- else }}
 HPA is disabled. Enable it with:
 
-  --set autoscaling.gateway.enabled=true \
-  --set autoscaling.gateway.minReplicas=2 \
-  --set autoscaling.gateway.maxReplicas=10 \
-  --set autoscaling.gateway.targetCPUUtilizationPercentage=70
+  --set autoscaling.server.enabled=true \
+  --set autoscaling.server.minReplicas=2 \
+  --set autoscaling.server.maxReplicas=10 \
+  --set autoscaling.server.targetCPUUtilizationPercentage=70
 
 Requires the metrics-server to be installed in your cluster.
 {{- end }}
@@ -64,6 +66,5 @@ Requires the metrics-server to be installed in your cluster.
  4. Check deployment status
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  kubectl rollout status deployment/{{ include "nebu.fullname" . }}-gateway -n {{ .Release.Namespace }}
-  kubectl rollout status deployment/{{ include "nebu.fullname" . }}-core    -n {{ .Release.Namespace }}
+  kubectl rollout status deployment/{{ include "nebu.fullname" . }}-server -n {{ .Release.Namespace }}
   kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }}

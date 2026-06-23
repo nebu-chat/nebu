@@ -9,6 +9,7 @@ import { Then } from '../../fixtures/nebu-fixtures';
 import { expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import { getActualRoomName } from './room-setup.steps';
+import { dismissKeySetupDialog } from './navigation.steps';
 
 /**
  * "Then the room list is visible"
@@ -41,24 +42,39 @@ Then(
   async ({ page }: { page: Page }, roomName: string) => {
     const actualName = getActualRoomName(roomName);
 
-    // Strategy 1 (Element Web 1.12.15+): aria-label="Open room {name}" (joined) OR
-    // aria-label="Open room {name} invitation." (invited)
-    const byAriaLabel = page.locator(`[aria-label="Open room ${actualName}"], [aria-label="Open room ${actualName} invitation."]`);
+    // Resolve the room tile in the left-panel room list. After accepting an invite, the
+    // room moves out of the "invites" preview and into the joined-room list. Use 'attached'
+    // (not 'visible') since the tile may be in the DOM but scrolled out of view in a long
+    // list. Multiple strategies cover Element Web version differences.
+    //   Strategy 1 (1.12.15+): aria-label="Open room {name}" (joined) OR ".. invitation." (invited)
+    //   Strategy 2 (older):    title attribute in room list / .mx_RoomTile
+    //   Strategy 3:            exact text anywhere in the left panel
+    const isInSidebar = async (perStrategyTimeout: number): Promise<boolean> => {
+      const byAriaLabel = page.locator(`[aria-label="Open room ${actualName}"], [aria-label="Open room ${actualName} invitation."]`);
+      const byTestId = page.getByTestId('room-list').locator(`[title="${actualName}"]`);
+      const byTile   = page.locator(`.mx_RoomTile[title="${actualName}"]`);
+      const byText   = page.locator('.mx_LeftPanel').getByText(actualName, { exact: true });
 
-    // Strategy 2 (older versions): title attribute in room list
-    const byTestId = page.getByTestId('room-list').locator(`[title="${actualName}"]`);
-    const byTile   = page.locator(`.mx_RoomTile[title="${actualName}"]`);
+      return await byAriaLabel.first().waitFor({ state: 'attached', timeout: perStrategyTimeout }).then(() => true).catch(() => false)
+        || await byTestId.first().waitFor({ state: 'attached', timeout: 5_000 }).then(() => true).catch(() => false)
+        || await byTile.first().waitFor({ state: 'attached', timeout: 5_000 }).then(() => true).catch(() => false)
+        || await byText.first().waitFor({ state: 'attached', timeout: 5_000 }).then(() => true).catch(() => false);
+    };
 
-    // Strategy 3: text anywhere in the left panel
-    const byText   = page.locator('.mx_LeftPanel').getByText(actualName, { exact: true });
+    // First pass: give the invitee's long-poll /sync time to deliver the membership change
+    // and Element time to re-render the room list.
+    let found = await isInSidebar(20_000);
 
-    // Use 'attached' state (not 'visible') since the element may be in the DOM but
-    // scrolled out of view in a long room list. Playwright isVisible() returns false
-    // for off-screen elements in scrollable containers.
-    const found = await byAriaLabel.first().waitFor({ state: 'attached', timeout: 20_000 }).then(() => true).catch(() => false)
-      || await byTestId.first().waitFor({ state: 'attached', timeout: 5_000 }).then(() => true).catch(() => false)
-      || await byTile.first().waitFor({ state: 'attached', timeout: 5_000 }).then(() => true).catch(() => false)
-      || await byText.first().waitFor({ state: 'attached', timeout: 5_000 }).then(() => true).catch(() => false);
+    // Reload-retry: a freshly-accepted invite often does not propagate to the room list
+    // within the long-poll window (Element sync lag). Reloading re-triggers initialSync,
+    // which returns the now-joined room in the joined-rooms set so the tile renders.
+    // Same established pattern as messages.steps.ts ("sees ... in her timeline").
+    if (!found) {
+      await page.reload();
+      await dismissKeySetupDialog(page);
+      await page.locator('.mx_LeftPanel').first().waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {});
+      found = await isInSidebar(20_000);
+    }
 
     expect(found, `Room "${actualName}" should appear in the sidebar`).toBe(true);
   }

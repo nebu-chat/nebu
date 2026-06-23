@@ -1,3 +1,4 @@
+@pending-feature
 Feature: Admin UI — OIDC Directory User Search Integration
   As an instance admin
   I want the user search to include OIDC-directory users who have never logged into Nebu

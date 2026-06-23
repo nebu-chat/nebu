@@ -18,7 +18,7 @@ Quality
 │   └── NFR-S6: Bootstrap mode disables permanently after first admin setup
 ├── Scalability
 │   ├── NFR-SC1: Go Gateway horizontally scalable without session affinity
-│   ├── NFR-SC2: Elixir/OTP Core supports cluster operation (Phase 2: libcluster)
+│   ├── NFR-SC2: Elixir/OTP Server supports cluster operation (Phase 2: libcluster)
 │   └── NFR-SC3: No external middleware layer required (PostgreSQL only)
 ├── Reliability
 │   ├── NFR-R1: OTP process isolation (Room crash → only that room affected)
@@ -56,7 +56,7 @@ Quality
 |---|---|---|---|
 | Silver-tier load | 500 concurrent users (60% sync, 20% send, 10% presence/typing, 5% room ops) | ≤500ms message latency | Loadtest on 2x AWS m5.large |
 | Gateway restart | SIGTERM | HTTP traffic resumes | ≤5s cold start |
-| Core restart | docker restart core | Events resume delivery, no cold-sync | Recovery via ETS + PostgreSQL checkpoint |
+| Server restart | docker restart server | Events resume delivery, no cold-sync | Recovery via ETS + PostgreSQL checkpoint |
 | gRPC stream lost | Network partition | message_buffer absorbs writes; drain on reconnect | 0 message loss |
 | Full-text search | POST /search with keyword query across user's rooms | GIN index hit, no seq-scan | ≤500ms at Silver load; scope enforced via room membership filter |
 

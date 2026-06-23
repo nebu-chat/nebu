@@ -10,8 +10,8 @@
 [![GitLab CI](https://gitlab.opencode.de/nebu/nebu-server/badges/main/pipeline.svg)](https://gitlab.opencode.de/nebu/nebu-server/-/pipelines)
 
 <!-- Tech stack -->
-[![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?style=flat-square&logo=go&logoColor=white)](https://go.dev)
-[![Erlang/OTP](https://img.shields.io/badge/Erlang%2FOTP-27+-A90533?style=flat-square&logo=erlang&logoColor=white)](https://www.erlang.org)
+[![Elixir](https://img.shields.io/badge/Elixir-1.19+-4B275F?style=flat-square&logo=elixir&logoColor=white)](https://elixir-lang.org)
+[![OTP](https://img.shields.io/badge/Erlang%2FOTP-27+-A90533?style=flat-square&logo=erlang&logoColor=white)](https://www.erlang.org)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16+-336791?style=flat-square&logo=postgresql&logoColor=white)](https://postgresql.org)
 [![Docker](https://img.shields.io/badge/Docker-compose-2496ED?style=flat-square&logo=docker&logoColor=white)](docker-compose.yml)
 
@@ -46,11 +46,11 @@ Existing Matrix servers each have a trade-off that makes them hard to adopt in e
 - **Apache 2.0** — no copyleft, commercial use welcome
 - **Matrix Client-Server API compatible** — standard clients, no fork required
 - **No federation** — ~40% less protocol complexity, optimized for single-org deployments
-- **Minimal dependencies** — Go + Elixir/OTP + PostgreSQL. No Redis, no NATS, no Kafka
+- **Minimal dependencies** — Elixir/OTP + PostgreSQL. No Redis, no NATS, no Kafka
 - **OIDC-first auth** — Keycloak, Azure AD, Google Workspace, Dex out of the box
 - **Ed25519 message signatures** — authenticity and non-repudiation built in
 - **Compliance-ready** — audit logging, legal export, four-eyes principle for privileged access
-- **Horizontally scalable** — stateless Go gateway + clustered Elixir core (libcluster + Horde)
+- **Horizontally scalable** — clustered Elixir/OTP application (libcluster + Horde + `pg`)
 
 **Intentional non-goals:** federation, end-to-end encryption (by design — see [Current Limitations](#current-limitations)).
 
@@ -64,14 +64,11 @@ Existing Matrix servers each have a trade-off that makes them hard to adopt in e
           └───────────────────┬──────────────────────┘
                               │ HTTPS / WSS (TLS 1.3)
           ┌───────────────────▼──────────────────────┐
-          │  Go Gateway        │  Go Media Gateway   │
-          │  (stateless)       │  (AES-256-GCM)      │
-          └───────────────────┬──────────────────────┘
-                              │ gRPC
-          ┌───────────────────▼──────────────────────┐
-          │  Elixir/OTP Core                         │
-          │  Horde · libcluster · ETS · pg groups    │
-          │  GenServers for rooms, sessions, presence│
+          │  Elixir/OTP Application (single release)  │
+          │  Bandit · Plug · Phoenix LiveView         │
+          │  Nebu.Matrix · Nebu.Media · Nebu.Admin    │
+          │  Horde · libcluster · ETS · pg groups     │
+          │  GenServers for rooms, sessions, presence │
           └───────────────────┬──────────────────────┘
                               │
           ┌───────────────────▼──────────────────────┐
@@ -80,7 +77,10 @@ Existing Matrix servers each have a trade-off that makes them hard to adopt in e
           └──────────────────────────────────────────┘
 ```
 
-**Three runtime components:** a Go binary (gateway + media), an Elixir release (core), and PostgreSQL. That's it.
+**Two runtime components:** one Elixir/OTP release and PostgreSQL. That's it. The Matrix
+API, media gateway, and Admin UI are three module namespaces (`Nebu.Matrix`,
+`Nebu.Media`, `Nebu.Admin`) inside that single application — no separate gateway, no
+gRPC hop between processes (ADR-019/ADR-021).
 
 <!-- markdownlint-disable MD013 -->
 Deep dives: [`docs/architecture/`](docs/architecture/) · ADRs: [`docs/architecture/adr/`](docs/architecture/adr/)
@@ -141,13 +141,13 @@ using or without the BMAD pipeline, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Quick Start
 
-**Prerequisites:** Docker Desktop, `make`, `git`. No local Go or Elixir installation required — all builds run in containers.
+**Prerequisites:** Docker Desktop, `make`, `git`. No local Elixir installation required — all builds run in containers.
 
 ```bash
 git clone <your-fork-url> nebu
 cd nebu
 make setup     # generates .secrets/internal_secret and dev credentials
-make dev       # starts gateway, core, postgres, dex (OIDC) via docker compose
+make dev       # starts server (Elixir), postgres, dex (OIDC) via docker compose
 ```
 
 | Service               | URL                                         | Purpose                    |
@@ -197,14 +197,13 @@ Full endpoint list: [`docs/matrix-api-scope.md`](docs/matrix-api-scope.md)
 
 | Layer               | Technology                                        |
 |---------------------|---------------------------------------------------|
-| API Gateway         | Go 1.26+                                          |
-| Media Gateway       | Go 1.26+                                          |
-| Core / Messaging    | Elixir/OTP 1.19+ (libcluster, Horde, ETS, pg)     |
-| Gateway ↔ Core      | gRPC (protobuf)                                   |
+| Application         | Elixir/OTP 1.19+ (single OTP app, libcluster, Horde) |
+| HTTP / Web          | Bandit + Plug (Matrix API & media); Phoenix LiveView (Admin UI) |
+| Domains             | `Nebu.Matrix` · `Nebu.Media` · `Nebu.Admin` (module namespaces) |
 | Database            | PostgreSQL 16+ (pgcrypto, tsvector)               |
 | Session / Cache     | ETS (no Redis)                                    |
 | Pub/Sub             | pg process groups (no NATS)                       |
-| Migrations          | golang-migrate (owned by gateway)                 |
+| Migrations          | Raw SQL via `Nebu.Release` (Ecto for pool only)   |
 | Container           | Docker + Docker Compose                           |
 
 All dependencies are Apache 2.0, MIT, BSD, or PostgreSQL License. No AGPLv3, no BSL, no SSPL.

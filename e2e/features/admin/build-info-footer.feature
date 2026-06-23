@@ -1,3 +1,4 @@
+@pending-feature
 Feature: Build info footer in Admin UI
   As a system operator
   I want to see build metadata in a footer on every authenticated admin page

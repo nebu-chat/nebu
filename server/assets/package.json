@@ -1,0 +1,13 @@
+{
+  "name": "nebu-admin-assets",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Tailwind CSS + DaisyUI build for the Nebu Phoenix LiveView Admin UI.",
+  "scripts": {
+    "build": "tailwindcss --input=css/app.css --output=../priv/static/assets/app.css --minify"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.17",
+    "daisyui": "^4.12.23"
+  }
+}

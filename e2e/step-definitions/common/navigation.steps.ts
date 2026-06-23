@@ -12,6 +12,29 @@ import { getActualRoomName, roomIdByScenario } from './room-setup.steps';
 const ELEMENT_URL = process.env.NEBU_ELEMENT_URL ?? 'http://localhost:7070';
 
 /**
+ * Dismiss Element's optional client-side encryption-key setup dialogs.
+ *
+ * Nebu uses managed (server-side) E2EE (ADR-011), so a Nebu user never bootstraps
+ * client-side cross-signing / secure backup. Element nonetheless attempts it after
+ * login and shows a blocking modal ("Setting up keys" / "Set up Secure Backup" /
+ * "Encryption upgrade available") which covers the room view. The correct user action
+ * for Nebu's model is to dismiss it (Cancel / Not now / Skip / Continue). This helper
+ * is best-effort and idempotent — it dismisses the dialog if present and is a no-op
+ * otherwise. Exported so login + room-navigation can both clear it.
+ */
+export async function dismissKeySetupDialog(page: Page): Promise<void> {
+  const dismiss = page.getByRole('button', {
+    name: /^cancel$|^not now$|^skip$|^later$|^continue$|^dismiss$|^close$|abbrechen|überspringen|später/i,
+  });
+  for (let i = 0; i < 3; i++) {
+    const visible = await dismiss.first().isVisible({ timeout: 1_000 }).catch(() => false);
+    if (!visible) return;
+    await dismiss.first().click({ timeout: 3_000 }).catch(() => {});
+    await page.waitForTimeout(400);
+  }
+}
+
+/**
  * "When alex navigates to Element Web"
  * Navigates to Element root without waiting for login.
  */
@@ -44,10 +67,14 @@ When(
       const joinBtn = page.getByRole('button', { name: /^accept$|^join the discussion$/i });
       const roomBody = page.locator('.mx_RoomView_body, .mx_BasicMessageComposer_input').first();
       await page.goto(`${ELEMENT_URL}/#/room/${encodeURIComponent(knownRoom.roomId)}`);
+      // Managed E2EE (ADR-011): clear the optional client key-setup modal that otherwise
+      // covers the room view.
+      await dismissKeySetupDialog(page);
       await Promise.race([
         roomBody.waitFor({ state: 'visible', timeout: 30_000 }).catch(() => null),
         joinBtn.first().waitFor({ state: 'visible', timeout: 30_000 }).catch(() => null),
       ]);
+      await dismissKeySetupDialog(page);
       if (await joinBtn.first().isVisible({ timeout: 500 }).catch(() => false)) {
         await joinBtn.first().click();
         await roomBody.waitFor({ state: 'visible', timeout: 20_000 });

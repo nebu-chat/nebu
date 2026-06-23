@@ -3,9 +3,9 @@
 
 aws_region       = "eu-central-1"
 # nebu_version: SemVer tag without the 'v' prefix (e.g. "1.0.0" for Git tag v1.0.0).
-# The release pipeline pushes images as:
-#   <image_registry>/nebu-gateway:<nebu_version>
-#   <image_registry>/nebu-core:<nebu_version>
+# go-removal-cleanup: server now serves public Matrix + media + admin. The release
+# pipeline pushes the single application image as:
+#   <image_registry>/nebu-server:<nebu_version>
 # Never use "latest" — the module validates this and will reject it.
 nebu_version     = "1.0.0"
 domain_name      = "chat.example.com"
@@ -28,7 +28,7 @@ skip_final_snapshot = false
 # Leave empty ("") for validate-only runs (tofu validate does not require a real ARN).
 acm_certificate_arn = ""
 
-# Number of desired ECS tasks for gateway and core services.
+# Number of desired ECS tasks for the server service.
 ecs_desired_count = 2
 
 # ── DNS ──────────────────────────────────────────────────────────────────────

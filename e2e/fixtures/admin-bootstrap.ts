@@ -109,8 +109,12 @@ async function runBootstrapWizard(page: Page): Promise<void> {
   // BUG-E2E-10 fix: CallbackHandler renders the select-claim page AT /admin/callback URL
   // (not redirecting to /admin/bootstrap/select-claim).
   // Also accept grant screen and direct dashboard landing.
+  // Dex consent/grant button ONLY. Must NOT match the Nebu select-claim page's
+  // "Confirm Admin Claim" submit button (which also contains "Confirm") — matching it
+  // here would click it prematurely (before a claim radio is chosen) and skip the
+  // proper claim-selection step below. Dex's consent button reads "Grant Access".
   const grantBtn = page.locator(
-    'button[type="submit"]:has-text("Grant"), button[type="submit"]:has-text("Confirm")'
+    'button[type="submit"]:has-text("Grant Access"), button:has-text("Grant Access")'
   );
 
   await page.waitForURL(
@@ -120,12 +124,15 @@ async function runBootstrapWizard(page: Page): Promise<void> {
     // Silently ignore if URL didn't match — check grant screen below
   });
 
-  // Handle optional Dex grant/consent screen
+  // Handle optional Dex grant/consent screen (first login per client only).
   const grantVisible = await grantBtn.first().isVisible({ timeout: 3_000 }).catch(() => false);
   if (grantVisible) {
     await grantBtn.first().click();
+    // After granting, the IdP redirects back and the flow may land on the select-claim
+    // page (/admin/callback) OR — if it completes quickly — go straight through to the
+    // dashboard/done. Accept any of them; the early-return below handles the terminal ones.
     await page.waitForURL(
-      /\/admin\/callback|\/admin\/bootstrap\/select-claim/,
+      /\/admin\/callback|\/admin\/bootstrap\/select-claim|\/admin\/bootstrap\/done|\/admin\/dashboard/,
       { timeout: 15_000 }
     );
   }

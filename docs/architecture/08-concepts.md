@@ -5,20 +5,90 @@
 **OIDC-only (no local accounts):** Every user authenticates via an OIDC-conformant provider
 (Keycloak, Azure AD, Dex, Google). No local passwords, no shadow directory.
 
-**Token flow:**
+**Token flow (single Elixir application, ADR-021):**
 ```
-Matrix Client → Go Gateway:
+Matrix Client → Nebu (Nebu.Web.Plugs.OidcPlug):
   Authorization: Bearer <oidc_token>
-  → Go validates token via OIDC provider (JWK verification)
+  → OidcPlug validates the token against the cached OIDC JWKS (signature + exp + iss + aud + sub)
   → extracts: user_id (@sub:server.name), system_role
+  → consults the token denylist (revoked tokens) and provisions the user row idempotently
 
-Go → Elixir (gRPC metadata):
-  "x-user-id": "@user:server.name"
-  "x-system-role": "user" | "instance_admin" | "compliance_officer"
-
-Elixir: trusts Go fully - no own token validation
-Auth token never forwarded to Elixir - only user_id + system_role
+OidcPlug → domain (in-process):
+  conn.assigns.current_user = "@user:server.name"  (+ access_token, oidc_claims)
+  the Matrix handlers call the domain functions directly — no metadata hop, no separate process
 ```
+
+There is no Go layer in front of the application; **the OIDC plug is the single auth + provisioning
+point**. Token revocation, rate limiting, and security headers are all enforced in `Nebu.Web` on the
+same node.
+
+Components in `Nebu.Web` (the shared HTTP plumbing):
+
+- **`Nebu.Web.Plugs.OidcPlug`** — extracts `Authorization: Bearer`, enforces a strict asymmetric
+  `alg` allowlist (`RS*/ES*/PS*` only — `alg:none` and HMAC `HS*` are rejected before any key
+  selection, blocking alg-confusion attacks, MEDIUM-2), selects the JWK by the token `kid`, and
+  verifies signature + `exp` + `iss` + `aud` + `sub` via `Assent.JWTAdapter.verify/3`. Issuer and
+  audience are validated **fail-closed**: a missing `oidc_issuer`/`oidc_audience` config rejects
+  every token rather than failing open (MEDIUM-3). After a token cryptographically verifies, the plug
+  consults `Nebu.Web.TokenDenylist` (see below) and rejects a revoked token. On success it assigns
+  `conn.assigns.current_user = "@<sub>:<server_name>"` (plus `access_token` and `oidc_claims`, so
+  `POST /logout` can revoke exactly the token that authenticated the request) and idempotently
+  provisions the user row (TTL-cached, 60s, kept off the `/sync` hot path). On failure it returns a
+  Matrix-error JSON envelope (`M_MISSING_TOKEN` / `M_UNKNOWN_TOKEN`) and halts.
+- **`Nebu.Web.TokenDenylist` (logout revocation, F-1)** — OidcPlug returns the verified OIDC token
+  verbatim as the `access_token`, so destroying the session GenServer alone would NOT stop the token
+  from re-validating on the next request; without a denylist, logout would be a no-op until the token's
+  own `exp`. `POST /logout` adds the presented token to this denylist; OidcPlug consults it on every
+  authenticated request (after crypto verification, so an attacker cannot flood it with unsigned
+  strings) and rejects a revoked token with `401 M_UNKNOWN_TOKEN`. Entries are keyed by the JWT `jti`
+  claim when present, otherwise by the SHA-256 hash of the raw compact token (Go `pgTokenHash` parity;
+  the raw token is never stored), and self-expire at the token's `exp` (lazy delete on lookup, so the
+  table cannot grow unbounded). **Persistence strategy (fix-jwt-denylist-persistence):** ETS is a
+  write-through cache; the pre-existing PostgreSQL `invalidated_tokens` table (`token_hash TEXT PRIMARY
+  KEY, expires_at BIGINT`) is the persistent truth source. `revoke/3` writes to ETS and then to DB
+  (best-effort — logs a warning on failure, never crashes). `revoked?/2` checks ETS first; on a miss it
+  falls back to a DB `SELECT` so tokens revoked before a node restart are still rejected after ETS is
+  cleared. DB keys use a flat-string encoding disjoint from ETS tagged tuples: `"jti:<value>"` for
+  jti-keyed entries, bare 64-char SHA-256 hex otherwise. DB results are not back-populated into ETS
+  (write-through only — avoids stale-cache issues in rolling-restart / multi-node scenarios).
+- **`Nebu.Web.Plugs.RateLimit` (per-IP rate limiting, F-3)** — a classic per-IP token-bucket limiter
+  (ETS), porting the Go gateway's `NewIPRateLimiter`/`strictRL` so the brute-force / verification-DoS
+  controls survive the migration. `POST /login` is limited to 30 req/min burst 10 (Go `strictRL`
+  parity); the long-poll `GET /sync` to a generous 600 req/min burst 100 (caps a single IP hammering
+  the endpoint to exhaust BEAM long-poll processes without impeding a normal client). On exhaustion it
+  responds `429` with the Matrix envelope `{"errcode":"M_LIMIT_EXCEEDED","error":"Rate limit
+  exceeded"}` plus a `Retry-After` header and halts. The bucket key is `conn.remote_ip` (the directly
+  connected peer — no trusted-proxy/XFF config yet, so the safe default: a client cannot spoof its own
+  bucket key). Buckets are volatile ETS (reset on restart — a restart cannot bypass a sustained attack
+  because the steady-state rate still bounds throughput). `NEBU_RATE_LIMIT_DISABLED=true` makes it a
+  no-op (test/dev escape hatch, mirroring the Go gateway flag).
+- **Security header (F-5)** — `Nebu.Web.Router` registers a `before_send` callback at the front of the
+  pipeline that sets `X-Content-Type-Options: nosniff` on **every** response — including those produced
+  by the forwarded sub-routers and CORSPlug's halted preflight. All Nebu responses are
+  `application/json` Matrix envelopes, so this prevents any MIME-sniffing edge case on a misbehaving
+  client.
+- **`Nebu.Web.JwksCache`** — a GenServer that fetches the OIDC provider JWKS on start and refreshes
+  it on a TTL (`NEBU_OIDC_JWKS_TTL`, default 300s). On a refresh failure it keeps the last-known-good
+  keys rather than blanking the cache, so transient JWKS outages do not reject otherwise-valid
+  tokens. The JWKS HTTP fetch uses TLS peer verification for `https` endpoints. Its state is volatile
+  and is recovered by a fresh fetch when the supervisor restarts it.
+- **Router scoping** — `Nebu.Web.Router` keeps `GET /health` open, forwards the unauthenticated Matrix
+  routes (`POST /login`, `GET /profile`, MSC2965 discovery) to `Nebu.Matrix.HttpPublic`, and forwards
+  everything else under `/_matrix` to the protected sub-router `Nebu.Matrix.Http.Protected` whose
+  pipeline runs `OidcPlug`.
+
+Both request-time ETS tables (token denylist, rate-limit buckets) are created eagerly at
+`Nebu.Application` boot so the lazy `ensure_table` fast path never has to race under concurrent
+first requests (closing a brief fail-open window, R-2). **Fail-loud config:** `runtime.exs` now
+**raises at boot** when `NEBU_OIDC_ISSUER` or `NEBU_OIDC_AUDIENCE` is missing in `prod`/`dev` (F-4) —
+since OidcPlug fails closed on missing issuer/audience, a misconfigured node would otherwise reject
+100% of traffic silently; raising at startup turns an operator misconfig into a fast, obvious failure
+(matching the existing `NEBU_DB_URL` / `NEBU_PII_ENCRYPTION_KEY` behaviour).
+
+Relevant configuration (server service): `NEBU_OIDC_ISSUER`, `NEBU_OIDC_AUDIENCE`,
+`NEBU_OIDC_JWKS_URI`, `NEBU_OIDC_JWKS_TTL`, `NEBU_OIDC_DISPLAY_NAME` (advertised IdP name for
+`POST /login` `m.login.sso`), `NEBU_RATE_LIMIT_DISABLED`, and `NEBU_SERVER_NAME` (used to build the
+`@<sub>:<server_name>` Matrix user ID).
 
 **Bootstrap mode:** First OIDC login automatically receives `instance_admin`. Bootstrap mode is
 permanently disabled after the first admin setup. No default password, no insecure fallback.
@@ -113,6 +183,43 @@ fallback preserves backward compatibility for test setups and deployments withou
 | Stackit prod (`oidc_mode = "dex"`) | `groups offline_access` | Same as local dev |
 | Stackit prod (`oidc_mode = "external"`) | `""` (empty) | External providers (Keycloak, Azure AD) may reject unknown scopes |
 
+**Configurable OIDC Refresh Mode (Story oidc-refresh-mode-config):**
+
+Whether the Matrix and Admin OIDC flows request a refresh token (`offline_access`) is **configurable
+per client** rather than hardcoded. Two `server_config` keys, each `offline | online`, drive it:
+
+| Key | Default | Builder reading it live | `offline_access` requested? |
+|---|---|---|---|
+| `matrix_oidc_refresh_mode` | `offline` | `Nebu.Matrix.SsoLogin.scope_list/0` | iff mode = `offline` |
+| `admin_oidc_refresh_mode` | `online` | `Nebu.Admin.Auth.admin_oidc_scope/0` | iff mode = `offline` |
+
+- **Set at bootstrap** (Bootstrap Wizard) **and changeable at runtime** via `/admin/config`
+  (`Nebu.Admin.ConfigLive`). Runtime changes apply to **subsequent logins** — no redeploy.
+- The scope builders read the mode **live** (per request, via an injectable
+  `:{matrix,admin}_oidc_refresh_mode_reader`, default = `server_config` lookup). `openid` is always
+  mandatory; `offline_access` is appended only when the client's mode is `offline`. Any
+  operator-configured base scope (`:admin_oidc_scope`) and `NEBU_OIDC_EXTRA_SCOPES` are still honoured.
+- The admin client **no longer force-requests `offline_access`** — its `online` default means no
+  special IdP client approval is needed for standard admin sign-in.
+- **IdP caveat:** **Dex** issues a refresh token *only* when `offline_access` is requested, so admin
+  `online` mode disables silent refresh on Dex. **Keycloak** supports session-bound online refresh, so
+  `online` mode there can still keep the session alive.
+
+**Configurable Nebu session-lifetime ceiling (Story e2e-session-refresh-suites):**
+
+The Nebu-controlled session ceiling — the Matrix opaque-session expiry (`min(oidc_exp, ceiling)` on
+login and the `/v3/refresh` re-mint) and the admin session cap — defaults to **8h**, read through
+`Nebu.Web.SessionConfig.{matrix,admin}_session_ttl_seconds/0`. Operators may shorten it at boot via
+`NEBU_MATRIX_SESSION_TTL_SECONDS` / `NEBU_ADMIN_SESSION_TTL_SECONDS` (parsed by
+`SessionConfig.parse_ttl/1`: only a strictly-positive integer applies; unset/junk/≤0 → the 8h
+default, never crashes the login path). This is primarily a **test seam** — `make test-e2e-refresh`
+sets a short TTL so the silent-refresh loop fires within a browser-test window — and is inert in
+production unless explicitly set. The login ceiling stays bounded by the OIDC `exp`; the `/v3/refresh`
+re-mint remains `now + ceiling` (the pre-existing trade-off, now configurable). Migration `000007`
+adds `matrix_oidc_refresh_mode` / `admin_oidc_refresh_mode` to the `server_config`
+`config_update_mutable` RLS allowlist so the refresh-mode runtime change (above) actually persists
+after bootstrap (the keys are enum-validated `offline|online` at every write — no scope injection).
+
 **SSO Nonce-Based Replay Prevention (Story 11-7, hardened Story 12.7):**
 
 `GetSSORedirect` generates a 16-byte cryptographically random nonce (32 hex chars) per SSO
@@ -135,11 +242,11 @@ intentional: `POST /login` is an authentication *attempt*, not a session validat
 
 **Deactivated User Login Rejection (Story 14.4):**
 
-`PostLogin` calls `ValidateToken` gRPC which checks `is_active` in the DB. When the Elixir
-core returns `PERMISSION_DENIED` with message `"user account is deactivated"`, `PostLogin`
+`PostLogin` calls `validate_token` (in-process) which checks `is_active` in the DB. When the Elixir
+domain returns `:permission_denied` with message `"user account is deactivated"`, `PostLogin`
 responds `403 M_USER_DEACTIVATED` (Matrix CS API v1.18 required errcode). This covers the
 case where a user was deleted via GDPR erasure but attempts to re-authenticate via OIDC.
-All other `ValidateToken` errors remain `500 M_UNKNOWN` (defensive - no internals leaked).
+All other `validate_token` errors remain `500 M_UNKNOWN` (defensive - no internals leaked).
 
 **Cache-Control: no-store on SSO Redirect (Story 11-7):**
 
@@ -158,46 +265,77 @@ state parameter to be rejected (`400 M_UNKNOWN "Invalid or expired SSO state"`).
 | medium | 30/min, burst 10 | SSO redirect/callback, public profile |
 | loose | 300/min, burst 100 | Discovery, capabilities, unauthenticated stubs |
 
-Implementation: `gateway/internal/middleware/ratelimit.go` - `NewIPRateLimiter` with LRU cache (10 000 entries, `github.com/hashicorp/golang-lru`). IP extracted via rightmost-minus-1 XFF strategy (spoofing-resistant). Prometheus `nebu_rate_limit_total` counter per tier.
+Implementation: `Nebu.Web.Plugs.RateLimit` - a per-IP token-bucket limiter backed by ETS, keyed on `conn.remote_ip` (the directly connected peer, not a spoofable `X-Forwarded-For`). The buckets are volatile ETS (reset on restart; steady-state rate still bounds throughput). `NEBU_RATE_LIMIT_DISABLED=true` makes it a no-op (test/dev). The tier values above are historical Go-gateway tiers; the consolidated app enforces equivalent limits in-process (e.g. `POST /login` 30/min, `GET /sync` 600/min).
 
-**Rate limiting (per IP) - Media Gateway (Story 12.10):**
+**Rate limiting (per IP) - media endpoints:**
 
-| Tier | Rate | Burst | Endpoints |
-|---|---|---|---|
-| upload | 10 req/s | 5 | `POST /_matrix/media/v3/upload` |
-| download | 100 req/s | 20 | `GET /_matrix/media/v3/download/…`, `GET /_matrix/media/v3/thumbnail/…` |
+The media endpoints are guarded by the same `Nebu.Web.Plugs.RateLimit` token-bucket limiter as the
+rest of the Matrix API (e.g. `preview_url` 30/min, `upload` 600/min). The limiter keys on the peer IP
+(`conn.remote_ip`), not a client-supplied `X-Forwarded-For`, so an attacker cannot rotate the bucket
+key. On exhaustion it returns `429` with `{"errcode":"M_LIMIT_EXCEEDED",...}` + `Retry-After`.
+`NEBU_RATE_LIMIT_DISABLED=true` disables it (dev/test escape hatch). (Historically these limits lived
+in a standalone Go media gateway with a `sync.Map` limiter and a `NEBU_TRUSTED_PROXY` gate; the Go
+media service is gone — ADR-021.)
 
-Implementation: `media/internal/ratelimit/ratelimit.go` - `NewIPRateLimiter(ctx context.Context, cfg Config, trustedProxy bool)` with `sync.Map` keyed by IP and a background cleanup goroutine (evicts entries not seen for >5 minutes, runs every 1 minute). No LRU dependency - simpler sync.Map + time-based eviction.
+## Media Served In-Process by the Elixir Application (ADR-021)
 
-**Story 12.14 - Stoppable cleanup goroutine:** `NewIPRateLimiter` now accepts `ctx context.Context` as its first parameter. The `cleanupLoop` goroutine uses a `select { case <-ticker.C: ... case <-ctx.Done(): return }` instead of `for range ticker.C`. When SIGTERM cancels the main context, the cleanup goroutine exits within one ticker interval (≤1 minute), preventing goroutine leaks during graceful shutdown.
+Media handling lives in `Nebu.Media.*` and serves the Matrix `/_matrix/media/v3/*` and
+`/_matrix/client/v1/media/*` endpoints (upload, download, download/{fileName}, thumbnail, preview_url)
+on the same Bandit/Plug pipeline behind `OidcPlug`. There is no separate media process. The
+cross-cutting controls are:
 
-**IP extraction - trusted-proxy gate (Story 12.11 SEC Fix F-2):**
+- **At-rest encryption (AES-256-GCM, ADR-011 managed E2EE key escrow):** `Nebu.Media.Crypto`
+  encrypts every media object with AES-256-GCM. The per-object AES key + nonce are stored hex in the
+  `media_files` table (key escrow — operator/server can decrypt, consistent with ADR-011's managed
+  model). The encryption is byte-compatible with the prior Go implementation. Because GCM authenticates
+  the whole blob, **download decrypts the entire object in memory** and then serves it (including HTTP
+  Range responses) over the decrypted plaintext.
+- **Access control = local OTP/DB call (no gRPC):** `Nebu.Media.Membership` checks `room_members`
+  via inline SQL inside the same node, replacing the former gRPC `CheckMembership` RPC — one fewer
+  cross-process hop. Note: `media_files` has no `room_id`, so the current check is *member-of-any-room*;
+  per-media room scoping is a documented accepted follow-up.
+- **Object storage = ExAws.S3 against MinIO (ADR-013):** `Nebu.Media.Storage` uses `ExAws.S3`.
+  New deps: `ex_aws`, `ex_aws_s3`, `finch`, `floki`, `sweet_xml`, `hackney`. A Finch pool is started in
+  `Nebu.Application`. `server/config/runtime.exs` reads the MinIO credentials from file-based Docker
+  secrets.
+- **SSRF guard for outbound preview fetches:** `preview_url` (`Nebu.Media.HttpFetch`) fetches the
+  target page via Finch and parses Open Graph tags with Floki. `Nebu.Media.SSRF` guards the outbound
+  request: a scheme allowlist plus blocking of loopback, RFC1918, link-local, CGNAT, cloud-metadata,
+  IPv4-mapped, and IPv6-ULA addresses, with resolve-once IP-pinning for `http`. A 1 MiB streamed body
+  cap bounds the response. Residual accepted risk: the https path is subject to an SNI/DNS-rebind TOCTOU
+  window.
+- **Rate limiting extended to media:** the existing `Nebu.Web.Plugs.RateLimit` (per-IP token bucket) now
+  also guards `preview_url` (30/min) and `upload` (600/min).
+- **Locality of Behavior (ADR-018):** the media code uses inline SQL with no schema/repository layer;
+  boundary seams (DB, storage, HTTP fetch) are injected via `Application.get_env` for testability.
 
-| `NEBU_TRUSTED_PROXY` | Behavior |
-|---|---|
-| `false` (default) | Always use `RemoteAddr`; ignore `X-Forwarded-For`. Attacker cannot bypass per-IP limit by rotating XFF header values. Use when the media gateway is directly exposed. |
-| `true` | Use rightmost `X-Forwarded-For` entry (proxy-appended) when header has 2+ entries; fall back to `RemoteAddr`. Use only when behind a trusted reverse proxy that strips client-supplied XFF. |
+## Matrix Session Lifecycle - Opaque Access Tokens (Story oidc-session-refresh)
 
-`NEBU_RATE_LIMIT_DISABLED=true` disables both tiers (dev/test escape hatch). **Story 12.12 (F-5):** When disabled, the media gateway emits `slog.Warn("rate limiting disabled - NEBU_RATE_LIMIT_DISABLED is set")` exactly once at startup, enabling operators to confirm rate-limiting status via startup logs. 429 response format: `{"errcode":"M_LIMIT_EXCEEDED","error":"Too many requests"}` + `Retry-After: N` header (Matrix CS API §rate-limiting compliant).
-
-**Cleanup correctness (Story 12.12 F-4):** The background cleanup goroutine (`cleanupLoop`) evicts entries where `time.Since(entry.lastSeen) > 5 minutes`. `entry.lastSeen` is updated by `getOrCreate` on every request - before the handler executes. An in-flight request updates `lastSeen` before the handler runs, so a concurrent cleanup tick never evicts a bucket for a request that is actively being processed.
-
-## Matrix Session Lifecycle - Opaque Access Tokens (Story fix-short-oidc-sessions)
+> **Stack note (ADR-021):** This concept is now realised in the Elixir/OTP stack. Earlier revisions of
+> this section described a Go gateway (`auth.go`, middleware structs, a cleanup goroutine, `GetSSOCallback`).
+> Those are superseded — the modules below are the current Elixir implementation. The Go gateway is gone.
 
 **Problem:** Matrix clients connected via OIDC were force-logged-out when the OIDC `id_token` expired
-(5 minute default in Keycloak). The gateway previously returned the OIDC JWT directly as the Matrix
-`access_token`, tying the session lifetime to the OIDC provider's token expiry.
+(5 minute default in Keycloak). The login handler previously returned the OIDC JWT directly as the Matrix
+`access_token`, tying the Matrix session lifetime to the OIDC provider's short access-token expiry
+("force-logout every 5 min" regression).
 
 **Solution:** Nebu now manages Matrix sessions server-side using opaque access tokens + refresh tokens
-(Matrix Client-Server API v1.3), decoupled from OIDC token lifetime.
+(Matrix Client-Server API v1.3), decoupled from OIDC token lifetime. The session lifetime is bounded at
+`min(oidc_exp, now + 8h)`.
 
-**Architecture:** `MatrixSessionStore` interface (implemented by `PostgresMatrixSessionStore`) maintains
-a `matrix_sessions` table with:
+**Dual session model (backward compatible):** `POST /login` issues opaque tokens **only when the client
+sends `refresh_token: true`** in the request body; otherwise the raw OIDC JWT is still returned as
+`access_token` (the original stateless behaviour). Both token shapes are accepted on subsequent requests —
+dispatch is by the *absence of a dot* (opaque tokens are 64-hex; JWTs always contain two dots).
+
+**Architecture:** `Nebu.Matrix.Session.MatrixSessionStore` (inline SQL over the `matrix_sessions` table,
+ADR-018 — no Ecto schema/repository) maintains a `matrix_sessions` row with:
 
 ```
 access_token (PK)  ← Opaque hex string (32 bytes = 64 hex chars, no dots)
 refresh_token      ← Opaque hex string (32 bytes), UNIQUE, rotated on each refresh
-oidc_refresh_token ← AES-256-GCM encrypted OIDC RT from Keycloak (optional, for future OIDC refresh)
+oidc_refresh_token ← AES-256-GCM encrypted OIDC RT from Keycloak (via Nebu.Web.SecretBox; optional, for future OIDC refresh)
 user_id            ← Matrix user ID (@user:server.name)
 device_id          ← From JWT "did" claim or SSO device registration
 expires_at         ← Absolute wall-clock time (Nebu controls expiry: NOW() + 8 hours)
@@ -206,88 +344,67 @@ grace_until        ← Grace window end time for old refresh token after rotatio
 created_at         ← Session creation timestamp
 ```
 
-**Token validation:** `WithOpaqueSessionCheck` middleware in `auth.go` wraps `JWTMiddleware`:
+**Token validation:** `Nebu.Web.Plugs.OidcPlug` dispatches by token shape — an opaque token is any
+bearer value with no `.` (JWTs always contain two dots). The JWT path is unchanged.
 
-```go
-func isOpaqueToken(token string) bool {
-    return !strings.Contains(token, ".")  // JWTs always have 2 dots
-}
-```
-
-When `isOpaqueToken(rawToken)` is true:
-1. Look up in `MatrixSessionStore.GetByAccessToken(ctx, token)`
+When the bearer token is opaque:
+1. Look up the row via `MatrixSessionStore` by `access_token`
 2. If not found: `401 M_UNKNOWN_TOKEN "Invalid token"`
 3. If found but `revoked_at IS NOT NULL`: `401 M_UNKNOWN_TOKEN "Token has been logged out"`
-4. If found but `expires_at < NOW()`: `401 M_UNKNOWN_TOKEN "Token has expired"` with `soft_logout: true`
-5. If found and valid: call `MarkAccessTokenUsed(token)` to end the old refresh token's grace window,
-   then populate request context (user_id, device_id) from session fields
+4. If found but expired (re-check `is_active` / `expires_at < NOW()`): `401 M_UNKNOWN_TOKEN` with
+   `soft_logout: true` so the client can silently re-auth without dropping the device
+5. If found and valid: populate `conn.assigns` (user_id, device_id) from the session row
 
-When `isOpaqueToken(rawToken)` is false, routing continues to existing OIDC JWT path (backward compat).
+When the bearer token contains a dot, routing continues on the existing OIDC JWT path (backward compat).
 
-**Session creation (SSO flow):**
+**Session creation (`POST /login`):**
 
-In `GetSSOCallback`:
-1. After `oauth2Config.Exchange()`, request `offline_access` scope from OIDC provider
-2. If `token.RefreshToken` is non-empty, encrypt it with AES-256-GCM using `internal_secret`
-3. Generate opaque `accessToken` and `refreshToken` (32 bytes each → hex)
-4. Compute `expiresAt = min(oidcTokenExpiry, NOW() + 8 hours)`
-5. Insert into `matrix_sessions` table; store opaque `accessToken` in `loginTokenStore`
+When the client sends `refresh_token: true`:
+1. Validate the OIDC token in-process (existing login logic)
+2. If an OIDC refresh token is available, encrypt it with `Nebu.Web.SecretBox` (AES-256-GCM) before
+   storing it in `oidc_refresh_token`
+3. Generate opaque `access_token` and `refresh_token` (32 random bytes each → 64-hex)
+4. Compute `expires_at = min(oidc_exp, NOW() + 8h)` — decouples the Matrix session from Keycloak's short
+   access-token lifetime
+5. Insert the `matrix_sessions` row and return `{access_token, refresh_token, expires_in_ms, …}`
 
-In `PostLogin` (after gRPC `ValidateToken`):
-- If client sent `refresh_token: true` in the request:
-  - Retrieve session from store by opaque `accessToken`
-  - Return `LoginTokenResponse` with `RefreshToken`, `ExpiresInMs` fields
-- If client omitted `refresh_token: true`:
-  - Return opaque `accessToken` only (no `expires_in_ms`, no `refresh_token`)
+When the client omits `refresh_token: true`, the raw OIDC JWT is returned as `access_token` and no
+session row is written (original stateless behaviour).
 
-**Session refresh (`POST /refresh`):**
+**Session refresh (`POST /_matrix/client/v3/refresh`):**
 
-Registered OUTSIDE `jwtMiddleware` (no auth header required per spec):
+Registered OUTSIDE the auth pipeline (unauthenticated by spec) but **rate-limited** via the per-IP
+`Nebu.Web.Plugs.RateLimit` token bucket:
 
-1. Extract `refresh_token` from request body
-2. `MatrixSessionStore.GetByRefreshToken(ctx, token)` → `session` (includes grace-window state)
-3. If session not found or grace-window expired: `401 M_UNKNOWN_TOKEN`
-4. If OIDC RT is stored and close to expiry: call OIDC provider to refresh (optional MVP)
-5. Generate new opaque `newAccessToken`, `newRefreshToken`
-6. Compute `newExpiresAt = NOW() + 8 hours`
-7. `RotateTokens(oldRefreshToken, newAccessToken, newRefreshToken, newExpiresAt)`:
-   - Insert new session row with new tokens
-   - Update old session row: `revoked_at = NOW()`, `grace_until = NOW() + 60s`
-8. Return `200 {"access_token": newAccessToken, "refresh_token": newRefreshToken, "expires_in_ms": <ms>}`
+1. Extract `refresh_token` from the request body
+2. Look up the session by `refresh_token` (including grace-window state)
+3. If not found or the grace window has expired: `401 M_UNKNOWN_TOKEN` with `soft_logout: true`
+4. Generate a new opaque `access_token` + `refresh_token`
+5. Compute `expires_at = min(oidc_exp, NOW() + 8h)`
+6. Rotate atomically: write the new tokens and mark the old row `revoked_at = NOW()`,
+   `grace_until = NOW() + 60s`
+7. Return `200 {"access_token", "refresh_token", "expires_in_ms"}`
 
-**Grace period semantics (AC4, Spec MUST):**
+**Grace period semantics (Spec MUST):**
 
-The 60-second grace window allows a client that fails to persist the `/refresh` response to retry
-the same old refresh token without error. Once the new `accessToken` is used in any authenticated
-request, `MarkAccessTokenUsed` executes:
+The 60-second grace window lets a client that failed to persist the `/refresh` response retry with the
+same old refresh token without error. After the window the old refresh token returns `401 M_UNKNOWN_TOKEN`.
 
-```sql
-UPDATE matrix_sessions
-SET grace_until = NOW()
-WHERE refresh_token = (
-  SELECT refresh_token FROM matrix_sessions WHERE access_token = $1 AND revoked_at IS NOT NULL
-)
-```
+**Logout:** `POST /logout` deletes the user's `matrix_sessions` rows (immediate, no grace window).
 
-This immediately expires the old refresh token's grace period. Subsequent `/refresh` calls with the
-old token return `401 M_UNKNOWN_TOKEN`.
-
-**Logout:** `POST /logout` calls `MatrixSessionStore.Revoke(accessToken)`, setting `revoked_at = NOW()`
-(immediate, no grace window for logout).
-
-**Cleanup:** Hourly cleanup goroutine calls `CleanupExpired(ctx)`, deleting rows where
-`expires_at < NOW() - INTERVAL '7 days'` (keep 7 days of audit history).
+**Admin deactivation:** `deactivate_user` also deletes the target user's `matrix_sessions` rows, so an
+admin-deactivated user's opaque sessions are invalidated immediately.
 
 **Comparison to Admin Sessions:**
 
 | Aspect | Admin Sessions | Matrix Sessions |
 |---|---|---|
-| Storage | `admin_sessions` table | `matrix_sessions` table |
-| Token format | Opaque hex (admin.go) | Opaque hex (matrix) |
-| Encrypted OIDC RT | Yes | Yes (future: allows Keycloak session binding) |
-| Lifetime control | Configurable per admin role | Fixed 8 hours for all Matrix clients |
-| Refresh pattern | Proactive refresh at 5-min window | On-demand via `/refresh` endpoint |
-| Grace period | None (admin must re-auth on timeout) | 60s grace after token rotation (AC4) |
+| Storage | Signed Phoenix session cookie (no DB row) | `matrix_sessions` table |
+| Token format | Encrypted claims/RT in the signed cookie | Opaque hex (64-hex, no dots) |
+| Encrypted OIDC RT | Yes — AES-256-GCM (`Nebu.Web.SecretBox`) in the cookie; used for active refresh | Yes (future: allows Keycloak session binding) |
+| Lifetime control | `session_exp = min(id_token.exp, now + 8h)` | `min(oidc_exp, now + 8h)` for all Matrix clients |
+| Refresh pattern | When `admin_oidc_refresh_mode = offline`: silent OIDC RT exchange on HTTP requests within a 120 s pre-expiry window, admin-group gate re-evaluated each refresh. Default `online` → no `offline_access`, no silent refresh (see refresh-mode config below) | On-demand via `/refresh` endpoint; `matrix_oidc_refresh_mode` (default `offline`) controls whether `offline_access` is requested |
+| Grace period | None (refresh failure / lost group → clear session, redirect `/admin/login`) | 60s grace after token rotation (AC4) |
 
 ## Cryptography
 
@@ -333,21 +450,21 @@ fail partway through wrap their entire body in `try/rescue`. The `rescue` clause
 audit entry (including an `"error"` metadata field with the exception message) before reraising the
 original exception. A nested `try/rescue` around the audit write itself ensures an outage in the
 audit writer never masks the original error. This guarantees that any partially-applied operation
-leaves a forensic record even when the gRPC call ultimately returns an error to the client.
+leaves a forensic record even when the in-process call ultimately returns an error to the client.
 
 ## GDPR Article 17 Right to Erasure - Deletion Orchestration (Story 14.4)
 
 `DELETE /api/v1/admin/users/{userId}` - instance_admin only (four-eyes: caller ≠ target).
 
-The `GdprDeleteHandler` (`gateway/internal/compliance/gdpr_delete.go`) chains the existing building blocks into a single atomic-from-the-caller's-perspective pipeline:
+The GDPR deletion handler in `Nebu.Compliance.*` chains the existing building blocks into a single atomic-from-the-caller's-perspective pipeline (all steps are in-process calls within the one application):
 
-1. **DeactivateUser gRPC** - `is_active=false` + all sessions destroyed (NOT_FOUND → 404 stops pipeline; AlreadyExists → idempotent continue)
-2. **DeleteUserKeys gRPC** - `private_key = NULL` for signing + encryption keys (best-effort: failure logged, pipeline continues)
+1. **DeactivateUser** - `is_active=false` + all sessions destroyed (NOT_FOUND → 404 stops pipeline; AlreadyExists → idempotent continue)
+2. **DeleteUserKeys** - `private_key = NULL` for signing + encryption keys (best-effort: failure logged, pipeline continues)
 3. **DB anonymization TX** - `profiles.displayname = 'Deleted User'`, `profiles.avatar_url = NULL`, `users.anonymized_at = <unix_ms>` (failure → 500, PII erasure MUST NOT be silently skipped)
 4. **Audit emit** - `gdpr_deletion` event with `keys_deleted: "confirmed"|"failed_best_effort"` metadata (never-raise: audit failure does not block 200)
 5. **200** `{"user_id": "...", "status": "gdpr_deleted"}`
 
-**Login behavior after deletion:** `POST /_matrix/client/v3/login` - when `ValidateToken` gRPC returns `PERMISSION_DENIED` with message containing `"deactivated"`, the gateway responds `403 M_USER_DEACTIVATED` (Matrix CS API v1.18 compliant).
+**Login behavior after deletion:** `POST /_matrix/client/v3/login` - when token validation finds the user `"deactivated"`, the login handler responds `403 M_USER_DEACTIVATED` (Matrix CS API v1.18 compliant).
 
 **Room history preservation:** Messages in room event timelines are NOT deleted - per Matrix spec and GDPR recital 65 (legitimate archive interest). The sender's profile is anonymized; message content remains.
 
@@ -364,7 +481,7 @@ Runbook: `docs/compliance/gdpr-deletion-runbook.md`
 ## Per-Device Sync Token Isolation (Story 9-22)
 
 Matrix clients identify themselves with a `device_id` extracted from the `"did"` claim in the
-JWT access token. The Elixir Core maintains independent sync checkpoints per `(user_id, device_id)`
+JWT access token. The Elixir Server maintains independent sync checkpoints per `(user_id, device_id)`
 in the `sync_tokens` table (composite PK, migration 000041).
 
 **Design invariants:**
@@ -378,17 +495,20 @@ in the `sync_tokens` table (composite PK, migration 000041).
   `Nebu.Session.PgStore.Postgres`; `/3` and `/1` remain for backward compatibility.
 
 **Token cleanup on logout:**
-`POST /logout` triggers `gRPC InvalidateUserSessions(user_id, device_id)` → Elixir
-`SessionSupervisor.destroy_session/2` → DB transaction deletes `sync_tokens` + `sessions` rows
-for that device. ETS is NOT evicted (other devices may still be active).
+`POST /logout` invalidates the session in-process via `SessionSupervisor.destroy_session/2` (a
+DB transaction that deletes the `sync_tokens` + `sessions` rows for that device). ETS is NOT evicted
+(other devices may still be active).
 
 ## Error Handling
 
-**Go:** Return-based, no panic in library code. gRPC status codes map to HTTP status codes at the
-gateway boundary. Matrix endpoints return `{"errcode": "M_...", "error": "..."}` format.
-
 **Elixir:** Tagged tuples `{:ok, result}` / `{:error, reason}`. No raise/throw for business logic.
-Let-it-crash + OTP Supervisor Trees for unexpected failures.
+Let-it-crash + OTP Supervisor Trees for unexpected failures. The HTTP layer maps domain results to
+Matrix error envelopes (`{"errcode": "M_...", "error": "..."}`). The in-process command layer
+(`Nebu.Matrix.EventDispatcher.Server`) raises `Nebu.Matrix.Error` with a `Nebu.Matrix.Status`
+atom as its error type (e.g. `:not_found`, `:permission_denied`, `:internal`);
+`Nebu.Matrix.Http.call_core/1` translates the status atom to the HTTP/Matrix response.
+(Prior to the `grpc-removal` epic, these were `GRPC.RPCError` / `GRPC.Status.<code>()` — that
+dependency is fully removed, ADR-021 2026-06-22.)
 
 **Media Gateway - Storage Error Classification (Story 12.4):**
 
@@ -515,7 +635,7 @@ uploader_user_id = formatMatrixUserID(subject, serverName)
                  = "@" + sanitiseLocalpart(subject) + ":" + serverName
 ```
 
-`sanitiseLocalpart` keeps only `[a-z0-9._-]` characters (spaces → `_`, all others dropped). This mirrors `gateway/internal/grpc/metadata.go sanitiseLocalpart` but is intentionally self-contained (no cross-binary import). `NEBU_SERVER_NAME` is mandatory - the media gateway exits with `FATAL: NEBU_SERVER_NAME is required` if unset. Historical rows (pre-12.9) contain raw OIDC claims and are grandfathered; see migration 000047 column comment. This enables compliance officers to correlate `media_files.uploader_user_id` with room event `sender` fields without manual claim-mapping.
+localpart sanitisation keeps only `[a-z0-9._-]` characters (spaces → `_`, all others dropped) — the same rule used for Matrix user IDs throughout the app. `NEBU_SERVER_NAME` is mandatory (the app raises at boot if unset). Historical rows (pre-12.9) contain raw OIDC claims and are grandfathered; see migration 000047 column comment. This enables compliance officers to correlate `media_files.uploader_user_id` with room event `sender` fields without manual claim-mapping.
 
 **Configurable OIDC claim for audit trail (Story 12.11 SEC Fix F-1):** The claim used as the audit trail user identity is now operator-configurable via `NEBU_OIDC_USER_ID_CLAIM` (default: `name`, matching migration 000044 column comment and the gateway's DB default).
 
@@ -539,13 +659,16 @@ Migration 000046 replaces the blanket `config_update_all` policy (USING true - i
 
 `server_name`, `bootstrap_completed`, and any future keys not in this allowlist are immutable at the DB level (defence-in-depth restoration from ADR G8).
 
-**Proto3 Bool / Direct DB Upsert Pattern (Story 14-2a):**
+**Bool / Direct DB Upsert Pattern (Story 14-2a):**
 
-Fields stored as booleans in `server_config` (e.g. `oidc_directory_enabled`) cannot be safely round-tripped via proto3 gRPC because `false` is the proto default and is indistinguishable from "not set". The pattern used: the REST API PATCH handler (`api.AdminServer`) holds a `ServerConfigRepository` and upserts directly. The Admin UI handler (`admin.ConfigHandler`) accepts a `ConfigKeyWriter` interface (set via `WithConfigDB`) and upserts directly for bool fields, while routing string fields through gRPC. This avoids inadvertent resets of boolean flags on unrelated gRPC calls.
+Fields stored as booleans in `server_config` (e.g. `oidc_directory_enabled`) must be updated
+with explicit nil-awareness. The pattern used: the Admin UI handler (in `Nebu.Admin.*`) upserts
+directly via inline SQL rather than going through the generic config update path. This avoids
+inadvertent resets of boolean flags when only a subset of fields is submitted.
 
 **OIDC Directory Service Pattern (Story 14-2b):**
 
-`OIDCDirectoryService` (`gateway/internal/admin/oidc_directory.go`) provides a secure, cached client for fetching user lists from an admin-configured OIDC directory endpoint. Key design decisions:
+The OIDC directory service (in `Nebu.Admin.*`) provides a secure, cached client for fetching user lists from an admin-configured OIDC directory endpoint. Key design decisions:
 
 - **secretString type**: the bearer token is wrapped in `type secretString string` with `String() "[REDACTED]"` - prevents accidental log exposure via `%+v` or slog auto-formatting (CR-3).
 - **HTTPS-only at call time**: `validateEndpoint` is called inside `FetchUsers` on every invocation, not just at config load. This is a defensive check: if the stored endpoint is later mutated to HTTP, the service fails hard rather than silently falling back (CR-1).
@@ -556,7 +679,7 @@ Fields stored as booleans in `server_config` (e.g. `oidc_directory_enabled`) can
 
 **OIDC Directory User Search Merge Pattern (Story 14-2c):**
 
-`UsersHandler.ListHandler` merges Nebu DB users (from gRPC `ListAdminUsers`) with OIDC directory users (from `OIDCDirectoryService.FetchUsers`) when `oidc_directory_enabled=true`. Key design decisions:
+`Nebu.Admin.UsersLive` (or the REST handler equivalent) merges Nebu DB users (from `list_admin_users` in-process) with OIDC directory users (from `OIDCDirectoryService.FetchUsers`) when `oidc_directory_enabled=true`. Key design decisions:
 
 - **WithOIDCDirectory setter**: `UsersHandler` accepts an `*OIDCDirectoryService` via a fluent setter (`WithOIDCDirectory(svc, serverName)`). The handler field is nil by default - zero-config backward compatibility.
 - **Nebu DB wins on dedup**: OIDC users whose `sanitize(sub)` matches a Nebu `UserId` are dropped from the OIDC-only list. The Nebu DB entry always takes precedence.
@@ -566,13 +689,13 @@ Fields stored as booleans in `server_config` (e.g. `oidc_directory_enabled`) can
 
 **Bulk User Provisioning Pattern (Story 14-3a):**
 
-`Nebu.Session.BulkImporter` provisions a list of OIDC users via the `BulkImportUsers` gRPC RPC. The provisioning flow is identical to first-login provisioning in `TokenValidator.Postgres.provision_new_user`. Key design decisions:
+`Nebu.Session.BulkImporter` provisions a list of OIDC users via the `bulk_import_users` in-process call. The provisioning flow is identical to first-login provisioning in `Nebu.Session.TokenValidator.Postgres.provision_new_user`. Key design decisions:
 
 - **Identical to first-login**: `BulkImporter` calls the same `UserStore.upsert_user/2` + `UserProvisioner.provision_user/4` functions as first login. Ed25519 signing keypairs and X25519 encryption keypairs are generated; `display_name` (Tier 1) and `email` (Tier 2) are encrypted identically.
 - **Duplicate detection**: a user whose `signing_key_id IS NOT NULL` in the `users` table is counted as `skipped` - not an error. The `UserProvisioner.Postgres` update SQL already uses `WHERE signing_key_id IS NULL` (idempotent guard), but BulkImporter avoids unnecessary keypair generation by checking first.
 - **Partial success**: `import_users/1` uses `Enum.reduce` across all users. Exceptions in `import_one/2` are rescued with `try/rescue` - the user is counted as `:failed` and the batch continues. The aggregate `{imported, skipped, failed}` is always returned.
-- **No bootstrap path**: bulk import always uses the provided `system_role` (Go gateway always sets "user"). The `BootstrapChecker.upsert_with_bootstrap` step from first-login is skipped (bootstrap is a one-time event that only triggers on the very first login to an empty instance).
-- **Trust model**: Core trusts the Go gateway (ADR G2). The gRPC handler does not re-validate admin role - the Go gateway enforces admin-only HTTP access before calling this RPC.
+- **No bootstrap path**: bulk import always uses the provided `system_role` (the admin import path always sets "user"). The `BootstrapChecker.upsert_with_bootstrap` step from first-login is skipped (bootstrap is a one-time event that only triggers on the very first login to an empty instance).
+- **Trust model**: the bulk-import command handler does not re-validate the admin role itself — the admin-only HTTP access is already enforced by the admin auth gate (`Nebu.Admin.Auth`) before the in-process call reaches it.
 - **Module injection**: all three dependencies (`lookup_module`, `user_store_module`, `provisioner_module`) are injectable via `Application.put_env` for test isolation. Default implementations use real PostgreSQL.
 
 **Bootstrap Wizard Step 4 - User Import UI Pattern (Story 14-3b):**
@@ -580,43 +703,45 @@ Fields stored as booleans in `server_config` (e.g. `oidc_directory_enabled`) can
 `BootstrapHandler` extends the 3-step wizard with a Step 4 that lets admins pre-provision OIDC users immediately after claim selection. Key design decisions:
 
 - **Redirect chain**: `ClaimSelectionHandler` now redirects to `/admin/bootstrap?step=4` instead of `/admin/dashboard`. Step 4 renders an "Import from OIDC" button. The admin can "Skip and finish" → `/admin/dashboard` at any time.
-- **Interface abstraction**: `OIDCDirectoryFetcher` (IsEnabled/FetchUsers) and `BulkImportClient` (BulkImportUsers) interfaces defined in `bootstrap.go` allow test injection without a real HTTP server or gRPC connection. `WithImportServices(fetcher, core, serverName)` wires them at startup.
-- **Two sub-actions via form POST**: `action=preview` fetches users (SCIM-preferred) and renders the preview table (display name, email, computed Matrix User ID); `action=import` re-fetches + calls `BulkImportUsers` gRPC + renders imported/skipped/failed counts.
+- **Interface abstraction**: `OIDCDirectoryFetcher` (IsEnabled/FetchUsers) and `BulkImportClient` (BulkImportUsers) behaviours/callbacks allow test injection. `WithImportServices(fetcher, core, serverName)` wires them at startup.
+- **Two sub-actions via form POST**: `action=preview` fetches users (SCIM-preferred) and renders the preview table (display name, email, computed Matrix User ID); `action=import` re-fetches + calls `bulk_import_users` in-process + renders imported/skipped/failed counts.
 - **AC4 disabled state**: when neither OIDC nor SCIM is enabled, Step 4 renders with a disabled import button.
 - **Matrix User ID computation**: reuses `sanitizeOIDCSub(u.Sub)` from `users.go` (same package) to produce `@{localpart}:{serverName}` - identical to the preview shown in the Users page (Story 14-2c).
 
 **SCIM 2.0 User Fetch Pattern (Story 14-3c / ADR-015 Protocol B):**
 
-`SCIMClient` (`gateway/internal/admin/scim_client.go`) fetches users from a SCIM 2.0 `/Users` endpoint using RFC 7644 pagination. Key design decisions:
+The SCIM client (in `Nebu.Admin.*`) fetches users from a SCIM 2.0 `/Users` endpoint using RFC 7644 pagination. Key design decisions:
 
 - **Protocol priority**: when both `oidc_directory_enabled` and `scim_enabled` are true, SCIM takes priority over the OIDC directory for the `action=import` (and `action=preview`) flows in Bootstrap Step 4. This is enforced in `BootstrapHandler.StepHandler` via the SCIM-preferred fetcher selection pattern.
 - **SCIMFetcher interface**: mirrors `OIDCDirectoryFetcher` (IsEnabled/FetchUsers) so `BootstrapHandler` uses a unified interface for both protocols. `WithSCIMFetcher(f SCIMFetcher)` wires the client at startup.
 - **RFC 7644 pagination**: `startIndex` is 1-based; `count=100` per page; iteration terminates on empty `Resources[]`. `totalResults` is used for the early-abort cap check (HR-1).
 - **secretString CR-1**: bearer token stored as `secretString` - `.String()` returns `[REDACTED]`; `.value()` only called to set the `Authorization` header.
-- **Bearer token encryption at rest**: stored as AES-256-GCM (nonce || ciphertext, hex) in `server_config.scim_bearer_token`. Encrypted at config-save time (config.go) with the gateway internal secret; decrypted at startup (main.go) before wiring into `SCIMClient`.
+- **Bearer token encryption at rest**: stored as AES-256-GCM (nonce || ciphertext, hex) in `server_config.scim_bearer_token`. Encrypted at config-save time with the internal secret; decrypted at startup before wiring into `SCIMClient`.
 - **scim_base_url convention**: the stored URL is the SCIM service root (e.g. `https://idp.example.com/scim/v2`). `buildPageURL` appends `/Users` if not already present, then adds `startIndex`/`count` query params.
 - **userName as sub**: `scimSub()` prefers `userName` over `id` - Azure AD and Okta export email-style userNames that align with OIDC `sub` semantics. The sub value goes through `sanitizeOIDCSub` for Matrix localpart derivation (same path as OIDC directory).
 - **Import progress singleton**: `importInProgress atomic.Bool` + `importProgress *importProgressState` are package-level singletons. `CompareAndSwap(false, true)` before each import → HTTP 409 on concurrent attempt (HR-3). Counters (`imported`, `total`, `failed`, `done`) are `atomic.Int32`/`atomic.Bool` - safe to read from the polling endpoint without a lock.
 - **Progress endpoint**: `GET /api/v1/admin/bootstrap/import-status` (behind `sessionGuard`) returns `{imported, total, failed, done}` JSON. The Bootstrap Wizard Step 4 HTML polls this endpoint via `setInterval` every 2s using `fetch(credentials: 'same-origin')`.
-- **Synchronous import**: for S-size story scope, `BulkImportUsers` gRPC is called synchronously; counters advance from 0/N to imported/N/done in a single step after the RPC returns. The progress bar shows 0/N while the RPC is in flight, then reloads the page on `done=true`.
+- **Synchronous import**: for S-size story scope, `bulk_import_users/1` is called synchronously; counters advance from 0/N to imported/N/done in a single step after the call returns. The progress bar shows 0/N while the call is in flight, then reloads the page on `done=true`.
 
 **Media Event Content Pass-Through Contract (Story 12.6):**
 
-`content.info` in `m.room.message` (and all other event types) is an **opaque JSON object** - the gateway passes it verbatim to Core, and Core stores it as JSONB without field inspection or modification. Client extension fields such as `blurhash` (used by Element Web for image loading placeholders) MUST be preserved through the full round-trip: gateway → gRPC → Core → DB → sync response.
+`content.info` in `m.room.message` (and all other event types) is an **opaque JSON object** - the send
+handler passes it verbatim to the event-dispatch layer, which stores it as JSONB without field
+inspection or modification. Client extension fields such as `blurhash` (used by Element Web for image
+loading placeholders) MUST be preserved through the full round-trip: send handler → event dispatch →
+DB → sync response.
 
 - The server never computes `blurhash` - it is always client-provided.
-- The `JSON → map[string]any → json.Marshal` round-trip in `PutSendEvent` preserves all fields.
-- The sync handler returns `content` as `json.RawMessage` - no field filtering.
+- The send/sync handlers carry `content` as an opaque JSON value end-to-end - no field filtering.
 
-This contract is validated by `TestSendEvent_BlurhashInContentInfo_PassedToGRPC` (AC1) and `TestGetSync_BlurhashInTimelineContent_PassedThrough` (AC2) in `gateway/internal/matrix/rooms_test.go` and `sync_test.go`.
+This contract is validated by the blurhash pass-through tests in the Matrix domain test suite (AC1: send carries the field through; AC2: sync returns it unchanged).
 
-**gRPC error surface rule (Story 9-27):** Elixir gRPC handlers must use `raise GRPC.RPCError,
-status: GRPC.Status.<code>(), message: "..."` to propagate errors to the Go gateway. Bare `:ok =`
-pattern matches on `Room.Server` calls produce `MatchError` at runtime, which gRPC-elixir maps to
-`codes.Unknown` → HTTP 500 with no structured error message. The correct form is a `case` expression
-that raises `GRPC.RPCError` with `GRPC.Status.internal()` on unexpected `{:error, reason}` tuples.
-This distinction is critical: `codes.Unknown` is ambiguous whereas `codes.Internal` correctly
-signals a server-side failure to the Go gateway's error mapper.
+**Error surface rule (Story 9-27):** the in-process command handlers
+(`Nebu.Matrix.EventDispatcher.Server`) raise `Nebu.Matrix.Error` with a `Nebu.Matrix.Status` atom
+as their error type. Bare `:ok =` pattern matches on `Room.Server` calls produce a `MatchError`,
+which maps to an ambiguous HTTP 500 with no structured error message. The correct form is a `case`
+expression that raises with `Nebu.Matrix.Status.internal()` on unexpected `{:error, reason}` tuples,
+so `Nebu.Matrix.Http.call_core/1` can translate `:internal` to a proper server-error response.
 
 ## Room GenServer Start on Demand (Story 11-11)
 
@@ -631,7 +756,7 @@ returning `404` for rooms that genuinely exist.
 case Nebu.Room.RoomSupervisor.start_room(room_id) do
   {:error, _reason} ->
     # Room does not exist in DB - Room.Server.init/1 returned {:stop, _}
-    raise GRPC.RPCError, status: GRPC.Status.not_found(), message: "room not found: #{room_id}"
+    raise Nebu.Matrix.Error, status: Nebu.Matrix.Status.not_found(), message: "room not found: #{room_id}"
   {:ok, _pid} ->
     # GenServer is running (either already was, or just started from DB)
     # ... proceed with room operation
@@ -644,7 +769,7 @@ running) or `{:error, _}` (room absent from DB).
 
 **`{:error, _}` wildcard trade-off:** Horde supervisor errors (e.g. `:max_children`) also map to
 `not_found` via this pattern. This is an acceptable trade-off: such errors are rare, and the alternative
-of forwarding an opaque `GRPC.Status.internal()` is less useful to clients. The same trade-off applies
+of forwarding an opaque `:internal` error is less useful to clients. The same trade-off applies
 consistently across all handlers that use `start_room/1`.
 
 **Race guard - `:noproc` after `start_room`:**
@@ -660,7 +785,7 @@ state =
     room_registry_module().get_state(room_id)
   catch
     :exit, {:noproc, _} ->
-      raise GRPC.RPCError, status: GRPC.Status.not_found(), message: "room not found: #{room_id}"
+      raise Nebu.Matrix.Error, status: Nebu.Matrix.Status.not_found(), message: "room not found: #{room_id}"
   end
 ```
 
@@ -681,8 +806,7 @@ deferred to a separate story to keep diffs minimal and reviewable.
 
 ## Logging
 
-**Go:** `log/slog` (stdlib), structured key-value pairs.
-**Elixir:** `Logger` with keyword metadata.
+**Elixir:** `Logger` with keyword metadata, structured key-value pairs.
 
 PII (email, display name) must never appear in log output. Debug level never enabled in production.
 
@@ -704,10 +828,60 @@ No mixing.
 
 ## Admin UI Security
 
-CSRF double-submit cookie on all state-changing Admin UI POST endpoints. Security headers
-middleware on all `/admin/*` routes (CSP, HSTS, X-Frame-Options). Session cookies are
-`HttpOnly`, `SameSite=Lax`. Admin UI templates served via `go:embed` - no filesystem access
-at runtime.
+**Phoenix LiveView Admin (admin-ui-migration — supersedes Go template admin):**
+
+The Admin UI is now served by `Nebu.Web.AdminEndpoint` (Phoenix.Endpoint, `server: false`) forwarded
+from `Nebu.Web.Router`. Key security controls:
+
+- **Admin auth gate (`Nebu.Admin.Auth`, `on_mount :require_admin`):** Checks the signed Phoenix
+  session for a valid admin claim. The claim is derived from `server_config.admin_group_claim`
+  (default `instance_admin`) via an inline SQL check (ADR-018) — parity with the Go
+  `MatchesAdminGroupClaim`. Unauthenticated access is redirected to `/admin/login`.
+- **CSRF:** Phoenix `protect_from_forgery` with a signed session — replaces the Go double-submit
+  cookie. All LiveView state mutations go through server-side event handlers (no direct form POST
+  without a verified CSRF token).
+- **Session cookie:** `http_only: true`, `secure: true` (config-driven; enforced in prod TLS). The
+  Phoenix session is signed/encrypted with `secret_key_base`, derived from `NEBU_ADMIN_SECRET_KEY_BASE`
+  or SHA-512 of the internal secret file. A missing `NEBU_ADMIN_SECRET_KEY_BASE` **raises at boot** in
+  prod when the internal secret file is also absent (fail-closed).
+- **Content-Security-Policy (admin browser pipeline):**
+  `default-src 'self'; connect-src 'self' ws: wss:; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'self'`
+  Applied as a Plug in the admin browser pipeline. `ws:/wss:` is required for LiveView WebSocket.
+  `style-src 'unsafe-inline'` is required for Phoenix LiveView inline transition styles.
+- **OIDC client secret at rest:** `BootstrapLive` encrypts the `oidc_client_secret` with AES-256-GCM
+  before persisting to `server_config` (reuses `Nebu.Media.Crypto`; key = SHA-256 of internal
+  secret; fail-closed when no secret is available). Byte-compatible with the existing Go
+  `admin.EncryptAES256GCM` scheme (shared internal secret, same key derivation).
+- **LiveView DOM-diff (no SPA build):** The Admin UI uses Phoenix LiveView server-rendered diffs over
+  a persistent WebSocket. There is no separate JS build step, no bundled SPA, and no client-side
+  state management framework. Interaction (e.g. auto-join toggle) is handled via `phx-click` events
+  processed server-side with inline SQL (ADR-018).
+- **Phoenix.PubSub:** Added to `Nebu.Application` as a child process required by LiveView. Uses
+  the `Phoenix.PubSub.PG2` adapter (in-process, no external broker — consistent with ADR-002).
+
+**Admin login (go-removal-cleanup — complete):** The Go admin handlers are deleted; server owns the
+full admin OIDC Authorization-Code + PKCE login in Elixir (`Nebu.Admin.Auth`). `/admin/login/start`
+mints a PKCE verifier/S256 challenge + CSRF state + OIDC nonce into the signed Phoenix session and
+redirects to the IdP; `/admin/callback` validates state (constant-time, fail-closed), exchanges the
+code at the provider token endpoint, verifies the ID token via the shared
+`Nebu.Web.Plugs.OidcPlug.verify_token/2` (signature/alg/iss/aud/exp/sub) + nonce binding, enforces the
+admin-group claim, and mints the Phoenix admin session (`renew: true`, `session_exp = min(idToken.exp,
+now+8h)`). There is one session cookie (the signed Phoenix `secret_key_base` cookie — http_only, secure,
+SameSite=Lax). `NEBU_ADMIN_OIDC_LOGIN_URL` is removed; the admin OAuth client is configured via
+`NEBU_ADMIN_OIDC_CLIENT_ID` / `..._CLIENT_SECRET[_FILE]` / `..._REDIRECT_URI`.
+
+**Admin silent OIDC token refresh (admin-oidc-session-refresh):** Admin login now requests
+`offline_access` so the IdP returns a `refresh_token`. The RT is encrypted with `Nebu.Web.SecretBox`
+(AES-256-GCM) and stored *inside* the signed admin session cookie — no `admin_sessions` DB row, no
+plaintext RT at rest. On each authenticated HTTP request `Nebu.Admin.Auth.fetch_current_user/2`
+silently refreshes within a 120 s pre-expiry window: it exchanges the stored RT at the token endpoint,
+re-verifies the new `id_token` via `OidcPlug.verify_token`, **re-evaluates the admin-group gate on the
+refreshed claims** (a revoked admin loses access on the next refresh), recomputes
+`session_exp = min(new id_token.exp, now+8h)`, renews the session and rotates the stored RT. On refresh
+failure or lost group it clears the session and redirects to `/admin/login`. This replaces the previous
+behaviour where the admin session was capped at the short `id_token.exp` with no refresh, causing a
+forced re-login roughly every 5 minutes against Keycloak. **Known limitation:** the refresh fires on
+HTTP round-trips, not over the persistent LiveView websocket.
 
 ## Testing Architecture (Story 9-26)
 
@@ -715,7 +889,7 @@ Nebu uses a two-layer E2E test strategy, splitting tests by the level of observa
 
 | Layer | Runner | Scope | Location |
 |---|---|---|---|
-| HTTP / Matrix API | Godog + `net/http` | REST endpoints, Matrix CS protocol, gRPC | `gateway/features/` |
+| HTTP / Matrix API | ExUnit `:integration` (Plug.Test / `:httpc`) | REST endpoints, Matrix CS protocol | `server/test/nebu/matrix/` |
 | Browser / UI | Playwright + `playwright-bdd` | Element Web flows, Admin UI, real OIDC redirects | `e2e/` |
 
 **No plain `.spec.ts` files without a `.feature` counterpart are accepted for new stories.**
@@ -804,14 +978,14 @@ avoiding extra HTTP round-trips from clients.
 **How Nebu implements bundled aggregations for `m.thread`:**
 
 1. `attach_thread_aggregations/3` is called for every list of timeline events returned from an
-   initial sync or an incremental delta sync in Elixir Core.
+   initial sync or an incremental delta sync in Elixir Server.
 2. For each event, it calls `count_thread_children(room_id, event_id)` and (when count > 0)
    fetches the latest reply via `fetch_events_by_relation/5` with `limit = 1` and empty opts.
 3. The aggregation struct `%{"m.thread" => %{count: N, latest_event: %{...}, current_user_participated: bool}}`
-   is JSON-encoded and stored in `Event.unsigned_relations` (proto field 9).
-4. In Go Gateway `sync.go`, `syncUnsigned.MRelations` is populated from `te.GetUnsignedRelations()`
-   only when the bytes are non-empty; `json:"m.relations,omitempty"` ensures absent relations
-   produce no extra JSON key.
+   is JSON-encoded and stored in `Core.Event.unsigned_relations` (originally protobuf field 9; now a plain struct key).
+4. In the Matrix sync handler, the event's `unsigned.m.relations` field is populated from the
+   `unsigned_relations` value only when it is non-empty; absent relations produce no extra JSON key
+   (the key is omitted entirely).
 
 **Database invariant:** The expression index on `events((content->'m.relates_to'->>'event_id'))`
 (migration 000042) is required; without it, `attach_thread_aggregations/3` would cause N sequential
@@ -833,7 +1007,7 @@ and two additional route variants:
 | `dir` | string | `"b"` | Must be `"f"` or `"b"`; `400 M_BAD_PARAM` otherwise |
 | `limit` | integer | 20 | Clamped to 100; 0 uses default |
 | `recurse` | boolean | false | Must be parseable; `400 M_BAD_PARAM` otherwise |
-| `from` | string | `""` | Opaque pagination token; passed through to Core |
+| `from` | string | `""` | Opaque pagination token; passed through to Server |
 
 **dir semantics:** `"b"` (backward) = newest-first DESC; `"f"` (forward) = oldest-first ASC.
 This mirrors the `GET /messages` semantics from the Matrix CS API spec.
@@ -843,8 +1017,8 @@ treats it the same as `dir=b`; true recursive relation traversal is deferred to 
 
 **prev_batch:** When using `dir=b` pagination, the response includes a `prev_batch` token in
 `GetRelationsResponse` (field 3) allowing clients to page backwards. Currently always empty
-(no prev-page cursor implemented in MVP); the field is present in the proto contract for
-forward compatibility.
+(no prev-page cursor implemented in MVP); the field is present in the `Core.GetRelationsResponse`
+struct for forward compatibility.
 
 ## Configurable OIDC Claim Mapping (Story 11-10)
 
@@ -875,17 +1049,26 @@ returns `"@" + sanitised + ":" + serverName`. If the result is empty (claim abse
 invalid characters), it falls back to `FormatUserID(sub, serverName)` - the SHA-256 opaque localpart
 path - using `claims["sub"]` as input.
 
-**Fallback chain (backward compatibility, AC7):**
+**Fallback chain (Elixir, `Nebu.Matrix.UserId.localpart/1`):**
 
-1. `NEBU_OIDC_USER_ID_CLAIM` env var (if set) overrides the DB value.
-2. `server_config.oidc_user_id_claim` loaded via 60-second TTL cache (`claimLoader` in `main.go`).
-3. If missing or empty: fall back to `"name"` claim - identical to the pre-11-10 `FormatUserIDFromClaims(sub, name, serverName)` behavior.
-4. If `name` claim also absent: `FormatUserID(sub, serverName)` SHA-256 path.
+1. `server_config.oidc_user_id_claim` (the operator-configured claim), served from
+   `Nebu.Matrix.OidcClaimCache` (see below).
+2. If unset/empty: the `preferred_username` claim.
+3. then the `name` claim.
+4. then `sub`; and if the chosen value sanitises to empty, `sub` is used as the final source.
 
-**TTL cache pattern:** `claimLoader` is constructed in `main.go` as a closure wrapping
-`loadServerConfigKey(db, "oidc_user_id_claim")` with a 60-second expiry. The loader is injected into
-`JWTMiddleware` (5th parameter) and `LoginHandler`. This avoids a DB round-trip on every request while
-keeping the mapping live-updatable without a gateway restart (updated value visible within 60 s).
+**Claim cache (`Nebu.Matrix.OidcClaimCache`, story `oidc-claim-boot-cache`):** the Go gateway's
+60-second-TTL `claimLoader` closure was removed with the Go stack. In the Elixir stack the configured
+claim is cached in node-local `persistent_term` and read directly on the caller in `configured_claim/0`
+— an O(1), lock-free read with **no DB round-trip on the request hot path** once populated. The cache is
+populated **lazily on first read** (three states: `:unset` / `{:value, string}` / `{:value, nil}`), so a
+confirmed value — including confirmed-absent — is never re-queried. Invalidation is **event-driven, not
+TTL-based**: all three write paths route through `Nebu.Admin.DB.upsert_server_config/1`, which calls the
+`Nebu.Matrix` public function `invalidate_oidc_claim_cache/0` when the `oidc_user_id_claim` key changes;
+that re-reads the DB and broadcasts an invalidation to peer nodes over the `nebu_matrix_oidc_claim_cache`
+`:pg` group (ADR-020 — identical behaviour single-node and clustered). This eliminates the per-request DB
+read and the transient fail-open-to-weaker-claim window in steady state (residual bounded to the
+node-start-until-first-successful-read cold-start window; SEC-reviewed and accepted).
 
 **Claim name validation:** `oidcClaimNameRe` (`^[a-zA-Z0-9:_\-.]+$`, 1–50 chars) is applied to all
 three claim fields on both the Admin UI POST handler and the Bootstrap Wizard Step 3. Invalid inputs
@@ -902,44 +1085,23 @@ before persisting and includes `previous_oidc_user_id_claim`, `previous_oidc_dis
 
 ## Build Metadata Injection (Story 11-9)
 
-Nebu exposes build metadata (`version`, `git_commit`, `build_time`) via two dedicated `GET /info`
-endpoints - one on the Go Gateway public mux (port 8080) and one on the Elixir Core health server
-(port 4000). Both endpoints require no authentication and return JSON:
+Nebu exposes build metadata (`version`, `git_commit`, `build_time`) via a `GET /info` endpoint on the
+application (port 4000). It requires no authentication and returns JSON:
 
 ```json
-{"component": "gateway", "version": "0.1.0", "git_commit": "abc1234", "build_time": "2026-05-11T10:00:00Z"}
+{"component": "nebu", "version": "0.1.0", "git_commit": "abc1234", "build_time": "2026-05-11T10:00:00Z"}
 ```
 
-**Two injection mechanisms - one per runtime:**
+**Injection mechanism:** `ARG → ENV` in the Dockerfile; `Nebu.BuildInfo.get/0` reads `System.get_env/2`
+at call time, defaulting to `"unknown"` when unset. Both the builder and runtime Dockerfile stages
+carry the three `ENV` vars so the values are available whether baked into the release BEAM files or
+read at process start.
 
-| Component | Mechanism | Fallback |
-|---|---|---|
-| Go Gateway | `-ldflags "-X main.buildVersion=… -X main.gitCommit=… -X main.buildTime=…"` at `go build` | `"unknown"` (package-level `var` defaults) |
-| Elixir Core | `ARG → ENV` in Dockerfile; `System.get_env/2` at call time in `Nebu.BuildInfo.get/0` | `"unknown"` (default arg to `System.get_env/2`) |
+**Admin UI footer:** The same build info is threaded into the LiveView layout so every authenticated
+admin page renders a footer of the form `nebu v<version> · <git_commit> · built <build_time>`,
+suppressed on the login and error pages.
 
-**Gateway - static handler pattern:** `NewInfoHandler` in `gateway/internal/health/info.go`
-pre-marshals the JSON body at handler construction time (called once during startup). Each
-request writes the same pre-computed byte slice - zero allocations per request. The handler
-is registered on `pubMux` (port 8080) alongside `/health` and `/ready`, NOT on the
-authenticated main mux.
-
-**Core - runtime ENV reads:** `Nebu.BuildInfo.get/0` reads `System.get_env/2` at call time.
-Both the builder and runtime Dockerfile stages carry the three `ENV` vars so the values are
-available regardless of whether they are baked into the release BEAM files or read at
-process start.
-
-**Admin UI footer:** The build vars are threaded into every authenticated admin page render
-via `admin.SetBuildInfo(buildVersion, gitCommit, buildTime)` (called once from `main.go`)
-and `admin.newPageData()` (called by each authenticated handler). The base template renders:
-
-```
-nebu gateway v{{.BuildVersion}} · {{.GitCommit}} · built {{.BuildTime}}
-```
-
-The footer is suppressed on the login page (`LoginMode: true`) and on error pages
-(`ErrorMode: true`) - both guards use `{{ if not }}` in `layouts/base.html`.
-
-**`make redeploy` integration:** The `redeploy` Makefile target now exports `GIT_COMMIT`
+**`make redeploy` integration:** The `redeploy` Makefile target exports `GIT_COMMIT`
 (from `git rev-parse --short HEAD`) and `BUILD_TIME` (from `date -u`) before calling
 `docker compose build`. When these are unset (e.g. plain `make redeploy` without env
 exports), `docker-compose.yml` passes `${GIT_COMMIT:-unknown}` - images build successfully
@@ -949,8 +1111,8 @@ and `GET /info` returns `"unknown"` values per AC3.
 
 **Bug fix:** Postgrex returns JSONB columns as a `%Postgrex.JSONB{decoded: map}` struct when the
 column value is a JSON object. Prior to Story 9-30, `event_map_to_proto/1` in
-`Nebu.EventDispatcher.Server` only handled plain Elixir maps and binary strings, causing a
-`Protocol.UndefinedError` (gRPC `INTERNAL` / HTTP 500) whenever `/relations` was called on rooms
+`Nebu.Matrix.EventDispatcher.Server` only handled plain Elixir maps and binary strings, causing a
+`Protocol.UndefinedError` (HTTP 500) whenever `/relations` was called on rooms
 that stored events with JSONB-typed `content` columns.
 
 **Fix:** A shape-based guard was added as the first branch in the `cond` inside
@@ -979,7 +1141,7 @@ can produce an arbitrary Elixir struct with a `:decoded` key via this code path 
 native Elixir terms, not ETF-deserialised arbitrary structs).
 
 **Scope:** The fix applies to every call site of `event_map_to_proto/1` - currently
-`GetRelations` (Story 9-29) and `GetMessages`. No new endpoints, migrations, gRPC handlers, or
+`get_relations` (Story 9-29) and `get_messages`. No new endpoints, migrations, or
 schema changes were introduced.
 
 _Source: `_bmad-output/planning-artifacts/architecture.md`, §Cross-Cutting Concerns, §Auth-Token-Flow, §Enforcement; `_bmad-output/planning-artifacts/prd.md`, §Cryptographic Identity Architecture; Story 9-22 (per-device sync token isolation, logout cleanup); Story 9-26 (Browser-First E2E layer, playwright-bdd, token sidecar pattern); Story 9-27 (gRPC error surface rule - GRPC.RPCError vs MatchError; failure audit trail pattern for multi-step operations); Story 9-28 (Thread aggregations in sync, bundled m.thread via unsigned_relations, GetRelations RPC, migration 000042 expression index); Story 9-29 (Relations API query params: dir, recurse, from; base and three-segment routes; prev_batch response field; fetch_events_by_relation/5 dynamic WHERE builder with rel_type + event_type + dir opts); Story 9-30 (JSONB content normalisation bug fix - %Postgrex.JSONB{decoded} struct guard in event_map_to_proto/1; resolves /relations HTTP 500 on JSONB-typed content columns); Story 11-7 (SSO nonce-based replay prevention; Cache-Control: no-store on SSO 302 redirect; denylist check in PostLogin with 403 M_FORBIDDEN; ssoStateStore capacity cap at 10,000; Safari re-login bugfix); Story 11-9 (build metadata injection - ldflags for Go, ARG→ENV for Elixir; NewInfoHandler static pre-marshalled response; Nebu.BuildInfo.get/0; Admin UI footer via SetBuildInfo/newPageData/ErrorMode; make redeploy GIT_COMMIT/BUILD_TIME exports); Story 11-10 (configurable OIDC claim mapping - FormatUserIDFromClaims refactored signature, TTL-cached claimLoader, oidcClaimNameRe validation, migration 000044 defaults seed, identity-stability warning, audit log with previous values, Bootstrap Wizard Step 3, ClaimMappingHandler admin settings page); Story 11-11 (Room GenServer start-on-demand concept - send_receipt/2 lookup_room → start_room fix; {:error,_} wildcard trade-off; :noproc guard pattern; handler inventory for start_room vs lookup_room); Story 12-6 (blurhash pass-through contract - content.info is opaque JSONB, client extension fields preserved verbatim; animated=false MUST NOT return animated thumbnail regression test; explicit traceability tests for AC1+AC2); Story 12.16 (Authenticated media endpoints - auth.Middleware TokenVerifier interface, M_MISSING_TOKEN/M_UNKNOWN_TOKEN error codes, fail-closed nil-verifier guard; config.Handler media config endpoint; CSP + Cross-Origin-Resource-Policy headers on all download/thumbnail 200 responses; v3 unauthenticated + v1 authenticated routing pattern in main.go; {fileName} path value for Content-Disposition); Story 13-14 (squashed seed migration - FORCE RLS intentionally absent on audit_log in single-role model; append-only enforced at application layer; audit_log_purge SECURITY DEFINER bypasses RLS as table owner without BYPASSRLS); bugfix-sso-bootstrap-credentials (OIDC client credential source hierarchy - newServerConfigClientIDLoader / newServerConfigClientSecretLoader TTL-cached loaders; DB takes precedence over env var; AES-256-GCM decryption on secret load; slog.Warn on decrypt failure; startup observability check; LoginHandler ClientIDLoader/ClientSecretLoader API; resolveClientID/resolveClientSecret methods)_

@@ -1,0 +1,18 @@
+# Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents.
+# Do not edit manually during an active pipeline run.
+# last_updated: 2026-06-18
+# [bugfix-fix-bootstrap-wizard-unreachable] 2026-06-18T20:27Z committed ✓ (ATDD+Dev+Code APPROVED, Kassandra HIGH-1 fixed)
+# [bugfix-fix-bootstrap-wizard-unreachable] 2026-06-18T20:27Z arc42-update → no arch change (bugfix to existing auth gate)
+# [bugfix-fix-bootstrap-wizard-unreachable] 2026-06-18T20:26Z security-review → Kassandra HIGH-1 (fail-open on DB error) FOUND+FIXED in-story; re-verified 8/8
+# [bugfix-fix-bootstrap-wizard-unreachable] 2026-06-18T20:23Z code-review → APPROVED (1 MINOR optional, not blocking) cycle 0
+# [bugfix-fix-bootstrap-wizard-unreachable] 2026-06-18T20:19Z ci-gate → PASS scoped (8/8 unit + HTTP: /admin/bootstrap 200, dashboard→bootstrap funnel; full admin-E2E blocked by Bug C warmup + Bug D label mismatch — documented)
+# [bugfix-fix-bootstrap-wizard-unreachable] 2026-06-18T11:13Z dev-story → done cycle 0 (8/8 green, admin suite 24 pass)
+# [bugfix-fix-bootstrap-wizard-unreachable] 2026-06-18T11:11Z test-review → CLEAN (0 MAJOR, 1 MINOR precondition)
+# [bugfix-fix-bootstrap-wizard-unreachable] 2026-06-18T11:09Z atdd → 3 failing tests (8 total) in auth_bootstrap_gate_test.exs
+# [bugfix-fix-bootstrap-wizard-unreachable] 2026-06-18T11:04Z pipeline started (--bug: bootstrap wizard unreachable on fresh instance)
+story: null
+current_step: null
+completed: []
+cycle_count: 0
+blocked_reason: null
+last_updated: "2026-06-18T20:27Z"

@@ -193,24 +193,30 @@ resource "aws_security_group" "ecs" {
   })
 }
 
-resource "aws_security_group_rule" "ecs_ingress_matrix_from_alb" {
+# go-removal-cleanup: the server container now serves the public HTTP listener on
+# port 4000 (Matrix CS API + /_matrix/media + admin LiveView). The ALB forwards
+# public traffic to server:4000. The previous gateway rule (port 8008 from ALB) and
+# the gRPC-from-ALB rule (port 9000 was never reached via the ALB) were removed.
+resource "aws_security_group_rule" "ecs_ingress_http_from_alb" {
   type                     = "ingress"
   security_group_id        = aws_security_group.ecs.id
-  from_port                = 8008
-  to_port                  = 8008
+  from_port                = 4000
+  to_port                  = 4000
   protocol                 = "tcp"
   source_security_group_id = aws_security_group.alb.id
-  description              = "Allow Matrix API (port 8008) from ALB security group"
+  description              = "Allow server HTTP listener (port 4000: Matrix API + media + admin) from ALB security group"
 }
 
-resource "aws_security_group_rule" "ecs_ingress_grpc_from_alb" {
+# gRPC is internal cluster communication only — never exposed via the ALB.
+# Self-referential rule: server tasks reach each other on port 9000 within the ECS SG.
+resource "aws_security_group_rule" "ecs_ingress_grpc_internal" {
   type                     = "ingress"
   security_group_id        = aws_security_group.ecs.id
   from_port                = 9000
   to_port                  = 9000
   protocol                 = "tcp"
-  source_security_group_id = aws_security_group.alb.id
-  description              = "Allow gRPC Core service (port 9000) from ALB security group"
+  source_security_group_id = aws_security_group.ecs.id
+  description              = "Allow internal gRPC (port 9000) between server ECS tasks"
 }
 
 resource "aws_security_group_rule" "ecs_egress_all" {

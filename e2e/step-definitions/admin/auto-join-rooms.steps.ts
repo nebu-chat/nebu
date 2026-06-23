@@ -4,46 +4,71 @@
  * Story: admin-auto-join-rooms (epic: room-naming-and-default-rooms)
  *
  * Framework: playwright-bdd (importTestFrom: 'fixtures/nebu-fixtures.ts')
+ *
+ * Adapted to the Elixir Admin UI (Nebu.Admin.RoomsLive): the rooms page is a single
+ * LiveView table with ONE inline auto-join toggle per row (role="switch",
+ * aria-label="Auto-join <name>"). There is no separate detail page and no settings
+ * form — the toggle persists immediately via phx-click. Steps therefore scope to a
+ * specific room's switch by its accessible name and assert the live-updated state.
  */
 
 import { Given, When, Then } from '../../fixtures/nebu-fixtures';
 import { expect } from '@playwright/test';
-import type { Page } from '@playwright/test';
+import type { Page, APIRequestContext, Browser } from '@playwright/test';
+import { NEBU_USERS } from '../../fixtures/users';
+import { getApiSession, createRoom } from '../../fixtures/dex-auth';
 
 const ADMIN_BASE_URL = process.env.NEBU_ADMIN_URL ?? 'http://localhost:8008';
 
-// ─── Background steps (reuse existing where available) ───────────────────────
-// "the Nebu stack is running", "bootstrap has been completed", and
-// "the operator is logged in as admin" are defined in bootstrap.steps.ts.
-// Only new steps specific to auto-join are defined here.
+// The suite runs serially (workers: 1, fullyParallel: false), so a module-level
+// "current room" is safe and lets the generic toggle/assert steps target the room
+// named by the preceding navigation step.
+let currentRoom = '';
+
+// The auto-join switch for a specific room — scoped by its accessible name so it is
+// unambiguous even though the list renders one switch per room. `.first()` keeps it
+// deterministic if earlier runs left more than one room with the same display name
+// (each run seeds a fresh "e2e-autojoin"); acting on any one such room is sufficient.
+function roomToggle(page: Page, roomName: string) {
+  return page.getByRole('switch', { name: `Auto-join ${roomName}` }).first();
+}
+
+async function gotoRooms(page: Page): Promise<void> {
+  await page.goto(`${ADMIN_BASE_URL}/admin/rooms`);
+  await page.waitForLoadState('networkidle');
+}
+
+// ─── Background / Given steps ────────────────────────────────────────────────
 
 Given(
   'a room named {string} exists in the system',
-  async ({ page }: { page: Page }, roomName: string) => {
-    // Navigate to the admin rooms list and verify the room appears.
-    await page.goto(`${ADMIN_BASE_URL}/admin/rooms`);
-    await page.waitForLoadState('networkidle');
-    // Use a specific locator targeting table cells, list items, or links.
-    const roomEntry = page.locator('td, li, a').filter({ hasText: roomName }).first();
-    await expect(roomEntry).toBeVisible({ timeout: 15_000 });
+  async (
+    { page, request, browser }: { page: Page; request: APIRequestContext; browser: Browser },
+    roomName: string,
+  ) => {
+    currentRoom = roomName;
+    // Ensure the precondition actually holds: create the room via the Matrix API if the
+    // admin list doesn't already show it (global-setup only seeds a couple of rooms).
+    await gotoRooms(page);
+    if (!(await roomToggle(page, roomName).isVisible().catch(() => false))) {
+      const session = await getApiSession(request, NEBU_USERS.kai, browser);
+      await createRoom(request, session.token, roomName).catch(() => { /* may already exist */ });
+      await gotoRooms(page);
+    }
+    await expect(roomToggle(page, roomName)).toBeVisible({ timeout: 15_000 });
   }
 );
 
 Given(
   'room {string} has auto-join enabled',
   async ({ page }: { page: Page }, roomName: string) => {
-    // Navigate to the room detail and enable auto-join if not already enabled.
-    await page.goto(`${ADMIN_BASE_URL}/admin/rooms`);
-    await page.waitForLoadState('networkidle');
-    // Click into the room detail using a specific locator.
-    await page.locator('td, li, a').filter({ hasText: roomName }).first().click();
-    await page.waitForLoadState('networkidle');
-    const toggle = page.locator('input[name="is_auto_join"]');
-    const isChecked = await toggle.isChecked();
-    if (!isChecked) {
-      await toggle.check();
-      await page.getByRole('button', { name: /save/i }).click();
-      await page.waitForLoadState('networkidle');
+    currentRoom = roomName;
+    await gotoRooms(page);
+    const toggle = roomToggle(page, roomName);
+    await expect(toggle).toBeVisible({ timeout: 15_000 });
+    if (!(await toggle.isChecked())) {
+      await toggle.click(); // phx-click persists immediately
+      await expect(toggle).toBeChecked({ timeout: 10_000 });
     }
   }
 );
@@ -53,30 +78,34 @@ Given(
 When(
   'the operator navigates to the detail page for room {string}',
   async ({ page }: { page: Page }, roomName: string) => {
-    await page.goto(`${ADMIN_BASE_URL}/admin/rooms`);
-    await page.waitForLoadState('networkidle');
-    await page.locator('td, li, a').filter({ hasText: roomName }).first().click();
-    await page.waitForLoadState('networkidle');
+    // RoomsLive is a single list view (no separate detail page); navigating to the
+    // rooms page is sufficient. Remember which room subsequent steps act on.
+    currentRoom = roomName;
+    await gotoRooms(page);
+    await expect(roomToggle(page, roomName)).toBeVisible({ timeout: 15_000 });
   }
 );
 
 When('the operator enables the auto-join toggle', async ({ page }: { page: Page }) => {
-  const toggle = page.locator('input[name="is_auto_join"]');
-  await toggle.check();
+  const toggle = roomToggle(page, currentRoom);
+  if (!(await toggle.isChecked())) {
+    await toggle.click();
+  }
 });
 
 When('the operator disables the auto-join toggle', async ({ page }: { page: Page }) => {
-  const toggle = page.locator('input[name="is_auto_join"]');
-  await toggle.uncheck();
+  const toggle = roomToggle(page, currentRoom);
+  if (await toggle.isChecked()) {
+    await toggle.click();
+  }
 });
 
 When(
   'the operator submits the room settings form',
   async ({ page }: { page: Page }) => {
-    // Find the form that contains the auto-join toggle and click its Save button.
-    const form = page.locator('form').filter({ has: page.locator('input[name="is_auto_join"]') });
-    await form.getByRole('button', { name: /save/i }).click();
-    await page.waitForLoadState('networkidle');
+    // No-op for the LiveView UI: the toggle persisted on click (phx-click). Just let
+    // the DOM-diff settle so the subsequent assertion reads the committed state.
+    await page.waitForTimeout(300);
   }
 );
 
@@ -85,35 +114,29 @@ When(
 Then(
   'the page shows the auto-join toggle as enabled',
   async ({ page }: { page: Page }) => {
-    const toggle = page.locator('input[name="is_auto_join"]');
-    await expect(toggle).toBeChecked();
+    await expect(roomToggle(page, currentRoom)).toBeChecked({ timeout: 10_000 });
   }
 );
 
 Then(
   'the page shows the auto-join toggle as disabled',
   async ({ page }: { page: Page }) => {
-    const toggle = page.locator('input[name="is_auto_join"]');
-    await expect(toggle).not.toBeChecked();
+    await expect(roomToggle(page, currentRoom)).not.toBeChecked({ timeout: 10_000 });
   }
 );
 
 Then(
   're-loading the room detail page still shows the auto-join toggle as enabled',
   async ({ page }: { page: Page }) => {
-    await page.reload();
-    await page.waitForLoadState('networkidle');
-    const toggle = page.locator('input[name="is_auto_join"]');
-    await expect(toggle).toBeChecked();
+    await gotoRooms(page);
+    await expect(roomToggle(page, currentRoom)).toBeChecked({ timeout: 10_000 });
   }
 );
 
 Then(
   're-loading the room detail page still shows the auto-join toggle as disabled',
   async ({ page }: { page: Page }) => {
-    await page.reload();
-    await page.waitForLoadState('networkidle');
-    const toggle = page.locator('input[name="is_auto_join"]');
-    await expect(toggle).not.toBeChecked();
+    await gotoRooms(page);
+    await expect(roomToggle(page, currentRoom)).not.toBeChecked({ timeout: 10_000 });
   }
 );

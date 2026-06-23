@@ -9,7 +9,6 @@
 #
 # SHA pin reference:
 #   actions/checkout      v4.1.1  → v6
-#   actions/setup-go      v5.0.1  → v6
 #   erlef/setup-beam      v1.16.0 → 61e01a43a562a89bfc54c7f9a378ff67b03e4a21
 #   actions/cache         v4.0.2  → 0c45773b623bea8c8e75f6c82b208c3cf94ea4f9
 #   actions/upload-artifact v7.0.1 → 043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -39,41 +38,23 @@ concurrency:
 
 env:
   GO_VERSION: "1.26"
+  # go-removal-cleanup (full-elixir-stack): GO_VERSION removed with the Go layer.
   ELIXIR_VERSION: "1.19"
   OTP_VERSION: "27"
   GITLEAKS_VERSION: "8.24.3"
 
 jobs:
 
-  lint-go:
+  # go-removal-cleanup (full-elixir-stack) AC1: fail if any *.go file reappears.
+  # lint-go and test-unit-go were removed along with the Go layer.
+  no-go-files:
     runs-on: ubuntu-22.04
-    timeout-minutes: 30
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v6 # v4.1.1
-      - name: Set up Go
-        uses: actions/setup-go@v6 # v5.0.1
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
-      - name: Download vendored JS assets
-        run: make download-vendor
-      - name: Run go vet
-        run: cd gateway && go vet ./...
-
-  test-unit-go:
-    runs-on: ubuntu-22.04
-    timeout-minutes: 30
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6 # v4.1.1
-      - name: Set up Go
-        uses: actions/setup-go@v6 # v5.0.1
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
-      - name: Run Go unit tests
-        run: make test-unit-go
+      - name: Assert no Go source files remain
+        run: bash test/smoke/no-go-files.sh
 
   test-unit-elixir:
     runs-on: ubuntu-22.04

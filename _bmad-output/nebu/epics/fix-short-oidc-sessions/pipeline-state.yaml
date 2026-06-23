@@ -1,4 +1,39 @@
-# last_updated: 2026-05-27
+# last_updated: 2026-06-23
+# [e2e-session-refresh-suites] 2026-06-23T09:28Z committed ✓ fa34a684 (TTL seam + RLS migration 000007 + 3 e2e suites; admin refresh + refresh-mode LIVE green; matrix browser deferred — Element client; Kassandra CLEAN)
+# [e2e-session-refresh-suites] 2026-06-23T09:26Z code-review CLEAN (1 optional MINOR fixed: integ TTL assertion); security-review Kassandra CLEAN (enum-as-selector; defaults unchanged; operator-only seam)
+# [e2e-session-refresh-suites] 2026-06-23T09:14Z dev+ci → TTL seam (unit 790 green) + RLS migration 000007 + 3 e2e suites; LIVE: admin refresh 2/2 PASS, refresh-mode persist PASS (RLS fix), matrix re-pended (Element v1.12.15 doesn't request refresh tokens)
+# [e2e-session-refresh-suites] 2026-06-23T08:35Z test-review → 1 MAJOR + 3 MINOR FIXED in story (seam covers /v3/refresh re-mint @429; soft-logout=revoke; admin wait=session-TTL knob; bootstrap wording softened)
+# [e2e-session-refresh-suites] 2026-06-23T08:31Z create-story → e2e-session-refresh-suites.md (TTL seam + 3 suites); atdd N/A (feature files already RED)
+# [e2e-session-refresh-suites] 2026-06-23T08:30Z pipeline started — complete 3 pending browser e2e suites
+# [oidc-refresh-mode-config] 2026-06-22T22:45Z committed ✓ (configurable refresh mode; Kassandra CLEAN)
+# [oidc-refresh-mode-config] 2026-06-22T22:42Z security-review → Kassandra CLEAN (0 findings; enum-as-selector, admin default online = more conservative)
+# [oidc-refresh-mode-config] 2026-06-22T22:40Z code-review → CLEAN (2 MINOR fixed cycle 1: form id, dead clause); unit 777 green
+# [oidc-refresh-mode-config] 2026-06-22T22:40Z ux-gate → CLEAN (no a11y blockers; labels+aria+native select)
+# [oidc-refresh-mode-config] 2026-06-22T22:35Z dev+ci → done: scope readers + de-forced admin offline_access + bootstrap/ConfigLive selectors+hints+enum-validate; unit 777 green
+# [oidc-refresh-mode-config] 2026-06-22T22:29Z test-review → CLEAN (0 MAJOR, 1 MINOR select markup, 1 INFO enum-validate)
+# [oidc-refresh-mode-config] 2026-06-22T22:27Z atdd → RED (9 failing: matrix/admin scope, bootstrap promote, ConfigLive+Dex hint; public-surface tests)
+# [oidc-refresh-mode-config] 2026-06-22T22:19Z create-story → configurable refresh mode (bootstrap + runtime); Matrix default offline, Admin default online
+# [admin-oidc-session-refresh] 2026-06-22T14:03Z committed ✓ f8469ae2 (admin silent refresh; Kassandra CLEAN). Both epic stories done.
+# [admin-oidc-session-refresh] 2026-06-22T13:59Z security-review → Kassandra CLEAN (0 findings; admin re-gates group on every refresh — stronger than before)
+# [admin-oidc-session-refresh] 2026-06-22T13:56Z code-review → 2 MINOR (non-blocking, accepted as follow-ups: AC4 e2e impl, refresh-storm guard)
+# [admin-oidc-session-refresh] 2026-06-22T13:49Z dev+ci → done: refresh in fetch_current_user, 2 seams, SecretBox reuse; unit 763 green (0 failures)
+# [admin-oidc-session-refresh] 2026-06-22T13:38Z test-review → CLEAN (0 MAJOR), 6 ACs covered
+# [admin-oidc-session-refresh] 2026-06-22T13:36Z atdd → RED (6 failing admin refresh tests + e2e stub; 2 guardrails green)
+# [admin-oidc-session-refresh] 2026-06-22T13:30Z create-story → admin-oidc-session-refresh.md (ports Go 9-14 to Elixir admin)
+# [oidc-session-refresh] 2026-06-22T13:28Z committed ✓ 24b2816b (Elixir port; 2 cycles + Kassandra HIGH fixed; integ 22/0)
+# [oidc-session-refresh] 2026-06-22T13:22Z security-review → Kassandra cycle 2 CLEAN (HIGH #1 RESOLVED, LOW-only: RLS + sweeper + new INFO admin-config-rotation follow-up)
+# [oidc-session-refresh] 2026-06-22T13:19Z integration VERIFIED on fresh DB: matrix_sso_test + login_refresh_test = 22 tests 0 failures (the cycle-2 '500' was stale-volume PII artifact)
+# [oidc-session-refresh] 2026-06-22T13:18Z dev-story cycle 2 → done (deactivate_user deletes matrix_sessions + opaque is_active recheck; unit 754 green). Running fresh-DB login integration check.
+# [oidc-session-refresh] 2026-06-22T13:02Z security-review → Kassandra HIGH #1 (deactivate_user opaque-session bypass) → cycle 2 fix
+# [oidc-session-refresh] 2026-06-22T12:56Z code-review → CLEAN (cycle 1: MINOR-1/2/3 fixed, MINOR-2 closes deactivation gap; unit 754 green, store integ 17/17)
+# [oidc-session-refresh] 2026-06-22T12:47Z code-review → 4 MINOR → cycle 1 (fix MINOR-1/2/3; MINOR-2 security-relevant)
+# [oidc-session-refresh] 2026-06-22T12:43Z ci-gate → ✓ build+unit-elixir (754 green, warnings-as-errors); 19 rel. integration green (dev); full integ/e2e deferred (stale go ci-script + pre-existing failures)
+# [oidc-session-refresh] 2026-06-22T12:42Z dev-story → done (cycle 0): store+secret_box new, 6 files modified; unit 754 green, 19 integration green
+# [oidc-session-refresh] 2026-06-22T12:23Z dev-story → started (cycle 0); spaces s6 committed (HEAD 1f5ce6f2)
+# [oidc-session-refresh] 2026-06-22T11:42Z test-review → CLEAN (0 MAJOR, 2 MINOR) — HOLD before dev: concurrent spaces pipeline
+# [oidc-session-refresh] 2026-06-22T11:40Z atdd → RED (store + login_refresh :integration + e2e AC8; unit suite 753 green)
+# [oidc-session-refresh] 2026-06-22T11:33Z oracle-gate → spec context carried over (Go review, wire-identical)
+# [oidc-session-refresh] 2026-06-22T11:29Z ELIXIR RE-TARGET pipeline started (Go fix never ported; +admin story)
 # [oidc-session-refresh] 2026-05-27T16:25Z committed ✓ (ATDD+Code CLEAN 2 cycles, Kassandra CLEAN)
 # [oidc-session-refresh] 2026-05-27T16:20Z arc42-update → done (06-runtime, 08-concepts, 09-decisions)
 # [oidc-session-refresh] 2026-05-27T16:05Z security-review → Kassandra CLEAN (0 CRITICAL/HIGH, 3 LOW advisory)
@@ -19,7 +54,7 @@
 epic: fix-short-oidc-sessions
 branch: bugfix/fix-short-oidc-sessions
 created: 2026-05-27
-last_updated: "2026-05-27T09:56Z"
+last_updated: "2026-06-23T09:28Z"
 
 stories:
   - slug: oidc-session-refresh

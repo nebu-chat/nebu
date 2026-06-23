@@ -29,12 +29,14 @@ import { Given, When, Then } from '../../fixtures/nebu-fixtures';
 import { expect } from '@playwright/test';
 import type { Page, APIRequestContext, Browser } from '@playwright/test';
 import { getActualRoomName, roomIdByScenario } from '../common/room-setup.steps';
+import { dismissKeySetupDialog } from '../common/navigation.steps';
 import { getApiSession } from '../../fixtures/dex-auth';
 import { NEBU_USERS } from '../../fixtures/users';
 import type { Response } from '@playwright/test';
 
 
 const MATRIX_BASE = process.env.NEBU_MATRIX_BASE ?? 'http://localhost:8008';
+const ELEMENT_URL = process.env.NEBU_ELEMENT_URL ?? 'http://localhost:7070';
 
 // Module-level promise for the /relations capture pattern.
 // Registered BEFORE the panel-open action via "alex captures the next /relations response",
@@ -90,41 +92,27 @@ function getThreadPanel(page: Page) {
 When(
   'marie navigates to room {string} in the second context',
   async ({ secondPage }: { secondPage: Page }, roomName: string) => {
-    const actualName = getActualRoomName(roomName);
-
-    // Strategy 1 (Element Web 1.12.15+): aria-label
-    const byAriaLabel = secondPage.locator(
-      `[aria-label="Open room ${actualName}"], [aria-label="Open room ${actualName} invitation."]`
-    );
-    // Strategy 2: title attribute
-    const byTitle = secondPage.locator(`.mx_RoomTile[title="${actualName}"]`)
-      .or(secondPage.getByTestId('room-list').locator(`[title="${actualName}"]`));
-    // Strategy 3: text in left panel
-    const byText = secondPage.locator('.mx_LeftPanel').getByText(actualName, { exact: true });
-
-    if (await byAriaLabel.first().isVisible({ timeout: 10_000 }).catch(() => false)) {
-      await byAriaLabel.first().click();
-    } else if (await byTitle.first().isVisible({ timeout: 5_000 }).catch(() => false)) {
-      await byTitle.first().click();
-    } else {
-      await expect(byText.first()).toBeVisible({ timeout: 20_000 });
-      await byText.first().click();
+    // Navigate by roomId direct-URL (like the main nav step's Strategy 0) instead of a
+    // sidebar lookup by name — the sidebar arrives via marie's long-poll /sync and racing
+    // it makes the test flaky. The roomId is known from the Background setup.
+    const known = roomIdByScenario.get(roomName);
+    if (!known) {
+      throw new Error(`Room "${roomName}" not in roomIdByScenario — Background setup must run first`);
     }
 
-    // Accept invite if shown — dialog can take several seconds to render after tile click
-    const acceptBtn = secondPage.getByRole('button', { name: /^accept$|^join/i });
+    const acceptBtn = secondPage.getByRole('button', { name: /^accept$|^join the discussion$/i });
     const roomView = secondPage.locator('.mx_RoomView_body, .mx_BasicMessageComposer_input').first();
 
-    // Wait for either the room view (already joined) or the accept button (invitation)
+    await secondPage.goto(`${ELEMENT_URL}/#/room/${encodeURIComponent(known.roomId)}`);
+    await dismissKeySetupDialog(secondPage);
     await Promise.race([
-      roomView.waitFor({ state: 'visible', timeout: 10_000 }).catch(() => null),
-      acceptBtn.first().waitFor({ state: 'visible', timeout: 10_000 }).catch(() => null),
+      roomView.waitFor({ state: 'visible', timeout: 30_000 }).catch(() => null),
+      acceptBtn.first().waitFor({ state: 'visible', timeout: 30_000 }).catch(() => null),
     ]);
-
+    await dismissKeySetupDialog(secondPage);
     if (await acceptBtn.first().isVisible({ timeout: 500 }).catch(() => false)) {
       await acceptBtn.first().click();
     }
-
     await roomView.waitFor({ state: 'visible', timeout: 20_000 });
   }
 );

@@ -2,29 +2,42 @@
 
 ## Docker Compose Stack (Development + Production)
 
-All builds run via Docker containers - no local Go, Elixir, or buf installation required.
+All builds run via Docker containers - no local Elixir or build-tool installation required.
 
 ```yaml
 # Simplified docker-compose.yml topology
 services:
-  gateway:        # Go binary (port 8008: Matrix API + Admin; port 8080: metrics)
-  core:           # Elixir OTP release (port 4000: health; port 9000: gRPC)
+  server:         # The single Elixir/OTP release (port 4000: health + Matrix C-S API incl.
+                  #   /_matrix/media/v3/* + Admin LiveView /admin/*). This is the whole application.
   postgres:       # PostgreSQL 16 (port 5432)
   dex:            # OIDC provider for development (port 5556)
   minio:          # MinIO S3-compatible object store (port 9000: API; port 9001: console) - Story 12.1
   createbuckets:  # Init container: creates nebu-media bucket + nebu-app IAM user+policy - Story 12.1/12.3
-  media:          # Go Media Gateway (port 8009: upload/download) - Story 12.3
+  # gateway:      # REMOVED (ADR-021): the Go gateway is gone — the Elixir server IS the application.
+  # media:        # REMOVED (ADR-021): the Go media gateway is gone — the server serves media in-process.
 ```
+
+**One container, all surfaces (ADR-019/020/021):** There is no Go container. The single Elixir `server`
+service serves the Matrix C-S API, the Matrix media API (`/_matrix/media/v3/*` and
+`/_matrix/client/v1/media/*`), and the Phoenix LiveView Admin UI (`/admin/*`) on the same Bandit port
+4000. `server` is wired with the MinIO Docker secrets (`NEBU_MINIO_ACCESS_KEY_FILE` /
+`NEBU_MINIO_SECRET_KEY_FILE`), the `NEBU_MINIO_*` env vars, and `depends_on` on `minio` (healthy) and
+`createbuckets` (completed). ExAws config in `server/config/runtime.exs` reads the file-based MinIO
+credentials. Media access control is a local `room_members` SQL call inside the app — no cross-process
+hop.
+
+**Admin login owned in Elixir:** The admin OIDC Authorization-Code + PKCE login lives in
+`Nebu.Admin.Auth` (`/admin/login/start`, `/admin/callback`, `/admin/logout`). The admin OAuth client
+is configured via `NEBU_ADMIN_OIDC_CLIENT_ID` / `..._CLIENT_SECRET[_FILE]` / `..._REDIRECT_URI` (fixed
+server-controlled redirect target). The session is the signed Phoenix `secret_key_base` cookie
+(http_only, secure, SameSite=Lax), capped at min(idToken.exp, now+8h).
 
 **Port map:**
 
 | Service | External Port | Purpose |
 |---|---|---|
-| Go Gateway | 8008 | Matrix Client-Server API + Admin UI + Admin API |
-| Go Gateway | 8080 (dev) / 8443 (TLS) | Health, Readiness, Prometheus metrics |
-| Go Media Gateway | 8009 | Matrix Media API (upload + download) |
-| Elixir Core | 4000 | Health endpoint (internal Docker network only) |
-| Elixir Core | 9000 | gRPC CoreService (internal Docker network only) |
+| Elixir application (`server`) | 4000 | Matrix C-S API + `/_matrix/media/v3/*` + Admin LiveView `/admin/*` + health/info |
+| Elixir application (`server`) | 9000 | Vestigial gRPC listener (nothing dials it; amended ADR-005) — internal network only |
 | PostgreSQL | 5432 | Database (internal Docker network only) |
 | Dex (dev) | 5556 | OIDC provider (development only) |
 | MinIO S3 API | 9000 | Object storage API (S3-compatible) - local dev only |
@@ -34,59 +47,52 @@ services:
 
 ```
 External boundary (exposed to clients):
-  Internet → [TLS 1.3] → Go Gateway     (Port 8008)
-  Internet → [TLS 1.3] → Go Media GW    (Port 8008 or separate)
+  Internet → [TLS 1.3] → Elixir application (Port 4000)
 
 Internal boundary (Docker network, not exposed):
-  Go Gateway  → [gRPC]          → Elixir Core  (Port 9000)
-  Go Media GW → [gRPC]          → Elixir Core  (Port 9000)
-  Go Gateway  → [HTTP PSK]      → /internal/nodes/* (Node Registry)
-  All services → [TLS]          → PostgreSQL   (Port 5432)
+  Elixir application → [TLS] → PostgreSQL  (Port 5432)
+  Elixir application → [S3/TLS] → MinIO    (Port 9000)
+  (HTTP surface → domain logic is an in-process function call within the one app — no network hop)
 ```
 
 ## Makefile Targets
 
 ```makefile
 make setup              # Generate .secrets/internal_secret, MinIO credentials, and dev credentials
-make dev                # docker compose up (gateway, core, postgres, dex)
+make dev                # docker compose up (server, postgres, dex, minio)
 make dev-reset-db       # Drop + recreate the database, apply the single seed migration (WARNING: destroys all data)
-make build-gateway      # Docker multi-stage build for Go gateway
-make build-core         # Docker multi-stage build for Elixir core
-make test-unit-go       # go test ./... in container
+make build-server       # Docker multi-stage build for the Elixir application
 make test-unit-elixir   # mix test in container
 make test-integration   # Full Docker Compose stack + Godog Gherkin tests
-make proto              # buf generate (in container)
-make gen-api            # oapi-codegen: openapi.yaml → api_gen.go
 ```
 
 ## Database Migration Strategy (Story 13-14)
 
 ### Squashed Seed Migration
 
-The gateway ships a **single seed migration** (`gateway/migrations/000001_init.up.sql`) that represents the complete current schema in its final state. The previous 49 incremental migration files (000002–000049) have been deleted.
+The application ships a **single seed migration** (raw SQL, e.g. `000001_init.up.sql`) that represents the complete current schema in its final state. The previous 49 incremental migration files (000002–000049) have been deleted. Migrations are applied by `Nebu.Release.migrate/0` (raw SQL run by the release before the app boots, ADR-018) — there is no golang-migrate and no ORM.
 
-**Rationale:** Incremental migrations accumulated role-specific ownership transfers (`ALTER TABLE … OWNER TO nebu_migrate`) and backward-compatibility grants (`GRANT EXECUTE … TO nebu`) that required the `nebu_migrate` and `nebu` PostgreSQL roles to exist before migrations ran. On managed database services (Stackit PostgresFlex, AWS Aurora Serverless v2) where the gateway cannot run `CREATE ROLE` DDL, this caused fresh deployments to fail at migration 24.
+**Rationale:** Incremental migrations accumulated role-specific ownership transfers (`ALTER TABLE … OWNER TO nebu_migrate`) and backward-compatibility grants (`GRANT EXECUTE … TO nebu`) that required the `nebu_migrate` and `nebu` PostgreSQL roles to exist before migrations ran. On managed database services (Stackit PostgresFlex, AWS Aurora Serverless v2) where the runtime role cannot run `CREATE ROLE` DDL, this caused fresh deployments to fail at migration 24.
 
 **Single-role model:** The squashed migration is designed to run as `nebu_app` (the runtime DB user). All objects are created by `nebu_app`; no ownership transfers or legacy grants are needed.
 
-**Key characteristics of `000001_init.up.sql`:**
+**Key characteristics of the seed migration:**
 
 - Contains all 26+ tables, indexes, triggers, functions, and RLS policies in final state
 - No references to `nebu_migrate` in ownership transfers or function grants
 - No `GRANT EXECUTE … TO nebu` (legacy backward-compat grants removed)
-- Uses `CREATE INDEX IF NOT EXISTS` instead of `CREATE INDEX CONCURRENTLY` - golang-migrate wraps each file in a transaction, and `CONCURRENTLY` cannot run inside a transaction block
-- `NEBU_DB_URL_MIGRATE` is still accepted for backward compatibility but is no longer required; `NEBU_DB_URL` (pointing to `nebu_app`) is used for both migrations and runtime on fresh deployments
+- `NEBU_DB_URL` (pointing to `nebu_app`) is used for both migrations and runtime on fresh deployments; `NEBU_DB_URL_MIGRATE` is still accepted for backward compatibility but is no longer required
 
-**`000001_init.down.sql`** drops all tables and functions in reverse dependency order. Extensions (`pgcrypto`, `uuid-ossp`) are intentionally NOT dropped - they may be shared at the PostgreSQL server level.
+**The down migration** drops all tables and functions in reverse dependency order. Extensions (`pgcrypto`, `uuid-ossp`) are intentionally NOT dropped - they may be shared at the PostgreSQL server level.
 
 **Local dev reset:**
 
 ```bash
-make dev-reset-db   # docker compose down --volumes → recreate postgres → apply migration 000001 → start gateway
+make dev-reset-db   # docker compose down --volumes → recreate postgres → start server (runs migration on boot)
                     # WARNING: destroys all local data
 ```
 
-After reset the gateway logs `migrations complete` and `GET /ready` returns `{"migrations":{"status":"UP","version":1}}`.
+After reset, `Nebu.Release.migrate/0` runs at boot and `GET /ready` reflects the applied schema version.
 
 ### Stackit PostgresFlex Role Provisioning
 
@@ -100,33 +106,25 @@ The Stackit OpenTofu module (`deploy/tofu/examples/stackit/database.tf`) provisi
 
 On fresh Stackit deployments, only `nebu_app` is used. The `nebu_migrate` and `nebu` users are provisioned to avoid breaking existing environments that may reference them, but they do not connect at runtime.
 
-## Multi-Stage Dockerfiles
+## Multi-Stage Dockerfile
 
-**Go Gateway pattern:**
-```dockerfile
-FROM golang:1.26-alpine AS builder
-WORKDIR /workspace
-RUN go build -o /gateway ./cmd/gateway
+There is a single image — the Elixir/OTP release. No Go build stage exists anymore (ADR-021).
 
-FROM gcr.io/distroless/static AS runtime
-COPY --from=builder /gateway /gateway
-ENTRYPOINT ["/gateway"]
-```
-
-**Elixir Core pattern:**
+**Elixir application pattern:**
 ```dockerfile
 FROM elixir:1.19-alpine AS builder
 RUN MIX_ENV=prod mix release
 
 FROM alpine:3.23 AS runtime
 COPY --from=builder /app/_build/prod/rel/nebu ./
+# Nebu.Release.migrate/0 runs raw-SQL migrations on boot, then the supervisor tree starts.
 ENTRYPOINT ["./bin/nebu", "start"]
 ```
 
 ## Health Checks
 
 ```yaml
-core:
+server:
   healthcheck:
     test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
     interval: 10s
@@ -136,8 +134,10 @@ core:
   restart: always
 ```
 
-Gateway readiness (`GET :8080/ready`) reflects the GRÜN/GELB/ROT core status derived from
-the gRPC stream health. Docker Compose uses liveness (`GET :4000/health`).
+Docker Compose uses liveness (`GET :4000/health`). Because everything runs in one node, there is no
+gateway↔core stream-health signal to derive readiness from — the former GRÜN/GELB/ROT status applied
+only to the removed gateway↔core gRPC boundary (ADR-021). `GET :4000/health` reports node and cluster
+status (see Server Clustering).
 
 ## Secret Management
 
@@ -183,13 +183,22 @@ _Source: `_bmad-output/planning-artifacts/architecture.md`, §Infrastructure & D
 
 Story 13-1 introduces a production-grade Infrastructure-as-Code layer under `deploy/`. Three target platforms are supported - see [ADR-014](adr/ADR-014-deployment-strategy-iac.md) for the full decision rationale.
 
+> **IaC predates ADR-021 — updating to single-container topology is tracked follow-up.** The OpenTofu
+> modules and Helm chart described below were authored when Nebu was a two-container deployment
+> (`gateway` + `core`). They still provision a `gateway` service/deployment and a separate
+> `media` service. Those resources now map onto the **single Elixir application container** (the
+> `server` image), which serves the Matrix API, media, and Admin UI on port 4000; references to a "Go
+> gateway", a separate "media gateway", port 8008, and the gateway↔core gRPC hop are historical and
+> will be collapsed when the IaC is regenerated for the consolidated topology. Read the platform
+> sections below with that mapping in mind.
+
 ### deploy/ Directory Structure
 
 ```
 deploy/
   tofu/
     modules/
-      nebu-core/      # Shared variables, validations, outputs (no provider resources)
+      nebu-shared/    # Shared variables, validations, outputs (no provider resources)
       nebu-aws/       # AWS: ECS Fargate + RDS + S3 + ACM (Story 13-2)
       nebu-stackit/   # STACKIT: VMs + Docker Compose + ALB + DBaaS (Story 13-3)
       nebu-k8s/       # Kubernetes: Helm Release wrapper (Story 13-4)
@@ -217,9 +226,9 @@ make test-iac-validate   # tofu fmt -check + tofu validate (all examples, no clo
 
 Equivalent CI gate: `validate-iac` job in `.gitlab-ci.yml` (runs on every push touching `deploy/**`).
 
-### Shared Module: nebu-core
+### Shared Module: nebu-shared
 
-`deploy/tofu/modules/nebu-core/` defines shared input variables consumed by all platform modules: `nebu_version`, `domain_name`, `admin_email`, `postgres_db_name`, `image_registry`. All variables carry validation constraints (non-empty checks, semver regex for `nebu_version`).
+`deploy/tofu/modules/nebu-shared/` defines shared input variables consumed by all platform modules: `nebu_version`, `domain_name`, `admin_email`, `postgres_db_name`, `image_registry`. All variables carry validation constraints (non-empty checks, semver regex for `nebu_version`).
 
 ### AWS Networking Module (nebu-aws)
 
@@ -260,9 +269,9 @@ Key variable: `acm_certificate_arn` - required for `tofu apply`; empty string is
 
 | Secret path | Purpose |
 |---|---|
-| `nebu/{env}/db_url` | Full PostgreSQL DSN (used by gateway + core) |
+| `nebu/{env}/db_url` | Full PostgreSQL DSN (used by gateway + server) |
 | `nebu/{env}/db_password` | RDS master password (plain string; kept separate for RDS rotation support) |
-| `nebu/{env}/internal_secret` | PSK for gateway ↔ core node registration (ADR-008) |
+| `nebu/{env}/internal_secret` | PSK for gateway ↔ server node registration (ADR-008) |
 | `nebu/{env}/oidc_client_secret` | OIDC client secret for identity provider registration |
 | `nebu/{env}/oidc_issuer` | OIDC issuer URL |
 | `nebu/{env}/release_cookie` | Erlang distribution cookie for OTP cluster authentication |
@@ -275,11 +284,11 @@ All `aws_secretsmanager_secret_version` resources are provisioned with `PLACEHOL
 
 - `aws_ecs_cluster` - Fargate cluster with Container Insights enabled (`"nebu-${environment}"`)
 - `aws_iam_role.ecs_task_execution` - Task execution role with `AmazonECSTaskExecutionRolePolicy` + inline policy for `secretsmanager:GetSecretValue` scoped to `arn:aws:secretsmanager:*:*:secret:nebu/${environment}/*` (least-privilege; no wildcard resource)
-- `aws_cloudwatch_log_group` - `/ecs/nebu-{env}-gateway` and `/ecs/nebu-{env}-core`, 30-day retention
+- `aws_cloudwatch_log_group` - `/ecs/nebu-{env}-gateway` and `/ecs/nebu-{env}-server`, 30-day retention
 - `aws_ecs_task_definition.gateway` - image `{registry}/nebu-gateway:{version}`, CPU 256 / Memory 512, port 8008, health check `GET /_matrix/client/v3/versions`, `secrets` field references individual Secrets Manager ARNs for `NEBU_DB_URL`, `NEBU_OIDC_ISSUER`, `NEBU_OIDC_CLIENT_SECRET`, `NEBU_INTERNAL_SECRET`
-- `aws_ecs_task_definition.core` - image `{registry}/nebu-core:{version}`, CPU 256 / Memory 512, port 9000, health check `GET /health`, `secrets` field references for `DATABASE_URL`, `RELEASE_COOKIE`, `NEBU_INTERNAL_SECRET`
+- `aws_ecs_task_definition.server` - image `{registry}/nebu-server:{version}`, CPU 256 / Memory 512, port 9000, health check `GET /health`, `secrets` field references for `DATABASE_URL`, `RELEASE_COOKIE`, `NEBU_INTERNAL_SECRET`
 - `aws_ecs_service.gateway` - Fargate service in private subnets, attached to the ALB target group (port 8008), `lifecycle { ignore_changes = [task_definition, desired_count] }` for GitOps rolling deployments
-- `aws_ecs_service.core` - Fargate service in private subnets (no ALB attachment; accessed by gateway via gRPC on port 9000 within the VPC)
+- `aws_ecs_service.server` - Fargate service in private subnets (no ALB attachment; accessed by gateway via gRPC on port 9000 within the VPC)
 
 **Security invariants:** No `environment` field used for secrets in any task definition - all sensitive values are injected exclusively via the `secrets` field with Secrets Manager ARNs. IAM permissions are scoped to the namespace `nebu/${environment}/*` only.
 
@@ -300,7 +309,7 @@ aws_lb (ALB, internet-facing)
 aws_ecs_service.gateway (private subnets, ECS Fargate, no public IP)
   │ gRPC port 9000 (VPC-internal, ECS SG)
   ▼
-aws_ecs_service.core (private subnets, ECS Fargate, no public IP)
+aws_ecs_service.server (private subnets, ECS Fargate, no public IP)
   │ port 5432 (private subnets, RDS SG)
   ▼
 aws_rds_cluster (Aurora PostgreSQL 16, Serverless v2, private subnets)
@@ -309,7 +318,7 @@ aws_rds_cluster (Aurora PostgreSQL 16, Serverless v2, private subnets)
 
 Secrets Manager (nebu/{env}/*) ──► ECS task execution role (secretsmanager:GetSecretValue)
                                         │
-                              injected into gateway + core containers
+                              injected into gateway + server containers
                               via ECS secrets field at task start
 ```
 
@@ -399,7 +408,7 @@ NEBU_TRUSTED_PROXY         — For X-Forwarded-* header handling via nginx
 
 **S3 Client Configuration (media/cmd/media/main.go):**
 
-The media gateway uses the MinIO Go client with path-style bucket lookup (`BucketLookupPath: minio.BucketLookupPath`) for StackIT Object Store compatibility. This translates bucket references to path-style S3 URLs: `https://endpoint/bucket/key` instead of virtual-hosted URLs.
+Media storage uses path-style bucket lookup for StackIT Object Store compatibility, translating bucket references to path-style S3 URLs (`https://endpoint/bucket/key`) instead of virtual-hosted URLs. (In the consolidated topology this is `Nebu.Media.Storage` via ExAws/Finch inside the single application; the historical IaC variables still describe a separate media service.)
 
 **nginx Routing (when `enable_media_gateway = true`):**
 
@@ -429,13 +438,13 @@ The Stackit deployment supports two OIDC profiles selected via `var.oidc_mode`:
 - `effective_oidc_issuer` is auto-derived as `http://<server_name>:5556/dex`; the gateway resolves Dex via Docker hairpin NAT (Linux SNAT/masquerade - no extra routing required).
 - A conditional SG rule `inbound_dex` opens port 5556 to `var.dex_allowed_cidr` (default `0.0.0.0/0` for demos; restrict to VPN/developer CIDR in shared environments).
 - `var.dex_static_password_hash` (required when `oidc_mode = "dex"`) must be a bcrypt hash (`$2a$`/`$2b$`/`$2y$` prefix). Generate with: `htpasswd -bnBC 12 '' 'yourpassword' | tr -d ':' | sed 's/$2y/$2a/'`.
-- Expected `docker compose ps` output: `dex` (healthy), `core` (healthy), `gateway` (healthy).
+- Expected `docker compose ps` output: `dex` (healthy), `server` (healthy), `gateway` (healthy).
 
 **`"external"` profile:**
 - No bundled IdP is deployed.
 - `var.oidc_issuer` (required, non-empty) is passed directly into `.env` as `NEBU_OIDC_ISSUER`.
 - `var.oidc_client_secret` must match the secret registered in the external OIDC provider.
-- Expected `docker compose ps` output: `core` (healthy), `gateway` (healthy).
+- Expected `docker compose ps` output: `server` (healthy), `gateway` (healthy).
 
 **Keycloak is fully removed in both profiles.** `stackit_postgresflex_user.keycloak` and `stackit_postgresflex_database.keycloak` no longer exist. There are no Keycloak-specific docker-compose services or secrets.
 
@@ -492,7 +501,7 @@ A new `deploy/tofu/examples/aws/outputs.tf` exports `dns_name = module.nebu_aws.
    - `.secrets/internal_secret` (mode `0600`, quoted scalar - no trailing newline)
    - `.env` (mode `0600`) - all runtime secrets injected from OpenTofu variables, including `NEBU_DB_URL` and `NEBU_DB_URL_MIGRATE` pointing to the PostgresFlex managed instance
    - `/opt/nebu/dex/config.yaml` (mode `0600`, `oidc_mode = "dex"` only) - Dex static configuration
-   - `docker-compose.yml` (mode `0640`) - two or three services: `core`, `gateway`, and conditionally `dex` (when `oidc_mode = "dex"`). No `postgres` service (managed PostgresFlex); no `keycloak` service.
+   - `docker-compose.yml` (mode `0640`) - two or three services: `server`, `gateway`, and conditionally `dex` (when `oidc_mode = "dex"`). No `postgres` service (managed PostgresFlex); no `keycloak` service.
 4. Installs `/etc/systemd/system/nebu.service` - `Type=simple`, no `-d` flag; systemd owns the process lifecycle with `Restart=on-failure RestartSec=10`
 5. Starts Docker (`systemctl start docker.service && sleep 2`) before starting `nebu.service`
 
@@ -653,16 +662,16 @@ The Element location includes WebSocket upgrade headers (`Upgrade`, `Connection`
 
 | Resource | Name pattern | Conditional | Purpose |
 |---|---|---|---|
-| Deployment | `{release}-nebu-gateway` | always | Go gateway; loads ConfigMap + optional Secret via `envFrom` |
-| Deployment | `{release}-nebu-core` | always | Elixir/OTP core |
+| Deployment | `{release}-nebu-gateway` | always | Application pod (historical name; runs the single Elixir release); loads ConfigMap + optional Secret via `envFrom` |
+| Deployment | `{release}-nebu-server` | always | Elixir/OTP server |
 | Service (ClusterIP) | `{release}-nebu-gateway` | always | Port 8008 → gateway pods |
-| Service (ClusterIP) | `{release}-nebu-core` | always | Port 9000 (gRPC) + 4000 (HTTP) → core pods |
+| Service (ClusterIP) | `{release}-nebu-server` | always | Port 9000 (gRPC) + 4000 (HTTP) → server pods |
 | ConfigMap | `{release}-nebu-config` | always | `NEBU_OIDC_ISSUER`, `NEBU_SERVER_NAME`, `NEBU_CORE_GRPC_ADDR` (non-secret) |
 | Ingress | `{release}-nebu` | `ingress.enabled: true` | nginx Ingress with configurable hostname and optional TLS secret |
 | PersistentVolumeClaim | `{release}-nebu-postgres` | `postgres.external: false` | Postgres storage when running in-cluster |
 | HorizontalPodAutoscaler | `{release}-nebu-gateway` | `autoscaling.gateway.enabled: true` | CPU-based HPA for gateway Deployment |
 
-`NEBU_CORE_GRPC_ADDR` is derived deterministically from the release name as `{release}-nebu-core:9000` - rendered by the ConfigMap template, not a values entry.
+`NEBU_CORE_GRPC_ADDR` is derived deterministically from the release name as `{release}-nebu-server:9000` - rendered by the ConfigMap template, not a values entry.
 
 **Secret management (ExistingSecret pattern):**
 
@@ -683,7 +692,7 @@ Image tags must be set independently per component. Omitting either tag causes `
 # Minimal production install:
 helm install nebu deploy/helm/nebu/ \
   --set gateway.image.tag=1.0.0 \
-  --set core.image.tag=1.0.0 \
+  --set server.image.tag=1.0.0 \
   --set config.oidcIssuer=https://your-idp.example.com \
   --set config.serverName=your-server-name \
   --set existingSecret.name=nebu-sensitive
@@ -691,7 +700,7 @@ helm install nebu deploy/helm/nebu/ \
 # With Ingress + HPA:
 helm install nebu deploy/helm/nebu/ \
   --set gateway.image.tag=1.0.0 \
-  --set core.image.tag=1.0.0 \
+  --set server.image.tag=1.0.0 \
   --set existingSecret.name=nebu-sensitive \
   --set ingress.enabled=true \
   --set ingress.hostname=nebu.example.com \
@@ -711,7 +720,7 @@ helm install nebu deploy/helm/nebu/ \
 | `chart_path` | string | required | Path to the Nebu Helm chart directory |
 | `namespace` | string | `"nebu"` | Kubernetes namespace (created if absent) |
 | `gateway_image_tag` | string | required | Container image tag for the gateway component |
-| `core_image_tag` | string | required | Container image tag for the core component |
+| `server_image_tag` | string | required | Container image tag for the server component |
 | `ingress_enabled` | bool | `false` | Enable the Ingress resource |
 | `helm_timeout` | number | `300` | Seconds to wait for all pods to reach Ready state |
 | `values_files` | list(string) | `[]` | Extra values files; must be non-empty absolute paths |
@@ -729,7 +738,7 @@ module "nebu_k8s" {
   chart_path        = var.chart_path
   namespace         = var.namespace
   gateway_image_tag = var.gateway_image_tag
-  core_image_tag    = var.core_image_tag
+  server_image_tag  = var.server_image_tag
   ingress_enabled   = var.ingress_enabled
   values_files      = ["${path.module}/../../../helm/nebu/values-dev.yaml"]
 }
@@ -748,7 +757,7 @@ make test-iac-validate
 helm install nebu deploy/helm/nebu/ \
   -f deploy/helm/nebu/values-dev.yaml \
   --set gateway.image.tag=dev \
-  --set core.image.tag=dev
+  --set server.image.tag=dev
 
 # 4. Wait for pods
 kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=nebu --timeout=180s -n default
@@ -773,14 +782,14 @@ docker compose -f docker-compose.yml -f docker-compose.scale.yml up \
   --scale gateway=2 --build -d --wait
 ```
 
-Both replicas connect to the same Core instance via `core:9000` (gRPC) and share the `internal_secret` PSK. For 2-core clustering, see Story 13-6 below.
+Both replicas connect to the same Server instance via `server:9000` (gRPC) and share the `internal_secret` PSK. For 2-server clustering, see Story 13-6 below.
 
 ```
 k6 load generator
   │ HTTP  (nebu_default Docker network)
   ▼
-[gateway replica 1] ──gRPC:9000──▶ core
-[gateway replica 2] ──gRPC:9000──▶ core
+[gateway replica 1] ──gRPC:9000──▶ server
+[gateway replica 2] ──gRPC:9000──▶ server
                                      │
                                      ▼
                                PostgreSQL 16
@@ -788,14 +797,14 @@ k6 load generator
 
 ---
 
-## Core Clustering (Story 13-6): libcluster + Horde Failover
+## Server Clustering (Story 13-6): libcluster + Horde Failover
 
-The Elixir Core supports horizontal scaling via libcluster for node discovery and Horde for distributed Room GenServer supervision. When a Core node fails, Horde automatically restarts Room GenServers on the surviving node within seconds (no manual intervention).
+The Elixir Server supports horizontal scaling via libcluster for node discovery and Horde for distributed Room GenServer supervision. When a Server node fails, Horde automatically restarts Room GenServers on the surviving node within seconds (no manual intervention).
 
 ### Architecture
 
 ```
-[gateway] ──gRPC:9000──▶ [core (nebu@core)]   ←── Horde CRDT cluster ───▶ [core2 (nebu@core2)]
+[gateway] ──gRPC:9000──▶ [server (nebu@server)]   ←── Horde CRDT cluster ───▶ [server2 (nebu@server2)]
                                │                                                    │
                           Room GenServers                                   Room GenServers
                            (Horde Registry)                               (Horde Registry)
@@ -805,63 +814,63 @@ The Elixir Core supports horizontal scaling via libcluster for node discovery an
                                         PostgreSQL 16
 ```
 
-When `core` (nebu@core) is stopped:
+When `server` (nebu@server) is stopped:
 1. Horde CRDT reconciliation detects the node departure
-2. Room GenServers that were running on `core` are restarted on `core2`
-3. Horde Registry re-registers the rooms under `core2`'s node
-4. Gateway's next gRPC call succeeds (Room GenServer is alive on `core2`)
+2. Room GenServers that were running on `server` are restarted on `server2`
+3. Horde Registry re-registers the rooms under `server2`'s node
+4. Gateway's next gRPC call succeeds (Room GenServer is alive on `server2`)
 
 ### Clustering Strategies
 
 | Environment | Strategy | Discovery |
 |---|---|---|
 | Docker Compose | `Cluster.Strategy.Gossip` | UDP broadcast (port 45892) within Docker network |
-| Kubernetes | `Cluster.Strategy.Kubernetes.DNS` | Headless Service DNS lookup (`core-headless`) |
+| Kubernetes | `Cluster.Strategy.Kubernetes.DNS` | Headless Service DNS lookup (`server-headless`) |
 
 ### Environment Variables
 
 | Variable | Purpose | Example |
 |---|---|---|
 | `CLUSTER_STRATEGY` | Selects libcluster strategy (`gossip` / `kubernetes`) | `gossip` |
-| `RELEASE_NODE` | Erlang node name for distribution | `nebu@core` |
+| `RELEASE_NODE` | Erlang node name for distribution | `nebu@server` |
 | `RELEASE_DISTRIBUTION` | Erlang distribution mode (`name` = long names) | `name` |
-| `CLUSTER_NODES` | Comma-separated peer list (informational; Gossip discovers dynamically) | `nebu@core` |
+| `CLUSTER_NODES` | Comma-separated peer list (informational; Gossip discovers dynamically) | `nebu@server` |
 
-### Local 2-Core Stack
+### Local 2-Server Stack
 
 ```bash
-# Start full stack with 2 Core nodes + scaled gateways
+# Start full stack with 2 Server nodes + scaled gateways
 docker compose -f docker-compose.yml -f docker-compose.scale.yml up -d
 
 # Simulate node failure (AC1 test)
-docker stop $(docker compose -f docker-compose.yml -f docker-compose.scale.yml ps --format json | jq -r 'select(.Service=="core") | .Name')
+docker stop $(docker compose -f docker-compose.yml -f docker-compose.scale.yml ps --format json | jq -r 'select(.Service=="server") | .Name')
 
-# Verify room availability after failover (rooms migrate to core2 within 10 seconds)
+# Verify room availability after failover (rooms migrate to server2 within 10 seconds)
 ```
 
 The `docker-compose.scale.yml` override adds:
-- `core` service: sets `RELEASE_NODE=nebu@core` and `CLUSTER_STRATEGY=gossip`
-- `core2` service: same image, `RELEASE_NODE=nebu@core2`, connects to core1 via Gossip multicast
+- `server` service: sets `RELEASE_NODE=nebu@server` and `CLUSTER_STRATEGY=gossip`
+- `server2` service: same image, `RELEASE_NODE=nebu@server2`, connects to server1 via Gossip multicast
 
 ### Kubernetes Clustering
 
-When `core.replicaCount > 1` in `values.yaml`, the Helm chart automatically injects:
+When `server.replicaCount > 1` in `values.yaml`, the Helm chart automatically injects:
 - `CLUSTER_STRATEGY=kubernetes` → activates `Cluster.Strategy.Kubernetes.DNS`
 - `RELEASE_NODE=nebu@$(MY_POD_IP)` → unique long-form node name per pod
 - `RELEASE_DISTRIBUTION=name` → enables Erlang long-name distribution
-- `KUBERNETES_SERVICE_NAME` pointing to the headless Service (`core-headless`)
+- `KUBERNETES_SERVICE_NAME` pointing to the headless Service (`server-headless`)
 
-A headless Service (`core-deployment-headless`) is automatically provisioned alongside the standard ClusterIP Service when `replicaCount > 1`. The headless Service returns A records for each pod, enabling libcluster to discover peers via DNS.
+A headless Service (`server-deployment-headless`) is automatically provisioned alongside the standard ClusterIP Service when `replicaCount > 1`. The headless Service returns A records for each pod, enabling libcluster to discover peers via DNS.
 
 ### Health Endpoint - Cluster Status
 
-`GET http://core:4000/health` now includes `cluster_nodes` in its JSON response:
+`GET http://server:4000/health` now includes `cluster_nodes` in its JSON response:
 
 ```json
 {
   "status": "UP",
-  "node": "nebu@core",
-  "cluster_nodes": ["nebu@core2"],
+  "node": "nebu@server",
+  "cluster_nodes": ["nebu@server2"],
   "components": { ... }
 }
 ```
@@ -872,8 +881,8 @@ A headless Service (`core-deployment-headless`) is automatically provisioned alo
 
 Erlang distribution requires all nodes in a cluster to share the same cookie. In production deployments:
 - **Docker Compose:** uses Erlang's default auto-generated cookie (acceptable for dev; nodes on the same Docker network)
-- **Kubernetes/AWS:** `RELEASE_COOKIE` is injected from Secrets Manager (see AWS secrets.tf) to ensure all Core pods use the same pre-shared cookie
-- **STACKIT:** operators must set a consistent `RELEASE_COOKIE` in the cloud-init bootstrap across all Core VMs
+- **Kubernetes/AWS:** `RELEASE_COOKIE` is injected from Secrets Manager (see AWS secrets.tf) to ensure all Server pods use the same pre-shared cookie
+- **STACKIT:** operators must set a consistent `RELEASE_COOKIE` in the cloud-init bootstrap across all Server VMs
 
 ### k6 Scenario Files
 
@@ -904,10 +913,10 @@ Story 13-11 introduces a versioned release track that runs alongside the existin
 
 | Track | Trigger | Image tag pattern | Purpose |
 |---|---|---|---|
-| Build (existing) | Every push / MR | `gateway:<SHA>`, `core:<SHA>` | Feeds integration tests; ephemeral |
-| Release (new) | SemVer Git tag (`v*.*.* `) | `nebu-gateway:<semver>`, `nebu-core:<semver>` | Production images; referenced by operators |
+| Build (existing) | Every push / MR | `gateway:<SHA>`, `server:<SHA>` | Feeds integration tests; ephemeral |
+| Release (new) | SemVer Git tag (`v*.*.* `) | `nebu-gateway:<semver>`, `nebu-server:<semver>` | Production images; referenced by operators |
 
-**Image naming:** Release images use the `nebu-gateway` / `nebu-core` prefix (not `gateway` / `core` as in build images). This distinguishes them at the registry level and prevents accidental cross-track references.
+**Image naming:** Release images use the `nebu-gateway` / `nebu-server` prefix (not `gateway` / `server` as in build images). This distinguishes them at the registry level and prevents accidental cross-track references.
 
 **Version stripping convention:** Git tag `v1.0.0` → image tag `1.0.0` (the `v` prefix is stripped in both the CI pipeline and the `make release` target).
 
@@ -917,7 +926,7 @@ Two Kaniko jobs in the new `release` stage of `.gitlab-ci.yml`:
 
 ```yaml
 release-gateway-image:   # → <CI_REGISTRY_IMAGE>/nebu-gateway:<semver>
-release-core-image:      # → <CI_REGISTRY_IMAGE>/nebu-core:<semver>
+release-server-image:    # → <CI_REGISTRY_IMAGE>/nebu-server:<semver>
 ```
 
 Both jobs:
@@ -939,7 +948,7 @@ workflow:
 ### Makefile Release Targets
 
 ```makefile
-make release TAG=v1.0.0       # Build gateway + core release images locally
+make release TAG=v1.0.0       # Build gateway + server release images locally
 make release-push TAG=v1.0.0  # Push to registry (requires docker login)
 
 # Full release workflow:
@@ -956,18 +965,18 @@ Operators reference release images via the `nebu_version` variable in OpenTofu o
 ```hcl
 nebu_version   = "1.0.0"   # strips 'v' prefix; matches image tag
 image_registry = "registry.gitlab.com/myorg/open-chat"
-# → pulls: <image_registry>/nebu-gateway:1.0.0 and nebu-core:1.0.0
+# → pulls: <image_registry>/nebu-gateway:1.0.0 and nebu-server:1.0.0
 ```
 
 **Helm:**
 ```bash
 helm install nebu deploy/helm/nebu/ \
   --set gateway.image.tag=1.0.0 \
-  --set core.image.tag=1.0.0 \
+  --set server.image.tag=1.0.0 \
   --set image.registry=registry.gitlab.com/myorg/open-chat \
   --set existingSecret.name=nebu-sensitive
 ```
 
-The `nebu_version` variable in the `nebu-core` shared module already enforces a semver regex and rejects `"latest"` - this constraint remains in force for all release images.
+The `nebu_version` variable in the `nebu-shared` shared module already enforces a semver regex and rejects `"latest"` - this constraint remains in force for all release images.
 
 _Source: Story 13-11 staged changes - `.gitlab-ci.yml`, `Makefile`, `deploy/helm/nebu/values.yaml`, `deploy/tofu/examples/*/terraform.tfvars.example`; Story 13-14 (squashed seed migration - single `000001_init.up.sql`, `make dev-reset-db` target, Stackit `nebu_migrate`/`nebu_legacy` backward-compat users)_

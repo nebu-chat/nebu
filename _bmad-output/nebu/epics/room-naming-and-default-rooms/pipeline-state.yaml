@@ -1,6 +1,12 @@
 # Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents.
 # Do not edit manually during an active pipeline run.
-# last_updated: 2026-05-30
+# last_updated: 2026-06-22
+# [oidc-claim-boot-cache] 2026-06-22T07:45Z arc42-update → 08-concepts claim-cache section updated (Go claimLoader → Elixir OidcClaimCache)
+# [oidc-claim-boot-cache] 2026-06-22T07:44Z security-review → Kassandra CLEAN (boot-window residual ACCEPTED; 1 LOW cluster-staleness backlog)
+# [oidc-claim-boot-cache] 2026-06-22T07:42Z code-review → CLEAN (1 MINOR: doc overstated residual → fixed; SEC residual deferred to Kassandra)
+# [oidc-claim-boot-cache] 2026-06-22T07:39Z ci-gate → ✓ all 4 jobs (unit-elixir 757/0)
+# [oidc-claim-boot-cache] 2026-06-22T07:39Z dev-story → 757 tests 0 fail; OidcClaimCache + Nebu.Matrix.invalidate_oidc_claim_cache/0
+# [oidc-claim-boot-cache] 2026-06-22T07:33Z create-story → oidc-claim-boot-cache.md (authored from SEC finding); atdd folded into TDD dev step
 # auto-join-on-user-import 2026-05-30T12:00Z committed ✓ (ATDD+Dev+Code CLEAN, arc42 Scenario 3q added)
 # auto-join-on-user-import 2026-05-30T11:55Z arc42-update → Scenario 3q added (bulk import auto-join + self-room path)
 # auto-join-on-user-import 2026-05-30T11:50Z security-review → skipped (not-needed)
@@ -68,9 +74,14 @@
 # direct-room-heroes 2026-05-28T12:45Z atdd → 6 Godog scenarios, 3 files
 # direct-room-heroes 2026-05-28 DONE: committed 6470e053 ✓
 # direct-room-heroes 2026-05-28 arc42-update → Scenario 3o added to 06-runtime.md (m.heroes room summary, attach_heroes, syncRoomSummary, delta optimization)
-story: null
-current_step: null
-completed: []
+story: "oidc-claim-boot-cache"
+current_step: "commit"
+completed:
+  - dev-story
+  - ci-gate
+  - code-review
+  - security-review
+  - arc42-update
 cycle_count: 0
 blocked_reason: null
-last_updated: "2026-05-30T22:08Z"
+last_updated: "2026-06-22T07:45Z"

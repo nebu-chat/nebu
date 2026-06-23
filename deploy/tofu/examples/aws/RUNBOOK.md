@@ -55,7 +55,11 @@ This runbook covers day-1 and day-2 operations for the Nebu AWS deployment
 
 ## Smoke Test
 
-After deploy, verify the gateway is reachable via HTTPS:
+go-removal-cleanup: server now serves public Matrix + media + admin — there is no
+separate gateway/media service. The ALB forwards HTTPS traffic to the server service
+on container port 4000.
+
+After deploy, verify the server service is reachable via HTTPS:
 
 ```bash
 curl https://<alb_dns_name>/_matrix/client/v3/versions
@@ -70,7 +74,7 @@ Expected response — a valid Matrix versions JSON, for example:
 }
 ```
 
-A `200 OK` with this body confirms the ALB, ECS gateway service, and health checks
+A `200 OK` with this body confirms the ALB, ECS server service, and health checks
 are all operational.
 
 ---
@@ -82,13 +86,7 @@ Force ECS to pull and run the latest container image without infrastructure chan
 ```bash
 aws ecs update-service \
   --cluster nebu-<environment> \
-  --service nebu-<environment>-gateway \
-  --force-new-deployment \
-  --region eu-central-1
-
-aws ecs update-service \
-  --cluster nebu-<environment> \
-  --service nebu-<environment>-core \
+  --service nebu-<environment>-server \
   --force-new-deployment \
   --region eu-central-1
 ```
@@ -105,7 +103,7 @@ The following secrets are stored in AWS Secrets Manager under `nebu/<environment
 | Secret path                          | Purpose                                      |
 |--------------------------------------|----------------------------------------------|
 | `nebu/<env>/db_password`             | RDS PostgreSQL master password               |
-| `nebu/<env>/internal_secret`         | Gateway ↔ Core node registration PSK        |
+| `nebu/<env>/internal_secret`         | Server node registration PSK (ADR-008)       |
 | `nebu/<env>/oidc_client_secret`      | OIDC client secret for the identity provider |
 
 ### Rotate a secret
@@ -184,7 +182,7 @@ OpenTofu creates DNS records automatically in Route 53.
 
 | Symptom | First step |
 |---|---|
-| ALB health check failing | Check ECS task logs: `aws logs tail /ecs/nebu-<env>-gateway --follow` |
+| ALB health check failing | Check ECS task logs: `aws logs tail /ecs/nebu-<env>-server --follow` |
 | ECS tasks not starting | Check Events in ECS console → look for `CannotPullContainerError` or secrets errors |
-| 502 Bad Gateway | Verify security group `ecs_ingress_matrix_from_alb` allows port 8008 from the ALB SG |
+| 502 Bad Gateway | Verify security group `ecs_ingress_http_from_alb` allows port 4000 from the ALB SG |
 | Secret not found on task start | Confirm IAM task execution role has `secretsmanager:GetSecretValue` on `nebu/<env>/*` |

@@ -97,13 +97,15 @@ Given('the operator is logged in as admin', async ({ page }: { page: Page }) => 
 
     // Handle Dex consent screen (if shown on first login for admin)
     const grantBtn = page.locator(
-      'button[type="submit"]:has-text("Grant"), button[type="submit"]:has-text("Confirm")'
+      'button[type="submit"]:has-text("Grant Access"), button:has-text("Grant Access")'
     );
     if (await grantBtn.first().isVisible({ timeout: 8_000 }).catch(() => false)) {
       await grantBtn.first().click();
     }
-    await page.waitForURL(/\/admin\/dashboard/, { timeout: 20_000 });
-    await expect(page).toHaveURL(/\/admin\/dashboard/);
+    // Normal admin login lands on /admin/rooms (Go parity — auth.ex callback redirects
+    // there, not /admin/dashboard). Accept any authenticated admin page.
+    await page.waitForURL(/\/admin\/(?:dashboard|rooms|users|config|compliance|audit)/, { timeout: 20_000 });
+    await expect(page).toHaveURL(/\/admin\/(?:dashboard|rooms|users|config|compliance|audit)/);
     return;
   }
 
@@ -123,13 +125,13 @@ Given('the operator is logged in as admin', async ({ page }: { page: Page }) => 
     await page.locator('input[name="password"]').fill(DEX_TEST_PASSWORD);
     await page.locator('button[type="submit"]').click();
     const grantBtn = page.locator(
-      'button[type="submit"]:has-text("Grant"), button[type="submit"]:has-text("Confirm")'
+      'button[type="submit"]:has-text("Grant Access"), button:has-text("Grant Access")'
     );
     if (await grantBtn.first().isVisible({ timeout: 8_000 }).catch(() => false)) {
       await grantBtn.first().click();
     }
-    await page.waitForURL(/\/admin\/dashboard/, { timeout: 20_000 });
-    await expect(page).toHaveURL(/\/admin\/dashboard/);
+    await page.waitForURL(/\/admin\/(?:dashboard|rooms|users|config|compliance|audit)/, { timeout: 20_000 });
+    await expect(page).toHaveURL(/\/admin\/(?:dashboard|rooms|users|config|compliance|audit)/);
     return;
   }
 
@@ -140,16 +142,16 @@ Given('the operator is logged in as admin', async ({ page }: { page: Page }) => 
     await page.locator('input[name="password"]').fill(DEX_TEST_PASSWORD);
     await page.locator('button[type="submit"]').click();
     const grantBtn = page.locator(
-      'button[type="submit"]:has-text("Grant"), button[type="submit"]:has-text("Confirm")'
+      'button[type="submit"]:has-text("Grant Access"), button:has-text("Grant Access")'
     );
     if (await grantBtn.first().isVisible({ timeout: 8_000 }).catch(() => false)) {
       await grantBtn.first().click();
     }
-    await page.waitForURL(/\/admin\/dashboard/, { timeout: 20_000 });
+    await page.waitForURL(/\/admin\/(?:dashboard|rooms|users|config|compliance|audit)/, { timeout: 20_000 });
   } catch {
-    // If we still can't reach Dex, check if we ended up at admin dashboard
+    // If we still can't reach Dex, check if we ended up at an authenticated admin page
   }
-  await expect(page).toHaveURL(/\/admin\/dashboard/);
+  await expect(page).toHaveURL(/\/admin\/(?:dashboard|rooms|users|config|compliance|audit)/);
 });
 
 When('the operator navigates to {string}', async ({ page }: { page: Page }, urlPath: string) => {

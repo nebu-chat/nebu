@@ -23,21 +23,21 @@
 
 | Term | Definition |
 |---|---|
-| **Go Gateway** | The stateless Go binary that handles all HTTP traffic, TLS termination, OIDC validation, and Admin UI serving |
-| **Elixir Core** | The Elixir/OTP application (umbrella) managing stateful chat logic via GenServers |
-| **gRPC** | Google Remote Procedure Call - the protocol used for Go Gateway ↔ Elixir Core communication |
-| **EventBus** | A gRPC server-streaming service from Elixir Core to Go Gateway for real-time event delivery |
-| **message_buffer** | A PostgreSQL table that holds outgoing events when the Elixir Core is temporarily unavailable (ROT status) |
-| **Drain Worker** | A Go goroutine that processes buffered messages from `message_buffer` when the Core reconnects |
-| **GRÜN/GELB/ROT** | German for Green/Yellow/Red - the three-state health model for the gRPC connection status |
+| **Go Gateway** | (Historical, removed ADR-021) The stateless Go binary that formerly handled all HTTP traffic, TLS termination, OIDC validation, and Admin UI serving. Replaced by `Nebu.Web` + `Nebu.Matrix.Http*` in the single Elixir application. |
+| **Elixir Core** | (Historical label) The Elixir/OTP application managing stateful chat logic. Now the whole stack — see Nebu application. |
+| **gRPC** | (Historical, removed `grpc-removal` epic 2026-06-22) Google Remote Procedure Call — was the protocol for Go Gateway ↔ Elixir Core communication. All gRPC dependencies removed; in-process calls use plain Elixir functions. |
+| **EventBus** | (Historical, removed) A gRPC server-streaming service from Elixir Core to Go Gateway for real-time event delivery. Removed with the Go gateway; sync wakeups now use `:pg` Process Groups. |
+| **message_buffer** | (Historical, removed) A PostgreSQL table that held outgoing events when the Elixir Core was temporarily unavailable (ROT status). No longer needed — the HTTP layer and domain are in-process. |
+| **Drain Worker** | (Historical, removed) A Go goroutine that processed buffered messages from `message_buffer`. Removed with the Go gateway. |
+| **GRÜN/GELB/ROT** | (Historical, removed) German for Green/Yellow/Red — the three-state health model for the gRPC connection status between Go Gateway and Elixir Core. |
 | **Horde** | An Elixir library providing CRDT-based distributed process registry and supervision (https://hexdocs.pm/horde) |
 | **ETS** | Erlang Term Storage - an in-memory key-value store built into the Erlang/OTP runtime (no Redis needed) |
 | **libcluster** | Elixir library for automatic cluster node discovery (Phase 2) |
-| **golang-migrate** | Go library for PostgreSQL schema migrations; the Go Gateway is the sole schema owner |
+| **golang-migrate** | (Historical, removed ADR-021/ADR-018) Go library for PostgreSQL schema migrations that the Go Gateway formerly ran. Replaced by `Nebu.Release.migrate/0` (raw SQL, applied at app startup). |
 | **MinIO** | S3-compatible object storage server used as the local-dev media backend (Epic 12). Apache 2.0 licensed. |
 | **nebu-media** | The MinIO bucket (created by the `createbuckets` init container) where all media uploads are stored |
 | **Storer** | Go interface (`Put / Get / Delete`) in `media/internal/storage` that abstracts file-system and S3 backends. `LocalStorer` implements it for the local filesystem; `MinIOStorer` for MinIO. Both handlers depend on `Storer` via injection (Story 12.2). |
-| **oapi-codegen** | A Go code generator that produces types and a `ServerInterface` from an OpenAPI 3.1 YAML spec |
+| **oapi-codegen** | (Historical, removed ADR-021) A Go code generator that produced types and a `ServerInterface` from an OpenAPI 3.1 YAML spec. Removed with the Go gateway. |
 | **PSK** | Pre-Shared Key - used for node registration security in the MVP (Docker Compose secrets) |
 | **mTLS** | Mutual TLS - ephemeral certificate-based authentication planned for Phase 2 node registration |
 | **AIMD** | Additive Increase Multiplicative Decrease - the adaptive drain rate algorithm for Phase 2 |

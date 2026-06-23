@@ -12,7 +12,9 @@ This runbook covers day-1 deploy and day-2 operations for Nebu hosted on a Stack
 - A Stackit service account key JSON (download: STACKIT portal → IAM → Service Accounts → Keys)
 - SSH key pair (the public key goes into `terraform.tfvars`)
 - Values for all required variables in `terraform.tfvars` (copy from `terraform.tfvars.example`)
-- Container images (`nebu-gateway`, `nebu-core`) pushed to your registry at the correct tag
+- Container image (`nebu-server`) pushed to your registry at the correct tag
+  (go-removal-cleanup: server now serves public Matrix + media + admin — there is no
+  separate `nebu-gateway` / `nebu-media` image)
 
 ---
 
@@ -28,11 +30,11 @@ Deploys [Dex IdP](https://dexidp.io/) as a Docker Compose sidecar alongside Nebu
 
 **Traffic routing (dex mode):**
 
-The gateway binds host port 8008 directly (same as external mode). The ALB targets port 8008 — no configuration change required between modes.
+go-removal-cleanup: server binds host port 8008 (mapped to its container port 4000) and serves the public Matrix CS API + media + admin directly (same as external mode). The NLB targets port 8008 — no configuration change required between modes.
 
 Dex is exposed on host port 5556 (plain HTTP). The SG rule `inbound_dex` is created conditionally in dex mode to allow browsers to follow OIDC redirects directly to port 5556.
 
-The gateway performs OIDC discovery via a Docker hairpin: it calls `http://<server_name>:5556/dex/.well-known/openid-configuration` using the VM's public IP. Standard Linux SNAT/masquerade handles this routing correctly.
+Server performs OIDC discovery via a Docker hairpin: it calls `http://<server_name>:5556/dex/.well-known/openid-configuration` using the VM's public IP. Standard Linux SNAT/masquerade handles this routing correctly.
 
 > **Note:** Host-based routing via nginx (`dex.<server_name>`) is a planned improvement for when TLS is configured. This will be implemented in a follow-up story.
 
@@ -42,8 +44,7 @@ The gateway performs OIDC discovery via a Docker hairpin: it calls `http://<serv
 sudo docker compose ps
 # NAME     IMAGE                        STATUS
 # dex      dexidp/dex:v2.45.1           Up (healthy)
-# core     <registry>/nebu-core:...     Up (healthy)
-# gateway  <registry>/nebu-gateway:...  Up (healthy)
+# server   <registry>/nebu-server:...   Up (healthy)
 ```
 
 The Dex config file is at `/opt/nebu/dex/config.yaml`. It contains a static OIDC client (`nebu-gateway`) and a static user (`operator@example.com` — in the `instance_admin` group).
@@ -63,11 +64,11 @@ curl http://<server_name>:5556/dex/.well-known/openid-configuration
 # Expected: {"issuer":"http://<server_name>:5556/dex", ...}
 ```
 
-To confirm the gateway is reachable on port 8008:
+To confirm server is reachable on port 8008:
 
 ```bash
 curl http://<server_name>:8008/_matrix/client/v3/versions
-# Expected: Matrix version list from gateway
+# Expected: Matrix version list served by server
 ```
 
 ### `oidc_mode = "external"` — External OIDC Provider (production)
@@ -125,16 +126,14 @@ Expected output once healthy (`oidc_mode = "dex"`):
 ```
 NAME       IMAGE                           STATUS
 dex        dexidp/dex:v2.45.1              Up (healthy)
-core       <registry>/nebu-core:<ver>      Up (healthy)
-gateway    <registry>/nebu-gateway:<ver>   Up (healthy)
+server     <registry>/nebu-server:<ver>    Up (healthy)
 ```
 
 Expected output once healthy (`oidc_mode = "external"`):
 
 ```
 NAME       IMAGE                           STATUS
-core       <registry>/nebu-core:<ver>      Up (healthy)
-gateway    <registry>/nebu-gateway:<ver>   Up (healthy)
+server     <registry>/nebu-server:<ver>    Up (healthy)
 ```
 
 > Note: the `postgres` container is no longer present — the database is now managed by Stackit PostgresFlex. Nebu services connect to the PostgresFlex instance directly via the private network.
@@ -161,7 +160,7 @@ Expected response:
 {"versions":["v1.1","v1.2","v1.3","v1.4","v1.5"]}
 ```
 
-> Note: the ALB currently uses TCP passthrough (`PROTOCOL_TCP`). TLS termination is handled by the gateway. In `oidc_mode = "dex"`, the Dex OIDC endpoint (`http://<server_name>:5556/dex/`) is plain HTTP — no TLS. The Matrix API on port 8008 is served directly by the gateway container.
+> Note: in `tls_mode = "none"` / `"acme"` the NLB uses TCP passthrough (`PROTOCOL_TCP`); in `tls_mode = "alb"` the Stackit ALB terminates TLS and forwards to the VM nginx proxy. In `oidc_mode = "dex"`, the Dex OIDC endpoint (`http://<server_name>:5556/dex/`) is plain HTTP — no TLS. go-removal-cleanup: the Matrix API on port 8008 is served directly by the server container (Bandit listener on container port 4000).
 
 ---
 
@@ -259,6 +258,6 @@ OpenTofu creates DNS records automatically in Stackit DNS.
 | cloud-init hangs | `sudo tail -f /var/log/cloud-init-output.log` |
 | Docker not installed | `sudo apt-get install -y docker-ce docker-compose-plugin` (manual fallback) |
 | nebu.service failed | `sudo systemctl status nebu.service` + `sudo journalctl -u nebu.service -n 50` |
-| Gateway unhealthy | `sudo docker compose logs gateway` — check OIDC issuer and DB connectivity |
-| `/_matrix/client/v3/versions` returns 502 | ALB target not healthy; check `sudo docker compose ps` — gateway must be `Up (healthy)` |
-| TLS certificate error | See `variables.tf` — `stackit_tls_certificate_arn` must be set for HTTPS termination at ALB |
+| Server unhealthy | `sudo docker compose logs server` — check OIDC issuer and DB connectivity |
+| `/_matrix/client/v3/versions` returns 502 | LB target not healthy; check `sudo docker compose ps` — server must be `Up (healthy)` |
+| TLS certificate error | See `variables.tf` — for `tls_mode = "alb"`, `tls_certificate_pem` / `tls_private_key_pem` must be set for HTTPS termination at the ALB |

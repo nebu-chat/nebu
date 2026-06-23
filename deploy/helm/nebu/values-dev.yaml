@@ -5,22 +5,11 @@
 image:
   pullPolicy: IfNotPresent
 
-gateway:
+# go-removal-cleanup (full-elixir-stack): only the server image remains — it serves Matrix,
+# /_matrix/media, and the admin UI.
+server:
   image:
-    # Override with the actual dev build tag, e.g. --set gateway.image.tag=dev-abc123
-    tag: "dev"
-  replicaCount: 1
-  resources:
-    requests:
-      cpu: "100m"
-      memory: "128Mi"
-    limits:
-      cpu: "100m"
-      memory: "128Mi"
-
-core:
-  image:
-    # Override with the actual dev build tag, e.g. --set core.image.tag=dev-abc123
+    # Override with the actual dev build tag, e.g. --set server.image.tag=dev-abc123
     tag: "dev"
   replicaCount: 1
   resources:

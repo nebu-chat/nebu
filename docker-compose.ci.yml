@@ -3,13 +3,12 @@
 # Usage (DinD integration-test job):
 #   docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --wait --no-build
 #
-# Kaniko pushes gateway and core images in the `build` stage before this runs.
+# Kaniko pushes the server image in the `build` stage before this runs.
 # CI_REGISTRY_IMAGE and CI_COMMIT_SHA are set automatically by GitLab CI.
+#
+# go-removal-cleanup (full-elixir-stack): the gateway and media images were removed —
+# the Elixir server now serves all public endpoints (Matrix, /_matrix/media, admin).
 
 services:
-  gateway:
-    image: ${CI_REGISTRY_IMAGE}/gateway:${CI_COMMIT_SHA}
-  core:
-    image: ${CI_REGISTRY_IMAGE}/core:${CI_COMMIT_SHA}
-  media:
-    image: ${CI_REGISTRY_IMAGE}/media:${CI_COMMIT_SHA}
+  server:
+    image: ${CI_REGISTRY_IMAGE}/server:${CI_COMMIT_SHA}

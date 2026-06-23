@@ -1,0 +1,3 @@
+# Code-review — fix-missing-matrix-room-routes
+Verdict: APPROVED. 0 CRITICAL/MAJOR. 1 MINOR (no negative test proving body user_id ignored — holds by construction), 2 INFO.
+Security all clear: acting user always conn.assigns[:current_user]/trusted_identity (no IDOR on leave/forget/upgrade); relations enforces membership + room-scoped event check; search takes user from trusted stream + SQL membership scoping (filters intersect, can't widen); search term parameterised (websearch_to_tsquery); limits clamped 1..100 at backend; proper Matrix error envelopes; /v1 relations routing confirmed. 11/11 unit green.

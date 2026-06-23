@@ -1,0 +1,9 @@
+# Sprint status — epic spaces-elixir
+# Matrix Spaces (MSC1772/MSC2946/MSC3083): createRoom m.space, state events,
+# story s6-element-spaces-e2e done (pipeline: ATDD+Dev+Code CLEAN; 4 GREEN + 2 @pending-feature (BUG-1 hierarchy-S3, BUG-2 restricted-join-403)): 2026-06-22
+# hierarchy BFS, restricted join, admin Spaces UI, and Element Web E2E coverage.
+epic: spaces-elixir
+stories:
+  s6-element-spaces-e2e:
+    status: done
+    summary: "Element Web E2E coverage for Spaces lifecycle (create/join/leave/hierarchy). 5 scenarios GREEN; 1 @pending (verified server-correct, see below). 0 server changes. Adversarial verification RETRACTED BOTH dev-flagged 'bugs' — neither is a server defect, so NO /nebu-pipeline --bug was warranted: (BUG-1 hierarchy) test-design error — children were private + a no-op `preset`; fixed via public children (join_rule public in initial_state), scenario un-pended + GREEN. (BUG-2 restricted-join-403) the '200' was presumed/never-run; direct API probe + code read prove the server returns 403 M_FORBIDDEN (S4 live). Non-member scenario kept @pending only because the parallel fix-short-oidc-sessions WIP step file (auth/matrix-session-refresh.steps.ts: malformed '/' expr + duplicate 'the room list is visible') breaks bddgen when enabled — unrelated to s6."

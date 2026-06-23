@@ -1422,3 +1422,397 @@ So that the site has a professional, memorable URL with valid TLS.
 **Note:** DNS configuration (CNAME/A record) must be set by the domain owner in the nebuchat.eu registrar. Story acceptance requires DNS propagation to complete.
 
 ---
+
+## Epic: full-elixir-stack — Consolidation to Pure Elixir/OTP (Remove Go Layer)
+
+**Goal:** Remove the Go gateway and media gateway entirely. All Matrix Client-Server API endpoints, the media gateway, and the Admin UI migrate to Elixir/OTP (Plug + Bandit + Phoenix LiveView). OIDC token validation moves into the Elixir request pipeline via `assent`. Result: one deployment artefact, one toolchain, zero gRPC hops on the hot path.
+
+**ADR:** `tmp/no-go-adr.md` (Status: Accepted, 2026-06-17)
+
+**Branch:** `feature/full-elixir-stack`
+
+**Implementation order (dependency-driven):**
+1. `elixir-http-foundation` — Bandit + Plug pipeline skeleton (no Go replacement yet)
+2. `oidc-middleware-migration` — `assent` OIDC validation Plug, replace Go OIDC
+3. `matrix-api-migration` — All `/_matrix/client/v3/*` in Elixir, remove Go gateway
+4. `media-gateway-migration` — Upload/download/Range/S3-stream/URL-preview in Elixir, remove Go media gateway
+5. `admin-ui-migration` — Phoenix LiveView Admin UI, remove Go admin backend
+6. `go-removal-cleanup` — Delete Go source, Dockerfiles, CI steps, OpenTofu Go targets
+
+---
+
+### Story: elixir-http-foundation
+
+As a Nebu operator,
+I want the Elixir/OTP core to expose a Plug + Bandit HTTP server with baseline middleware,
+So that subsequent stories can add routes incrementally without setting up the HTTP layer from scratch.
+
+**Size:** S
+**security_review:** not-needed
+
+**Acceptance Criteria:**
+
+1. **Given** `make dev` brings up the stack,
+   **When** `GET http://core:4000/health` is called,
+   **Then** `200 OK` with body `{"status":"ok"}` is returned by Bandit (not by Go).
+
+2. **Given** any HTTP request to Bandit,
+   **When** it is processed,
+   **Then** the response includes a `X-Request-Id` header with a UUID-v4 value.
+
+3. **Given** any HTTP request to Bandit,
+   **When** it is processed,
+   **Then** a structured log line is emitted at `info` level containing `method`, `path`, `status`, `duration_ms`, and `request_id`.
+
+4. **Given** a request from a browser (CORS preflight `OPTIONS` with `Origin: http://localhost`),
+   **When** it arrives at Bandit,
+   **Then** the response includes `Access-Control-Allow-Origin` and `Access-Control-Allow-Methods` headers.
+
+5. **Given** the Elixir umbrella project,
+   **When** it compiles,
+   **Then** Bandit starts on port `4000` and Cowboy is not a dependency.
+
+**Acceptance Tests:**
+
+### Tests written FIRST (before implementation code):
+
+1. **`test/http_foundation_test.exs`** — ExUnit integration test (hits real Bandit)
+   - Given: Bandit started on port 4000
+   - When: `GET /health`
+   - Then: `200`, body `%{"status" => "ok"}`, `X-Request-Id` header present
+
+2. **`test/cors_plug_test.exs`** — ExUnit unit test (Plug.Test)
+   - Given: OPTIONS preflight with `Origin: http://localhost`
+   - When: routed through the Plug pipeline
+   - Then: response contains CORS allow headers
+
+---
+
+### Story: oidc-middleware-migration
+
+As a Nebu user,
+I want my Bearer token to be validated by the Elixir layer directly against the OIDC provider's JWKS endpoint,
+So that OIDC validation no longer requires a trust delegation from Go.
+
+**Size:** M
+**security_review:** required
+
+**Acceptance Criteria:**
+
+1. **Given** a valid Keycloak-issued Bearer token,
+   **When** a protected endpoint is called in Elixir,
+   **Then** the request proceeds and the user's Matrix ID is available in `conn.assigns.current_user`.
+
+2. **Given** an expired Bearer token,
+   **When** a protected endpoint is called,
+   **Then** `401 Unauthorized` with `{"errcode":"M_UNKNOWN_TOKEN","error":"Access token has expired"}` is returned.
+
+3. **Given** a tampered (invalid signature) Bearer token,
+   **When** a protected endpoint is called,
+   **Then** `401 Unauthorized` with `M_UNKNOWN_TOKEN` is returned.
+
+4. **Given** no `Authorization` header,
+   **When** a protected endpoint is called,
+   **Then** `401 Unauthorized` with `{"errcode":"M_MISSING_TOKEN","error":"Missing access token"}` is returned.
+
+5. **Given** the OIDC provider's JWKS endpoint,
+   **When** the application starts,
+   **Then** the JWKS keys are fetched and cached; cache TTL is configurable via `NEBU_OIDC_JWKS_TTL` (default: 300s).
+
+6. **Given** the Go gateway is still running,
+   **When** this story is complete,
+   **Then** Go's OIDC middleware is disabled (pass-through) — all token validation happens in Elixir.
+
+**Acceptance Tests:**
+
+### Tests written FIRST (before implementation code):
+
+1. **`test/oidc_plug_test.exs`** — ExUnit unit test (Plug.Test, mocked JWKS)
+   - Given: mock JWKS returns a valid public key
+   - When: request with a validly-signed JWT arrives
+   - Then: `conn.assigns.current_user` is set, request passes through
+
+2. **`test/oidc_plug_expired_test.exs`** — ExUnit unit test
+   - Given: expired JWT (exp in the past)
+   - When: routed through the OIDC Plug
+   - Then: `401` with `M_UNKNOWN_TOKEN`
+
+3. **`gateway/features/oidc-middleware-migration.feature`** — Godog integration test
+   - Given: real Keycloak token obtained via Authorization Code + PKCE
+   - When: `GET /_matrix/client/v3/sync` is called with that token via Elixir
+   - Then: `200` (or valid Matrix error), Go OIDC middleware is bypassed
+
+---
+
+### Story: matrix-api-migration
+
+As a Matrix client,
+I want all `/_matrix/client/v3/*` endpoints served directly from Elixir/OTP,
+So that the `/sync` long-polling connection is a BEAM process with no Go→Elixir gRPC hop.
+
+**Size:** L
+**security_review:** required
+
+**Acceptance Criteria:**
+
+1. **Given** all Matrix endpoints listed in CLAUDE.md (login, logout, sync, send, messages, createRoom, join, typing, receipt, profile, presence, MSC2965),
+   **When** each is called via the Elixir router,
+   **Then** each returns the same response shape as the previous Go implementation (contract parity).
+
+2. **Given** a Matrix client with 1000 concurrent `/sync` long-polling connections,
+   **When** measured over 60 seconds,
+   **Then** median latency for event delivery is ≤ the baseline measured against the Go gateway (no regression).
+
+3. **Given** the Go gateway container,
+   **When** this story is complete,
+   **Then** the Go gateway is removed from `docker-compose.yml` and the routing goes directly to Elixir.
+
+4. **Given** the existing Godog integration test suite,
+   **When** run against the Elixir router,
+   **Then** all previously passing scenarios still pass.
+
+5. **Given** the MSC2965 OIDC discovery endpoints (`/auth_issuer`, `/auth_metadata`),
+   **When** called via the Elixir router,
+   **Then** they return the correct issuer and metadata from `NEBU_OIDC_ISSUER`.
+
+**Acceptance Tests:**
+
+### Tests written FIRST (before implementation code):
+
+1. **`gateway/features/matrix-api-migration.feature`** — Godog integration test (one scenario per endpoint group)
+   - Given: Elixir router handling requests (Go gateway removed from compose)
+   - When: each Matrix endpoint is exercised
+   - Then: response shape matches Matrix spec
+
+2. **`test/sync_bandit_test.exs`** — ExUnit concurrent connection test
+   - Given: 50 clients with open `/sync` connections
+   - When: a message is sent to a room
+   - Then: all 50 clients receive the event within 500ms
+
+---
+
+### Story: media-gateway-migration
+
+As a Matrix client,
+I want media upload and download handled directly by Elixir,
+So that media access control is a local function call (no cross-process gRPC hop) and there is one fewer Go service.
+
+**Size:** M
+**security_review:** required
+
+**Acceptance Criteria:**
+
+1. **Given** an authenticated user uploads a file via `PUT /_matrix/media/v3/upload`,
+   **When** the request is processed by the Elixir media handler,
+   **Then** the file is stored in S3/MinIO and a `mxc://` URI is returned.
+
+2. **Given** a room member requests `GET /_matrix/media/v3/download/{serverName}/{mediaId}`,
+   **When** the handler checks room membership (local call within OTP),
+   **Then** the file is streamed directly from S3 via `ExAws.S3` with no RAM buffering.
+
+3. **Given** a `Range: bytes=0-1023` header in a download request,
+   **When** processed by Bandit,
+   **Then** `206 Partial Content` is returned with the correct byte range.
+
+4. **Given** a non-member user requests `GET /_matrix/media/v3/download/{serverName}/{mediaId}`,
+   **When** membership is checked,
+   **Then** `403 Forbidden` with `M_FORBIDDEN` is returned.
+
+5. **Given** a URL preview request `GET /_matrix/media/v3/preview_url?url=<url>`,
+   **When** processed via `Finch`,
+   **Then** OG-meta tags (`og:title`, `og:description`, `og:image`) are extracted and returned.
+
+6. **Given** the Go media gateway container,
+   **When** this story is complete,
+   **Then** it is removed from `docker-compose.yml`.
+
+**Acceptance Tests:**
+
+### Tests written FIRST (before implementation code):
+
+1. **`gateway/features/media-upload-download.feature`** — Godog integration test
+   - Given: authenticated user, running S3/MinIO
+   - When: upload via Elixir handler
+   - Then: `mxc://` URI returned; download returns same bytes
+
+2. **`test/media_range_request_test.exs`** — ExUnit unit test (Plug.Test)
+   - Given: Range header `bytes=0-99`
+   - When: download handler processes it
+   - Then: `206` with 100 bytes
+
+3. **`test/media_access_control_test.exs`** — ExUnit unit test
+   - Given: non-member user
+   - When: download attempted
+   - Then: `403 M_FORBIDDEN`
+
+---
+
+### Story: admin-ui-migration
+
+As a Nebu instance admin,
+I want the Admin UI served by Phoenix LiveView,
+So that the UI is reactive without a SPA build pipeline and the Go admin backend can be removed.
+
+**Size:** L
+**security_review:** required
+
+**Acceptance Criteria:**
+
+1. **Given** an admin user navigates to `/admin`,
+   **When** they are authenticated via OIDC (admin claim present),
+   **Then** the Phoenix LiveView admin dashboard renders with the same feature set as the Go-template Admin UI: Room Management, User Overview, Bootstrap Wizard.
+
+2. **Given** an admin uses the Room Management LiveView,
+   **When** they change the auto-join status of a room,
+   **Then** the change is immediately reflected in the UI (LiveView DOM diff push) without a full page reload.
+
+3. **Given** a non-admin user navigates to `/admin`,
+   **When** their OIDC claims are checked,
+   **Then** `403 Forbidden` is returned (admin claim gate preserved).
+
+4. **Given** the Go admin backend container,
+   **When** this story is complete,
+   **Then** it is removed from `docker-compose.yml` and all Admin UI routes are served by Phoenix.
+
+5. **Given** the existing Admin UI Playwright+Gherkin E2E test suite,
+   **When** run against the Phoenix LiveView Admin UI,
+   **Then** all previously passing scenarios still pass.
+
+**Acceptance Tests:**
+
+### Tests written FIRST (before implementation code):
+
+1. **`e2e/features/admin-ui-liveview.feature`** — Playwright + Cucumber scenario
+   - Given: admin session (real OIDC Authorization Code + PKCE flow)
+   - When: `/admin/rooms` is visited
+   - Then: room list renders; auto-join toggle works; update is reflected without reload
+
+2. **`e2e/features/admin-ui-auth-gate.feature`** — Playwright + Cucumber scenario
+   - Given: non-admin user
+   - When: navigates to `/admin`
+   - Then: `403` or redirect to error page
+
+3. **`test/admin_liveview_unit_test.exs`** — ExUnit + LiveView test helpers
+   - Given: LiveView mount with mock assigns
+   - When: toggle event fired
+   - Then: LiveView assigns updated, DB call triggered
+
+---
+
+### Story: elixir-stack-regression
+
+As a Nebu operator,
+I want a comprehensive end-to-end regression suite executed against the pure Elixir stack (Go gateway and media gateway already removed from compose),
+So that we have documented proof that no Matrix API contract, media flow, Admin UI flow, or OIDC flow regressed during the migration.
+
+**Size:** M
+**security_review:** not-needed
+
+**Acceptance Criteria:**
+
+1. **Given** the full stack running with Go removed (`docker-compose.yml` has no `gateway` or `media` service),
+   **When** the complete Matrix user journey is exercised (login → create room → invite → send message → `/sync` receives event → read receipt → typing indicator → logout),
+   **Then** every step returns the correct Matrix-spec response and the Godog suite exits `0`.
+
+2. **Given** an authenticated user,
+   **When** they upload an image via `PUT /_matrix/media/v3/upload` and immediately download it,
+   **Then** the downloaded bytes are identical to the uploaded bytes (no corruption); a Range request returns `206` with the correct slice.
+
+3. **Given** an admin user,
+   **When** they complete the full Admin UI flow in a real browser (Room Management → toggle auto-join → User Overview → confirm user count),
+   **Then** all Playwright + Gherkin scenarios that passed against the Go Admin UI pass against the Phoenix LiveView Admin UI.
+
+4. **Given** a URL preview request for a well-known URL with OG tags,
+   **When** `GET /_matrix/media/v3/preview_url?url=<url>` is called,
+   **Then** `og:title` and `og:description` are present in the response.
+
+5. **Given** an OIDC token issued by Dex (Authorization Code + PKCE),
+   **When** it is presented to any protected endpoint,
+   **Then** the Elixir OIDC Plug validates it correctly and the request succeeds (no fallback to Go).
+
+6. **Given** the `make test-integration` target,
+   **When** executed after Go removal,
+   **Then** it exits `0` — all Godog scenarios and Playwright E2E scenarios are green.
+
+7. **Given** a load scenario of 200 concurrent `/sync` long-polling clients,
+   **When** 50 messages are broadcast to a shared room over 60 seconds,
+   **Then** median event-delivery latency is ≤ 150ms (BEAM baseline, no gRPC hop).
+
+**Acceptance Tests:**
+
+### Tests written FIRST (before implementation code):
+
+1. **`gateway/features/elixir-regression-matrix.feature`** — Godog integration test
+   - Full Matrix user journey: login → createRoom → send → sync → receipt → typing → logout
+   - Run against Elixir-only stack (`NEBU_BASE_URL=http://core:4000`)
+   - All steps must be green; any `501 Not Implemented` is a blocker
+
+2. **`gateway/features/elixir-regression-media.feature`** — Godog integration test
+   - Upload JPEG → download → verify bytes identical
+   - Range request `bytes=0-99` → `206` with 100 bytes
+   - URL preview → `og:title` present
+   - Non-member download → `403 M_FORBIDDEN`
+
+3. **`e2e/features/elixir-regression-admin.feature`** — Playwright + Cucumber scenario
+   - Admin login (real OIDC PKCE flow) → Room Management → toggle auto-join → User Overview → count
+   - All previous Admin UI scenarios replayed against Phoenix LiveView
+
+4. **`test/regression_sync_load_test.exs`** — ExUnit load test
+   - 200 concurrent `/sync` clients, 50 broadcast messages
+   - Median latency ≤ 150ms measured via `:timer.tc`
+
+---
+
+### Story: go-removal-cleanup
+
+As a Nebu contributor,
+I want all Go source code, Docker images, CI steps, and deployment targets removed,
+So that the repository has a single Elixir/OTP artefact and toolchain.
+
+**Size:** S
+**security_review:** not-needed
+
+**Acceptance Criteria:**
+
+1. **Given** the repository root,
+   **When** `find . -name "*.go" | grep -v vendor` is executed,
+   **Then** the output is empty (no Go source files remain).
+
+2. **Given** `docker-compose.yml`,
+   **When** inspected,
+   **Then** no `gateway` or `media` Go-based services appear; only `core` (Elixir), `postgres`, `dex`, and a reverse proxy.
+
+3. **Given** the CI pipeline (`.gitlab-ci.yml` or `.github/workflows/`),
+   **When** inspected,
+   **Then** no `go build`, `go test`, `govulncheck`, or Go-related steps remain.
+
+4. **Given** the OpenTofu deployment manifests,
+   **When** inspected,
+   **Then** all Go-gateway container targets (AWS ECS task defs, Stackit docker-compose, Helm chart) reference only the single Elixir container.
+
+5. **Given** `Renovate` configuration,
+   **When** inspected,
+   **Then** Go module update rules are removed; only Elixir/Mix + PostgreSQL remain.
+
+6. **Given** `make test-unit-go` and `make build-gateway` targets in the Makefile,
+   **When** the Makefile is inspected,
+   **Then** they are removed or return a clear deprecation error if accidentally called.
+
+7. **Given** the full CI pipeline,
+   **When** it runs after this story is merged,
+   **Then** it completes green in ≤ the baseline CI time minus the Go build time.
+
+**Acceptance Tests:**
+
+### Tests written FIRST (before implementation code):
+
+1. **Shell assertion in CI** — `test/smoke/no-go-files.sh`
+   - When: executed in the repo root
+   - Then: exits 0 if `find . -name "*.go" | grep -v vendor` returns empty; exits 1 otherwise
+
+2. **`make ci`** — full pipeline run
+   - Given: all Go artefacts removed
+   - When: `make ci` runs
+   - Then: exits 0, no Go-related step failures
+
+---

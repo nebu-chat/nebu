@@ -68,114 +68,49 @@ resource "aws_iam_role_policy" "ecs_task_execution_secrets" {
 }
 
 # ── CloudWatch Log Groups for ECS tasks ─────────────────────────────────────
+# go-removal-cleanup: the Go gateway log group was removed. The Elixir server is now
+# the single application container — it serves the public Matrix CS API, the
+# /_matrix/media endpoints, and the Phoenix LiveView admin on its Bandit listener.
 
-resource "aws_cloudwatch_log_group" "gateway" {
-  name              = "/ecs/nebu-${var.environment}-gateway"
+resource "aws_cloudwatch_log_group" "server" {
+  name              = "/ecs/nebu-${var.environment}-server"
   retention_in_days = 30
 
   tags = merge(var.common_tags, {
-    Name = "nebu-${var.environment}-gateway-logs"
+    Name = "nebu-${var.environment}-server-logs"
   })
 }
 
-resource "aws_cloudwatch_log_group" "core" {
-  name              = "/ecs/nebu-${var.environment}-core"
-  retention_in_days = 30
+# ── ECS Task Definition: server ──────────────────────────────────────────────
+# go-removal-cleanup: the separate Go gateway task definition was removed. The
+# Elixir server is now the single application container — it serves the public
+# Matrix CS API, the /_matrix/media endpoints, and the Phoenix LiveView admin on
+# its Bandit HTTP listener (container port 4000), plus gRPC on 9000 (internal).
 
-  tags = merge(var.common_tags, {
-    Name = "nebu-${var.environment}-core-logs"
-  })
-}
-
-# ── ECS Task Definition: gateway ─────────────────────────────────────────────
-
-resource "aws_ecs_task_definition" "gateway" {
-  family                   = "nebu-${var.environment}-gateway"
+resource "aws_ecs_task_definition" "server" {
+  family                   = "nebu-${var.environment}-server"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
   cpu                      = 256
   memory                   = 512
   execution_role_arn       = aws_iam_role.ecs_task_execution.arn
 
-  depends_on = [aws_cloudwatch_log_group.gateway]
+  depends_on = [aws_cloudwatch_log_group.server]
 
   container_definitions = jsonencode([
     {
-      name      = "gateway"
-      image     = "${var.image_registry}/nebu-gateway:${var.nebu_version}"
+      name      = "server"
+      image     = "${var.image_registry}/nebu-server:${var.nebu_version}"
       essential = true
 
       portMappings = [
         {
-          containerPort = 8008
+          # Public HTTP listener (Matrix CS API + /_matrix/media + admin LiveView).
+          containerPort = 4000
           protocol      = "tcp"
-        }
-      ]
-
-      healthCheck = {
-        command     = ["CMD-SHELL", "wget -qO- http://localhost:8008/_matrix/client/v3/versions || exit 1"]
-        interval    = 30
-        timeout     = 5
-        retries     = 3
-        startPeriod = 60
-      }
-
-      # All NEBU_* environment variables sourced from Secrets Manager — never plaintext.
-      secrets = [
-        {
-          name      = "NEBU_DB_URL"
-          valueFrom = aws_secretsmanager_secret.db_url.arn
         },
         {
-          name      = "NEBU_OIDC_ISSUER"
-          valueFrom = aws_secretsmanager_secret.oidc_issuer.arn
-        },
-        {
-          name      = "NEBU_OIDC_CLIENT_SECRET"
-          valueFrom = aws_secretsmanager_secret.oidc_client_secret.arn
-        },
-        {
-          name      = "NEBU_INTERNAL_SECRET"
-          valueFrom = aws_secretsmanager_secret.nebu_internal_secret.arn
-        }
-      ]
-
-      logConfiguration = {
-        logDriver = "awslogs"
-        options = {
-          awslogs-group         = "/ecs/nebu-${var.environment}-gateway"
-          awslogs-region        = var.aws_region
-          awslogs-stream-prefix = "gateway"
-        }
-      }
-    }
-  ])
-
-  tags = merge(var.common_tags, {
-    Name = "nebu-${var.environment}-gateway-task"
-  })
-}
-
-# ── ECS Task Definition: core ────────────────────────────────────────────────
-
-resource "aws_ecs_task_definition" "core" {
-  family                   = "nebu-${var.environment}-core"
-  requires_compatibilities = ["FARGATE"]
-  network_mode             = "awsvpc"
-  cpu                      = 256
-  memory                   = 512
-  execution_role_arn       = aws_iam_role.ecs_task_execution.arn
-
-  depends_on = [aws_cloudwatch_log_group.core]
-
-  container_definitions = jsonencode([
-    {
-      name      = "core"
-      image     = "${var.image_registry}/nebu-core:${var.nebu_version}"
-      essential = true
-
-      portMappings = [
-        {
+          # gRPC (internal cluster communication only).
           containerPort = 9000
           protocol      = "tcp"
         }
@@ -190,6 +125,8 @@ resource "aws_ecs_task_definition" "core" {
       }
 
       # All runtime credentials sourced from Secrets Manager — never plaintext.
+      # Server now serves the public Matrix API + admin, so it needs the OIDC config
+      # that previously lived on the gateway task.
       secrets = [
         {
           name      = "DATABASE_URL"
@@ -202,31 +139,41 @@ resource "aws_ecs_task_definition" "core" {
         {
           name      = "NEBU_INTERNAL_SECRET"
           valueFrom = aws_secretsmanager_secret.nebu_internal_secret.arn
+        },
+        {
+          name      = "NEBU_OIDC_ISSUER"
+          valueFrom = aws_secretsmanager_secret.oidc_issuer.arn
+        },
+        {
+          name      = "NEBU_ADMIN_OIDC_CLIENT_SECRET"
+          valueFrom = aws_secretsmanager_secret.oidc_client_secret.arn
         }
       ]
 
       logConfiguration = {
         logDriver = "awslogs"
         options = {
-          awslogs-group         = "/ecs/nebu-${var.environment}-core"
+          awslogs-group         = "/ecs/nebu-${var.environment}-server"
           awslogs-region        = var.aws_region
-          awslogs-stream-prefix = "core"
+          awslogs-stream-prefix = "server"
         }
       }
     }
   ])
 
   tags = merge(var.common_tags, {
-    Name = "nebu-${var.environment}-core-task"
+    Name = "nebu-${var.environment}-server-task"
   })
 }
 
-# ── ECS Service: gateway ──────────────────────────────────────────────────────
+# ── ECS Service: server ───────────────────────────────────────────────────────
+# go-removal-cleanup: the separate gateway ECS service was removed. The server
+# service is now the ALB target — the ALB forwards public traffic to server:4000.
 
-resource "aws_ecs_service" "gateway" {
-  name            = "nebu-${var.environment}-gateway"
+resource "aws_ecs_service" "server" {
+  name            = "nebu-${var.environment}-server"
   cluster         = aws_ecs_cluster.this.id
-  task_definition = aws_ecs_task_definition.gateway.arn
+  task_definition = aws_ecs_task_definition.server.arn
   desired_count   = var.ecs_desired_count
   launch_type     = "FARGATE"
 
@@ -237,9 +184,9 @@ resource "aws_ecs_service" "gateway" {
   }
 
   load_balancer {
-    target_group_arn = aws_lb_target_group.gateway.arn
-    container_name   = "gateway"
-    container_port   = 8008
+    target_group_arn = aws_lb_target_group.server.arn
+    container_name   = "server"
+    container_port   = 4000
   }
 
   # Allow ECS to update the service without tofu treating it as a drift.
@@ -253,35 +200,6 @@ resource "aws_ecs_service" "gateway" {
   ]
 
   tags = merge(var.common_tags, {
-    Name = "nebu-${var.environment}-gateway-service"
-  })
-}
-
-# ── ECS Service: core ─────────────────────────────────────────────────────────
-
-resource "aws_ecs_service" "core" {
-  name            = "nebu-${var.environment}-core"
-  cluster         = aws_ecs_cluster.this.id
-  task_definition = aws_ecs_task_definition.core.arn
-  desired_count   = var.ecs_desired_count
-  launch_type     = "FARGATE"
-
-  network_configuration {
-    subnets          = aws_subnet.private[*].id
-    security_groups  = [aws_security_group.ecs.id]
-    assign_public_ip = false
-  }
-
-  # Allow ECS to update the service without tofu treating it as a drift.
-  lifecycle {
-    ignore_changes = [task_definition, desired_count]
-  }
-
-  depends_on = [
-    aws_iam_role_policy_attachment.ecs_task_execution_managed,
-  ]
-
-  tags = merge(var.common_tags, {
-    Name = "nebu-${var.environment}-core-service"
+    Name = "nebu-${var.environment}-server-service"
   })
 }

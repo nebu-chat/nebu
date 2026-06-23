@@ -6,108 +6,106 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Nebu** (short for Nebuchadnezzar, the ship of the free from The Matrix film) – An enterprise-grade, Matrix Client-Server API compatible chat server. Apache 2.0 licensed, no federation, horizontally scalable. Designed to replace Slack/Teams with full data sovereignty.
 
-This project is currently in early development. The `main.go` is a placeholder; the architecture described in `README.md` is the implementation target.
+The entire stack is Elixir/OTP (ADR-021 — Go was removed in the `full-elixir-stack`
+epic). The codebase is a **single OTP application** (ADR-019), not an umbrella.
 
 ## Tech Stack
 
 | Layer | Technology |
 |---|---|
-| API Gateway | Go 1.26+ |
-| Media Gateway | Go 1.26+ |
-| Core / Messaging | Elixir/OTP 1.19+ |
-| Gateway ↔ Core | gRPC (protobuf) |
+| Application | Elixir/OTP 1.19+ — single OTP app (`:nebu` / `Nebu.Application`) |
+| HTTP / Web | Bandit + Plug (Matrix API & media); Phoenix LiveView (Admin UI) |
 | Database | PostgreSQL 16+ |
+| Migrations | Raw SQL via `Nebu.Release.migrate/0` (Ecto for the connection pool only) |
 | Sessions / Cache | ETS (Elixir built-in) — kein Redis |
 | Pub/Sub | pg Process Groups (built-in) — kein NATS |
 | Clustering | libcluster + Horde |
 
 ## Architecture
 
-Three-tier design:
+**One Elixir/OTP application** (`server/`, app `:nebu`), no umbrella (ADR-019), with three
+feature-domain module namespaces plus shared/cross-cutting namespaces, all under one
+supervisor tree (`Nebu.Application` → `Nebu.Supervisor`):
 
-1. **Go Gateway** (`gateway/`) — Handles all Matrix Client-Server API HTTP traffic, TLS termination, rate limiting, auth middleware (OIDC-only). Stateless, horizontally scalable. Communicates with Core via gRPC.
+- **`Nebu.Matrix`** — Matrix Client-Server API + all stateful chat logic: rooms (Horde
+  GenServers), sessions (ETS + PostgreSQL), presence, permissions, signing, event
+  dispatch, sync, and the Matrix HTTP surface (`Nebu.Matrix.Http*`).
+- **`Nebu.Media`** — media gateway (upload/download/crypto/storage via ExAws/Finch).
+- **`Nebu.Admin`** — Admin UI (Phoenix LiveView) + admin OIDC login + admin DB queries.
+- **`Nebu.Web`** — shared HTTP plumbing: the single Bandit listener's top router, plugs
+  (OIDC, rate limit, request id/logger), JWKS cache, token denylist.
+- **`Nebu.Compliance`** — audit log (cross-cutting).
+- Top-level infra: `Nebu.Repo`, `Nebu.Release`, `Nebu.Health.*`, `Nebu.NodeRegistration`.
 
-2. **Elixir/OTP Core** (`core/`) — Actor-model runtime for Room GenServers (via Horde), Session Manager (ETS + PostgreSQL), Presence, and Event Dispatch. Handles all stateful chat logic. Clusters via libcluster.
+**Public-API rule (ADR-020):** other domains may only call `Nebu.Matrix`, `Nebu.Media`,
+`Nebu.Admin` — never another domain's internal submodules. PostgreSQL is the append-only
+event log + schema owner (migrations via `Nebu.Release`, ADR-018). No Redis. No NATS. No Kafka.
 
-3. **Infrastructure** — PostgreSQL as append-only event log and schema owner (via golang-migrate). No Redis. No NATS. No Kafka.
+> `Nebu.Matrix.EventDispatcher.Server` + the `Core.*` structs are the **in-process**
+> command/DTO layer the HTTP routers call directly. They were once a gRPC service; the
+> `grpc-removal` epic (ADR-021) removed the last of it — no `:grpc`/`:protobuf` deps, no
+> `use GRPC.Server`, no network listener. `Server` is a plain module raising
+> `Nebu.Matrix.Error` (status via `Nebu.Matrix.Status`), and `Core.*` (`server/lib/pb/`)
+> are plain Elixir structs. `Nebu.Matrix.Http.call_core/1` maps a raised
+> `Nebu.Matrix.Error` to the Matrix HTTP error envelope.
 
-## Planned Directory Structure
+## Directory Structure
 
 ```
-gateway/
-  cmd/gateway/         ← entrypoint (migrate → registry → HTTP)
-  internal/
-    auth/              ← OIDC-only (no SAML/LDAP directly)
-    matrix/            ← Matrix API handlers
-    middleware/        ← rate limiting, logging, CORS
-    grpc/              ← Core communication (stream + fallback)
-    buffer/            ← message_buffer drain strategy
-    admin/             ← Admin API + UI (Go Templates + go:embed)
-    registry/          ← Elixir node registry
-  migrations/          ← golang-migrate SQL files
-media/
-  cmd/media/           ← entrypoint
-  internal/
-    upload/ download/ crypto/ storage/
-core/                  ← Elixir/OTP Umbrella
-  apps/
-    room_manager/      ← Horde + Room GenServer
-    session_manager/   ← ETS + PostgreSQL hybrid since-token
-    presence/          ← Presence Manager
-    event_dispatcher/  ← EventBus gRPC Stream + pg Process Groups
-    signature/         ← Ed25519 signing + X25519 encryption + Nebu.EventId
-    permissions/       ← System roles + room power levels
-proto/                 ← gRPC .proto definitions + generated stubs
+server/                     ← the single Elixir/OTP application (app :nebu)
+  mix.exs                   ← one mix.exs (no apps_path, no umbrella)
+  lib/
+    nebu/
+      application.ex        ← Nebu.Application — one supervisor tree
+      stateful_supervisor.ex← isolates crash-prone Presence/Session/Horde rooms
+      repo.ex  release.ex   ← Ecto Repo (pool) + raw-SQL migration runner
+      matrix/               ← Nebu.Matrix.* — Matrix API + rooms/sessions/presence/…
+      media/                ← Nebu.Media.* — media gateway
+      admin/                ← Nebu.Admin.* — Admin LiveView UI + admin DB
+      web/                  ← Nebu.Web.* — router, plugs, jwks, token denylist
+      compliance/           ← Nebu.Compliance.* — audit log
+      health/  node_registration.ex  build_info.ex   ← infra
+    pb/                     ← Core.* plain-struct DTOs (in-process command/response shapes)
+  priv/
+    migrations/             ← canonical SQL schema (ADR-018) — run by Nebu.Release
+    static/                 ← Admin UI assets (served by Nebu.Admin.Endpoint)
+  test/nebu/{matrix,media,admin,web,compliance}/  ← tests mirror the domains
+proto/                      ← historical .proto (no longer generated from — grpc-removal/ADR-021)
 docs/
-  architecture/        ← SAD.md, data-model.md, ADRs
-  stories/             ← BMAD epics & stories
+  architecture/             ← arc42 sections, ADRs
+  stories/                  ← BMAD epics & stories
 ```
 
 ## Commands
 
-All builds run via Docker containers — no local Go, Elixir, or buf installation required.
+All builds run via Docker containers — no local Elixir or buf installation required.
 
-### Go Gateway (via build container)
-
-```bash
-make build-gateway                # docker multi-stage build
-make test-unit-go                 # go test ./... in container
-make gen-api                      # oapi-codegen: openapi.yaml → api_gen.go
-```
-
-### Elixir/OTP Core (via build container)
+### Elixir/OTP server (via build container)
 
 ```bash
-make build-core                   # docker multi-stage build
+make build-server                 # mix compile inside the build container
 make test-unit-elixir             # mix test in container
-```
-
-### Proto / gRPC
-
-```bash
-make proto                        # buf generate (in container)
 ```
 
 ### Local Development (Docker)
 
 ```bash
-make dev                          # docker compose up (gateway, core, postgres, keycloak)
+make dev                          # docker compose up (server, postgres, dex/keycloak, minio)
 make setup                        # first-time setup: generate .secrets/internal_secret + test keys
 make test-integration             # full stack + Godog Gherkin tests
-make redeploy                     # rebuild gateway + core Docker images and restart containers
+make redeploy                     # rebuild + restart the server Docker image/container
 ```
 
-**After committing code changes, always use `make redeploy`** — not `make build-gateway` or `make build-core`.
+**After committing code changes, always use `make redeploy`** — not `make build-server`.
 
-- `make build-gateway` builds `nebu-gateway:dev` — a different tag than what docker compose uses (`nebu-gateway:latest`).
-- `make build-core` only runs `mix compile` inside a throw-away container — it does NOT build a Docker image at all.
-- `make redeploy` runs `docker compose build --no-cache gateway core && docker compose up -d --force-recreate gateway core`, which correctly rebuilds the images docker compose uses and restarts the containers.
+- `make build-server` only runs `mix compile` inside a throw-away container — it does NOT build a Docker image.
+- `make redeploy` rebuilds the `server` image docker compose uses and recreates the container.
 
-Environment variables for gateway (prefix: `NEBU_`):
-- `NEBU_CORE_GRPC_ADDR` — gRPC address of the Elixir core (default: `core:9000`)
-- `NEBU_DB_URL` — PostgreSQL connection string
-- `NEBU_OIDC_ISSUER` — OIDC provider URL
-- `NEBU_INTERNAL_SECRET_FILE` — path to shared node-registration secret file
+Environment variables (prefix: `NEBU_`):
+- `NEBU_DB_URL` — PostgreSQL connection string (migrations: `NEBU_DB_URL_MIGRATE` fallback)
+- `NEBU_OIDC_ISSUER` / `NEBU_OIDC_AUDIENCE` — OIDC provider config (validated at boot)
+- `NEBU_PII_ENCRYPTION_KEY` — 32-byte hex key for PII-at-rest encryption
+- `NEBU_INTERNAL_SECRET_FILE` — path to shared node-registration / admin-key-base secret file
 
 ## Matrix API Scope
 
@@ -139,7 +137,7 @@ ADRs are tracked in `docs/architecture/adr/`:
 | 002 | No Redis, No NATS — ETS + pg Process Groups replace both |
 | 003 | Content-Hash Event-ID (Matrix Room Version 6+) |
 | 004 | Horde Registry + DynamicSupervisor for Room GenServers |
-| 005 | gRPC Server-Streaming EventBus + Unary fallback |
+| 005 | gRPC Server-Streaming EventBus + Unary fallback — **superseded by ADR-021 / `grpc-removal` epic** (gRPC fully removed; the command layer is in-process plain modules) |
 | 006 | message_buffer drain strategy (linear MVP, AIMD Phase 2) |
 | 007 | Ed25519 (signing) + X25519 (encryption) — two key pairs per user |
 | 008 | Node registration: PSK via Compose secrets (MVP) → Ephemeral mTLS (Phase 2) |
@@ -151,6 +149,10 @@ ADRs are tracked in `docs/architecture/adr/`:
 | 015 | OIDC User Directory Integration: two complementary protocols — OIDC directory endpoint (Dex/Keycloak, user search) + SCIM 2.0 RFC 7644 (Azure AD/Okta, bulk import) |
 | 016 | Git Branching and Release Strategy: simplified Git Flow (`main` + `develop` + …) — **Superseded by ADR-017** |
 | 017 | Simplified main-only branching: `main` is the single long-lived branch; `feature/*`, `bugfix/*`, `release/*`, `hotfix/*` all branch from and merge to `main`. No `develop`. `main` builds dev-* images. |
+| 018 | No Domain Model — Locality of Behavior: no ORM, no Repository pattern, no Service layer. SQL inline in each endpoint file. Migration SQL is the only canonical data model. Deliberate adaptation for LLM-assisted development (BMAD). |
+| 019 | Single OTP Application — no umbrella. One `mix.exs`, one `Nebu.Application`, one supervisor tree. Domains are module namespaces under `lib/nebu/`. |
+| 020 | Clustering Strategy & Module Architecture — `Nebu.Matrix`/`Media`/`Admin` domains with a Public-API rule (only these modules are callable cross-domain); BEAM-native scaling (libcluster + Horde + pg). |
+| 021 | Elixir Consolidation / Go Removal — Go gateway + media gateway removed; whole stack is one Elixir/OTP app. gRPC fully removed (`grpc-removal` epic): no `:grpc`/`:protobuf` deps, the command layer is in-process plain modules + `Core.*` plain structs; native `Nebu.Matrix.Error`/`Status` replaces `GRPC.RPCError`/`GRPC.Status` (supersedes ADR-005). |
 
 ## Named Epic Convention (from v0.3.0+)
 
@@ -213,7 +215,7 @@ The Red-Green-Refactor cycle:
 1. Failing tests from Gate 1 are already present — do not write new implementation code before running them
 2. Implement until all acceptance tests pass (no new code without a failing test)
 3. For complex test scenarios or edge cases: invoke **`/bmad-tea`** as a test design partner
-4. Run `make test-unit-go` + `make test-unit-elixir` before marking story as `review`
+4. Run `make test-unit-elixir` before marking story as `review`
 
 ### Gate 3 — Code Review (`/bmad-code-review`)
 
@@ -248,7 +250,7 @@ security_review: required | optional | not-needed
 - `required` — pipeline runs a security-focused `/bmad-code-review` pass in a fresh subagent after Gate 3. CRITICAL/HIGH block the commit.
 - `optional` — user decides per-invocation.
 - `not-needed` — skipped.
-- Flag missing → auto-classified `required` if the staged diff touches `gateway/internal/{auth,middleware,admin,db}/`, `core/apps/{signature,permissions}/`, new routes in `cmd/gateway/main.go`, new SQL migrations, or Elixir code using `:crypto` / external input.
+- Flag missing → auto-classified `required` if the staged diff touches `server/lib/nebu/web/` (plugs/router/auth), `server/lib/nebu/admin/`, `server/lib/nebu/matrix/{signature,permissions,session}/`, the Bandit/router wiring in `server/lib/nebu/application.ex`, new SQL migrations under `server/priv/migrations/`, or Elixir code using `:crypto` / external input.
 
 **SEC Gate 2 — Epic-end (mandatory):**
 
@@ -266,7 +268,7 @@ At the end of each epic, run **`/bmad-testarch-trace`** to generate the requirem
 Use the `context7` MCP server before implementing any story that touches external libraries or APIs. Load current docs first, do not rely on training data alone.
 
 **When to use:**
-- Any story using `go-oidc`, `grpc-go`, OTP `:crypto`, Dex API, `golang-migrate`, `oapi-codegen`, Tailwind, DaisyUI, Vue.js, Playwright
+- Any story using `assent` (OIDC), `bandit`/`plug`, `phoenix`/`phoenix_live_view`, `ecto`/`postgrex`, `ex_aws`/`finch`, OTP `:crypto`/`:pg`, `horde`/`libcluster`, Dex API, Tailwind, DaisyUI, Playwright
 - When API behavior is unclear or a library version has changed
 
 **How:** Call `mcp__context7__resolve-library-id` → `mcp__context7__query-docs` before writing implementation code.
@@ -276,7 +278,7 @@ Use the `playwright` MCP server for all E2E tests that involve HTML pages, forms
 
 **Split:**
 - **Playwright + Cucumber/Gherkin** → browser-level tests (HTML pages, form submits, button clicks, redirects, Matrix web client E2E)
-- **Godog + net/http** → HTTP/gRPC-level tests (REST API, Matrix API protocol, gRPC endpoints)
+- **ExUnit `:integration` tests (`Plug.Test` / `:httpc` against the running stack)** → HTTP/protocol-level tests (Matrix Client-Server API, media endpoints). These live in `server/test/` and run via `make test-integration`. (The former Go/Godog HTTP harness was removed with the Go stack — ADR-021.)
 
 **E2E test format (mandatory):** All Playwright E2E tests MUST be written as Gherkin feature files with a Cucumber-based framework (`playwright-bdd` or `@cucumber/cucumber` + Playwright). Plain `.spec.ts` files without a `.feature` counterpart are not accepted.
 
@@ -286,7 +288,7 @@ e2e/features/<feature>.feature   ← Gherkin scenarios (written first, failing)
 e2e/steps/<feature>.steps.ts     ← Cucumber step definitions
 ```
 
-**Why:** Godog HTTP-level navigation of Authorization Code flows is complex and brittle. Playwright handles real browser flows correctly. Gherkin keeps scenarios readable and directly traceable to acceptance criteria.
+**Why:** HTTP-level navigation of Authorization Code flows is complex and brittle. Playwright handles real browser flows correctly. Gherkin keeps scenarios readable and directly traceable to acceptance criteria.
 
 **Migration note:** Existing `.spec.ts` files are being migrated to the Gherkin format. New stories must use `.feature` + step definitions from day one — no new plain `.spec.ts` files.
 
@@ -310,19 +312,19 @@ Write **ExUnit tests first** (failing), then implement:
 
 #### For Matrix API Endpoint Stories:
 
-Write **Godog scenario first** (failing), then implement:
+Write the **ExUnit `:integration` test first** (failing), then implement:
 
-1. Write `gateway/features/<feature>.feature` with happy path + one error case
-2. The handler returns `501 Not Implemented` initially
-3. Implement handler until Godog scenario is green
-4. Add edge case unit tests (Go httptest)
-5. **Additionally:** if the API behavior is visible through a web client (send message, join room, sync, etc.), also write a Playwright+Gherkin scenario in `e2e/features/` that tests through a real browser session. Godog alone does not cover the browser-level behavior.
+1. Write a `@moduletag :integration` ExUnit test in `server/test/nebu/matrix/` driving the Plug router (happy path + one error case)
+2. The handler returns `501 Not Implemented` (or `M_UNRECOGNIZED`) initially
+3. Implement the handler until the integration test is green
+4. Add edge-case unit tests (`Plug.Test` conn helpers, pure ExUnit)
+5. **Additionally:** if the API behavior is visible through a web client (send message, join room, sync, etc.), also write a Playwright+Gherkin scenario in `e2e/features/` that tests through a real browser session.
 
 #### For Admin UI Stories (HTML/browser) and Matrix Web Client Stories:
 
 Write **Gherkin feature file first** (failing), then implement:
 
-1. Write `e2e/features/<feature>.feature` (Gherkin scenarios) before any HTML/Go template code
+1. Write `e2e/features/<feature>.feature` (Gherkin scenarios) before any HEEx/LiveView template code
 2. Write `e2e/steps/<feature>.steps.ts` (Cucumber step definitions) — initially failing
 3. Use real browser flows — no cookie forging, no DB seeding shortcuts
 4. Tests run against the real running stack (no mocks) via `playwright-bdd` or `@cucumber/cucumber` + Playwright
@@ -369,13 +371,10 @@ See **BMAD Workflow** section above for the full gate sequence.
 All Gherkin tests involving OIDC must use Authorization Code + PKCE. ROPC is not supported by Dex v2.41+. Never use `grant_type=password` shortcuts in E2E tests.
 
 ## Elixir Conventions
-- GenServer state: immer via handle_* callbacks, nie direkt
-- Fehler: let it crash + Supervisor, kein defensive try/rescue
-- Ecto: Changesets für alle Validierungen, kein direkt insert!
-- Supervisor-Strategien: one_for_one default, begründe Abweichungen
-- Keine Prozess-Registrierung ohne via-Tuple oder Registry
-
-## Go Conventions
-- Errors: explicit handling, kein panic in Library-Code
-- Context: immer als ersten Parameter durchreichen
-- Interfaces: klein halten, definiert vom Consumer
+- **Single OTP app, no umbrella (ADR-019):** one `mix.exs`, one `Nebu.Application`. Never add a new `mix.exs`, a new `use Application`, or an `apps/` dir. New domains are module namespaces under `lib/nebu/`.
+- **Public-API rule (ADR-020):** cross-domain calls go only through `Nebu.Matrix`, `Nebu.Media`, `Nebu.Admin` — never another domain's internal submodules.
+- **No domain model (ADR-018):** SQL inline in the handler (`Postgrex.query`/`Nebu.Repo`); no `Ecto.Schema`, no Repository/Service layer. SQL duplication is intentional, not a finding.
+- GenServer state: immer via handle_* callbacks, nie direkt.
+- Fehler: let it crash + Supervisor, kein defensive try/rescue.
+- Supervisor-Strategien: one_for_one default, begründe Abweichungen.
+- **Cluster-ready primitives (ADR-020):** register processes via `Horde` (not a local `Registry`); for cluster-critical pub/sub use `pg`, not local `Phoenix.PubSub` alone. Code must behave identically on a single node and in a cluster.

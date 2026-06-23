@@ -8,7 +8,37 @@
 #   _bmad-output/nebu/epics/<epic-name>/pipeline-state.yaml
 # This file is no longer used for named-epic pipeline runs.
 #
-# last_updated: 2026-06-10
+# last_updated: 2026-06-23
+# [bug-audit-writer-async-race] 2026-06-23T11:41Z committed ✓ edef9af5 (async:false fix + structural guard; unit 791/0 multi-seed; code-review CLEAN, sec n/a)
+# [bug-audit-writer-async-race] 2026-06-23T11:41Z code-review → MINOR-fixed (stale comment) → CLEAN; security-review skipped (test-only, no sec surface); arc42 → no arch change
+# [bug-audit-writer-async-race] 2026-06-23T11:36Z ci-gate → ✓ unit 791/0 across seeds 0/747557/1/42 (--warnings-as-errors); flake gone
+# [bug-audit-writer-async-race] 2026-06-23T11:35Z dev-story → set write_audit_log_test + user_deletion_test to async:false (cycle 0); 2-line fix per test-review, no prod change
+# [bug-audit-writer-async-race] 2026-06-23T11:34Z test-review → 3 MAJOR (test-induced design damage); red test REPLACED with structural async-isolation guard (RED, lists user_deletion_test + write_audit_log_test); no prod change needed
+# [bug-audit-writer-async-race] 2026-06-23T11:31Z atdd → 1 deterministic red test (audit_writer_seam_race_regression_test.exs); orchestrator flagged it may force unnecessary prod change vs async:false fix
+# [bug-audit-writer-async-race] 2026-06-23T11:26Z pipeline started (--bug: WriteAuditLogTest et al. race on global Application.put_env(:compliance, :audit_writer) under async:true — concurrent module clobbers env mid-flight → assert_receive timeout; fix = process-local writer injection or async:false + regression guard)
+# [bug-flaky-rate-limit] 2026-06-22T08:45Z committed ✓ 147ea442 (unit 756/0, ci-local --all green, code-review+Kassandra CLEAN; LOW: gate clock-seam to non-prod — backlog, fail-closed)
+# [bug-flaky-rate-limit] 2026-06-22T08:30Z pipeline started (--bug: url_preview_test.exs:146 flaky — token-bucket wall-clock refill lets 11th req through on slow CI; fix = injectable clock seam, deterministic test)
+# [bug-unit-test-drift] 2026-06-22T07:27Z committed ✓ 02484d22 (749/0, ci-local --all green, code-review+Kassandra CLEAN)
+# [bug-unit-test-drift] 2026-06-22T07:26Z arc42-update → no arch changes (test fixes + defensive guard in existing fn)
+# [bug-unit-test-drift] 2026-06-22T07:26Z security-review → Kassandra CLEAN (1 MEDIUM deferred: cache oidc_user_id_claim at boot)
+# [bug-unit-test-drift] 2026-06-22T07:23Z code-review → 1 MAJOR (rooms_db_module on_exit leak) fixed cycle 1 → CLEAN; user_id.ex INFO only
+# [bug-unit-test-drift] 2026-06-22T07:16Z ci-gate → ✓ no-go+unit-elixir(749/0)+secret-scan+verify-docs
+# [bug-unit-test-drift] 2026-06-22T07:14Z dev-story → 749 tests 0 fail (8 test files + user_id.ex defensive fix)
+# [bug-unit-test-drift] 2026-06-22T07:00Z atdd → failing tests already present (red unit suite = regression evidence); test-review n/a (no story ACs)
+# [bug-unit-test-drift] 2026-06-22T07:00Z pipeline started (--bug: unit-suite red, test-drift since 23647c62)
+# [space-room-in-space-bug] 2026-06-22T06:31Z committed ✓ 652d9c00 (createRoom honors initial_state; MINOR fixed 1 cycle + Kassandra CLEAN; e2e API+@ui GREEN)
+# [space-room-in-space-bug] 2026-06-22T06:30Z arc42-update → no arch changes (bug fix completes existing createRoom endpoint behavior)
+# [space-room-in-space-bug] 2026-06-22T06:29Z security-review → Kassandra CLEAN (0 CRIT/HIGH; 1 MED 2 LOW advisory). Hardened F-1: initial_state capped at 64 (400 M_INVALID_PARAM).
+# [space-room-in-space-bug] 2026-06-22T06:22Z final-verify → redeployed server image (fix+guard), @bug-room-in-space BOTH scenarios GREEN (API + @ui); awaiting Kassandra
+# [space-room-in-space-bug] 2026-06-22T06:19Z code-review cycle 1 → MINOR-1 guard + MINOR-4 tests fixed (9/9 pass, 0 regressions); @ui e2e GREEN via fixture fix
+# [space-room-in-space-bug] 2026-06-22T06:12Z code-review → 0 CRITICAL/MAJOR, 4 MINOR → cycle 1 (fix MINOR-1 parent-space guard + MINOR-4 ordering/guard tests; MINOR-2/3 accepted)
+# [space-room-in-space-bug] 2026-06-22T06:05Z ci-gate → PASS: API e2e GREEN (fix proven), rename runtime-clean (server healthy), units baseline 0 new; @ui scenario blocked by device-verify-modal fixture gap (known brittleness)
+# [space-room-in-space-bug] 2026-06-22T05:55Z dev-story → done (cycle 0): createRoom honors initial_state (proto+handler+create_room/2), 8 ExUnit pass, compile clean, 0 regressions
+# [space-room-in-space-bug] 2026-06-22T05:43Z test reworked → RED for right reason (m.space.parent dropped); root cause CONFIRMED on live stack: createRoom drops initial_state. test-review MAJOR resolved.
+# [space-room-in-space-bug] 2026-06-22T05:14Z user: owner role (PL gate ruled out) + build faithful Element-UI repro on live stack → rework RED test, no seeded edge
+# [space-room-in-space-bug] 2026-06-21T20:58Z test-review → 1 MAJOR (false-green) + root-cause doubt → paused before dev
+# [space-room-in-space-bug] 2026-06-21T20:54Z atdd → 2 failing element e2e scenarios (create-room-in-space.feature)
+# [space-room-in-space-bug] 2026-06-21T20:49Z bug pipeline started → createRoom drops initial_state (m.space.child); element space e2e lost from epic-15 (570c9278/939f3a49), never merged
 # [bugfix-fix-compliance-rls-policies] 2026-06-10T16:20Z committed ✓ (ATDD+Code 1 cycle CLEAN+Kassandra CLEAN)
 # [bugfix-fix-compliance-rls-policies] 2026-06-10T16:15Z arc42-update → no arch changes (DDL-only, compliance tables not in Arc42 scope)
 # [bugfix-fix-compliance-rls-policies] 2026-06-10T16:10Z security-review → Kassandra CLEAN (0 CRITICAL/HIGH, 1 MEDIUM deferred to app logic)
@@ -92,4 +122,4 @@ current_step: null
 completed: []
 cycle_count: 0
 blocked_reason: null
-last_updated: "2026-06-10T15:54Z"
+last_updated: "2026-06-23T11:41Z"

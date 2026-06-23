@@ -2,10 +2,9 @@
 # All build commands run inside Docker containers.
 # No local Go, Elixir, or buf installation required.
 
-DOCKER_GO     = docker run --rm -v $(PWD):/workspace -w /workspace golang:1.26-alpine
+# go-removal-cleanup (full-elixir-stack): DOCKER_GO / DOCKER_NODE / DOCKER_BUF were used
+# only by the now-removed Go gateway build and admin asset pipeline.
 DOCKER_ELIXIR = docker run --rm -v $(PWD):/workspace -w /workspace elixir:1.20-alpine
-DOCKER_BUF    = docker run --rm -v $(PWD):/workspace -w /workspace bufbuild/buf
-DOCKER_NODE   = docker run --rm -v $(PWD):/workspace -w /workspace node:22-alpine
 DOCKER_TOFU   = docker run --rm --entrypoint sh -v $(PWD):/workspace -w /workspace ghcr.io/opentofu/opentofu:1.9
 DOCKER_HELM   = docker run --rm --entrypoint sh -v $(PWD):/workspace -w /workspace alpine/helm:3.17
 
@@ -15,68 +14,43 @@ CI_REGISTRY_IMAGE ?= registry.gitlab.com/philippb/open-chat
 # Strip the leading 'v' from TAG (e.g. v1.0.0 → 1.0.0) for image tagging.
 IMAGE_VERSION = $(patsubst v%,%,$(TAG))
 
-.PHONY: build-gateway build-core redeploy build-admin-css download-fonts download-vendor dev dev-reset-db setup test-unit-go test-unit-elixir test-integration test-integration-elixir test-integration-ci test-e2e test-matrix-compat test-load-silber build-element-e2e test-e2e-element build-fluffychat-e2e test-e2e-fluffychat proto gen-api test-compose-ports test-compose-minio test-iac-validate test-load-syntax release release-push
+.PHONY: ci build-gateway build-media build-server redeploy dev dev-reset-db setup test-unit-go test-unit-elixir test-integration test-integration-elixir test-integration-ci test-e2e test-matrix-compat test-load-silber build-element-e2e test-e2e-element build-fluffychat-e2e test-e2e-fluffychat gen-api assets test-compose-ports test-compose-minio test-iac-validate test-load-syntax release release-push
 
-## download-fonts: Download Inter + JetBrains Mono WOFF2 fonts (run once; commit results)
-download-fonts:
-	docker run --rm -v $(PWD):/workspace -w /workspace alpine:3.19 sh -c "\
-		apk add -q --no-cache curl && \
-		mkdir -p gateway/internal/admin/static/fonts && \
-		curl -fsSL -o gateway/internal/admin/static/fonts/Inter-Regular.woff2 \
-			'https://fonts.bunny.net/inter/files/inter-latin-400-normal.woff2' && \
-		curl -fsSL -o gateway/internal/admin/static/fonts/Inter-Medium.woff2 \
-			'https://fonts.bunny.net/inter/files/inter-latin-500-normal.woff2' && \
-		curl -fsSL -o gateway/internal/admin/static/fonts/Inter-SemiBold.woff2 \
-			'https://fonts.bunny.net/inter/files/inter-latin-600-normal.woff2' && \
-		curl -fsSL -o gateway/internal/admin/static/fonts/JetBrainsMono-Regular.woff2 \
-			'https://fonts.bunny.net/jetbrains-mono/files/jetbrains-mono-latin-400-normal.woff2'"
+## ci: Aggregate CI gate — Elixir unit tests + the no-go-files smoke gate (AT#2).
+## go-removal-cleanup (full-elixir-stack): the canonical local CI entrypoint after
+## the Go layer was removed.
+ci: test-unit-elixir
+	./test/smoke/no-go-files.sh
 
-## download-vendor: Download vendored JS files (run once; results are gitignored — downloaded at build time)
-download-vendor:
-	@[ -f gateway/internal/admin/static/vendor/vue.esm-browser.prod.js ] || \
-	docker run --rm -v $(PWD):/workspace -w /workspace alpine:3.19 sh -c "\
-		apk add -q --no-cache curl && \
-		mkdir -p gateway/internal/admin/static/vendor && \
-		curl -fsSL -o gateway/internal/admin/static/vendor/vue.esm-browser.prod.js \
-			'https://cdn.jsdelivr.net/npm/vue@3.5.13/dist/vue.esm-browser.prod.js'"
+## build-gateway: REMOVED — the Go gateway no longer exists (full-elixir-stack migration).
+build-gateway:
+	@echo "Error: Go layer has been removed in the full-elixir-stack migration. See docs/stories/full-elixir-stack/go-removal-cleanup.md" && exit 1
 
-## build-admin-css: Compile Tailwind CSS + DaisyUI into gateway/internal/admin/static/admin.css
-build-admin-css:
-	$(DOCKER_NODE) sh -c "\
-		cd gateway/internal/admin && \
-		npm install --silent tailwindcss@3 daisyui@4 && \
-		npx tailwindcss \
-			--config tailwind.config.js \
-			--input tailwind.input.css \
-			--output static/admin.css \
-			--minify"
+## build-media: REMOVED — the Go media gateway no longer exists (full-elixir-stack migration).
+build-media:
+	@echo "Error: Go layer has been removed in the full-elixir-stack migration. See docs/stories/full-elixir-stack/go-removal-cleanup.md" && exit 1
 
-## build-gateway: Build the Go Gateway Docker image (multi-stage)
-build-gateway: gen-api build-admin-css download-vendor
-	docker build -t nebu-gateway:dev ./gateway
+## build-server: Compile the Elixir/OTP server inside container (mix compile — does NOT rebuild the Docker image)
+build-server:
+	$(DOCKER_ELIXIR) sh -c "cd server && mix local.hex --force && mix deps.get && mix compile"
 
-## build-core: Compile the Elixir/OTP Core inside container (mix compile — does NOT rebuild the Docker image)
-build-core:
-	$(DOCKER_ELIXIR) sh -c "cd core && mix local.hex --force && mix deps.get && mix compile"
-
-## redeploy: Rebuild gateway + core + media Docker images (via docker compose) and restart containers.
-## Use this after committing code changes — make build-gateway / make build-core do NOT update
-## the images used by docker compose. Always use --no-cache to avoid stale layer reuse.
-## Build args are computed here so deployed images always carry real version metadata.
+## redeploy: Rebuild the server Docker image (via docker compose) and restart the container.
+## Use this after committing code changes — make build-server does NOT update the image used
+## by docker compose. Always use --no-cache to avoid stale layer reuse.
+## go-removal-cleanup (full-elixir-stack): the server is now the only application image — it serves
+## Matrix, /_matrix/media, and the admin UI. Build args carry real version metadata.
 redeploy:
 	GIT_COMMIT=$$(git rev-parse --short HEAD) \
 	BUILD_TIME=$$(date -u +%Y-%m-%dT%H:%M:%SZ) \
 	RELEASE_VERSION=$$(git describe --tags --always 2>/dev/null || echo dev) \
-	docker compose build --no-cache gateway core media
-	docker compose up -d --force-recreate gateway core media
+	docker compose build --no-cache server
+	docker compose up -d --force-recreate server
 
-## release: Build versioned release images locally (TAG=vN.N.N required).
-## Images are tagged as $(CI_REGISTRY_IMAGE)/nebu-gateway:<version>, nebu-core:<version>, and nebu-media:<version>.
+## release: Build the versioned release image locally (TAG=vN.N.N required).
+## go-removal-cleanup (full-elixir-stack): only the server image is built now — it serves
+## Matrix, /_matrix/media, and the admin UI. Image is tagged $(CI_REGISTRY_IMAGE)/nebu-server:<version>.
 ## Use docker login registry.gitlab.com before pushing. Chain with release-push:
 ##   TAG=v1.0.0 make release release-push
-## NOTE: Builds are sequential — if the gateway build fails, core/media are not built. Rerun make release to retry.
-## NOTE: This target uses committed api_gen.go and admin.css as-is.
-##   Run 'make gen-api build-admin-css' first if openapi.yaml or Tailwind sources were changed.
 release:
 ifndef TAG
 	$(error TAG is required. Usage: TAG=v1.0.0 make release)
@@ -90,24 +64,12 @@ endif
 		--build-arg GIT_COMMIT=$$(git rev-parse --short HEAD) \
 		--build-arg BUILD_TIME=$$(date -u +%Y-%m-%dT%H:%M:%SZ) \
 		--build-arg RELEASE_VERSION=$(IMAGE_VERSION) \
-		-t $(CI_REGISTRY_IMAGE)/nebu-gateway:$(IMAGE_VERSION) \
-		./gateway
-	docker build \
-		--build-arg GIT_COMMIT=$$(git rev-parse --short HEAD) \
-		--build-arg BUILD_TIME=$$(date -u +%Y-%m-%dT%H:%M:%SZ) \
-		--build-arg RELEASE_VERSION=$(IMAGE_VERSION) \
-		-t $(CI_REGISTRY_IMAGE)/nebu-core:$(IMAGE_VERSION) \
-		./core
-	docker build \
-			--build-arg GIT_COMMIT=$$(git rev-parse --short HEAD) \
-			--build-arg BUILD_TIME=$$(date -u +%Y-%m-%dT%H:%M:%SZ) \
-			--build-arg RELEASE_VERSION=$(IMAGE_VERSION) \
-			-t $(CI_REGISTRY_IMAGE)/nebu-media:$(IMAGE_VERSION) \
-			./media
+		-t $(CI_REGISTRY_IMAGE)/nebu-server:$(IMAGE_VERSION) \
+		./server
 
-## release-push: Push versioned release images to the registry (TAG=vN.N.N required).
+## release-push: Push the versioned release image to the registry (TAG=vN.N.N required).
 ## Run after `make release TAG=vN.N.N`. Requires docker login registry.gitlab.com.
-## Pushes nebu-gateway, nebu-core, and nebu-media images.
+## go-removal-cleanup (full-elixir-stack): pushes only the nebu-server image.
 release-push:
 ifndef TAG
 	$(error TAG is required. Usage: TAG=v1.0.0 make release-push)
@@ -115,16 +77,14 @@ endif
 ifeq ($(strip $(TAG)),)
 	$(error TAG is required. Usage: TAG=v1.0.0 make release-push)
 endif
-	docker push $(CI_REGISTRY_IMAGE)/nebu-gateway:$(IMAGE_VERSION)
-	docker push $(CI_REGISTRY_IMAGE)/nebu-core:$(IMAGE_VERSION)
-	docker push $(CI_REGISTRY_IMAGE)/nebu-media:$(IMAGE_VERSION)
+	docker push $(CI_REGISTRY_IMAGE)/nebu-server:$(IMAGE_VERSION)
 
-## dev: Start the full local development stack (gateway, core, postgres, dex)
+## dev: Start the full local development stack (server, postgres, dex, minio)
 dev:
 	docker compose up
 
-## dev-reset-db: Drop and recreate the nebu database, then restart the gateway so migrations re-run.
-## Use this after Story 13.14 squash or any time you need a clean database.
+## dev-reset-db: Drop and recreate the nebu database, then restart the server so migrations re-run.
+## go-removal-cleanup (full-elixir-stack): the server now runs migrations on startup and serves health.
 ## WARNING: This destroys ALL data in the local database. Use only in development.
 ## Usage: make dev-reset-db
 dev-reset-db:
@@ -134,15 +94,15 @@ dev-reset-db:
 	docker compose up -d postgres
 	@echo "Waiting for postgres to be ready..."
 	@until docker compose exec -T postgres pg_isready -U postgres -q; do sleep 1; done
-	@echo "Starting all services (gateway will run squashed migration 000001)..."
+	@echo "Starting all services (the server will run migrations on startup)..."
 	docker compose up -d
-	@echo "Waiting for gateway to be healthy (max 120s)..."
-	@_retries=0; until docker compose exec -T gateway wget -qO- http://localhost:8080/ready 2>/dev/null | grep -q '"status":"UP"'; do \
+	@echo "Waiting for the server to be healthy (max 120s)..."
+	@_retries=0; until docker compose exec -T server curl -fs http://localhost:4000/health >/dev/null 2>&1; do \
 		_retries=$$((_retries+1)); \
-		if [ "$$_retries" -ge 60 ]; then echo "ERROR: gateway did not become healthy after 120s"; exit 1; fi; \
+		if [ "$$_retries" -ge 60 ]; then echo "ERROR: server did not become healthy after 120s"; exit 1; fi; \
 		sleep 2; \
 	done
-	@echo "dev-reset-db complete. Run 'docker compose logs gateway' to verify migrations ran cleanly."
+	@echo "dev-reset-db complete. Run 'docker compose logs server' to verify migrations ran cleanly."
 
 ## setup: First-time setup — generate .secrets/internal_secret, MinIO credentials, and dev credentials
 setup:
@@ -186,42 +146,31 @@ setup:
 	@echo "  compliance@example.com / changeme  (compliance_officer)"
 	@echo "  alex@example.com       / changeme  (user)"
 
-## test-unit-go: Run Go unit tests inside container
-## Story 12.3: media module tests included (no race detector — CGO not required for media)
-test-unit-go: download-vendor
-	$(DOCKER_GO) sh -c "apk add -q --no-cache gcc musl-dev && cd gateway && go test -race ./... && cd ../media && go test ./..."
+## test-unit-go: REMOVED — the Go layer no longer exists (full-elixir-stack migration).
+test-unit-go:
+	@echo "Error: Go layer has been removed in the full-elixir-stack migration. See docs/stories/full-elixir-stack/go-removal-cleanup.md" && exit 1
 
 ## test-unit-elixir: Run Elixir unit tests inside container
 test-unit-elixir:
-	$(DOCKER_ELIXIR) sh -c "cd core && mix local.hex --force && mix deps.get && mix test --warnings-as-errors"
+	$(DOCKER_ELIXIR) sh -c "cd server && mix local.hex --force && mix deps.get && mix test --warnings-as-errors"
 
-## test-integration: Run full stack integration tests (Godog / Gherkin + Elixir integration tests).
-## The Go test runner joins the nebu_default compose network so it can reach
-## gateway:8080 and core:4000 by service name — works locally and in DinD CI.
-## Elixir integration tests (mix test --include integration) also run against the live stack.
+## test-integration: Run full stack integration tests against the live Elixir stack.
+## go-removal-cleanup (full-elixir-stack): the Go integration runner was removed — the server
+## now serves the public Matrix endpoint (server:8008) and admin (server:4000). The Elixir
+## integration tests (mix test --include integration) run against the live stack.
 test-integration: setup
 	NEBU_RATE_LIMIT_DISABLED=true docker compose up -d --wait && \
 	docker run --rm -v $(PWD):/workspace -w /workspace \
 		--network=nebu_default \
-		-e NEBU_TEST_GATEWAY_URL=http://gateway:8080 \
-		-e NEBU_TEST_CORE_URL=http://core:4000 \
-		-e NEBU_TEST_DEX_URL=http://dex:5556 \
-		-e NEBU_TEST_MATRIX_URL=http://gateway:8008 \
-		-e NEBU_TEST_DB_URL=postgresql://nebu_app:nebu_app_dev_pw@postgres:5432/nebu \
-		-e NEBU_TEST_MIGRATION_DB_URL=postgresql://nebu_migrate:nebu_migrate_dev_pw@postgres:5432/nebu \
-		-e NEBU_TEST_CORE_GRPC_ADDR=core:9000 \
-		-e NEBU_TEST_INTERNAL_SECRET=$$(cat .secrets/internal_secret) \
-		golang:1.26-alpine \
-		sh -c "apk add -q --no-cache gcc musl-dev && cd gateway && go test -v -tags integration ./test/integration/..."; \
-	GO_EXIT=$$?; \
-	docker run --rm -v $(PWD):/workspace -w /workspace \
-		--network=nebu_default \
 		-e NEBU_DB_URL=postgresql://nebu_app:nebu_app_dev_pw@postgres:5432/nebu \
+		-e NEBU_TEST_MATRIX_URL=http://server:8008 \
+		-e NEBU_TEST_SERVER_URL=http://server:4000 \
+		-e NEBU_TEST_DEX_URL=http://dex:5556 \
 		elixir:1.19-alpine \
-		sh -c "cd core && mix local.hex --force && mix deps.get && mix test --include integration --warnings-as-errors"; \
+		sh -c "cd server && mix local.hex --force && mix deps.get && mix test --include integration --warnings-as-errors"; \
 	ELIXIR_EXIT=$$?; \
 	docker compose down; \
-	[ $$GO_EXIT -eq 0 ] && [ $$ELIXIR_EXIT -eq 0 ]
+	exit $$ELIXIR_EXIT
 
 ## test-integration-elixir: Run Elixir integration tests only (mix test --include integration).
 ## Requires the full stack to be running (docker compose up -d --wait).
@@ -232,26 +181,24 @@ test-integration-elixir: setup
 		--network=nebu_default \
 		-e NEBU_DB_URL=postgresql://nebu_app:nebu_app_dev_pw@postgres:5432/nebu \
 		elixir:1.19-alpine \
-		sh -c "cd core && mix local.hex --force && mix deps.get && mix test --include integration --warnings-as-errors"; \
+		sh -c "cd server && mix local.hex --force && mix deps.get && mix test --include integration --warnings-as-errors"; \
 	EXIT=$$?; docker compose down; exit $$EXIT
 
 ## test-integration-ci: Run full stack integration tests using pre-built registry images (CI only).
 ## Requires CI_REGISTRY_IMAGE and CI_COMMIT_SHA to be set (injected automatically by GitLab CI).
 ## The caller must run `docker login` before invoking this target.
+## go-removal-cleanup (full-elixir-stack): runs the Elixir integration tests against the server
+## (server:8008 Matrix, server:4000 admin) — the Go integration runner was removed.
 test-integration-ci: setup
 	docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --wait --no-build && \
 	docker run --rm -v $(PWD):/workspace -w /workspace \
 		--network=nebu_default \
-		-e NEBU_TEST_GATEWAY_URL=http://gateway:8080 \
-		-e NEBU_TEST_CORE_URL=http://core:4000 \
+		-e NEBU_DB_URL=postgresql://nebu_app:nebu_app_dev_pw@postgres:5432/nebu \
+		-e NEBU_TEST_MATRIX_URL=http://server:8008 \
+		-e NEBU_TEST_SERVER_URL=http://server:4000 \
 		-e NEBU_TEST_DEX_URL=http://dex:5556 \
-		-e NEBU_TEST_MATRIX_URL=http://gateway:8008 \
-		-e NEBU_TEST_DB_URL=postgresql://nebu_app:nebu_app_dev_pw@postgres:5432/nebu \
-		-e NEBU_TEST_MIGRATION_DB_URL=postgresql://nebu_migrate:nebu_migrate_dev_pw@postgres:5432/nebu \
-		-e NEBU_TEST_CORE_GRPC_ADDR=core:9000 \
-		-e NEBU_TEST_INTERNAL_SECRET=$$(cat .secrets/internal_secret) \
-		golang:1.26-alpine \
-		sh -c "apk add -q --no-cache gcc musl-dev && cd gateway && go test -v -tags integration ./test/integration/..."; \
+		elixir:1.19-alpine \
+		sh -c "cd server && mix local.hex --force && mix deps.get && mix test --include integration --warnings-as-errors"; \
 	EXIT=$$?; docker compose -f docker-compose.yml -f docker-compose.ci.yml down; exit $$EXIT
 
 ## test-matrix-compat: Matrix SDK compatibility smoke test (optional CI gate — not part of test-integration)
@@ -261,7 +208,7 @@ test-matrix-compat:
 	docker compose up -d --wait && \
 	docker run --rm -v $(PWD):/workspace -w /workspace/tests/matrix_compat \
 		--network=nebu_default \
-		-e NEBU_MATRIX_URL=http://gateway:8008 \
+		-e NEBU_MATRIX_URL=http://server:8008 \
 		-e NEBU_DEX_URL=http://dex:5556 \
 		node:22-alpine \
 		sh -c "npm ci && node smoke_test.js"
@@ -273,7 +220,7 @@ test-load-silber:
 	docker compose up -d --wait && \
 	docker run --rm -v $(PWD)/tests/load:/scripts \
 		--network=nebu_default \
-		-e NEBU_LOAD_TARGET_URL=$${NEBU_LOAD_TARGET_URL:-http://gateway:8008} \
+		-e NEBU_LOAD_TARGET_URL=$${NEBU_LOAD_TARGET_URL:-http://server:8008} \
 		-e NEBU_DEX_URL=$${NEBU_DEX_URL:-http://dex:5556} \
 		grafana/k6:0.50.0 run /scripts/k6_chat.js
 
@@ -322,6 +269,33 @@ test-e2e-admin:
 	npx bddgen && \
 	npx playwright test --project=admin-ui --reporter=list
 
+## test-e2e-refresh: Run the @short-ttl OIDC session-refresh scenarios (story
+## e2e-session-refresh-suites) against a DEDICATED short-session-TTL stack. These cannot run
+## in the shared 8h stack (admin past-lifetime, Matrix survives-past-lifetime). The target:
+##   1. recreates the server with short NEBU_*_SESSION_TTL_SECONDS,
+##   2. sets admin_oidc_refresh_mode=offline (Dex issues a refresh token only with
+##      offline_access — required for the admin silent refresh),
+##   3. runs ONLY @short-ttl scenarios (NEBU_E2E_TAGS) across element-web + admin-ui.
+## Requires: stack up (`make dev`) + a server image with the refresh code (`make redeploy`)
+## + `127.0.0.1 dex` in /etc/hosts. Tune the TTL via NEBU_E2E_TTL (default 30s).
+NEBU_E2E_TTL ?= 30
+test-e2e-refresh:
+	NEBU_MATRIX_SESSION_TTL_SECONDS=$(NEBU_E2E_TTL) \
+	NEBU_ADMIN_SESSION_TTL_SECONDS=$(NEBU_E2E_TTL) \
+	  docker compose up -d --no-deps --force-recreate server
+	docker compose exec -T postgres psql -U nebu -d nebu -c \
+	  "INSERT INTO server_config (key, value, set_at) VALUES ('admin_oidc_refresh_mode','offline',(EXTRACT(EPOCH FROM NOW())*1000)::bigint) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, set_at=EXCLUDED.set_at;"
+	cd e2e && npm install --silent && \
+	  npx playwright install chromium --with-deps && \
+	  NEBU_E2E_TAGS='@short-ttl and not @pending-feature' \
+	  NEBU_MATRIX_SESSION_TTL_SECONDS=$(NEBU_E2E_TTL) \
+	  NEBU_ADMIN_SESSION_TTL_SECONDS=$(NEBU_E2E_TTL) \
+	  npx bddgen && \
+	  NEBU_E2E_TAGS='@short-ttl and not @pending-feature' \
+	  NEBU_MATRIX_SESSION_TTL_SECONDS=$(NEBU_E2E_TTL) \
+	  NEBU_ADMIN_SESSION_TTL_SECONDS=$(NEBU_E2E_TTL) \
+	  npx playwright test --reporter=list
+
 ## build-fluffychat-e2e: Build the FluffyChat Web E2E Docker image (Flutter multi-stage — slow first build)
 ## Requires: tmp/fluffychat/ to contain the FluffyChat source checkout.
 build-fluffychat-e2e:
@@ -347,18 +321,18 @@ test-e2e-admin-bdd: test-e2e-admin
 ## test-e2e-all: Alias for test-e2e (runs all BDD + legacy tests).
 test-e2e-all: test-e2e
 
-## test-compose-ports: CI smoke test — assert that port 9000 is NOT published by the core service.
+## test-compose-ports: CI smoke test — assert that port 9000 is NOT published by the server service.
 ## Story 5.29a AC8: gRPC port must not be bound to the host.
 ## Fallback for CI runners where the Go integration test cannot use Docker SDK.
 test-compose-ports:
-	@echo "Checking that core service does NOT publish port 9000 to the host..."
+	@echo "Checking that the server service does NOT publish port 9000 to the host..."
 	@if docker compose config --format json 2>/dev/null | python3 -c \
-		"import json,sys; cfg=json.load(sys.stdin); ports=cfg.get('services',{}).get('core',{}).get('ports',[]); \
+		"import json,sys; cfg=json.load(sys.stdin); ports=cfg.get('services',{}).get('server',{}).get('ports',[]); \
 		bound=[p for p in ports if str(p.get('target',''))==str(9000) and str(p.get('published','')) not in ('','0')]; \
 		sys.exit(1) if bound else print('PASS: port 9000 not published on host')"; then \
 		true; \
 	else \
-		echo "FAIL: core service still publishes port 9000 to the host. Remove '- \"9000:9000\"' from docker-compose.yml."; \
+		echo "FAIL: server service still publishes port 9000 to the host. Remove '- \"9000:9000\"' from docker-compose.yml."; \
 		exit 1; \
 	fi
 
@@ -385,24 +359,22 @@ test-compose-minio:
 	assert 'mc anonymous set' not in ep_str, 'FAIL: createbuckets entrypoint must NOT set public bucket policy (Story 12.3 AC3)'; \
 	print('PASS: MinIO service+secrets+IAM configured correctly; no public bucket policy (ports 9000+9001 published)')"
 
-## proto: Generate gRPC stubs from .proto definitions (via buf + protoc)
-## Step 1: buf generates Go stubs using remote plugins
-## Step 2: protoc + protoc-gen-elixir generates Elixir stubs
-proto:
-	docker run --rm -v $(PWD):/workspace -w /workspace/proto bufbuild/buf generate
-	docker run --rm -v $(PWD):/workspace -w /workspace/proto \
-		elixir:1.19-alpine sh -c '\
-		apk add -q --no-cache protobuf && \
-		mix local.hex --force --quiet && \
-		mix escript.install --force hex protobuf && \
-		mkdir -p ../core/apps/event_dispatcher/lib/pb && \
-		protoc --plugin=protoc-gen-elixir=/root/.mix/escripts/protoc-gen-elixir --elixir_out=../core/apps/event_dispatcher/lib/pb --proto_path=. core.proto'
+# proto: REMOVED — grpc-removal (ADR-021). The gRPC/protobuf stack was removed; the
+# former Core.* protobuf DTOs are now hand-maintained plain Elixir structs in
+# server/lib/pb/core.pb.ex (no protoc generation). proto/core.proto is kept only as a
+# historical reference of the former wire contract — it is no longer generated from.
 
-## gen-api: Generate Go server stubs from openapi.yaml (oapi-codegen, strict-server)
+## assets: Build the Admin UI stylesheet (Tailwind + DaisyUI, "nebu"/Obsidian theme) into
+## server/priv/static/assets/app.css. Runs in a Node container — no local npm required.
+## Run after changing the admin LiveView templates or server/assets/{tailwind.config.js,css/app.css}.
+## (The server Docker image rebuilds this automatically via its `assets` stage.)
+assets:
+	docker run --rm -v $(PWD):/workspace -w /workspace/server/assets node:20-alpine \
+		sh -c "npm ci --no-audit --no-fund && npm run build"
+
+## gen-api: REMOVED — Go server stub generation is obsolete (full-elixir-stack migration).
 gen-api:
-	$(DOCKER_GO) sh -c "go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@latest \
-		--config gateway/api/oapi-codegen.yaml \
-		gateway/api/openapi.yaml"
+	@echo "Error: Go layer has been removed in the full-elixir-stack migration. See docs/stories/full-elixir-stack/go-removal-cleanup.md" && exit 1
 
 ## test-iac-validate: Validate OpenTofu IaC files + Helm chart + k6 load test syntax.
 ## Runs tofu fmt -check (formatting) and tofu validate (syntax/types) for all example directories.
@@ -423,15 +395,14 @@ test-iac-validate: test-load-syntax
 	@echo "==> Helm: lint deploy/helm/nebu/"
 	$(DOCKER_HELM) -c "helm lint deploy/helm/nebu/"
 	@echo "==> Helm: template render check deploy/helm/nebu/ (default values)"
-	$(DOCKER_HELM) -c "helm template nebu deploy/helm/nebu/ --set gateway.image.tag=validate --set core.image.tag=validate > /dev/null"
+	$(DOCKER_HELM) -c "helm template nebu deploy/helm/nebu/ --set server.image.tag=validate > /dev/null"
 	@echo "==> Helm: template render check deploy/helm/nebu/ (ingress + HPA enabled)"
-	$(DOCKER_HELM) -c "helm template nebu deploy/helm/nebu/ --set gateway.image.tag=validate --set core.image.tag=validate --set ingress.enabled=true --set ingress.hostname=nebu.example.com --set autoscaling.gateway.enabled=true > /dev/null"
+	$(DOCKER_HELM) -c "helm template nebu deploy/helm/nebu/ --set server.image.tag=validate --set ingress.enabled=true --set ingress.hostname=nebu.example.com --set autoscaling.server.enabled=true > /dev/null"
 	@if command -v kubectl >/dev/null 2>&1 && kubectl get nodes -o name >/dev/null 2>&1; then \
 		echo "==> Helm: template dry-run: renders chart and validates against k8s API schema (requires kubectl in PATH)"; \
 		$(DOCKER_HELM) -c "helm template nebu deploy/helm/nebu/ \
 			-f deploy/helm/nebu/values-dev.yaml \
-			--set gateway.image.tag=validate \
-			--set core.image.tag=validate" \
+			--set server.image.tag=validate" \
 			| kubectl apply --dry-run=client -f -; \
 	else \
 		echo "==> Helm: no reachable cluster — skipping kubectl dry-run (run against a live kind cluster to enable)"; \

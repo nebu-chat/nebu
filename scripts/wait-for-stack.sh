@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # =============================================================================
 # scripts/wait-for-stack.sh
-# Polls until all four Nebu services are healthy or a 120s timeout is reached.
+# Polls until all Nebu services (postgres, dex, server) are healthy or a 120s
+# timeout is reached.
+# go-removal-cleanup (full-elixir-stack): the Go gateway was removed — the server now
+# serves the public Matrix endpoint, so there is no separate gateway to poll.
 #
 # Usage:
 #    scripts/wait-for-stack.sh
@@ -34,12 +37,8 @@ check_dex() {
     wget -q -O- 'http://dex:5556/dex/.well-known/openid-configuration' >/dev/null 2>&1
 }
 
-check_core() {
-    wget -q -O- 'http://core:4000/health' >/dev/null 2>&1
-}
-
-check_gateway() {
-    wget -q -O- 'http://gateway:8008/health' >/dev/null 2>&1
+check_server() {
+    wget -q -O- 'http://server:4000/health' >/dev/null 2>&1
 }
 
 # ---------------------------------------------------------------------------
@@ -67,19 +66,11 @@ while [ "$elapsed" -lt "$TIMEOUT" ]; do
         all_ok=false
     fi
 
-    # core
-    if check_core; then
-        echo "[OK]   core"
+    # server (serves the public Matrix endpoint after the full-elixir-stack cutover)
+    if check_server; then
+        echo "[OK]   server"
     else
-        echo "[..]   core"
-        all_ok=false
-    fi
-
-    # gateway
-    if check_gateway; then
-        echo "[OK]   gateway"
-    else
-        echo "[..]   gateway"
+        echo "[..]   server"
         all_ok=false
     fi
 

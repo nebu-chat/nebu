@@ -1,0 +1,13 @@
+# Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents.
+# Do not edit manually during an active pipeline run.
+#
+# last_updated: 2026-06-22
+# [grpc-removal] 2026-06-22T09:40Z epic DONE ✓ (0e2949b2 CP1, 8d64031d CP2, aa7c4dc7 CP3, 36e538cf docs, 350080ef warn-fix). ci-local --all green (755/0, warnings-as-errors clean). code-review CLEAN; SEC Gate 2 Kassandra CLEAN (artifact saved). :grpc+:protobuf removed from mix.lock; zero gRPC/protobuf code remains.
+# [grpc-removal] 2026-06-22T09:05Z CP1 committed ✓ 0e2949b2 — native Error/Status (26 files, 756/0, zero GRPC.RPCError/Status in code)
+# [grpc-removal] 2026-06-22T08:50Z epic started — drop :grpc dep; replace GRPC.RPCError/Status + use GRPC.Server + fake stream with native Nebu.Matrix.Error/Status. Executed as 3 always-green checkpoints (intermediate per-story states can't each be independently green).
+story: null
+current_step: null
+completed: []
+cycle_count: 0
+blocked_reason: null
+last_updated: "2026-06-22T09:34Z"

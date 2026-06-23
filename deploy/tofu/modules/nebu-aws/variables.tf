@@ -112,7 +112,7 @@ variable "acm_certificate_arn" {
 }
 
 variable "ecs_desired_count" {
-  description = "Desired number of running ECS tasks for gateway and core services."
+  description = "Desired number of running ECS tasks for the server service."
   type        = number
   default     = 1
 

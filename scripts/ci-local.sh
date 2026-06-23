@@ -6,10 +6,12 @@
 # Uses the same Docker images as .gitlab-ci.yml (single source of truth).
 # Calling any job here produces the same result as the pipeline.
 #
+# go-removal-cleanup (full-elixir-stack): the Go layer was removed — lint-go and
+# test-unit-go are gone; a no-go-files smoke gate replaces them.
+#
 # Usage:
 #   scripts/ci-local.sh                # run all jobs sequentially
-#   scripts/ci-local.sh --lint         # run lint-go only
-#   scripts/ci-local.sh --test-go      # run test-unit-go only
+#   scripts/ci-local.sh --no-go        # run no-go-files smoke gate only
 #   scripts/ci-local.sh --test-elixir  # run test-unit-elixir only
 #   scripts/ci-local.sh --scan         # run secret-scan only
 #   scripts/ci-local.sh --verify       # run verify-docs only
@@ -17,7 +19,7 @@
 #   scripts/ci-local.sh --docs-watch   # start docs dev server with live-reload
 #   scripts/ci-local.sh --all          # run all jobs (same as no args)
 #
-# Jobs: lint-go  test-unit-go  test-unit-elixir  secret-scan  verify-docs
+# Jobs: no-go-files  test-unit-elixir  secret-scan  verify-docs
 # Docs: --docs / --docs-watch require Node.js + npx (not Docker)
 #
 # Requires: Docker in PATH (all jobs except --docs / --docs-watch)
@@ -33,11 +35,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # ---------------------------------------------------------------------------
-# Image versions — keep in sync with the Makefile (DOCKER_GO/DOCKER_ELIXIR)
+# Image versions — keep in sync with the Makefile (DOCKER_ELIXIR).
 # Public docker.io images so the script works on a fresh clone without
 # access to the GitLab Container Registry.
 # ---------------------------------------------------------------------------
-GO_IMAGE="golang:1.26-alpine"
 ELIXIR_IMAGE="elixir:1.19-alpine"
 
 # ---------------------------------------------------------------------------
@@ -65,22 +66,15 @@ docker_run() {
 # ---------------------------------------------------------------------------
 # Individual job functions
 # ---------------------------------------------------------------------------
-job_lint_go() {
-    echo "==> lint-go"
-    docker_run "${GO_IMAGE}" \
-        sh -c "apk add -q --no-cache gcc musl-dev && cd gateway && go vet ./..."
-}
-
-job_test_unit_go() {
-    echo "==> test-unit-go"
-    docker_run "${GO_IMAGE}" \
-        sh -c "apk add -q --no-cache gcc musl-dev && cd gateway && go test -race ./..."
+job_no_go_files() {
+    echo "==> no-go-files (full-elixir-stack smoke gate)"
+    "${SCRIPT_DIR}/../test/smoke/no-go-files.sh"
 }
 
 job_test_unit_elixir() {
     echo "==> test-unit-elixir"
     docker_run "${ELIXIR_IMAGE}" \
-        sh -c "cd core && mix local.hex --force && mix local.rebar --force && mix deps.get && mix test --warnings-as-errors"
+        sh -c "cd server && mix local.hex --force && mix local.rebar --force && mix deps.get && mix test --warnings-as-errors"
 }
 
 job_secret_scan() {
@@ -143,8 +137,7 @@ job_docs_watch() {
 }
 
 run_all() {
-    job_lint_go
-    job_test_unit_go
+    job_no_go_files
     job_test_unit_elixir
     job_secret_scan
     job_verify_docs
@@ -161,8 +154,7 @@ Usage: $(basename "$0") [MODE]
 Modes:
   (no args)        run all jobs sequentially (excludes docs)
   --all            run all jobs sequentially (excludes docs)
-  --lint           run lint-go
-  --test-go        run test-unit-go
+  --no-go          run no-go-files smoke gate
   --test-elixir    run test-unit-elixir
   --scan           run secret-scan
   --verify         run verify-docs
@@ -170,8 +162,9 @@ Modes:
   --docs-watch     start docs dev server with live-reload (http://localhost:3000)
   --help, -h       show this message
 
-CI jobs (--all, --lint, --test-*, --scan, --verify): require Docker in PATH.
-  Uses public docker.io images: golang:1.26-alpine, elixir:1.19-alpine.
+CI jobs (--all, --test-elixir, --scan, --verify): require Docker in PATH.
+  Uses public docker.io image: elixir:1.19-alpine.
+  --no-go runs without Docker.
 
 Docs jobs (--docs, --docs-watch): require Node.js + npx in PATH.
   Uses @document-writing-tools/markdown-webbook via npx (no Docker needed).
@@ -184,10 +177,14 @@ EOF
 # ---------------------------------------------------------------------------
 MODE="${1:-all}"
 
-# --help / -h work without docker being installed
+# --help / -h and --no-go work without docker being installed
 case "${MODE}" in
     --help | -h)
         usage 0
+        ;;
+    --no-go)
+        job_no_go_files
+        exit 0
         ;;
 esac
 
@@ -196,12 +193,6 @@ preflight_check
 case "${MODE}" in
     --all | all)
         run_all
-        ;;
-    --lint)
-        job_lint_go
-        ;;
-    --test-go)
-        job_test_unit_go
         ;;
     --test-elixir)
         job_test_unit_elixir

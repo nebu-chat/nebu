@@ -30,3 +30,13 @@ ADR-015-oidc-user-directory-integration:
   title: "ADR-015 - OIDC User Directory Integration"
 ADR-016-git-branching-release-strategy:
   title: "ADR-016 - Git Branching & Release Strategy"
+ADR-017-simplified-main-only-branching:
+  title: "ADR-017 - Simplified Main-Only Branching"
+ADR-018-no-domain-model-locality-of-behavior:
+  title: "ADR-018 - No Domain Model / Locality of Behavior"
+ADR-019-single-otp-application:
+  title: "ADR-019 - Single OTP Application (No Umbrella)"
+ADR-020-clustering-and-module-architecture:
+  title: "ADR-020 - Clustering Strategy & Module Architecture"
+ADR-021-elixir-consolidation-go-removal:
+  title: "ADR-021 - Elixir Consolidation / Go Removal"

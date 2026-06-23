@@ -23,8 +23,8 @@ provider "aws" {
   region = var.aws_region
 }
 
-module "nebu_core" {
-  source = "../../modules/nebu-core"
+module "nebu_shared" {
+  source = "../../modules/nebu-shared"
 
   nebu_version     = var.nebu_version
   domain_name      = var.domain_name
@@ -45,10 +45,11 @@ module "nebu_aws" {
   aurora_min_capacity = var.aurora_min_capacity
   aurora_max_capacity = var.aurora_max_capacity
 
-  # Compute — task definitions reference nebu-core outputs for image/version
+  # Compute — the server task definition references nebu-shared outputs for image/version.
+  # go-removal-cleanup: server now serves public Matrix + media + admin (no Go gateway).
   aws_region          = var.aws_region
-  image_registry      = module.nebu_core.image_registry
-  nebu_version        = module.nebu_core.nebu_version
+  image_registry      = module.nebu_shared.image_registry
+  nebu_version        = module.nebu_shared.nebu_version
   acm_certificate_arn = var.acm_certificate_arn
   ecs_desired_count   = var.ecs_desired_count
 

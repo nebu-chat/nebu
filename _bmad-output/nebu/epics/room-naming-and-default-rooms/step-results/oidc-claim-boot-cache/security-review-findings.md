@@ -1,0 +1,9 @@
+# SEC Gate 1 — oidc-claim-boot-cache (2026-06-22)
+
+**Reviewer:** Kassandra (opus). **Verdict: CLEAN (no CRITICAL/HIGH) — does not block commit.**
+
+- **Original MEDIUM RESOLVED (steady state):** after the first successful claim read, `configured_claim/0` → `OidcClaimCache.get/0` serves from `persistent_term` with zero DB activity; a request-time DB outage can no longer change token attribution.
+- **Boot-window residual — ACCEPTED:** fail-open-to-weaker-claim is now bounded to "node start until first successful claim read", is NOT attacker-inducible (cache only `:unset` on in-cluster process restart; attacker cannot reset it or take the DB down), narrow blast radius (only operators with a non-default `oidc_user_id_claim`). The blocking eager-boot-read alternative is correctly rejected (would couple startup to DB and still can't help when Repo isn't yet queryable). No change required.
+- **[LOW] Cluster staleness (backlog, non-blocking):** a live node transiently partitioned from `:pg` at broadcast time keeps a stale claim until its next restart / next invalidation (no TTL). Direction-of-risk: if an admin *tightens* the claim, a stale node keeps the looser one → continued collisions on that node only. Same event-driven no-TTL model already accepted for JwksCache/TokenDenylist/SsoStore. Optional hardening: periodic safety re-read, or re-broadcast on `:pg` membership-change. Tracked as follow-up, not a gate.
+- **No new attacker-reachable surface:** `Nebu.Matrix.invalidate_oidc_claim_cache/0` reachable only via auth-gated admin LiveView / in-process gRPC `SetServerConfig`; `:pg` group is BEAM-internal; invalidation message carries no payload (no cache poisoning — `refresh` always re-reads the DB source of truth).
+- **No regression:** fallback chain + sanitize unchanged; no claim/user-id values logged.

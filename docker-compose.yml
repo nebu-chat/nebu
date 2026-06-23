@@ -34,9 +34,15 @@ services:
       # on first container start (docker-entrypoint-initdb.d runs only on empty volumes).
       - ./dev/postgres/init:/docker-entrypoint-initdb.d:ro
 
-  gateway:
+  # go-removal-cleanup (full-elixir-stack): the Go `gateway:` service was removed.
+  # The Elixir `server:` service below now serves ALL public endpoints (Matrix CS API,
+  # /_matrix/media, and the Phoenix LiveView admin /admin) on its single Bandit
+  # listener (server:4000), published to the host on 8008 (Matrix) and 8080 (admin).
+  # The server also owns the OIDC Authorization-Code + PKCE login flow and runs DB
+  # migrations on startup (see server/Dockerfile + NEBU_DB_URL_MIGRATE below).
+  server:
     build:
-      context: ./gateway
+      context: ./server
       args:
         GIT_COMMIT: ${GIT_COMMIT:-unknown}
         BUILD_TIME: ${BUILD_TIME:-unknown}
@@ -44,68 +50,84 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      dex:
+      # media-gateway-migration (AC6): the server now serves /_matrix/media/v3/* directly
+      # (Elixir Nebu.Media), so it needs MinIO healthy and the bucket/IAM-user
+      # created — exactly the dependencies the removed `media:` service had.
+      minio:
         condition: service_healthy
-    secrets: [internal_secret]
+      createbuckets:
+        condition: service_completed_successfully
+    # media-gateway-migration (AC6): MinIO IAM credentials (file-based Docker
+    # Secrets) consumed by Nebu.Media.Storage / config/runtime.exs ExAws config.
+    secrets:
+      - internal_secret
+      - minio_app_access_key
+      - minio_app_secret_key
     environment:
-      # Story 5.29a — AC3: runtime uses nebu_app (non-superuser, bound by RLS)
-      NEBU_DB_URL: "postgresql://nebu_app:nebu_app_dev_pw@postgres:5432/nebu"
-      # Story 5.29a — AC3: migrations run as nebu_migrate (table owner)
-      NEBU_DB_URL_MIGRATE: "postgresql://nebu_migrate:nebu_migrate_dev_pw@postgres:5432/nebu"
-      NEBU_CORE_GRPC_ADDR: "core:9000"
-      NEBU_INTERNAL_SECRET_FILE: "/run/secrets/internal_secret"
-      NEBU_SERVER_NAME: "localhost"
-      NEBU_OIDC_ISSUER: "http://dex:5556/dex"
-      NEBU_OIDC_CLIENT_ID: "nebu-gateway"
-      NEBU_OIDC_CLIENT_SECRET: "nebu-dev-secret"
-      NEBU_OIDC_CLAIM_ROLE: "groups"
-      # Story 5-30: Dex-specific extra OIDC scopes (groups + offline_access).
-      # Leave unset for external providers (e.g. Keycloak) to avoid invalid_grant errors.
-      NEBU_OIDC_EXTRA_SCOPES: "groups offline_access"
-      # Fail-closed environment label. The gateway treats anything other than
-      # {dev,development,test,staging} as production, so dev-only escape hatches
-      # (NEBU_ALLOW_INSECURE_OIDC_ISSUER, NEBU_ALLOW_INSECURE_KEK) only apply
-      # when this is set.
-      NEBU_ENV: "dev"
-      # DEV-ONLY: allow http:// OIDC issuer for the Docker-internal Dex hostname.
-      # Requires NEBU_ENV=dev|development|test|staging — refused otherwise.
-      NEBU_ALLOW_INSECURE_OIDC_ISSUER: "true"
-      # Integration-test escape hatch: set NEBU_RATE_LIMIT_DISABLED=true in the
-      # host environment before `docker compose up` to disable the IP rate limiter.
-      # make test-integration sets this automatically; never set in production.
-      NEBU_RATE_LIMIT_DISABLED: "${NEBU_RATE_LIMIT_DISABLED:-false}"
-    ports:
-      - "8008:8008"
-      - "8080:8080"
-    healthcheck:
-      test: ["CMD", "/healthcheck"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-
-  core:
-    build:
-      context: ./core
-      args:
-        GIT_COMMIT: ${GIT_COMMIT:-unknown}
-        BUILD_TIME: ${BUILD_TIME:-unknown}
-        RELEASE_VERSION: ${RELEASE_VERSION:-unknown}
-    depends_on:
-      postgres:
-        condition: service_healthy
-    secrets: [internal_secret]
-    environment:
-      # Story 5.29a — AC3: core also uses nebu_app at runtime (no DDL from core)
+      # Story 5.29a — AC3: the server also uses nebu_app at runtime (no DDL from the server)
       NEBU_DB_URL: "postgresql://nebu_app:nebu_app_dev_pw@postgres:5432/nebu"
       DATABASE_URL: "ecto://nebu_app:nebu_app_dev_pw@postgres:5432/nebu"
+      # go-removal-cleanup: migrations run as nebu_migrate (table owner) — ported from
+      # the removed gateway service. server/Dockerfile invokes Nebu.Release.migrate/0 on
+      # startup before the server boots, using this connection.
+      NEBU_DB_URL_MIGRATE: "postgresql://nebu_migrate:nebu_migrate_dev_pw@postgres:5432/nebu"
       NEBU_INTERNAL_SECRET_FILE: "/run/secrets/internal_secret"
-      NEBU_GATEWAY_INTERNAL_URL: "http://gateway:8008"
       NEBU_SERVER_NAME: "localhost"
       NEBU_PII_ENCRYPTION_KEY: "${NEBU_PII_ENCRYPTION_KEY:-6465766b65793030303030303030303030303030303030303030303030303030}"
+      # oidc-middleware-migration: Elixir-side OIDC Bearer-token validation
+      # (Nebu.Web.Plugs.OidcPlug + Nebu.Web.JwksCache). The JWKS keys are fetched
+      # from Dex on start and refreshed on NEBU_OIDC_JWKS_TTL (default 300s).
+      NEBU_OIDC_ISSUER: "http://dex:5556/dex"
+      NEBU_OIDC_AUDIENCE: "nebu-gateway"
+      NEBU_OIDC_JWKS_URI: "http://dex:5556/dex/keys"
+      NEBU_OIDC_JWKS_TTL: "300"
+      # Matrix-client SSO leg (bugfix-fix-matrix-sso-redirect-missing): the m.login.sso →
+      # /_matrix/client/v3/login/sso/redirect flow mints a token validated against the
+      # NEBU_OIDC_AUDIENCE above, so it MUST use the audience-matching `nebu-gateway` Dex
+      # client — whose registered redirect_uri is /_matrix/client/v3/login/sso/redirect/oidc
+      # (dev/dex/config.yaml). This is a DIFFERENT client from the admin UI (nebu-admin),
+      # so it must be configured explicitly rather than reusing the admin bootstrap client.
+      NEBU_OIDC_CLIENT_ID: "nebu-gateway"
+      NEBU_OIDC_CLIENT_SECRET: "nebu-dev-secret"
+      # go-removal-cleanup: the server now owns the admin OIDC Authorization-Code + PKCE login
+      # (Nebu.Admin.Auth), replacing the deleted Go gateway flow. Uses the dedicated
+      # `nebu-admin` Dex client (dev/dex/config.yaml) with the registered redirect_uri.
+      # The redirect_uri is fixed and server-controlled (never derived from request
+      # headers), and must match a redirectURI registered with the IdP.
+      NEBU_ADMIN_OIDC_CLIENT_ID: "nebu-admin"
+      NEBU_ADMIN_OIDC_CLIENT_SECRET: "nebu-admin-secret"
+      NEBU_ADMIN_OIDC_REDIRECT_URI: "http://localhost:8008/admin/callback"
+      NEBU_ADMIN_OIDC_SCOPE: "openid profile email groups"
+      # DEV-ONLY: this stack serves the admin UI over plain http://localhost, so the
+      # admin session cookie must NOT be Secure (otherwise the login-state cookie is
+      # not returned on the OIDC callback in stricter browsers → "Invalid login state").
+      # Production serves over TLS and leaves this unset (defaults to secure:true).
+      NEBU_ADMIN_SESSION_SECURE: "false"
+      # Integration-test escape hatch: set NEBU_RATE_LIMIT_DISABLED=true in the host
+      # environment before `docker compose up` to disable the IP rate limiter.
+      # make test-integration sets this automatically; never set in production.
+      NEBU_RATE_LIMIT_DISABLED: "${NEBU_RATE_LIMIT_DISABLED:-false}"
+      # e2e-session-refresh-suites: Nebu session ceilings (default 8h, set in
+      # Nebu.Web.SessionConfig). Leave empty for normal dev/prod (→ 8h). The
+      # `make test-e2e-refresh` target sets these short on the host so the silent
+      # OIDC-refresh loop fires within the test window. Empty / junk → 8h default
+      # (parsed by SessionConfig.parse_ttl/1, never crashes the login path).
+      NEBU_MATRIX_SESSION_TTL_SECONDS: "${NEBU_MATRIX_SESSION_TTL_SECONDS:-}"
+      NEBU_ADMIN_SESSION_TTL_SECONDS: "${NEBU_ADMIN_SESSION_TTL_SECONDS:-}"
+      # media-gateway-migration (AC6): media object storage, ported from the Go
+      # `media:` service. Same MinIO bucket + nebu-app IAM credentials.
+      NEBU_MINIO_ENDPOINT: "minio:9000"
+      NEBU_MINIO_ACCESS_KEY_FILE: "/run/secrets/minio_app_access_key"
+      NEBU_MINIO_SECRET_KEY_FILE: "/run/secrets/minio_app_secret_key"
+      NEBU_MINIO_BUCKET: "nebu-media"
+      NEBU_MINIO_USE_SSL: "false"
     ports:
-      # Story 5.29a — AC8: gRPC port 9000 is NOT published to the host.
-      # Port 9000 is only reachable within the internal Compose network (core:9000).
+      # go-removal-cleanup: the server now serves the public Matrix endpoint (host 8008)
+      # and the admin UI (host 8080) — both formerly published by the Go gateway —
+      # plus its own 4000. All three map to the single Bandit listener on server:4000.
+      # (The gRPC network listener was removed — ADR-021; the server no longer opens port 9000.)
+      - "8008:4000"
+      - "8080:4000"
       - "4000:4000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
@@ -134,7 +156,8 @@ services:
       context: .
       dockerfile: docker/Dockerfile.element-e2e
     depends_on:
-      gateway:
+      # go-removal-cleanup: was gateway; the server now serves the public Matrix endpoint.
+      server:
         condition: service_healthy
     ports:
       - "7070:80"
@@ -201,55 +224,11 @@ services:
       exit 0
       '
 
-  # Story 12.3 — Media Gateway service wired to MinIO using nebu-app IAM credentials.
-  # Credentials are read from Docker Secrets generated by `make setup`.
-  # The nebu-app user has only s3:PutObject + s3:GetObject on nebu-media/* (see dev/minio/nebu-app-policy.json).
-  media:
-    build:
-      context: ./media
-    restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
-      createbuckets:
-        condition: service_completed_successfully
-    secrets:
-      - minio_app_access_key
-      - minio_app_secret_key
-    environment:
-      # Story 12.9: NEBU_SERVER_NAME is now mandatory (fatal exit if unset).
-      # Used to construct canonical Matrix user IDs (@localpart:server) in media_files.
-      # Override via env var for non-localhost deployments.
-      NEBU_SERVER_NAME: "${NEBU_SERVER_NAME:-localhost}"
-      NEBU_DB_URL: "postgresql://nebu_app:nebu_app_dev_pw@postgres:5432/nebu"
-      NEBU_STORAGE_BACKEND: "minio"
-      NEBU_MINIO_ENDPOINT: "minio:9000"
-      NEBU_MINIO_ACCESS_KEY_FILE: "/run/secrets/minio_app_access_key"
-      NEBU_MINIO_SECRET_KEY_FILE: "/run/secrets/minio_app_secret_key"
-      NEBU_MINIO_BUCKET: "nebu-media"
-      NEBU_MINIO_USE_SSL: "false"
-      # HIGH-2 [Story 12.7]: OIDC JWT validation for media upload.
-      # Same OIDC provider as the API gateway — tokens issued by Dex are valid here too.
-      NEBU_OIDC_ISSUER: "http://dex:5556/dex"
-      NEBU_OIDC_CLIENT_ID: "nebu"
-      # Story 12.11 [F-1]: OIDC claim used as user identity in audit records.
-      # Default "name" matches migration 000044 column comment.
-      # Set to "sub" or "email" if your Dex config uses a different unique claim.
-      NEBU_OIDC_USER_ID_CLAIM: "name"
-      # Story 12.11 [F-2]: NEBU_TRUSTED_PROXY=false is the secure default.
-      # Set to "true" only when the media gateway is behind a trusted reverse proxy
-      # that sets X-Forwarded-For. Without a trusted proxy, XFF can be spoofed.
-      NEBU_TRUSTED_PROXY: "false"
-    ports:
-      - "8009:8009"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8009/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
+  # media-gateway-migration (AC6): the Go `media:` service was removed here. The
+  # Elixir server now serves the deprecated /_matrix/media/v3/* endpoints directly
+  # (Nebu.Media via the Bandit listener on server:4000), with the same MinIO
+  # bucket + nebu-app IAM credentials now wired into the `server:` service above.
+  # The minio + createbuckets services are intentionally retained.
 
 volumes:
   postgres_data:

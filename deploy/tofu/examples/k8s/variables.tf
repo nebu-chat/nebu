@@ -10,13 +10,10 @@ variable "kube_context" {
   default     = ""
 }
 
-variable "gateway_image_tag" {
-  description = "Container image tag for the Nebu gateway component (e.g. '0.3.0' or 'dev')."
-  type        = string
-}
-
-variable "core_image_tag" {
-  description = "Container image tag for the Nebu core component (e.g. '0.3.0' or 'dev')."
+# go-removal-cleanup: gateway_image_tag was removed. server_image_tag is the only
+# required image tag — server serves the public Matrix + media + admin.
+variable "server_image_tag" {
+  description = "Container image tag for the Nebu server component (e.g. '0.3.0' or 'dev')."
   type        = string
 }
 
