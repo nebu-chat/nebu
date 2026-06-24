@@ -1,0 +1,8 @@
+# Sprint status — epic room-naming-and-default-rooms (room-names bug batch)
+# last_updated: 2026-06-23
+# story admin-room-creator-provisioning done (Bug: creator provisioned + orphan cleanup; code-review MINOR(2) fixed, Kassandra LOW-1 fixed; 796/0): 2026-06-23
+# Stories from the room-names bug report (3 findings scoped as an epic batch):
+stories:
+  admin-room-creator-provisioning: done
+  room-canonical-alias-from-name: done
+  admin-add-user-autocomplete: done

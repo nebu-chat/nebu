@@ -1187,4 +1187,78 @@ does not affect other users. All errors are non-fatal warning logs only.
 
 _Source: Story auto-join-on-user-import (epic: room-naming-and-default-rooms)._
 
+## Scenario 3r: createRoom — Creator Provisioning & Orphan Cleanup (Story admin-room-creator-provisioning)
+
+A room's creator must become its first member (`m.room.member` join), and `room_members.user_id`
+has FK `room_members_user_id_fkey → users(user_id)`. The Admin-UI OIDC login path does **not**
+provision a `users` row (unlike the Matrix `OidcPlug.provision/2` path), so an admin creating a room
+via the Admin UI used a `creator_id` absent from `users`. The creator-join then violated the FK and
+aborted creation **after** `m.room.create` but **before** membership and `m.room.name` — leaving an
+orphan room rendered in the Admin UI as the raw `!id:localhost` + "Stale" (0 members).
+
+**Hardened `create_room/2` flow** (`Nebu.Matrix.EventDispatcher.Server`, both the Admin UI
+`Nebu.Matrix.create_room/2` path and the Matrix `POST /createRoom` path converge here):
+
+1. `generate_room_id/0` → `room_supervisor_module().start_new_room(room_id)`. `start_new_room/1`
+   surfaces an already-running room as `{:error, :already_started, pid}` (instead of the old
+   `{:ok, pid}` collapse) → `create_room` raises `Nebu.Matrix.Error` `already_exists` and runs **no**
+   cleanup, so orphan cleanup can never target a pre-existing room (defense-in-depth, SEC LOW-1).
+2. Persist `m.room.create`.
+3. **Provision the creator:** `user_store_module().upsert_user(creator_id, "user")` —
+   `INSERT … ON CONFLICT (user_id) DO UPDATE SET last_seen_at = …`. Idempotent, cluster-safe; role is
+   always `"user"` (never `instance_admin`) and an existing user's `system_role`/`is_active` are
+   untouched on conflict (no privilege escalation, no re-activation of a deactivated user).
+4. Creator-join → power levels → `m.room.name` + `update_room_name`.
+   - **Canonical alias (Story room-canonical-alias-from-name):** still inside the `if name`
+     block, after `m.room.name`, the name is sanitised to a Matrix alias localpart
+     (`[a-z0-9._=\-+]`, runs→`-`, dot/dash-trimmed; needs ≥1 alphanumeric else no alias),
+     bounded so `#localpart:<server>` ≤ 255 bytes, and registered in the `room_aliases`
+     table (migration 000008: `alias PK, room_id → rooms, created_at`). The PK is the sole
+     uniqueness authority — a plain INSERT whose `unique_violation → {:error, :conflict}`
+     drives a deterministic collision suffix (`-2`, `-3`, … up to 20), race-safe (ADR-020,
+     no read-then-write). On success an `m.room.canonical_alias` state event (already in
+     `@writable_state_types`, read by `build_room_summary/3`) is emitted so the alias surfaces
+     in sync + space hierarchy with no proto change. The whole alias step is **non-fatal** and
+     skipped for nameless rooms. `delete_room/1` also deletes `room_aliases` rows (FK child
+     before parent) so orphan cleanup of a failed create cannot FK-fail.
+5. The whole post-`start_new_room` body runs in `try/rescue`. Any raise (including `Postgrex.Error`,
+   which the previous `rescue e in Nebu.Matrix.Error` did not catch) triggers `cleanup_orphan_room/1`:
+   stop the Room GenServer with `:normal` (relies on Horde `restart: :transient` so it is not
+   restarted and cannot re-insert the row) then `delete_room/1` (transactional DELETE
+   `events` → `room_members` → `rooms`, `room_id` param-bound), and the clean error is re-surfaced.
+
+**Accepted limitation:** cleanup is best-effort — a correlated DB outage that fails both the create
+and `delete_room/1` may leave the row; a fully transactional create is out of scope because the
+`rooms` row is inserted in the Room GenServer `init/1` (Horde), not in the event-write transaction.
+
+_Source: Stories admin-room-creator-provisioning + room-canonical-alias-from-name (epic: room-naming-and-default-rooms)._
+
+## Scenario 3s: Admin UI — Add-User Autocomplete (Story admin-add-user-autocomplete)
+
+The "Add user" inputs on the room detail and Spaces detail pages suggest existing users as the
+admin types, instead of requiring a full Matrix id from memory.
+
+1. The admin types into the add-user field (`phx-change="suggest_users"`, `phx-debounce="200"`).
+2. The LiveView handler calls the shared `Nebu.Admin.UserSuggest.search/1` (min 2 chars enforced
+   **server-side**, `LIMIT 10`, `:admin_user_searcher` seam → `Nebu.Admin.DB.search_users/2`).
+3. `search_users/2`: `SELECT user_id FROM users WHERE is_active = true AND user_id ILIKE $1 ESCAPE '\\'
+   ORDER BY user_id LIMIT $2`. The term is parameter-bound; `escape_like/1` escapes `\`, `%`, `_`
+   so wildcard chars match literally (no enumeration broadening). Only `user_id` is selected — no PII
+   decryption.
+4. Results render as an ARIA combobox (`role=combobox` input + `role=listbox`/`option` list,
+   `aria-expanded`/`aria-controls`/`aria-activedescendant`); the `UserCombobox` JS hook handles
+   Up/Down/Enter/Esc with no focus trap and degrades to free-text + `phx-click` selection without JS.
+   Selecting a suggestion fills the field; the existing `add_member` submit path is unchanged and
+   stays free-text (autocomplete is assistive).
+5. Both pages share one helper + event contract + JS hook. The Spaces detail page also gained an
+   "Add member" form (a Space is a room) routing through `Nebu.Matrix.admin_add_room_member/3`
+   (ADR-020, audited, local-domain default-deny) with a member roster + success flash.
+   `list_users/3` now honours its search term across keyset pagination (filtered page 2+).
+
+**Security:** admin-only via `live_session :admin, on_mount: {Nebu.Admin.Auth, :require_admin}`
+(covers every `handle_event`); `actor_id` is server-derived, never a client param; user_id is
+HEEx-escaped (no XSS). Kassandra SEC Gate 1: PASS, no findings.
+
+_Source: Story admin-add-user-autocomplete (epic: room-naming-and-default-rooms)._
+
 _Source: `_bmad-output/planning-artifacts/architecture.md`, §Implementation Patterns, §API & Kommunikation, §Resilienz & Selbst-Heilung; Story 9-19 (GAP-JOIN-PUBLIC, GAP-LEAVE-ONCE, GAP-FORGET); Story 9-22 (GAP-SINCE-IGNORED - per-device sync tokens, per-device logout cleanup); Story 9-23 (GAP-INVITE-STATE - invite_state stripped state enrichment: join_rules, avatar, create); Story 9-24 (GAP-GLOBAL-ACCOUNT-DATA - top-level account_data delivery in all 4 sync paths, RLS-aware ListGlobalAccountData); Story 9-25 (GAP-BUFFER-NEXT-BATCH - synthetic buf_<ms>_<seq> next_batch token on buffer fast-path, replaces echoed since= token); Story 9-27 (Scenario 3i - full Matrix §11.35.1 room upgrade flow, GRPC.RPCError error handling, archive_room_atomic idempotency, terminate_child, try/rescue failure audit); Story 9-28 (Scenario 3j - GetRelations RPC + bundled m.thread aggregations in sync unsigned field, attach_thread_aggregations, fetch_events_by_relation, count_thread_children, migration 000042); Story 9-29 (Scenario 3j-1 expanded - base route + three-segment route, dir/event_type/recurse/from params, prev_batch response field, fetch_events_by_relation/5 dynamic WHERE builder, 400 validation for invalid dir/recurse); Story 11-7 (Scenario 6 - SSO nonce generation + verification, Cache-Control: no-store on 302, denylist check in PostLogin, ssoStateStore capacity cap at 10,000); Story 11-8 (Scenario 3k - GET /rooms/{roomId}/event/{eventId} new route + GetEvent gRPC RPC, Horde membership guard, fetch_event/2 DB query, attach_thread_aggregations, core_grpc.pb.ex rpc :GetRelations + rpc :GetEvent bug fix); Story 11-10 (Scenario 3l - Matrix login claim mapping: claimLoader TTL-cached DB lookup, FormatUserIDFromClaims fallback chain, JWTMiddleware userIDClaimLoader param, NEBU_OIDC_USER_ID_CLAIM env override; Scenario 3m - Bootstrap Wizard Step 3 claim mapping form, draft save, atomic ClaimSelectionHandler transaction, identity-stability warning); Story 11-11 (Scenario 3n - send_receipt/2 start-on-demand fix: lookup_room → start_room, :noproc guard on get_state, 404 preserved for ghost rooms, 403 preserved for non-members); bugfix-sso-bootstrap-credentials (Scenario 6 addendum - dynamic OIDC client credentials via TTL-cached loaders; resolveClientID/resolveClientSecret in GetSSORedirect + GetSSOCallback; DB precedence over env var; no restart required); Story direct-room-heroes (Scenario 3o - m.heroes room summary in sync response: attach_heroes/3, get_room_heroes/2, syncRoomSummary+omitempty, proto fields 6-8 on SyncRoom, delta optimization via membership_changed check); Story admin-auto-join-rooms (Scenario 3p - auto-join rooms at first login: is_auto_join column+partial-index, list_auto_join_rooms, ensure_auto_join_memberships, is_new flag in TokenValidator, Task.start fire-and-forget, Admin UI toggle + CSRF, update_room_auto_join gRPC+DB); Story auto-join-on-user-import (Scenario 3q - bulk import provisioning path: BulkImporter.import_users/1 returns imported_user_ids, bulk_import_users/2 spawns Task.start per new user, ensure_auto_join_memberships + ensure_personal_room fire-and-forget, try/catch :exit guard on Room.Server.join/2)_

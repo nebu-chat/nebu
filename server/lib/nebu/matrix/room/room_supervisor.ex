@@ -25,6 +25,45 @@ defmodule Nebu.Matrix.Room.RoomSupervisor do
     end
   end
 
+  @doc """
+  Starts a Room GenServer for a *brand-new* `room_id`, distinguishing a freshly
+  started room from one that was already running.
+
+  Unlike `start_room/1`, this collapses the `{:already_started, pid}` case into
+  an explicit `{:error, :already_started, pid}` instead of `{:ok, pid}`. The
+  create-room command path (`Nebu.Matrix.EventDispatcher.Server.create_room/2`)
+  uses this so it can refuse to operate on a pre-existing room — its orphan
+  cleanup hard-deletes events/members/row and must therefore only ever target a
+  room this call actually created. For a freshly `generate_room_id/0`-d id the
+  `:already_started` branch is practically impossible, but treating it as a
+  conflict (rather than silently proceeding) is what makes the cleanup safe.
+
+  Returns:
+    * `{:ok, pid}` — a new Room GenServer was started for `room_id`.
+    * `{:error, :already_started, pid}` — a Room GenServer was already running.
+    * `{:error, reason}` — start failed.
+  """
+  @spec start_new_room(String.t()) ::
+          {:ok, pid()} | {:error, :already_started, pid()} | {:error, term()}
+  def start_new_room(room_id) do
+    case Horde.DynamicSupervisor.start_child(
+           Nebu.Matrix.Room.HordeSupervisor,
+           {Nebu.Matrix.Room.Server, room_id}
+         ) do
+      {:ok, pid} ->
+        case await_registry(room_id, pid) do
+          {:ok, pid} -> {:ok, pid}
+          other -> other
+        end
+
+      {:error, {:already_started, pid}} ->
+        {:error, :already_started, pid}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
   # Horde.Registry uses CRDT replication — the pid may not be visible via lookup
   # immediately after start_child returns. Poll until the entry appears (max 500 ms).
   defp await_registry(room_id, pid, retries \\ 100) do

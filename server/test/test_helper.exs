@@ -9,3 +9,7 @@ ExUnit.configure(exclude: [:integration])
 # (loaded once so every media_*_test.exs can use them without per-file requires).
 Code.require_file("nebu/media/media_test_support.exs", __DIR__)
 Code.require_file("nebu/media/media_fakes.exs", __DIR__)
+
+# admin-room-creator-provisioning: shared no-op UserStore for the create_room/2
+# creator-provisioning seam, so DB-mocked unit tests need no live Repo.
+Code.require_file("nebu/matrix/event_dispatcher/create_room_test_support.exs", __DIR__)

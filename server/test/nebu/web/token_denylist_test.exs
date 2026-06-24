@@ -11,9 +11,58 @@ defmodule Nebu.Web.TokenDenylistTest do
 
   @table :nebu_http_token_denylist
 
+  # Every raw token string these tests revoke. revoked?/2 falls back to the
+  # `invalidated_tokens` DB table on an ETS miss, so clearing only ETS is not
+  # enough in the integration container (a live Nebu.Repo): a `jti:<jti>` or
+  # SHA-256 hash row written by a PRIOR run would make a fresh "not revoked yet"
+  # assertion read as revoked. Clear BOTH the jti-keyed rows and the hash-keyed
+  # rows for this test's tokens, in setup and on_exit, guarded by Repo presence.
+  @raw_tokens [
+    "raw.token.value",
+    "different-raw-token",
+    "some.other.token",
+    "raw.token",
+    "secret-token",
+    "some.other.token",
+    "raw",
+    "raw.tok"
+  ]
+
+  defp hash_db_key(token), do: :crypto.hash(:sha256, token) |> Base.encode16(case: :lower)
+
+  defp clear_db_rows do
+    if Process.whereis(Nebu.Repo) do
+      # jti-keyed rows for all jtis this module uses (jti-1, jti-x, jti-expired, …).
+      _ =
+        Ecto.Adapters.SQL.query(
+          Nebu.Repo,
+          "DELETE FROM invalidated_tokens WHERE token_hash LIKE 'jti:jti-%'",
+          []
+        )
+
+      # hash-keyed rows for every raw token this module revokes.
+      hashes = Enum.map(@raw_tokens, &hash_db_key/1)
+
+      _ =
+        Ecto.Adapters.SQL.query(
+          Nebu.Repo,
+          "DELETE FROM invalidated_tokens WHERE token_hash = ANY($1)",
+          [hashes]
+        )
+    end
+
+    :ok
+  end
+
   setup do
     if :ets.whereis(@table) != :undefined, do: :ets.delete_all_objects(@table)
-    on_exit(fn -> if :ets.whereis(@table) != :undefined, do: :ets.delete_all_objects(@table) end)
+    clear_db_rows()
+
+    on_exit(fn ->
+      if :ets.whereis(@table) != :undefined, do: :ets.delete_all_objects(@table)
+      clear_db_rows()
+    end)
+
     :ok
   end
 

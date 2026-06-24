@@ -35,3 +35,17 @@ Feature: Admin UI — Create a room
     And the operator opens the create-room modal
     And the operator submits the create-room form with an empty name
     Then the create-room modal shows the error "Name is required"
+
+  # Story admin-room-creator-provisioning (epic: room-naming-and-default-rooms) — AC4 + AC5.
+  # Regression: an admin whose Matrix id has no `users` row used to leave an orphan room
+  # (raw "!…:localhost" id + "Stale" badge). The creator-provisioning fix means the room
+  # must now show its typed name with an "Active" status. The admin in this stack logs in
+  # via the Admin-UI OIDC flow (no pre-seeded Matrix `users` row) — exactly the bug case.
+  @ac4-created-room-named-and-active @room-creator-provisioning
+  Scenario: [AC4/AC5] An admin-created room shows its name and an Active status (not the raw id + Stale)
+    When the operator navigates to "/admin/rooms"
+    And the operator creates a room named "general" with visibility "Private"
+    And the operator navigates to "/admin/rooms"
+    Then the rooms list shows a room named "general" with status "Active"
+    And the rooms list does not show that room as a raw room id
+    And the rooms list does not show that room with status "Stale"

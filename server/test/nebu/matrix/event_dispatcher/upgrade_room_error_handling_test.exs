@@ -369,6 +369,7 @@ defmodule Nebu.Matrix.EventDispatcher.UpgradeRoomErrorHandlingTest do
     :ets.new(:upgrade_err_test_db, [:named_table, :public, :set])
 
     Application.put_env(:room_manager,     :db_module,           BaseDB)
+    Application.put_env(:event_dispatcher, :user_store_module,   Nebu.Test.NoOpUserStore)
     Application.put_env(:event_dispatcher, :messages_db_module,  BaseDB)
     # FB-E5-03: route create_room/2's name/type writes through BaseDB, not Nebu.Repo.
     Application.put_env(:event_dispatcher, :rooms_db_module,     BaseDB)
@@ -388,6 +389,7 @@ defmodule Nebu.Matrix.EventDispatcher.UpgradeRoomErrorHandlingTest do
 
     on_exit(fn ->
       Application.delete_env(:room_manager,     :db_module)
+      Application.delete_env(:event_dispatcher, :user_store_module)
       Application.delete_env(:event_dispatcher, :messages_db_module)
       Application.delete_env(:event_dispatcher, :rooms_db_module)
       Application.delete_env(:event_dispatcher, :invite_db_module)

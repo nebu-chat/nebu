@@ -93,7 +93,11 @@ defmodule Nebu.Admin.RoomsLive do
         detail_error: nil,
         create_error: nil,
         members: [],
-        member_error: nil
+        member_error: nil,
+        # admin-add-user-autocomplete: the current add-user field value (so a selected
+        # suggestion can be reflected back into the input) + the suggestion listbox.
+        add_member_user_id: "",
+        user_suggestions: []
       )
 
     # Detail-view selection. Production: the `/admin/rooms/:room_id` route supplies
@@ -282,6 +286,36 @@ defmodule Nebu.Admin.RoomsLive do
   # validates too, but rejecting here avoids a needless round-trip and gives the inline
   # error). Routes through Nebu.Matrix.admin_add_room_member/3 (the audited join path,
   # ADR-020) with the logged-in admin as actor. On success the member list is re-fetched.
+  # admin-add-user-autocomplete: debounced typeahead on the add-user input. phx-change
+  # fires with the current field value; the shared helper applies the >=2-char gate and
+  # the LIMIT-capped, parameter-bound user search (ADR-018/ADR-020). The submit path is
+  # unchanged — these suggestions are assistive (the field stays free-text).
+  @impl Phoenix.LiveView
+  def handle_event("suggest_users", params, socket) do
+    query = params["user_id"] || ""
+
+    {:noreply,
+     socket
+     |> assign(:add_member_user_id, query)
+     |> assign(:user_suggestions, Nebu.Admin.UserSuggest.search(query))}
+  end
+
+  # The admin picked a suggestion: fill the input with the full Matrix id and collapse
+  # the listbox. Submit still runs the unchanged add_member path.
+  @impl Phoenix.LiveView
+  def handle_event("select_user_suggestion", %{"user_id" => user_id}, socket) do
+    {:noreply,
+     socket
+     |> assign(:add_member_user_id, user_id)
+     |> assign(:user_suggestions, [])}
+  end
+
+  # admin-add-user-autocomplete: Esc dismisses the listbox (the combobox hook pushes this).
+  @impl Phoenix.LiveView
+  def handle_event("dismiss_user_suggestions", _params, socket) do
+    {:noreply, assign(socket, :user_suggestions, [])}
+  end
+
   @impl Phoenix.LiveView
   def handle_event("add_member", params, socket) do
     room = socket.assigns.room
@@ -300,7 +334,10 @@ defmodule Nebu.Admin.RoomsLive do
             {:noreply,
              socket
              |> assign(:members, fetch_members(room.room_id))
-             |> assign(:member_error, nil)}
+             |> assign(:member_error, nil)
+             # admin-add-user-autocomplete: clear the input + listbox after a successful add.
+             |> assign(:add_member_user_id, "")
+             |> assign(:user_suggestions, [])}
 
           {:error, :invalid_user_id} ->
             {:noreply, assign(socket, :member_error, "Invalid user id")}
@@ -642,24 +679,60 @@ defmodule Nebu.Admin.RoomsLive do
             {@member_error}
           </p>
 
-          <%!-- AC1: add-member form. --%>
+          <%!-- AC1: add-member form with an ARIA-combobox user typeahead (assistive;
+                the field stays free-text). phx-change drives the debounced suggestion
+                query; the listbox below is a role="listbox" of role="option" rows. --%>
           <form
             id="add-member-form"
             phx-submit="add_member"
+            phx-change="suggest_users"
             class="flex items-end gap-2 mb-4"
             data-form="add-member"
           >
-            <label class="form-control grow">
-              <span class="label-text">Add user</span>
+            <div class="form-control grow relative" role="none">
+              <label for="add-member-user-id" class="label-text" id="add-member-user-id-label">
+                Add user
+              </label>
               <input
                 type="text"
+                id="add-member-user-id"
                 name="user_id"
+                value={@add_member_user_id}
                 placeholder="@user:server"
                 class="input input-bordered w-full"
                 data-field="add-member-user-id"
+                autocomplete="off"
+                phx-hook="UserCombobox"
+                role="combobox"
+                aria-autocomplete="list"
+                aria-expanded={to_string(@user_suggestions != [])}
+                aria-controls="add-member-user-suggestions"
+                aria-labelledby="add-member-user-id-label"
                 aria-label="Matrix user id to add"
+                phx-debounce="200"
               />
-            </label>
+              <ul
+                :if={@user_suggestions != []}
+                id="add-member-user-suggestions"
+                role="listbox"
+                aria-label="Matching users"
+                class="menu bg-base-200 rounded-box shadow absolute z-10 mt-1 w-full max-h-60 overflow-auto"
+              >
+                <li
+                  :for={s <- @user_suggestions}
+                  role="option"
+                  id={"user-suggestion-" <> s.user_id}
+                  aria-selected="false"
+                  data-role="user-suggestion"
+                  data-user-id={s.user_id}
+                  class="cursor-pointer px-3 py-2 font-mono text-sm hover:bg-base-300"
+                  phx-click="select_user_suggestion"
+                  phx-value-user_id={s.user_id}
+                >
+                  {s.user_id}
+                </li>
+              </ul>
+            </div>
             <button type="submit" class="btn btn-primary" role="button">Add</button>
           </form>
 
@@ -753,7 +826,7 @@ defmodule Nebu.Admin.RoomsLive do
         <label class="modal-backdrop" for="create-room-modal">Close</label>
       </div>
 
-      <form phx-change="filter" class="mb-4 max-w-xs" data-form="room-filter">
+      <form id="room-filter-form" phx-change="filter" class="mb-4 max-w-xs" data-form="room-filter">
         <label class="form-control w-full">
           <span class="label-text">Status</span>
           <select

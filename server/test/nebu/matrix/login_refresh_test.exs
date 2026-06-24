@@ -45,6 +45,26 @@ defmodule Nebu.Matrix.LoginRefreshTest do
   @authorize "https://idp.example.com/realms/nebu/auth"
   @token_endpoint "https://idp.example.com/realms/nebu/token"
 
+  # Per-run-unique sub → per-run-unique Matrix user id. config/test.exs uses a
+  # RANDOM pii_encryption_key per boot, so the test process cannot decrypt PII rows
+  # written by another boot's key (e.g. a pre-existing @alice:test.local from the
+  # running server). Each run provisions + decrypts its OWN rows with this boot's
+  # key, so a unique sub avoids colliding with pre-existing users → no login 500.
+  # A FRESH sub PER TEST (generated in setup), not a shared module attribute:
+  # config/test.exs uses a RANDOM pii_encryption_key per boot, so the test process
+  # cannot decrypt PII rows written under another boot's key (a pre-existing
+  # @alice:test.local from the running server) → login 500. A unique id per test
+  # means each test provisions + decrypts its OWN row with this boot's key. It MUST
+  # be per-test (not per-module): the deactivate_user / invalidate_user_sessions
+  # tests permanently set is_active=false on their user, and TokenValidator never
+  # reactivates — a shared id would 403 every test that ran after them. lowercase
+  # hex needs no localpart sanitisation, so the uid is exactly "@<sub>:<server>".
+  defp fresh_sub, do: "alice" <> Base.encode16(:crypto.strong_rand_bytes(6), case: :lower)
+
+  # The per-test sub is stashed in the process dictionary by setup so the signing
+  # helpers (sign_id_token / mint_login_token) read the SAME id the test provisions.
+  defp current_sub, do: Process.get(:login_refresh_sub) || raise("sub not set by setup")
+
   @router_opts Nebu.Web.Router.init([])
   @hex64 ~r/^[0-9a-f]{64}$/
 
@@ -111,7 +131,7 @@ defmodule Nebu.Matrix.LoginRefreshTest do
         %{
           "iss" => @issuer,
           "aud" => @audience,
-          "sub" => "alice",
+          "sub" => current_sub(),
           "exp" => future_exp(),
           "iat" => System.system_time(:second)
         },
@@ -158,7 +178,7 @@ defmodule Nebu.Matrix.LoginRefreshTest do
     state = params["state"]
     nonce = params["nonce"]
 
-    id_token = sign_id_token(priv, %{"sub" => "alice", "nonce" => nonce})
+    id_token = sign_id_token(priv, %{"sub" => current_sub(), "nonce" => nonce})
 
     # 3-tuple override: dev extends the exchange seam to surface the OIDC RT.
     Application.put_env(:nebu_http, :matrix_sso_token_override, fn ->
@@ -179,14 +199,46 @@ defmodule Nebu.Matrix.LoginRefreshTest do
   end
 
   setup do
+    # These tests hammer POST /login + /refresh + /sync from a single (default) peer
+    # IP, which would trip the per-IP login limiter. Disable the limiter LOCALLY for
+    # this file only (no global env — that bug throttled nothing AND broke the
+    # RateLimitTest assertions). Restore the prior value exactly in on_exit so it
+    # cannot bleed into the rate-limit assertion tests.
+    prev_rl = Application.get_env(:nebu_http, :rate_limit_disabled)
+    Application.put_env(:nebu_http, :rate_limit_disabled, true)
+
+    on_exit(fn ->
+      case prev_rl do
+        nil -> Application.delete_env(:nebu_http, :rate_limit_disabled)
+        v -> Application.put_env(:nebu_http, :rate_limit_disabled, v)
+      end
+    end)
+
     if Process.whereis(SsoStore) == nil, do: start_supervised!(SsoStore)
     priv = setup_oidc()
 
-    uid = "@alice:" <> @server_name
+    sub = fresh_sub()
+    Process.put(:login_refresh_sub, sub)
+    uid = "@" <> sub <> ":" <> @server_name
 
     if Process.whereis(Nebu.Repo) do
       _ = Nebu.Matrix.Session.TokenValidator.validate(uid, "user", "Alice", "alice@example.com")
       _ = Nebu.Matrix.Profile.DB.upsert_profile(uid, "Alice", nil)
+
+      on_exit(fn ->
+        if Process.whereis(Nebu.Repo) do
+          # matrix_sessions holds BOTH opaque access + refresh tokens (columns, not a
+          # separate table). Delete it before users (FK).
+          for table <- ["matrix_sessions", "profiles", "users"] do
+            _ =
+              Ecto.Adapters.SQL.query(
+                Nebu.Repo,
+                "DELETE FROM #{table} WHERE user_id = $1",
+                [uid]
+              )
+          end
+        end
+      end)
     end
 
     {:ok, priv_jwk: priv, user_id: uid}

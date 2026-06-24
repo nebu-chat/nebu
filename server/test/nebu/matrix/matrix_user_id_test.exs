@@ -22,7 +22,39 @@ defmodule Nebu.Matrix.UserIdTest do
 
   alias Nebu.Matrix.UserId
 
+  # The standard-chain unit blocks below assert the "no configured claim" path.
+  # In the integration container Nebu.Repo IS running and the shared DB carries a
+  # real server_config.oidc_user_id_claim row (the live server persists one), so
+  # OidcClaimCache.get/0 would read it and break the standard preferred_username →
+  # name → sub chain. We can't reliably clear it via the DB: a single shared
+  # OidcClaimCache GenServer + concurrent test modules calling upsert_server_config
+  # re-populate the cache mid-test (a race). Instead, force the claim to nil
+  # DETERMINISTICALLY via the injectable reader seam the cache itself documents
+  # (:matrix, :oidc_claim_reader) and reset the cache so the next get/0 uses it.
+  # Restore the previous reader + reset in on_exit. No DB writes → no race, and
+  # the live config row is never touched.
+  defp force_no_configured_claim do
+    prev = Application.get_env(:matrix, :oidc_claim_reader)
+    Application.put_env(:matrix, :oidc_claim_reader, fn -> nil end)
+    Nebu.Matrix.OidcClaimCache.reset_for_test()
+
+    on_exit(fn ->
+      case prev do
+        nil -> Application.delete_env(:matrix, :oidc_claim_reader)
+        v -> Application.put_env(:matrix, :oidc_claim_reader, v)
+      end
+
+      Nebu.Matrix.OidcClaimCache.reset_for_test()
+    end)
+
+    :ok
+  end
+
   describe "localpart/1 fallback chain (no Repo → standard claims)" do
+    setup do
+      force_no_configured_claim()
+    end
+
     test "preferred_username wins" do
       assert UserId.localpart(%{"preferred_username" => "alex"}) == "alex"
     end
@@ -93,12 +125,11 @@ defmodule Nebu.Matrix.UserIdTest do
             _ -> nil
           end
 
-        Ecto.Adapters.SQL.query!(
-          Nebu.Repo,
-          "INSERT INTO server_config (key, value) VALUES ('oidc_user_id_claim', 'email') " <>
-            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
-          []
-        )
+        # Use the public write helper (ADR-018/ADR-020): it supplies the NOT-NULL
+        # `set_at` column AND invalidates the node-local OidcClaimCache so the new
+        # claim is actually read on the next derivation (a raw INSERT omitted set_at
+        # → not_null_violation, and left a stale cache).
+        :ok = Nebu.Admin.DB.upsert_server_config(%{"oidc_user_id_claim" => "email"})
 
         on_exit(fn ->
           if Process.whereis(Nebu.Repo) do
@@ -110,12 +141,10 @@ defmodule Nebu.Matrix.UserIdTest do
                   []
                 )
 
+                Nebu.Matrix.OidcClaimCache.reset_for_test()
+
               v ->
-                Ecto.Adapters.SQL.query!(
-                  Nebu.Repo,
-                  "UPDATE server_config SET value = $1 WHERE key = 'oidc_user_id_claim'",
-                  [v]
-                )
+                :ok = Nebu.Admin.DB.upsert_server_config(%{"oidc_user_id_claim" => v})
             end
           end
         end)

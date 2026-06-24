@@ -39,6 +39,22 @@ defmodule Nebu.Matrix.Room.DBBehaviour do
   @callback insert_room(room_id :: String.t()) :: {:ok, integer()} | {:error, term()}
 
   @doc """
+  Hard-deletes a room and all rows that reference it (events, members), used to
+  clean up an orphan room when room creation fails after `m.room.create` was
+  written (story admin-room-creator-provisioning, AC3). This is a destructive
+  delete reserved for the failed-create rollback path — NOT the archive flow.
+
+  Returns `:ok` on success (idempotent — deleting an already-absent room is `:ok`).
+  Returns `{:error, reason}` on DB failure.
+
+  Optional callback: only ever invoked on the concrete `Nebu.Matrix.Room.DB`
+  via `rooms_db_module().delete_room/1` in the failed-create orphan-cleanup path
+  (and guarded by a `rescue`). Test fakes that do not exercise that path need not
+  implement it.
+  """
+  @callback delete_room(room_id :: String.t()) :: :ok | {:error, term()}
+
+  @doc """
   Inserts a member into room_members.
 
   Returns `:ok` on success.
@@ -390,7 +406,8 @@ defmodule Nebu.Matrix.Room.DBBehaviour do
   @callback opted_out?(room_id :: String.t(), user_id :: String.t()) ::
               {:ok, boolean()} | {:error, term()}
 
-  @optional_callbacks list_auto_join_spaces: 0,
+  @optional_callbacks delete_room: 1,
+                      list_auto_join_spaces: 0,
                       auto_join_room?: 1,
                       insert_auto_join_opt_out: 3,
                       opted_out?: 2

@@ -118,6 +118,7 @@ defmodule Nebu.Matrix.EventDispatcher.CreateRoomInitialStateTest do
     :ets.new(:create_room_initial_state_db, [:named_table, :public, :set])
 
     Application.put_env(:room_manager, :db_module, FakeDB)
+    Application.put_env(:event_dispatcher, :user_store_module, Nebu.Test.NoOpUserStore)
     Application.put_env(:event_dispatcher, :messages_db_module, FakeDB)
     Application.put_env(:event_dispatcher, :rooms_db_module, FakeDB)
     Application.put_env(:event_dispatcher, :server_name, "test.local")
@@ -134,6 +135,7 @@ defmodule Nebu.Matrix.EventDispatcher.CreateRoomInitialStateTest do
 
     on_exit(fn ->
       Application.delete_env(:room_manager, :db_module)
+      Application.delete_env(:event_dispatcher, :user_store_module)
       Application.delete_env(:event_dispatcher, :messages_db_module)
       Application.delete_env(:event_dispatcher, :rooms_db_module)
       Application.delete_env(:event_dispatcher, :server_name)

@@ -117,6 +117,7 @@ defmodule Nebu.Matrix.EventDispatcher.CreateRoomTest do
 
     # Inject fake DB so Room GenServers don't need PostgreSQL.
     Application.put_env(:room_manager, :db_module, FakeDB)
+    Application.put_env(:event_dispatcher, :user_store_module, Nebu.Test.NoOpUserStore)
 
     # Story 5.29d AC1 (FB-E5-03): also inject FakeDB as the messages_db_module so
     # Server.create_room/2's insert_event call does not hit Nebu.Repo.
@@ -150,6 +151,7 @@ defmodule Nebu.Matrix.EventDispatcher.CreateRoomTest do
     on_exit(fn ->
       # Remove Application overrides.
       Application.delete_env(:room_manager, :db_module)
+      Application.delete_env(:event_dispatcher, :user_store_module)
       Application.delete_env(:event_dispatcher, :messages_db_module)
       Application.delete_env(:event_dispatcher, :rooms_db_module)
       Application.delete_env(:event_dispatcher, :server_name)

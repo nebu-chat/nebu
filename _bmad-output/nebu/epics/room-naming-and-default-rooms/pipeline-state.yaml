@@ -1,6 +1,27 @@
 # Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents.
 # Do not edit manually during an active pipeline run.
-# last_updated: 2026-06-22
+# last_updated: 2026-06-24
+# [integration-test-rehab] 2026-06-24T08:42Z ci-gate → full fresh-volume integration GREEN x2 (969 tests, 0 failures, EXIT 0); unit 825/0 EXIT 0
+# [integration-test-rehab] 2026-06-24T07:24Z pipeline started — fix 14 pre-existing integration failures (all test/harness-side per diagnosis; 0 product changes)
+# [room-names-bug] 2026-06-23T20:28Z VERIFY tests → unit 825/0 EXIT0; integration: SearchUsersDBTest regression fixed (9/9); 14 pre-existing failures remain in untouched domains (LoginRefresh/MatrixRouter/UserId/Denylist/AdminScope + 2 room fixtures inserting members w/o users row = old FK)
+# [room-names-bug] 2026-06-23T20:15Z integration baseline → 14 pre-existing failures in untouched domains (LoginRefresh x6, MatrixRouter login x2, UserId x2, Denylist, AdminScope + 2 room fixtures inserting members w/o users row = old FK); NOT regressions
+# [admin-add-user-autocomplete] 2026-06-23T17:37Z committed ✓ 562587b3 (825/0 EXIT0, MINOR fixed 1 cycle + Kassandra PASS + CI warnings-as-errors regression fixed)
+# [admin-add-user-autocomplete] 2026-06-23T17:37Z arc42-update → 06-runtime Scenario 3s added (admin add-user autocomplete)
+# [admin-add-user-autocomplete] 2026-06-23T17:34Z code-review → MINOR-only (2 MINOR + 1 INFO fixed cycle 1: search+keyset pagination, spaces member roster+flash, trimmed SELECT); 825/0 EXIT0; CLEAN
+# [admin-add-user-autocomplete] 2026-06-23T17:25Z ci-gate → FIXED branch-wide warnings-as-errors regression (delete_room/1 @optional_callbacks + test_ignore_filters); make test-unit-elixir EXIT 0, 824/0
+# [admin-add-user-autocomplete] 2026-06-23T17:06Z atdd → folded into TDD dev step (UI story: ExUnit search + LiveView + Playwright)
+# [room-canonical-alias-from-name] 2026-06-23T17:06Z committed ✓ 86bb1b9c (813/0, MAJOR fixed 1 cycle + Kassandra PASS 3 LOW accepted)
+# [room-canonical-alias-from-name] 2026-06-23T17:05Z arc42-update → 06-runtime Scenario 3r extended (alias derivation/registration/emit + delete_room alias cleanup)
+# [room-canonical-alias-from-name] 2026-06-23T17:02Z code-review → 1 MAJOR (delete_room missed room_aliases FK → orphan-cleanup would FK-fail) + spec hardening; fixed cycle 1; 813/0; CLEAN
+# [room-canonical-alias-from-name] 2026-06-23T16:54Z ci-gate → unit-elixir 810/0 green (migration applies on redeploy)
+# [room-canonical-alias-from-name] 2026-06-23T16:47Z atdd → folded into TDD dev step
+# [room-canonical-alias-from-name] 2026-06-23T16:44Z pipeline started (story 2/3: derive #localpart:server canonical alias from room name)
+# [admin-room-creator-provisioning] 2026-06-23T16:44Z committed ✓ 046769cd (796/0, code-review MINOR fixed, Kassandra LOW-1 fixed)
+# [admin-room-creator-provisioning] 2026-06-23T16:35Z code-review → MINOR-only (2 MINOR fixed cycle 1: :transient dep comment + accepted correlated-failure cleanup limitation); CLEAN
+# [admin-room-creator-provisioning] 2026-06-23T16:29Z ci-gate → unit-elixir 795/0 green; e2e admin create_room .feature added (pending stack)
+# [admin-room-creator-provisioning] 2026-06-23T16:15Z atdd → folded into TDD dev step (bug regression test written first)
+# [admin-room-creator-provisioning] 2026-06-23T16:14Z pipeline started (bug flow; root-cause verified live: creator not in users → room_members FK crash → orphan nameless/stale room)
+# [oidc-claim-boot-cache] 2026-06-22T07:45Z committed ✓ 7221d2ba (757/0, ci-local --all green, code-review+Kassandra CLEAN)
 # [oidc-claim-boot-cache] 2026-06-22T07:45Z arc42-update → 08-concepts claim-cache section updated (Go claimLoader → Elixir OidcClaimCache)
 # [oidc-claim-boot-cache] 2026-06-22T07:44Z security-review → Kassandra CLEAN (boot-window residual ACCEPTED; 1 LOW cluster-staleness backlog)
 # [oidc-claim-boot-cache] 2026-06-22T07:42Z code-review → CLEAN (1 MINOR: doc overstated residual → fixed; SEC residual deferred to Kassandra)
@@ -74,14 +95,9 @@
 # direct-room-heroes 2026-05-28T12:45Z atdd → 6 Godog scenarios, 3 files
 # direct-room-heroes 2026-05-28 DONE: committed 6470e053 ✓
 # direct-room-heroes 2026-05-28 arc42-update → Scenario 3o added to 06-runtime.md (m.heroes room summary, attach_heroes, syncRoomSummary, delta optimization)
-story: "oidc-claim-boot-cache"
-current_step: "commit"
-completed:
-  - dev-story
-  - ci-gate
-  - code-review
-  - security-review
-  - arc42-update
+story: null
+current_step: null
+completed: []
 cycle_count: 0
 blocked_reason: null
-last_updated: "2026-06-22T07:45Z"
+last_updated: "2026-06-24T08:42Z"
