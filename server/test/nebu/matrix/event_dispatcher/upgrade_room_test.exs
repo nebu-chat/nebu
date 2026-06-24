@@ -225,6 +225,7 @@ defmodule Nebu.Matrix.EventDispatcher.UpgradeRoomTest do
     :ets.new(:upgrade_room_test_db, [:named_table, :public, :set])
 
     Application.put_env(:room_manager,     :db_module,           FakeDB)
+    Application.put_env(:event_dispatcher, :user_store_module,   Nebu.Test.NoOpUserStore)
     Application.put_env(:event_dispatcher, :messages_db_module, FakeDB)
     # FB-E5-03: route create_room/2's name/type writes through FakeDB, not Nebu.Repo.
     Application.put_env(:event_dispatcher, :rooms_db_module,    FakeDB)
@@ -244,6 +245,7 @@ defmodule Nebu.Matrix.EventDispatcher.UpgradeRoomTest do
 
     on_exit(fn ->
       Application.delete_env(:room_manager,     :db_module)
+      Application.delete_env(:event_dispatcher, :user_store_module)
       Application.delete_env(:event_dispatcher, :messages_db_module)
       Application.delete_env(:event_dispatcher, :rooms_db_module)
       Application.delete_env(:event_dispatcher, :invite_db_module)

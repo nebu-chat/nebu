@@ -94,7 +94,9 @@ defmodule Nebu.Admin.AdminTokenRefreshTest do
             :admin_oidc_scope,
             :oidc_metadata_override,
             :admin_oidc_token_override,
-            :admin_oidc_refresh_override
+            :admin_oidc_refresh_override,
+            # Belt-and-suspenders: never let the refresh-mode seam bleed to other files.
+            :admin_oidc_refresh_mode_reader
           ] do
         Application.delete_env(:nebu_http, k)
       end
@@ -158,6 +160,23 @@ defmodule Nebu.Admin.AdminTokenRefreshTest do
   # pin the new DEFAULT (no reader seam / no server_config row → online → no offline_access,
   # openid present).
   test "[AC1] login_start requests openid (default online mode → NO forced offline_access)" do
+    # "Default online" must be DETERMINISTIC. In the integration container Nebu.Repo is
+    # running and the shared DB may carry a real admin_oidc_refresh_mode row (or a
+    # sibling test / file wrote 'offline'), so a live DB read here is racy — that was the
+    # AdminTokenRefreshTest:160 flake (expected online, got offline_access). Model the
+    # default via the documented reader seam returning nil: admin_refresh_mode/0
+    # collapses nil → "online", so offline_access must NOT be added. No DB read, no race;
+    # the live config row is never touched. Restore the prior seam in on_exit.
+    prev = Application.get_env(:nebu_http, :admin_oidc_refresh_mode_reader)
+    Application.put_env(:nebu_http, :admin_oidc_refresh_mode_reader, fn -> nil end)
+
+    on_exit(fn ->
+      case prev do
+        nil -> Application.delete_env(:nebu_http, :admin_oidc_refresh_mode_reader)
+        v -> Application.put_env(:nebu_http, :admin_oidc_refresh_mode_reader, v)
+      end
+    end)
+
     conn = session_conn(:get, "/admin/login/start") |> Auth.login_start(%{})
 
     assert conn.status == 302

@@ -50,6 +50,15 @@ defmodule Nebu.Web.MatrixRouterTest do
   @audience "nebu-gateway"
   @kid "matrix-router-key-1"
 
+  # Per-run-unique sub → per-run-unique Matrix user id. config/test.exs uses a
+  # RANDOM pii_encryption_key per boot, so the test process cannot decrypt PII rows
+  # written under a DIFFERENT boot's key (e.g. a pre-existing @kai:test.local from
+  # the running server) → login 500. A unique sub per run means each run provisions
+  # and decrypts its OWN rows with this boot's key. lowercase hex needs no localpart
+  # sanitisation, so the uid is exactly "@<sub>:<server>".
+  @run_id Base.encode16(:crypto.strong_rand_bytes(6), case: :lower)
+  @kai_sub "kai" <> @run_id
+
   @router_opts Nebu.Web.Router.init([])
 
   # ── shared helpers ────────────────────────────────────────────────────────
@@ -324,10 +333,38 @@ defmodule Nebu.Web.MatrixRouterTest do
   describe "login rate limit (F-3)" do
     setup do
       _priv = setup_oidc_keys()
+
+      # The integration harness sets NEBU_RATE_LIMIT_DISABLED=true (and other suites
+      # set :rate_limit_disabled) so they are not throttled. This test EXPLICITLY
+      # enables the limiter for its duration — otherwise the disabled escape hatch
+      # makes the plug a no-op and no 429 is ever produced. Mirrors url_preview_test.
+      prev_env = System.get_env("NEBU_RATE_LIMIT_DISABLED")
+      System.delete_env("NEBU_RATE_LIMIT_DISABLED")
+      prev_app = Application.get_env(:nebu_http, :rate_limit_disabled)
+      # DELETE the override (not put false) so a leaked `true` from a sibling test —
+      # e.g. login_refresh_test / the AC1 contract block — cannot disable the limiter
+      # under us. With the key absent the plug's disabled? default (false) applies and
+      # the limiter is ENABLED, which is what this block asserts. Consistent with the
+      # RateLimitTest setup that also force-deletes the key.
+      Application.delete_env(:nebu_http, :rate_limit_disabled)
+
       # Clean the shared bucket table so the count starts fresh.
       if :ets.whereis(:nebu_http_rate_limit_buckets) != :undefined do
         :ets.delete_all_objects(:nebu_http_rate_limit_buckets)
       end
+
+      on_exit(fn ->
+        if :ets.whereis(:nebu_http_rate_limit_buckets) != :undefined do
+          :ets.delete_all_objects(:nebu_http_rate_limit_buckets)
+        end
+
+        case prev_app do
+          nil -> Application.delete_env(:nebu_http, :rate_limit_disabled)
+          v -> Application.put_env(:nebu_http, :rate_limit_disabled, v)
+        end
+
+        if prev_env, do: System.put_env("NEBU_RATE_LIMIT_DISABLED", prev_env)
+      end)
 
       :ok
     end
@@ -374,8 +411,23 @@ defmodule Nebu.Web.MatrixRouterTest do
     @describetag :integration
 
     setup do
+      # These contract tests drive POST /login + protected endpoints repeatedly from
+      # the default peer IP, which would trip the per-IP login limiter. Disable the
+      # limiter LOCALLY for this describe block only (no global env — the F-3 block
+      # below ASSERTS the limiter and must keep working). Restore the prior value
+      # exactly in on_exit so nothing bleeds into the rate-limit assertion tests.
+      prev_rl = Application.get_env(:nebu_http, :rate_limit_disabled)
+      Application.put_env(:nebu_http, :rate_limit_disabled, true)
+
+      on_exit(fn ->
+        case prev_rl do
+          nil -> Application.delete_env(:nebu_http, :rate_limit_disabled)
+          v -> Application.put_env(:nebu_http, :rate_limit_disabled, v)
+        end
+      end)
+
       priv = setup_oidc_keys()
-      {uid, token} = bearer_for("kai", priv)
+      {uid, token} = bearer_for(@kai_sub, priv)
 
       # Fixture: "kai is a logged-in user." In the migrated stack the Elixir side
       # is the single auth + provisioning point (OidcPlug provisions on any authed
@@ -389,6 +441,15 @@ defmodule Nebu.Web.MatrixRouterTest do
         # validate/4 provisions the users row; the profiles row is upserted by the
         # login path (Server.validate_token). Mirror that here so GET /profile finds it.
         _ = Nebu.Matrix.Profile.DB.upsert_profile(uid, "Kai", nil)
+
+        on_exit(fn ->
+          if Process.whereis(Nebu.Repo) do
+            # matrix_sessions before users (FK). Per-run-unique uid → no cross-run leak.
+            for table <- ["matrix_sessions", "profiles", "users"] do
+              _ = Ecto.Adapters.SQL.query(Nebu.Repo, "DELETE FROM #{table} WHERE user_id = $1", [uid])
+            end
+          end
+        end)
       end
 
       {:ok, priv_jwk: priv, user_id: uid, token: token}

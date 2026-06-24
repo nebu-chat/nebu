@@ -71,7 +71,15 @@ defmodule Nebu.Admin.SpacesLive do
         view_mode: :index,
         space: nil,
         children: [],
-        child_input: ""
+        child_input: "",
+        # admin-add-user-autocomplete: shared add-user typeahead state (the add-member
+        # field below reuses Nebu.Admin.UserSuggest + the same event contract as RoomsLive).
+        add_member_user_id: "",
+        user_suggestions: [],
+        member_error: nil,
+        # MINOR-2: render a member roster so a successful add has visible confirmation
+        # (a Space is a room — reuse the RoomsLive member-fetch seam on the space room_id).
+        members: []
       )
       |> assign(:spaces, load_spaces(session))
       |> assign(:injected_session, session)
@@ -162,6 +170,71 @@ defmodule Nebu.Admin.SpacesLive do
         else: socket.assigns.space
 
     {:noreply, socket |> assign(:spaces, spaces) |> assign(:space, space)}
+  end
+
+  # ── admin-add-user-autocomplete: add-user typeahead (shared with RoomsLive) ─────
+  # A Space is a room, so adding a member routes through the same audited Matrix
+  # public-API path (admin_add_room_member/3, ADR-020) the room add-member uses. The
+  # suggestion query reuses Nebu.Admin.UserSuggest (shared helper, same event contract).
+
+  @impl Phoenix.LiveView
+  def handle_event("suggest_users", params, socket) do
+    query = params["user_id"] || ""
+
+    {:noreply,
+     socket
+     |> assign(:add_member_user_id, query)
+     |> assign(:user_suggestions, Nebu.Admin.UserSuggest.search(query))}
+  end
+
+  @impl Phoenix.LiveView
+  def handle_event("select_user_suggestion", %{"user_id" => user_id}, socket) do
+    {:noreply,
+     socket
+     |> assign(:add_member_user_id, user_id)
+     |> assign(:user_suggestions, [])}
+  end
+
+  @impl Phoenix.LiveView
+  def handle_event("dismiss_user_suggestions", _params, socket) do
+    {:noreply, assign(socket, :user_suggestions, [])}
+  end
+
+  @impl Phoenix.LiveView
+  def handle_event("add_member", params, socket) do
+    space = socket.assigns.space
+    user_id = String.trim(params["user_id"] || "")
+
+    cond do
+      is_nil(space) ->
+        {:noreply, socket}
+
+      not Nebu.Matrix.UserId.valid?(user_id) ->
+        {:noreply, assign(socket, :member_error, "Invalid user id")}
+
+      true ->
+        case add_member(space.room_id, user_id, socket.assigns.actor_id) do
+          {:ok, _} ->
+            # MINOR-2: visible confirmation — re-fetch the roster (the added user now
+            # appears) AND show a success flash naming the user.
+            {:noreply,
+             socket
+             |> assign(:members, fetch_members(space.room_id))
+             |> assign(:member_error, nil)
+             |> assign(:add_member_user_id, "")
+             |> assign(:user_suggestions, [])
+             |> put_flash(:info, "Added #{user_id}")}
+
+          {:error, :invalid_user_id} ->
+            {:noreply, assign(socket, :member_error, "Invalid user id")}
+
+          {:error, :not_found} ->
+            {:noreply, assign(socket, :member_error, "User not found: #{user_id}")}
+
+          {:error, reason} ->
+            {:noreply, assign(socket, :member_error, "Could not add member: #{inspect(reason)}")}
+        end
+    end
   end
 
   # ── AC3: edit name/topic ───────────────────────────────────────────────────────
@@ -270,9 +343,16 @@ defmodule Nebu.Admin.SpacesLive do
         _ -> real_children(space_id)
       end
 
+    members =
+      case session["room_members"] do
+        list when is_list(list) -> Enum.map(list, &normalize_member/1)
+        _ -> if space, do: fetch_members(space.room_id), else: []
+      end
+
     socket
     |> assign(:space, space)
     |> assign(:children, children)
+    |> assign(:members, members)
   end
 
   defp real_get_space(space_id) do
@@ -319,6 +399,37 @@ defmodule Nebu.Admin.SpacesLive do
       _ -> Nebu.Matrix.set_room_auto_join(actor_id, room_id, value)
     end
   end
+
+  # admin-add-user-autocomplete: add a member to the Space (a Space is a room) through
+  # the same audited Matrix public-API path RoomsLive uses (:admin_member_adder seam in
+  # unit tests, else Nebu.Matrix.admin_add_room_member/3 — ADR-020).
+  defp add_member(room_id, user_id, actor_id) do
+    case Application.get_env(:nebu_http, :admin_member_adder) do
+      fun when is_function(fun, 3) -> fun.(room_id, user_id, actor_id)
+      _ -> Nebu.Matrix.admin_add_room_member(room_id, user_id, actor_id)
+    end
+  end
+
+  # MINOR-2: a Space is a room — reuse the RoomsLive member-fetch seam
+  # (:admin_member_lister → Nebu.Admin.DB.list_room_members/1) so a successful add shows
+  # the new member in a roster. No space-specific membership semantics are invented.
+  defp fetch_members(room_id) do
+    case Application.get_env(:nebu_http, :admin_member_lister) do
+      fun when is_function(fun, 1) ->
+        Enum.map(fun.(room_id), &normalize_member/1)
+
+      _ ->
+        if running?(Nebu.Repo) do
+          {:ok, rows} = Nebu.Admin.DB.list_room_members(room_id)
+          Enum.map(rows, &normalize_member/1)
+        else
+          []
+        end
+    end
+  end
+
+  defp normalize_member(%{user_id: uid}), do: %{user_id: uid}
+  defp normalize_member(%{"user_id" => uid}), do: %{user_id: uid}
 
   # ── normalizers (string-keyed test sessions → atom-keyed assigns) ──────────────
 
@@ -382,6 +493,14 @@ defmodule Nebu.Admin.SpacesLive do
     <div class="admin-space-detail" data-page="space-detail">
       <.link navigate="/admin/spaces" class="text-sm text-primary">&larr; Back to Spaces</.link>
 
+      <%!-- MINOR-2: success/error flash (e.g. "Added @user:server" after a member add). --%>
+      <p :if={Phoenix.Flash.get(@flash, :info)} class="alert alert-success my-4" role="status" data-role="flash-info">
+        {Phoenix.Flash.get(@flash, :info)}
+      </p>
+      <p :if={Phoenix.Flash.get(@flash, :error)} class="alert alert-error my-4" role="alert">
+        {Phoenix.Flash.get(@flash, :error)}
+      </p>
+
       <p :if={@space == nil} class="text-base-content/70 mt-4">Space not found.</p>
 
       <div :if={@space != nil}>
@@ -419,6 +538,91 @@ defmodule Nebu.Admin.SpacesLive do
               phx-value-space_id={@space.room_id}
             />
           </label>
+        </div>
+
+        <%!-- admin-add-user-autocomplete: add a member to the Space with the shared
+              ARIA-combobox user typeahead (assistive; the field stays free-text). --%>
+        <div class="mb-8 max-w-2xl" data-section="members">
+          <h2 class="text-xl font-semibold mb-2">Add member</h2>
+
+          <p :if={@member_error} class="text-error mb-3" role="alert" data-role="member-error">
+            {@member_error}
+          </p>
+
+          <form
+            id="space-add-member-form"
+            phx-submit="add_member"
+            phx-change="suggest_users"
+            class="flex items-end gap-2"
+            data-form="add-member"
+          >
+            <div class="form-control grow relative" role="none">
+              <label
+                for="space-add-member-user-id"
+                class="label-text"
+                id="space-add-member-user-id-label"
+              >
+                Add user
+              </label>
+              <input
+                type="text"
+                id="space-add-member-user-id"
+                name="user_id"
+                value={@add_member_user_id}
+                placeholder="@user:server"
+                class="input input-bordered w-full"
+                data-field="add-member-user-id"
+                autocomplete="off"
+                phx-hook="UserCombobox"
+                role="combobox"
+                aria-autocomplete="list"
+                aria-expanded={to_string(@user_suggestions != [])}
+                aria-controls="space-add-member-user-suggestions"
+                aria-labelledby="space-add-member-user-id-label"
+                aria-label="Matrix user id to add"
+                phx-debounce="200"
+              />
+              <ul
+                :if={@user_suggestions != []}
+                id="space-add-member-user-suggestions"
+                role="listbox"
+                aria-label="Matching users"
+                class="menu bg-base-200 rounded-box shadow absolute z-10 mt-1 w-full max-h-60 overflow-auto"
+              >
+                <li
+                  :for={s <- @user_suggestions}
+                  role="option"
+                  id={"space-user-suggestion-" <> s.user_id}
+                  aria-selected="false"
+                  data-role="user-suggestion"
+                  data-user-id={s.user_id}
+                  class="cursor-pointer px-3 py-2 font-mono text-sm hover:bg-base-300"
+                  phx-click="select_user_suggestion"
+                  phx-value-user_id={s.user_id}
+                >
+                  {s.user_id}
+                </li>
+              </ul>
+            </div>
+            <button type="submit" class="btn btn-primary" role="button">Add</button>
+          </form>
+
+          <%!-- MINOR-2: member roster — re-rendered after a successful add so the new
+                member is visible (matches RoomsLive). --%>
+          <p :if={@members == []} class="text-base-content/70 mt-3" data-role="no-members">
+            No members.
+          </p>
+
+          <ul :if={@members != []} class="divide-y divide-base-300 mt-3" role="list" data-list="members">
+            <li
+              :for={member <- @members}
+              class="flex items-center py-2"
+              data-role="member-row"
+              data-user-id={member.user_id}
+            >
+              <span class="font-mono text-sm">{member.user_id}</span>
+            </li>
+          </ul>
         </div>
 
         <h2 class="text-xl font-semibold mb-2">Child rooms</h2>

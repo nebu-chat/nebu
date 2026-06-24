@@ -16,6 +16,18 @@ defmodule Nebu.Web.Plugs.RateLimitTest do
   setup do
     if :ets.whereis(@table) != :undefined, do: :ets.delete_all_objects(@table)
 
+    # Defend against bleed: a sibling test (login_refresh_test, the matrix-router AC1
+    # contract block, …) may have set :rate_limit_disabled=true. The 429-asserting
+    # tests below REQUIRE the limiter enabled, so force the override off here in setup
+    # (not just on_exit) — and assert the OS env hatch isn't "true" either, since
+    # disabled?/0 ORs both. Tests that WANT it disabled (the no-op test) set it
+    # explicitly after this.
+    Application.delete_env(:nebu_http, :rate_limit_disabled)
+
+    assert System.get_env("NEBU_RATE_LIMIT_DISABLED") != "true",
+           "RateLimitTest requires the limiter ENABLED — NEBU_RATE_LIMIT_DISABLED must not be \"true\" " <>
+             "(do not set it globally in the test harness; disable the limiter per-test via app env instead)"
+
     on_exit(fn ->
       if :ets.whereis(@table) != :undefined, do: :ets.delete_all_objects(@table)
       Application.delete_env(:nebu_http, :rate_limit_disabled)

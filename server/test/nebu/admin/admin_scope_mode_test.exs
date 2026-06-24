@@ -125,9 +125,25 @@ defmodule Nebu.Admin.AdminScopeModeTest do
     end
 
     test "unset mode → DEFAULTS to online (NO offline_access) — AC1/AC3 default" do
-      # No reader seam → default reader reads server_config; no row → admin default
-      # is ONLINE: offline_access must NOT be force-added (the bug this story fixes).
-      Application.delete_env(:nebu_http, :admin_oidc_refresh_mode_reader)
+      # "unset" means the default reader resolves no configured mode and falls back
+      # to the admin "online" default. In the integration container Nebu.Repo IS
+      # running and the shared DB carries a real admin_oidc_refresh_mode row (the
+      # live server persists one), and concurrent integration tests in this module
+      # write 'offline'/'online' — so a live DB read here is racy. Model "unset"
+      # DETERMINISTICALLY with the documented reader seam returning nil (the same
+      # seam shape the other AC3 tests use): the reader collapses nil → "online",
+      # so offline_access must NOT be added. No DB writes → no race; the live
+      # config row is never touched. Restore in on_exit.
+      prev = Application.get_env(:nebu_http, :admin_oidc_refresh_mode_reader)
+      Application.put_env(:nebu_http, :admin_oidc_refresh_mode_reader, fn -> nil end)
+
+      on_exit(fn ->
+        case prev do
+          nil -> Application.delete_env(:nebu_http, :admin_oidc_refresh_mode_reader)
+          v -> Application.put_env(:nebu_http, :admin_oidc_refresh_mode_reader, v)
+        end
+      end)
+
       scopes = scope_params()
       assert "openid" in scopes
       refute "offline_access" in scopes
@@ -151,7 +167,28 @@ defmodule Nebu.Admin.AdminScopeModeTest do
     @describetag :integration
 
     setup do
+      # These tests assert on the LIVE server_config read, so any leaked reader seam
+      # (from a sibling unit test / another file) MUST be removed first — otherwise it
+      # shadows the DB and the row we write is never consulted. Force-clear it here and
+      # restore the prior value in on_exit. Clean the row before AND after so a stale
+      # value left by another run can't poison the read.
+      prev_reader = Application.get_env(:nebu_http, :admin_oidc_refresh_mode_reader)
+      Application.delete_env(:nebu_http, :admin_oidc_refresh_mode_reader)
+
+      if Process.whereis(Nebu.Repo) do
+        Ecto.Adapters.SQL.query(
+          Nebu.Repo,
+          "DELETE FROM server_config WHERE key = 'admin_oidc_refresh_mode'",
+          []
+        )
+      end
+
       on_exit(fn ->
+        case prev_reader do
+          nil -> Application.delete_env(:nebu_http, :admin_oidc_refresh_mode_reader)
+          v -> Application.put_env(:nebu_http, :admin_oidc_refresh_mode_reader, v)
+        end
+
         if Process.whereis(Nebu.Repo) do
           Ecto.Adapters.SQL.query(
             Nebu.Repo,

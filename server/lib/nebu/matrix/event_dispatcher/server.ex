@@ -25,6 +25,14 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
     Application.get_env(:event_dispatcher, :rooms_db_module, Nebu.Matrix.Room.DB)
   end
 
+  # ─── Configurable alias DB module for testability ─────────────────────────────
+  # Override via Application.put_env(:event_dispatcher, :alias_db_module, FakeAliasDB) in tests.
+  # Used by create_room/2 to register a room's canonical alias in the room_aliases
+  # directory (story room-canonical-alias-from-name).
+  defp alias_db_module do
+    Application.get_env(:event_dispatcher, :alias_db_module, Nebu.Matrix.Room.DB)
+  end
+
   # ─── Configurable receipt DB module for testability ──────────────────────────
   # Override via Application.put_env(:event_dispatcher, :receipt_db_module, FakeReceiptDB) in tests.
   defp receipt_db_module do
@@ -87,6 +95,24 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
     Application.get_env(:event_dispatcher, :bulk_importer_module, Nebu.Matrix.Session.BulkImporter)
   end
 
+  # ─── Configurable UserStore module for testability ───────────────────────────
+  # Override via Application.put_env(:event_dispatcher, :user_store_module, FakeUserStore) in tests.
+  # Used by create_room/2 to provision the creator into `users` (idempotent upsert)
+  # before the creator-join, so an admin id with no prior `users` row does not hit the
+  # room_members → users FK violation (story admin-room-creator-provisioning).
+  defp user_store_module do
+    Application.get_env(:event_dispatcher, :user_store_module, Nebu.Matrix.Session.UserStore)
+  end
+
+  # ─── Configurable RoomSupervisor module for testability ──────────────────────
+  # Override via Application.put_env(:event_dispatcher, :room_supervisor_module, FakeModule) in tests.
+  # Used by create_room/2 to start a brand-new room via start_new_room/1, which
+  # distinguishes a freshly started room from one that was already running so the
+  # orphan-cleanup path can never hard-delete a pre-existing room.
+  defp room_supervisor_module do
+    Application.get_env(:event_dispatcher, :room_supervisor_module, Nebu.Matrix.Room.RoomSupervisor)
+  end
+
   def send_event(request, _stream) do
     room_id = request.room_id
     sender_id = request.sender_id
@@ -102,7 +128,7 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
     raw_state_key = Map.get(request, :state_key, "")
     state_key = if is_state_event, do: raw_state_key, else: nil
 
-    # Decode content bytes from protobuf (bytes field → binary → decode to map).
+    # Decode content JSON string to a map (content is stored as JSONB, may arrive as binary).
     content =
       case Jason.decode(request.content) do
         {:ok, map} -> map
@@ -155,8 +181,103 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
     room_id = generate_room_id()
     creator_id = request.creator_id
 
-    case Nebu.Matrix.Room.RoomSupervisor.start_room(room_id) do
+    # Kassandra SEC LOW-1: use start_new_room/1 (NOT start_room/1) so we can
+    # distinguish a brand-new room from one that was already running. For a freshly
+    # generate_room_id/0-d id an already-running room is practically impossible (an
+    # 8-byte random opaque collision), but if it ever happened, proceeding would run
+    # do_create_room/cleanup_orphan_room against a PRE-EXISTING room — and a later
+    # failure's cleanup_orphan_room/1 would hard-delete that room's events+members+row.
+    # We refuse the conflict instead, so cleanup can only ever target a room THIS call
+    # created. start_room/1 (which collapses :already_started into {:ok, pid}) is left
+    # untouched for all other callers.
+    case room_supervisor_module().start_new_room(room_id) do
       {:ok, _pid} ->
+        # Everything below writes rows that reference rooms.room_id (the rooms row was
+        # inserted by Room.Server.init/1). A failure in any of these writes — notably
+        # the creator-join FK violation when the creator has no `users` row (story
+        # admin-room-creator-provisioning) — must NOT leave an orphan room (blank name,
+        # 0 members → "stale" in the Admin UI). Run the create steps and, on ANY error
+        # (including a raised Postgrex.Error / MatchError, which the previous
+        # `rescue e in Nebu.Matrix.Error` did NOT catch), delete the just-created room
+        # and surface a clean error instead of crashing the caller.
+        try do
+          do_create_room(room_id, request, creator_id)
+        rescue
+          e in Nebu.Matrix.Error ->
+            cleanup_orphan_room(room_id)
+            reraise e, __STACKTRACE__
+
+          e ->
+            Logger.error(
+              "create_room: cleaning up orphan room #{room_id} after failure: " <>
+                Exception.format(:error, e, __STACKTRACE__)
+            )
+
+            cleanup_orphan_room(room_id)
+
+            raise Nebu.Matrix.Error,
+              status: Nebu.Matrix.Status.internal(),
+              message: "create_room failed: #{Exception.message(e)}"
+        end
+
+      {:error, :already_started, _pid} ->
+        # Room id already in use (random-id collision — see comment above). Raise a
+        # clean conflict and do NOT touch the pre-existing room: no do_create_room,
+        # no cleanup_orphan_room, so the existing room's events/members/row are never
+        # deleted. This is the LOW-1 safety guarantee.
+        raise Nebu.Matrix.Error,
+          status: Nebu.Matrix.Status.already_exists(),
+          message: "room already exists: #{room_id}"
+
+      {:error, reason} ->
+        raise Nebu.Matrix.Error,
+          status: Nebu.Matrix.Status.internal(),
+          message: "Failed to start room: #{inspect(reason)}"
+    end
+  end
+
+  # Best-effort cleanup of a half-created room so a failed create never leaves an
+  # orphan (story admin-room-creator-provisioning AC3). Stops the Room GenServer and
+  # hard-deletes the rooms/events/room_members rows via the injectable rooms_db_module()
+  # seam. Cleanup failures are logged, never raised — the original error is what the
+  # caller must see.
+  #
+  # Accepted limitation (correlated failure): this cleanup is best-effort. If
+  # delete_room/1 below itself fails — e.g. the same DB outage that caused the create to
+  # fail in the first place — the half-created rooms row may persist, and the *original*
+  # error is still what we surface to the caller. A fully transactional create
+  # (m.room.create + creator membership + m.room.name in one DB transaction) is out of
+  # scope for this story: the rooms row is inserted in the Room GenServer init/1 (Horde),
+  # not in the event-write transaction, so it cannot be rolled back as part of those
+  # writes. This residual is accepted.
+  defp cleanup_orphan_room(room_id) do
+    case Nebu.Matrix.Room.RoomSupervisor.lookup_room(room_id) do
+      # Stop with :normal on purpose: Horde supervises the Room GenServer with
+      # restart: :transient, which does NOT restart a child that exits :normal. This is
+      # what makes cleanup correct — a restart would re-run init/1 and re-insert the
+      # rooms row right after we DELETE it (a re-insert race). Cleanup correctness
+      # therefore depends on the child remaining :transient; changing it to :permanent
+      # would silently reintroduce that race.
+      {:ok, pid} -> if Process.alive?(pid), do: GenServer.stop(pid, :normal, 5_000)
+      _ -> :ok
+    end
+
+    case rooms_db_module().delete_room(room_id) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("create_room: orphan-room cleanup failed for #{room_id}: #{inspect(reason)}")
+    end
+  rescue
+    e ->
+      Logger.warning("create_room: orphan-room cleanup raised for #{room_id}: #{Exception.message(e)}")
+  end
+
+  # The create_room/2 body once the Room GenServer (and its rooms row) exists.
+  # Returns %Core.CreateRoomResponse{}. Raises on failure; the caller's try/rescue
+  # turns any raise into orphan cleanup + a clean Nebu.Matrix.Error.
+  defp do_create_room(room_id, request, creator_id) do
         # Matrix Spaces (spaces-elixir s1): merge the client's creation_content into the
         # m.room.create content. Matrix CS §createRoom merges creation_content into the
         # create event content, but the server controls `creator` and `room_version` — the
@@ -197,9 +318,42 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
             Logger.warning("create_room: failed to write m.room.create for #{room_id}: #{inspect(reason)}")
         end
 
+        # Provision the creator into `users` BEFORE the creator-join (story
+        # admin-room-creator-provisioning). The room_members.user_id → users.user_id FK
+        # otherwise rejects the join for any creator with no prior `users` row — e.g. an
+        # instance admin who only ever logged into the Admin UI (whose OIDC path does not
+        # provision a `users` row). Done here in the shared command path so BOTH the Admin
+        # UI (Nebu.Matrix.create_room/2) and Matrix POST /createRoom benefit.
+        #
+        # SECURITY: always the normal "user" role — NEVER instance_admin, regardless of
+        # caller. The upsert is INSERT … ON CONFLICT DO UPDATE (last_seen_at only), so an
+        # existing row's role is preserved (no privilege downgrade, no duplication) and the
+        # write is safe under a concurrent first-create race (ADR-020). creator_id is bound
+        # as a query parameter (no SQL injection). This provisions only the create caller's
+        # own id — no path here can provision an arbitrary other user id.
+        case user_store_module().upsert_user(creator_id, "user") do
+          {:ok, _} ->
+            :ok
+
+          {:error, reason} ->
+            raise Nebu.Matrix.Error,
+              status: Nebu.Matrix.Status.internal(),
+              message: "create_room: failed to provision creator #{creator_id}: #{inspect(reason)}"
+        end
+
         # Join creator AFTER m.room.create — emit_membership_event writes m.room.member
         # as the second event in the timeline (spec §8.5.1 order: create → member → pl).
-        :ok = Nebu.Matrix.Room.Server.join(room_id, creator_id)
+        # A non-:ok return (e.g. an unexpected DB failure) raises so the caller's
+        # try/rescue cleans up the orphan room rather than leaving a nameless/stale room.
+        case Nebu.Matrix.Room.Server.join(room_id, creator_id) do
+          :ok ->
+            :ok
+
+          {:error, reason} ->
+            raise Nebu.Matrix.Error,
+              status: Nebu.Matrix.Status.internal(),
+              message: "create_room: creator-join failed for #{room_id}: #{inspect(reason)}"
+        end
 
         # Wake the creator's long-polling sync task immediately (mirrors join_room/2 pattern).
         # Without this broadcast, a sync task that started BEFORE createRoom returns will not
@@ -263,11 +417,19 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
             {:error, reason} ->
               Logger.warning("create_room: failed to persist rooms.name for #{room_id}: #{inspect(reason)}")
           end
+
+          # Derive + register a canonical alias `#localpart:server` from the name and emit
+          # m.room.canonical_alias (story room-canonical-alias-from-name). Ordered AFTER
+          # m.room.name (the alias is derived from the same name). The WHOLE step is
+          # NON-FATAL — mirrors the name/type handling above: any derivation/registration
+          # failure logs a warning and leaves the room created. A room with no name skips
+          # this entirely (backwards compat) because we are inside the `if name` block.
+          register_canonical_alias(room_id, creator_id, name)
         end
 
         # Matrix Spaces (spaces-elixir s1): persist the denormalised rooms.room_type
         # column when a type was supplied (e.g. "m.space"). For an ordinary room
-        # room_type is "" (proto default) → leave the column NULL (backward compat, AC4).
+        # room_type is "" (empty default) → leave the column NULL (backward compat, AC4).
         # The value is bound as a query parameter in update_room_type/2 (no SQL injection).
         room_type = Map.get(request, :room_type, "")
         if is_binary(room_type) and room_type != "" do
@@ -288,18 +450,178 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
         )
 
         %Core.CreateRoomResponse{room_id: room_id}
+  end
+
+  # ─── Canonical alias derivation + registration (story room-canonical-alias-from-name) ──
+
+  # Bounded retry budget for the deterministic collision suffix (#localpart, -2, …, -N).
+  # Beyond this we give up (non-fatal) rather than loop forever.
+  @alias_collision_retries 20
+
+  # Max total alias bytes incl. the leading `#` and the `:server` suffix (Matrix spec).
+  @alias_max_bytes 255
+
+  @doc false
+  # Derive a spec-valid Matrix alias localpart from a room name. PURE.
+  #
+  # Rules (kept deliberately conservative for interop, per Oracle context):
+  #   1. lowercase the whole name,
+  #   2. replace every run of characters OUTSIDE the allowlist `[a-z0-9._=\-+]` with a
+  #      single `-`. `/` is deliberately EXCLUDED from the allowlist: Matrix grammar
+  #      permits it in a localpart, but `/` mis-routes in the `/directory/room/{alias}`
+  #      path, so we fold it to a dash (interop hardening, code-review MINOR),
+  #   3. collapse runs of `-` and trim leading/trailing `-`,
+  #   4. trim leading/trailing `.` — dot-only / edge-dot localparts are interop hazards
+  #      that Synapse/Element avoid,
+  #   5. if nothing usable remains (empty or punctuation-only) → :none (caller emits no
+  #      alias; room still created).
+  #
+  # Length bounding so the full `#localpart:server` fits in @alias_max_bytes is applied by
+  # the caller (it knows the server name); this function only normalises the localpart.
+  @spec derive_alias_localpart(String.t()) :: {:ok, String.t()} | :none
+  def derive_alias_localpart(name) when is_binary(name) do
+    localpart =
+      name
+      |> String.downcase()
+      # Replace any run of disallowed chars with a single dash. `/` is NOT in the
+      # allowlist (mis-routes in /directory/room/{alias}) so it folds to a dash.
+      |> String.replace(~r/[^a-z0-9._=\-+]+/u, "-")
+      # Collapse repeated dashes that may have been introduced.
+      |> String.replace(~r/-+/, "-")
+      # Trim leading/trailing dashes, then leading/trailing dots (interop hardening).
+      |> String.trim("-")
+      |> String.trim(".")
+      # A `.-.` style edge can leave a dangling dash after dot-trim; trim once more.
+      |> String.trim("-")
+
+    # Require at least one alphanumeric char: a localpart that is empty or only
+    # punctuation (e.g. "...", "_=_") is an interop hazard → emit no alias.
+    if localpart == "" or not String.match?(localpart, ~r/[a-z0-9]/) do
+      :none
+    else
+      {:ok, localpart}
+    end
+  end
+
+  def derive_alias_localpart(_), do: :none
+
+  # Derive, register (with deterministic collision handling) and emit the canonical alias.
+  # Fully non-fatal: every failure path logs a warning and returns :ok so the room stays
+  # created.
+  defp register_canonical_alias(room_id, creator_id, name) do
+    server_name = Application.get_env(:event_dispatcher, :server_name, "nebu.local")
+
+    case derive_alias_localpart(name) do
+      :none ->
+        # No usable localpart (e.g. an all-invalid / emoji-only name) — room keeps its
+        # m.room.name but gets no alias. Backwards compat / AC3.
+        :ok
+
+      {:ok, base_localpart} ->
+        base_localpart = bound_localpart(base_localpart, server_name)
+
+        case base_localpart do
+          "" ->
+            :ok
+
+          _ ->
+            try_register_alias(room_id, creator_id, server_name, base_localpart, 1)
+        end
+    end
+  rescue
+    e ->
+      Logger.warning(
+        "create_room: canonical-alias step raised for #{room_id} (non-fatal): #{Exception.message(e)}"
+      )
+
+      :ok
+  end
+
+  # Bound the localpart so the full `#localpart:server` alias is <= @alias_max_bytes.
+  # The collision suffix (`-N`) is short relative to this budget; we reserve a few bytes
+  # for it so a suffixed candidate also stays within the limit.
+  defp bound_localpart(localpart, server_name) do
+    # bytes available for the localpart = 255 - len("#") - len(":server") - reserve for "-NN"
+    overhead = 1 + 1 + byte_size(server_name) + 4
+    max_localpart = max(@alias_max_bytes - overhead, 0)
+
+    localpart
+    |> binary_part_safe(max_localpart)
+    |> String.trim("-")
+  end
+
+  # Truncate to at most `max_bytes` bytes without splitting a UTF-8 codepoint. The
+  # localpart is already restricted to ASCII allowlist chars, but stay codepoint-safe.
+  defp binary_part_safe(str, max_bytes) when byte_size(str) <= max_bytes, do: str
+
+  defp binary_part_safe(str, max_bytes) do
+    str
+    |> String.graphemes()
+    |> Enum.reduce_while({"", 0}, fn g, {acc, size} ->
+      gsize = byte_size(g)
+
+      if size + gsize <= max_bytes do
+        {:cont, {acc <> g, size + gsize}}
+      else
+        {:halt, {acc, size}}
+      end
+    end)
+    |> elem(0)
+  end
+
+  # Deterministic collision loop: attempt #localpart:server, then #localpart-2:server,
+  # … up to @alias_collision_retries. The DB unique constraint decides the winner
+  # (race-safe — ADR-020); a {:error, :conflict} means another room already owns that
+  # alias, so we try the next suffix. On the first successful insert we emit
+  # m.room.canonical_alias and stop. Any non-conflict DB error / exhausted retries is
+  # non-fatal (log + leave the room created).
+  defp try_register_alias(room_id, _creator_id, _server_name, _base, attempt)
+       when attempt > @alias_collision_retries do
+    Logger.warning(
+      "create_room: exhausted alias-collision retries for #{room_id} (non-fatal); room created without alias"
+    )
+
+    :ok
+  end
+
+  defp try_register_alias(room_id, creator_id, server_name, base_localpart, attempt) do
+    localpart = if attempt == 1, do: base_localpart, else: "#{base_localpart}-#{attempt}"
+    alias_str = "##{localpart}:#{server_name}"
+
+    case alias_db_module().insert_room_alias(alias_str, room_id, Nebu.DB.Helpers.now_ms()) do
+      :ok ->
+        # Alias registered → emit the canonical_alias state event via the same
+        # signed/persisted/fanned-out path used for m.room.name. Already in
+        # @writable_state_types and read by build_room_summary/3 → surfaces in sync +
+        # space hierarchy with no proto change.
+        case emit_state_event(room_id, creator_id, "m.room.canonical_alias", "", %{"alias" => alias_str}) do
+          {:ok, _event_id} ->
+            :ok
+
+          {:error, reason} ->
+            Logger.warning(
+              "create_room: registered alias #{alias_str} but failed to emit m.room.canonical_alias for #{room_id} (non-fatal): #{inspect(reason)}"
+            )
+
+            :ok
+        end
+
+      {:error, :conflict} ->
+        # Alias taken — try the next deterministic suffix.
+        try_register_alias(room_id, creator_id, server_name, base_localpart, attempt + 1)
 
       {:error, reason} ->
-        raise Nebu.Matrix.Error,
-          status: Nebu.Matrix.Status.internal(),
-          message: "Failed to start room: #{inspect(reason)}"
+        Logger.warning(
+          "create_room: failed to register canonical alias #{alias_str} for #{room_id} (non-fatal): #{inspect(reason)}"
+        )
+
+        :ok
     end
   end
 
   # ─── WriteAuditLog ─────────────────────────────────────────────────────────────
-  # Called by the Go gateway for admin-layer events (login, logout, bootstrap).
   # Delegates to the configurable audit_writer_module (Nebu.Compliance.AuditWriter in prod).
-  # Returns ok: false when AuditWriter returns {:error, _} — Go decides whether to warn.
+  # Returns ok: false when AuditWriter returns {:error, _}.
   def write_audit_log(request, _stream) do
     metadata =
       case Jason.decode(request.metadata_json) do
@@ -370,7 +692,7 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
 
           {:error, :room_full} ->
             # Story 6.8: room has reached max_members capacity.
-            # Go gateway maps codes.ResourceExhausted → 403 M_ROOM_FULL.
+            # HTTP handler maps :resource_exhausted → 403 M_ROOM_FULL.
             raise Nebu.Matrix.Error,
               status: Nebu.Matrix.Status.resource_exhausted(),
               message: "room is full"
@@ -483,7 +805,7 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
 
   # ─── UpdateRoomSettings — Story 6.8: Admin PATCH /admin/rooms/{roomId} ─────────
   #
-  # Called by the Go gateway after a successful DB update of room settings.
+  # Called by the Admin HTTP handler after a successful DB update of room settings.
   # Delegates to Nebu.Matrix.Room.Server.update_settings/2 (best-effort fire-and-forget cast).
   # Returns UpdateRoomSettingsResponse{ok: true} always — failure to find the running
   # GenServer is non-fatal (room may not be started, or settings will be loaded on next init).
@@ -966,7 +1288,7 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
     limit = max(1, min(request.limit, 100))
     direction = if request.direction in ["f", "b"], do: request.direction, else: "b"
 
-    # Extract caller identity from gRPC metadata (set by Go JWTMiddleware).
+    # Extract caller identity from request metadata (set by OIDC plug).
     {user_id, _system_role} = Nebu.Matrix.RequestMetadata.trusted_identity(stream)
 
     # Room existence check — Room GenServer must be running.
@@ -991,21 +1313,21 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
         {:ok, events, next_batch, prev_batch} =
           messages_db_module().fetch_events(room_id, direction, limit, from_token)
 
-        proto_events = Enum.map(events, &event_map_to_proto/1)
+        core_events = Enum.map(events, &event_map_to_core_event/1)
 
         %Core.GetMessagesResponse{
-          events: proto_events,
+          events: core_events,
           next_batch: next_batch,
           prev_batch: prev_batch
         }
     end
   end
 
-  # Convert a DB event map (string keys) to a %Core.Event{} protobuf struct.
+  # Convert a DB event map (string keys) to a %Core.Event{} struct.
   # The `content` column is JSONB — Postgrex returns it as either an Elixir map,
   # a %Postgrex.JSONB{decoded: map} struct, or a binary string.
   # All three forms are normalised to a map before re-encoding.
-  defp event_map_to_proto(event) do
+  defp event_map_to_core_event(event) do
     # content from the DB may arrive as:
     #   - %Postgrex.JSONB{decoded: map} struct (Story 9-30 fix — must be before is_map)
     #   - Elixir map (Postgrex decoded JSONB object directly)
@@ -1043,7 +1365,7 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
     room_id = request.room_id
     power_levels_json = request.power_levels_json
 
-    # Extract caller identity from gRPC metadata (set by Go JWTMiddleware).
+    # Extract caller identity from request metadata (set by OIDC plug).
     {user_id, _system_role} = Nebu.Matrix.RequestMetadata.trusted_identity(stream)
 
     # Validate caller identity.
@@ -1177,7 +1499,7 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
     receipt_type = request.receipt_type
     event_id = request.event_id
 
-    # user_id is sent in the request body by the Go gateway (same as join_room pattern).
+    # user_id is sent in the request body (same as join_room pattern).
     user_id = request.user_id
 
     if is_nil(user_id) or user_id == "" do
@@ -1307,14 +1629,14 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
   # ─── DeleteUserKeys — Story 5.7: DSGVO Key-Deletion ──────────────────────────
   #
   # Delegates to Nebu.Compliance.UserDeletion.delete_user_keys/3.
-  # Maps Elixir result tuples to gRPC status codes (consumed by Go gateway for HTTP mapping):
+  # Maps Elixir result tuples to Nebu.Matrix.Status codes:
   #   {:ok, %{keys_deleted_at: ms}} → DeleteUserKeysResponse{status: "keys_deleted", keys_deleted_at: ms}
   #   {:error, :user_not_found}     → Nebu.Matrix.Status.not_found()
   #   {:error, :conflict}           → Nebu.Matrix.Status.already_exists()
   #   {:error, reason}              → Nebu.Matrix.Status.internal()
   #
   # The failure-invariant audit ("user_keys_deletion_attempted") is handled inside
-  # Nebu.Compliance.UserDeletion — the gRPC handler does NOT need to emit it.
+  # Nebu.Compliance.UserDeletion — this handler does NOT need to emit it.
 
   def delete_user_keys(%Core.DeleteUserKeysRequest{} = req, _stream) do
     case Nebu.Compliance.UserDeletion.delete_user_keys(req.admin_user_id, req.target_user_id, req.reason) do
@@ -1346,7 +1668,7 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
   # ─── InvalidateUserSessions — Story 6.5: Admin deactivation revokes all sessions ─
   # Story 9-22 (AC4): Per-device logout when device_id is set.
   #
-  # Called by the Go gateway:
+  # Two callers:
   #   - Admin deactivation: device_id="" → destroy_session/1 deletes all sync_tokens +
   #     sessions rows for the user and evicts from ETS.
   #   - Matrix POST /logout: device_id="<id>" → destroy_session/2 deletes only the
@@ -1354,7 +1676,7 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
   #     ETS is NOT evicted (other devices may still be active).
   #
   # Returns %Core.InvalidateUserSessionsResponse{ok: true} on success.
-  # Raises Nebu.Matrix.Error with status=internal on failure (Go logs as warning, does not block).
+  # Raises Nebu.Matrix.Error with status=internal on failure (logged as warning, does not block).
 
   def invalidate_user_sessions(%Core.InvalidateUserSessionsRequest{} = req, _stream) do
     # AC4 (Story 9-22): per-device cleanup when device_id is present.
@@ -1390,8 +1712,8 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
 
   # ─── InvalidateAllAdminSessions — Story 6.10: Admin config OIDC change ────────
   #
-  # Called by the Go gateway when OIDC issuer/client_id/client_secret changes in
-  # PATCH /admin/config. Forces all active sessions to re-authenticate.
+  # Called when OIDC issuer/client_id/client_secret changes via PATCH /admin/config.
+  # Forces all active sessions to re-authenticate.
   #
   # Flow:
   #   1. List all active user_ids from ETS via Nebu.Matrix.Session.EtsStore.list_user_ids/0.
@@ -1950,7 +2272,7 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
           raw_tl_events =
             events
             |> Enum.reverse()
-            |> Enum.map(&event_map_to_proto/1)
+            |> Enum.map(&event_map_to_core_event/1)
 
           timeline_events = attach_thread_aggregations(raw_tl_events, room_id, user_id)
           limited = length(events) >= 20
@@ -1977,7 +2299,7 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
               state_evs  = build_state_events(state, room_id)
               {:ok, evs, _next_batch, prev_b} =
                 messages_db_module().fetch_events(room_id, "b", 20, "")
-              raw_tl_evs = evs |> Enum.reverse() |> Enum.map(&event_map_to_proto/1)
+              raw_tl_evs = evs |> Enum.reverse() |> Enum.map(&event_map_to_core_event/1)
               tl_evs = attach_thread_aggregations(raw_tl_evs, room_id, user_id)
               deduped = dedup_member_state_events(state_evs, tl_evs)
               sync_room =
@@ -2196,7 +2518,7 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
 
               {:new_invite, _room_id} ->
                 # New invitation for this user — cancel timer and return empty delta.
-                # The Go gateway's buildInviteRooms queries the DB for invite data,
+                # buildInviteRooms queries the DB for invite data,
                 # so returning [] here is sufficient to unblock the client.
                 Process.cancel_timer(timer_ref)
                 flush_long_poll_timeout()
@@ -2263,7 +2585,7 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
         {:ok, events} ->
           try do
             state = room_registry_module().get_state(room_id)
-            raw_timeline_events = Enum.map(events, &event_map_to_proto/1)
+            raw_timeline_events = Enum.map(events, &event_map_to_core_event/1)
             thread_roots = thread_root_updates(events, room_id, user_id)
             timeline_events = attach_thread_aggregations(raw_timeline_events, room_id, user_id)
             timeline_events = thread_roots ++ timeline_events
@@ -2277,7 +2599,7 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
             # from state so the client computes the change (not a no-op delta).
             # We detect state events in the raw batch via Map.has_key?("state_key"),
             # which correctly identifies state events with empty state_key (power_levels,
-            # name, join_rules) — proto conversion cannot distinguish them from messages.
+            # name, join_rules) — event_map_to_core_event cannot distinguish them from messages.
             timeline_state_keys =
               events
               |> Enum.filter(fn ev -> Map.has_key?(ev, "state_key") end)
@@ -3096,18 +3418,18 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
     end
   end
 
-  # ─── Story 6.9: ArchiveRoom + UnarchiveRoom gRPC handlers ─────────────────────
+  # ─── Story 6.9: ArchiveRoom + UnarchiveRoom ────────────────────────────────────
   #
   # archive_room/2:
-  #   Called by the Go gateway after successfully setting rooms.status = 'archived' in DB.
+  #   Called by the Admin HTTP handler after successfully setting rooms.status = 'archived' in DB.
   #   Best-effort: terminates the running Room GenServer via Horde so in-memory state is
   #   cleared. The DB is authoritative — even if the GenServer is not running, ok=true.
   #   On next start, Room.Server.init/1 sees status="archived" → {:stop, :normal} → no loop.
   #
   # unarchive_room/2:
-  #   Called by the Go gateway after successfully setting rooms.status = 'active' in DB.
+  #   Called by the Admin HTTP handler after successfully setting rooms.status = 'active' in DB.
   #   Best-effort: starts the Room GenServer so it is immediately available for messages.
-  #   Returns ok=true even if start_room fails (DB is authoritative; Gateway returns 200).
+  #   Returns ok=true even if start_room fails (DB is authoritative; returns 200).
 
   # ─── Story 9.1 AC:4 — ArchiveRoom with atomic SELECT FOR UPDATE ─────────────
   #
@@ -3242,7 +3564,7 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
     %Core.UnarchiveRoomResponse{ok: true}
   end
 
-  # ─── Story 9.1: Admin gRPC RPCs — User + Room Management ─────────────────────
+  # ─── Story 9.1: Admin RPCs — User + Room Management ───────────────────────────
 
   # ─── ListAdminUsers ──────────────────────────────────────────────────────────
   #
@@ -3582,9 +3904,9 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
       # Story 14-2a: oidc_directory_endpoint is a string — safe to use maybe_add_change
       # (empty string = "do not update" convention). oidc_directory_enabled is a bool
       # proto3 field — cannot distinguish false-from-unset, so it is persisted via the
-      # direct DB upsert path in the Go gateway PATCH handler. The proto field exists for
-      # completeness; the Core gRPC path does not process bool fields to avoid inadvertently
-      # overwriting the stored value with the proto default (false) on unrelated gRPC calls.
+      # direct DB upsert path in the Admin PATCH handler. The Core.* field exists for
+      # completeness; the Core path does not process bool fields to avoid inadvertently
+      # overwriting the stored value with the default (false) on unrelated calls.
       |> maybe_add_change("oidc_directory_endpoint", req.oidc_directory_endpoint)
 
     if changes == [] do
@@ -3930,13 +4252,13 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
   # Full-text search over rooms where the authenticated user is an active member.
   # Delegates to Nebu.Matrix.Search.DB.search_messages/5 which enforces membership at SQL layer.
   #
-  # SECURITY: user_id MUST come from gRPC metadata (x-user-id set by Go JWTMiddleware).
+  # SECURITY: user_id MUST come from request metadata (x-user-id set by OIDC plug).
   # The request.user_id field is IGNORED — reading it would bypass membership enforcement
   # and allow a malicious authenticated user to search any other user's rooms (IDOR).
   # See Security Trust Boundary section in Story 11.3 for full details.
 
   def search_messages(request, stream) do
-    # SECURITY: user_id MUST come from gRPC metadata, never from request.user_id
+    # SECURITY: user_id MUST come from request metadata, never from request.user_id
     {user_id, _system_role} = Nebu.Matrix.RequestMetadata.trusted_identity(stream)
 
     if is_nil(user_id) or user_id == "" do
@@ -4293,8 +4615,8 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
 
     case messages_db_module().fetch_events_by_relation(room_id, event_id, rel_type, limit, opts) do
       {:ok, events} ->
-        proto_events = Enum.map(events, &event_map_to_proto/1)
-        %Core.GetRelationsResponse{events: proto_events}
+        core_events = Enum.map(events, &event_map_to_core_event/1)
+        %Core.GetRelationsResponse{events: core_events}
 
       {:error, reason} ->
         raise Nebu.Matrix.Error,
@@ -4331,7 +4653,7 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
 
         case messages_db_module().fetch_event(event_id, room_id) do
           {:ok, event_map} ->
-            %Core.GetEventResponse{event: event_map_to_proto(event_map)}
+            %Core.GetEventResponse{event: event_map_to_core_event(event_map)}
 
           {:error, :not_found} ->
             raise Nebu.Matrix.Error,
@@ -4393,7 +4715,7 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
 
   # For each thread reply in the raw DB event batch, fetches the corresponding
   # root event from DB (if not already in the delta) and returns those root events
-  # as proto Events with m.thread aggregations attached.
+  # as Core.Event structs with m.thread aggregations attached.
   # Prepended to the timeline so Element Web creates Thread objects in real-time
   # rather than only after a full page reload (initial sync).
   defp thread_root_updates(db_events, room_id, user_id) do
@@ -4410,7 +4732,7 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
             []
           else
             case messages_db_module().fetch_event(root_id, room_id) do
-              {:ok, root_ev} -> [event_map_to_proto(root_ev)]
+              {:ok, root_ev} -> [event_map_to_core_event(root_ev)]
               _ -> []
             end
           end
@@ -4453,14 +4775,14 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
 
   # ─── BulkImportUsers — Story 14-3a: Admin bulk user provisioning ───────────────
   #
-  # Delegates to the configurable BulkImporter module so the Go gateway can pre-provision
+  # Delegates to the configurable BulkImporter module to pre-provision
   # OIDC users before first login. Each user is processed with the same flow as
   # validate_token/2 (upsert user row + keypairs + encrypted PII).
   #
   # Security hardening (SEC Gate 2, F-2 + F-3):
-  #   1. trusted_identity extracted from gRPC stream metadata — caller must be identified.
-  #   2. system_role is hard-coded to "user" — the proto field was removed; callers
-  #      cannot escalate privileges by sending a different role on the wire.
+  #   1. trusted_identity extracted from request metadata — caller must be identified.
+  #   2. system_role is hard-coded to "user" — the field was removed from Core.*; callers
+  #      cannot escalate privileges by sending a different role.
   #   3. Audit log emitted after every call (F-3) — aggregate entry per bulk operation.
   #
   # Partial success: imported + skipped + failed = len(request.users).

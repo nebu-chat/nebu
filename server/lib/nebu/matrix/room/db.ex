@@ -39,6 +39,23 @@ defmodule Nebu.Matrix.Room.DB do
   RETURNING user_id
   """
 
+  # Hard-delete used ONLY by the failed-create rollback (story
+  # admin-room-creator-provisioning, AC3). Deletes child rows first to satisfy the
+  # FK constraints (events.room_id, room_members.room_id, room_aliases.room_id →
+  # rooms.room_id), then the room itself. room_id is bound as a query parameter ($1)
+  # — no SQL injection.
+  #
+  # room_aliases (story room-canonical-alias-from-name) has
+  # `room_id TEXT NOT NULL REFERENCES rooms(room_id)` with NO ON DELETE CASCADE, so if
+  # create_room registered a canonical alias and a LATER step raised, the orphan
+  # cleanup would FK-fail on `DELETE FROM rooms` and roll back — leaving the exact
+  # orphan room this rollback exists to remove. Deleting the alias rows first (FK
+  # child before parent) keeps the cleanup transaction valid.
+  @sql_delete_events_for_room "DELETE FROM events WHERE room_id = $1"
+  @sql_delete_members_for_room "DELETE FROM room_members WHERE room_id = $1"
+  @sql_delete_aliases_for_room "DELETE FROM room_aliases WHERE room_id = $1"
+  @sql_delete_room "DELETE FROM rooms WHERE room_id = $1"
+
   @doc """
   Loads all active members for the given `room_id`.
 
@@ -148,6 +165,37 @@ defmodule Nebu.Matrix.Room.DB do
 
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+
+  @doc """
+  Hard-deletes a room and everything that references it (events, members, aliases), in
+  one transaction. Used by the failed-create rollback (story
+  admin-room-creator-provisioning, AC3) so a create that fails after `m.room.create`
+  leaves no orphan room. Idempotent: deleting an absent room returns `:ok`.
+
+  Child rows are deleted before the parent `rooms` row to satisfy the FK constraints
+  — this includes `room_aliases` (story room-canonical-alias-from-name), whose
+  `room_id` FK has no ON DELETE CASCADE; omitting it would FK-fail the rollback and
+  leave the orphan room.
+
+  Returns `:ok` on success, `{:error, reason}` on DB failure.
+  """
+  @spec delete_room(String.t()) :: :ok | {:error, term()}
+  def delete_room(room_id) do
+    Nebu.Repo.transaction(fn ->
+      with {:ok, _} <- Ecto.Adapters.SQL.query(Nebu.Repo, @sql_delete_events_for_room, [room_id]),
+           {:ok, _} <- Ecto.Adapters.SQL.query(Nebu.Repo, @sql_delete_members_for_room, [room_id]),
+           {:ok, _} <- Ecto.Adapters.SQL.query(Nebu.Repo, @sql_delete_aliases_for_room, [room_id]),
+           {:ok, _} <- Ecto.Adapters.SQL.query(Nebu.Repo, @sql_delete_room, [room_id]) do
+        :ok
+      else
+        {:error, reason} -> Nebu.Repo.rollback(reason)
+      end
+    end)
+    |> case do
+      {:ok, :ok} -> :ok
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -1140,6 +1188,59 @@ defmodule Nebu.Matrix.Room.DB do
 
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+
+  # ─── Room aliases (story room-canonical-alias-from-name) ─────────────────────
+
+  @sql_insert_room_alias """
+  INSERT INTO room_aliases (alias, room_id, created_at)
+  VALUES ($1, $2, $3)
+  """
+
+  @doc """
+  Registers `alias_str` (`#localpart:server`) for `room_id` in the server-wide
+  room_aliases directory.
+
+  The `alias` column is the PRIMARY KEY, so a second registration of the same alias is
+  rejected by the unique constraint. We translate that into `{:error, :conflict}` so the
+  caller can deterministically retry the next candidate (`#localpart-2:server`, …) — this
+  is the race-safe collision scheme (ADR-020): no read-then-write, the DB decides the
+  winner. Both `alias_str` and `room_id` are bound as query parameters (no SQL injection;
+  the name is external input — see story SEC notes).
+
+  Returns `:ok` on success, `{:error, :conflict}` on a unique-constraint violation, and
+  `{:error, reason}` on any other DB failure.
+  """
+  @spec insert_room_alias(String.t(), String.t(), integer()) ::
+          :ok | {:error, :conflict} | {:error, term()}
+  def insert_room_alias(alias_str, room_id, created_at) do
+    case Ecto.Adapters.SQL.query(Nebu.Repo, @sql_insert_room_alias, [alias_str, room_id, created_at]) do
+      {:ok, _} ->
+        :ok
+
+      {:error, %Postgrex.Error{postgres: %{code: :unique_violation}}} ->
+        {:error, :conflict}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  @sql_lookup_alias "SELECT room_id FROM room_aliases WHERE alias = $1"
+
+  @doc """
+  Resolves a room alias (`#localpart:server`) to its room id.
+
+  Returns `{:ok, room_id}` if registered, `{:error, :not_found}` otherwise,
+  `{:error, reason}` on a DB failure. `alias_str` is bound as a query parameter.
+  """
+  @spec lookup_alias(String.t()) :: {:ok, String.t()} | {:error, :not_found} | {:error, term()}
+  def lookup_alias(alias_str) do
+    case Ecto.Adapters.SQL.query(Nebu.Repo, @sql_lookup_alias, [alias_str]) do
+      {:ok, %{rows: [[room_id]]}} -> {:ok, room_id}
+      {:ok, %{rows: []}} -> {:error, :not_found}
+      {:error, reason} -> {:error, reason}
     end
   end
 

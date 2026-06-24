@@ -1,6 +1,7 @@
 # Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents.
 # Do not edit manually during an active pipeline run.
 # last_updated: 2026-06-23
+# [jwt-denylist-persistence] 2026-06-23T12:10Z commit → done
 # [jwt-denylist-persistence] 2026-06-23T12:05Z arc42-update → 08-concepts.md TokenDenylist persistence paragraph updated
 # [jwt-denylist-persistence] 2026-06-23T12:00Z security-review → Kassandra APPROVED (F-1 MEDIUM fixed before commit)
 # [jwt-denylist-persistence] 2026-06-23T11:30Z code-review → APPROVED cycle 1 (PATCH-1 MEDIUM + 2 LOW all fixed)
@@ -11,18 +12,9 @@
 # [jwt-denylist-persistence] 2026-06-23T10:15Z atdd → 5 failing integration tests (AC1/AC2/AC4/AC5/AC6 RED); AC3/AC7/AC8 unit regression guards green
 # [jwt-denylist-persistence] 2026-06-23T10:05Z create-story → jwt-denylist-persistence.md
 # [jwt-denylist-persistence] 2026-06-23T10:00Z pipeline started
-story: "jwt-denylist-persistence"
-current_step: "commit"
-completed:
-  - "create-story"
-  - create-story
-  - atdd
-  - test-review
-  - dev-story
-  - ci-gate
-  - code-review
-  - security-review
-  - arc42-update
-cycle_count: 1
+story: null
+current_step: null
+completed: []
+cycle_count: 0
 blocked_reason: null
-last_updated: "2026-06-23T08:16Z"
+last_updated: "2026-06-23T08:17Z"

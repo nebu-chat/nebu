@@ -30,6 +30,78 @@ defmodule Nebu.Admin.DB do
   Returns {list_of_user_maps, next_cursor_string}.
   """
   @spec list_users(pos_integer(), String.t(), String.t()) :: {list(map()), String.t()}
+  def list_users(limit, cursor, search)
+      when is_binary(search) and search != "" do
+    # Story admin-add-user-autocomplete: a non-empty search term filters by user_id
+    # (ILIKE substring, parameter-bound, wildcard-escaped). The FULL user column set is
+    # selected (same shape the unfiltered path returns) so the Admin users page keeps
+    # decrypting display_name / masking email unchanged — only the row set is narrowed.
+    #
+    # MINOR-1 fix: the search is COMBINED with keyset pagination (`user_id > $cursor`) so
+    # filtered paging works across pages — page 2+ keeps the search term instead of
+    # falling through to the unfiltered keyset clause and returning unrelated users. With
+    # an empty cursor this is the first filtered page; with a non-empty cursor it is the
+    # next filtered page beyond `cursor`. `search_users/2` is the lean variant the
+    # add-user autocomplete uses (user_id only, no PII columns).
+    trimmed = String.trim(search)
+
+    if trimmed == "" do
+      list_users(limit, cursor, "")
+    else
+      pattern = "%" <> escape_like(trimmed) <> "%"
+      fetch_limit = limit + 1
+
+      rows =
+        if cursor == "" do
+          Ecto.Adapters.SQL.query!(
+            Nebu.Repo,
+            """
+            SELECT user_id,
+                   display_name_encrypted,
+                   display_name_nonce,
+                   email_encrypted,
+                   email_nonce,
+                   email_ephemeral_pub,
+                   is_active,
+                   system_role,
+                   created_at
+            FROM users
+            WHERE user_id ILIKE $1 ESCAPE '\\'
+            ORDER BY user_id
+            LIMIT $2
+            """,
+            [pattern, fetch_limit]
+          )
+        else
+          Ecto.Adapters.SQL.query!(
+            Nebu.Repo,
+            """
+            SELECT user_id,
+                   display_name_encrypted,
+                   display_name_nonce,
+                   email_encrypted,
+                   email_nonce,
+                   email_ephemeral_pub,
+                   is_active,
+                   system_role,
+                   created_at
+            FROM users
+            WHERE user_id ILIKE $1 ESCAPE '\\' AND user_id > $2
+            ORDER BY user_id
+            LIMIT $3
+            """,
+            [pattern, cursor, fetch_limit]
+          )
+        end
+
+      users = Enum.map(rows.rows, &row_to_user_map/1)
+      has_more = length(users) > limit
+      page = Enum.take(users, limit)
+      next = if has_more, do: List.last(page).user_id, else: ""
+      {page, next}
+    end
+  end
+
   def list_users(limit, cursor, _search) do
     # Fetch limit+1 rows to detect if there is a next page.
     fetch_limit = limit + 1
@@ -112,6 +184,63 @@ defmodule Nebu.Admin.DB do
       [] -> {:error, :not_found}
       [row] -> {:ok, row_to_user_map(row)}
     end
+  end
+
+  @doc """
+  Story admin-add-user-autocomplete — typeahead search over existing users.
+
+  Matches the (trimmed) `term` as a case-insensitive substring of `user_id`, restricted
+  to active users, capped at `limit` rows, ordered by `user_id`. Returns a list of
+  `%{user_id: ...}` maps (the only field the add-user autocomplete needs — no PII is
+  decrypted; the Admin users page exposes the same `user_id`).
+
+  Security (ADR-018, SEC Gate):
+    * The term is bound as a query PARAMETER ($1) — never interpolated (SQL-injection safe).
+    * ILIKE wildcard metacharacters (`%`, `_`, and the escape char `\\`) in the term are
+      escaped with `ESCAPE '\\'`, so a `%`/`_` in the term matches literally and cannot
+      broaden the match to every row (enumeration guard).
+    * `is_active = true` so disabled accounts are not suggested.
+    * `LIMIT` caps the result (enumeration / DoS guard).
+
+  A blank/whitespace-only term, or one shorter than the minimum length enforced by the
+  caller, returns `[]` (the `Nebu.Admin.UserSuggest` helper applies the >=2-char gate so
+  both Admin pages share it).
+  """
+  @spec search_users(String.t(), pos_integer()) :: list(map())
+  def search_users(term, limit) when is_binary(term) and is_integer(limit) and limit > 0 do
+    trimmed = String.trim(term)
+
+    if trimmed == "" do
+      []
+    else
+      pattern = "%" <> escape_like(trimmed) <> "%"
+
+      result =
+        Ecto.Adapters.SQL.query!(
+          Nebu.Repo,
+          """
+          SELECT user_id
+          FROM users
+          WHERE is_active = true
+            AND user_id ILIKE $1 ESCAPE '\\'
+          ORDER BY user_id
+          LIMIT $2
+          """,
+          [pattern, limit]
+        )
+
+      Enum.map(result.rows, fn [user_id] -> %{user_id: user_id} end)
+    end
+  end
+
+  # Escapes the LIKE/ILIKE metacharacters (`\\`, `%`, `_`) in a user-supplied term so the
+  # term is matched LITERALLY inside the surrounding `%...%`. Used with `ESCAPE '\\'`. The
+  # backslash MUST be escaped first so it does not double-escape the `%`/`_` replacements.
+  defp escape_like(term) do
+    term
+    |> String.replace("\\", "\\\\")
+    |> String.replace("%", "\\%")
+    |> String.replace("_", "\\_")
   end
 
   @doc """

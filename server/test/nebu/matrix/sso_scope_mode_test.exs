@@ -144,9 +144,24 @@ defmodule Nebu.Matrix.SsoScopeModeTest do
     end
 
     test "unset mode → DEFAULTS to offline (includes offline_access) — AC1/AC7" do
-      # No reader seam installed → default reader reads server_config; with no row
-      # it MUST default to offline (preserves current behavior, no regression).
-      Application.delete_env(:nebu_http, :matrix_oidc_refresh_mode_reader)
+      # "Unset" = no configured mode resolves. In the integration container Nebu.Repo
+      # IS running and the shared DB may carry a real matrix_oidc_refresh_mode row (or
+      # a concurrent/sibling test wrote 'online'), so a live DB read here is racy and
+      # was the source of the SsoScopeModeTest:146 flake (expected offline, got online).
+      # Model "unset" DETERMINISTICALLY via the documented reader seam returning nil:
+      # matrix_refresh_mode/0 collapses nil → "offline" (the production default), so
+      # offline_access MUST be present. No DB read, no race; the live row is untouched.
+      # Restore the prior seam value in on_exit so nothing bleeds across files.
+      prev = Application.get_env(:nebu_http, :matrix_oidc_refresh_mode_reader)
+      Application.put_env(:nebu_http, :matrix_oidc_refresh_mode_reader, fn -> nil end)
+
+      on_exit(fn ->
+        case prev do
+          nil -> Application.delete_env(:nebu_http, :matrix_oidc_refresh_mode_reader)
+          v -> Application.put_env(:nebu_http, :matrix_oidc_refresh_mode_reader, v)
+        end
+      end)
+
       scopes = scope_params()
       assert "openid" in scopes
       assert "offline_access" in scopes
@@ -178,7 +193,28 @@ defmodule Nebu.Matrix.SsoScopeModeTest do
     @describetag :integration
 
     setup do
+      # These tests assert on the LIVE server_config read, so any leaked reader seam
+      # (from a sibling unit test / another file) MUST be removed first — otherwise the
+      # seam shadows the DB and the row we write is never consulted. Force-clear it here
+      # and restore the prior value in on_exit. Also clean the row before AND after so a
+      # stale 'online'/'offline' left by another run can't poison the default-read.
+      prev_reader = Application.get_env(:nebu_http, :matrix_oidc_refresh_mode_reader)
+      Application.delete_env(:nebu_http, :matrix_oidc_refresh_mode_reader)
+
+      if Process.whereis(Nebu.Repo) do
+        Ecto.Adapters.SQL.query(
+          Nebu.Repo,
+          "DELETE FROM server_config WHERE key = 'matrix_oidc_refresh_mode'",
+          []
+        )
+      end
+
       on_exit(fn ->
+        case prev_reader do
+          nil -> Application.delete_env(:nebu_http, :matrix_oidc_refresh_mode_reader)
+          v -> Application.put_env(:nebu_http, :matrix_oidc_refresh_mode_reader, v)
+        end
+
         if Process.whereis(Nebu.Repo) do
           Ecto.Adapters.SQL.query(
             Nebu.Repo,

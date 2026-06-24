@@ -13,7 +13,7 @@ defmodule Nebu.Matrix do
 
   The Matrix domain owns: rooms and room state, the event log and dispatch, sync,
   sessions/tokens, presence, typing, receipts, profiles, power levels, message
-  signing, and the Matrix Client-Server HTTP/gRPC surface.
+  signing, and the Matrix Client-Server HTTP surface.
 
   `defdelegate` entries are added here as concrete cross-domain operations are
   introduced; today the in-process callers within the Matrix domain use the internal

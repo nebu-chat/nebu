@@ -66,6 +66,16 @@ defmodule Nebu.Admin.AdminStaleRoomsTest do
       insert_room.(@active_no_member, "active")
       insert_room.(@archived_no_member, "archived")
 
+      member_uid = "@m_#{@run_id}:test.local"
+
+      # room_members.user_id FKs to users.user_id (room_members_user_id_fkey), so the
+      # member's users row must exist first. Only user_id + created_at are NOT NULL.
+      Ecto.Adapters.SQL.query!(
+        Nebu.Repo,
+        "INSERT INTO users (user_id, created_at) VALUES ($1, $2) ON CONFLICT (user_id) DO NOTHING",
+        [member_uid, now]
+      )
+
       # One active member for the active_with_member room (left_at IS NULL).
       Ecto.Adapters.SQL.query!(
         Nebu.Repo,
@@ -74,7 +84,7 @@ defmodule Nebu.Admin.AdminStaleRoomsTest do
         VALUES ($1, $2, $3, NULL)
         ON CONFLICT DO NOTHING
         """,
-        [@active_with_member, "@m_#{@run_id}:test.local", now]
+        [@active_with_member, member_uid, now]
       )
 
       on_exit(fn ->
@@ -88,6 +98,13 @@ defmodule Nebu.Admin.AdminStaleRoomsTest do
           Nebu.Repo,
           "DELETE FROM rooms WHERE room_id = ANY($1)",
           [[@active_with_member, @active_no_member, @archived_no_member]]
+        )
+
+        # Drop the seeded member user (after room_members, FK).
+        Ecto.Adapters.SQL.query!(
+          Nebu.Repo,
+          "DELETE FROM users WHERE user_id = $1",
+          [member_uid]
         )
       end)
 

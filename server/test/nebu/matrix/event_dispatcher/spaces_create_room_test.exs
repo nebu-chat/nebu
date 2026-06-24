@@ -96,6 +96,7 @@ defmodule Nebu.Matrix.EventDispatcher.SpacesCreateRoomTest do
     :ets.new(:spaces_create_room_db, [:named_table, :public, :set])
 
     Application.put_env(:room_manager, :db_module, FakeDB)
+    Application.put_env(:event_dispatcher, :user_store_module, Nebu.Test.NoOpUserStore)
     Application.put_env(:event_dispatcher, :messages_db_module, FakeDB)
     # rooms_db_module() is how create_room/2 reaches update_room_type/2 — inject FakeDB
     # so the room_type write is captured and never hits Nebu.Repo.
@@ -114,6 +115,7 @@ defmodule Nebu.Matrix.EventDispatcher.SpacesCreateRoomTest do
 
     on_exit(fn ->
       Application.delete_env(:room_manager, :db_module)
+      Application.delete_env(:event_dispatcher, :user_store_module)
       Application.delete_env(:event_dispatcher, :messages_db_module)
       Application.delete_env(:event_dispatcher, :rooms_db_module)
       Application.delete_env(:event_dispatcher, :server_name)
