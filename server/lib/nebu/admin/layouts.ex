@@ -61,16 +61,16 @@ defmodule Nebu.Admin.Layouts do
             <.nav_item :if={not @bootstrap_completed} navigate="/admin/bootstrap" key="bootstrap" active={@active_nav}>
               Bootstrap Setup
             </.nav_item>
-            <.nav_item navigate="/admin/dashboard" key="dashboard" active={@active_nav}>Dashboard</.nav_item>
-            <.nav_item navigate="/admin/compliance" key="compliance" active={@active_nav}>Compliance</.nav_item>
-            <.nav_item navigate="/admin/users" key="users" active={@active_nav}>Users</.nav_item>
-            <.nav_item navigate="/admin/rooms" key="rooms" active={@active_nav}>Rooms</.nav_item>
-            <.nav_item navigate="/admin/spaces" key="spaces" active={@active_nav}>Spaces</.nav_item>
-            <.nav_item navigate="/admin/config" key="config" active={@active_nav}>Configuration</.nav_item>
-            <.nav_item navigate="/admin/config/role-mapping" key="role-mapping" active={@active_nav}>Role Mapping</.nav_item>
-            <.nav_item navigate="/admin/config/claim-mapping" key="claim-mapping" active={@active_nav}>Claim Mapping</.nav_item>
+            <.nav_item :if={@bootstrap_completed} navigate="/admin/dashboard" key="dashboard" active={@active_nav}>Dashboard</.nav_item>
+            <.nav_item :if={@bootstrap_completed} navigate="/admin/compliance" key="compliance" active={@active_nav}>Compliance</.nav_item>
+            <.nav_item :if={@bootstrap_completed} navigate="/admin/users" key="users" active={@active_nav}>Users</.nav_item>
+            <.nav_item :if={@bootstrap_completed} navigate="/admin/rooms" key="rooms" active={@active_nav}>Rooms</.nav_item>
+            <.nav_item :if={@bootstrap_completed} navigate="/admin/spaces" key="spaces" active={@active_nav}>Spaces</.nav_item>
+            <.nav_item :if={@bootstrap_completed} navigate="/admin/config" key="config" active={@active_nav}>Configuration</.nav_item>
+            <.nav_item :if={@bootstrap_completed} navigate="/admin/config/role-mapping" key="role-mapping" active={@active_nav}>Role Mapping</.nav_item>
+            <.nav_item :if={@bootstrap_completed} navigate="/admin/config/claim-mapping" key="claim-mapping" active={@active_nav}>Claim Mapping</.nav_item>
           </ul>
-          <div class="p-2 border-t border-base-300">
+          <div :if={@bootstrap_completed} class="p-2 border-t border-base-300">
             <a
               href="/admin/logout"
               data-navkey="logout"

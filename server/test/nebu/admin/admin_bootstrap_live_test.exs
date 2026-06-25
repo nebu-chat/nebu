@@ -172,4 +172,58 @@ defmodule Nebu.Web.AdminBootstrapLiveTest do
     assert html =~ ~s(data-step="1")
     assert html =~ "Instance name must not be empty."
   end
+
+  # Regression: bug-bootstrap-nav-and-ws-proxy
+  # During bootstrap (bootstrap_completed = false) the sidebar must show ONLY the
+  # Bootstrap Setup link. Dashboard, Users, Rooms, etc. are inaccessible until the
+  # instance is configured and must not be rendered (a user clicking them would hit
+  # the require_admin redirect loop or see blank / broken admin pages).
+  test "nav hides all non-bootstrap items while bootstrap is incomplete" do
+    {:ok, _view, html} =
+      live_isolated(Plug.Test.conn(:get, "/admin/bootstrap"), Nebu.Admin.BootstrapLive,
+        session: %{"current_user" => nil}
+      )
+
+    assert html =~ "Bootstrap Setup"
+
+    refute html =~ ~s(data-navkey="dashboard")
+    refute html =~ ~s(data-navkey="compliance")
+    refute html =~ ~s(data-navkey="users")
+    refute html =~ ~s(data-navkey="rooms")
+    refute html =~ ~s(data-navkey="spaces")
+    refute html =~ ~s(data-navkey="config")
+    refute html =~ ~s(data-navkey="role-mapping")
+    refute html =~ ~s(data-navkey="claim-mapping")
+  end
+
+  # Regression: after bootstrap completion the regular admin nav reappears and
+  # the Bootstrap Setup link is hidden (operator no longer needs the wizard).
+  test "nav shows all admin items and hides bootstrap link once bootstrap is complete",
+       %{store: store} do
+    Agent.update(store, fn s -> put_in(s, [:config, "bootstrap_completed"], "true") end)
+
+    {:ok, _view, html} =
+      live_isolated(Plug.Test.conn(:get, "/admin/bootstrap"), Nebu.Admin.BootstrapLive,
+        session: %{"current_user" => %{"admin" => true, "sub" => "admin-1"}}
+      )
+
+    refute html =~ ~s(data-navkey="bootstrap")
+    assert html =~ ~s(data-navkey="dashboard")
+    assert html =~ ~s(data-navkey="users")
+    assert html =~ ~s(data-navkey="rooms")
+  end
+
+  # Regression: bug-bootstrap-nav-and-ws-proxy
+  # app.js must configure longPollFallbackMs so LiveView falls back to HTTP
+  # long-polling when the WebSocket is blocked by a reverse proxy (e.g. Stackit
+  # Nginx). Without this, all phx-submit/phx-click events silently fail in proxy
+  # environments, making the wizard completely non-functional.
+  test "app.js configures LongPoll fallback for proxy environments that block WebSockets" do
+    app_js = File.read!("priv/static/assets/app.js")
+
+    assert app_js =~ ~r/longPollFallbackMs:\s*[1-9]\d*/,
+           "app.js must set longPollFallbackMs to a positive integer so LiveSocket actually " <>
+             "falls back to LongPoll when WebSocket is blocked by a reverse proxy (Stackit Nginx). " <>
+             "longPollFallbackMs: 0 disables the fallback and silently breaks the wizard in proxy environments."
+  end
 end

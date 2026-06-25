@@ -99,6 +99,10 @@
     var liveSocket = new LiveSocket("/admin/live", Socket, {
       params: { _csrf_token: csrfToken },
       hooks: Hooks,
+      // Fall back to HTTP long-polling after 2.5 s when WebSocket is blocked by a
+      // reverse proxy (e.g. Stackit Nginx). Without this, all phx-submit/phx-click
+      // events silently fail in proxy environments.
+      longPollFallbackMs: 2500,
     });
 
     liveSocket.connect();
