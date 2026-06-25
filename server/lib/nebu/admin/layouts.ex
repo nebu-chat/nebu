@@ -40,11 +40,19 @@ defmodule Nebu.Admin.Layouts do
   end
 
   # The shared admin shell: topbar + sidebar + content. Nav items mirror the Go admin.
+  # Works for both LiveView sockets (assign_new/3 with change tracking) and dead
+  # controller renders (plain map — use Map.put_new/3 for compatibility).
   def live(assigns) do
     assigns =
-      assigns
-      |> assign_new(:active_nav, fn -> nil end)
-      |> assign_new(:bootstrap_completed, fn -> true end)
+      if is_map_key(assigns, :__changed__) do
+        assigns
+        |> assign_new(:active_nav, fn -> nil end)
+        |> assign_new(:bootstrap_completed, fn -> true end)
+      else
+        assigns
+        |> Map.put_new(:active_nav, nil)
+        |> Map.put_new(:bootstrap_completed, true)
+      end
 
     ~H"""
     <div class="min-h-screen flex flex-col">

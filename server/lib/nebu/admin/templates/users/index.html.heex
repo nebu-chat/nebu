@@ -1,0 +1,29 @@
+<div class="admin-users" data-page="users">
+  <h1 class="text-2xl font-bold mb-4">Users</h1>
+
+  <p :if={@users == []} class="text-base-content/70">No users found.</p>
+
+  <table :if={@users != []} class="table w-full" role="table">
+    <thead>
+      <tr>
+        <th scope="col">User</th>
+        <th scope="col">Role</th>
+        <th scope="col">Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr :for={user <- @users} data-user-id={user.user_id}>
+        <td>{user.user_id}</td>
+        <td>{user.role}</td>
+        <td>
+          <span
+            class={"badge " <> if(user.is_active, do: "badge-success", else: "badge-error")}
+            data-status={if user.is_active, do: "active", else: "deactivated"}
+          >
+            {if user.is_active, do: "active", else: "deactivated"}
+          </span>
+        </td>
+      </tr>
+    </tbody>
+  </table>
+</div>

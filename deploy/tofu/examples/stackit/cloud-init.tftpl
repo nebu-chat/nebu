@@ -234,6 +234,8 @@ write_files:
               proxy_set_header   X-Real-IP         $remote_addr;
               proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
               proxy_set_header   X-Forwarded-Proto https;
+              proxy_set_header   Upgrade           $http_upgrade;
+              proxy_set_header   Connection        $connection_upgrade;
           }
 
           location /api/v1/ {
@@ -342,6 +344,8 @@ write_files:
               proxy_set_header   X-Real-IP         $remote_addr;
               proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
               proxy_set_header   X-Forwarded-Proto https;
+              proxy_set_header   Upgrade           $http_upgrade;
+              proxy_set_header   Connection        $connection_upgrade;
           }
 
           # Internal/compliance API paths — routed to server (not Element).

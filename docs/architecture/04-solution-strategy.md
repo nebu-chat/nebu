@@ -8,7 +8,7 @@
 |---|---|---|
 | Single application runtime (HTTP + stateful chat logic) | Elixir/OTP 1.19 (Erlang/OTP 27) | OTP Supervisor trees, Horde CRDT clustering, ETS in-memory state; one BEAM node serves everything |
 | HTTP surface (Matrix C-S API + media) | Bandit + Plug | Pure-Elixir HTTP server; in-process dispatch to domain functions |
-| Admin UI | Phoenix LiveView | Server-rendered admin pages on the same Bandit listener |
+| Admin UI | Phoenix HTTP controllers + Phoenix LiveView (Dashboard, AuditLog, Bootstrap) | Server-rendered admin pages on the same Bandit listener; CRUD pages use PRG HTTP controllers, real-time pages remain LiveViews |
 | Reliable event log + schema authority | PostgreSQL 16 | Append-only event log, raw-SQL migrations via `Nebu.Release.migrate/0` (ADR-018), RLS policies |
 | No Redis | ETS (Elixir built-in) | Session state, since-token cursors - eliminates a stateful dependency |
 | No NATS/Kafka | pg Process Groups (Elixir built-in) | Pub/sub fanout - eliminates an external broker |
@@ -22,7 +22,7 @@ Nebu is one Mix app (`:nebu`, `Nebu.Application`, one supervisor tree). The HTTP
 stateful chat logic live in the same BEAM node, split into module namespaces: `Nebu.Matrix.*`
 (Matrix C-S API + rooms via Horde, sessions via ETS + PostgreSQL, presence, permissions, Ed25519
 signing, event dispatch, sync, and the `Nebu.Matrix.Http*` surface), `Nebu.Media.*` (upload/
-download/crypto/storage against S3/MinIO), `Nebu.Admin.*` (Phoenix LiveView Admin UI + admin OIDC
+download/crypto/storage against S3/MinIO), `Nebu.Admin.*` (Phoenix HTTP controller + LiveView Admin UI + admin OIDC
 login), `Nebu.Web.*` (shared HTTP plumbing: the single Bandit listener's router + plugs, JWKS cache,
 token denylist), and `Nebu.Compliance.*` (audit log). The HTTP layer calls domain functions
 directly — there is no inter-process hop. PostgreSQL is append-only for events and audit logs.
@@ -60,7 +60,7 @@ pre-shared secret (`Nebu.NodeRegistration`).
 
 **7. Locality of Behavior — No Domain Model, No ORM (ADR-018)**
 
-SQL is written inline in each endpoint/LiveView implementation file. No `Ecto.Schema`, no Repository
+SQL is written inline in each endpoint/controller implementation file. No `Ecto.Schema`, no Repository
 pattern, no Service layer (`Nebu.Repo` is the Ecto connection pool only). The raw-SQL migrations are
 the sole canonical data model. This keeps every endpoint fully self-contained: handler, auth check,
 SQL, and response shape are all visible in one file — optimized for LLM-assisted development (BMAD

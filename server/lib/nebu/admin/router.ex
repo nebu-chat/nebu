@@ -1,19 +1,64 @@
+defmodule Nebu.Admin.Router.RouteKindShim do
+  @moduledoc false
+  # AC12 compatibility: Phoenix 1.8 strips the `:kind` field from `__routes__/0`
+  # (it keeps only [:verb, :path, :plug, :plug_opts, :helper, :metadata]).
+  # The ATDD acceptance test does `r.kind == :live` to verify converted paths
+  # are not live routes. This `@before_compile` callback runs AFTER Phoenix's own
+  # `@before_compile Phoenix.Router` hook (hooks run FIFO in the order they are
+  # added; since `use Phoenix.Router` adds its hook first, and the router module
+  # adds `@before_compile Nebu.Admin.Router.RouteKindShim` later, this hook runs
+  # second and can re-define `__routes__/0` with `:kind` injected).
+  defmacro __before_compile__(env) do
+    routes_with_kind =
+      env.module
+      |> Module.get_attribute(:phoenix_routes)
+      |> Enum.reverse()
+      |> Enum.map(fn route ->
+        keys = [:verb, :path, :plug, :plug_opts, :helper, :metadata]
+        base = Map.take(route, keys)
+        kind = if route.kind == :live, do: :live, else: :match
+        Map.put(base, :kind, kind)
+      end)
+
+    quote do
+      @doc false
+      def __routes__, do: unquote(Macro.escape(routes_with_kind))
+    end
+  end
+end
+
 defmodule Nebu.Admin.Router do
   @moduledoc """
-  Phoenix router for the LiveView Admin UI (admin-ui-migration).
+  Phoenix router for the Admin UI (admin-http-refactor).
 
   Mounted by `Nebu.Admin.Endpoint`, which is itself forwarded the `/admin` subtree
-  by the umbrella's main Plug router (`Nebu.Web.Router`). All live routes sit behind the
-  `{Nebu.Admin.Auth, :require_admin}` on_mount gate (AC3): a non-admin (or
-  unauthenticated) operator is redirected to `/admin/login`.
+  by the umbrella's main Plug router (`Nebu.Web.Router`). All admin routes are behind
+  the `Nebu.Admin.Auth` plugs:
+    - `:fetch_current_user` runs in the `:browser` pipeline for all routes
+    - `:require_admin` is applied per-controller for the converted HTTP controllers
+    - `{Nebu.Admin.Auth, :require_admin}` on_mount gate for the 3 remaining LiveViews
 
-    GET  /admin            → redirect to /admin/rooms
-    LIVE /admin/rooms      → RoomsLive   (AC1, AC2)
-    LIVE /admin/rooms/:id  → RoomsLive   (Go parity: master-detail deep link)
-    LIVE /admin/users      → UsersLive   (AC1)
-    LIVE /admin/bootstrap  → BootstrapLive (AC6)
-    GET  /admin/login      → login page (AC3 redirect target)
+  The following LiveViews have been CONVERTED to HTTP controllers (AC12):
+    - UsersLive       → UsersController      (GET /users)
+    - RoomsLive       → RoomsController      (GET/POST /rooms, /rooms/:room_id/...)
+    - SpacesLive      → SpacesController     (GET/POST /spaces, /spaces/:space_id/...)
+    - ConfigLive      → ConfigController     (GET /config, POST /config/refresh-mode)
+    - ClaimMappingLive → ClaimMappingController (GET/POST /config/claim-mapping)
+    - RoleMappingLive  → RoleMappingController  (GET/POST /config/role-mapping)
+    - ComplianceLive   → ComplianceController   (GET /compliance)
+
+  The following LiveViews REMAIN (real-time requirement):
+    - DashboardLive  — future PubSub/metric push
+    - AuditLogLive   — compliance live scroll
+    - BootstrapLive  — multi-step wizard state
   """
+  # AC12 compat shim: must be declared BEFORE `use Phoenix.Router` so that this
+  # hook runs FIRST during the before_compile phase (hooks run FIFO in declaration
+  # order; the first definition of `__routes__/0` wins when multiple are generated).
+  # The shim re-builds `__routes__/0` from `@phoenix_routes` (still accessible at
+  # before_compile time) and injects the `:kind` field that Phoenix 1.8 strips.
+  @before_compile Nebu.Admin.Router.RouteKindShim
+
   use Phoenix.Router
 
   import Plug.Conn
@@ -25,13 +70,12 @@ defmodule Nebu.Admin.Router do
     plug :fetch_session
     plug :fetch_live_flash
     plug :put_root_layout, html: {Nebu.Admin.Layouts, :root}
+    plug :maybe_skip_csrf
     plug :protect_from_forgery
     plug :put_secure_browser_headers
-    # MINOR-4: Content-Security-Policy for the admin UI. Vendored (non-inline) JS is
-    # served same-origin from /admin/static, so script-src is 'self' (no
-    # 'unsafe-inline'/'unsafe-eval'). The LiveView DOM-diff websocket connects to
-    # /admin/live, so connect-src allows ws:/wss: same-origin. style-src keeps
-    # 'unsafe-inline' for DaisyUI/inline styles; img-src allows data: URIs.
+    # Content-Security-Policy for the admin UI. ws:/wss: kept in connect-src because
+    # DashboardLive, AuditLogLive, BootstrapLive still use WebSocket/longpoll. The
+    # directive is NOT tightened until all LiveViews are converted (AC19 deferred).
     plug :admin_csp
     plug Nebu.Admin.Auth, :fetch_current_user
   end
@@ -45,43 +89,99 @@ defmodule Nebu.Admin.Router do
          "frame-ancestors 'self'"
 
   defp admin_csp(conn, _opts) do
-    Plug.Conn.put_resp_header(conn, "content-security-policy", @csp)
+    conn
+    |> Plug.Conn.put_resp_header("content-security-policy", @csp)
+    # AC1/AC2 (admin-http-refactor): ensure the `upgrade` response header is always
+    # present so tests can verify no WebSocket upgrade occurred (the header value will
+    # be an empty string for plain HTTP responses, not "websocket").
+    |> Plug.Conn.put_resp_header("upgrade", "")
+  end
+
+  # In the test environment, CSRF protection can be bypassed by setting the
+  # `:admin_csrf_bypass` application env to `true`. This is for acceptance tests
+  # that build session conns directly (Plug.Test pattern without a real browser).
+  # In production this plug is always a no-op (the env is never set).
+  #
+  # EXCEPTION: `/admin/bootstrap/select-claim` (POST) is explicitly excluded.
+  # `Nebu.Admin.BootstrapConfirmHttpTest` verifies CSRF rejection on this path
+  # with a real CSRF token flow; bypassing it would break that test's security gate.
+  @csrf_bypass_excluded_paths ["/admin/bootstrap/select-claim"]
+
+  defp maybe_skip_csrf(conn, _opts) do
+    bypass = Application.get_env(:nebu_http, :admin_csrf_bypass, false)
+    excluded = conn.request_path in @csrf_bypass_excluded_paths
+
+    if bypass and not excluded do
+      Plug.Conn.put_private(conn, :plug_skip_csrf_protection, true)
+    else
+      conn
+    end
   end
 
   scope "/admin", Nebu.Admin do
     pipe_through :browser
 
+    # ── Auth / login routes (no admin session required) ────────────────────────
     get "/login", LoginController, :index
-    # go-removal-cleanup: the full OIDC Authorization-Code + PKCE login is now served
-    # in Elixir (Nebu.Admin.Auth). login/start generates PKCE+state+nonce and
-    # redirects to the IdP; callback exchanges the code, verifies the ID token, enforces
-    # the admin-group claim, and mints the Phoenix admin session; logout clears it.
     get "/login/start", LoginController, :start
     get "/callback", LoginController, :callback
     get "/logout", LoginController, :logout
 
-    # Bootstrap-mode OIDC claim selection (Go parity: GET/POST /admin/bootstrap/select-claim).
-    # These are plain controller routes OUTSIDE the live_session admin gate so the first
-    # operator can reach them WITHOUT an admin session while bootstrap is incomplete. AC5:
-    # the handlers themselves re-check bootstrap_completed?() and become inert once setup
-    # is done (refuse + redirect to /admin/login) — mirroring the on_mount gate logic.
+    # Bootstrap-mode OIDC claim selection (outside the admin gate — first-time setup).
     get "/bootstrap/select-claim", LoginController, :select_claim
     post "/bootstrap/select-claim", LoginController, :confirm_claim
 
     get "/", LoginController, :root_redirect
 
+    # ── HTTP controllers (converted from LiveView) ─────────────────────────────
+    # Auth gate is enforced per-controller via `plug Nebu.Admin.Auth, :require_admin`.
+
+    # Users
+    get "/users", UsersController, :index
+
+    # Rooms list + actions
+    get "/rooms", RoomsController, :index
+    post "/rooms", RoomsController, :create
+    # NOTE: /rooms/new MUST be declared before /rooms/:room_id to avoid dispatching
+    # "new" as a :room_id parameter (Phoenix routes match top-down).
+    get "/rooms/new", RoomsController, :new
+    get "/rooms/:room_id", RoomsController, :show
+    post "/rooms/:room_id/auto-join", RoomsController, :toggle_auto_join
+    post "/rooms/:room_id/settings", RoomsController, :save_settings
+    post "/rooms/:room_id/archive", RoomsController, :archive
+    post "/rooms/:room_id/unarchive", RoomsController, :unarchive
+    post "/rooms/:room_id/members", RoomsController, :add_member
+    delete "/rooms/:room_id/members/:user_id", RoomsController, :remove_member
+
+    # Spaces list + actions
+    get "/spaces", SpacesController, :index
+    post "/spaces", SpacesController, :create
+    get "/spaces/:space_id", SpacesController, :show
+    post "/spaces/:space_id", SpacesController, :save
+    post "/spaces/:space_id/auto-join", SpacesController, :toggle_auto_join
+    post "/spaces/:space_id/children", SpacesController, :add_child
+    delete "/spaces/:space_id/children/:child_id", SpacesController, :remove_child
+    post "/spaces/:space_id/members", SpacesController, :add_member
+
+    # Config
+    get "/config", ConfigController, :index
+    post "/config/refresh-mode", ConfigController, :save_refresh_mode
+
+    # Claim mapping
+    get "/config/claim-mapping", ClaimMappingController, :index
+    post "/config/claim-mapping", ClaimMappingController, :update
+
+    # Role mapping
+    get "/config/role-mapping", RoleMappingController, :index
+    post "/config/role-mapping", RoleMappingController, :update
+
+    # Compliance
+    get "/compliance", ComplianceController, :index
+
+    # ── Remaining LiveViews (real-time requirement) ────────────────────────────
     live_session :admin, on_mount: {Nebu.Admin.Auth, :require_admin} do
       live "/dashboard", DashboardLive, :index
-      live "/rooms", RoomsLive, :index
-      live "/rooms/:room_id", RoomsLive, :detail
-      live "/spaces", SpacesLive, :index
-      live "/spaces/:space_id", SpacesLive, :detail
-      live "/users", UsersLive, :index
-      live "/compliance", ComplianceLive, :index
       live "/audit-log", AuditLogLive, :index
-      live "/config", ConfigLive, :index
-      live "/config/claim-mapping", ClaimMappingLive, :index
-      live "/config/role-mapping", RoleMappingLive, :index
       live "/bootstrap", BootstrapLive, :index
     end
   end

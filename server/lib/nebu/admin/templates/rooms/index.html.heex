@@ -1,0 +1,88 @@
+<div class="admin-rooms" data-page="rooms">
+  <div class="flex items-center justify-between mb-4">
+    <h1 class="text-2xl font-bold">Rooms</h1>
+    <a href="/admin/rooms/new" class="btn btn-primary" role="button" data-role="open-create-room">
+      Create room
+    </a>
+  </div>
+
+  <p :if={Map.get(assigns, :create_error)} class="text-error mb-3" role="alert" data-role="create-error">
+    {assigns[:create_error]}
+  </p>
+
+  <%!-- Status filter: GET query param (no LiveView event) --%>
+  <form id="room-filter-form" method="get" action="/admin/rooms" class="mb-4 max-w-xs" data-form="room-filter">
+    <label class="form-control w-full">
+      <span class="label-text">Status</span>
+      <select
+        name="status"
+        class="select select-bordered w-full"
+        data-field="status-filter"
+        aria-label="Filter rooms by status"
+      >
+        <option value="all" selected={@status_filter == "all"}>All</option>
+        <option value="active" selected={@status_filter == "active"}>Active</option>
+        <option value="archived" selected={@status_filter == "archived"}>Archived</option>
+        <option value="stale" selected={@status_filter == "stale"}>Stale</option>
+      </select>
+    </label>
+    <button type="submit" class="btn btn-sm mt-2">Filter</button>
+  </form>
+
+  <p :if={@rooms == []} class="text-base-content/70">No rooms found.</p>
+
+  <table :if={@rooms != []} class="table w-full" role="table">
+    <thead>
+      <tr>
+        <th scope="col">Room</th>
+        <th scope="col">Status</th>
+        <th scope="col">Auto-join</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr
+        :for={room <- @rooms}
+        data-room-id={room.room_id}
+        data-auto-join={to_string(room.is_auto_join)}
+        data-status={room_status(room)}
+      >
+        <td>
+          <a href={"/admin/rooms/" <> URI.encode(room.room_id, &URI.char_unreserved?(&1))} class="text-primary">
+            {room_display_name(room)}
+          </a>
+        </td>
+        <td>
+          <span class={"badge " <> status_badge_class(room_status(room))} data-role="status-badge">
+            {status_label(room_status(room))}
+          </span>
+        </td>
+        <td>
+          <%!-- Auto-join toggle: POST form (no phx-click) --%>
+          <form
+            method="post"
+            action={"/admin/rooms/" <> URI.encode(room.room_id, &URI.char_unreserved?(&1)) <> "/auto-join"}
+            data-form="auto-join-toggle"
+          >
+            <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+            <label class="cursor-pointer label gap-2">
+              <span class="sr-only">
+                Toggle auto-join for {room_display_name(room)}
+              </span>
+              <button
+                type="submit"
+                class={"toggle toggle-primary" <> if(room.is_auto_join, do: " toggle-active", else: "")}
+                role="switch"
+                data-role="auto-join-toggle"
+                data-room-id={room.room_id}
+                aria-checked={to_string(room.is_auto_join)}
+                aria-label={"Auto-join " <> room_display_name(room)}
+              >
+                {if room.is_auto_join, do: "On", else: "Off"}
+              </button>
+            </label>
+          </form>
+        </td>
+      </tr>
+    </tbody>
+  </table>
+</div>

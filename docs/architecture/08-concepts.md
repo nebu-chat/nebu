@@ -839,34 +839,42 @@ No mixing.
 
 ## Admin UI Security
 
-**Phoenix LiveView Admin (admin-ui-migration — supersedes Go template admin):**
+**Phoenix HTTP Controller + LiveView Admin (admin-ui-migration + admin-http-refactor — supersedes Go template admin):**
 
 The Admin UI is now served by `Nebu.Web.AdminEndpoint` (Phoenix.Endpoint, `server: false`) forwarded
 from `Nebu.Web.Router`. Key security controls:
 
-- **Admin auth gate (`Nebu.Admin.Auth`, `on_mount :require_admin`):** Checks the signed Phoenix
-  session for a valid admin claim. The claim is derived from `server_config.admin_group_claim`
-  (default `instance_admin`) via an inline SQL check (ADR-018) — parity with the Go
-  `MatchesAdminGroupClaim`. Unauthenticated access is redirected to `/admin/login`.
-- **CSRF:** Phoenix `protect_from_forgery` with a signed session — replaces the Go double-submit
-  cookie. All LiveView state mutations go through server-side event handlers (no direct form POST
-  without a verified CSRF token).
+- **Admin auth gate — two mechanisms:**
+  - HTTP controllers use `Nebu.Admin.Auth.require_admin/2` as a Plug in the `:admin` pipeline.
+  - Remaining LiveViews (Dashboard, AuditLog, Bootstrap) use `on_mount {Nebu.Admin.Auth, :require_admin}`.
+  Both check the signed Phoenix session for a valid admin claim derived from
+  `server_config.admin_group_claim` (default `instance_admin`) via an inline SQL check (ADR-018).
+  Unauthenticated access is redirected to `/admin/login`.
+- **CRUD page rendering (admin-http-refactor):** Users, Rooms, Spaces, Config, ClaimMapping,
+  RoleMapping, and Compliance pages are now rendered by Phoenix HTTP controllers following the
+  Post-Redirect-Get (PRG) pattern. Each controller module has a corresponding HTML view module and
+  HEEx template. State changes are submitted as standard HTML form POSTs; the controller processes
+  the request, writes to the DB via inline SQL (ADR-018), and redirects to the GET page. No
+  persistent WebSocket is required for these pages.
+- **Real-time LiveViews (unchanged):** DashboardLive, AuditLogLive, and BootstrapLive remain as
+  Phoenix LiveViews — they require server-push or multi-step stateful interactions that benefit from
+  the persistent WebSocket connection.
+- **CSRF:** Phoenix `protect_from_forgery` with a signed session — applies to both HTTP controller
+  form submissions (standard CSRF token in form) and LiveView event handlers (CSRF verified
+  by Phoenix automatically).
 - **Session cookie:** `http_only: true`, `secure: true` (config-driven; enforced in prod TLS). The
   Phoenix session is signed/encrypted with `secret_key_base`, derived from `NEBU_ADMIN_SECRET_KEY_BASE`
   or SHA-512 of the internal secret file. A missing `NEBU_ADMIN_SECRET_KEY_BASE` **raises at boot** in
   prod when the internal secret file is also absent (fail-closed).
 - **Content-Security-Policy (admin browser pipeline):**
   `default-src 'self'; connect-src 'self' ws: wss:; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'self'`
-  Applied as a Plug in the admin browser pipeline. `ws:/wss:` is required for LiveView WebSocket.
-  `style-src 'unsafe-inline'` is required for Phoenix LiveView inline transition styles.
+  Applied as a Plug in the admin browser pipeline. `ws:/wss:` is required for the three remaining
+  LiveViews (Dashboard, AuditLog, Bootstrap). `style-src 'unsafe-inline'` is required for Phoenix
+  LiveView inline transition styles.
 - **OIDC client secret at rest:** `BootstrapLive` encrypts the `oidc_client_secret` with AES-256-GCM
   before persisting to `server_config` (reuses `Nebu.Media.Crypto`; key = SHA-256 of internal
   secret; fail-closed when no secret is available). Byte-compatible with the existing Go
   `admin.EncryptAES256GCM` scheme (shared internal secret, same key derivation).
-- **LiveView DOM-diff (no SPA build):** The Admin UI uses Phoenix LiveView server-rendered diffs over
-  a persistent WebSocket. There is no separate JS build step, no bundled SPA, and no client-side
-  state management framework. Interaction (e.g. auto-join toggle) is handled via `phx-click` events
-  processed server-side with inline SQL (ADR-018).
 - **Phoenix.PubSub:** Added to `Nebu.Application` as a child process required by LiveView. Uses
   the `Phoenix.PubSub.PG2` adapter (in-process, no external broker — consistent with ADR-002).
 
@@ -1108,9 +1116,9 @@ at call time, defaulting to `"unknown"` when unset. Both the builder and runtime
 carry the three `ENV` vars so the values are available whether baked into the release BEAM files or
 read at process start.
 
-**Admin UI footer:** The same build info is threaded into the LiveView layout so every authenticated
-admin page renders a footer of the form `nebu v<version> · <git_commit> · built <build_time>`,
-suppressed on the login and error pages.
+**Admin UI footer:** The same build info is threaded into the shared admin layout so every authenticated
+admin page (both HTTP controller pages and LiveViews) renders a footer of the form
+`nebu v<version> · <git_commit> · built <build_time>`, suppressed on the login and error pages.
 
 **`make redeploy` integration:** The `redeploy` Makefile target exports `GIT_COMMIT`
 (from `git rev-parse --short HEAD`) and `BUILD_TIME` (from `date -u`) before calling

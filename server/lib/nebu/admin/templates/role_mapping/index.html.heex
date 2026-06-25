@@ -1,0 +1,28 @@
+<h1 class="text-heading font-semibold mb-4">Role Mapping</h1>
+<p class="text-text-secondary mb-4">
+  The OIDC token claim whose values grant instance-admin access.
+</p>
+
+<p :if={Phoenix.Flash.get(@flash, :info)} class="alert alert-success mb-4">
+  {Phoenix.Flash.get(@flash, :info)}
+</p>
+<p :if={Phoenix.Flash.get(@flash, :error)} class="alert alert-error mb-4">
+  {Phoenix.Flash.get(@flash, :error)}
+</p>
+
+<form method="post" action="/admin/config/role-mapping" class="max-w-md flex flex-col gap-4">
+  <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+  <div>
+    <label for="admin_group_claim" class="block text-sm mb-1">Admin group claim</label>
+    <input
+      id="admin_group_claim"
+      name="admin_group_claim"
+      value={@value}
+      class="input input-bordered w-full"
+    />
+    <p :if={@error} role="alert" data-field="admin_group_claim" class="text-error text-sm mt-1">
+      {@error}
+    </p>
+  </div>
+  <button type="submit" class="btn btn-primary self-start">Save</button>
+</form>

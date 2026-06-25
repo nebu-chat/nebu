@@ -707,7 +707,7 @@ deactivated user's opaque sessions are killed at once.
 
 ## Scenario 3m-admin: Admin UI Silent OIDC Refresh (Story admin-oidc-session-refresh)
 
-The Admin UI (Phoenix LiveView, `Nebu.Admin.Auth`) previously capped the admin session at the short
+The Admin UI (`Nebu.Admin.Auth`) previously capped the admin session at the short
 `id_token.exp` with no refresh, so admins were force-logged-out roughly every 5 minutes against
 Keycloak. The fix keeps the admin signed in by silently refreshing the OIDC token on HTTP round-trips —
 no DB-backed session, no plaintext refresh token at rest. As of Story `oidc-refresh-mode-config` the
@@ -761,7 +761,7 @@ removed from the group at the IdP loses access on the next refresh (not only at 
 `Nebu.Web.SecretBox` (AES-256-GCM) — there is no `admin_sessions` table row and no DB persistence.
 
 **Known limitation:** refresh occurs on HTTP round-trips, not over the live LiveView websocket; a tab
-sitting idle on a websocket-only view is refreshed on its next HTTP navigation.
+sitting idle on a websocket-only LiveView (Dashboard, AuditLog, Bootstrap) is refreshed on its next HTTP navigation. HTTP controller pages trigger refresh on every page load.
 
 **Configurable refresh mode (Story oidc-refresh-mode-config):** the `offline_access` request and the
 silent-refresh path above are active only when `admin_oidc_refresh_mode = offline`. The **default is
@@ -769,7 +769,7 @@ silent-refresh path above are active only when `admin_oidc_refresh_mode = offlin
 relies on the IdP's own session — on Dex this means no refresh token at all, so the admin is logged
 out at `session_exp`; Keycloak supports session-bound online refresh. Matrix login is governed by the
 sibling key `matrix_oidc_refresh_mode` (default `offline`). Both keys are set at bootstrap and
-changeable at runtime via `/admin/config` (`Nebu.Admin.ConfigLive`), applying to subsequent logins
+changeable at runtime via `/admin/config` (`Nebu.Admin.ConfigController`), applying to subsequent logins
 with no redeploy; `Nebu.Admin.Auth.admin_oidc_scope/0` and `Nebu.Matrix.SsoLogin.scope_list/0` read
 their mode live.
 
@@ -1078,8 +1078,8 @@ automatically joined to all such rooms at first login, without manual invite.
 **Admin toggle flow:**
 
 1. Admin submits the settings form (`POST /admin/rooms/{roomId}/settings`) with `is_auto_join=true`.
-2. The Admin LiveView handler reads the submitted value and passes it as `is_auto_join`
-   in an `UpdateRoomSettingsRequest` struct to `update_room_settings/2` in-process.
+2. The Admin HTTP controller (`Nebu.Admin.RoomsController`) reads the submitted value and passes it
+   as `is_auto_join` in an `UpdateRoomSettingsRequest` struct to `update_room_settings/2` in-process.
 3. `update_room_settings/2` checks `is_nil(req.is_auto_join)` — only updates when the optional
    field is present. Calls `admin_db_module().update_room_auto_join(room_id, is_auto_join)`.
 4. DB: `UPDATE rooms SET is_auto_join = $2 WHERE room_id = $1` (parametrised).
@@ -1238,8 +1238,8 @@ _Source: Stories admin-room-creator-provisioning + room-canonical-alias-from-nam
 The "Add user" inputs on the room detail and Spaces detail pages suggest existing users as the
 admin types, instead of requiring a full Matrix id from memory.
 
-1. The admin types into the add-user field (`phx-change="suggest_users"`, `phx-debounce="200"`).
-2. The LiveView handler calls the shared `Nebu.Admin.UserSuggest.search/1` (min 2 chars enforced
+1. The admin types into the add-user field (autocomplete input on the Rooms/Spaces HTTP controller pages).
+2. The controller calls the shared `Nebu.Admin.UserSuggest.search/1` (min 2 chars enforced
    **server-side**, `LIMIT 10`, `:admin_user_searcher` seam → `Nebu.Admin.DB.search_users/2`).
 3. `search_users/2`: `SELECT user_id FROM users WHERE is_active = true AND user_id ILIKE $1 ESCAPE '\\'
    ORDER BY user_id LIMIT $2`. The term is parameter-bound; `escape_like/1` escapes `\`, `%`, `_`
@@ -1255,9 +1255,8 @@ admin types, instead of requiring a full Matrix id from memory.
    (ADR-020, audited, local-domain default-deny) with a member roster + success flash.
    `list_users/3` now honours its search term across keyset pagination (filtered page 2+).
 
-**Security:** admin-only via `live_session :admin, on_mount: {Nebu.Admin.Auth, :require_admin}`
-(covers every `handle_event`); `actor_id` is server-derived, never a client param; user_id is
-HEEx-escaped (no XSS). Kassandra SEC Gate 1: PASS, no findings.
+**Security:** admin-only via `require_admin` plug in the `:admin` HTTP pipeline; `actor_id` is
+server-derived, never a client param; user_id is HEEx-escaped (no XSS). Kassandra SEC Gate 1: PASS, no findings.
 
 _Source: Story admin-add-user-autocomplete (epic: room-naming-and-default-rooms)._
 
