@@ -76,11 +76,14 @@ Components in `Nebu.Web` (the shared HTTP plumbing):
   via `:pg` ensures all nodes stay synchronized (ADR-020, M-3). When both env vars and DB values are
   absent, the config returns `nil` and OidcPlug fails closed (F-4 — all tokens rejected with 401).
 - **`Nebu.Web.JwksCache`** — a GenServer that fetches the OIDC provider JWKS on start and refreshes
-  it on a TTL (`NEBU_OIDC_JWKS_TTL`, default 300s). The JWKS URI is resolved from `NEBU_OIDC_JWKS_URI`
-  env var (preferred) or `OidcConfig` cache (fallback for bootstrap mode). On a refresh failure it keeps
-  the last-known-good keys rather than blanking the cache, so transient JWKS outages do not reject
-  otherwise-valid tokens. The JWKS HTTP fetch uses TLS peer verification for `https` endpoints. Its state
-  is volatile and is recovered by a fresh fetch when the supervisor restarts it.
+  it on a TTL (`NEBU_OIDC_JWKS_TTL`, default 300s). The JWKS URI is resolved in priority order:
+  (1) `NEBU_OIDC_JWKS_URI` env var / `OidcConfig` DB cache (bootstrap mode),
+  (2) auto-discovered from the issuer's `/.well-known/openid-configuration` document (when only
+  `NEBU_OIDC_ISSUER` is set — valid per OIDC spec). The discovered `jwks_uri` is validated to use
+  `https://` or `http://` scheme only (SSRF guard). On a refresh failure it keeps the last-known-good
+  keys rather than blanking the cache, so transient JWKS outages do not reject otherwise-valid tokens.
+  The JWKS HTTP fetch uses TLS peer verification for `https` endpoints. Its state is volatile and
+  is recovered by a fresh fetch when the supervisor restarts it.
 - **Router scoping** — `Nebu.Web.Router` keeps `GET /health` open, forwards the unauthenticated Matrix
   routes (`POST /login`, `GET /profile`, MSC2965 discovery) to `Nebu.Matrix.HttpPublic`, and forwards
   everything else under `/_matrix` to the protected sub-router `Nebu.Matrix.Http.Protected` whose
@@ -887,7 +890,11 @@ code at the provider token endpoint, verifies the ID token via the shared
 admin-group claim, and mints the Phoenix admin session (`renew: true`, `session_exp = min(idToken.exp,
 now+8h)`). There is one session cookie (the signed Phoenix `secret_key_base` cookie — http_only, secure,
 SameSite=Lax). `NEBU_ADMIN_OIDC_LOGIN_URL` is removed; the admin OAuth client is configured via
-`NEBU_ADMIN_OIDC_CLIENT_ID` / `..._CLIENT_SECRET[_FILE]` / `..._REDIRECT_URI`.
+`NEBU_ADMIN_OIDC_CLIENT_ID` / `..._CLIENT_SECRET[_FILE]` / `..._REDIRECT_URI`. When
+`NEBU_ADMIN_OIDC_REDIRECT_URI` is not explicitly set, `Nebu.Admin.Auth` derives the default from
+`NEBU_SERVER_NAME` + `NEBU_ADMIN_SESSION_SECURE`: `https://{server_name}/admin/callback` for
+production (non-localhost) and `http://localhost:8008/admin/callback` for local dev. The value is
+always server-controlled and never derived from request headers (Host/X-Forwarded-*).
 
 **Admin silent OIDC token refresh (admin-oidc-session-refresh):** Admin login now requests
 `offline_access` so the IdP returns a `refresh_token`. The RT is encrypted with `Nebu.Web.SecretBox`

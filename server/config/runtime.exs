@@ -172,8 +172,11 @@ if config_env() in [:prod, :dev] do
   config :nebu_http,
     admin_oidc_client_id: System.get_env("NEBU_ADMIN_OIDC_CLIENT_ID", System.get_env("NEBU_OIDC_CLIENT_ID", "")),
     admin_oidc_client_secret: admin_oidc_client_secret,
-    admin_oidc_redirect_uri:
-      System.get_env("NEBU_ADMIN_OIDC_REDIRECT_URI", "http://localhost:8008/admin/callback"),
+    # When NEBU_ADMIN_OIDC_REDIRECT_URI is not set, nil is stored here and
+    # Nebu.Admin.Auth.redirect_uri/0 derives the value from :server_name +
+    # :admin_session_secure at runtime, so non-localhost deployments automatically
+    # get the correct https://{server_name}/admin/callback URI.
+    admin_oidc_redirect_uri: System.get_env("NEBU_ADMIN_OIDC_REDIRECT_URI"),
     admin_oidc_scope: System.get_env("NEBU_ADMIN_OIDC_SCOPE", "openid profile email")
 
   # Admin session cookie `secure` flag (Nebu.Admin.Endpoint). Defaults to true
