@@ -34,6 +34,8 @@ defmodule Nebu.Web.Plugs.OidcPlug do
 
   import Plug.Conn
 
+  require Logger
+
   # Asymmetric signature algorithms only. `none` and HMAC (HS*) are intentionally
   # absent so a token signed with the public key as an HMAC secret, or with no
   # signature at all, is rejected before any verification work happens.
@@ -204,6 +206,20 @@ defmodule Nebu.Web.Plugs.OidcPlug do
   defp do_provision(user_id, claims) do
     display_name = claims["preferred_username"] || claims["name"] || ""
     email = claims["email"] || ""
+
+    # MAJOR-1: warn operators when OIDC claims are absent so they know to set
+    # NEBU_OIDC_EXTRA_SCOPES. Only logged on first provisioning (cache miss), not every request.
+    if email == "" do
+      Logger.warning(
+        "OIDC: email claim absent for #{user_id} — set NEBU_OIDC_EXTRA_SCOPES=profile email if email is required"
+      )
+    end
+
+    if display_name == "" do
+      Logger.warning(
+        "OIDC: preferred_username/name claim absent for #{user_id} — set NEBU_OIDC_EXTRA_SCOPES=profile if display name is required"
+      )
+    end
 
     case Nebu.Matrix.Session.TokenValidator.validate(user_id, "user", display_name, email) do
       {:ok, _user} ->

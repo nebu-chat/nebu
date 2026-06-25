@@ -29,8 +29,9 @@ defmodule Nebu.Matrix.SsoLogin do
 
   Client id/secret come from the Bootstrap DB (`server_config`) when present, with
   the `NEBU_OIDC_*` env (`:matrix_oidc_client_id` / `:matrix_oidc_client_secret`)
-  as fallback. The scope list is `openid profile email offline_access` plus any
-  non-duplicate `NEBU_OIDC_EXTRA_SCOPES` (`:oidc_extra_scopes`).
+  as fallback. The scope list is `openid` (plus `offline_access` when refresh
+  mode is offline) plus any `NEBU_OIDC_EXTRA_SCOPES` (`:oidc_extra_scopes`,
+  e.g. `profile email`).
   """
   import Plug.Conn
   import Nebu.Matrix.Http, only: [error: 4]
@@ -300,7 +301,7 @@ defmodule Nebu.Matrix.SsoLogin do
     end
   end
 
-  # ── scope list (openid profile email [+offline_access] + NEBU_OIDC_EXTRA_SCOPES) ─
+  # ── scope list (openid [+offline_access] + NEBU_OIDC_EXTRA_SCOPES) ─────────────
   #
   # `offline_access` is no longer hardcoded: it is included iff the server_config key
   # `matrix_oidc_refresh_mode` resolves to "offline" (story oidc-refresh-mode-config,
@@ -311,7 +312,7 @@ defmodule Nebu.Matrix.SsoLogin do
   # Test seam (mirrors OidcClaimCache's :oidc_claim_reader): a 0-arity fun under
   # :matrix_oidc_refresh_mode_reader injects the mode; default reads server_config.
 
-  @base_scopes ~w(openid profile email)
+  @base_scopes ~w(openid)
 
   @sql_matrix_refresh_mode "SELECT value FROM server_config WHERE key = 'matrix_oidc_refresh_mode' LIMIT 1"
 
@@ -420,9 +421,10 @@ defmodule Nebu.Matrix.SsoLogin do
   defp exchange_code(_endpoint, _code, _verifier, _cfg, _redirect_uri), do: {:error, :missing_verifier}
 
   # oidc-session-refresh: also surface the OIDC `refresh_token` from the
-  # token-endpoint response (present when `offline_access` is granted — it is in
-  # @base_scopes). The RT is returned as the 3rd element so the login path can
-  # mint a long-lived opaque Nebu session; absent → nil → JWT fallback (AC7).
+  # token-endpoint response (present when `offline_access` is granted —
+  # appended by scope_list/0 when mode is "offline"). The RT is returned as the
+  # 3rd element so the login path can mint a long-lived opaque Nebu session;
+  # absent → nil → JWT fallback (AC7).
   defp extract_id_token(resp_body) do
     case Jason.decode(resp_body) do
       {:ok, %{"id_token" => id_token} = body} when is_binary(id_token) and id_token != "" ->
