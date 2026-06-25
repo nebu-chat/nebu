@@ -40,7 +40,7 @@ cross-referenced with the Matrix Client-Server API specification.
 
 | Method | Endpoint | Status | Notes |
 |---|---|---|---|
-| GET | `/_matrix/client/v3/sync` | ✅ | Long-poll, ETS + gRPC, account_data included |
+| GET | `/_matrix/client/v3/sync` | ✅ | Long-poll (max 25s cap, was 30s); initial sync parallel room fetch (Task.async_stream, max_concurrency: 5); account_data included |
 
 ## Room Management
 
@@ -111,8 +111,8 @@ cross-referenced with the Matrix Client-Server API specification.
 
 | Method | Endpoint | Status | Notes |
 |---|---|---|---|
-| GET | `/_matrix/client/v3/user/{userId}/account_data/{type}` | ✅ | Global account data |
-| PUT | `/_matrix/client/v3/user/{userId}/account_data/{type}` | ✅ | Global account data |
+| GET | `/_matrix/client/v3/user/{userId}/account_data/{type}` | ✅ | ETS-backed (volatile); 404 M_NOT_FOUND if unset; IDOR guard |
+| PUT | `/_matrix/client/v3/user/{userId}/account_data/{type}` | ✅ | Stores in ETS (volatile, lost on restart); IDOR guard |
 | GET | `/_matrix/client/v3/user/{userId}/rooms/{roomId}/account_data/{type}` | ✅ | Per-room account data |
 | PUT | `/_matrix/client/v3/user/{userId}/rooms/{roomId}/account_data/{type}` | ✅ | Per-room account data |
 | GET | `/_matrix/client/v3/user/{userId}/rooms/{roomId}/tags` | ✅ | Room tags |
@@ -213,10 +213,12 @@ the roadmap toward Managed E2EE.
 | POST | `/_matrix/client/v3/keys/query` | 🔶 | Returns empty device_keys for known users |
 | POST | `/_matrix/client/v3/keys/claim` | 🔶 | Returns empty one_time_keys |
 | GET | `/_matrix/client/v3/keys/changes` | 🔶 | Returns changed: [], left: [] |
-| POST | `/_matrix/client/v3/keys/device_signing/upload` | 🔶 | UIA dummy flow (m.login.dummy), accepts silently |
+| POST | `/_matrix/client/v3/keys/device_signing/upload` | 🔶 | Returns `200 {}` (no-op; ADR-011 managed E2EE) |
 | POST | `/_matrix/client/v3/keys/signatures/upload` | 🔶 | Returns failures: {} |
-| GET | `/_matrix/client/v3/room_keys/version` | 🔶 | Returns 404 (no backup) |
+| GET | `/_matrix/client/v3/room_keys/version` | 🔶 | Returns 404 M_NOT_FOUND (no backup configured) |
 | POST | `/_matrix/client/v3/room_keys/version` | 🔶 | Returns version: "1" (not stored) |
+| GET | `/_matrix/client/unstable/org.matrix.msc3814.v1/dehydrated_device` | 🔶 | Returns 404 M_NOT_FOUND (MSC3814 not supported) |
+| GET | `/_matrix/client/unstable/org.matrix.msc4143/rtc/transports` | 🔶 | Returns 404 M_NOT_FOUND (MSC4143 not supported) |
 
 ## Spaces (Phase 3 - MSC1772 / MSC2946 / MSC3083)
 

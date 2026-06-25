@@ -249,7 +249,14 @@ defmodule Nebu.Matrix.SsoLogin do
   # ── OIDC config (Bootstrap DB → NEBU_OIDC_* env fallback) ───────────────────
 
   defp oidc_config do
-    issuer = Application.get_env(:nebu_http, :oidc_issuer)
+    # Mirrors OidcPlug.oidc_issuer/0: env takes priority; OidcConfig DB cache
+    # fills in when env is absent (Bootstrap-Wizard deployments without NEBU_OIDC_ISSUER).
+    issuer =
+      case Application.get_env(:nebu_http, :oidc_issuer) do
+        v when is_binary(v) and v != "" -> v
+        _ -> Nebu.Web.OidcConfig.get().issuer
+      end
+
     {client_id, client_secret} = resolve_client_credentials()
 
     cond do

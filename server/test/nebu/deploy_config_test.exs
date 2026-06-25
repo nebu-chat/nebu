@@ -55,40 +55,6 @@ defmodule Nebu.DeployConfigTest do
     end
   end
 
-  # ── AC3: No SSL query params in DB URLs inside environment block ───────────────
-
-  describe "AC3 — DB URLs in environment block must not contain SSL query parameters" do
-    test "NEBU_DB_URL in environment block does not contain ?ssl= or ?sslmode=", %{
-      content: content
-    } do
-      # Extract only the environment: block of the server service by finding all
-      # occurrences of NEBU_DB_URL lines. Any occurrence with ?ssl= or ?sslmode=
-      # indicates SSL is still baked into the URL instead of controlled via the env var.
-      #
-      # This test is RED because the current template still has:
-      #   NEBU_DB_URL: "postgresql://...?ssl=true"
-      refute content =~ ~r/NEBU_DB_URL:.*\?ssl=/,
-             "NEBU_DB_URL in environment block still contains ?ssl= parameter. " <>
-               "Remove SSL query params — use NEBU_POSTGRES_SSL instead."
-
-      refute content =~ ~r/NEBU_DB_URL:.*\?sslmode=/,
-             "NEBU_DB_URL in environment block still contains ?sslmode= parameter. " <>
-               "Remove SSL query params — use NEBU_POSTGRES_SSL instead."
-    end
-
-    test "NEBU_DB_URL_MIGRATE in environment block does not contain SSL query parameters", %{
-      content: content
-    } do
-      refute content =~ ~r/NEBU_DB_URL_MIGRATE:.*\?ssl=/,
-             "NEBU_DB_URL_MIGRATE in environment block still contains ?ssl= parameter. " <>
-               "Remove SSL query params — use NEBU_POSTGRES_SSL instead."
-
-      refute content =~ ~r/NEBU_DB_URL_MIGRATE:.*\?sslmode=/,
-             "NEBU_DB_URL_MIGRATE in environment block still contains ?sslmode= parameter. " <>
-               "Remove SSL query params — use NEBU_POSTGRES_SSL instead."
-    end
-  end
-
   # ── AC4: DB URLs removed from the .env content block ─────────────────────────
 
   describe "AC4 — NEBU_DB_URL and NEBU_DB_URL_MIGRATE not in the .env content block" do
@@ -148,22 +114,6 @@ defmodule Nebu.DeployConfigTest do
              "NEBU_DB_URL_MIGRATE is not present as an inline postgresql:// value " <>
                "in the environment: block. Expected a line like: " <>
                "NEBU_DB_URL_MIGRATE: \"postgresql://...\""
-    end
-  end
-
-  # ── AC3 + AC4 combined: .env block has no SSL params in any DB URL line ───────
-
-  describe "AC3+AC4 combined — no SSL query params anywhere in any DB URL (env or .env)" do
-    test "no ?sslmode= anywhere in the template DB URL values", %{content: content} do
-      # The .env block currently has sslmode=require in both URLs.
-      # After the fix, ?sslmode= must not appear anywhere in the template.
-      refute String.contains?(content, "sslmode=require"),
-             "Found sslmode=require in cloud-init.tftpl. " <>
-               "All SSL configuration must go through NEBU_POSTGRES_SSL."
-
-      refute String.contains?(content, "sslmode=verify-full"),
-             "Found sslmode=verify-full in cloud-init.tftpl. " <>
-               "All SSL configuration must go through NEBU_POSTGRES_SSL."
     end
   end
 

@@ -1469,6 +1469,10 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
     room_id = request.room_id
     user_id = request.user_id
     typing = request.typing
+    # 30_000ms is the Matrix-spec default for how long a typing indicator
+    # persists before auto-clearing. This is a FEATURE duration, not a
+    # connection hold time — the endpoint returns 200 immediately after
+    # setting the typing state. Do NOT conflate with the sync long-poll cap.
     timeout_ms = request.timeout_ms |> max(0) |> min(30_000)
 
     # Room existence check.
@@ -2260,62 +2264,85 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
             message: "database unavailable: #{inspect(reason)}"
       end
 
+    # Fetch all rooms concurrently — wall-clock is bounded by the slowest single
+    # room rather than the sum of all rooms. max_concurrency: 5 caps concurrent
+    # DB checkouts well below the pool size (attach_thread_aggregations does 2
+    # additional queries per room, so 5 rooms = up to 15 concurrent checkouts at
+    # peak — safe within a 10-connection pool with reasonable headroom for other
+    # requests). on_timeout: :kill_task drops slow rooms gracefully; they re-appear
+    # on the next incremental sync.
     sync_rooms =
-      Enum.flat_map(room_ids, fn room_id ->
-        try do
-          state = room_registry_module().get_state(room_id)
-          state_events = build_state_events(state, room_id)
+      Task.async_stream(
+        room_ids,
+        fn room_id ->
+          try do
+            state = room_registry_module().get_state(room_id)
+            state_events = build_state_events(state, room_id)
 
-          {:ok, events, _next_batch, prev_batch} =
-            messages_db_module().fetch_events(room_id, "b", 20, "")
+            {:ok, events, _next_batch, prev_batch} =
+              messages_db_module().fetch_events(room_id, "b", 20, "")
 
-          raw_tl_events =
-            events
-            |> Enum.reverse()
-            |> Enum.map(&event_map_to_core_event/1)
+            raw_tl_events =
+              events
+              |> Enum.reverse()
+              |> Enum.map(&event_map_to_core_event/1)
 
-          timeline_events = attach_thread_aggregations(raw_tl_events, room_id, user_id)
-          limited = length(events) >= 20
-          deduped_state = dedup_member_state_events(state_events, timeline_events)
+            timeline_events = attach_thread_aggregations(raw_tl_events, room_id, user_id)
+            limited = length(events) >= 20
+            deduped_state = dedup_member_state_events(state_events, timeline_events)
 
-          sync_room =
-            %Core.SyncRoom{
-              room_id: room_id,
-              state_events: deduped_state,
-              timeline_events: timeline_events,
-              limited: limited,
-              prev_batch: prev_batch
-            }
-            |> attach_heroes(user_id, deduped_state)
+            sync_room =
+              %Core.SyncRoom{
+                room_id: room_id,
+                state_events: deduped_state,
+                timeline_events: timeline_events,
+                limited: limited,
+                prev_batch: prev_batch
+              }
+              |> attach_heroes(user_id, deduped_state)
 
-          [sync_room]
-        catch
-          # Room GenServer not running (e.g. after core restart). Start it on demand —
-          # Room.init/1 reloads all state from DB, so this is always safe.
-          :exit, {:noproc, _} ->
-            _ = Nebu.Matrix.Room.RoomSupervisor.start_room(room_id)
-            try do
-              state      = room_registry_module().get_state(room_id)
-              state_evs  = build_state_events(state, room_id)
-              {:ok, evs, _next_batch, prev_b} =
-                messages_db_module().fetch_events(room_id, "b", 20, "")
-              raw_tl_evs = evs |> Enum.reverse() |> Enum.map(&event_map_to_core_event/1)
-              tl_evs = attach_thread_aggregations(raw_tl_evs, room_id, user_id)
-              deduped = dedup_member_state_events(state_evs, tl_evs)
-              sync_room =
-                %Core.SyncRoom{
-                  room_id:         room_id,
-                  state_events:    deduped,
-                  timeline_events: tl_evs,
-                  limited:         length(evs) >= 20,
-                  prev_batch:      prev_b
-                }
-                |> attach_heroes(user_id, deduped)
-              [sync_room]
-            catch
-              :exit, _ -> []
-            end
-        end
+            [sync_room]
+          catch
+            # Room GenServer not running (e.g. after core restart). Start it on demand —
+            # Room.init/1 reloads all state from DB, so this is always safe.
+            :exit, {:noproc, _} ->
+              _ = Nebu.Matrix.Room.RoomSupervisor.start_room(room_id)
+              try do
+                state      = room_registry_module().get_state(room_id)
+                state_evs  = build_state_events(state, room_id)
+                {:ok, evs, _next_batch, prev_b} =
+                  messages_db_module().fetch_events(room_id, "b", 20, "")
+                raw_tl_evs = evs |> Enum.reverse() |> Enum.map(&event_map_to_core_event/1)
+                tl_evs = attach_thread_aggregations(raw_tl_evs, room_id, user_id)
+                deduped = dedup_member_state_events(state_evs, tl_evs)
+                sync_room =
+                  %Core.SyncRoom{
+                    room_id:         room_id,
+                    state_events:    deduped,
+                    timeline_events: tl_evs,
+                    limited:         length(evs) >= 20,
+                    prev_batch:      prev_b
+                  }
+                  |> attach_heroes(user_id, deduped)
+                [sync_room]
+              catch
+                :exit, _ -> []
+              end
+          end
+        end,
+        max_concurrency: 5,
+        timeout: 10_000,
+        on_timeout: :kill_task,
+        ordered: false
+      )
+      |> Enum.flat_map(fn
+        {:ok, rooms} ->
+          rooms
+
+        {:exit, reason} ->
+          require Logger
+          Logger.warning("[get_initial_sync] room fetch timed out (10s) for user #{user_id}: #{inspect(reason)}")
+          []
       end)
 
     # Find the most recent event_id across all rooms for the since_token anchor.
@@ -2345,7 +2372,7 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
   #
   # Flow (revised to prevent missed-event race):
   #   1. Extract user_id, since_token, timeout_ms from request.
-  #   2. Clamp timeout_ms to max 30 000 ms.
+  #   2. Clamp timeout_ms to max 25 000 ms (was 30 000; reduced for ALB headroom).
   #   3. Look up last_event_id via pg_store_module().get_since_token(user_id).
   #      - {:error, :not_found} → fallback to get_initial_sync, set fallback_to_initial: true.
   #   4. Get room IDs: rooms_db_module().get_rooms_for_user(user_id).
@@ -2362,7 +2389,7 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
     device_id = request.device_id
     # client_since_token is validated against the stored token after lookup (AC2, Story 9-22).
     client_since_token = request.since_token
-    timeout_ms = request.timeout_ms |> max(0) |> min(30_000)
+    timeout_ms = request.timeout_ms |> max(0) |> min(25_000)
 
     # Step 3: Resolve last_event_id from the since_token.
     # Use per-device lookup when device_id is present (Story 9-22).

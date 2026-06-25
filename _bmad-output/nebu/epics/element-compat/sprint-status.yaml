@@ -1,0 +1,13 @@
+# story element-startup-stubs done (pipeline: ATDD+Code 1 cycle CLEAN): 2026-06-25
+# story account-data-get done (pipeline: ATDD MAJOR fixed+Code 1 cycle CLEAN): 2026-06-25
+epic: element-compat
+stories:
+  - id: element-startup-stubs
+    status: planned
+    summary: "6 missing Element startup stub endpoints"
+  - id: account-data-get
+    status: planned
+    summary: "GET account_data with ETS store"
+  - id: sync-nginx-timeout
+    status: done
+    summary: "nginx proxy_read_timeout for /sync long-poll"

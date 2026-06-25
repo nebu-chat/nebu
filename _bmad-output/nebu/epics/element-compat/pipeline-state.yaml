@@ -1,0 +1,44 @@
+# Nebu Pipeline State — element-compat epic
+# last_updated: 2026-06-25
+# [sync-nginx-timeout] 2026-06-25T18:02Z committed ✓ (code 1 cycle APPROVED; 905/0)
+# [sync-nginx-timeout] 2026-06-25T18:00Z arc42-update → matrix-api-scope.md: sync cap 25s + parallel initial sync noted
+# [sync-nginx-timeout] 2026-06-25T17:58Z security-review → skipped (not-needed: no new auth surface, timeout cap + parallelism only)
+# [sync-nginx-timeout] 2026-06-25T17:58Z code-review cycle 1 → APPROVED (F-01 typing comment, F-03 Logger, F-04 max_concurrency 5, F-05 flow comment; 905/0)
+# [sync-nginx-timeout] 2026-06-25T17:51Z ci-gate → ✓ unit-elixir 905/0 (--warnings-as-errors clean)
+# [sync-nginx-timeout] 2026-06-25T17:50Z dev-story → done (cycle 0): parse_timeout def+25s cap, server.ex min(25_000), Task.async_stream in get_initial_sync; 905/0
+# [sync-nginx-timeout] 2026-06-25T17:40Z test-review → CLEAN (MAJOR-1+2 fixed: server.ex note+AC3 covers delta path; timing bound+5 rooms; shape assertions corrected)
+# [sync-nginx-timeout] 2026-06-25T17:35Z atdd → 4 RED tests (parse_timeout private; integration tests excluded)
+# [sync-nginx-timeout] 2026-06-25T17:32Z oracle-gate → spec context captured (timeout advisory, cap spec-compliant, initial sync must return 200)
+# [sync-nginx-timeout] 2026-06-25T17:31Z create-story → sync-nginx-timeout.md
+# [sync-nginx-timeout] 2026-06-25T17:30Z pipeline started
+# [account-data-get] 2026-06-25T17:10Z committed ✓ (ATDD MAJOR fixed+Code 1 cycle CLEAN; 901/0)
+# [account-data-get] 2026-06-25T17:08Z arc42-update → matrix-api-scope.md: account_data notes updated (ETS volatile, IDOR guard)
+# [account-data-get] 2026-06-25T17:06Z security-review → skipped (not-needed: OidcPlug auth + IDOR guard; no new auth surface)
+# [account-data-get] 2026-06-25T17:05Z code-review cycle 2 → APPROVED (0 MAJOR/MINOR)
+# [account-data-get] 2026-06-25T16:58Z code-review → 1 MINOR (PUT IDOR untested) → cycle 1
+# [account-data-get] 2026-06-25T16:52Z ci-gate → ✓ unit-elixir 900/0 (--warnings-as-errors clean)
+# [account-data-get] 2026-06-25T16:50Z dev-story → done (cycle 0): AccountDataStore ETS + GET/PUT in protected.ex; 900/0
+# [account-data-get] 2026-06-25T16:42Z test-review → MAJOR-1 fixed (unique ETS types), MINOR-2 fixed (IDOR completeness); CLEAN
+# [account-data-get] 2026-06-25T16:35Z atdd → 6 tests (1 auth-gate + 5 behavioral; 4 RED, 2 GREEN)
+# [account-data-get] 2026-06-25T16:28Z oracle-gate → spec context captured (GET/PUT account_data, IDOR guard, ETS volatile acceptable)
+# [account-data-get] 2026-06-25T16:25Z create-story → account-data-get.md
+# [account-data-get] 2026-06-25T16:20Z pipeline started
+# [element-startup-stubs] 2026-06-25T16:18Z committed ✓ (ATDD+Code 1 cycle CLEAN; 894/0)
+# [element-startup-stubs] 2026-06-25T16:15Z arc42-update → matrix-api-scope.md: 2 MSC entries added, device_signing note corrected
+# [element-startup-stubs] 2026-06-25T16:11Z security-review → skipped (not-needed: read-only stubs, no auth surface)
+# [element-startup-stubs] 2026-06-25T16:10Z code-review cycle 2 → APPROVED (0 MAJOR/MINOR)
+# [element-startup-stubs] 2026-06-25T16:05Z code-review → 2 MINOR → cycle 1
+# [element-startup-stubs] 2026-06-25T16:00Z ci-gate → ✓ unit-elixir 894/0 (--warnings-as-errors clean)
+# [element-startup-stubs] 2026-06-25T15:55Z dev-story → done (cycle 0): 6 stubs in protected.ex; 894/0
+# [element-startup-stubs] 2026-06-25T15:50Z test-review → CLEAN (0 MAJOR, 1 MINOR: error-string pinning — acceptable, ACs define the strings)
+# [element-startup-stubs] 2026-06-25T15:45Z atdd → 12 failing tests (matrix_client_compat_test.exs: 6 auth-gate + 6 contract)
+# [element-startup-stubs] 2026-06-25T15:40Z oracle-gate → spec context captured
+# [element-startup-stubs] 2026-06-25T15:35Z create-story → element-startup-stubs.md
+# [element-startup-stubs] 2026-06-25T15:31Z pipeline started
+# [element-compat] 2026-06-25T15:30Z epic started — 3 stories: element-startup-stubs, account-data-get, sync-nginx-timeout
+story: null
+current_step: null
+completed: []
+cycle_count: 0
+blocked_reason: null
+last_updated: "2026-06-25T17:31Z"
