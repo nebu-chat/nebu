@@ -5,18 +5,17 @@ defmodule Nebu.Matrix.SsoScopeModeTest do
 
   ## What is under test
 
-  Today the Matrix SSO scope is HARD-CODED (`SsoLogin.@base_scopes` =
-  `openid profile email offline_access`). This story makes the
-  `offline_access` part configurable per the `server_config` key
+  `SsoLogin.@base_scopes` is now `~w(openid)` (fix-element-login). The
+  `offline_access` scope is configurable per the `server_config` key
   `matrix_oidc_refresh_mode` (`offline` | `online`), read LIVE on each
   login-start so a runtime change applies without a redeploy:
 
     * `matrix_oidc_refresh_mode = offline` (or unset → default offline) →
       scope INCLUDES `offline_access`.
     * `matrix_oidc_refresh_mode = online` → scope EXCLUDES `offline_access`
-      (just `openid profile email` + extras).
-    * `openid` is always present; `NEBU_OIDC_EXTRA_SCOPES`
-      (`:oidc_extra_scopes`) are still appended in every mode.
+      (just `openid` + extras).
+    * `openid` is always present; `profile` and `email` are opt-in via
+      `NEBU_OIDC_EXTRA_SCOPES` (`:oidc_extra_scopes`).
 
   ## Public surface (no testing of privates)
 
@@ -138,9 +137,9 @@ defmodule Nebu.Matrix.SsoScopeModeTest do
       scopes = scope_params()
       assert "openid" in scopes
       refute "offline_access" in scopes
-      # The non-refresh base scopes remain.
-      assert "profile" in scopes
-      assert "email" in scopes
+      # profile and email are opt-in via NEBU_OIDC_EXTRA_SCOPES (fix-element-login).
+      refute "profile" in scopes
+      refute "email" in scopes
     end
 
     test "unset mode → DEFAULTS to offline (includes offline_access) — AC1/AC7" do

@@ -9,6 +9,28 @@
 # This file is no longer used for named-epic pipeline runs.
 #
 # last_updated: 2026-06-25
+# [bug-fix-element-login] 2026-06-25T18:05Z committed ✓ (ATDD+Code 2 cycles CLEAN+Kassandra CLEAN 2 LOW advisory)
+# [bug-fix-element-login] 2026-06-25T18:00Z arc42-update → docs/08-concepts.md already updated in cycle 1 (MINOR-8)
+# [bug-fix-element-login] 2026-06-25T17:55Z security-review → Kassandra CLEAN (0 CRIT/HIGH/MED, 2 LOW advisory: PII in log msg; pre-existing client-secret interpolation)
+# [bug-fix-element-login] 2026-06-25T17:50Z code-review cycle 2 → CLEAN (0 MAJOR/MINOR)
+# [bug-fix-element-login] 2026-06-25T17:45Z dev-story → done (cycle 2): test @moduledoc GREEN phrasing; arch doc Go refs replaced with Elixir behavior
+# [bug-fix-element-login] 2026-06-25T17:40Z code-review cycle 1 → 0 MAJOR, 2 MINOR (test @moduledoc RED phrasing; arch doc Go refs) → cycle 2
+# [bug-fix-element-login] 2026-06-25T17:35Z ci-gate → ✓ 874/0 (--warnings-as-errors clean)
+# [bug-fix-element-login] 2026-06-25T17:30Z dev-story → done (cycle 1): Logger.warning for absent email/display_name claims; stale comments+docs fixed
+# [bug-fix-element-login] 2026-06-25T17:25Z code-review → 1 MAJOR (email silent empty, no warning) + 7 MINOR (stale comments) → cycle 1
+# [bug-fix-element-login] 2026-06-25T17:20Z ci-gate → ✓ build+unit-elixir 874/0 (2 skipped pre-existing)
+# [bug-fix-element-login] 2026-06-25T17:15Z dev-story → done (cycle 0): @base_scopes openid only; sso_scope_mode_test stale assertions fixed; 874/874
+# [bug-fix-element-login] 2026-06-25T17:20Z dev-story → done (cycle 0): @base_scopes ~w(openid profile email) → ~w(openid); updated sso_scope_mode_test.exs stale assertion; 874/874 passed; story status → review
+# [bug-fix-element-login] 2026-06-25T17:10Z test-review → CLEAN (0 MAJOR, 0 MINOR, 3 INFO)
+# [bug-fix-element-login] 2026-06-25T17:05Z atdd → 5 failing tests (sso_login_scope_test.exs: AC1×2, AC2×1, AC4×2)
+# [bug-fix-element-login] 2026-06-25T17:00Z pipeline started (--bug: SSO login fails — @base_scopes includes profile email which innoq OIDC client rejects; offline→M_UNKNOWN/state, online→M_FORBIDDEN/verify; fix: reduce base to openid only)
+# [bug-redirect-jwks] 2026-06-25T16:50Z committed ✓ (ATDD+Code 1 MINOR fixed+Kassandra 1 HIGH fixed SSRF scheme guard+2 MED advisory)
+# [bug-redirect-jwks] 2026-06-25T16:40Z security-review → Kassandra 0 CRIT, 1 HIGH fixed (scheme validation), 2 MED advisory (seam-prod-guard, OidcPlug fail-closed confirmed), 1 LOW advisory (server_name format)
+# [bug-redirect-jwks] 2026-06-25T16:30Z code-review → 3 MINOR (1 fixed: discover:error not ok[]; 2 accepted: seam-prod-guard consistent-pattern; server_name single-domain-design); CLEAN
+# [bug-redirect-jwks] 2026-06-25T16:20Z dev-story → done (cycle 0): JwksCache discover_jwks_uri_and_fetch + jwks_http_fetcher seam; Admin.Auth derive_admin_redirect_uri/0; runtime.exs nil default
+# [bug-redirect-jwks] 2026-06-25T16:10Z test-review → 3 MAJOR (JWKS seam contract, dead counter, runtime.exs not testable → extract derivation fn); dev-story to address
+# [bug-redirect-jwks] 2026-06-25T16:05Z atdd → 3 failing tests (jwks_cache_test.exs + admin_redirect_uri_test.exs)
+# [bug-redirect-jwks] 2026-06-25T16:00Z pipeline started (--bug: 1) JwksCache requires explicit JWKS URI — should auto-detect from .well-known; 2) admin callback URL hardcoded localhost:8008 — should derive from NEBU_SERVER_NAME + scheme)
 # [admin-http-refactor] 2026-06-25T15:50Z committed ✓ 51eb9b0a (ATDD+Code 2 cycles CLEAN+Kassandra CLEAN; 851/854)
 # [admin-http-refactor] 2026-06-25T15:45Z arc42-update → done (04,05,06,07,08,09-decisions)
 # [admin-http-refactor] 2026-06-25T15:30Z security-review → Kassandra CLEAN (0 CRIT/HIGH, 2 LOW advisory)
@@ -151,4 +173,4 @@ current_step: null
 completed: []
 cycle_count: 0
 blocked_reason: null
-last_updated: "2026-06-25T09:27Z"
+last_updated: "2026-06-25T13:19Z"

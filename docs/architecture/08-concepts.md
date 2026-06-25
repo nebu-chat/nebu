@@ -109,9 +109,10 @@ permanently disabled after the first admin setup. No default password, no insecu
 
 **Configurable OIDC Extra Scopes (Bug 5-30 + Bug 5-31):**
 
-The OIDC authorization request scope list is configurable per deployment. The standard base scopes
-`openid profile email` are always requested. Additional scopes (e.g. `groups offline_access` for Dex)
-are appended at runtime. Two flows use this mechanism with different precedence chains:
+The OIDC authorization request scope list is configurable per deployment. The standard base scope
+is `openid` only (`offline_access` is appended when Matrix refresh mode is "offline"). `profile` and
+`email` are opt-in extras — not requested by default. Additional scopes are appended at runtime via
+`NEBU_OIDC_EXTRA_SCOPES` (e.g. `profile email groups`). Two flows use this mechanism:
 
 **Admin auth flow (Bug 5-30) — two-level precedence, live DB override:**
 
@@ -126,18 +127,15 @@ An operator can override the env var default by inserting the `oidc_extra_scopes
 `server_config` via the Bootstrap Wizard or direct DB update — the DB value takes unconditional
 precedence without a gateway restart.
 
-**Matrix SSO flow (Bug 5-31) — startup-only, env var only:**
+**Matrix SSO flow (Bug 5-31) — live Application env, no restart required:**
 
-`GetSSORedirect` and `GetSSOCallback` also request configurable extra scopes, but the Matrix SSO
-flow has **no live DB override**. The scope list is resolved once at gateway startup:
+`GET /_matrix/client/v3/login/sso/redirect` (and the callback) also request configurable extra
+scopes via `Nebu.Matrix.SsoLogin.scope_list/0`. The Elixir implementation reads configuration
+live on every login-start request — no gateway restart is needed to pick up changes:
 
-1. **`NEBU_OIDC_EXTRA_SCOPES` env var** — read by `config.Load()` via `strings.Fields()` (whitespace-split).
-2. Passed as `Config.OIDCExtraScopes → LoginConfig.ExtraScopes → LoginHandler.extraScopes`.
-3. Applied by `buildSSOScopeList(extra []string) []string` in `sso.go` — deduplicates against `[openid, profile, email]` before appending.
-
-A gateway restart is required to pick up env-var changes for the SSO flow. The `buildSSOScopeList`
-helper in `sso.go` is intentionally parallel to `buildScopeList` in `admin/auth.go` — they cannot
-be unified without creating a circular import between packages.
+1. **Base scope** — always `openid` only (`profile` and `email` are opt-in, not in the base).
+2. **`NEBU_OIDC_EXTRA_SCOPES` env var** — read via `Application.get_env(:nebu_http, :oidc_extra_scopes)` (set from `runtime.exs`); appended after deduplication.
+3. **`offline_access`** — appended when the Matrix OIDC refresh mode is `"offline"`; the mode is read live from `server_config` per login-start request via the injectable `:matrix_oidc_refresh_mode_reader` seam (default = DB lookup). No restart required for mode changes.
 
 **OIDC Client Credential Source Hierarchy (bugfix-sso-bootstrap-credentials):**
 

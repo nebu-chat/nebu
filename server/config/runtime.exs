@@ -50,8 +50,8 @@ if config_env() in [:prod, :dev] do
   # OIDC client credentials to exchange the authorization code. Source of record is
   # the Bootstrap DB (server_config.oidc_client_id/secret); these env values are the
   # fallback (bfd4884f parity). The Matrix client_id falls back to the shared
-  # NEBU_OIDC_CLIENT_ID. NEBU_OIDC_EXTRA_SCOPES (53904df6) are appended to the base
-  # openid/profile/email/offline_access scope list.
+  # NEBU_OIDC_CLIENT_ID. NEBU_OIDC_EXTRA_SCOPES (53904df6) are appended to the
+  # openid[/offline_access] base scope list (e.g. profile email).
   matrix_oidc_client_secret =
     case System.get_env("NEBU_OIDC_CLIENT_SECRET_FILE") do
       nil -> System.get_env("NEBU_OIDC_CLIENT_SECRET", "")
