@@ -8,7 +8,10 @@
 #   _bmad-output/nebu/epics/<epic-name>/pipeline-state.yaml
 # This file is no longer used for named-epic pipeline runs.
 #
-# last_updated: 2026-06-23
+# last_updated: 2026-06-25
+# [bug-bootstrap-nav-and-ws-proxy] 2026-06-25T09:25Z dev-story → done (cycle 0): layouts.ex nav guard + app.js longPollFallbackMs
+# [bug-bootstrap-nav-and-ws-proxy] 2026-06-25T09:15Z atdd → 3 failing tests (nav-hidden + bootstrap-shown + longPollFallbackMs)
+# [bug-bootstrap-nav-and-ws-proxy] 2026-06-25T09:00Z pipeline started (--bug: 1) bootstrap nav shows non-bootstrap items during wizard; 2) Next button unclickable due to WS WebSocket blocked by Stackit Nginx proxy — LiveSocket needs longPollFallbackMs)
 # [bug-audit-writer-async-race] 2026-06-23T11:41Z committed ✓ edef9af5 (async:false fix + structural guard; unit 791/0 multi-seed; code-review CLEAN, sec n/a)
 # [bug-audit-writer-async-race] 2026-06-23T11:41Z code-review → MINOR-fixed (stale comment) → CLEAN; security-review skipped (test-only, no sec surface); arc42 → no arch change
 # [bug-audit-writer-async-race] 2026-06-23T11:36Z ci-gate → ✓ unit 791/0 across seeds 0/747557/1/42 (--warnings-as-errors); flake gone
@@ -117,9 +120,12 @@
 # [5-30] 2026-05-24T19:49Z atdd → 4 failing tests (auth_extra_scopes_test.go)
 # [5-30] 2026-05-24T19:38Z pipeline started (story pre-created)
 
-story: null
-current_step: null
-completed: []
+story: "bug-bootstrap-nav-and-ws-proxy"
+current_step: "ci-gate"
+completed:
+  - atdd
+  - test-review
+  - dev-story
 cycle_count: 0
 blocked_reason: null
-last_updated: "2026-06-23T11:41Z"
+last_updated: "2026-06-25T06:05Z"
