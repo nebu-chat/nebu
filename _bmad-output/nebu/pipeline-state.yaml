@@ -9,6 +9,13 @@
 # This file is no longer used for named-epic pipeline runs.
 #
 # last_updated: 2026-06-25
+# [bug-oidc-login-keycloak] 2026-06-25T14:30Z committed ✓ (ATDD+Code CLEAN, Kassandra 1 MED advisory accepted)
+# [bug-oidc-login-keycloak] 2026-06-25T14:28Z security-review → Kassandra CLEAN (0 CRIT/HIGH; 1 MED advisory: seam guard consistent with pre-existing pattern)
+# [bug-oidc-login-keycloak] 2026-06-25T14:22Z code-review → MAJOR-1 accepted (seam-prod-guard advisory, consistent with all other seams); MAJOR-2 fixed (AC4 admin-env fallback test added); 878/0 clean
+# [bug-oidc-login-keycloak] 2026-06-25T14:18Z ci-gate → ✓ unit-elixir 877/0 (--warnings-as-errors clean)
+# [bug-oidc-login-keycloak] 2026-06-25T14:15Z dev-story → done (cycle 0): resolve_client_credentials reads oidc_client_secret+decrypt; sso_bootstrap_reader seam; 1-arity matrix_sso_token_override; 877/0
+# [bug-oidc-login-keycloak] 2026-06-25T14:10Z atdd → 3 failing regression tests (sso_login_bootstrap_credentials_test.exs: AC1×1, AC3×1, guard×1)
+# [bug-oidc-login-keycloak] 2026-06-25T14:00Z pipeline started (--bug: Matrix SSO callback fails against Keycloak — {:token_endpoint_status, 401}; Bootstrap DB path reads oidc_client_secret_decrypted (non-existent key) → empty secret; fix: read oidc_client_secret + decrypt)
 # [bug-fix-element-login] 2026-06-25T18:05Z committed ✓ (ATDD+Code 2 cycles CLEAN+Kassandra CLEAN 2 LOW advisory)
 # [bug-fix-element-login] 2026-06-25T18:00Z arc42-update → docs/08-concepts.md already updated in cycle 1 (MINOR-8)
 # [bug-fix-element-login] 2026-06-25T17:55Z security-review → Kassandra CLEAN (0 CRIT/HIGH/MED, 2 LOW advisory: PII in log msg; pre-existing client-secret interpolation)
@@ -173,4 +180,4 @@ current_step: null
 completed: []
 cycle_count: 0
 blocked_reason: null
-last_updated: "2026-06-25T13:19Z"
+last_updated: "2026-06-25T14:11Z"

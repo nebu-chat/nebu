@@ -280,7 +280,8 @@ defmodule Nebu.Matrix.SsoLogin do
         {matrix_id, Application.get_env(:nebu_http, :matrix_oidc_client_secret, "")}
 
       is_binary(bootstrap_id) and bootstrap_id != "" ->
-        {bootstrap_id, config_value("oidc_client_secret_decrypted") || ""}
+        encrypted = config_value("oidc_client_secret") || ""
+        {bootstrap_id, Nebu.Admin.BootstrapLive.decrypt_secret(encrypted)}
 
       true ->
         {Application.get_env(:nebu_http, :admin_oidc_client_id),
@@ -290,14 +291,24 @@ defmodule Nebu.Matrix.SsoLogin do
 
   @sql_config "SELECT value FROM server_config WHERE key = $1 LIMIT 1"
 
+  # Test seam: :sso_bootstrap_reader is a 1-arity fun `fn(key) -> value | nil`.
+  # When set, it replaces the live Repo query for server_config lookups — allows
+  # tests to inject Bootstrap DB values (encrypted oidc_client_secret, oidc_client_id)
+  # without a live PostgreSQL connection. Mirrors the :admin_bootstrap_store seam.
   defp config_value(key) do
-    if running?(Nebu.Repo) do
-      case Ecto.Adapters.SQL.query(Nebu.Repo, @sql_config, [key]) do
-        {:ok, %{rows: [[value]]}} when is_binary(value) and value != "" -> value
-        _ -> nil
-      end
-    else
-      nil
+    case Application.get_env(:nebu_http, :sso_bootstrap_reader) do
+      fun when is_function(fun, 1) ->
+        fun.(key)
+
+      _ ->
+        if running?(Nebu.Repo) do
+          case Ecto.Adapters.SQL.query(Nebu.Repo, @sql_config, [key]) do
+            {:ok, %{rows: [[value]]}} when is_binary(value) and value != "" -> value
+            _ -> nil
+          end
+        else
+          nil
+        end
     end
   end
 
@@ -357,17 +368,27 @@ defmodule Nebu.Matrix.SsoLogin do
 
   # ── token exchange (PKCE + Basic auth) — mirrors Nebu.Admin.Auth.exchange_code ─
 
-  # Test seam: :matrix_sso_token_override is a 0-arity fun. It returns either the
-  # oidc-session-refresh 3-tuple {:ok, id_token, oidc_refresh_token} or the legacy
-  # 2-tuple {:ok, id_token} (or {:error, _}), short-circuiting the HTTP+discovery
-  # leg (every surrounding check — state, nonce, verify — still runs). Mirrors the
-  # admin :admin_oidc_token_override. Normalised to a 3-tuple here so callers have
-  # one shape.
+  # Test seam: :matrix_sso_token_override accepts two forms:
+  #
+  #   - 0-arity `fn()` — legacy form. Returns {:ok, id_token[, oidc_refresh_token]}
+  #     or {:error, _}, short-circuiting the HTTP+discovery leg. Existing tests use
+  #     this form. Mirrors :admin_oidc_token_override.
+  #
+  #   - 1-arity `fn(cfg)` — credential-spy form (bugfix/oidc-login-keycloak). Receives
+  #     the resolved OIDC config map (contains :client_id, :client_secret) so tests can
+  #     assert on what credentials were actually resolved from the Bootstrap DB path.
+  #     Returns the same shape as the 0-arity form.
+  #
+  # Every surrounding check — state, nonce, verify — still runs in both forms.
+  # Normalised to a 3-tuple by normalize_exchange/1.
   defp exchange(conn, code, verifier, cfg) do
     result =
       case Application.get_env(:nebu_http, :matrix_sso_token_override) do
         fun when is_function(fun, 0) ->
           fun.()
+
+        fun when is_function(fun, 1) ->
+          fun.(cfg)
 
         _ ->
           with {:ok, token_endpoint} <- discover(cfg.issuer, "token_endpoint") do
