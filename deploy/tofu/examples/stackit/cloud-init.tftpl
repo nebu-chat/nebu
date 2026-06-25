@@ -448,8 +448,8 @@ write_files:
           secrets: [internal_secret]
 %{ endif ~}
           environment:
-            NEBU_DB_URL: "postgresql://${pg_user}:${pg_password}@${pg_host}:${pg_port}/nebu"
-            NEBU_DB_URL_MIGRATE: "postgresql://${pg_migrate_user}:${pg_migrate_password}@${pg_host}:${pg_port}/nebu"
+            NEBU_DB_URL: "postgresql://${pg_user}:${pg_password}@${pg_host}:${pg_port}/nebu?sslmode=require"
+            NEBU_DB_URL_MIGRATE: "postgresql://${pg_migrate_user}:${pg_migrate_password}@${pg_host}:${pg_port}/nebu?sslmode=require"
             NEBU_POSTGRES_SSL: "true"
             NEBU_INTERNAL_SECRET_FILE: "/run/secrets/internal_secret"
             NEBU_SERVER_NAME: $${NEBU_SERVER_NAME}
@@ -485,7 +485,7 @@ write_files:
 %{ if enable_element_web ~}
 
         element:
-          image: vectorim/element-web:v1.12.15
+          image: vectorim/element-web:v1.12.22
           restart: unless-stopped
           volumes:
             - /opt/nebu/element-config.json:/app/config.json:ro

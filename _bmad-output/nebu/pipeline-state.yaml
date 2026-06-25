@@ -9,6 +9,9 @@
 # This file is no longer used for named-epic pipeline runs.
 #
 # last_updated: 2026-06-25
+# [bug-element-key-gen-apis] 2026-06-25T15:00Z pipeline started (--bug: Element asks for key generation after login — 404 on m.cross_signing.master, dehydrated_device, version endpoints; 504 on /sync)
+# [bug-oidc-issuer-no-db-fallback] 2026-06-25T14:40Z committed ✓ (ATDD+Code CLEAN; 882/0)
+# [bug-oidc-issuer-no-db-fallback] 2026-06-25T14:35Z pipeline started (--bug: sso_login.oidc_config/0 reads issuer only from Application env, not Bootstrap DB; without NEBU_OIDC_ISSUER env var SSO redirect fails 503; fix: use Nebu.Web.OidcConfig.get().issuer as fallback, mirrors OidcPlug.oidc_issuer/0)
 # [bug-oidc-login-keycloak] 2026-06-25T14:30Z committed ✓ (ATDD+Code CLEAN, Kassandra 1 MED advisory accepted)
 # [bug-oidc-login-keycloak] 2026-06-25T14:28Z security-review → Kassandra CLEAN (0 CRIT/HIGH; 1 MED advisory: seam guard consistent with pre-existing pattern)
 # [bug-oidc-login-keycloak] 2026-06-25T14:22Z code-review → MAJOR-1 accepted (seam-prod-guard advisory, consistent with all other seams); MAJOR-2 fixed (AC4 admin-env fallback test added); 878/0 clean
@@ -175,9 +178,9 @@
 # [5-30] 2026-05-24T19:49Z atdd → 4 failing tests (auth_extra_scopes_test.go)
 # [5-30] 2026-05-24T19:38Z pipeline started (story pre-created)
 
-story: null
-current_step: null
+story: "bug-element-key-gen-apis"
+current_step: "oracle-gate"
 completed: []
 cycle_count: 0
 blocked_reason: null
-last_updated: "2026-06-25T14:11Z"
+last_updated: "2026-06-25T15:26Z"

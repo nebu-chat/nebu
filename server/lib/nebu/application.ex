@@ -30,6 +30,7 @@ defmodule Nebu.Application do
     #    under concurrent first requests (security re-review R-2). ──
     Nebu.Web.TokenDenylist.init_table()
     Nebu.Web.Plugs.RateLimit.init_table()
+    Nebu.Matrix.AccountDataStore.init_table()
 
     # ── :pg scope for room/presence process-group broadcast (ADR-002/005). ──
     case :pg.start_link() do

@@ -118,6 +118,54 @@ defmodule Nebu.Web.MatrixClientCompatTest do
   describe "auth gate on the client-compat endpoints — no DB" do
     @room URI.encode_www_form("!any:test.local")
 
+    # ── NEW: Element startup-phase endpoints (AC 1–6) ─────────────────────
+    # These six endpoints are not yet implemented (routes missing in Protected).
+    # The auth gate tests verify OidcPlug rejects unauthenticated requests with
+    # 401 M_MISSING_TOKEN BEFORE any route handler runs. They will pass only
+    # once the routes exist in the Protected router and OidcPlug is wired up.
+
+    # AC 1 — thirdparty/protocols
+    test "GET /thirdparty/protocols with NO Bearer → 401 M_MISSING_TOKEN" do
+      conn = call(:get, "/_matrix/client/v3/thirdparty/protocols")
+      assert conn.status == 401
+      assert json(conn)["errcode"] == "M_MISSING_TOKEN"
+    end
+
+    # AC 2 — voip/turnServer
+    test "GET /voip/turnServer with NO Bearer → 401 M_MISSING_TOKEN" do
+      conn = call(:get, "/_matrix/client/v3/voip/turnServer")
+      assert conn.status == 401
+      assert json(conn)["errcode"] == "M_MISSING_TOKEN"
+    end
+
+    # AC 3 — room_keys/version
+    test "GET /room_keys/version with NO Bearer → 401 M_MISSING_TOKEN" do
+      conn = call(:get, "/_matrix/client/v3/room_keys/version")
+      assert conn.status == 401
+      assert json(conn)["errcode"] == "M_MISSING_TOKEN"
+    end
+
+    # AC 4 — MSC3814 dehydrated_device
+    test "GET /unstable/org.matrix.msc3814.v1/dehydrated_device with NO Bearer → 401 M_MISSING_TOKEN" do
+      conn = call(:get, "/_matrix/client/unstable/org.matrix.msc3814.v1/dehydrated_device")
+      assert conn.status == 401
+      assert json(conn)["errcode"] == "M_MISSING_TOKEN"
+    end
+
+    # AC 5 — MSC4143 rtc/transports
+    test "GET /unstable/org.matrix.msc4143/rtc/transports with NO Bearer → 401 M_MISSING_TOKEN" do
+      conn = call(:get, "/_matrix/client/unstable/org.matrix.msc4143/rtc/transports")
+      assert conn.status == 401
+      assert json(conn)["errcode"] == "M_MISSING_TOKEN"
+    end
+
+    # AC 6 — keys/device_signing/upload
+    test "POST /keys/device_signing/upload with NO Bearer → 401 M_MISSING_TOKEN" do
+      conn = call(:post, "/_matrix/client/v3/keys/device_signing/upload", %{})
+      assert conn.status == 401
+      assert json(conn)["errcode"] == "M_MISSING_TOKEN"
+    end
+
     test "GET /account/whoami with NO Bearer → 401 M_MISSING_TOKEN" do
       conn = call(:get, "/_matrix/client/v3/account/whoami")
       assert conn.status == 401
@@ -168,6 +216,13 @@ defmodule Nebu.Web.MatrixClientCompatTest do
 
     test "PUT /user/{userId}/account_data/{type} with NO Bearer → 401 M_MISSING_TOKEN" do
       conn = call(:put, "/_matrix/client/v3/user/@x:test.local/account_data/m.breadcrumbs", %{})
+      assert conn.status == 401
+      assert json(conn)["errcode"] == "M_MISSING_TOKEN"
+    end
+
+    # AC4 (auth gate) — GET account_data also sits on the Protected pipeline
+    test "GET /user/{userId}/account_data/{type} with NO Bearer → 401 M_MISSING_TOKEN" do
+      conn = call(:get, "/_matrix/client/v3/user/%40alice%3Atest.local/account_data/m.secret_storage.default_key")
       assert conn.status == 401
       assert json(conn)["errcode"] == "M_MISSING_TOKEN"
     end
@@ -283,6 +338,388 @@ defmodule Nebu.Web.MatrixClientCompatTest do
 
       assert conn.status == 200
       assert json(conn) == %{}
+    end
+
+    # ── NEW: Element startup-phase endpoints (AC 1–6) ─────────────────────
+    # These six tests will FAIL until the routes are added to Protected and
+    # the handlers return the spec-mandated bodies. Each test describes the
+    # exact contract the implementation must satisfy.
+
+    # AC 1 — thirdparty/protocols: 200 with empty object (no protocols)
+    test "GET /thirdparty/protocols with valid Bearer → 200 {}", %{token: token} do
+      conn = call(:get, "/_matrix/client/v3/thirdparty/protocols", nil, auth(token))
+      assert conn.status == 200
+      assert json(conn) == %{}
+    end
+
+    # AC 2 — voip/turnServer: 404 M_NOT_FOUND (no TURN server configured)
+    test "GET /voip/turnServer with valid Bearer → 404 M_NOT_FOUND", %{token: token} do
+      conn = call(:get, "/_matrix/client/v3/voip/turnServer", nil, auth(token))
+      assert conn.status == 404
+      body = json(conn)
+      assert body["errcode"] == "M_NOT_FOUND"
+      assert body["error"] == "No TURN server configured"
+    end
+
+    # AC 3 — room_keys/version: 404 M_NOT_FOUND (no backup found)
+    test "GET /room_keys/version with valid Bearer → 404 M_NOT_FOUND", %{token: token} do
+      conn = call(:get, "/_matrix/client/v3/room_keys/version", nil, auth(token))
+      assert conn.status == 404
+      body = json(conn)
+      assert body["errcode"] == "M_NOT_FOUND"
+      assert body["error"] == "No backup found"
+    end
+
+    # AC 4 — MSC3814 dehydrated_device: 404 M_NOT_FOUND (no dehydrated device)
+    test "GET /unstable/msc3814 dehydrated_device with valid Bearer → 404 M_NOT_FOUND", %{token: token} do
+      conn = call(:get, "/_matrix/client/unstable/org.matrix.msc3814.v1/dehydrated_device", nil, auth(token))
+      assert conn.status == 404
+      body = json(conn)
+      assert body["errcode"] == "M_NOT_FOUND"
+      assert body["error"] == "No dehydrated device found"
+    end
+
+    # AC 5 — MSC4143 rtc/transports: 404 M_NOT_FOUND (no RTC transports)
+    test "GET /unstable/msc4143 rtc/transports with valid Bearer → 404 M_NOT_FOUND", %{token: token} do
+      conn = call(:get, "/_matrix/client/unstable/org.matrix.msc4143/rtc/transports", nil, auth(token))
+      assert conn.status == 404
+      body = json(conn)
+      assert body["errcode"] == "M_NOT_FOUND"
+      assert body["error"] == "No RTC transports"
+    end
+
+    # AC 6 — keys/device_signing/upload: 200 {} (accept and acknowledge, no-op)
+    test "POST /keys/device_signing/upload with valid Bearer → 200 {}", %{token: token} do
+      conn = call(:post, "/_matrix/client/v3/keys/device_signing/upload", %{}, auth(token))
+      assert conn.status == 200
+      assert json(conn) == %{}
+    end
+  end
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # account_data ETS store — no DB
+  #
+  # These tests cover AC2–AC6 for the GET /user/{userId}/account_data/{type}
+  # endpoint and the ETS-backed PUT+GET round-trip:
+  #
+  #   AC1 — PUT stores body and returns 200 {}
+  #   AC2 — GET reads from ETS and returns 200 <stored body>
+  #   AC3 — GET returns 404 M_NOT_FOUND when no data was stored
+  #   AC4 — OidcPlug enforces auth (tested in auth-gate describe above)
+  #   AC5 — data survives multiple PUT-then-GET round trips (overwrite)
+  #   AC6 — no regression: existing PUT still returns 200 {}
+  #
+  # All tests in this block are RED until:
+  #   1. Nebu.Matrix.AccountDataStore (ETS) is implemented
+  #   2. GET /client/v3/user/:user_id/account_data/:type is wired in protected.ex
+  #   3. PUT /client/v3/user/:user_id/account_data/:type writes to ETS
+  # ══════════════════════════════════════════════════════════════════════════
+
+  describe "account_data ETS store — no DB" do
+    setup do
+      priv = setup_oidc_keys()
+      {uid_alice, token_alice} = bearer_for("alice", priv)
+      {uid_bob, token_bob} = bearer_for("bob", priv)
+      {:ok, user_id: uid_alice, token: token_alice, other_user_id: uid_bob, other_token: token_bob}
+    end
+
+    # AC3 — GET returns 404 M_NOT_FOUND when no data was stored for the type
+    test "GET account_data for unseen type → 404 M_NOT_FOUND", %{user_id: uid, token: token} do
+      type = "m.test.account.data.#{:erlang.unique_integer([:positive])}"
+
+      conn =
+        call(
+          :get,
+          "/_matrix/client/v3/user/#{URI.encode_www_form(uid)}/account_data/#{type}",
+          nil,
+          auth(token)
+        )
+
+      assert conn.status == 404
+      body = json(conn)
+      assert body["errcode"] == "M_NOT_FOUND"
+      assert body["error"] == "Account data not found"
+    end
+
+    # AC2 — PUT stores body in ETS; GET reads it back unchanged (round-trip)
+    test "PUT then GET round-trip → GET returns exactly the stored body", %{user_id: uid, token: token} do
+      type = "m.test.account.data.#{:erlang.unique_integer([:positive])}"
+      stored_body = %{"algorithm" => "m.secret_storage.v1.aes-hmac-sha2", "iv" => "abc123"}
+
+      put_conn =
+        call(
+          :put,
+          "/_matrix/client/v3/user/#{URI.encode_www_form(uid)}/account_data/#{type}",
+          stored_body,
+          auth(token)
+        )
+
+      assert put_conn.status == 200
+      assert json(put_conn) == %{}
+
+      get_conn =
+        call(
+          :get,
+          "/_matrix/client/v3/user/#{URI.encode_www_form(uid)}/account_data/#{type}",
+          nil,
+          auth(token)
+        )
+
+      assert get_conn.status == 200
+      assert json(get_conn) == stored_body
+    end
+
+    # AC4 (Oracle) — user isolation / IDOR guard: Alice's data is NOT readable by Bob
+    test "GET another user's account_data → 403 M_FORBIDDEN", %{
+      user_id: uid_alice,
+      token: token_alice,
+      other_user_id: _uid_bob,
+      other_token: token_bob
+    } do
+      type = "m.test.account.data.#{:erlang.unique_integer([:positive])}"
+      alice_body = %{"keys" => %{"ed25519:abc" => "ALICEKEY"}}
+
+      # Alice stores her own data
+      put_conn =
+        call(
+          :put,
+          "/_matrix/client/v3/user/#{URI.encode_www_form(uid_alice)}/account_data/#{type}",
+          alice_body,
+          auth(token_alice)
+        )
+
+      assert put_conn.status == 200
+
+      # Bob attempts to read Alice's account_data → must be rejected
+      get_conn =
+        call(
+          :get,
+          "/_matrix/client/v3/user/#{URI.encode_www_form(uid_alice)}/account_data/#{type}",
+          nil,
+          auth(token_bob)
+        )
+
+      assert get_conn.status == 403
+      assert json(get_conn)["errcode"] == "M_FORBIDDEN"
+
+      # Alice CAN read her own data (same type she just stored)
+      own_get =
+        call(
+          :get,
+          "/_matrix/client/v3/user/#{URI.encode_www_form(uid_alice)}/account_data/#{type}",
+          nil,
+          auth(token_alice)
+        )
+
+      assert own_get.status == 200
+      assert json(own_get) == alice_body
+    end
+
+    # AC4 (Oracle) — user isolation / IDOR guard: Alice CANNOT write Bob's account_data (PUT IDOR)
+    test "PUT another user's account_data → 403 M_FORBIDDEN", %{
+      user_id: _uid_alice,
+      token: token_alice,
+      other_user_id: uid_bob,
+      other_token: _token_bob
+    } do
+      type = "m.test.account.data.#{:erlang.unique_integer([:positive])}"
+      malicious_body = %{"injected" => "by_alice"}
+
+      # Alice attempts to write to Bob's account_data path → must be rejected
+      put_conn =
+        call(
+          :put,
+          "/_matrix/client/v3/user/#{URI.encode_www_form(uid_bob)}/account_data/#{type}",
+          malicious_body,
+          auth(token_alice)
+        )
+
+      assert put_conn.status == 403
+      assert json(put_conn)["errcode"] == "M_FORBIDDEN"
+    end
+
+    # AC5 — data survives multiple PUT-then-GET round trips; second PUT overwrites first
+    test "second PUT overwrites first; GET returns latest body", %{user_id: uid, token: token} do
+      type = "m.test.account.data.#{:erlang.unique_integer([:positive])}"
+      body_v1 = %{"recent_rooms" => ["!roomA:test.local"]}
+      body_v2 = %{"recent_rooms" => ["!roomB:test.local", "!roomA:test.local"]}
+
+      # First PUT
+      put1 =
+        call(
+          :put,
+          "/_matrix/client/v3/user/#{URI.encode_www_form(uid)}/account_data/#{type}",
+          body_v1,
+          auth(token)
+        )
+
+      assert put1.status == 200
+
+      # Second PUT (overwrite)
+      put2 =
+        call(
+          :put,
+          "/_matrix/client/v3/user/#{URI.encode_www_form(uid)}/account_data/#{type}",
+          body_v2,
+          auth(token)
+        )
+
+      assert put2.status == 200
+
+      # GET returns the most recently stored body
+      get_conn =
+        call(
+          :get,
+          "/_matrix/client/v3/user/#{URI.encode_www_form(uid)}/account_data/#{type}",
+          nil,
+          auth(token)
+        )
+
+      assert get_conn.status == 200
+      assert json(get_conn) == body_v2
+    end
+
+    # AC6 — regression: PUT still returns 200 {} (existing behaviour must not break)
+    test "PUT account_data → 200 {} (regression: existing PUT contract intact)", %{user_id: uid, token: token} do
+      type = "m.test.account.data.#{:erlang.unique_integer([:positive])}"
+
+      conn =
+        call(
+          :put,
+          "/_matrix/client/v3/user/#{URI.encode_www_form(uid)}/account_data/#{type}",
+          %{"recent_rooms" => []},
+          auth(token)
+        )
+
+      assert conn.status == 200
+      assert json(conn) == %{}
+    end
+  end
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # sync timeout — AC4: parse_timeout/1 must cap at 25_000ms, not 30_000ms.
+  # These are pure unit tests — no DB, no auth, just the parser function.
+  # RED until parse_timeout is promoted from defp to def AND the cap changes
+  # from min(30_000) to min(25_000) in protected.ex.
+  # Note: server.ex line ~2365 also has min(30_000) — both must be changed to
+  # min(25_000). The server.ex clamp is defense-in-depth for internal callers;
+  # HTTP path always goes through parse_timeout first, so the protected.ex cap
+  # is what governs client requests. Both changes verified in code review diff.
+  # ══════════════════════════════════════════════════════════════════════════
+
+  describe "parse_timeout/1 — server-enforced cap at 25_000ms (AC4)" do
+    # parse_timeout/1 must be promoted from defp to def for these to compile.
+    # This visibility promotion is itself part of the AC4 implementation.
+
+    test "values at or above 25_000 are clamped to 25_000" do
+      alias Nebu.Web.Router.Protected
+
+      assert Protected.parse_timeout("25000") == 25_000
+      assert Protected.parse_timeout("30000") == 25_000
+      assert Protected.parse_timeout("60000") == 25_000
+      assert Protected.parse_timeout("999999") == 25_000
+    end
+
+    test "values below 25_000 are passed through" do
+      alias Nebu.Web.Router.Protected
+
+      assert Protected.parse_timeout("0") == 0
+      assert Protected.parse_timeout("100") == 100
+      assert Protected.parse_timeout("10000") == 10_000
+      assert Protected.parse_timeout("24999") == 24_999
+    end
+
+    test "nil returns 0" do
+      assert Nebu.Web.Router.Protected.parse_timeout(nil) == 0
+    end
+
+    test "non-integer string returns 0" do
+      assert Nebu.Web.Router.Protected.parse_timeout("abc") == 0
+    end
+  end
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # sync timeout — AC3: short-timeout long-poll returns promptly (exercises
+  # both the protected.ex parse_timeout cap AND the server.ex clamp, since
+  # get_sync_delta is the code path activated by a ?since= request).
+  # AC2: initial sync with 5 rooms must complete quickly (Task.async_stream
+  # parallelism). The 5-room test with a 3s timing bound can only pass if
+  # the fetch is concurrent; sequential fetching at typical GenServer latency
+  # would breach the bound.
+  # INTEGRATION — requires live OTP tree + DB.
+  # ══════════════════════════════════════════════════════════════════════════
+
+  describe "GET /sync — timeout behaviour and initial snapshot (AC2, AC3)" do
+    @describetag :integration
+
+    setup do
+      priv = setup_oidc_keys()
+      uid_suffix = :erlang.unique_integer([:positive])
+      {uid, token} = bearer_for("sync-timeout-user-#{uid_suffix}", priv)
+
+      if Process.whereis(Nebu.Repo) do
+        _ = Nebu.Matrix.Session.TokenValidator.validate(uid, "user", "SyncUser", "sync@example.com")
+        _ = Nebu.Matrix.Profile.DB.upsert_profile(uid, "SyncUser", nil)
+      end
+
+      {:ok, user_id: uid, token: token}
+    end
+
+    defp create_sync_room(token, name) do
+      conn = call(:post, "/_matrix/client/v3/createRoom", %{"name" => name}, auth(token))
+      assert conn.status == 200, "createRoom must succeed"
+      json(conn)["room_id"]
+    end
+
+    test "initial sync with 5 rooms returns correct shape within 3s (AC2)", %{token: token} do
+      # 5 rooms to expose sequential-vs-parallel difference: sequential at ~200ms/room
+      # would take ~1s; parallel should complete in ~200ms regardless of room count.
+      # The 3s bound is generous enough to avoid flap on slow CI, tight enough to
+      # catch a regression back to sequential fetching.
+      for i <- 1..5, do: create_sync_room(token, "sync-par-room-#{i}")
+
+      t0 = System.monotonic_time(:millisecond)
+      conn = call(:get, "/_matrix/client/v3/sync", nil, auth(token))
+      elapsed = System.monotonic_time(:millisecond) - t0
+
+      assert conn.status == 200
+      body = json(conn)
+      assert is_binary(body["next_batch"]), "next_batch must be a binary token"
+      assert is_map(body["rooms"]), "rooms must be a map"
+      assert is_map(body["rooms"]["join"]), "rooms.join must be a map"
+      joined_ids = Map.keys(body["rooms"]["join"])
+      assert length(joined_ids) >= 5, "all 5 created rooms must appear in joined rooms"
+
+      Enum.each(joined_ids, fn room_id ->
+        room = body["rooms"]["join"][room_id]
+        # Actual shape from Nebu.Matrix.Http.sync_response/2: state and timeline
+        # are maps with an "events" list, not plain lists (INFO-1 fix).
+        assert is_list(room["state"]["events"]), "room #{room_id} state.events must be a list"
+        assert is_list(room["timeline"]["events"]), "room #{room_id} timeline.events must be a list"
+      end)
+
+      assert elapsed < 3000, "initial sync with 5 rooms took #{elapsed}ms — should be < 3000ms with parallel fetch"
+    end
+
+    test "incremental sync with timeout=500 returns within 1500ms (AC3)", %{token: token} do
+      # This test exercises the server.ex get_sync_delta code path (activated by ?since=).
+      # With the cap change, ?since + ?timeout=500 → server.ex clamp(500, 25_000) = 500
+      # → long-poll returns after 500ms. Margin: 3× (1500ms bound) allows for scheduler
+      # latency on slow CI machines. async: false ensures no parallel test pollution.
+      initial = call(:get, "/_matrix/client/v3/sync", nil, auth(token))
+      assert initial.status == 200
+      since = json(initial)["next_batch"]
+      assert is_binary(since)
+
+      t0 = System.monotonic_time(:millisecond)
+      conn = call(:get, "/_matrix/client/v3/sync?since=#{URI.encode(since)}&timeout=500", nil, auth(token))
+      elapsed = System.monotonic_time(:millisecond) - t0
+
+      assert conn.status == 200
+      body = json(conn)
+      assert is_binary(body["next_batch"]), "next_batch must be present in empty delta"
+      # 3× margin over 500ms timeout: accounts for scheduler overhead + DB latency on CI.
+      assert elapsed < 1500, "sync with timeout=500 took #{elapsed}ms — should be < 1500ms"
     end
   end
 

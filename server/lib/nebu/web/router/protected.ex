@@ -161,9 +161,44 @@ defmodule Nebu.Web.Router.Protected do
   # ── Client startup endpoints (Element compatibility) ───────────────────────
   # A full Matrix client (Element Web) fetches these on startup and BLOCKS on the
   # loading spinner — never reaching /sync — until they answer. Nebu's MVP did not
-  # implement them, so Element hung. Return spec-valid minimal responses. (Optional
-  # endpoints Element tolerates as 404 — room_keys/version, voip/turnServer,
-  # thirdparty/protocols, dehydrated_device, unset account_data — are left unimplemented.)
+  # implement them, so Element hung. Return spec-valid minimal responses.
+
+  # GET /thirdparty/protocols — no third-party protocols supported; return empty object.
+  # Element retries on 404; 200 {} stops the retry loop. (Matrix CS §thirdparty)
+  get "/client/v3/thirdparty/protocols" do
+    send_json(conn, 200, %{})
+  end
+
+  # GET /voip/turnServer — no TURN server configured (optional feature).
+  # Element tolerates 404 M_NOT_FOUND here.
+  get "/client/v3/voip/turnServer" do
+    error(conn, 404, "M_NOT_FOUND", "No TURN server configured")
+  end
+
+  # GET /room_keys/version — no key backup configured. 404 M_NOT_FOUND is the
+  # spec-defined response (Matrix CS §Server-side key backups).
+  get "/client/v3/room_keys/version" do
+    error(conn, 404, "M_NOT_FOUND", "No backup found")
+  end
+
+  # GET MSC3814 dehydrated_device — not in CS API v1.18; unstable proposal only.
+  # Return 404 M_NOT_FOUND — Element accepts this.
+  get "/client/unstable/org.matrix.msc3814.v1/dehydrated_device" do
+    error(conn, 404, "M_NOT_FOUND", "No dehydrated device found")
+  end
+
+  # GET MSC4143 rtc/transports — not in CS API v1.18; unstable proposal only.
+  # Return 404 M_NOT_FOUND — Element accepts this.
+  get "/client/unstable/org.matrix.msc4143/rtc/transports" do
+    error(conn, 404, "M_NOT_FOUND", "No RTC transports")
+  end
+
+  # POST /keys/device_signing/upload — cross-signing key upload stub.
+  # ADR-011: managed E2EE model; accept and acknowledge, no-op store.
+  # Spec 200 response is {} (Matrix CS §Cross-signing, added v1.1).
+  post "/client/v3/keys/device_signing/upload" do
+    send_json(conn, 200, %{})
+  end
 
   # GET /capabilities — advertise supported room versions + which actions are allowed.
   get "/client/v3/capabilities" do
@@ -229,12 +264,41 @@ defmodule Nebu.Web.Router.Protected do
     send_json(conn, 200, %{})
   end
 
-  # GET/PUT /user/{userId}/account_data/{type} — per-user account data. Nebu has no
-  # account-data store yet; GET of unset data is a spec-valid 404 (clients tolerate it),
-  # and PUT is accepted as a no-op so client startup writes (breadcrumbs, recent emoji,
-  # secret-storage bootstrap) don't error out and stall the app.
-  put "/client/v3/user/:_user_id/account_data/:_type" do
-    send_json(conn, 200, %{})
+  # GET/PUT /user/{userId}/account_data/{type} — ETS-backed per-user account data stub.
+  # PUT stores the JSON body; GET reads it back. Volatile (in-memory ETS, lost on restart).
+  # ADR-011: managed E2EE stub; ADR-002: ETS for volatile data.
+  put "/client/v3/user/:user_id/account_data/:type" do
+    authenticated_user = conn.assigns[:current_user]
+    decoded_user = URI.decode_www_form(user_id)
+    decoded_type = URI.decode_www_form(type)
+
+    if decoded_user != authenticated_user do
+      error(conn, 403, "M_FORBIDDEN", "You can only write your own account data")
+    else
+      json_body = Jason.encode!(body_params(conn))
+      Nebu.Matrix.AccountDataStore.put(decoded_user, decoded_type, json_body)
+      send_json(conn, 200, %{})
+    end
+  end
+
+  get "/client/v3/user/:user_id/account_data/:type" do
+    authenticated_user = conn.assigns[:current_user]
+    decoded_user = URI.decode_www_form(user_id)
+    decoded_type = URI.decode_www_form(type)
+
+    if decoded_user != authenticated_user do
+      error(conn, 403, "M_FORBIDDEN", "You can only read your own account data")
+    else
+      case Nebu.Matrix.AccountDataStore.get(decoded_user, decoded_type) do
+        {:ok, json_body} ->
+          conn
+          |> put_resp_content_type("application/json")
+          |> send_resp(200, json_body)
+
+        :error ->
+          error(conn, 404, "M_NOT_FOUND", "Account data not found")
+      end
+    end
   end
 
   # ── POST /_matrix/client/v3/createRoom ────────────────────────────────────
@@ -1031,11 +1095,16 @@ defmodule Nebu.Web.Router.Protected do
     end
   end
 
-  defp parse_timeout(nil), do: 0
+  # Capped at 25_000ms (not 30_000ms) to leave headroom against upstream proxy
+  # timeouts (Stackit ALB backend timeout is typically 60s; 25s hold + overhead
+  # stays comfortably within that window). Promoted to `def` for unit testability.
+  @doc false
+  def parse_timeout(nil), do: 0
 
-  defp parse_timeout(raw) when is_binary(raw) do
+  @doc false
+  def parse_timeout(raw) when is_binary(raw) do
     case Integer.parse(raw) do
-      {v, _} -> v |> max(0) |> min(30_000)
+      {v, _} -> v |> max(0) |> min(25_000)
       :error -> 0
     end
   end
