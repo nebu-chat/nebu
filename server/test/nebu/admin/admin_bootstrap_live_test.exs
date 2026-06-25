@@ -66,9 +66,17 @@ defmodule Nebu.Web.AdminBootstrapLiveTest do
     # Deterministic at-rest key for the client-secret encryption seam (MINOR-3).
     Application.put_env(:nebu_http, :admin_secret_at_rest, @at_rest_key)
 
+    # Ensure OIDC env vars are clean so bootstrap form fields are NOT disabled (env-locked)
+    # during these tests. A prior test may leak these values. The env-lock behavior is
+    # tested separately in bootstrap_oidc_audience_test.exs (AC4).
+    for k <- [:oidc_issuer, :oidc_audience, :matrix_oidc_client_id, :oidc_jwks_uri] do
+      Application.delete_env(:nebu_http, k)
+    end
+
     on_exit(fn ->
-      Application.delete_env(:nebu_http, :admin_bootstrap_store)
-      Application.delete_env(:nebu_http, :admin_secret_at_rest)
+      for k <- [:admin_bootstrap_store, :admin_secret_at_rest, :oidc_issuer, :oidc_audience, :matrix_oidc_client_id, :oidc_jwks_uri] do
+        Application.delete_env(:nebu_http, k)
+      end
     end)
 
     {:ok, store: store}
@@ -115,11 +123,15 @@ defmodule Nebu.Web.AdminBootstrapLiveTest do
     assert Agent.get(store, &(&1.draft["instance_name"])) == "test-nebu"
 
     # Step 2 → 3: OIDC config (client secret encrypted before it touches the store).
+    # oidc_audience is required (M-2, cycle-1) when not set via NEBU_OIDC_AUDIENCE env.
+    # oidc_jwks_uri is required (MAJOR-1, cycle-2) when not set via NEBU_OIDC_JWKS_URI env.
     view
     |> form("form", %{
       "oidc_issuer" => "https://idp.example.com",
       "oidc_client_id" => "nebu-admin",
-      "oidc_client_secret" => @client_secret
+      "oidc_client_secret" => @client_secret,
+      "oidc_audience" => "nebu-admin",
+      "oidc_jwks_uri" => "https://idp.example.com/.well-known/jwks.json"
     })
     |> render_submit()
 

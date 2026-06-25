@@ -548,23 +548,35 @@ defmodule Nebu.Admin.Auth do
         |> halt()
 
       true ->
-        complete_bootstrap(draft, selected)
+        case complete_bootstrap(draft, selected) do
+          :ok ->
+            # Mint the admin session for the just-authenticated operator. The chosen claim
+            # is now in server_config, so put_current_user resolves admin == true.
+            user = %{
+              "sub" => draft["bootstrap_sub"],
+              "email" => draft["bootstrap_email"],
+              "admin" => true,
+              "session_exp" => System.system_time(:second) + SessionConfig.admin_session_ttl_seconds()
+            }
 
-        # Mint the admin session for the just-authenticated operator. The chosen claim
-        # is now in server_config, so put_current_user resolves admin == true.
-        user = %{
-          "sub" => draft["bootstrap_sub"],
-          "email" => draft["bootstrap_email"],
-          "admin" => true,
-          "session_exp" => System.system_time(:second) + SessionConfig.admin_session_ttl_seconds()
-        }
+            conn
+            |> configure_session(renew: true)
+            |> put_session("current_user", user)
+            |> assign(:current_user, user)
+            |> Phoenix.Controller.redirect(to: "/admin/dashboard")
+            |> halt()
 
-        conn
-        |> configure_session(renew: true)
-        |> put_session("current_user", user)
-        |> assign(:current_user, user)
-        |> Phoenix.Controller.redirect(to: "/admin/dashboard")
-        |> halt()
+          {:error, reason} ->
+            # MINOR-1 (cycle-2): guard in do_complete_bootstrap/2 rejected the
+            # completion (e.g. missing audience). Do NOT set bootstrap_completed or
+            # mint a session. Log the reason and bounce back to login so the operator
+            # can re-enter the wizard with the correct configuration.
+            Logger.warning("bootstrap_confirm_claim rejected by do_complete_bootstrap: #{inspect(reason)}")
+
+            conn
+            |> Phoenix.Controller.redirect(to: "/admin/login?error=auth_failed")
+            |> halt()
+        end
     end
   end
 
@@ -1096,20 +1108,63 @@ defmodule Nebu.Admin.Auth do
   # the gate). The seam/no-Repo path (unit tests) has no transaction boundary and runs the
   # same sequential upserts.
   defp complete_bootstrap(draft, admin_group_claim) do
-    if not seam_installed?() and running?(Nebu.Repo) do
-      # Ecto.Repo.transaction/1 (NOT Ecto.Adapters.SQL.transaction/2, which does not
-      # exist) — wrap the sequential upserts so a mid-flight crash cannot leave a
-      # half-promoted config. The inline Ecto.Adapters.SQL.query calls inside
-      # do_complete_bootstrap run on the transaction's checked-out connection.
-      {:ok, :ok} =
-        Nebu.Repo.transaction(fn ->
-          do_complete_bootstrap(draft, admin_group_claim)
-        end)
+    result =
+      if not seam_installed?() and running?(Nebu.Repo) do
+        # Ecto.Repo.transaction/1 (NOT Ecto.Adapters.SQL.transaction/2, which does not
+        # exist) — wrap the sequential upserts so a mid-flight crash cannot leave a
+        # half-promoted config. The inline Ecto.Adapters.SQL.query calls inside
+        # do_complete_bootstrap run on the transaction's checked-out connection.
+        case Nebu.Repo.transaction(fn ->
+               case do_complete_bootstrap(draft, admin_group_claim) do
+                 {:error, reason} ->
+                   # Roll back the transaction and surface the error to the caller.
+                   Nebu.Repo.rollback(reason)
 
-      :ok
-    else
-      do_complete_bootstrap(draft, admin_group_claim)
+                 :ok ->
+                   :ok
+               end
+             end) do
+          {:ok, :ok} -> :ok
+          {:error, reason} -> {:error, reason}
+        end
+      else
+        do_complete_bootstrap(draft, admin_group_claim)
+      end
+
+    # Only trigger cache refresh when the bootstrap actually completed successfully.
+    # C-1 (oidc-env-optional-bootstrap cycle-1): after the config is written,
+    # refresh OidcConfig and JwksCache so the newly-written OIDC values (issuer,
+    # audience, jwks_uri) are immediately visible to OidcPlug on this node. Without
+    # this, OidcConfig's ETS cache retains nil values until the next TTL-based
+    # refresh, causing every Matrix Bearer token to be rejected with 401 until a
+    # process restart.
+    #
+    # Refresh OidcConfig first (makes issuer/audience/jwks_uri warm in ETS) and
+    # then JwksCache (reads the newly-warm jwks_uri to fetch signing keys).
+    # Errors in either call are non-fatal for bootstrap completion — they are
+    # already logged inside each module and the TTL-based refresh will recover.
+    #
+    # Test seam: `:bootstrap_cache_refresh_hook` (0-arity fun) is invoked instead
+    # when installed; this lets unit tests verify the C-1 refresh path without a
+    # live Repo or real OidcConfig/JwksCache GenServers. In production the seam is
+    # absent and the Process.whereis guards below run directly.
+    if result == :ok do
+      case Application.get_env(:nebu_http, :bootstrap_cache_refresh_hook) do
+        hook when is_function(hook, 0) ->
+          hook.()
+
+        _ ->
+          if Process.whereis(Nebu.Web.OidcConfig) != nil do
+            Nebu.Web.OidcConfig.refresh()
+          end
+
+          if Process.whereis(Nebu.Web.JwksCache) != nil do
+            Nebu.Web.JwksCache.refresh()
+          end
+      end
     end
+
+    result
   end
 
   # True when the injectable bootstrap store seam is installed (unit tests). The seam owns
@@ -1119,36 +1174,55 @@ defmodule Nebu.Admin.Auth do
   end
 
   defp do_complete_bootstrap(draft, admin_group_claim) do
-    keys = ~w(instance_name oidc_issuer oidc_client_id oidc_client_secret
-              oidc_user_id_claim oidc_displayname_claim oidc_email_claim)
+    # MINOR-1 (cycle-2): guard against completing bootstrap without an OIDC audience.
+    # A missing audience means OidcPlug fails closed permanently (all Bearer tokens
+    # rejected with 401 M_UNKNOWN_TOKEN). Fail here rather than silently creating a
+    # broken instance. The audience is valid if either the draft or the NEBU_OIDC_AUDIENCE
+    # env var (via Application env, set by runtime.exs from NEBU_OIDC_AUDIENCE) provides
+    # a non-empty value.
+    audience_in_draft = is_binary(draft["oidc_audience"]) and draft["oidc_audience"] != ""
+    env_audience = Application.get_env(:nebu_http, :oidc_audience)
+    audience_in_env = is_binary(env_audience) and env_audience != ""
 
-    # Only promote keys with a non-empty draft value. An empty string is truthy in
-    # Elixir, so a bare `if draft[key]` would overwrite a sensibly-seeded default (e.g.
-    # the migration's oidc_user_id_claim='name') with "", which then makes login fall
-    # back to the opaque `sub` localpart.
-    Enum.each(keys, fn key ->
-      case draft[key] do
-        v when is_binary(v) and v != "" -> put_config(key, v)
-        _ -> :ok
-      end
-    end)
+    if not audience_in_draft and not audience_in_env do
+      {:error, :audience_required}
+    else
+      # oidc-env-optional-bootstrap (AC4): include oidc_audience and oidc_jwks_uri
+      # in the promoted keys so the Bootstrap Wizard can configure them alongside
+      # the other OIDC fields. oidc_jwks_uri is needed for C-2 (bootstrap-wizard
+      # deployments where NEBU_OIDC_JWKS_URI is not set as an env var).
+      keys = ~w(instance_name oidc_issuer oidc_client_id oidc_client_secret
+                oidc_audience oidc_jwks_uri
+                oidc_user_id_claim oidc_displayname_claim oidc_email_claim)
 
-    # Story oidc-refresh-mode-config (AC4): promote the operator's chosen refresh modes.
-    # SECURITY: validate to the offline|online enum before writing — an empty/invalid
-    # draft value must NOT overwrite the client's default (no scope injection via
-    # server_config). An out-of-enum value is simply not promoted (the live default
-    # then applies: Matrix=offline / Admin=online).
-    Enum.each(~w(matrix_oidc_refresh_mode admin_oidc_refresh_mode), fn key ->
-      case draft[key] do
-        v when v in ["offline", "online"] -> put_config(key, v)
-        _ -> :ok
-      end
-    end)
+      # Only promote keys with a non-empty draft value. An empty string is truthy in
+      # Elixir, so a bare `if draft[key]` would overwrite a sensibly-seeded default (e.g.
+      # the migration's oidc_user_id_claim='name') with "", which then makes login fall
+      # back to the opaque `sub` localpart.
+      Enum.each(keys, fn key ->
+        case draft[key] do
+          v when is_binary(v) and v != "" -> put_config(key, v)
+          _ -> :ok
+        end
+      end)
 
-    put_config("admin_group_claim", admin_group_claim)
-    put_config("bootstrap_completed", "true")
-    clear_draft()
-    :ok
+      # Story oidc-refresh-mode-config (AC4): promote the operator's chosen refresh modes.
+      # SECURITY: validate to the offline|online enum before writing — an empty/invalid
+      # draft value must NOT overwrite the client's default (no scope injection via
+      # server_config). An out-of-enum value is simply not promoted (the live default
+      # then applies: Matrix=offline / Admin=online).
+      Enum.each(~w(matrix_oidc_refresh_mode admin_oidc_refresh_mode), fn key ->
+        case draft[key] do
+          v when v in ["offline", "online"] -> put_config(key, v)
+          _ -> :ok
+        end
+      end)
+
+      put_config("admin_group_claim", admin_group_claim)
+      put_config("bootstrap_completed", "true")
+      clear_draft()
+      :ok
+    end
   end
 
   defp now_ms, do: System.system_time(:millisecond)

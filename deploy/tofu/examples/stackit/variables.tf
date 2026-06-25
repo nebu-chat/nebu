@@ -254,6 +254,12 @@ variable "oidc_issuer" {
   default     = "" # Empty default enables `tofu validate` without providing a value
 }
 
+variable "oidc_audience" {
+  description = "Expected 'aud' claim in OIDC Bearer tokens. Leave empty to default to oidc_client_id (correct for Dex and most single-client setups). Set explicitly when your IdP issues access tokens with a separate audience (e.g. Keycloak with resource servers)."
+  type        = string
+  default     = "" # Empty = use oidc_client_id as audience
+}
+
 variable "oidc_mode" {
   description = "OIDC deployment profile. 'dex': deploy Dex as a sidecar (static config, no database — for test/demo environments). 'external': no bundled IdP; operator must provide oidc_issuer and oidc_client_secret (for production with a managed OIDC provider)."
   type        = string

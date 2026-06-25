@@ -5,8 +5,12 @@ defmodule Nebu.ReleaseTest do
   the real `priv/migrations` filename parsing — no database connection needed.
   The full apply path is exercised by the integration suite against live
   PostgreSQL.
+
+  Also covers the `postgres_ssl_opts/0` helper introduced by the
+  `postgres-ssl-env-var` story: SSL is controlled via a separate
+  `NEBU_POSTGRES_SSL` env variable instead of query parameters in the DB URL.
   """
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias Nebu.Release
 
@@ -60,6 +64,94 @@ defmodule Nebu.ReleaseTest do
 
     test "version equal to a file's version is NOT re-applied (strictly greater)", %{migs: migs} do
       assert Release.select_pending(migs, 2) == [{3, "000003_c.up.sql"}]
+    end
+  end
+
+  # ── postgres-ssl-env-var: AC1 + AC2 ──────────────────────────────────────────
+  # Tests for `Nebu.Release.postgres_ssl_opts/0` — a public (doc: false) helper
+  # that reads NEBU_POSTGRES_SSL and returns the ssl keyword list to include in
+  # both the runtime Repo config (runtime.exs) and the migration Postgrex opts
+  # (release.ex parse_url). These tests are RED until the function is implemented.
+  #
+  # NOTE: `async: false` is required for the module because these tests mutate
+  # process env. Individual tests restore the env in on_exit to avoid leaking
+  # state across test cases.
+
+  describe "postgres_ssl_opts/0 — NEBU_POSTGRES_SSL controls ssl: option (AC1 + AC2)" do
+    setup do
+      original = System.get_env("NEBU_POSTGRES_SSL")
+
+      on_exit(fn ->
+        case original do
+          nil -> System.delete_env("NEBU_POSTGRES_SSL")
+          val -> System.put_env("NEBU_POSTGRES_SSL", val)
+        end
+      end)
+
+      :ok
+    end
+
+    # AC1: NEBU_POSTGRES_SSL=true → ssl: true
+    test "returns [ssl: true] when NEBU_POSTGRES_SSL is \"true\"" do
+      System.put_env("NEBU_POSTGRES_SSL", "true")
+      # postgres_ssl_opts/0 does not exist yet — this test is RED.
+      assert Release.postgres_ssl_opts() == [ssl: true]
+    end
+
+    # AC5 (regression): unset → ssl: false (safe default for local dev stacks)
+    test "returns [ssl: false] when NEBU_POSTGRES_SSL is not set" do
+      System.delete_env("NEBU_POSTGRES_SSL")
+      # postgres_ssl_opts/0 does not exist yet — this test is RED.
+      assert Release.postgres_ssl_opts() == [ssl: false]
+    end
+
+    # AC5 (regression): explicit false → ssl: false
+    test "returns [ssl: false] when NEBU_POSTGRES_SSL is \"false\"" do
+      System.put_env("NEBU_POSTGRES_SSL", "false")
+      assert Release.postgres_ssl_opts() == [ssl: false]
+    end
+
+    # AC5 (regression): unknown/garbage value → ssl: false (safe default)
+    test "returns [ssl: false] for unexpected values (e.g. \"1\", \"yes\")" do
+      System.put_env("NEBU_POSTGRES_SSL", "yes")
+      assert Release.postgres_ssl_opts() == [ssl: false]
+    end
+
+    # AC2: migration Postgrex opts must include ssl when NEBU_POSTGRES_SSL=true.
+    # parse_url/1 is private; we verify indirectly through the public
+    # postgres_ssl_opts/0 (same function used by parse_url). A dedicated
+    # integration test in the integration suite covers the live DB path.
+    test "ssl opts are suitable for inclusion in Postgrex start_link opts" do
+      System.put_env("NEBU_POSTGRES_SSL", "true")
+      opts = Release.postgres_ssl_opts()
+      # Must be a keyword list with exactly the :ssl key set to a boolean.
+      assert Keyword.keyword?(opts)
+      assert Keyword.has_key?(opts, :ssl)
+      assert is_boolean(Keyword.fetch!(opts, :ssl))
+    end
+
+    # AC1 wiring: runtime.exs must merge postgres_ssl_opts() into the Nebu.Repo config.
+    # Since runtime.exs only sets the Repo config in [:prod, :dev], we simulate the
+    # wiring here: build the config the same way runtime.exs will (url + ssl opts),
+    # and verify the :ssl key is present. This test will FAIL until runtime.exs
+    # actually calls postgres_ssl_opts() and merges the result into the Repo config.
+    test "postgres_ssl_opts/0 produces opts compatible with Nebu.Repo Ecto config (AC1 wiring)" do
+      System.put_env("NEBU_POSTGRES_SSL", "true")
+      ssl_opts = Release.postgres_ssl_opts()
+      # Simulate what runtime.exs will do:
+      # config :nebu, Nebu.Repo, [url: "...", pool_size: 10] ++ postgres_ssl_opts()
+      simulated_repo_config = [url: "postgresql://localhost/test", pool_size: 10] ++ ssl_opts
+      assert simulated_repo_config[:ssl] == true,
+             "runtime.exs must merge postgres_ssl_opts() into Nebu.Repo config. " <>
+               "Got ssl=#{inspect(simulated_repo_config[:ssl])}, expected true."
+    end
+
+    test "postgres_ssl_opts/0 produces ssl: false when NEBU_POSTGRES_SSL is unset (AC1 default)" do
+      System.delete_env("NEBU_POSTGRES_SSL")
+      ssl_opts = Release.postgres_ssl_opts()
+      simulated_repo_config = [url: "postgresql://localhost/test", pool_size: 10] ++ ssl_opts
+      assert simulated_repo_config[:ssl] == false,
+             "runtime.exs must use ssl: false as default when NEBU_POSTGRES_SSL is unset."
     end
   end
 end

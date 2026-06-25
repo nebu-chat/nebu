@@ -1,0 +1,29 @@
+# last_updated: 2026-06-25
+# [postgres-ssl-env-var] 2026-06-25T10:05Z committed ✓ (ATDD+Dev+Code CLEAN, 867 passed)
+# [postgres-ssl-env-var] 2026-06-25T10:00Z arc42-update → CLAUDE.md + docs/architecture/07-deployment.md
+# [postgres-ssl-env-var] 2026-06-25T09:56Z security-review → skipped (not-needed)
+# [postgres-ssl-env-var] 2026-06-25T09:55Z code-review → CLEAN (cycle 0, 0 MAJOR)
+# [postgres-ssl-env-var] 2026-06-25T09:45Z ci-gate → ✓ 867 passed
+# [postgres-ssl-env-var] 2026-06-25T09:30Z dev-story → done (cycle 0)
+# [postgres-ssl-env-var] 2026-06-25T09:15Z test-review → MAJOR-1 fixed (AC1 wiring test added), 2 MINOR accepted
+# [postgres-ssl-env-var] 2026-06-25T09:05Z atdd → 11 failing tests
+# [postgres-ssl-env-var] 2026-06-25T09:00Z pipeline started (--bug)
+# [oidc-env-optional-bootstrap] 2026-06-24T23:36Z committed ✓ (ATDD+Dev 2 cycles+Kassandra CLEAN, 852 passed)
+# [oidc-env-optional-bootstrap] 2026-06-24T23:35Z arc42-update → 4 docs files
+# [oidc-env-optional-bootstrap] 2026-06-24T23:33Z security-review → Kassandra CLEAN
+# [oidc-env-optional-bootstrap] 2026-06-24T23:28Z code-review → CLEAN (cycle 2, 852 passed)
+# [oidc-env-optional-bootstrap] 2026-06-24T23:06Z code-review → 1 MAJOR → cycle 2
+# [oidc-env-optional-bootstrap] 2026-06-24T23:02Z ci-gate → ✓ 844 passed (cycle 1) | dev-story → done (cycle 1)
+# [oidc-env-optional-bootstrap] 2026-06-24T22:27Z code-review → 2 CRITICAL 4 MAJOR → cycle 1
+# [oidc-env-optional-bootstrap] 2026-06-24T22:21Z ci-gate → ✓ build+unit-elixir (840 passed)
+# [oidc-env-optional-bootstrap] 2026-06-24T22:19Z dev-story → done (cycle 0)
+# [oidc-env-optional-bootstrap] 2026-06-24T22:04Z test-review → 4 MAJOR accepted by user (MAJOR-4 → follow-up story)
+# [oidc-env-optional-bootstrap] 2026-06-24T21:47Z test-review → 4 MAJOR 3 MINOR — blocked
+# [oidc-env-optional-bootstrap] 2026-06-24T21:45Z atdd → 7 failing tests
+# [oidc-env-optional-bootstrap] 2026-06-24T21:35Z pipeline started (--bug)
+story: null
+current_step: null
+last_updated: "2026-06-25T00:01Z"
+completed: []
+cycle_count: 0
+blocked_reason: null

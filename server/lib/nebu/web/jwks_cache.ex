@@ -43,6 +43,18 @@ defmodule Nebu.Web.JwksCache do
   end
 
   @doc """
+  Forces an immediate re-fetch and updates the key cache.
+
+  Used after Bootstrap Wizard completion to pull in keys for the newly-configured
+  OIDC issuer without waiting for the next TTL-based refresh. Accepts a `GenServer.server()`
+  so isolated test instances (started with a unique `:name`) can be targeted by pid.
+  """
+  @spec refresh(GenServer.server()) :: :ok
+  def refresh(server \\ __MODULE__) do
+    GenServer.call(server, :refresh)
+  end
+
+  @doc """
   Returns the configured cache TTL in milliseconds.
 
   Default 300_000 (300s). `NEBU_OIDC_JWKS_TTL` is read in SECONDS and converted
@@ -82,6 +94,20 @@ defmodule Nebu.Web.JwksCache do
   @impl GenServer
   def handle_call(:keys, _from, state) do
     {:reply, state.keys, state}
+  end
+
+  @impl GenServer
+  def handle_call(:refresh, _from, state) do
+    # oidc-env-optional-bootstrap (AC5): on-demand refresh after bootstrap completion.
+    # On success, replace the key set. On failure, keep last-known-good keys
+    # (same policy as the TTL refresh path in handle_info/2).
+    keys =
+      case do_fetch(state.fetcher) do
+        {:ok, fresh} -> fresh
+        :error -> state.keys
+      end
+
+    {:reply, :ok, %{state | keys: keys}}
   end
 
   @impl GenServer
@@ -135,7 +161,15 @@ defmodule Nebu.Web.JwksCache do
   defp invoke_fetcher(nil), do: http_fetch()
 
   defp http_fetch do
-    case Application.get_env(:nebu_http, :oidc_jwks_uri) do
+    # C-2 (oidc-env-optional-bootstrap): resolve the JWKS URI from env first,
+    # then fall back to the DB-backed OidcConfig cache (bootstrap-wizard
+    # deployments where NEBU_OIDC_JWKS_URI is absent but was stored via the
+    # wizard's step-2 form into server_config.oidc_jwks_uri).
+    uri =
+      Application.get_env(:nebu_http, :oidc_jwks_uri) ||
+        Nebu.Web.OidcConfig.jwks_uri()
+
+    case uri do
       nil ->
         # No configured endpoint: nothing to fetch. Treat as an empty (but
         # successful) key set rather than a failure to keep stale keys around.

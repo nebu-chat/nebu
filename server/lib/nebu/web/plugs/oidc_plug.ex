@@ -436,8 +436,24 @@ defmodule Nebu.Web.Plugs.OidcPlug do
   end
 
   defp server_name, do: Application.get_env(:nebu_http, :server_name, "localhost")
-  defp oidc_issuer, do: Application.get_env(:nebu_http, :oidc_issuer)
-  defp oidc_audience, do: Application.get_env(:nebu_http, :oidc_audience)
+
+  # oidc-env-optional-bootstrap: issuer/audience fall back to server_config (via
+  # OidcConfig cache) when the env var is absent. Env var takes precedence; DB value
+  # fills in when env is nil. Fail-closed invariant (MEDIUM-3) is preserved: if both
+  # sources are nil, check_issuer/check_audience return {:error, :*_not_configured}.
+  defp oidc_issuer do
+    case Application.get_env(:nebu_http, :oidc_issuer) do
+      v when is_binary(v) and v != "" -> v
+      _ -> Nebu.Web.OidcConfig.get().issuer
+    end
+  end
+
+  defp oidc_audience do
+    case Application.get_env(:nebu_http, :oidc_audience) do
+      v when is_binary(v) and v != "" -> v
+      _ -> Nebu.Web.OidcConfig.get().audience
+    end
+  end
 
   # ── Failure response ────────────────────────────────────────────────────
 
