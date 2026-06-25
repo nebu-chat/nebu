@@ -9,6 +9,32 @@
 # This file is no longer used for named-epic pipeline runs.
 #
 # last_updated: 2026-06-25
+# [admin-http-refactor] 2026-06-25T15:50Z committed ✓ 51eb9b0a (ATDD+Code 2 cycles CLEAN+Kassandra CLEAN; 851/854)
+# [admin-http-refactor] 2026-06-25T15:45Z arc42-update → done (04,05,06,07,08,09-decisions)
+# [admin-http-refactor] 2026-06-25T15:30Z security-review → Kassandra CLEAN (0 CRIT/HIGH, 2 LOW advisory)
+# [admin-http-refactor] 2026-06-25T15:15Z code-review cycle 2 → CLEAN (0 MAJOR/MINOR)
+# [admin-http-refactor] 2026-06-25T15:00Z dev-story → done (cycle 2): ConfigController case + RoleMapping POST test
+# [admin-http-refactor] 2026-06-25T14:45Z code-review cycle 1 → 2 MINOR → cycle 2
+# [admin-http-refactor] 2026-06-25T14:25Z dev-story → done (cycle 1): all 3 MAJOR + 5 MINOR fixed
+# [admin-http-refactor] 2026-06-25T14:00Z code-review → 3 MAJOR (UI broken, AC10 half, :ok= crash) → cycle 1
+# [admin-http-refactor] 2026-06-25T13:45Z ci-gate → build clean + unit-elixir 851/854 (3 pre-existing DeployConfigTest failures unrelated)
+# [admin-http-refactor] 2026-06-25T13:30Z dev-story → done (cycle 0): 7 controllers + templates, router updated, 27/27 AC tests green
+# [admin-http-refactor] 2026-06-25T14:00Z dev-story → done (27/27 ACs green; 851/854 unit suite; no compiler warnings); story status → review
+# [admin-http-refactor] 2026-06-25T12:40Z test-review → 3 MAJOR fixed (AC9/AC12/AC19 + INFO-3/4) → CLEAN
+# [admin-http-refactor] 2026-06-25T12:35Z test-review → 3 MAJOR (AC9/AC12/AC19 gaps) — waiting for user
+# [admin-http-refactor] 2026-06-25T12:20Z atdd → 11 failing tests (admin_http_controllers_test.exs)
+# [admin-http-refactor] 2026-06-25T12:05Z create-story → admin-forms-http-controller.md
+# [admin-http-refactor] 2026-06-25T12:00Z pipeline started
+# [bug-bootstrap-next-button-ws] 2026-06-25T11:27Z committed ✓ (nginx Upgrade+Connection /admin/ ALB+ACME; app.js longPollFallbackMs removed; 870/873 pre-existing failures; code-review 1 MINOR accepted)
+# [bug-bootstrap-next-button-ws] 2026-06-25T11:26Z arc42-update → no arch changes (nginx config fix, deployment infra only)
+# [bug-bootstrap-next-button-ws] 2026-06-25T11:25Z security-review → skipped (nginx config + dead JS option removal, no auth surface)
+# [bug-bootstrap-next-button-ws] 2026-06-25T11:25Z code-review → 1 MINOR (test desc names ALB but covers both ALB+ACME; cosmetic) → accepted CLEAN
+# [bug-bootstrap-next-button-ws] 2026-06-25T11:21Z ci-gate → 870/873 (3 pre-existing AC3/AC4 ssl failures unrelated to this fix)
+# [bug-bootstrap-next-button-ws] 2026-06-25T11:20Z dev-story → done (cycle 0): nginx Upgrade+Connection headers in /admin/ blocks (ALB+ACME); removed fake longPollFallbackMs from app.js
+# [bug-bootstrap-next-button-ws] 2026-06-25T11:11Z test-review → CLEAN (static file assertions, no hidden state)
+# [bug-bootstrap-next-button-ws] 2026-06-25T11:10Z atdd → 3 failing tests (nginx /admin/ Upgrade+Connection headers; app.js longPollFallbackMs)
+# [bug-bootstrap-next-button-ws] 2026-06-25T11:00Z pipeline started (--bug: bootstrap Next button unresponsive — nginx /admin/ location missing Upgrade+Connection WS headers; longPollFallbackMs is not a valid LiveView option)
+# [bug-bootstrap-nav-and-ws-proxy] 2026-06-25T09:45Z committed ✓ bab85b20 (nav guard + logout guard + longPollFallbackMs 2500; 870/0; code-review 3 MINOR fixed 1 cycle; Kassandra CLEAN)
 # [bug-bootstrap-nav-and-ws-proxy] 2026-06-25T09:25Z dev-story → done (cycle 0): layouts.ex nav guard + app.js longPollFallbackMs
 # [bug-bootstrap-nav-and-ws-proxy] 2026-06-25T09:15Z atdd → 3 failing tests (nav-hidden + bootstrap-shown + longPollFallbackMs)
 # [bug-bootstrap-nav-and-ws-proxy] 2026-06-25T09:00Z pipeline started (--bug: 1) bootstrap nav shows non-bootstrap items during wizard; 2) Next button unclickable due to WS WebSocket blocked by Stackit Nginx proxy — LiveSocket needs longPollFallbackMs)
@@ -120,12 +146,9 @@
 # [5-30] 2026-05-24T19:49Z atdd → 4 failing tests (auth_extra_scopes_test.go)
 # [5-30] 2026-05-24T19:38Z pipeline started (story pre-created)
 
-story: "bug-bootstrap-nav-and-ws-proxy"
-current_step: "ci-gate"
-completed:
-  - atdd
-  - test-review
-  - dev-story
+story: null
+current_step: null
+completed: []
 cycle_count: 0
 blocked_reason: null
-last_updated: "2026-06-25T06:05Z"
+last_updated: "2026-06-25T09:27Z"

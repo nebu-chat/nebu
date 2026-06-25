@@ -20,10 +20,20 @@
     }
 
     var Socket = window.Phoenix.Socket;
+    var LongPoll = window.Phoenix.LongPoll;
     var LiveSocket = window.LiveView.LiveSocket;
 
     var meta = document.querySelector("meta[name='csrf-token']");
     var csrfToken = meta ? meta.getAttribute("content") : null;
+
+    // Throttle re-polls to avoid hammering the server when WebSocket is unavailable.
+    // Default Phoenix LongPoll polls again immediately after each response; 1 500 ms
+    // is enough to feel responsive while staying friendly to the server and proxies.
+    class ThrottledLongPoll extends LongPoll {
+      poll() {
+        setTimeout(() => super.poll(), 1500);
+      }
+    }
 
     // admin-add-user-autocomplete: ARIA-combobox keyboard navigation for the add-user
     // typeahead (rooms + spaces share this hook). The suggestion options are server-
@@ -97,12 +107,9 @@
     };
 
     var liveSocket = new LiveSocket("/admin/live", Socket, {
+      transport: ThrottledLongPoll,
       params: { _csrf_token: csrfToken },
       hooks: Hooks,
-      // Fall back to HTTP long-polling after 2.5 s when WebSocket is blocked by a
-      // reverse proxy (e.g. Stackit Nginx). Without this, all phx-submit/phx-click
-      // events silently fail in proxy environments.
-      longPollFallbackMs: 2500,
     });
 
     liveSocket.connect();

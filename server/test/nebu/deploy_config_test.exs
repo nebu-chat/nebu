@@ -166,4 +166,72 @@ defmodule Nebu.DeployConfigTest do
                "All SSL configuration must go through NEBU_POSTGRES_SSL."
     end
   end
+
+  # ── Regression: /admin/ nginx locations must forward WebSocket upgrade headers ─
+  #
+  # Phoenix LiveView connects via WebSocket to /admin/live. Without the Upgrade +
+  # Connection proxy headers on the /admin/ location block, nginx silently drops the
+  # WebSocket upgrade handshake and the LiveSocket never connects — so phx-submit
+  # events (Next button, form submits) are never delivered to the server.
+  #
+  # Both TLS modes (tls_mode = "alb" and tls_mode = "acme") have an explicit
+  # `location /admin/` block when element_web is enabled. Both must carry the two
+  # WebSocket headers. The `location /` catch-all blocks already have them; the
+  # dedicated /admin/ block was the omission.
+
+  defp extract_admin_blocks(content) do
+    Regex.scan(~r/location \/admin\/ \{[^}]+\}/, content)
+    |> Enum.map(fn [match] -> match end)
+  end
+
+  describe "nginx /admin/ locations must forward WebSocket upgrade headers" do
+    test "ALB nginx config /admin/ location has Upgrade WebSocket header", %{
+      content: content
+    } do
+      blocks = extract_admin_blocks(content)
+
+      assert length(blocks) >= 1,
+             "Expected at least one `location /admin/ { ... }` block in cloud-init.tftpl " <>
+               "but found none. Check the nginx proxy config sections."
+
+      Enum.each(blocks, fn block ->
+        assert String.contains?(block, "proxy_set_header   Upgrade"),
+               "location /admin/ block is missing `proxy_set_header Upgrade $http_upgrade`.\n" <>
+                 "Phoenix LiveView WebSocket connections to /admin/live will be rejected " <>
+                 "by nginx, causing all phx-submit events to silently fail.\n" <>
+                 "Affected block:\n#{block}"
+      end)
+    end
+
+    test "ALB nginx config /admin/ location has Connection WebSocket header", %{
+      content: content
+    } do
+      blocks = extract_admin_blocks(content)
+
+      Enum.each(blocks, fn block ->
+        assert String.contains?(block, "proxy_set_header   Connection"),
+               "location /admin/ block is missing `proxy_set_header Connection $connection_upgrade`.\n" <>
+                 "Affected block:\n#{block}"
+      end)
+    end
+  end
+
+  # ── Regression: app.js must not use the fake longPollFallbackMs option ─────────
+  #
+  # `longPollFallbackMs` does not exist in Phoenix LiveView 1.0 — the LiveSocket
+  # constructor silently ignores it. Using it as the sole workaround gives the
+  # impression that WS fallback is configured when it is not. The correct fix is
+  # to add Upgrade/Connection headers to the nginx /admin/ location.
+
+  describe "app.js LiveSocket configuration" do
+    test "does not use the non-existent longPollFallbackMs option" do
+      app_js_path = Path.expand("../../priv/static/assets/app.js", __DIR__)
+      js = File.read!(app_js_path)
+
+      refute String.contains?(js, "longPollFallbackMs"),
+             "app.js contains `longPollFallbackMs` which is not a valid Phoenix LiveView " <>
+               "LiveSocket option and is silently ignored. Remove it — the correct fix is " <>
+               "adding Upgrade+Connection headers to the nginx /admin/ location block."
+    end
+  end
 end

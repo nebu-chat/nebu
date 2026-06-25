@@ -8,7 +8,7 @@ All builds run via Docker containers - no local Elixir or build-tool installatio
 # Simplified docker-compose.yml topology
 services:
   server:         # The single Elixir/OTP release (port 4000: health + Matrix C-S API incl.
-                  #   /_matrix/media/v3/* + Admin LiveView /admin/*). This is the whole application.
+                  #   /_matrix/media/v3/* + Admin UI /admin/*). This is the whole application.
   postgres:       # PostgreSQL 16 (port 5432)
   dex:            # OIDC provider for development (port 5556)
   minio:          # MinIO S3-compatible object store (port 9000: API; port 9001: console) - Story 12.1
@@ -19,8 +19,9 @@ services:
 
 **One container, all surfaces (ADR-019/020/021):** There is no Go container. The single Elixir `server`
 service serves the Matrix C-S API, the Matrix media API (`/_matrix/media/v3/*` and
-`/_matrix/client/v1/media/*`), and the Phoenix LiveView Admin UI (`/admin/*`) on the same Bandit port
-4000. `server` is wired with the MinIO Docker secrets (`NEBU_MINIO_ACCESS_KEY_FILE` /
+`/_matrix/client/v1/media/*`), and the Admin UI (`/admin/*`) on the same Bandit port
+4000. The Admin UI uses Phoenix HTTP controllers (PRG pattern) for CRUD pages and Phoenix LiveView for
+real-time pages (Dashboard, AuditLog, Bootstrap Wizard). `server` is wired with the MinIO Docker secrets (`NEBU_MINIO_ACCESS_KEY_FILE` /
 `NEBU_MINIO_SECRET_KEY_FILE`), the `NEBU_MINIO_*` env vars, and `depends_on` on `minio` (healthy) and
 `createbuckets` (completed). ExAws config in `server/config/runtime.exs` reads the file-based MinIO
 credentials. Media access control is a local `room_members` SQL call inside the app — no cross-process
@@ -104,7 +105,7 @@ the ETS cache and trigger cluster-wide reloads.
 
 | Service | External Port | Purpose |
 |---|---|---|
-| Elixir application (`server`) | 4000 | Matrix C-S API + `/_matrix/media/v3/*` + Admin LiveView `/admin/*` + health/info |
+| Elixir application (`server`) | 4000 | Matrix C-S API + `/_matrix/media/v3/*` + Admin UI `/admin/*` + health/info |
 | Elixir application (`server`) | 9000 | Vestigial gRPC listener (nothing dials it; amended ADR-005) — internal network only |
 | PostgreSQL | 5432 | Database (internal Docker network only) |
 | Dex (dev) | 5556 | OIDC provider (development only) |

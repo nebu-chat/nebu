@@ -23,6 +23,11 @@ config :nebu_http, start_admin_endpoint: true
 # Tests run over plain HTTP, so relax it here only.
 config :nebu_http, admin_session_secure: false
 
+# admin-http-refactor: acceptance tests use Plug.Test directly (not ConnTest/browser).
+# They build session conns without going through a GET to acquire a CSRF token, so
+# CSRF protection is bypassed for the test environment. NEVER set this in prod/dev.
+config :nebu_http, admin_csrf_bypass: true
+
 config :nebu, Nebu.Admin.Endpoint,
   server: false,
   secret_key_base: String.duplicate("nebu-admin-test-secret-key-base!", 2),

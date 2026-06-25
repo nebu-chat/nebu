@@ -1,0 +1,27 @@
+<h1 class="text-heading font-semibold mb-4">Compliance</h1>
+<p class="text-text-secondary mb-4">Privileged-access requests (four-eyes review trail).</p>
+
+<p :if={@requests == []} class="text-text-secondary">No compliance requests.</p>
+
+<div :if={@requests != []} class="overflow-x-auto">
+  <table class="table table-zebra">
+    <thead>
+      <tr>
+        <th>Requester</th>
+        <th>Room</th>
+        <th>Status</th>
+        <th>Justification</th>
+        <th>Created</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr :for={r <- @requests}>
+        <td class="font-mono">{r.requester}</td>
+        <td class="font-mono text-mono">{r.room_id}</td>
+        <td><span class={["badge badge-sm", status_class(r.status)]}>{r.status}</span></td>
+        <td class="max-w-md truncate">{r.justification}</td>
+        <td class="font-mono text-mono whitespace-nowrap">{r.created_at}</td>
+      </tr>
+    </tbody>
+  </table>
+</div>

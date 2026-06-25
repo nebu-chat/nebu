@@ -104,21 +104,31 @@ server/lib/nebu/
 │                       link-local / CGNAT / cloud-metadata / IPv4-mapped / IPv6-ULA; resolve-once
 │                       IP-pinning for http (https-SNI DNS-rebind TOCTOU = residual accepted risk)
 │
-├── admin/            ← Nebu.Admin.* — Phoenix LiveView Admin UI + admin OIDC login
+├── admin/            ← Nebu.Admin.* — Phoenix HTTP controller + LiveView Admin UI + admin OIDC login
 │   ├── endpoint.ex   ← Phoenix.Endpoint with server: false — NO separate listener; the top router
 │   │                   forwards the /admin subtree by calling it, so admin pages ride the same Bandit
 │   │                   port (4000) as Matrix/media
-│   ├── router.ex     ← Phoenix.Router; live_session :admin gated by on_mount {Nebu.Admin.Auth,
-│   │                   :require_admin}; /admin/login + /admin/login/start are public
+│   ├── router.ex     ← Phoenix.Router; :admin pipeline with require_admin plug; CRUD pages use
+│   │                   get/post/delete routes; LiveViews (Dashboard, AuditLog, Bootstrap) use
+│   │                   live_session :admin; /admin/login + /admin/login/start are public
 │   ├── auth.ex       ← admin OIDC Authorization-Code + PKCE login (login_start/callback/logout) +
-│   │                   on_mount admin gate; PKCE S256 + state + nonce in the signed session;
-│   │                   constant-time state validation; verifies the ID token via the shared OidcPlug
-│   │                   verify; gates on server_config.admin_group_claim (default instance_admin,
-│   │                   inline SQL, ADR-018); mints the Phoenix session (renew, 8h cap)
-│   ├── rooms_live.ex ← Room Management LiveView (auto-join toggle via inline SQL UPDATE, DOM-diff push)
-│   ├── users_live.ex ← User overview (OIDC-imported users), inline SQL; OIDC-directory merge
-│   └── bootstrap_live.ex ← 4-step Bootstrap Wizard (state in bootstrap_draft + server_config k/v;
-│                       oidc_client_secret AES-256-GCM encrypted at rest, fail-closed if no secret)
+│   │                   require_admin plug (for HTTP controllers) + on_mount admin gate (for LiveViews);
+│   │                   PKCE S256 + state + nonce in the signed session; constant-time state
+│   │                   validation; verifies the ID token via the shared OidcPlug verify; gates on
+│   │                   server_config.admin_group_claim (default instance_admin, inline SQL, ADR-018);
+│   │                   mints the Phoenix session (renew, 8h cap)
+│   ├── rooms_controller.ex      ← Room Management HTTP controller (PRG pattern; inline SQL, ADR-018)
+│   ├── users_controller.ex      ← User overview HTTP controller (OIDC-imported users, inline SQL)
+│   ├── spaces_controller.ex     ← Spaces management HTTP controller
+│   ├── config_controller.ex     ← Server configuration HTTP controller
+│   ├── claim_mapping_controller.ex ← OIDC claim mapping HTTP controller
+│   ├── role_mapping_controller.ex  ← Role mapping HTTP controller
+│   ├── compliance_controller.ex    ← Compliance settings HTTP controller
+│   ├── dashboard_live.ex        ← Dashboard LiveView (real-time metrics; remains as LiveView)
+│   ├── audit_log_live.ex        ← Audit log LiveView (live-streaming audit events; remains as LiveView)
+│   └── bootstrap_live.ex        ← 4-step Bootstrap Wizard LiveView (state in bootstrap_draft +
+│                       server_config k/v; oidc_client_secret AES-256-GCM encrypted at rest,
+│                       fail-closed if no secret; remains as LiveView)
 │
 └── compliance/       ← Nebu.Compliance.* — four-eyes access, append-only audit-log writers, signed
                         export, GDPR erasure orchestration (deactivate → delete keys → anonymize →

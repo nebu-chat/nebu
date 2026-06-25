@@ -1,0 +1,54 @@
+<h1 class="text-heading font-semibold mb-4">OIDC Claim Mapping</h1>
+<p class="text-text-secondary mb-4">Map IdP token claims to Matrix identity fields.</p>
+
+<p :if={Phoenix.Flash.get(@flash, :info)} class="alert alert-success mb-4">
+  {Phoenix.Flash.get(@flash, :info)}
+</p>
+<p :if={Phoenix.Flash.get(@flash, :error)} class="alert alert-error mb-4">
+  {Phoenix.Flash.get(@flash, :error)}
+</p>
+
+<form method="post" action="/admin/config/claim-mapping" class="max-w-md flex flex-col gap-4">
+  <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+
+  <div>
+    <label for="oidc_user_id_claim" class="block text-sm mb-1">User ID claim</label>
+    <input
+      id="oidc_user_id_claim"
+      name="oidc_user_id_claim"
+      value={@values["oidc_user_id_claim"]}
+      class="input input-bordered w-full"
+    />
+    <p :if={@errors["oidc_user_id_claim"]} role="alert" data-field="oidc_user_id_claim" class="text-error text-sm mt-1">
+      {@errors["oidc_user_id_claim"]}
+    </p>
+  </div>
+
+  <div>
+    <label for="oidc_displayname_claim" class="block text-sm mb-1">Display name claim</label>
+    <input
+      id="oidc_displayname_claim"
+      name="oidc_displayname_claim"
+      value={@values["oidc_displayname_claim"]}
+      class="input input-bordered w-full"
+    />
+    <p :if={@errors["oidc_displayname_claim"]} role="alert" data-field="oidc_displayname_claim" class="text-error text-sm mt-1">
+      {@errors["oidc_displayname_claim"]}
+    </p>
+  </div>
+
+  <div>
+    <label for="oidc_email_claim" class="block text-sm mb-1">Email claim</label>
+    <input
+      id="oidc_email_claim"
+      name="oidc_email_claim"
+      value={@values["oidc_email_claim"]}
+      class="input input-bordered w-full"
+    />
+    <p :if={@errors["oidc_email_claim"]} role="alert" data-field="oidc_email_claim" class="text-error text-sm mt-1">
+      {@errors["oidc_email_claim"]}
+    </p>
+  </div>
+
+  <button type="submit" class="btn btn-primary self-start">Save</button>
+</form>

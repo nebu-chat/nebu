@@ -86,19 +86,27 @@ A consequential design change: media access control is now a local `room_members
 application, replacing the former gRPC `CheckMembership` RPC (one fewer cross-process hop). See §5
 Building Blocks and §8 Cross-Cutting Concepts for the component and concept detail.
 
-## Phoenix LiveView Admin UI (admin-ui-migration → ADR-020/021)
+## Phoenix Admin UI — HTTP Controllers + LiveView (admin-ui-migration + admin-http-refactor → ADR-020/021)
 
-The Admin UI is `Nebu.Admin.*` — Phoenix LiveView hosted in the single application (the Go-template
-admin that used to compile into the gateway binary is deleted). This realizes two existing decisions
-rather than introducing a new ADR:
+The Admin UI is `Nebu.Admin.*` — hosted in the single application (the Go-template admin that used
+to compile into the gateway binary is deleted). This realizes two existing decisions rather than
+introducing a new ADR:
 
 - **[ADR-001](adr/ADR-001-elixir-otp.md) (Elixir/OTP as Core Runtime):** the admin UI runs on the BEAM
   within the one application — consistent with placing all stateful and server-rendered logic in
   Elixir/OTP rather than in Go.
 - **[ADR-018](adr/ADR-018-no-domain-model-locality-of-behavior.md) (No Domain Model):** all admin
-  LiveViews (RoomsLive, UsersLive, BootstrapLive, Auth) use inline SQL directly in the LiveView
-  module — no repository layer, no domain model. Consistent with the ADR-018 locality-of-behavior
-  principle.
+  controllers and LiveViews use inline SQL directly in the module — no repository layer, no domain
+  model. Consistent with the ADR-018 locality-of-behavior principle.
+
+**admin-http-refactor:** CRUD admin pages (Users, Rooms, Spaces, Config, ClaimMapping, RoleMapping,
+Compliance) were refactored from Phoenix LiveViews to native Phoenix HTTP controllers following the
+Post-Redirect-Get (PRG) pattern. Each controller has a corresponding HTML view module and HEEx
+template. Three LiveViews remain: DashboardLive, AuditLogLive, and BootstrapLive — pages that
+benefit from real-time server-push or multi-step stateful flows. The admin router was updated
+accordingly: `live/3` routes replaced with `get`/`post`/`delete` for the converted pages. A new
+`require_admin` plug was added to `Nebu.Admin.Auth` for the HTTP controller pipeline (complementing
+the existing `on_mount :require_admin` for LiveViews).
 
 **Admin login owned in Elixir (ADR-021):** `Nebu.Admin.Auth` owns the complete admin OIDC
 Authorization-Code + PKCE login. `/admin/login/start` generates the PKCE verifier/S256 challenge + CSRF

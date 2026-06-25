@@ -73,7 +73,26 @@ defmodule Nebu.Admin.Auth do
 
   @impl Plug
   def call(conn, :fetch_current_user), do: fetch_current_user(conn, [])
+  def call(conn, :require_admin), do: require_admin(conn, [])
   def call(conn, _opts), do: fetch_current_user(conn, [])
+
+  @doc """
+  Plug for HTTP controllers: checks that `current_user` is an authenticated admin.
+  Redirects to `/admin/login` if not. Must run AFTER `:fetch_current_user` (which is
+  placed in the `:browser` pipeline and runs for all routes).
+  """
+  def require_admin(conn, _opts) do
+    case conn.assigns[:current_user] do
+      %{"admin" => true} ->
+        conn
+
+      _ ->
+        conn
+        |> Phoenix.Controller.put_flash(:error, "Admin access required")
+        |> Phoenix.Controller.redirect(to: "/admin/login")
+        |> halt()
+    end
+  end
 
   @doc """
   Reads the verified admin session from the session store and assigns `current_user`

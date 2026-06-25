@@ -1,0 +1,44 @@
+<h1 class="text-heading font-semibold mb-4">Configuration</h1>
+<p class="text-text-secondary mb-4">
+  Instance settings (<code>server_config</code>). Edit OIDC claim and role mapping via
+  their dedicated pages.
+</p>
+
+<%!-- OIDC refresh mode: POST form (no phx-change) --%>
+<form id="oidc-refresh-mode-form" method="post" action="/admin/config/refresh-mode" class="mb-6">
+  <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+  <h2 class="text-heading font-semibold mb-2">OIDC refresh mode</h2>
+
+  <label class="form-control mt-2">
+    <span class="label-text">Matrix client refresh mode</span>
+    <select name="refresh_mode" aria-label="Matrix refresh mode" class="select select-bordered">
+      <option value="offline" selected={refresh_mode(@config, "matrix_oidc_refresh_mode") == "offline"}>
+        offline (offline_access)
+      </option>
+      <option value="online" selected={refresh_mode(@config, "matrix_oidc_refresh_mode") == "online"}>
+        online
+      </option>
+    </select>
+  </label>
+
+  <p class="text-sm text-text-secondary mt-2">
+    <strong>offline</strong>: long-lived offline refresh token (survives IdP logout).
+    <strong>online</strong>: session-bound refresh token (dies on IdP SSO logout).
+  </p>
+
+  <button type="submit" class="btn btn-primary mt-3">Save refresh mode</button>
+</form>
+
+<div class="overflow-x-auto">
+  <table class="table table-zebra">
+    <thead>
+      <tr><th>Key</th><th>Value</th></tr>
+    </thead>
+    <tbody>
+      <tr :for={{k, v} <- @config}>
+        <td class="font-mono text-mono">{k}</td>
+        <td class="font-mono text-mono break-all">{v}</td>
+      </tr>
+    </tbody>
+  </table>
+</div>

@@ -1,0 +1,65 @@
+<div class="admin-spaces" data-page="spaces">
+  <div class="flex items-center justify-between mb-4">
+    <h1 class="text-2xl font-bold">Spaces</h1>
+  </div>
+
+  <p :if={@create_error} class="text-error mb-3" role="alert" data-role="create-error">
+    {@create_error}
+  </p>
+
+  <%!-- Create space form --%>
+  <form id="create-space-form" method="post" action="/admin/spaces" class="mb-6 max-w-sm" data-form="create-space">
+    <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+    <label class="form-control w-full mb-3">
+      <span class="label-text">Space name</span>
+      <input
+        type="text"
+        name="name"
+        placeholder="Engineering"
+        class="input input-bordered w-full"
+        aria-label="Space name"
+      />
+    </label>
+    <button type="submit" class="btn btn-primary">Create space</button>
+  </form>
+
+  <p :if={@spaces == []} class="text-base-content/70">No spaces found.</p>
+
+  <table :if={@spaces != []} class="table w-full" role="table">
+    <thead>
+      <tr>
+        <th scope="col">Space</th>
+        <th scope="col">Members</th>
+        <th scope="col">Children</th>
+        <th scope="col">Auto-join</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr :for={space <- @spaces} data-space-id={space.room_id}>
+        <td>
+          <a href={"/admin/spaces/" <> URI.encode(space.room_id, &URI.char_unreserved?(&1))} class="text-primary">
+            {space_display_name(space)}
+          </a>
+        </td>
+        <td>{Map.get(space, :member_count, 0)}</td>
+        <td>{Map.get(space, :child_count, 0)}</td>
+        <td>
+          <form
+            method="post"
+            action={"/admin/spaces/" <> URI.encode(space.room_id, &URI.char_unreserved?(&1)) <> "/auto-join"}
+          >
+            <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+            <button
+              type="submit"
+              class="btn btn-xs"
+              role="switch"
+              aria-checked={to_string(space.is_auto_join)}
+            >
+              {if space.is_auto_join, do: "On", else: "Off"}
+            </button>
+          </form>
+        </td>
+      </tr>
+    </tbody>
+  </table>
+</div>

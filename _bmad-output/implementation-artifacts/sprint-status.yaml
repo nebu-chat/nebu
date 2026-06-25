@@ -8,7 +8,8 @@
 #   _bmad-output/nebu/epics/<epic-name>/sprint-status.yaml
 # ═══════════════════════════════════════════════════════════════════════════════
 # generated: 2026-03-20
-# last_updated: 2026-05-26
+# last_updated: 2026-06-25
+# story admin-http-refactor done (pipeline: ATDD+Dev+Code 2 cycles+Kassandra CLEAN — 7 LiveViews → HTTP controllers): 2026-06-25
 # story bugfix-sso-bootstrap-credentials done (pipeline: ATDD+Code CLEAN 2 cycles, Kassandra CLEAN): 2026-05-26
 # story 5-32 done (pipeline: ATDD+Code CLEAN — 2 cycles): 2026-05-26
 # story 5-31 done (pipeline: ATDD+Code CLEAN — 1 cycle, arc42 updated): 2026-05-26

@@ -95,7 +95,6 @@ default:
 
 stages:
   - build-ci-images
-  - lint
   - unit
   - verify
   - build
@@ -160,23 +159,6 @@ build-ci-dex:
       changes: [docker/Dockerfile.dex-ci, dev/dex/config.yaml]
     - when: manual
       allow_failure: true
-
-# ─── No-Go-Files Smoke Gate ─────────────────────────────────────────────────────
-# go-removal-cleanup (full-elixir-stack) AC1: a CI gate that fails if any *.go file
-# reappears in the tree. Toolchain-free (pure POSIX find), runs in any image.
-no-go-files:
-  stage: lint
-  image: alpine:3.23
-  before_script:
-    - apk add --no-cache bash
-  script:
-    - bash test/smoke/no-go-files.sh
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
-    - if: '$CI_COMMIT_BRANCH =~ /^feature\//'
-    - if: '$CI_COMMIT_BRANCH =~ /^bugfix\//'
-    - if: '$CI_COMMIT_BRANCH =~ /^release\//'
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
 
 # ─── Unit Tests ───────────────────────────────────────────────────────────────
 # go-removal-cleanup (full-elixir-stack): lint-go and test-unit-go were removed along

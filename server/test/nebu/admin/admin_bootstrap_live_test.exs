@@ -213,17 +213,32 @@ defmodule Nebu.Web.AdminBootstrapLiveTest do
     assert html =~ ~s(data-navkey="rooms")
   end
 
-  # Regression: bug-bootstrap-nav-and-ws-proxy
-  # app.js must configure longPollFallbackMs so LiveView falls back to HTTP
-  # long-polling when the WebSocket is blocked by a reverse proxy (e.g. Stackit
-  # Nginx). Without this, all phx-submit/phx-click events silently fail in proxy
-  # environments, making the wizard completely non-functional.
-  test "app.js configures LongPoll fallback for proxy environments that block WebSockets" do
-    app_js = File.read!("priv/static/assets/app.js")
+  # Regression: bug-bootstrap-next-button-ws
+  # The nginx /admin/ location must forward WebSocket upgrade headers so that the
+  # LiveSocket WebSocket handshake for /admin/live succeeds. Without Upgrade +
+  # Connection headers nginx silently rejects the WS upgrade, disconnecting the
+  # LiveSocket and making all phx-submit events (Next button) unreachable.
+  #
+  # `longPollFallbackMs` is NOT a valid Phoenix LiveView 1.0 option — it is
+  # silently ignored by the LiveSocket constructor and must not be relied on.
+  test "nginx cloud-init /admin/ location forwards WebSocket Upgrade and Connection headers" do
+    template_path = Path.expand(
+      "../../../../deploy/tofu/examples/stackit/cloud-init.tftpl",
+      __DIR__
+    )
 
-    assert app_js =~ ~r/longPollFallbackMs:\s*[1-9]\d*/,
-           "app.js must set longPollFallbackMs to a positive integer so LiveSocket actually " <>
-             "falls back to LongPoll when WebSocket is blocked by a reverse proxy (Stackit Nginx). " <>
-             "longPollFallbackMs: 0 disables the fallback and silently breaks the wizard in proxy environments."
+    content = File.read!(template_path)
+    admin_blocks = Regex.scan(~r/location \/admin\/ \{[^}]+\}/, content) |> Enum.map(fn [m] -> m end)
+
+    assert length(admin_blocks) >= 1,
+           "Expected at least one `location /admin/ { }` block in cloud-init.tftpl"
+
+    Enum.each(admin_blocks, fn block ->
+      assert String.contains?(block, "proxy_set_header   Upgrade"),
+             "nginx /admin/ block missing Upgrade WebSocket header — LiveSocket cannot connect"
+
+      assert String.contains?(block, "proxy_set_header   Connection"),
+             "nginx /admin/ block missing Connection WebSocket header — LiveSocket cannot connect"
+    end)
   end
 end
