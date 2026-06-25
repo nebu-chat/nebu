@@ -148,7 +148,11 @@ if config_env() in [:prod, :dev] do
         raise "NEBU_ADMIN_SECRET_KEY_BASE (or NEBU_INTERNAL_SECRET_FILE) must be set in prod"
     end
 
-  config :nebu, Nebu.Admin.Endpoint, secret_key_base: admin_secret_key_base
+  config :nebu, Nebu.Admin.Endpoint,
+    secret_key_base: admin_secret_key_base,
+    # Overrides compile-time default ("localhost") so Phoenix accepts LiveView socket
+    # connections from the configured public hostname (origin check uses url[:host]).
+    url: [host: System.get_env("NEBU_SERVER_NAME", "localhost")]
 
   # go-removal-cleanup: the admin OIDC Authorization-Code + PKCE login is now served in
   # Elixir (Nebu.Admin.Auth), replacing the deleted Go gateway flow. It reuses the
