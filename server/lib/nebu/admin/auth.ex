@@ -837,8 +837,18 @@ defmodule Nebu.Admin.Auth do
   # The redirect_uri MUST be a fixed, server-controlled value registered with the IdP —
   # it is NOT derived from request headers (Host/X-Forwarded-*), which an attacker could
   # spoof to redirect the auth code elsewhere. Configured via NEBU_ADMIN_OIDC_REDIRECT_URI.
+  # When not explicitly set, derived from :server_name + :admin_session_secure app config.
   defp redirect_uri do
-    Application.get_env(:nebu_http, :admin_oidc_redirect_uri, "http://localhost:8008/admin/callback")
+    Application.get_env(:nebu_http, :admin_oidc_redirect_uri) ||
+      derive_admin_redirect_uri()
+  end
+
+  defp derive_admin_redirect_uri do
+    server_name = Application.get_env(:nebu_http, :server_name, "localhost")
+    secure = Application.get_env(:nebu_http, :admin_session_secure, true)
+    scheme = if secure, do: "https", else: "http"
+    host = if server_name == "localhost", do: "localhost:8008", else: server_name
+    "#{scheme}://#{host}/admin/callback"
   end
 
   # Resolves one endpoint from the provider discovery document via the existing

@@ -171,16 +171,76 @@ defmodule Nebu.Web.JwksCache do
 
     case uri do
       nil ->
-        # No configured endpoint: nothing to fetch. Treat as an empty (but
-        # successful) key set rather than a failure to keep stale keys around.
-        {:ok, []}
+        # No explicit JWKS URI configured: try auto-discovery from the OIDC
+        # issuer's well-known openid-configuration document. This handles the
+        # common deployment where only NEBU_OIDC_ISSUER is set (not
+        # NEBU_OIDC_JWKS_URI) — which is valid per the OIDC spec.
+        discover_jwks_uri_and_fetch()
 
       uri ->
         fetch_jwks_over_http(uri)
     end
   end
 
+  defp discover_jwks_uri_and_fetch do
+    issuer =
+      Application.get_env(:nebu_http, :oidc_issuer) ||
+        Nebu.Web.OidcConfig.get()[:issuer]
+
+    case issuer do
+      nil ->
+        # No issuer and no explicit JWKS URI: nothing to discover. Treat as
+        # an empty (but successful) key set rather than a failure.
+        {:ok, []}
+
+      issuer ->
+        with {:ok, body} <- Nebu.Matrix.OidcMetadata.fetch(issuer),
+             {:ok, doc} <- Jason.decode(body),
+             {:ok, jwks_uri} <- extract_valid_jwks_uri(doc) do
+          fetch_jwks_over_http(jwks_uri)
+        else
+          _ ->
+            # Return :error so do_fetch/1 keeps the last-known-good key set rather
+            # than overwriting it with an empty list on a transient discovery failure.
+            Logger.warning("JwksCache: could not discover jwks_uri from issuer #{issuer}")
+            :error
+        end
+    end
+  end
+
+  # Extracts the jwks_uri from an OIDC discovery document and validates its scheme.
+  # Only http:// and https:// are accepted — other schemes (file://, etc.) are rejected
+  # to prevent SSRF via a malicious discovery document.
+  defp extract_valid_jwks_uri(%{"jwks_uri" => uri})
+       when is_binary(uri) and uri != "" do
+    if String.starts_with?(uri, "https://") or String.starts_with?(uri, "http://") do
+      {:ok, uri}
+    else
+      :error
+    end
+  end
+
+  defp extract_valid_jwks_uri(_), do: :error
+
   defp fetch_jwks_over_http(uri) do
+    # Allow test injection of the HTTP key-fetch step via :jwks_http_fetcher.
+    # The seam is checked before making a real HTTP request so tests can stub
+    # the final key-fetch step without a live JWKS endpoint.
+    case Application.get_env(:nebu_http, :jwks_http_fetcher) do
+      fun when is_function(fun, 1) ->
+        case fun.(uri) do
+          {:ok, keys} when is_list(keys) -> {:ok, keys}
+          other ->
+            Logger.warning("JwksCache :jwks_http_fetcher returned unexpected value: #{inspect(other)}")
+            :error
+        end
+
+      _ ->
+        fetch_jwks_over_http_real(uri)
+    end
+  end
+
+  defp fetch_jwks_over_http_real(uri) do
     http_opts = http_opts_for(uri)
 
     case :httpc.request(:get, {String.to_charlist(uri), []}, http_opts, body_format: :binary) do
