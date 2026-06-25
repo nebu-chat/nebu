@@ -103,6 +103,7 @@ make redeploy                     # rebuild + restart the server Docker image/co
 
 Environment variables (prefix: `NEBU_`):
 - `NEBU_DB_URL` — PostgreSQL connection string (migrations: `NEBU_DB_URL_MIGRATE` fallback)
+- `NEBU_POSTGRES_SSL` — set to `"true"` to enable SSL on the PostgreSQL connection (both runtime Repo and migrations); default `"false"`. Use this instead of `?ssl=true` / `?sslmode=require` URL parameters.
 - `NEBU_OIDC_ISSUER` / `NEBU_OIDC_AUDIENCE` — OIDC provider config (validated at boot)
 - `NEBU_PII_ENCRYPTION_KEY` — 32-byte hex key for PII-at-rest encryption
 - `NEBU_INTERNAL_SECRET_FILE` — path to shared node-registration / admin-key-base secret file

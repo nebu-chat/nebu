@@ -48,9 +48,8 @@ write_files:
     owner: root:root
     permissions: "0600"
     content: |
-      NEBU_DB_URL=postgresql://${pg_user}:${pg_password}@${pg_host}:${pg_port}/nebu?sslmode=require
-      NEBU_DB_URL_MIGRATE=postgresql://${pg_migrate_user}:${pg_migrate_password}@${pg_host}:${pg_port}/nebu?sslmode=require
       NEBU_OIDC_ISSUER=${oidc_issuer}
+      NEBU_OIDC_AUDIENCE=${oidc_audience}
       NEBU_ADMIN_OIDC_CLIENT_SECRET=${oidc_client_secret}
       NEBU_ADMIN_OIDC_CLIENT_ID=${oidc_client_id}
       NEBU_SERVER_NAME=${server_name}
@@ -445,14 +444,14 @@ write_files:
           secrets: [internal_secret]
 %{ endif ~}
           environment:
-            # Postgrex (Elixir) requires ?ssl=true.
-            # This environment override takes precedence over env_file for the server service.
-            NEBU_DB_URL: "postgresql://${pg_user}:${pg_password}@${pg_host}:${pg_port}/nebu?ssl=true"
-            NEBU_DB_URL_MIGRATE: $${NEBU_DB_URL_MIGRATE}
+            NEBU_DB_URL: "postgresql://${pg_user}:${pg_password}@${pg_host}:${pg_port}/nebu"
+            NEBU_DB_URL_MIGRATE: "postgresql://${pg_migrate_user}:${pg_migrate_password}@${pg_host}:${pg_port}/nebu"
+            NEBU_POSTGRES_SSL: "true"
             NEBU_INTERNAL_SECRET_FILE: "/run/secrets/internal_secret"
             NEBU_SERVER_NAME: $${NEBU_SERVER_NAME}
             # OIDC config — server now serves the public Matrix API + admin.
             NEBU_OIDC_ISSUER: $${NEBU_OIDC_ISSUER}
+            NEBU_OIDC_AUDIENCE: $${NEBU_OIDC_AUDIENCE}
             NEBU_ADMIN_OIDC_CLIENT_SECRET: $${NEBU_ADMIN_OIDC_CLIENT_SECRET}
             NEBU_ADMIN_OIDC_CLIENT_ID: $${NEBU_ADMIN_OIDC_CLIENT_ID}
 %{ if enable_media_gateway ~}

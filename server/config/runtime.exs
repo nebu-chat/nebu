@@ -26,13 +26,14 @@ end
 # Nebu.Web.JwksCache fetches the JWKS on start and refreshes on NEBU_OIDC_JWKS_TTL.
 # Only configured in prod/dev — tests set this config directly (never raise here).
 if config_env() in [:prod, :dev] do
-  # F-4: fail CLOSED and LOUD on missing OIDC config. OidcPlug already rejects
-  # every token when issuer/audience is nil (fail-closed at the plug, MEDIUM-3),
-  # so a misconfigured node would otherwise 401 100% of traffic silently. Raise
-  # at boot instead — matching NEBU_DB_URL / NEBU_PII_ENCRYPTION_KEY — so an
-  # operator misconfig is a fast, obvious startup failure, not a mystery outage.
-  oidc_issuer = System.get_env("NEBU_OIDC_ISSUER") || raise("NEBU_OIDC_ISSUER is not set")
-  oidc_audience = System.get_env("NEBU_OIDC_AUDIENCE") || raise("NEBU_OIDC_AUDIENCE is not set")
+  # oidc-env-optional-bootstrap: OIDC issuer/audience default to nil when absent so
+  # the server can start without env vars and accept OIDC config from the Bootstrap
+  # Wizard (server_config). OidcPlug enforces fail-closed behavior at the plug level
+  # (MEDIUM-3): nil issuer or audience → all tokens rejected with 401 M_UNKNOWN_TOKEN.
+  # Operators who pre-configure OIDC via env still get the same startup behavior — the
+  # values are set and plug validation passes as before.
+  oidc_issuer = System.get_env("NEBU_OIDC_ISSUER")
+  oidc_audience = System.get_env("NEBU_OIDC_AUDIENCE")
 
   config :nebu_http,
     server_name: System.get_env("NEBU_SERVER_NAME", "localhost"),
@@ -117,7 +118,8 @@ config :event_dispatcher, server_name: System.get_env("NEBU_SERVER_NAME", "local
 if config_env() in [:prod, :dev] do
   config :nebu, Nebu.Repo,
     url: System.get_env("NEBU_DB_URL") || raise("NEBU_DB_URL is not set"),
-    pool_size: 10
+    pool_size: 10,
+    ssl: System.get_env("NEBU_POSTGRES_SSL", "false") == "true"
 end
 
 # ── admin-ui-migration: Phoenix LiveView Admin UI endpoint (runtime secret) ───

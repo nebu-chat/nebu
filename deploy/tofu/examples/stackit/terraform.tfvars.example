@@ -102,6 +102,12 @@ oidc_issuer = "https://auth.example.com/realms/nebu"
 # external mode: must match the client ID registered in your OIDC provider
 oidc_client_id = "<REPLACE_WITH_OIDC_CLIENT_ID>"
 
+# Optional: OIDC audience (aud claim in Bearer tokens).
+# Leave empty to use oidc_client_id as audience (correct for Dex and most setups).
+# Set explicitly only when your IdP issues access tokens with a separate audience
+# (e.g. Keycloak with resource servers configured).
+# oidc_audience = ""
+
 # Required: OIDC client secret.
 # dex mode:      embedded into Dex staticClients (same value used by gateway and Dex)
 # external mode: must match the client secret registered in your OIDC provider

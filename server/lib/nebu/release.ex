@@ -185,6 +185,12 @@ defmodule Nebu.Release do
       raise "NEBU_DB_URL_MIGRATE (or NEBU_DB_URL) is not set — cannot run migrations"
   end
 
+  @doc false
+  @spec postgres_ssl_opts() :: [ssl: boolean()]
+  def postgres_ssl_opts do
+    [ssl: System.get_env("NEBU_POSTGRES_SSL", "false") == "true"]
+  end
+
   # Parse a postgres[ql]://user:pass@host:port/db URL into Postgrex start opts.
   defp parse_url(url) do
     uri = URI.parse(url)
@@ -205,6 +211,6 @@ defmodule Nebu.Release do
       database: String.trim_leading(uri.path || "", "/"),
       # A single connection is enough for the migrate-and-exit task.
       pool_size: 1
-    ]
+    ] ++ postgres_ssl_opts()
   end
 end

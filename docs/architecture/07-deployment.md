@@ -32,6 +32,74 @@ is configured via `NEBU_ADMIN_OIDC_CLIENT_ID` / `..._CLIENT_SECRET[_FILE]` / `..
 server-controlled redirect target). The session is the signed Phoenix `secret_key_base` cookie
 (http_only, secure, SameSite=Lax), capped at min(idToken.exp, now+8h).
 
+## OIDC Configuration Sourcing (oidc-env-optional-bootstrap)
+
+**Before Story oidc-env-optional-bootstrap:** `NEBU_OIDC_ISSUER` and `NEBU_OIDC_AUDIENCE` were mandatory
+environment variables at boot time. The application rejected startup if either was unset.
+
+**After oidc-env-optional-bootstrap:** These environment variables are now **optional**. OIDC configuration
+can be sourced from two places: environment variables (preferred, lock-in) or the `server_config` database
+table (populated by the Bootstrap Wizard or operator). The actual behavior differs per deployment mode:
+
+| Scenario | NEBU_OIDC_ISSUER | NEBU_OIDC_AUDIENCE | Source of truth | Behavior |
+|---|---|---|---|---|
+| First-boot bootstrap mode | unset | unset | Bootstrap Wizard collects them in step 2; stored in `server_config` | Wizard completion promotes `bootstrap_draft` into `server_config`; `OidcConfig` cache is invalidated and reloaded |
+| Post-bootstrap or env-locked | set | set | Environment variables | OidcPlug uses env-var values directly (ignores `server_config`) |
+| Mixed mode (unusual, not recommended) | set | unset | Environment (issuer) + server_config (audience) | OidcPlug uses issuer from env, falls back to `server_config` for audience |
+
+**New component: `Nebu.Web.OidcConfig`**
+
+To avoid a per-request database lookup on the OIDC hot path (every Bearer token validation), OIDC config
+sourced from `server_config` is cached in a named ETS table `:nebu_http_oidc_config` (read_concurrency: true).
+
+The `Nebu.Web.OidcConfig` GenServer:
+- **Loads on boot:** Reads `server_config` table for `oidc_issuer`, `oidc_audience`, and `oidc_jwks_uri` keys
+  and populates the ETS cache.
+- **Refreshes on wizard completion:** The Bootstrap Wizard calls `OidcConfig.refresh/0` after promoting
+  the `bootstrap_draft` into `server_config` (AC2/AC5 in story oidc-env-optional-bootstrap).
+- **Cluster-aware via :pg:** When refreshed, broadcasts an invalidation message to peer nodes (ADR-020,
+  pattern M-3) so all nodes in a cluster update their caches.
+- **Fall-through to nil:** If a config key is unset in the DB and no env var is set, the cache returns `nil`.
+
+**OidcPlug resolution logic:**
+
+```
+for issuer and audience:
+  1. Check NEBU_OIDC_ISSUER env var → if set, use it (lock-in)
+  2. Fall through to OidcConfig.get() → reads ETS cache (may be nil)
+  3. Fail-closed: if both env and cache are nil, reject the token with 401 M_UNKNOWN_TOKEN
+
+for JWKS URI (used by JwksCache):
+  1. Check NEBU_OIDC_JWKS_URI env var → if set, use it
+  2. Fall through to OidcConfig.jwks_uri() → reads ETS cache (may be nil)
+  3. If both are nil, JwksCache.http_fetch/0 returns {:ok, []} (no keys); all tokens rejected
+```
+
+**Bootstrap Wizard form changes (Story oidc-env-optional-bootstrap):**
+
+Step 2 now collects two new fields:
+- `oidc_audience` (text input) — required if `NEBU_OIDC_AUDIENCE` env var is not set
+- `oidc_jwks_uri` (text input) — required if `NEBU_OIDC_JWKS_URI` env var is not set
+
+When an env var IS set for a field, the form input is rendered as `disabled` and its value is locked to the
+env var. Disabled fields are omitted from the form submission (browser default behavior), so the wizard
+correctly falls back to the env-var value for locked fields (no overwrite race condition).
+
+On step 3 (finalization), the wizard persists all collected values (including `oidc_audience` and
+`oidc_jwks_uri`) into `server_config` atomically. It then calls `OidcConfig.refresh/0` to invalidate
+the ETS cache and trigger cluster-wide reloads.
+
+**Security notes:**
+
+- **Fail-closed on missing config:** If bootstrap completes without an audience or JWKS URI (when env vars
+  are also absent), the OIDC plug correctly enters a fail-closed state and rejects all tokens with 401.
+  The Bootstrap Wizard validates this at form submission (AC2, AC5) to prevent completing into a broken state.
+- **Env vars override DB:** When `NEBU_OIDC_*` env vars are set, they always take precedence over the
+  `server_config` values. This ensures that operators can lock OIDC config at deployment time and prevent
+  accidental misconfiguration via the Bootstrap Wizard.
+- **Cluster coherency:** All nodes in a cluster refresh their ETS caches within milliseconds after a wizard
+  completion, ensuring consistent OIDC enforcement across the cluster.
+
 **Port map:**
 
 | Service | External Port | Purpose |
@@ -499,7 +567,7 @@ A new `deploy/tofu/examples/aws/outputs.tf` exports `dns_name = module.nebu_aws.
 2. Installs Docker CE + Docker Compose plugin via the official Docker apt repository
 3. Writes `/opt/nebu/` directory tree (permissions `0700`) with:
    - `.secrets/internal_secret` (mode `0600`, quoted scalar - no trailing newline)
-   - `.env` (mode `0600`) - all runtime secrets injected from OpenTofu variables, including `NEBU_DB_URL` and `NEBU_DB_URL_MIGRATE` pointing to the PostgresFlex managed instance
+   - `.env` (mode `0600`) - runtime secrets injected from OpenTofu variables (OIDC secrets, admin credentials, etc.). `NEBU_DB_URL`, `NEBU_DB_URL_MIGRATE`, and `NEBU_POSTGRES_SSL` are set directly in the `docker-compose.yml` `environment:` block — not in `.env` — so DB connection config is visible in compose without shell-variable expansion.
    - `/opt/nebu/dex/config.yaml` (mode `0600`, `oidc_mode = "dex"` only) - Dex static configuration
    - `docker-compose.yml` (mode `0640`) - two or three services: `server`, `gateway`, and conditionally `dex` (when `oidc_mode = "dex"`). No `postgres` service (managed PostgresFlex); no `keycloak` service.
 4. Installs `/etc/systemd/system/nebu.service` - `Type=simple`, no `-d` flag; systemd owns the process lifecycle with `Restart=on-failure RestartSec=10`
@@ -540,6 +608,12 @@ A new `deploy/tofu/examples/aws/outputs.tf` exports `dns_name = module.nebu_aws.
   - `oidc_mode = "external"`: `""` (empty — external providers such as Keycloak may reject non-standard scopes)
 - `docker-compose.yml` (local dev): `NEBU_OIDC_EXTRA_SCOPES=groups offline_access` added for the dev Dex environment
 - The gateway reads `NEBU_OIDC_EXTRA_SCOPES` as the env-var fallback; a `server_config` / `bootstrap_draft` DB key `oidc_extra_scopes` takes unconditional precedence when present (see §8 Cross-Cutting Concepts — "Configurable OIDC Extra Scopes")
+
+**Changes in Bug postgres-ssl-env-var (PostgreSQL SSL via separate env var):**
+- `NEBU_POSTGRES_SSL: "true"` added to the `server:` service `environment:` block in `docker-compose.yml` (Stackit cloud-init template). Managed PostgreSQL services (Stackit PostgresFlex) require TLS; setting it here keeps the connection URL clean.
+- `NEBU_DB_URL` and `NEBU_DB_URL_MIGRATE` moved from `.env` (shell-variable `$${…}` references) into the `environment:` block as literal values — no `${}` indirection needed anymore.
+- `server/config/runtime.exs`: `Nebu.Repo` config gains `ssl: System.get_env("NEBU_POSTGRES_SSL", "false") == "true"`. URL query parameters `?ssl=true` / `?sslmode=require` are no longer used or needed.
+- `server/lib/nebu/release.ex`: `postgres_ssl_opts/0` helper reads the same `NEBU_POSTGRES_SSL` env var and appends `[ssl: true|false]` to the Postgrex start opts used by the migration runner (`Nebu.Release.migrate/0`).
 
 **Security invariants:**
 - `pg_password` appears only inside `.env` (mode `0600`), never in plain environment variables or log output

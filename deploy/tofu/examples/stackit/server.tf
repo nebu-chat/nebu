@@ -93,6 +93,7 @@ resource "stackit_server" "nebu" {
     oidc_client_secret           = var.oidc_client_secret
     oidc_client_id               = var.oidc_client_id
     oidc_issuer                  = local.effective_oidc_issuer
+    oidc_audience                = var.oidc_audience != "" ? var.oidc_audience : var.oidc_client_id
     oidc_mode                    = var.oidc_mode
     dex_static_password_hash     = var.oidc_mode == "dex" ? var.dex_static_password_hash : ""
     dex_user1_password_hash      = var.oidc_mode == "dex" ? var.dex_user1_password_hash : null

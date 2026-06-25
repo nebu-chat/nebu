@@ -56,6 +56,9 @@ defmodule Nebu.Admin.BootstrapOidcFlowTest do
       "oidc_issuer" => @issuer,
       "oidc_client_id" => @client_id,
       "oidc_client_secret" => encrypted,
+      # MINOR-1 (cycle-2): oidc_audience is required by do_complete_bootstrap/2 when
+      # NEBU_OIDC_AUDIENCE is not set. All bootstrap confirm tests must include it.
+      "oidc_audience" => "nebu-audience",
       "oidc_user_id_claim" => "sub",
       "oidc_displayname_claim" => "name",
       "oidc_email_claim" => "email"

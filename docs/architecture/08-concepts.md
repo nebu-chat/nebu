@@ -67,11 +67,20 @@ Components in `Nebu.Web` (the shared HTTP plumbing):
   by the forwarded sub-routers and CORSPlug's halted preflight. All Nebu responses are
   `application/json` Matrix envelopes, so this prevents any MIME-sniffing edge case on a misbehaving
   client.
+- **`Nebu.Web.OidcConfig`** — a GenServer + ETS cache for OIDC issuer, audience, and JWKS URI
+  (oidc-env-optional-bootstrap story). When `NEBU_OIDC_ISSUER`, `NEBU_OIDC_AUDIENCE`, and/or
+  `NEBU_OIDC_JWKS_URI` are unset as environment variables (bootstrap-wizard deployments), `OidcPlug` and
+  `JwksCache` fall back to the `server_config` database table via this cache. Caching in ETS
+  `:nebu_http_oidc_config` avoids per-request DB lookups on the hot OIDC path. The cache is refreshed
+  by the Bootstrap Wizard after configuration is written to `server_config`, and cluster-aware invalidation
+  via `:pg` ensures all nodes stay synchronized (ADR-020, M-3). When both env vars and DB values are
+  absent, the config returns `nil` and OidcPlug fails closed (F-4 — all tokens rejected with 401).
 - **`Nebu.Web.JwksCache`** — a GenServer that fetches the OIDC provider JWKS on start and refreshes
-  it on a TTL (`NEBU_OIDC_JWKS_TTL`, default 300s). On a refresh failure it keeps the last-known-good
-  keys rather than blanking the cache, so transient JWKS outages do not reject otherwise-valid
-  tokens. The JWKS HTTP fetch uses TLS peer verification for `https` endpoints. Its state is volatile
-  and is recovered by a fresh fetch when the supervisor restarts it.
+  it on a TTL (`NEBU_OIDC_JWKS_TTL`, default 300s). The JWKS URI is resolved from `NEBU_OIDC_JWKS_URI`
+  env var (preferred) or `OidcConfig` cache (fallback for bootstrap mode). On a refresh failure it keeps
+  the last-known-good keys rather than blanking the cache, so transient JWKS outages do not reject
+  otherwise-valid tokens. The JWKS HTTP fetch uses TLS peer verification for `https` endpoints. Its state
+  is volatile and is recovered by a fresh fetch when the supervisor restarts it.
 - **Router scoping** — `Nebu.Web.Router` keeps `GET /health` open, forwards the unauthenticated Matrix
   routes (`POST /login`, `GET /profile`, MSC2965 discovery) to `Nebu.Matrix.HttpPublic`, and forwards
   everything else under `/_matrix` to the protected sub-router `Nebu.Matrix.Http.Protected` whose
@@ -79,11 +88,13 @@ Components in `Nebu.Web` (the shared HTTP plumbing):
 
 Both request-time ETS tables (token denylist, rate-limit buckets) are created eagerly at
 `Nebu.Application` boot so the lazy `ensure_table` fast path never has to race under concurrent
-first requests (closing a brief fail-open window, R-2). **Fail-loud config:** `runtime.exs` now
-**raises at boot** when `NEBU_OIDC_ISSUER` or `NEBU_OIDC_AUDIENCE` is missing in `prod`/`dev` (F-4) —
-since OidcPlug fails closed on missing issuer/audience, a misconfigured node would otherwise reject
-100% of traffic silently; raising at startup turns an operator misconfig into a fast, obvious failure
-(matching the existing `NEBU_DB_URL` / `NEBU_PII_ENCRYPTION_KEY` behaviour).
+first requests (closing a brief fail-open window, R-2). **Fail-loud config:** `runtime.exs` no longer
+**requires** `NEBU_OIDC_ISSUER` and `NEBU_OIDC_AUDIENCE` at boot (oidc-env-optional-bootstrap story) —
+these are now optional, sourced from either environment variables (preferred) or `server_config` database
+(populated by Bootstrap Wizard or operator). However, `NEBU_DB_URL` and `NEBU_PII_ENCRYPTION_KEY` remain
+mandatory at boot. When both env vars and DB values are absent, OidcPlug fails closed (F-4) and rejects
+all tokens with 401 — the Bootstrap Wizard validates at form submission (AC2/AC5) to prevent completing
+into this broken state.
 
 Relevant configuration (server service): `NEBU_OIDC_ISSUER`, `NEBU_OIDC_AUDIENCE`,
 `NEBU_OIDC_JWKS_URI`, `NEBU_OIDC_JWKS_TTL`, `NEBU_OIDC_DISPLAY_NAME` (advertised IdP name for

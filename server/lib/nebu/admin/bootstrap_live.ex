@@ -121,24 +121,72 @@ defmodule Nebu.Admin.BootstrapLive do
   end
 
   defp save_oidc(params, socket) do
-    issuer = String.trim(params["oidc_issuer"] || "")
-    client_id = String.trim(params["oidc_client_id"] || "")
+    # M-1 (cycle-1): disabled HTML inputs are NOT submitted by the browser — their
+    # field is absent from params. When a field is locked by an env var (disabled),
+    # fall back to the env-var value so the validation and draft-write below still
+    # work correctly for operators who have NEBU_OIDC_ISSUER / NEBU_OIDC_CLIENT_ID set.
+    issuer = String.trim(params["oidc_issuer"] || "") |> env_fallback(env_oidc_issuer())
+    client_id = String.trim(params["oidc_client_id"] || "") |> env_fallback(env_oidc_client_id())
     client_secret = params["oidc_client_secret"] || ""
+    # oidc-env-optional-bootstrap (AC3): collect oidc_audience from step-2 form.
+    # M-1 (cycle-1): fall back to the env-var audience when the field is disabled.
+    audience = String.trim(params["oidc_audience"] || "") |> env_fallback(env_oidc_audience())
+    # C-2 (cycle-1): collect oidc_jwks_uri from step-2 form.
+    # MAJOR-1 (cycle-2): apply env_fallback/2 so that when the field is disabled
+    # (env-locked) and the browser sends "", the env-var value is substituted.
+    jwks_uri = String.trim(params["oidc_jwks_uri"] || "") |> env_fallback(env_oidc_jwks_uri())
 
-    if issuer == "" or client_id == "" or client_secret == "" do
-      {:noreply, assign(socket, error: "Issuer, client ID and client secret are required.")}
-    else
-      put_draft("oidc_issuer", issuer)
-      put_draft("oidc_client_id", client_id)
-      # MINOR-3: encrypt the client secret at rest (AES-256-GCM) before storing it in
-      # bootstrap_draft — byte-for-byte parity with the Go bootstrap handler
-      # (gateway/internal/admin/crypto.go encryptAES256GCM, keyed by the gateway
-      # internal secret). The encrypted blob is carried forward unchanged when the
-      # draft is promoted into server_config in complete_bootstrap/1.
-      put_draft("oidc_client_secret", encrypt_secret(client_secret))
-      {:noreply, assign(socket, draft: load_draft(), step: 3, error: nil)}
+    # M-2 (cycle-1): audience is required when it is not set via NEBU_OIDC_AUDIENCE.
+    # A bootstrap that completes without an audience leaves OidcPlug in permanent
+    # fail-closed mode (all tokens rejected with 401 M_UNKNOWN_TOKEN). Validate here
+    # so the wizard never silently completes into a broken state.
+    audience_valid? = audience != "" or env_oidc_audience() != nil
+
+    # MAJOR-1 (cycle-2): JWKS URI is required when not set via NEBU_OIDC_JWKS_URI.
+    # No OIDC discovery is implemented — a blank JWKS URI means JwksCache.http_fetch/0
+    # gets nil → returns {:ok, []} (no keys) → every Bearer token rejected with 401
+    # forever. Validate here so the wizard never completes into a permanently broken state.
+    jwks_uri_valid? = jwks_uri != "" or env_oidc_jwks_uri() != nil
+
+    cond do
+      issuer == "" or client_id == "" or client_secret == "" ->
+        {:noreply, assign(socket, error: "Issuer, client ID and client secret are required.")}
+
+      not audience_valid? ->
+        {:noreply,
+         assign(socket,
+           error: "Audience is required when not set via NEBU_OIDC_AUDIENCE env var."
+         )}
+
+      not jwks_uri_valid? ->
+        {:noreply,
+         assign(socket,
+           error: "JWKS URI is required when not set via NEBU_OIDC_JWKS_URI env var."
+         )}
+
+      true ->
+        put_draft("oidc_issuer", issuer)
+        put_draft("oidc_client_id", client_id)
+        # MINOR-3: encrypt the client secret at rest (AES-256-GCM) before storing it in
+        # bootstrap_draft — byte-for-byte parity with the Go bootstrap handler
+        # (gateway/internal/admin/crypto.go encryptAES256GCM, keyed by the gateway
+        # internal secret). The encrypted blob is carried forward unchanged when the
+        # draft is promoted into server_config in complete_bootstrap/1.
+        put_draft("oidc_client_secret", encrypt_secret(client_secret))
+        # oidc-env-optional-bootstrap (AC3): persist audience.
+        put_draft("oidc_audience", audience)
+        # C-2 (cycle-1): persist JWKS URI (may be empty — JwksCache handles nil gracefully).
+        put_draft("oidc_jwks_uri", jwks_uri)
+        {:noreply, assign(socket, draft: load_draft(), step: 3, error: nil)}
     end
   end
+
+  # When a form field is disabled (env-locked) its value is absent from the submitted
+  # params (browsers do not send disabled inputs). If the trimmed param value is empty
+  # and an env-var fallback exists, use the env-var value. When neither is present,
+  # returns "" (the empty string — the caller validates required fields after this).
+  defp env_fallback("", env_val) when is_binary(env_val) and env_val != "", do: env_val
+  defp env_fallback(param_val, _env_val), do: param_val
 
   # Persists the claim-mapping fields (defaults applied for blank inputs) to the draft.
   # Called by the step-3 "Connect with OIDC" handler before the OIDC login hand-off.
@@ -300,6 +348,38 @@ defmodule Nebu.Admin.BootstrapLive do
     :crypto.hash(:sha256, secret)
   end
 
+  # ── oidc-env-optional-bootstrap (AC4): env-var source helpers ─────────────────
+  # Return the env-var value when set, nil otherwise. Called from the HEEx template
+  # to determine whether a field should be pre-filled and disabled (locked by env).
+  # Uses Application env set from runtime.exs (which now defaults to nil rather than
+  # raising, so these return nil on a bootstrap-wizard deployment).
+
+  defp env_oidc_issuer do
+    v = Application.get_env(:nebu_http, :oidc_issuer)
+    if is_binary(v) and v != "", do: v, else: nil
+  end
+
+  defp env_oidc_audience do
+    v = Application.get_env(:nebu_http, :oidc_audience)
+    if is_binary(v) and v != "", do: v, else: nil
+  end
+
+  defp env_oidc_client_id do
+    # NEBU_OIDC_CLIENT_ID sets both matrix_oidc_client_id and admin_oidc_client_id in
+    # runtime.exs. The bootstrap wizard cares about the shared client_id for the
+    # Matrix/OidcPlug path; we surface it via :matrix_oidc_client_id.
+    v = Application.get_env(:nebu_http, :matrix_oidc_client_id)
+    if is_binary(v) and v != "", do: v, else: nil
+  end
+
+  # C-2 (cycle-1): JWKS URI env helper. Returns the NEBU_OIDC_JWKS_URI value
+  # when set (non-empty), nil otherwise. Used by the step-2 form to lock the JWKS
+  # URI field when the env var is already configured.
+  defp env_oidc_jwks_uri do
+    v = Application.get_env(:nebu_http, :oidc_jwks_uri)
+    if is_binary(v) and v != "", do: v, else: nil
+  end
+
   defp parse_step(nil, draft), do: resume_step(draft)
 
   defp parse_step(value, draft) when is_binary(value) do
@@ -331,7 +411,9 @@ defmodule Nebu.Admin.BootstrapLive do
       <h1 class="text-2xl font-bold mb-2">Bootstrap Setup</h1>
 
       <%!-- Progress indicator (Go parity): each step is marked; the active one carries
-            data-progress-step matching the current step + aria-current for a11y. --%>
+            data-progress-step matching the current step + aria-current for a11y.
+            oidc-env-optional-bootstrap (AC3): all steps expose a goto_step button so the
+            operator (and tests) can navigate to any step directly. --%>
       <ol class="steps mb-6" data-progress aria-label="Bootstrap progress">
         <li
           :for={s <- @steps}
@@ -339,7 +421,14 @@ defmodule Nebu.Admin.BootstrapLive do
           data-progress-step={if(s == @step, do: s, else: nil)}
           aria-current={if(s == @step, do: "step", else: nil)}
         >
-          {@step_labels[s]}
+          <button
+            type="button"
+            phx-click="goto_step"
+            phx-value-step={s}
+            class={if(s == @step, do: "font-semibold", else: "cursor-pointer underline")}
+          >
+            {@step_labels[s]}
+          </button>
         </li>
       </ol>
 
@@ -365,26 +454,38 @@ defmodule Nebu.Admin.BootstrapLive do
       </form>
 
       <form :if={not @completed and @step == 2} id="bootstrap-step-2" phx-submit="save_step">
+        <%!-- oidc-env-optional-bootstrap (AC4): env-locked fields show a "(set via env)"
+              indicator and are disabled when the corresponding NEBU_OIDC_* env var is set.
+              Operators can see the source-of-truth without being able to accidentally
+              override env-controlled values via the wizard. --%>
         <label class="form-control">
-          <span class="label-text">OIDC Issuer URL</span>
+          <span class="label-text">
+            OIDC Issuer URL
+            <span :if={env_oidc_issuer()} class="ml-1 text-xs text-base-content/60">(set via env)</span>
+          </span>
           <input
             type="url"
             name="oidc_issuer"
             aria-label="OIDC Issuer URL"
-            value={@draft["oidc_issuer"]}
+            value={env_oidc_issuer() || @draft["oidc_issuer"]}
             class="input input-bordered"
-            required
+            required={env_oidc_issuer() == nil}
+            disabled={env_oidc_issuer() != nil}
           />
         </label>
         <label class="form-control mt-2">
-          <span class="label-text">OIDC Client ID</span>
+          <span class="label-text">
+            OIDC Client ID
+            <span :if={env_oidc_client_id()} class="ml-1 text-xs text-base-content/60">(set via env)</span>
+          </span>
           <input
             type="text"
             name="oidc_client_id"
             aria-label="OIDC Client ID"
-            value={@draft["oidc_client_id"]}
+            value={env_oidc_client_id() || @draft["oidc_client_id"]}
             class="input input-bordered"
-            required
+            required={env_oidc_client_id() == nil}
+            disabled={env_oidc_client_id() != nil}
           />
         </label>
         <label class="form-control mt-2">
@@ -395,6 +496,47 @@ defmodule Nebu.Admin.BootstrapLive do
             aria-label="OIDC Client Secret"
             class="input input-bordered"
             required
+          />
+        </label>
+        <%!-- oidc-env-optional-bootstrap (AC3 / M-2): audience field. Required when
+              NEBU_OIDC_AUDIENCE is not set — an absent audience permanently breaks
+              Matrix Bearer-token validation (OidcPlug fail-closed). Env-locked when
+              NEBU_OIDC_AUDIENCE is set (AC4): shown as disabled with a "(set via env)"
+              hint. The `required` attribute matches the server-side M-2 validation. --%>
+        <label class="form-control mt-2">
+          <span class="label-text">
+            OIDC Audience
+            <span :if={env_oidc_audience()} class="ml-1 text-xs text-base-content/60">(set via env)</span>
+          </span>
+          <input
+            type="text"
+            name="oidc_audience"
+            aria-label="OIDC Audience"
+            value={env_oidc_audience() || @draft["oidc_audience"]}
+            class="input input-bordered"
+            required={env_oidc_audience() == nil}
+            disabled={env_oidc_audience() != nil}
+          />
+        </label>
+        <%!-- C-2 (cycle-1) / MAJOR-1 (cycle-2): JWKS URI field. Required unless the env
+              var NEBU_OIDC_JWKS_URI is set — no OIDC discovery is implemented, so a blank
+              URI means JwksCache gets nil and returns no signing keys, causing every Bearer
+              token to be rejected with 401 permanently. Env-locked when NEBU_OIDC_JWKS_URI
+              is set (AC4 pattern). --%>
+        <label class="form-control mt-2">
+          <span class="label-text">
+            JWKS URI
+            <span :if={is_nil(env_oidc_jwks_uri())} class="ml-1 text-xs text-base-content/60">(required)</span>
+            <span :if={env_oidc_jwks_uri() != nil} class="ml-1 text-xs text-base-content/60">(set via env)</span>
+          </span>
+          <input
+            type="url"
+            name="oidc_jwks_uri"
+            aria-label="JWKS URI"
+            value={env_oidc_jwks_uri() || @draft["oidc_jwks_uri"]}
+            class="input input-bordered"
+            required={env_oidc_jwks_uri() == nil}
+            disabled={env_oidc_jwks_uri() != nil}
           />
         </label>
         <button type="submit" class="btn btn-primary mt-4">Next</button>

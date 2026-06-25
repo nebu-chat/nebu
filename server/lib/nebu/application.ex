@@ -106,7 +106,13 @@ defmodule Nebu.Application do
   # under the same registered name (config :nebu_http, :start_jwks_cache false).
   defp jwks_cache_children do
     if Application.get_env(:nebu_http, :start_jwks_cache, true) do
-      [{Nebu.Web.JwksCache, []}]
+      [
+        # oidc-env-optional-bootstrap: OidcConfig caches issuer/audience from
+        # server_config so OidcPlug can read them without a per-request DB query.
+        # Started before JwksCache so the config is warm before any key fetch.
+        Nebu.Web.OidcConfig,
+        {Nebu.Web.JwksCache, []}
+      ]
     else
       []
     end
