@@ -756,11 +756,11 @@ defmodule Nebu.Admin.Auth do
 
   # ── OIDC config + discovery ──────────────────────────────────────────────────────
 
-  # Reads the admin OIDC client config. In normal mode it comes from Application env
-  # (set in runtime.exs from NEBU_OIDC_* / file-based client-secret). In bootstrap mode
-  # the OIDC config has NOT yet been promoted into server_config, so it is read from the
-  # bootstrap_draft (Go parity: loadOIDCConfigFromDraft), decrypting the at-rest secret.
-  # issuer is shared with OidcPlug. Fails CLOSED when issuer or client_id is absent.
+  # Reads the admin OIDC client config. In bootstrap mode the config has NOT yet been
+  # promoted into server_config, so it is read from the bootstrap_draft (Go parity:
+  # loadOIDCConfigFromDraft), decrypting the at-rest secret. In normal mode env vars take
+  # priority; when absent the values are resolved from server_config (Bootstrap-Wizard
+  # deployments that omit env vars). Mirrors OidcPlug and SsoLogin. Fails CLOSED.
   defp oidc_config("bootstrap") do
     draft = load_draft()
     issuer = draft["oidc_issuer"]
@@ -776,15 +776,59 @@ defmodule Nebu.Admin.Auth do
   end
 
   defp oidc_config(_mode) do
-    issuer = Application.get_env(:nebu_http, :oidc_issuer)
-    client_id = Application.get_env(:nebu_http, :admin_oidc_client_id)
-    client_secret = Application.get_env(:nebu_http, :admin_oidc_client_secret, "")
+    # Env vars take priority; fall back to server_config DB values when absent.
+    # Mirrors OidcPlug.oidc_issuer/0 (issuer) and SsoLogin.resolve_client_credentials/0 (client pair).
+    issuer =
+      case Application.get_env(:nebu_http, :oidc_issuer) do
+        v when is_binary(v) and v != "" -> v
+        _ -> Nebu.Web.OidcConfig.get().issuer
+      end
+
+    client_id =
+      case Application.get_env(:nebu_http, :admin_oidc_client_id) do
+        v when is_binary(v) and v != "" -> v
+        _ -> admin_config_value("oidc_client_id")
+      end
+
+    client_secret =
+      case Application.get_env(:nebu_http, :admin_oidc_client_secret) do
+        v when is_binary(v) and v != "" ->
+          v
+
+        _ ->
+          encrypted = admin_config_value("oidc_client_secret") || ""
+          Nebu.Admin.BootstrapLive.decrypt_secret(encrypted)
+      end
+
     scope = admin_oidc_scope()
 
     cond do
       not is_binary(issuer) or issuer == "" -> {:error, :issuer_not_configured}
       not is_binary(client_id) or client_id == "" -> {:error, :client_id_not_configured}
       true -> {:ok, %{issuer: issuer, client_id: client_id, client_secret: client_secret, scope: scope}}
+    end
+  end
+
+  @sql_admin_oidc_config "SELECT value FROM server_config WHERE key = $1 LIMIT 1"
+
+  # Test seam: :admin_oidc_config_reader is a 1-arity fun `fn(key) -> value | nil`.
+  # When set, it replaces the live Repo query for server_config lookups — lets tests
+  # inject OIDC config (client_id, client_secret) without a live PostgreSQL connection.
+  # Mirrors the :sso_bootstrap_reader seam in Nebu.Matrix.SsoLogin.
+  defp admin_config_value(key) do
+    case Application.get_env(:nebu_http, :admin_oidc_config_reader) do
+      fun when is_function(fun, 1) ->
+        fun.(key)
+
+      _ ->
+        if running?(Nebu.Repo) do
+          case Ecto.Adapters.SQL.query(Nebu.Repo, @sql_admin_oidc_config, [key]) do
+            {:ok, %{rows: [[value]]}} when is_binary(value) and value != "" -> value
+            _ -> nil
+          end
+        else
+          nil
+        end
     end
   end
 

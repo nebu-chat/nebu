@@ -1,0 +1,10 @@
+# last_updated: 2026-06-26
+# [admin-oidc-no-env] 2026-06-26T10:05Z dev-story → done (cycle 0), 912/912 passed
+# [admin-oidc-no-env] 2026-06-26T10:02Z atdd → 2 failing tests (AC1 x2)
+# [admin-oidc-no-env] 2026-06-26T10:00Z pipeline started (--bug)
+story: "admin-oidc-no-env"
+current_step: "code-review"
+last_updated: "2026-06-26T10:12Z"
+completed:
+  - atdd
+  - dev-story
