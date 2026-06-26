@@ -94,13 +94,13 @@ pii_encryption_key = "<REPLACE: openssl rand -hex 32>"
 # Use dex mode ONLY in isolated test/demo environments — NEVER for production.
 oidc_mode = "external"  # or: "dex"
 
-# Required only when oidc_mode = "external".
-oidc_issuer = "https://auth.example.com/realms/nebu"
+# Optional when oidc_mode = "external": omit to let Nebu read the issuer from the database.
+# oidc_issuer = "https://auth.example.com/realms/nebu"
 
-# Required: OIDC client ID.
-# dex mode:      embedded into Dex staticClients (same value used by gateway and Dex)
-# external mode: must match the client ID registered in your OIDC provider
-oidc_client_id = "<REPLACE_WITH_OIDC_CLIENT_ID>"
+# Optional: OIDC client ID.
+# dex mode:      required — embedded into Dex staticClients
+# external mode: omit to let Nebu read OIDC config from the database
+# oidc_client_id = "<REPLACE_WITH_OIDC_CLIENT_ID>"
 
 # Optional: OIDC audience (aud claim in Bearer tokens).
 # Leave empty to use oidc_client_id as audience (correct for Dex and most setups).
@@ -108,10 +108,10 @@ oidc_client_id = "<REPLACE_WITH_OIDC_CLIENT_ID>"
 # (e.g. Keycloak with resource servers configured).
 # oidc_audience = ""
 
-# Required: OIDC client secret.
-# dex mode:      embedded into Dex staticClients (same value used by gateway and Dex)
-# external mode: must match the client secret registered in your OIDC provider
-oidc_client_secret = "<REPLACE_WITH_OIDC_CLIENT_SECRET>"
+# Optional: OIDC client secret.
+# dex mode:      required — embedded into Dex staticClients
+# external mode: omit to let Nebu read OIDC config from the database
+# oidc_client_secret = "<REPLACE_WITH_OIDC_CLIENT_SECRET>"
 
 # ── Dex static users (oidc_mode = "dex" only) ────────────────────────────────
 # Generate hashes with: htpasswd -bnBC 12 '' 'yourpassword' | tr -d ':' | sed 's/$2y/$2a/'

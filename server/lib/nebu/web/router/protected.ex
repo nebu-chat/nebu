@@ -23,6 +23,8 @@ defmodule Nebu.Web.Router.Protected do
 
   import Nebu.Matrix.Http
 
+  alias Nebu.Matrix.DeviceKeyStore
+
   plug Nebu.Web.Plugs.OidcPlug
   plug :fetch_query_params
   plug :match
@@ -87,7 +89,26 @@ defmodule Nebu.Web.Router.Protected do
         {initial.since_token, initial.rooms}
       end
 
-    send_json(conn, 200, sync_response(next_batch, rooms))
+    send_json(conn, 200, put_device_e2e_counts(sync_response(next_batch, rooms), conn))
+  end
+
+  # E2E extension to /sync (Matrix CS §e2e-extensions-to-sync): report the unclaimed
+  # one-time-key count + unused fallback-key algorithms so the client's crypto layer
+  # stops re-uploading. Raw OIDC JWTs carry no device_id (see OidcPlug); for those we
+  # fall back to the user-aggregate count (exact for a single-device user). This is the
+  # key DIRECTORY only — it does not enable E2EE (ADR-011).
+  defp put_device_e2e_counts(response, conn) do
+    user = conn.assigns[:current_user]
+
+    otk_counts =
+      case conn.assigns[:device_id] do
+        did when is_binary(did) and did != "" -> DeviceKeyStore.otk_counts(user, did)
+        _ -> DeviceKeyStore.otk_counts_for_user(user)
+      end
+
+    response
+    |> Map.put("device_one_time_keys_count", otk_counts)
+    |> Map.put("device_unused_fallback_key_types", DeviceKeyStore.unused_fallback_key_types_for_user(user))
   end
 
   # ── POST /_matrix/client/v3/logout ────────────────────────────────────────
@@ -155,7 +176,18 @@ defmodule Nebu.Web.Router.Protected do
   # spec and omitted (Nebu's OIDC access token is not per-device). `is_guest` is always
   # false — Nebu has no guest access.
   get "/client/v3/account/whoami" do
-    send_json(conn, 200, %{"user_id" => conn.assigns[:current_user], "is_guest" => false})
+    base = %{"user_id" => conn.assigns[:current_user], "is_guest" => false}
+
+    # device_id is Required when a device is bound to the token (spec §whoami), which
+    # is the case for opaque Nebu sessions (OidcPlug assigns it). Raw OIDC JWTs are not
+    # per-device, so the field is correctly omitted there.
+    body =
+      case conn.assigns[:device_id] do
+        did when is_binary(did) and did != "" -> Map.put(base, "device_id", did)
+        _ -> base
+      end
+
+    send_json(conn, 200, body)
   end
 
   # ── Client startup endpoints (Element compatibility) ───────────────────────
@@ -234,12 +266,22 @@ defmodule Nebu.Web.Router.Protected do
     send_json(conn, 200, @empty_pushrules)
   end
 
-  # POST /keys/query — device-key lookup. Nebu's managed-E2EE model (ADR-011) has no
-  # per-device key publishing yet; return empty maps so the crypto layer initialises
-  # cleanly instead of erroring.
+  # POST /keys/query — device-key lookup (Matrix CS §/keys/query). Echoes back the
+  # device_keys objects published via /keys/upload so a client (incl. Element querying
+  # its OWN user) sees its device as registered. Cross-signing maps stay empty (no
+  # cross-signing). This is the key DIRECTORY only — it does not enable E2EE (ADR-011).
   post "/client/v3/keys/query" do
+    requested = body_params(conn)["device_keys"]
+
+    device_keys =
+      if is_map(requested) and map_size(requested) > 0 do
+        query_device_keys(requested)
+      else
+        %{}
+      end
+
     send_json(conn, 200, %{
-      "device_keys" => %{},
+      "device_keys" => device_keys,
       "master_keys" => %{},
       "self_signing_keys" => %{},
       "user_signing_keys" => %{},
@@ -247,9 +289,54 @@ defmodule Nebu.Web.Router.Protected do
     })
   end
 
-  # POST /keys/upload — accept and acknowledge device-key upload (no-op store).
+  # POST /keys/upload — publish device identity keys, one-time keys, and fallback keys
+  # (Matrix CS §/keys/upload). Persists them in the device-key directory and returns the
+  # real unclaimed one_time_key_counts. device_id comes from the body's device_keys object
+  # (Required on first upload, "must match the device used at login") and falls back to the
+  # token's bound device for opaque sessions. With nothing to attribute (empty body, JWT
+  # session w/o a bound device) it's a no-op returning empty counts — does NOT touch the DB.
   post "/client/v3/keys/upload" do
-    send_json(conn, 200, %{"one_time_key_counts" => %{}})
+    user = conn.assigns[:current_user]
+    params = body_params(conn)
+    device_keys = params["device_keys"]
+    one_time_keys = params["one_time_keys"]
+    fallback_keys = params["fallback_keys"]
+
+    cond do
+      # Bound the per-request write amplification (keys/upload is unauthenticated-rate-
+      # limited only by the global body cap). A well-behaved client uploads ≤50 keys and
+      # stops once /sync reports the target count is reached; the cap stops a malicious
+      # client from packing one body with a huge key set. 100 comfortably exceeds Element.
+      oversized?(one_time_keys) or oversized?(fallback_keys) ->
+        error(conn, 400, "M_INVALID_PARAM", "Too many keys in a single upload")
+
+      true ->
+        case upload_device_id(device_keys, conn) do
+          nil ->
+            send_json(conn, 200, %{"one_time_key_counts" => %{}})
+
+          device_id ->
+            if is_map(device_keys), do: DeviceKeyStore.put_device_keys(user, device_id, device_keys)
+            if is_map(one_time_keys), do: DeviceKeyStore.store_one_time_keys(user, device_id, one_time_keys)
+            if is_map(fallback_keys), do: DeviceKeyStore.store_fallback_keys(user, device_id, fallback_keys)
+
+            send_json(conn, 200, %{"one_time_key_counts" => DeviceKeyStore.otk_counts(user, device_id)})
+        end
+    end
+  end
+
+  # GET /devices — the user's registered devices (Matrix CS §/devices). Backed by the
+  # device-key directory (a device appears once it has published keys).
+  get "/client/v3/devices" do
+    send_json(conn, 200, %{"devices" => DeviceKeyStore.list_devices(conn.assigns[:current_user])})
+  end
+
+  # GET /devices/{deviceId} — a single device, or 404 if unknown.
+  get "/client/v3/devices/:device_id" do
+    case DeviceKeyStore.get_device(conn.assigns[:current_user], URI.decode_www_form(device_id)) do
+      nil -> error(conn, 404, "M_NOT_FOUND", "Unknown device")
+      device -> send_json(conn, 200, device)
+    end
   end
 
   # POST /user/{userId}/filter — a client uploads a sync filter and gets an id back BEFORE
@@ -1030,30 +1117,86 @@ defmodule Nebu.Web.Router.Protected do
 
   # ── helpers ───────────────────────────────────────────────────────────────
 
+  # Per-request key cap for /keys/upload (DoS bound — see handler comment).
+  @max_keys_per_upload 100
+
+  defp oversized?(map) when is_map(map), do: map_size(map) > @max_keys_per_upload
+  defp oversized?(_), do: false
+
+  # device_id for /keys/upload: the body's device_keys.device_id is authoritative
+  # (Required on first upload), then the token's bound device (opaque sessions), then —
+  # for OTK-only top-ups on a raw OIDC JWT (no bound device) — the user's sole registered
+  # device. nil → nothing to attribute (no-op, no DB write).
+  defp upload_device_id(device_keys, conn) do
+    cond do
+      is_map(device_keys) and is_binary(device_keys["device_id"]) and device_keys["device_id"] != "" ->
+        device_keys["device_id"]
+
+      is_binary(conn.assigns[:device_id]) and conn.assigns[:device_id] != "" ->
+        conn.assigns[:device_id]
+
+      true ->
+        DeviceKeyStore.sole_device_id(conn.assigns[:current_user])
+    end
+  end
+
+  # Resolves a /keys/query `device_keys` request (`%{user_id => [device_ids]}`) against
+  # the directory. An empty device list selects all of that user's devices (per spec);
+  # users/devices with no published keys are omitted (no `failures` entry).
+  defp query_device_keys(requested) do
+    all = DeviceKeyStore.query_devices(Map.keys(requested))
+
+    Enum.reduce(requested, %{}, fn {user_id, device_list}, acc ->
+      case Map.get(all, user_id) do
+        nil ->
+          acc
+
+        devices ->
+          selected =
+            case device_list do
+              list when is_list(list) and list != [] -> Map.take(devices, list)
+              _ -> devices
+            end
+
+          if map_size(selected) > 0, do: Map.put(acc, user_id, selected), else: acc
+      end
+    end)
+  end
+
   defp do_set_room_state(conn, raw_room, raw_event_type, raw_state_key) do
     user = conn.assigns[:current_user]
     room = URI.decode_www_form(raw_room)
     event_type = URI.decode_www_form(raw_event_type)
     state_key = URI.decode_www_form(raw_state_key)
 
-    if conn.assigns[:json_parse_error] == true do
-      error(conn, 400, "M_BAD_JSON", "Request body is not valid JSON")
-    else
-      # body is the raw content object; re-encode to JSON for the request struct.
-      content = body_params(conn)
+    cond do
+      # E2EE guardrail (ADR-011 managed-decryption model): a room must never flip to
+      # client-side end-to-end encryption, or the server could no longer read its content.
+      # Enabling E2EE is done solely by sending an m.room.encryption state event (CS §E2E),
+      # so we reject that event type outright. The device-key directory stays fully
+      # functional — it is orthogonal to encryption.
+      event_type == "m.room.encryption" ->
+        error(conn, 403, "M_FORBIDDEN", "End-to-end encryption is not supported on this server")
 
-      req = %Core.SetRoomStateRequest{
-        room_id: room,
-        sender_id: user,
-        event_type: event_type,
-        state_key: state_key,
-        content_json: Jason.encode!(content)
-      }
+      conn.assigns[:json_parse_error] == true ->
+        error(conn, 400, "M_BAD_JSON", "Request body is not valid JSON")
 
-      case call_core(fn -> Nebu.Matrix.EventDispatcher.Server.set_room_state(req, stream(user)) end) do
-        {:ok, resp} -> send_json(conn, 200, %{"event_id" => resp.event_id})
-        {:error, err} -> send_error(conn, err)
-      end
+      true ->
+        # body is the raw content object; re-encode to JSON for the request struct.
+        content = body_params(conn)
+
+        req = %Core.SetRoomStateRequest{
+          room_id: room,
+          sender_id: user,
+          event_type: event_type,
+          state_key: state_key,
+          content_json: Jason.encode!(content)
+        }
+
+        case call_core(fn -> Nebu.Matrix.EventDispatcher.Server.set_room_state(req, stream(user)) end) do
+          {:ok, resp} -> send_json(conn, 200, %{"event_id" => resp.event_id})
+          {:error, err} -> send_error(conn, err)
+        end
     end
   end
 

@@ -124,6 +124,11 @@ Environment variables (prefix: `NEBU_`):
 - `GET  /_matrix/client/v3/presence/{userId}/status`
 - `GET  /_matrix/client/unstable/org.matrix.msc2965/auth_issuer` (MSC2965 OIDC discovery — also stable `v1/` path)
 - `GET  /_matrix/client/unstable/org.matrix.msc2965/auth_metadata` (MSC2965 OIDC discovery — also stable `v1/` path)
+- `POST /_matrix/client/v3/keys/upload` · `POST /_matrix/client/v3/keys/query` — device-key **directory** (PostgreSQL-backed, `Nebu.Matrix.DeviceKeyStore`). Stores/serves public device + one-time + fallback keys so clients (Element) register a device cleanly. **Not E2EE** — orthogonal to encryption (ADR-011).
+- `GET  /_matrix/client/v3/devices` · `GET /_matrix/client/v3/devices/{deviceId}` — device list for the current user
+- `GET  /_matrix/client/v3/account/whoami` (returns `device_id` for opaque sessions)
+
+**E2EE stays OFF (ADR-011):** `m.room.encryption` is rejected/skipped in every state-write path (direct state-PUT → `403 M_FORBIDDEN`; `createRoom` `initial_state` and room-upgrade `copy_state_events` → skipped). The device-key directory does **not** enable encryption.
 
 **Intentionally excluded:** All `/_matrix/federation/*`, `/_matrix/identity/*`, `/_matrix/key/*` (no federation by design).
 

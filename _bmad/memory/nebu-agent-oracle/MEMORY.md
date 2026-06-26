@@ -32,6 +32,39 @@ Room Moderation (Epics 7/15) — implemented:
 Room Moderation (Epic 15) — MISSING (Story 15-11 scope):
 - `PUT /_matrix/client/v3/rooms/{roomId}/redact/{eventId}/{txnId}` — P0 MISSING, needs full end-to-end (Gateway + gRPC RPC + Core)
 
+### Device Keys / E2EE Boundary (login "device could not be registered" bug, 2026-06-26)
+The device-key directory is ORTHOGONAL to E2EE. Implementing it correctly does NOT activate
+encryption — encryption is enabled PER ROOM by the client sending an `m.room.encryption` state
+event (§E2E, "In order to enable end-to-end encryption in a room, clients can send an
+`m.room.encryption` state event"). So Nebu can implement the full device/key surface and stay
+managed-model (ADR-011) as long as no room gets `m.room.encryption`.
+
+Contracts that the no-op stubs violate (these are why Element errors):
+- `POST /keys/upload` 200: `one_time_key_counts` is **Required** = unclaimed OTK count per
+  algorithm held for THIS device. Constant `{}` breaks OlmMachine reconciliation.
+- `POST /keys/query` 200: `device_keys[user_id][device_id]` must echo back the SAME object
+  uploaded via /keys/upload + an `unsigned` property. Empty `{}` ⇒ client can't see its own
+  device ⇒ "device could not be registered" (dominant trigger).
+- `/sync` E2E extension: `device_one_time_keys_count` (req if OTKs exist) +
+  `device_unused_fallback_key_types` (**Required**, v1.2).
+- `GET /account/whoami`: `device_id` required when a device is bound to the token.
+- `GET /_matrix/client/v3/devices` (+ `/devices/{deviceId}`): device manager list.
+Guardrail: optionally reject client PUT of `m.room.encryption` to hard-enforce ADR-011.
+
+### device_id ↔ Geräteschlüssel vs. Recht-auf-Vergessen-Key (2026-06-26)
+ZWEI verschiedene Schlüssel — nie verwechseln:
+- **Matrix-Geräteschlüssel** (device_keys / /keys/upload): 1:1 pro Gerät, CLIENT-generiert, privater
+  Teil NIE auf dem Server (§Device keys "the private part ... should never be exported"). device_id
+  ist pro-Gerät, viele pro User. "Eine device_id pro User" erzwingen BRICHT die Spec: §Relationship
+  between access tokens and devices — "If the client sets the device_id, the server will invalidate any
+  access/refresh tokens previously assigned to that device" ⇒ zweite Anmeldung killt erste Session;
+  /keys/upload-Uploads zweier Geräte überschreiben sich (PK user,device). NICHT erzwingen.
+- **Recht-auf-Vergessen-/Signing-Key** = ADR-007 `user_keys` (per-User Ed25519 signing + X25519
+  encryption, serverseitig, beim Provisioning erzeugt, private_key bei GDPR-Löschung genullt). EINER
+  pro User, bereits implementiert. PRD "ein Ed25519-Keypair pro User" = dieser serverseitige Key,
+  NICHT der Geräteschlüssel/Cross-Signing-Key. Geräteschlüssel taugt NICHT für Erasure (Server hat
+  keinen privaten Teil). Empfehlung: Multi-Device behalten, Erasure über user_keys-X25519.
+
 ## Known Spec Decisions
 _Deliberate implementation choices — accepted deviations, spec ambiguity resolutions. Not re-flagged as findings._
 

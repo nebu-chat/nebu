@@ -20,10 +20,11 @@ defmodule Nebu.ReleaseTest do
       result = Release.list_up_migrations(dir)
 
       versions = result |> Enum.map(&elem(&1, 0)) |> Enum.sort()
-      # priv/migrations now ships 000001–000008 (000004 add_room_type,
+      # priv/migrations now ships 000001–000009 (000004 add_room_type,
       # 000005 space_hierarchy_index, 000006 auto_join_opt_outs,
-      # 000007 config_refresh_mode_mutable, 000008 room_aliases).
-      assert versions == [1, 2, 3, 4, 5, 6, 7, 8]
+      # 000007 config_refresh_mode_mutable, 000008 room_aliases,
+      # 000009 device_keys).
+      assert versions == [1, 2, 3, 4, 5, 6, 7, 8, 9]
 
       # Only *.up.sql files are returned — *.down.sql are excluded.
       assert Enum.all?(result, fn {_v, path} -> String.ends_with?(path, ".up.sql") end)

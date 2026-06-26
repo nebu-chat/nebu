@@ -48,10 +48,18 @@ write_files:
     owner: root:root
     permissions: "0600"
     content: |
+%{ if oidc_issuer != "" ~}
       NEBU_OIDC_ISSUER=${oidc_issuer}
+%{ endif ~}
+%{ if oidc_audience != "" ~}
       NEBU_OIDC_AUDIENCE=${oidc_audience}
+%{ endif ~}
+%{ if oidc_client_secret != "" ~}
       NEBU_ADMIN_OIDC_CLIENT_SECRET=${oidc_client_secret}
+%{ endif ~}
+%{ if oidc_client_id != "" ~}
       NEBU_ADMIN_OIDC_CLIENT_ID=${oidc_client_id}
+%{ endif ~}
       NEBU_SERVER_NAME=${server_name}
       NEBU_IMAGE_REGISTRY=${image_registry}
       NEBU_VERSION=${nebu_version}
@@ -453,11 +461,18 @@ write_files:
             NEBU_POSTGRES_SSL: "true"
             NEBU_INTERNAL_SECRET_FILE: "/run/secrets/internal_secret"
             NEBU_SERVER_NAME: $${NEBU_SERVER_NAME}
-            # OIDC config — server now serves the public Matrix API + admin.
+%{ if oidc_issuer != "" ~}
             NEBU_OIDC_ISSUER: $${NEBU_OIDC_ISSUER}
+%{ endif ~}
+%{ if oidc_audience != "" ~}
             NEBU_OIDC_AUDIENCE: $${NEBU_OIDC_AUDIENCE}
+%{ endif ~}
+%{ if oidc_client_secret != "" ~}
             NEBU_ADMIN_OIDC_CLIENT_SECRET: $${NEBU_ADMIN_OIDC_CLIENT_SECRET}
+%{ endif ~}
+%{ if oidc_client_id != "" ~}
             NEBU_ADMIN_OIDC_CLIENT_ID: $${NEBU_ADMIN_OIDC_CLIENT_ID}
+%{ endif ~}
 %{ if enable_media_gateway ~}
             # Media object storage — server serves /_matrix/media from the S3 bucket.
             NEBU_MINIO_ENDPOINT: "${s3_endpoint}"

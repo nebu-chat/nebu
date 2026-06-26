@@ -12,7 +12,21 @@ mit der Anforderung nach vollständigem Compliance-Zugriff vereinbar ist.
 Nebu zielt auf compliance-first-Organisationen ab, die server-seitige Nachrichtensichtbarkeit für
 Audit-Logging, Four-Eyes-Compliance-Zugriff und rechtlichen Export benötigen. Die E2EE-Stubs
 (`keys/upload`, `keys/query`, `keys/device_signing/upload`, `room_keys/*`) bleiben in Betrieb,
-um Client-Fehlerdialoge zu verhindern. Es wird kein echtes Key-Material gespeichert.
+um Client-Fehlerdialoge zu verhindern.
+
+> **Update 2026-06-26 (bugfix `fix-device-key-registration`):** Die reinen No-op-Stubs für
+> `keys/upload`/`keys/query` lösten in Element den Fehler *"device could not be registered"* aus
+> (leeres `/keys/query` ⇒ der Client sah sein eigenes Gerät nie als publiziert). `keys/upload`,
+> `keys/query`, `GET /devices(/{id})` und `whoami.device_id` sind jetzt ein **funktionierendes,
+> PostgreSQL-gestütztes Geräteschlüssel-Verzeichnis** (Tabellen `device_keys`,
+> `device_one_time_keys`, `device_fallback_keys`; Migration `000009`). Das Verzeichnis ist
+> **orthogonal zu E2EE** — es speichert/serviert öffentliche Geräteschlüssel und schaltet keine
+> Verschlüsselung ein. E2EE wird in Matrix ausschließlich durch ein `m.room.encryption`-State-Event
+> aktiviert; Nebu **verweigert** dieses Event in *jedem* Schreibpfad (direkter State-PUT → 403
+> `M_FORBIDDEN`; `createRoom` `initial_state` und Room-Upgrade `copy_state_events` → übersprungen),
+> sodass die Managed-Decryption-Garantie erhalten bleibt. Das durable gespeicherte öffentliche
+> Ed25519-Geräteschlüssel-Material ist zudem die Grundlage für die spätere Nachricht-Signatur-/
+> Non-Repudiation-Verifikation (PRD FR25–FR27).
 
 ## Evaluierte Optionen
 
@@ -74,7 +88,11 @@ Die E2EE-Stubs bleiben unverändert in Betrieb. Epic 10 ruht bis zur Wiederaufna
 ## Konsequenzen
 
 - Keine neuen E2EE-Implementierungsarbeiten bis zur Wiederaufnahme
-- E2EE-Stubs (`keys/upload`, `keys/query`, `keys/device_signing/upload`, `room_keys/*`) bleiben aktiv
+- E2EE-Stubs (`keys/device_signing/upload`, `room_keys/*`) bleiben aktiv; `keys/upload`/`keys/query`/
+  `devices` sind seit `fix-device-key-registration` (2026-06-26) ein funktionierendes
+  Geräteschlüssel-Verzeichnis (kein E2EE — siehe Kontext-Update oben)
+- Der Server erzwingt aktiv das No-E2EE-Invariant: `m.room.encryption` wird in allen Schreibpfaden
+  abgelehnt/übersprungen (State-PUT, `createRoom` `initial_state`, Room-Upgrade)
 - Option 3 (Compliance-Bot) wird als nächster Evaluierungsschritt aufgegriffen, wenn die unter
   "Entscheidung" genannten Voraussetzungen erfüllt sind
 - Policy-based Encryption at Rest (unabhängig von E2EE) bleibt als eigenständige Option offen
