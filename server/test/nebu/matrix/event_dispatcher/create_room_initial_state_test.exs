@@ -243,7 +243,7 @@ defmodule Nebu.Matrix.EventDispatcher.CreateRoomInitialStateTest do
       assert join_rules["sender"] == "@alice:test.local"
     end
 
-    test "the additional types Element sends (encryption, guest_access, history_visibility) are persisted" do
+    test "guest_access + history_visibility are persisted; m.room.encryption is rejected (ADR-011)" do
       req = %Core.CreateRoomRequest{
         creator_id: "@alice:test.local",
         name: "Encrypted Room",
@@ -261,9 +261,13 @@ defmodule Nebu.Matrix.EventDispatcher.CreateRoomInitialStateTest do
       resp = Server.create_room(req, build_stream())
       track_room(resp.room_id)
 
-      [enc] = state_events(resp.room_id, "m.room.encryption")
-      assert enc["content"]["algorithm"] == "m.megolm.v1.aes-sha2"
+      # ADR-011 managed-decryption model: m.room.encryption must NEVER be persisted, even
+      # via createRoom initial_state — a single persisted encryption event would flip the
+      # room to client-side E2EE and the server could no longer read its content. It is in
+      # @initial_state_forbidden_types, so it is skipped (logged) like m.room.member/create.
+      assert state_events(resp.room_id, "m.room.encryption") == []
 
+      # The other (non-privileged, non-encryption) types Element sends are still honored.
       [guest] = state_events(resp.room_id, "m.room.guest_access")
       assert guest["content"]["guest_access"] == "forbidden"
 

@@ -4396,11 +4396,20 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
   # State event types that initial_state must NEVER set/forge during createRoom.
   # m.room.create is emitted authoritatively as the first event; m.room.member is
   # forging-sensitive (membership is established via the creator-join + invite/join
-  # paths); m.room.power_levels is set authoritatively above (creator = 100). All
-  # other spec-valid state types (m.space.parent, m.room.join_rules,
-  # m.room.encryption, m.room.guest_access, m.room.history_visibility, …) are honored
-  # — this is deliberately NOT a narrow allowlist (see create_room/2 comment).
-  @initial_state_forbidden_types ~w(m.room.create m.room.member m.room.power_levels)
+  # paths); m.room.power_levels is set authoritatively above (creator = 100).
+  #
+  # m.room.encryption is forbidden to enforce the managed-decryption model (ADR-011):
+  # a persisted m.room.encryption event alone turns a room end-to-end encrypted (clients
+  # switch to client-side Megolm and the server can no longer read content). The direct
+  # PUT .../state/m.room.encryption path is rejected with 403 in the HTTP router; this
+  # entry closes the equivalent createRoom initial_state bypass. Unlike membership/PL
+  # (which are GenServer-authoritative, so a forged event is inert), encryption is
+  # event-derived — every state-event writer must forbid it, not just one guardrail.
+  #
+  # All other spec-valid state types (m.space.parent, m.room.join_rules,
+  # m.room.guest_access, m.room.history_visibility, …) are honored — this is
+  # deliberately NOT a narrow allowlist (see create_room/2 comment).
+  @initial_state_forbidden_types ~w(m.room.create m.room.member m.room.power_levels m.room.encryption)
 
   # Decode and apply createRoom `initial_state` entries (a JSON array of
   # { "type", "state_key", "content" }) as creator-authored state events, in array
@@ -4539,9 +4548,14 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
 
     # Exclude tombstone, aliases, and space events (get_generic_state_events already
     # excludes member/power_levels/create/name, but tombstone/aliases are included).
+    # m.room.encryption is excluded for the same reason it is in @initial_state_forbidden_types:
+    # the managed-decryption model (ADR-011) forbids any room from carrying an encryption
+    # event, so an upgrade must never copy one forward (defense-in-depth — the create/state-PUT
+    # paths already prevent one from existing via the API).
     excluded_types = [
       "m.room.tombstone",
       "m.room.aliases",
+      "m.room.encryption",
       "m.space.child",
       "m.space.parent"
     ]

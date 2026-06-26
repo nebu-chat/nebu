@@ -8,7 +8,15 @@
 #   _bmad-output/nebu/epics/<epic-name>/pipeline-state.yaml
 # This file is no longer used for named-epic pipeline runs.
 #
-# last_updated: 2026-06-25
+# last_updated: 2026-06-26
+# [device-key-registration] 2026-06-26T08:12Z committed ✓ (device-key directory + E2EE guardrail; code-review CLEAN 1 cycle + Kassandra CLEAN)
+# [device-key-registration] 2026-06-26T08:11Z arc42-update → ADR-011 + CLAUDE.md Matrix scope updated
+# [device-key-registration] 2026-06-26T08:09Z code-review → CLEAN (cycle 1); security-review → Kassandra CLEAN (F-1 fixed+verified, F-2 fixed); copy_state_events hardened
+# [device-key-registration] 2026-06-26T08:05Z code-review → MAJOR-1 + Kassandra F-1 (HIGH): m.room.encryption createRoom-initial_state bypass → fixed (forbidden type + regression test); F-2 OTK cap added → cycle 1
+# [device-key-registration] 2026-06-26T07:54Z ci-gate → ✓ unit 904 green (warnings-as-errors) + device_keys 9/9 + state/compat 65/65 integration
+# [device-key-registration] 2026-06-26T07:37Z test-review → CLEAN (0 MAJOR, 7/7 AC covered)
+# [device-key-registration] 2026-06-26T07:36Z atdd → device_keys_test.exs: 6 failing (round-trip, otk-accum, unknown-user, /devices, durability, e2ee-guardrail)
+# [device-key-registration] 2026-06-26T07:14Z bug pipeline started — device-registration error on login w/o enabling E2EE
 # [bug-element-key-gen-apis] 2026-06-25T15:00Z pipeline started (--bug: Element asks for key generation after login — 404 on m.cross_signing.master, dehydrated_device, version endpoints; 504 on /sync)
 # [bug-oidc-issuer-no-db-fallback] 2026-06-25T14:40Z committed ✓ (ATDD+Code CLEAN; 882/0)
 # [bug-oidc-issuer-no-db-fallback] 2026-06-25T14:35Z pipeline started (--bug: sso_login.oidc_config/0 reads issuer only from Application env, not Bootstrap DB; without NEBU_OIDC_ISSUER env var SSO redirect fails 503; fix: use Nebu.Web.OidcConfig.get().issuer as fallback, mirrors OidcPlug.oidc_issuer/0)
@@ -178,9 +186,9 @@
 # [5-30] 2026-05-24T19:49Z atdd → 4 failing tests (auth_extra_scopes_test.go)
 # [5-30] 2026-05-24T19:38Z pipeline started (story pre-created)
 
-story: "bug-element-key-gen-apis"
-current_step: "oracle-gate"
+story: null
+current_step: null
 completed: []
 cycle_count: 0
 blocked_reason: null
-last_updated: "2026-06-25T15:26Z"
+last_updated: "2026-06-26T08:12Z"

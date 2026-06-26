@@ -217,33 +217,35 @@ variable "pii_encryption_key" {
 }
 
 variable "oidc_client_secret" {
-  description = "Required. When oidc_mode = 'dex': embedded into Dex staticClients config (same value used by both gateway and Dex). When oidc_mode = 'external': must match the client secret registered in your external OIDC provider. Minimum 16 characters."
+  description = "Optional. When oidc_mode = 'dex': required — embedded into Dex staticClients config. When oidc_mode = 'external': omit to let Nebu read OIDC config from the database. Minimum 16 characters when set."
   type        = string
   sensitive   = true
+  default     = null
 
   validation {
-    condition     = length(var.oidc_client_secret) >= 16
-    error_message = "oidc_client_secret must be at least 16 characters."
+    condition     = var.oidc_client_secret == null || length(var.oidc_client_secret) >= 16
+    error_message = "oidc_client_secret must be at least 16 characters when set."
   }
 
   validation {
-    condition     = !strcontains(var.oidc_client_secret, "\"") && !strcontains(var.oidc_client_secret, "\\")
+    condition     = var.oidc_client_secret == null || (!strcontains(var.oidc_client_secret, "\"") && !strcontains(var.oidc_client_secret, "\\"))
     error_message = "oidc_client_secret must not contain double-quote or backslash characters (YAML interpolation constraint)."
   }
 }
 
 variable "oidc_client_id" {
-  description = "Required. When oidc_mode = 'dex': embedded into Dex staticClients config (same value used by both gateway and Dex). When oidc_mode = 'external': must match the client secret registered in your external OIDC provider. Minimum 8 characters."
+  description = "Optional. When oidc_mode = 'dex': required — embedded into Dex staticClients config. When oidc_mode = 'external': omit to let Nebu read OIDC config from the database. Minimum 8 characters when set."
   type        = string
   sensitive   = true
+  default     = null
 
   validation {
-    condition     = length(var.oidc_client_id) >= 8
-    error_message = "oidc_client_id must be at least 8 characters."
+    condition     = var.oidc_client_id == null || length(var.oidc_client_id) >= 8
+    error_message = "oidc_client_id must be at least 8 characters when set."
   }
 
   validation {
-    condition     = !strcontains(var.oidc_client_id, "\"") && !strcontains(var.oidc_client_id, "\\")
+    condition     = var.oidc_client_id == null || (!strcontains(var.oidc_client_id, "\"") && !strcontains(var.oidc_client_id, "\\"))
     error_message = "oidc_client_id must not contain double-quote or backslash characters (YAML interpolation constraint)."
   }
 }

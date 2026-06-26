@@ -90,10 +90,10 @@ resource "stackit_server" "nebu" {
 
   user_data = templatefile("${path.module}/cloud-init.tftpl", {
     internal_secret              = var.internal_secret
-    oidc_client_secret           = var.oidc_client_secret
-    oidc_client_id               = var.oidc_client_id
+    oidc_client_secret           = var.oidc_client_secret != null ? var.oidc_client_secret : ""
+    oidc_client_id               = var.oidc_client_id != null ? var.oidc_client_id : ""
     oidc_issuer                  = local.effective_oidc_issuer
-    oidc_audience                = var.oidc_audience != "" ? var.oidc_audience : var.oidc_client_id
+    oidc_audience                = var.oidc_audience != "" ? var.oidc_audience : (var.oidc_client_id != null ? var.oidc_client_id : "")
     oidc_mode                    = var.oidc_mode
     dex_static_password_hash     = var.oidc_mode == "dex" ? var.dex_static_password_hash : ""
     dex_user1_password_hash      = var.oidc_mode == "dex" ? var.dex_user1_password_hash : null
@@ -148,8 +148,8 @@ resource "stackit_server" "nebu" {
     }
 
     precondition {
-      condition     = var.oidc_mode == "dex" || length(var.oidc_issuer) > 0
-      error_message = "oidc_issuer must be set when oidc_mode = 'external'."
+      condition     = var.oidc_mode != "dex" || (var.oidc_client_id != null && var.oidc_client_secret != null)
+      error_message = "oidc_client_id and oidc_client_secret are required when oidc_mode = 'dex'."
     }
 
     # CORS guard: Element Web needs a reverse proxy to share the same origin as the
