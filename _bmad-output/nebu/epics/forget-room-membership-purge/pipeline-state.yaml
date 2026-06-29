@@ -17,3 +17,17 @@ completed: []
 cycle_count: 0
 blocked_reason: null
 last_updated: "2026-06-28T07:23Z"
+story: "bugfix-forget-room-membership-purge"
+current_step: "commit"
+completed:
+  - create-story
+  - atdd
+  - test-review
+  - dev-story
+  - ci-gate
+  - code-review
+  - security-review
+  - arc42-update
+cycle_count: 1
+blocked_reason: null
+last_updated: "2026-06-28T07:23Z"
