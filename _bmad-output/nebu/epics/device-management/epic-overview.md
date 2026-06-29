@@ -23,6 +23,9 @@ on** the device-key directory, which is not yet merged to `main`.
 > production. S1 therefore does **NOT** edit `000009` — it adds a **new forward migration** that
 > creates the `devices` table and **backfills** a `devices` row from every existing `device_keys`
 > row, so an already-deployed Stackit DB upgrades cleanly. Never alter a shipped migration.
+on** the device-key directory, which is not yet merged to `main`. A useful consequence: migration
+`000009` has **not shipped** yet, so this epic can refine its schema in place (story S1) without a
+production data migration.
 
 ## Conflict assessment — does the bugfix block a full build-out?
 
@@ -61,6 +64,7 @@ intact and does **not** conflate the two. Right-to-be-forgotten stays on `user_k
    with a **15-minute fresh-auth window** — if the last fresh login is older than 15 min, a fresh SSO
    re-login is required before the deletion executes. A token *refresh* does not count as fresh auth.
    Future: extend the UIA flow with email/MFA stages without touching the endpoints.
+   with full metadata. UIA-on-delete adapted to Nebu's OIDC model (no password challenge).
 4. **s4-admin-ui-device-management** — Admin LiveView: per-user device list, rename, revoke/delete a
    device (force-logout that session). Accessibility per PRD (hard constraint).
 

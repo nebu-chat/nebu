@@ -27,3 +27,18 @@ completed: []
 cycle_count: 0
 blocked_reason: null
 last_updated: "2026-06-28T10:33Z"
+story: "oidc-bootstrap-only-config"
+story: "bugfix-oidc-bootstrap-only-e2e-regressions"
+current_step: "commit"
+completed:
+  - create-story
+  - atdd
+  - test-review
+  - dev-story
+  - ci-gate
+  - code-review
+  - security-review
+  - arc42-update
+cycle_count: 1
+blocked_reason: null
+last_updated: "2026-06-28T10:33Z"

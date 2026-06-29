@@ -214,3 +214,16 @@ completed:
 cycle_count: 1
 blocked_reason: null
 last_updated: "2026-06-26T08:12Z"
+story: "device-key-registration"
+current_step: "commit"
+completed:
+  - atdd
+  - test-review
+  - dev-story
+  - ci-gate
+  - code-review
+  - security-review
+  - arc42-update
+cycle_count: 1
+blocked_reason: null
+last_updated: "2026-06-26T08:12Z"

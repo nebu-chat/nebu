@@ -52,6 +52,46 @@
 # [s2-device-lifecycle-at-login] 2026-06-26T12:09Z atdd → 12 integration tests (7 red, 5 G3-regression green) in device_lifecycle_login_test.exs
 # [s2-device-lifecycle-at-login] 2026-06-26T12:00Z oracle-gate → spec context captured (CS API v1.18 device/token-binding rules)
 # [s2-device-lifecycle-at-login] 2026-06-26T11:58Z pipeline started (story pre-written, S1 done)
+# last_updated: 2026-06-26
+# [s4-admin-ui-device-management] 2026-06-26T20:49Z committed ✓ (aabad7e8 — ATDD+Dev; UX V1 confirm fixed 1 cycle; 2 MINOR fixed 1 cycle; Kassandra CLEAN; unit 922 green; integration 1115 only 2 pre-existing flakes)
+# [s4-admin-ui-device-management] 2026-06-26T20:48Z arc42-update → 05-building-blocks (admin device handlers + Nebu.Matrix device facade ADR-020 boundary) + 08-concepts (admin device-mgmt workflow, S3 kill-switch reuse, device_renamed/device_deleted @known_actions) + manifest; verify-docs 3/3 PASS
+# [s4-admin-ui-device-management] 2026-06-26T20:45Z security-review → Kassandra CLEAN/APPROVED (0 CRIT/HIGH/MED; 3 LOW+1 INFO non-blocking). All 4 S4 watch-list items satisfied: authz no-bypass, IDOR route-pinned, XSS HEEx-escaped on legacy values, kill-switch revokes-before-key-delete (reuses S3), audit complete (renamed/deleted registered, success+failure)
+# [s4-admin-ui-device-management] 2026-06-26T20:41Z code-review → CLEAN (cycle 2): both MINOR fixed (M-1 AC1 created+last-seen ts asserted via ISO tokens 2023-11-03/2023-11-14; M-2 rescue narrowed to RuntimeError). unit 922 green 0 warn
+# [s4-admin-ui-device-management] 2026-06-26T20:38Z code-review → PASS 0 MAJOR/CRIT (cycle 1): ADR-020 clean, authz/IDOR/CSRF/XSS/audit/kill-switch all PASS, dev test-edits sound; 2 MINOR (M-1 assert AC1 created+last-seen ts; M-2 narrow rescue to RuntimeError) + 4 INFO → cycle 2 fix
+# [s4-admin-ui-device-management] 2026-06-26T20:34Z ux-gate → CLEAN (cycle 1): V1 resolved (real native onsubmit confirm() on revoke form, fixed message no interpolation, keyboard-operable) + A1 resolved (single label on rename input); tests strengthened (ExUnit asserts onsubmit+confirm( on revoke form; E2E asserts dialog actually fired). 1 residual advisory (inert leftover data-confirm attr, non-blocking). unit 922→green 0 warn
+# [s4-admin-ui-device-management] 2026-06-26T20:31Z ux-gate → 1 BLOCKING (V1: revoke data-confirm is LiveView-only markup on a dead controller render w/ no JS handler → revoke deletes WITHOUT confirmation, breaks AC3+AC5) + 5 advisories → cycle 1 fix. Static a11y otherwise solid (semantic table, headings, labels, escaping, contrast, focus order)
+# [s4-admin-ui-device-management] 2026-06-26T20:29Z ci-gate → ✓ unit-elixir 922 green/0 warn (17 device-mgmt incl authz/IDOR/XSS/CSRF/audit); redeploy verified /admin/users/:id live (302 not 404); integration 1115 (only 2 pre-existing flakes: SyncLoad perf, SearchUsers isolation, 0 new); device-mgmt e2e self-skipped (Element-Web coupling in shared background — fixture-rot workstream, not blocking)
+# [s4-admin-ui-device-management] 2026-06-26T20:19Z dev-story → done (cycle 0): facade list/rename/delete_user_device (delete = S3 revoke+keys in one); GET /users/:id detail page + rename/delete POST; show.html.heex (a11y table, data-* selectors, data-confirm, CSRF); audit device_renamed/device_deleted registered+routed via env seam; created_at surfaced. unit 922 green 0 warnings
+# [s4-admin-ui-device-management] 2026-06-26T20:06Z test-review → PASS (0 MAJOR): all AC1-4 + 6 security expectations covered, real OIDC/device flows; 3 MINOR (networkidle, assert 'created' col, ts formatting) + 3 INFO for dev
+# [s4-admin-ui-device-management] 2026-06-26T20:03Z atdd → 17 failing ExUnit (device_management_test.exs: AC1-4 + XSS-escape/IDOR/CSRF/audit-registration) + 4 E2E scenarios (device-management.feature: list/rename/revoke+confirm/empty)
+# [s4-admin-ui-device-management] 2026-06-26T19:54Z pipeline started (story pre-written, S1+S2+S3 done); classify → matrix:false ui:true sec:required
+# [s3-matrix-device-endpoints] 2026-06-26T19:52Z committed ✓ (d24c120d — ATDD+Dev; test-review MAJOR fixed; 1 MINOR 1 cycle; Kassandra HIGH UIA-bypass fixed cycle 2, CLEAN; CI 1098 green)
+# [s3-matrix-device-endpoints] 2026-06-26T19:44Z arc42-update → 05-building-blocks (Uia/DeviceId/Sweeper + mig 000012) + 08-concepts (UIA step-up, kill-switch, auth_time, device_id validation) + matrix-api-scope + manifest
+# [s3-matrix-device-endpoints] 2026-06-26T19:40Z security-review → Kassandra CLEAN (cycle 2 re-review: H-1+M-1+array-cap all CLOSED; 0 CRIT/HIGH/MED, 2 LOW accepted). S3 cleared to ship
+# [s3-matrix-device-endpoints] 2026-06-26T19:37Z dev-story → done (cycle 2): H-1 fixed (Uia.complete/2 enforces SSO-verified sub→user_id match via UserId.from_claims, mismatch=403 no-complete); M-1 max_age=0 on UIA authorize only; /delete_devices array cap 100 + dedupe; +2 tests (cross-sub bypass, oversized array); build clean, 23 endpoint tests green
+# [s3-matrix-device-endpoints] 2026-06-26T19:29Z security-review → Kassandra HIGH (H-1: UIA SSO completion not bound to fresh sub → step-up bypass) +M-1(max_age)+array-cap NOTE; fixing in cycle 2 (not shipping a HIGH auth-bypass on the story's own control)
+# [s3-matrix-device-endpoints] 2026-06-26T19:23Z code-review → CLEAN (cycle 1): MINOR-1+INFO-1 resolved, 0 findings, build clean, 33 tests green
+# [s3-matrix-device-endpoints] 2026-06-26T19:20Z dev-story → done (cycle 1): MINOR-1 fixed (symmetric token-preserve opaque+JWT via caller_credential; DeviceBinding.hash public) +2 regression tests (33 green); INFO-1 fixed (sso_state col/idx dropped from 000012); build clean
+# [s3-matrix-device-endpoints] 2026-06-26T19:05Z code-review → no CRIT/MAJOR; 1 MINOR (JWT self-delete preserve asymmetry) + INFO-1 (dead sso_state col) → cycle 1
+# [s3-matrix-device-endpoints] 2026-06-26T19:00Z ux-gate → skipped (ui:false, no admin/ files)
+# [s3-matrix-device-endpoints] 2026-06-26T19:00Z ci-gate → ✓ build+unit-elixir(905)+integration(1094/0 fail, +19 S3 green); image rebuilt, 000012 applied; no regressions/flakes
+# [s3-matrix-device-endpoints] 2026-06-26T18:51Z dev-story → done (cycle 0): PUT/DELETE/POST delete_devices routes + Uia gate + uia_sessions(DB) + m.login.sso fallback; mig 000012 (auth_time, jwt_device_bindings.exp+idx, uia_sessions); F-1 kill-switch via TokenDenylist.revoke_by_hash; F-2 DeviceId.valid? at login+keys/upload; Sweeper; auth_time refresh-preserved. build clean; focused tests green
+# [s3-matrix-device-endpoints] 2026-06-26T18:14Z test-review → 1 MAJOR (non-spec UIA re-submit) RESOLVED in-suite via real m.login.sso fallback + session-only auth; +3 MINOR fixed (single-use replay, M_INVALID_PARAM pin, bulk IDOR); 19 tests
+# [s3-matrix-device-endpoints] 2026-06-26T18:07Z atdd → 17 failing tests (device_endpoints_test.exs: AC2/3/4/5+F-1 kill-switch+F-2 device_id validation) + release_test bump to 000012
+# [s3-matrix-device-endpoints] 2026-06-26T18:00Z oracle-gate → spec context captured (CS v1.18 PUT/DELETE/delete_devices + m.login.sso UIA fallback)
+# [s3-matrix-device-endpoints] 2026-06-26T17:58Z pipeline started (story pre-written, S1+S2 done)
+# [s2-device-lifecycle-at-login] 2026-06-26T14:55Z committed ✓ (6c77a8a6 — ATDD+Dev CLEAN, 2 MINOR fixed 1 cycle, Kassandra CLEAN)
+# [s2-device-lifecycle-at-login] 2026-06-26T14:50Z arc42-update → 05-building-blocks (DeviceBinding + mig 000011) + 08-concepts (device_id assign, S2 lifecycle, server-authoritative) + manifest
+# [s2-device-lifecycle-at-login] 2026-06-26T14:45Z security-review → Kassandra CLEAN (0 CRIT/HIGH; 3 LOW+1 INFO non-blocking; S3 carry-forward: binding store lacks jti/exp for device-delete kill-switch)
+# [s2-device-lifecycle-at-login] 2026-06-26T14:35Z code-review → CLEAN (cycle 1)
+# [s2-device-lifecycle-at-login] 2026-06-26T14:30Z code-review → MINOR-only (0 CRIT/MAJOR); cycle 1: fixed MINOR-C (DeviceBinding.put best-effort) + MINOR-B (stale test moduledoc); MINOR-A accept-as-designed
+# [s2-device-lifecycle-at-login] 2026-06-26T14:05Z ux-gate → skipped (ui:false)
+# [s2-device-lifecycle-at-login] 2026-06-26T13:40Z dev-story → done (cycle 0): mig 000011 jwt_device_bindings + DeviceBinding store; login owns device upsert+JWT bind; OidcPlug assigns :device_id; keys/upload G1 mismatch reject; /sync throttled last_seen; sole_device_id removed
+# [s2-device-lifecycle-at-login] 2026-06-26T12:50Z dev-story → done (cycle 0): 13/13 ATDD green; G3 regression (login_refresh, device_keys) green; release migration-list bumped to 000011; sole_device_id/1 removed. Only env flakes remain (SyncLoad perf timeout under host load, matrix_sso @alex PII-key flake — both green in isolation / on clean DB).
+# [s2-device-lifecycle-at-login] 2026-06-26T12:20Z test-review → 1 MAJOR (AC5 uncovered) closed in-suite + AC5 throttle test added; 2 MINOR deferred to dev
+# [s2-device-lifecycle-at-login] 2026-06-26T12:09Z atdd → 12 integration tests (7 red, 5 G3-regression green) in device_lifecycle_login_test.exs
+# [s2-device-lifecycle-at-login] 2026-06-26T12:00Z oracle-gate → spec context captured (CS API v1.18 device/token-binding rules)
+# [s2-device-lifecycle-at-login] 2026-06-26T11:58Z pipeline started (story pre-written, S1 done)
 # [s1-device-registry-model] 2026-06-26T10:13Z committed ✓ (ff83d4b9 — ATDD+Dev CLEAN, 2 MINOR fixed 1 cycle, Kassandra CLEAN)
 # [s1-device-registry-model] 2026-06-26T10:12Z arc42-update → 05-building-blocks + 08-concepts + manifest
 # [s1-device-registry-model] 2026-06-26T10:10Z security-review → Kassandra CLEAN (0 CRIT/HIGH, 2 LOW pre-existing → SEC Gate 2)
@@ -69,3 +109,9 @@ completed: []
 cycle_count: 0
 blocked_reason: null
 last_updated: "2026-06-28T18:23Z"
+last_updated: "2026-06-26T10:13Z"
+last_updated: "2026-06-26T14:21Z"
+last_updated: "2026-06-26T19:44Z"
+last_updated: "2026-06-26T20:41Z"
+last_updated: "2026-06-26T20:49Z"
+last_updated: "2026-06-28T18:22Z"
