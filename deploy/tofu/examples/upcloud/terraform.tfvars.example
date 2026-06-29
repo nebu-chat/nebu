@@ -1,0 +1,178 @@
+# terraform.tfvars.example
+# Copy this file to terraform.tfvars and fill in the values.
+# Do NOT commit terraform.tfvars — it contains secrets.
+#
+# Quick-start:
+#   cp terraform.tfvars.example terraform.tfvars
+#   # fill in the REQUIRED values below
+#   tofu init && tofu apply
+
+# ── UpCloud Authentication ────────────────────────────────────────────────────
+
+# Required: UpCloud API credentials.
+# Create a sub-account: UpCloud Hub → User Management → Add sub-account → enable API access.
+# NEVER use your main account credentials — use a dedicated sub-account.
+upcloud_username = "<REPLACE: upcloud sub-account username>"
+upcloud_password = "<REPLACE: upcloud sub-account password>"
+
+# Required: contents of your SSH public key (e.g. ~/.ssh/id_ed25519.pub)
+ssh_public_key = "ssh-ed25519 AAAA... operator@example.com"
+
+# ── VM & Zone ─────────────────────────────────────────────────────────────────
+
+# Optional: deployment environment label (used in resource names)
+environment = "dev"
+
+# Optional: UpCloud zone for VM + LB + managed database
+# Run: upctl zone list
+zone = "de-fra1"
+
+# Optional: network CIDR block for the private network
+network_cidr = "10.0.0.0/24"
+
+# Optional: VM plan (4 vCPU / 8 GB RAM — recommended minimum for Nebu)
+# Run: upctl server plans
+vm_plan = "4xCPU-8GB"
+
+# Optional: Ubuntu 24.04 LTS template name — verify current name:
+#   upctl storage list --type template | grep -i ubuntu
+vm_template = "Ubuntu Server 24.04 LTS (Noble Numbat)"
+
+# ── TLS mode ──────────────────────────────────────────────────────────────────
+# "none": no TLS, server exposed on port 8008 via LB TCP passthrough.
+# "acme": nginx on VM + certbot Let's Encrypt (HTTP-01 challenge on first boot).
+#         Requires a publicly resolvable domain pointing to the LB.
+# "alb":  UpCloud LB terminates TLS — provide certificate + private key below.
+#         Obtain externally (e.g. certbot DNS-01 against your domain hoster).
+
+tls_mode     = "alb"            # or: "acme", "none"
+acme_email   = "ops@example.com"
+acme_staging = true             # only relevant when tls_mode = "acme"
+
+# Required when tls_mode = "alb": paths to PEM certificate (fullchain) and private key.
+# Example (after obtaining via certbot):
+#   tls_certificate_pem = "/etc/letsencrypt/live/chat.example.com/fullchain.pem"
+#   tls_private_key_pem = "/etc/letsencrypt/live/chat.example.com/privkey.pem"
+tls_certificate_pem = "<REPLACE: path to PEM certificate fullchain>"
+tls_private_key_pem = "<REPLACE: path to PEM private key>"
+
+# ── Managed PostgreSQL ────────────────────────────────────────────────────────
+
+# Optional: managed PostgreSQL plan
+# Run: upctl database plans --type postgresql
+# hobbyist-2 = 2 vCPU / 2 GB RAM / HDD (development/testing)
+# For production: 2x2xHDD or higher
+db_plan = "hobbyist-2"
+
+# ── Load Balancer ─────────────────────────────────────────────────────────────
+
+# Optional: LB plan — "development" is free (no SLA), suitable for testing.
+# For production: "production-small" or higher.
+# Run: upctl loadbalancer plans
+lb_plan = "development"
+
+# ── Secrets & Encryption ─────────────────────────────────────────────────────
+
+# Required: shared PSK for server node registration (ADR-008).
+# Generate with: openssl rand -hex 32
+internal_secret = "<REPLACE: openssl rand -hex 32>"
+
+# Required: 32-byte AES key for PII field encryption in the Elixir server.
+# Generate with: openssl rand -hex 32
+pii_encryption_key = "<REPLACE: openssl rand -hex 32>"
+
+# ── OIDC Profile ─────────────────────────────────────────────────────────────
+# Choose 'dex' to deploy a bundled Dex IdP sidecar (test/demo environments).
+# Choose 'external' to use an external OIDC provider (production).
+#
+# WARNING (dex mode): Dex runs on plain HTTP (port 5556) unless tls_mode != "none".
+# Use dex mode ONLY in isolated test/demo environments — NEVER for production.
+oidc_mode = "external"  # or: "dex"
+
+# Optional when oidc_mode = "external": omit to let Nebu read the issuer from the database.
+# oidc_issuer = "https://auth.example.com/realms/nebu"
+
+# Optional: OIDC client ID.
+# dex mode:      required — embedded into Dex staticClients
+# external mode: omit to let Nebu read OIDC config from the database
+# oidc_client_id = "<REPLACE_WITH_OIDC_CLIENT_ID>"
+
+# Optional: OIDC audience (aud claim in Bearer tokens).
+# Leave empty to use oidc_client_id as audience (correct for Dex and most setups).
+# oidc_audience = ""
+
+# Optional: OIDC client secret.
+# dex mode:      required — embedded into Dex staticClients
+# external mode: omit to let Nebu read OIDC config from the database
+# oidc_client_secret = "<REPLACE_WITH_OIDC_CLIENT_SECRET>"
+
+# ── Dex static users (oidc_mode = "dex" only) ────────────────────────────────
+# Generate hashes with: htpasswd -bnBC 12 '' 'yourpassword' | tr -d ':' | sed 's/$2y/$2a/'
+# Tip: $2y$ output from htpasswd is also accepted directly (no sed needed).
+
+# Required when oidc_mode = "dex": operator account (group: instance_admin)
+dex_static_password_hash = "<REPLACE_WITH_BCRYPT_HASH>"
+
+# Optional: additional demo/test users — comment out to skip provisioning
+# dex_user1_password_hash      = "<REPLACE_WITH_BCRYPT_HASH>"   # alice@example.com (group: users)
+# dex_user2_password_hash      = "<REPLACE_WITH_BCRYPT_HASH>"   # bob@example.com   (group: users)
+# dex_compliance_password_hash = "<REPLACE_WITH_BCRYPT_HASH>"   # compliance@example.com (group: compliance_officer)
+
+# Optional: CIDR allowed to reach Dex on port 5556 (dex mode, tls_mode = "none" only).
+# Restrict to your IP or VPN CIDR — default 0.0.0.0/0 is only safe for isolated envs.
+# dex_allowed_cidr = "0.0.0.0/0"
+
+# ── Domain & Registry ────────────────────────────────────────────────────────
+
+# Required: public domain name of the Nebu instance (used as NEBU_SERVER_NAME)
+server_name = "chat.example.com"
+
+# Required: container image registry prefix.
+# Server is the single application image, pushed as:
+#   <image_registry>/nebu-server:<nebu_version>
+image_registry = "registry.gitlab.com/myorg/nebu-server"
+
+# Required: SemVer tag without the 'v' prefix (e.g. "0.2.1" for Git tag v0.2.1).
+# Never use "latest" — the module validates this and will reject it.
+nebu_version = "0.2.1"
+
+# Optional: UpCloud LB plan (only relevant for request routing / SLA).
+# lb_plan = "development"
+
+# ── DNS ──────────────────────────────────────────────────────────────────────
+# dns_mode = "default": creates UpCloud DNS records (domain must be in UpCloud DNS Zones).
+#   CNAME record: <server_name> → <lb dns_name>.
+#   Requires the domain zone to exist in UpCloud DNS before apply.
+# dns_mode = "external": skips DNS creation — register the 'dns_name' output as a
+#   CNAME (if your DNS provider supports CNAME flattening) or as an A-record
+#   by resolving the LB DNS name to its IP.
+dns_mode = "external"
+
+# When dns_mode = "default": optionally create a dex.<server_name> CNAME.
+# dex_subdomain_enabled = false
+
+# ── Media object storage (UpCloud Managed Object Storage) ─────────────────────
+# When enabled, the server container serves /_matrix/media/* from the S3 bucket.
+# S3 credentials are fully managed by OpenTofu — no manual portal step required.
+#
+# Note: object storage region is separate from the compute zone.
+# Run: upctl object-storage regions
+#
+# enable_media_gateway  = true
+# s3_bucket             = "nebu-media"
+# object_storage_region = "europe-1"
+
+# ── Element Web client ────────────────────────────────────────────────────────
+# Requires tls_mode = "acme" or "alb" (lifecycle precondition enforced by tofu apply).
+# enable_element_web = false
+
+# ── Container resource limits ─────────────────────────────────────────────────
+# Default values are tuned for a 4xCPU-8GB VM.
+# Adjust if using a larger or smaller VM plan.
+#
+# server_cpu_limit     = "1.50"   # Elixir/BEAM — benefits from multiple cores
+# server_memory_limit  = "2g"     # BEAM allocates aggressively — set to prevent OOM
+# dex_cpu_limit        = "0.25"   # Dex IdP sidecar (oidc_mode = "dex" only)
+# dex_memory_limit     = "128m"
+# element_cpu_limit    = "0.25"   # Element Web (enable_element_web = true only)
+# element_memory_limit = "128m"

@@ -116,10 +116,34 @@ end
 config :event_dispatcher, server_name: System.get_env("NEBU_SERVER_NAME", "localhost")
 
 if config_env() in [:prod, :dev] do
+  db_url = System.get_env("NEBU_DB_URL") || raise("NEBU_DB_URL is not set")
+
+  ssl_opts =
+    if System.get_env("NEBU_POSTGRES_SSL", "false") == "true" do
+      case System.get_env("NEBU_POSTGRES_CA_CERT_FILE") do
+        nil ->
+          [verify: :verify_none]
+
+        path ->
+          db_host = URI.parse(db_url).host || "localhost"
+
+          [
+            verify: :verify_peer,
+            cacertfile: to_charlist(path),
+            server_name_indication: to_charlist(db_host),
+            customize_hostname_check: [
+              match_fun: :public_key.pkix_verify_hostname_match_fun(:https)
+            ]
+          ]
+      end
+    else
+      false
+    end
+
   config :nebu, Nebu.Repo,
-    url: System.get_env("NEBU_DB_URL") || raise("NEBU_DB_URL is not set"),
+    url: db_url,
     pool_size: 10,
-    ssl: System.get_env("NEBU_POSTGRES_SSL", "false") == "true"
+    ssl: ssl_opts
 end
 
 # ── admin-ui-migration: Phoenix LiveView Admin UI endpoint (runtime secret) ───

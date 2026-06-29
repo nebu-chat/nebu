@@ -186,9 +186,37 @@ defmodule Nebu.Release do
   end
 
   @doc false
-  @spec postgres_ssl_opts() :: [ssl: boolean()]
-  def postgres_ssl_opts do
-    [ssl: System.get_env("NEBU_POSTGRES_SSL", "false") == "true"]
+  @spec postgres_ssl_opts() :: [ssl: false | keyword()]
+  @spec postgres_ssl_opts(String.t() | nil) :: [ssl: false | keyword()]
+  def postgres_ssl_opts(hostname \\ nil) do
+    case System.get_env("NEBU_POSTGRES_SSL", "false") do
+      "true" ->
+        ssl_opts =
+          case System.get_env("NEBU_POSTGRES_CA_CERT_FILE") do
+            nil ->
+              [verify: :verify_none]
+
+            path ->
+              base = [
+                verify: :verify_peer,
+                cacertfile: to_charlist(path),
+                customize_hostname_check: [
+                  match_fun: :public_key.pkix_verify_hostname_match_fun(:https)
+                ]
+              ]
+
+              if is_binary(hostname) and hostname != "" do
+                [{:server_name_indication, to_charlist(hostname)} | base]
+              else
+                base
+              end
+          end
+
+        [ssl: ssl_opts]
+
+      _ ->
+        [ssl: false]
+    end
   end
 
   # Parse a postgres[ql]://user:pass@host:port/db URL into Postgrex start opts.
@@ -211,6 +239,6 @@ defmodule Nebu.Release do
       database: String.trim_leading(uri.path || "", "/"),
       # A single connection is enough for the migrate-and-exit task.
       pool_size: 1
-    ] ++ postgres_ssl_opts()
+    ] ++ postgres_ssl_opts(uri.host)
   end
 end

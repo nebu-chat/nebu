@@ -447,6 +447,10 @@ write_files:
           image: $${NEBU_IMAGE_REGISTRY}/nebu-server:$${NEBU_VERSION}
           restart: unless-stopped
           # No depends_on: postgres — managed PostgresFlex is always available
+%{ if fetch_postgres_ca ~}
+          volumes:
+            - /opt/nebu/postgres-ca.pem:/opt/nebu/postgres-ca.pem:ro
+%{ endif ~}
 %{ if enable_media_gateway ~}
           secrets:
             - internal_secret
@@ -456,8 +460,8 @@ write_files:
           secrets: [internal_secret]
 %{ endif ~}
           environment:
-            NEBU_DB_URL: "postgresql://${pg_user}:${pg_password}@${pg_host}:${pg_port}/nebu?sslmode=require"
-            NEBU_DB_URL_MIGRATE: "postgresql://${pg_migrate_user}:${pg_migrate_password}@${pg_host}:${pg_port}/nebu?sslmode=require"
+            NEBU_DB_URL: "postgresql://${pg_user}:${pg_password}@${pg_host}:${pg_port}/nebu"
+            NEBU_DB_URL_MIGRATE: "postgresql://${pg_migrate_user}:${pg_migrate_password}@${pg_host}:${pg_port}/nebu"
             NEBU_POSTGRES_SSL: "true"
             NEBU_INTERNAL_SECRET_FILE: "/run/secrets/internal_secret"
             NEBU_SERVER_NAME: $${NEBU_SERVER_NAME}
@@ -676,6 +680,33 @@ runcmd:
   - systemctl start fluent-bit
 %{ endif ~}
 
+%{ if fetch_postgres_ca ~}
+  # ── Fetch PostgreSQL server CA certificate ──────────────────────────────────
+  # Managed databases (e.g. UpCloud/Aiven) use a private CA that is not in the
+  # system trust store. Extract the TLS certificate chain from the DB host at
+  # boot time — the VM can reach the host via the private SDN. All certs in the
+  # chain are saved so Postgrex verify_peer can validate the server certificate.
+  # NEBU_POSTGRES_CA_CERT_FILE is appended to .env before the container starts.
+  - |
+    for i in $(seq 1 12); do
+      CERTS=$(echo Q | openssl s_client -connect ${pg_host}:${pg_port} -showcerts 2>/dev/null \
+        | sed -n '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/p')
+      if [ -n "$CERTS" ]; then
+        printf '%s\n' "$CERTS" > /opt/nebu/postgres-ca.pem
+        chmod 0644 /opt/nebu/postgres-ca.pem
+        echo "NEBU_POSTGRES_CA_CERT_FILE=/opt/nebu/postgres-ca.pem" >> /opt/nebu/.env
+        echo "[nebu-bootstrap] PostgreSQL CA cert saved to /opt/nebu/postgres-ca.pem"
+        break
+      fi
+      echo "[nebu-bootstrap] DB not reachable yet (attempt $i/12), waiting 10s..."
+      sleep 10
+    done
+    if [ ! -f /opt/nebu/postgres-ca.pem ]; then
+      echo "[nebu-bootstrap] WARNING: Could not fetch PostgreSQL CA cert after 12 attempts." >&2
+      echo "[nebu-bootstrap] WARNING: Server will start with verify_none (encrypted, unverified)." >&2
+    fi
+
+%{ endif ~}
   # ── Enable + start nebu.service ─────────────────────────────────────────────
   - systemctl daemon-reload
   - systemctl enable nebu.service

@@ -1,0 +1,17 @@
+# last_updated: 2026-06-28
+# [postgres-ssl-ca-cert] 2026-06-28T10:45Z committed ✓ (HIGH+MAJOR+2MINOR fixed, 21 tests green)
+# [postgres-ssl-ca-cert] 2026-06-28T10:41Z arc42-update → no arch changes (infra/config only)
+# [postgres-ssl-ca-cert] 2026-06-28T10:40Z security-review → HIGH fixed (SNI+hostname_check), 2 MEDIUM documented
+# [postgres-ssl-ca-cert] 2026-06-28T10:30Z code-review → 1 MAJOR fixed (volume mount), 2 MINOR fixed, cycle 0
+# [postgres-ssl-ca-cert] 2026-06-28T10:20Z ci-gate → ✓ 916 unit tests passed
+# [postgres-ssl-ca-cert] 2026-06-28T10:11Z dev-story → done (cycle 0, impl pre-existed)
+# [postgres-ssl-ca-cert] 2026-06-28T10:10Z test-review → CLEAN (0 MAJOR, 1 MINOR fixed)
+# [postgres-ssl-ca-cert] 2026-06-28T10:05Z atdd → 11 failing tests (now green — impl existed)
+# [postgres-ssl-ca-cert] 2026-06-28T10:01Z create-story → postgres-ssl-ca-cert.md
+# [postgres-ssl-ca-cert] 2026-06-28T10:00Z pipeline started
+story: null
+current_step: null
+last_updated: "2026-06-28T19:55Z"
+completed: []
+cycle_count: 0
+blocked_reason: null

@@ -139,6 +139,9 @@ resource "stackit_server" "nebu" {
     s3_secret_key        = var.s3_secret_key
     s3_endpoint          = var.s3_endpoint
     s3_bucket            = var.s3_bucket
+    # StackIT PostgresFlex uses a Let's Encrypt certificate signed by a globally
+    # trusted CA — no need to fetch a private CA cert at boot time.
+    fetch_postgres_ca = false
   })
 
   lifecycle {
