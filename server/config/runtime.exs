@@ -21,48 +21,35 @@ for {env_name, cfg_key} <- [
   end
 end
 
-# ─── oidc-middleware-migration: OIDC Bearer-token validation (Elixir) ─────────
-# Nebu.Web.Plugs.OidcPlug validates Bearer tokens against the cached JWKS keys.
-# Nebu.Web.JwksCache fetches the JWKS on start and refreshes on NEBU_OIDC_JWKS_TTL.
-# Only configured in prod/dev — tests set this config directly (never raise here).
+# ─── oidc-bootstrap-only-config (ADR-022): OIDC config is bootstrap-only ──────
+# OIDC is configured EXCLUSIVELY through the Bootstrap Wizard (server_config), read
+# at runtime via the DB-backed Nebu.Web.OidcConfig cache. There are NO NEBU_OIDC_* /
+# NEBU_ADMIN_OIDC_* configuration variables — issuer, audience, JWKS URI, and the
+# single OIDC client (id/secret) all come from server_config. The server BOOTS
+# without OIDC config; OidcPlug/SsoLogin/Admin.Auth validate per-operation and fail
+# closed (all Bearer tokens 401, admin → /bootstrap) until the wizard completes.
+#
+# Only non-config presentation/operational knobs remain here:
+#   - NEBU_OIDC_DISPLAY_NAME — advertised IdP label for GET /v3/login (m.login.sso)
+#   - NEBU_SSO_REDIRECT_SCHEMES — allowed non-http client redirect schemes
+#   - NEBU_OIDC_JWKS_TTL — JwksCache refresh interval (read in Nebu.Web.JwksCache)
 if config_env() in [:prod, :dev] do
-  # oidc-env-optional-bootstrap: OIDC issuer/audience default to nil when absent so
-  # the server can start without env vars and accept OIDC config from the Bootstrap
-  # Wizard (server_config). OidcPlug enforces fail-closed behavior at the plug level
-  # (MEDIUM-3): nil issuer or audience → all tokens rejected with 401 M_UNKNOWN_TOKEN.
-  # Operators who pre-configure OIDC via env still get the same startup behavior — the
-  # values are set and plug validation passes as before.
-  oidc_issuer = System.get_env("NEBU_OIDC_ISSUER")
-  oidc_audience = System.get_env("NEBU_OIDC_AUDIENCE")
-
   config :nebu_http,
     server_name: System.get_env("NEBU_SERVER_NAME", "localhost"),
-    oidc_issuer: oidc_issuer,
-    oidc_audience: oidc_audience,
-    oidc_jwks_uri: System.get_env("NEBU_OIDC_JWKS_URI"),
     # Advertised IdP display name for GET /_matrix/client/v3/login (m.login.sso).
-    # Mirrors the Go gateway's NEBU_OIDC_DISPLAY_NAME (default "SSO").
     oidc_display_name: System.get_env("NEBU_OIDC_DISPLAY_NAME", "SSO"),
+    sso_redirect_schemes: System.get_env("NEBU_SSO_REDIRECT_SCHEMES", ""),
     start_jwks_cache: true
 
-  # ── Matrix client SSO leg (bugfix-fix-matrix-sso-redirect-missing) ──────────
-  # The browser-facing m.login.sso → /login/sso/redirect → callback flow needs the
-  # OIDC client credentials to exchange the authorization code. Source of record is
-  # the Bootstrap DB (server_config.oidc_client_id/secret); these env values are the
-  # fallback (bfd4884f parity). The Matrix client_id falls back to the shared
-  # NEBU_OIDC_CLIENT_ID. NEBU_OIDC_EXTRA_SCOPES (53904df6) are appended to the
-  # openid[/offline_access] base scope list (e.g. profile email).
-  matrix_oidc_client_secret =
-    case System.get_env("NEBU_OIDC_CLIENT_SECRET_FILE") do
-      nil -> System.get_env("NEBU_OIDC_CLIENT_SECRET", "")
-      path -> path |> File.read!() |> String.trim()
-    end
-
-  config :nebu_http,
-    matrix_oidc_client_id: System.get_env("NEBU_OIDC_CLIENT_ID", ""),
-    matrix_oidc_client_secret: matrix_oidc_client_secret,
-    oidc_extra_scopes: System.get_env("NEBU_OIDC_EXTRA_SCOPES", ""),
-    sso_redirect_schemes: System.get_env("NEBU_SSO_REDIRECT_SCHEMES", "")
+  # ── device-management S3: UIA fresh-auth window (Option B) ──────────────────
+  # Device delete (DELETE /devices/{id}, POST /delete_devices) is UIA-gated: a login
+  # within this many seconds satisfies it; otherwise the caller is challenged for a
+  # fresh m.login.sso. Default 900s (15 min). Only a strictly-positive integer is
+  # applied; junk/<=0 leaves the Nebu.Matrix.Uia default untouched.
+  case Integer.parse(System.get_env("NEBU_UIA_FRESH_AUTH_SECONDS", "")) do
+    {seconds, ""} when seconds > 0 -> config :nebu_http, uia_fresh_auth_seconds: seconds
+    _ -> :ok
+  end
 end
 
 # ─── media-gateway-migration: S3/MinIO storage for the Elixir media gateway ──
@@ -178,30 +165,12 @@ if config_env() in [:prod, :dev] do
     # connections from the configured public hostname (origin check uses url[:host]).
     url: [host: System.get_env("NEBU_SERVER_NAME", "localhost")]
 
-  # go-removal-cleanup: the admin OIDC Authorization-Code + PKCE login is now served in
-  # Elixir (Nebu.Admin.Auth), replacing the deleted Go gateway flow. It reuses the
-  # shared :oidc_issuer (configured above) for discovery + ID-token validation, and adds
-  # the admin OAuth client credentials and the fixed registered redirect_uri.
-  #
-  # The client secret is read from a Docker-secret file path when provided
-  # (NEBU_ADMIN_OIDC_CLIENT_SECRET_FILE), else from the inline env var. The redirect_uri
-  # is a fixed, server-controlled value (NOT derived from request headers) and MUST be
-  # registered with the IdP; it defaults to the Compose-fronted origin.
-  admin_oidc_client_secret =
-    case System.get_env("NEBU_ADMIN_OIDC_CLIENT_SECRET_FILE") do
-      nil -> System.get_env("NEBU_ADMIN_OIDC_CLIENT_SECRET", "")
-      path -> path |> File.read!() |> String.trim()
-    end
-
-  config :nebu_http,
-    admin_oidc_client_id: System.get_env("NEBU_ADMIN_OIDC_CLIENT_ID", System.get_env("NEBU_OIDC_CLIENT_ID", "")),
-    admin_oidc_client_secret: admin_oidc_client_secret,
-    # When NEBU_ADMIN_OIDC_REDIRECT_URI is not set, nil is stored here and
-    # Nebu.Admin.Auth.redirect_uri/0 derives the value from :server_name +
-    # :admin_session_secure at runtime, so non-localhost deployments automatically
-    # get the correct https://{server_name}/admin/callback URI.
-    admin_oidc_redirect_uri: System.get_env("NEBU_ADMIN_OIDC_REDIRECT_URI"),
-    admin_oidc_scope: System.get_env("NEBU_ADMIN_OIDC_SCOPE", "openid profile email")
+  # oidc-bootstrap-only-config (ADR-022): the admin OIDC operator login uses the
+  # SINGLE wizard-configured client (server_config.oidc_client_id/secret) — the same
+  # client that validates Matrix Bearer tokens. There is no separate admin OIDC client
+  # and no NEBU_ADMIN_OIDC_* config. The /admin/callback redirect_uri is derived at
+  # runtime by Nebu.Admin.Auth.redirect_uri/0 from :server_name + :admin_session_secure
+  # (server-controlled, never from request headers) and is registered on the one client.
 
   # Admin session cookie `secure` flag (Nebu.Admin.Endpoint). Defaults to true
   # (TLS-only, fail-closed). Set NEBU_ADMIN_SESSION_SECURE=false ONLY for a local

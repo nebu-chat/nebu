@@ -1,9 +1,13 @@
 defmodule Nebu.Admin.UserSuggest do
   @moduledoc """
-  Story admin-add-user-autocomplete — shared add-user typeahead used by BOTH
-  `Nebu.Admin.RoomsLive` (room add-member) and `Nebu.Admin.SpacesLive`.
+  Story admin-add-user-autocomplete — shared add-user typeahead backend used by the
+  room AND space add-member pages. Since admin-http-refactor those pages are plain
+  HTTP controllers (`Nebu.Admin.RoomsController` / `SpacesController`); the suggestion
+  data is served as JSON by `Nebu.Admin.UsersController.search/2`
+  (GET /admin/users/search) and rendered client-side by the CSP-safe fetch widget in
+  `priv/static/assets/app.js`.
 
-  Single source of truth for the suggestion query so the two Admin pages do not
+  Single source of truth for the suggestion query so the Admin pages do not
   copy-paste the search/limit/min-length logic.
 
     * `min_chars/0`  — the minimum query length before any DB hit (>=2). Below this the

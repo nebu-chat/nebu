@@ -59,18 +59,41 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
         expires_at: expires_at
       } = params) do
     enc_oidc_rt = Map.get(params, :oidc_refresh_token)
+    # S3: auth_time (unix seconds) is the user's LAST FRESH authentication time,
+    # taken at login from the id_token's auth_time/iat claim. The UIA freshness gate
+    # compares now - auth_time. nil → treated as "stale" (always challenge).
+    auth_time = Map.get(params, :auth_time)
 
     {:ok, _} =
       query(
         """
         INSERT INTO matrix_sessions
-          (access_token, refresh_token, oidc_refresh_token, user_id, device_id, expires_at, created_at)
-        VALUES ($1, $2, $3, $4, $5, $6, NOW())
+          (access_token, refresh_token, oidc_refresh_token, user_id, device_id, expires_at, auth_time, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
         """,
-        [at, rt, enc_oidc_rt, user_id, device_id, expires_at]
+        [at, rt, enc_oidc_rt, user_id, device_id, expires_at, auth_time]
       )
 
     :ok
+  end
+
+  @doc """
+  Reads the auth context for the UIA freshness gate (S3) by opaque access token:
+  `{:ok, %{user_id, device_id, auth_time}}` (auth_time is unix seconds or nil) or
+  `:error`. Read-path: never raises.
+  """
+  @spec get_auth_context(String.t()) :: {:ok, map()} | :error
+  def get_auth_context(access_token) when is_binary(access_token) do
+    case safe_query(
+           "SELECT user_id, device_id, auth_time FROM matrix_sessions WHERE access_token = $1",
+           [access_token]
+         ) do
+      {:ok, %{rows: [[user_id, device_id, auth_time]]}} ->
+        {:ok, %{user_id: user_id, device_id: device_id, auth_time: auth_time}}
+
+      _ ->
+        :error
+    end
   end
 
   @doc """
@@ -142,24 +165,28 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
             Nebu.Repo.rollback(:not_found)
 
           {:ok, _} ->
-            # 2. Read the old row to copy user_id/device_id and (default) the OIDC RT.
-            {:ok, %{rows: [[user_id, device_id, old_enc_oidc_rt]]}} =
+            # 2. Read the old row to copy user_id/device_id, (default) the OIDC RT,
+            #    and — S3 — the auth_time VERBATIM. A refresh is NOT a fresh
+            #    authentication, so it must carry over the original auth_time
+            #    unchanged; resetting it here would let a refresh defeat the UIA
+            #    freshness gate (story Dev Notes).
+            {:ok, %{rows: [[user_id, device_id, old_enc_oidc_rt, old_auth_time]]}} =
               query(
-                "SELECT user_id, device_id, oidc_refresh_token FROM matrix_sessions WHERE access_token = $1",
+                "SELECT user_id, device_id, oidc_refresh_token, auth_time FROM matrix_sessions WHERE access_token = $1",
                 [old_at]
               )
 
             enc_oidc_rt = new_oidc_rt || old_enc_oidc_rt
 
-            # 3. Insert the new row.
+            # 3. Insert the new row, carrying auth_time over unchanged.
             {:ok, _} =
               query(
                 """
                 INSERT INTO matrix_sessions
-                  (access_token, refresh_token, oidc_refresh_token, user_id, device_id, expires_at, created_at)
-                VALUES ($1, $2, $3, $4, $5, $6, NOW())
+                  (access_token, refresh_token, oidc_refresh_token, user_id, device_id, expires_at, auth_time, created_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
                 """,
-                [new_at, new_rt, enc_oidc_rt, user_id, device_id, new_expires_at]
+                [new_at, new_rt, enc_oidc_rt, user_id, device_id, new_expires_at, old_auth_time]
               )
 
             :ok
@@ -323,6 +350,24 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
       query("DELETE FROM matrix_sessions WHERE expires_at < NOW() - INTERVAL '7 days'", [])
 
     n
+  end
+
+  @doc """
+  Refreshes `auth_time` (unix seconds) for ALL of a user's active opaque sessions
+  (S3). Called after the user completes a fresh `m.login.sso` UIA stage so the
+  subsequent re-submit on the SAME opaque token is within the fresh-auth window.
+  Best-effort: never raises.
+  """
+  @spec refresh_auth_time(String.t(), integer()) :: :ok
+  def refresh_auth_time(user_id, auth_time)
+      when is_binary(user_id) and is_integer(auth_time) do
+    _ =
+      safe_query(
+        "UPDATE matrix_sessions SET auth_time = $2 WHERE user_id = $1 AND revoked_at IS NULL",
+        [user_id, auth_time]
+      )
+
+    :ok
   end
 
   # ── internals ──────────────────────────────────────────────────────────────

@@ -1,0 +1,110 @@
+<div class="admin-user-detail" data-page="user-detail">
+  <a href="/admin/users" class="text-sm text-primary">&larr; Back to Users</a>
+
+  <p :if={Phoenix.Flash.get(@flash, :info)} class="alert alert-success my-4" role="status">
+    {Phoenix.Flash.get(@flash, :info)}
+  </p>
+  <p :if={Phoenix.Flash.get(@flash, :error)} class="alert alert-error my-4" role="alert">
+    {Phoenix.Flash.get(@flash, :error)}
+  </p>
+
+  <h1 class="text-2xl font-bold mb-2" data-user-id={@user_id}>{@user_id}</h1>
+  <p class="text-base-content/70 mb-6">Manage this user's registered devices.</p>
+
+  <section class="max-w-4xl" data-section="devices" aria-labelledby="devices-heading">
+    <h2 id="devices-heading" class="text-lg font-bold mb-3">Devices</h2>
+
+    <p :if={@devices == []} class="text-base-content/70" data-role="no-devices">
+      No devices registered for this user.
+    </p>
+
+    <div :if={@devices != []} class="overflow-x-auto">
+      <table class="table w-full" role="table">
+        <caption class="sr-only">Registered devices for {@user_id}</caption>
+        <thead>
+          <tr>
+            <th scope="col">Device ID</th>
+            <th scope="col">Display name</th>
+            <th scope="col">Last seen</th>
+            <th scope="col">Created</th>
+            <th scope="col">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr
+            :for={device <- @devices}
+            data-role="device-row"
+            data-device-id={device["device_id"]}
+          >
+            <td class="font-mono text-sm" data-field="device-id">{device["device_id"]}</td>
+            <td data-field="display-name">{device_display_name(device)}</td>
+            <td data-field="last-seen">{last_seen_cell(device)}</td>
+            <td data-field="created">{format_ts(device["created_ts"])}</td>
+            <td>
+              <div class="flex items-center gap-2">
+                <%!-- Rename form: POST to /admin/users/:user_id/devices/:device_id/rename --%>
+                <form
+                  method="post"
+                  action={"/admin/users/" <> URI.encode(@user_id, &URI.char_unreserved?(&1)) <> "/devices/" <> URI.encode(device["device_id"], &URI.char_unreserved?(&1)) <> "/rename"}
+                  class="flex items-end gap-2"
+                  data-form="rename-device"
+                  data-device-id={device["device_id"]}
+                >
+                  <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+                  <label class="sr-only" for={"rename-" <> device["device_id"]}>
+                    New display name for device {device["device_id"]}
+                  </label>
+                  <input
+                    type="text"
+                    id={"rename-" <> device["device_id"]}
+                    name="display_name"
+                    value={device_display_name(device)}
+                    placeholder="Display name"
+                    class="input input-bordered input-sm w-48"
+                    autocomplete="off"
+                  />
+                  <button type="submit" class="btn btn-sm btn-primary" role="button">
+                    Rename
+                  </button>
+                </form>
+
+                <%!-- Revoke control: POST + _method=DELETE, with a real, keyboard-operable
+                     confirmation step (AC3/AC5). This page is a dead controller render
+                     (no LiveView socket), so Phoenix `data-confirm` is NOT honored at
+                     runtime. The admin CSP is `script-src 'self'` WITHOUT 'unsafe-inline'
+                     (Nebu.Admin.Router @csp), so an inline `onsubmit="return confirm(...)"`
+                     handler is blocked by the browser and never fires. Instead, the
+                     external /admin/static/assets/app.js (allowed by `script-src 'self'`)
+                     attaches a single `submit` listener to `[data-form="revoke-device"]`
+                     forms and calls `confirm()` with this form's `data-confirm` message —
+                     CSP-compliant, keyboard-operable (fires on Enter or click submit), and
+                     framework-free (works on a dead controller render). HEEx auto-escapes
+                     `data-confirm`, so the device id is safe in the attribute value. --%>
+                <form
+                  method="post"
+                  action={"/admin/users/" <> URI.encode(@user_id, &URI.char_unreserved?(&1)) <> "/devices/" <> URI.encode(device["device_id"], &URI.char_unreserved?(&1))}
+                  data-form="revoke-device"
+                  data-device-id={device["device_id"]}
+                  data-confirm={"Revoke device " <> device["device_id"] <> "? This logs out its session and removes its keys."}
+                >
+                  <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+                  <input type="hidden" name="_method" value="DELETE" />
+                  <button
+                    type="submit"
+                    class="btn btn-sm btn-error"
+                    role="button"
+                    data-role="revoke-device"
+                    data-device-id={device["device_id"]}
+                    aria-label={"Revoke device " <> device["device_id"]}
+                  >
+                    Revoke
+                  </button>
+                </form>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>

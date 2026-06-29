@@ -58,6 +58,11 @@ defmodule Nebu.Web.Router.Protected do
     since = q["since"]
     timeout_ms = parse_timeout(q["timeout"])
 
+    # S2 AC5: advance the device's last_seen_ts/last_seen_ip on this authenticated
+    # activity, THROTTLED inside the store so back-to-back /syncs don't hammer the DB.
+    # Best-effort: must never fail the /sync it rides on.
+    touch_device_last_seen(conn)
+
     {next_batch, rooms} =
       if is_binary(since) and since != "" do
         delta =
@@ -291,16 +296,24 @@ defmodule Nebu.Web.Router.Protected do
 
   # POST /keys/upload — publish device identity keys, one-time keys, and fallback keys
   # (Matrix CS §/keys/upload). Persists them in the device-key directory and returns the
-  # real unclaimed one_time_key_counts. device_id comes from the body's device_keys object
-  # (Required on first upload, "must match the device used at login") and falls back to the
-  # token's bound device for opaque sessions. With nothing to attribute (empty body, JWT
-  # session w/o a bound device) it's a no-op returning empty counts — does NOT touch the DB.
+  # real unclaimed one_time_key_counts.
+  #
+  # S2 AC4/AC6/G1: the device a write attributes to is determined SOLELY by the token's
+  # server-side binding (`conn.assigns[:device_id]`, set by OidcPlug for BOTH opaque and
+  # raw-JWT sessions). A body `device_keys.device_id` that CONTRADICTS the bound device is
+  # rejected UP FRONT — before any write — so a token bound to DEV_A can never publish keys
+  # for DEV_B (the spec: device_keys device_id "Must match the device ID used when logging
+  # in"). With no bound device and no body device_id there is nothing to attribute → no-op,
+  # empty counts, no DB touch.
   post "/client/v3/keys/upload" do
     user = conn.assigns[:current_user]
     params = body_params(conn)
     device_keys = params["device_keys"]
     one_time_keys = params["one_time_keys"]
     fallback_keys = params["fallback_keys"]
+
+    bound_device = conn.assigns[:device_id]
+    body_device = if is_map(device_keys), do: device_keys["device_id"]
 
     cond do
       # Bound the per-request write amplification (keys/upload is unauthenticated-rate-
@@ -310,12 +323,33 @@ defmodule Nebu.Web.Router.Protected do
       oversized?(one_time_keys) or oversized?(fallback_keys) ->
         error(conn, 400, "M_INVALID_PARAM", "Too many keys in a single upload")
 
+      # S3 F-2: a body device_keys.device_id that is oversized (>255 bytes) or carries
+      # control chars is rejected at ingress, before any store touch.
+      is_binary(body_device) and body_device != "" and not Nebu.Matrix.DeviceId.valid?(body_device) ->
+        error(conn, 400, "M_INVALID_PARAM", "Invalid device_id")
+
+      # SECURITY G1: a body device_id that names a DIFFERENT device than the token is bound
+      # to is a cross-device-transfer attempt → reject before any write touches the store.
+      is_binary(bound_device) and bound_device != "" and
+        is_binary(body_device) and body_device != "" and body_device != bound_device ->
+        error(conn, 403, "M_FORBIDDEN", "device_keys device_id does not match the authenticated device")
+
       true ->
         case upload_device_id(device_keys, conn) do
           nil ->
             send_json(conn, 200, %{"one_time_key_counts" => %{}})
 
           device_id ->
+            # A raw-JWT session minted before its device binding existed (e.g. a JWT that
+            # did not run through the S2 login binding) establishes its binding the first
+            # time it names a device by publishing that device's keys. This is secure: a
+            # token can only ever bind to the device it ITSELF publishes keys for, the
+            # device a request acts as is still never another device's (G1's up-front
+            # mismatch check fires once a binding exists), and it lets a later OTK-only
+            # top-up on the SAME token resolve the device without the removed
+            # sole_device_id heuristic.
+            maybe_bind_jwt_device(conn, user, device_id)
+
             if is_map(device_keys), do: DeviceKeyStore.put_device_keys(user, device_id, device_keys)
             if is_map(one_time_keys), do: DeviceKeyStore.store_one_time_keys(user, device_id, one_time_keys)
             if is_map(fallback_keys), do: DeviceKeyStore.store_fallback_keys(user, device_id, fallback_keys)
@@ -325,8 +359,23 @@ defmodule Nebu.Web.Router.Protected do
     end
   end
 
-  # GET /devices — the user's registered devices (Matrix CS §/devices). Backed by the
-  # device-key directory (a device appears once it has published keys).
+  # POST /keys/signatures/upload — cross-signing signature upload stub.
+  # ADR-011: managed E2EE model; cross-signing signatures are not persisted.
+  # Element Web calls this after device registration (cross-signing bootstrap flow).
+  # Per spec the response is {"failures": {}} (Matrix CS §/keys/signatures/upload).
+  #
+  # Body is intentionally ignored — cross-signing is excluded (ADR-011). OidcPlug
+  # has already validated auth. Nebu.Web.Plugs.JsonBody (in the top-level pipeline)
+  # has already parsed the request: a malformed JSON body sets `json_parse_error: true`
+  # on the conn (no raised exception), so this stub reaches `send_json` safely even
+  # for non-JSON bodies — Plug never raises here.
+  post "/client/v3/keys/signatures/upload" do
+    send_json(conn, 200, %{"failures" => %{}})
+  end
+
+  # GET /devices — the user's registered devices (Matrix CS §/devices). Sourced from the
+  # `devices` table (S1 device-registry-model), so it lists ALL of the user's devices,
+  # including keyless ones that have not published any crypto keys.
   get "/client/v3/devices" do
     send_json(conn, 200, %{"devices" => DeviceKeyStore.list_devices(conn.assigns[:current_user])})
   end
@@ -336,6 +385,95 @@ defmodule Nebu.Web.Router.Protected do
     case DeviceKeyStore.get_device(conn.assigns[:current_user], URI.decode_www_form(device_id)) do
       nil -> error(conn, 404, "M_NOT_FOUND", "Unknown device")
       device -> send_json(conn, 200, device)
+    end
+  end
+
+  # PUT /devices/{deviceId} — rename (S3 AC2). Owner-scoped, NOT UIA-gated. A rename
+  # of an unknown / another user's device affects 0 rows → 404 M_NOT_FOUND (no IDOR,
+  # no existence oracle). Success → 200 {}.
+  put "/client/v3/devices/:device_id" do
+    user = conn.assigns[:current_user]
+    did = URI.decode_www_form(device_id)
+    display_name = body_params(conn)["display_name"]
+
+    if DeviceKeyStore.rename_device(user, did, display_name) == :ok do
+      send_json(conn, 200, %{})
+    else
+      error(conn, 404, "M_NOT_FOUND", "Unknown device")
+    end
+  end
+
+  # DELETE /devices/{deviceId} — delete (S3 AC3), UIA-gated (Option B). On success:
+  # full per-device teardown (key material, opaque session, bound-JWT kill-switch).
+  # Idempotent (deleting an absent device → 200 {}); another user's device → 404.
+  delete "/client/v3/devices/:device_id" do
+    user = conn.assigns[:current_user]
+    did = URI.decode_www_form(device_id)
+
+    # IDOR guard (S3 G3): a device_id owned by ANOTHER user → 404, BEFORE any UIA
+    # challenge (no existence oracle, no cross-user delete). An absent-for-everyone
+    # device falls through to an idempotent 200 no-op.
+    if DeviceKeyStore.belongs_to_other_user?(user, did) do
+      error(conn, 404, "M_NOT_FOUND", "Unknown device")
+    else
+      uia_gate(conn, "delete_devices", [did], fn conn, via_auth ->
+        # If satisfied by the recent-login window (via_auth=false), the presented
+        # token bound to this device must stop authenticating (AC3 → revoke it). If
+        # the user just completed a fresh m.login.sso re-auth (via_auth=true), the
+        # request token is preserved (they re-proved themselves this request) so it
+        # can finish the request — for BOTH opaque sessions AND raw JWTs.
+        preserve = if via_auth, do: caller_credential(conn), else: nil
+        delete_one_device(user, did, preserve)
+        send_json(conn, 200, %{})
+      end)
+    end
+  end
+
+  # POST /delete_devices — bulk delete (S3 AC4). Same UIA gate as DELETE, challenged
+  # once for the whole batch. The "devices" key is required (missing → 400). Each id
+  # is scoped to the caller: a foreign device_id in the array is silently skipped (no
+  # cross-user delete — G3). Empty array → 200 {} no-op (still gated, but a fresh
+  # session satisfies it). Idempotent → 200 {}.
+  post "/client/v3/delete_devices" do
+    user = conn.assigns[:current_user]
+    params = body_params(conn)
+    devices = params["devices"]
+
+    cond do
+      not Map.has_key?(params, "devices") ->
+        error(conn, 400, "M_MISSING_PARAM", "devices is required")
+
+      not is_list(devices) ->
+        error(conn, 400, "M_INVALID_PARAM", "devices must be an array")
+
+      # Bound the work + canonicalisation: a single request must not enumerate/delete an
+      # unbounded device set. Cap at <=100 device_ids; reject larger with 400. The cap is
+      # checked on the raw array length BEFORE filtering so a padded array cannot smuggle
+      # more than 100 real ids through.
+      length(devices) > 100 ->
+        error(conn, 400, "M_INVALID_PARAM", "devices must contain at most 100 entries")
+
+      true ->
+        # Filter to binaries and dedupe so the UIA params canonicalisation and the
+        # per-device loop are stable (a repeated id is processed once).
+        ids = devices |> Enum.filter(&is_binary/1) |> Enum.uniq()
+
+        uia_gate(conn, "delete_devices", ids, fn conn, _via_auth ->
+          # Scope to the caller: only delete device_ids actually owned by this user.
+          # Preserve the credential MAKING this batch request (its device may be in the
+          # list) so the caller can finish the batch and keep managing devices after a
+          # bulk delete — all OTHER targeted sessions are still revoked. The preserve is
+          # symmetric: for an opaque caller it spares the matrix_sessions row, and for a
+          # raw-JWT caller it spares the kill-switch denylist of THIS token's hash.
+          preserve = caller_credential(conn)
+
+          for id <- ids do
+            unless DeviceKeyStore.belongs_to_other_user?(user, id),
+              do: delete_one_device(user, id, preserve)
+          end
+
+          send_json(conn, 200, %{})
+        end)
     end
   end
 
@@ -1117,26 +1255,205 @@ defmodule Nebu.Web.Router.Protected do
 
   # ── helpers ───────────────────────────────────────────────────────────────
 
+  # S3 AC5 / G1 / G2 — User-Interactive-Authentication gate (Option B, m.login.sso).
+  #
+  # `op` + `params` (the sorted target device_ids) bind the UIA session. `proceed` is
+  # the success continuation run once UIA is satisfied. Flow:
+  #
+  #   * An `auth: {"session": id}` block in the body → atomically consume the bound,
+  #     stage-complete, single-use UIA session (Uia.consume); on success proceed, on
+  #     failure (foreign user / wrong op / already-consumed / not-completed) re-challenge
+  #     with a FRESH session (401). This is what makes a replayed/foreign session a 401
+  #     rather than a free pass (G2).
+  #   * No auth block → if the caller's last fresh auth is within the window, proceed
+  #     directly (G1 fresh path); otherwise mint a UIA session bound to (user, op, params)
+  #     and return the 401 challenge.
+  defp uia_gate(conn, op, device_ids, proceed) do
+    user = conn.assigns[:current_user]
+    canonical = Nebu.Matrix.Uia.canonical_params(device_ids)
+    auth = body_params(conn)["auth"]
+
+    cond do
+      is_map(auth) and is_binary(auth["session"]) ->
+        case Nebu.Matrix.Uia.consume(auth["session"], user, op, canonical) do
+          # `true` = satisfied via a FRESH m.login.sso re-auth (auth block). The user
+          # just re-authenticated, so the token making this request is preserved.
+          :ok -> proceed.(conn, true)
+          :error -> challenge(conn, user, op, canonical)
+        end
+
+      Nebu.Matrix.Uia.fresh?(caller_auth_time(conn)) ->
+        # Satisfied by the recent-login window (no fresh re-auth this request): the
+        # presented token bound to a deleted device is revoked as normal.
+        proceed.(conn, false)
+
+      true ->
+        challenge(conn, user, op, canonical)
+    end
+  end
+
+  defp challenge(conn, user, op, canonical) do
+    session_id = Nebu.Matrix.Uia.mint_session(user, op, canonical)
+    send_json(conn, 401, Nebu.Matrix.Uia.challenge_body(session_id))
+  end
+
+  # The caller's last-fresh-auth time (unix seconds) for the UIA window. An opaque
+  # session reads matrix_sessions.auth_time; a raw JWT uses its auth_time/iat claim.
+  defp caller_auth_time(conn) do
+    token = conn.assigns[:access_token]
+
+    cond do
+      is_binary(token) and not String.contains?(token, ".") ->
+        case Nebu.Matrix.Session.MatrixSessionStore.get_auth_context(token) do
+          {:ok, %{auth_time: at}} -> at
+          :error -> nil
+        end
+
+      true ->
+        claims = conn.assigns[:oidc_claims] || %{}
+
+        case claims["auth_time"] do
+          t when is_integer(t) -> t
+          _ -> if is_integer(claims["iat"]), do: claims["iat"], else: nil
+        end
+    end
+  end
+
+  # S3 AC3 per-device teardown: key material + opaque session + bound-JWT kill-switch.
+  # Scoped to the OWNING user (the caller must already be confirmed as the owner / the
+  # id must not belong to another user). Best-effort and idempotent throughout.
+  #
+  # TRUE SEMANTICS (single, coherent rule — IDENTICAL for opaque AND raw-JWT sessions):
+  # deleting a device revokes that device's session (AC3). The ONLY exception is the
+  # live credential MAKING this request: when the device being deleted is the caller's
+  # own current device AND `preserve` carries that credential, the request token is
+  # spared so it can finish the batch and the caller keeps managing devices. This
+  # preserve is SYMMETRIC across token kinds:
+  #   * opaque caller — its `matrix_sessions` row (matched by current_device) is NOT
+  #     dropped;
+  #   * raw-JWT caller — the kill-switch SKIPS the binding row whose token_hash equals
+  #     the SHA-256 of the live request token (so it is not denylisted), even though
+  #     other JWTs bound to the same device ARE revoked.
+  # `preserve == nil` (e.g. a single DELETE satisfied by the recent-login window, NOT a
+  # fresh re-auth) preserves nothing — the presented token bound to the deleted device
+  # stops authenticating, which is what the F-1 kill-switch / AC3 require.
+  #
+  # `preserve` is `nil` or `{current_device, current_token_hash}` where
+  # `current_token_hash` may be `nil` (no resolvable token, e.g. opaque caller — only
+  # the device match matters there).
+  defp delete_one_device(user, device_id, preserve) do
+    {preserve_device, preserve_token_hash} =
+      case preserve do
+        {dev, hash} -> {dev, hash}
+        nil -> {nil, nil}
+      end
+
+    # F-1 kill-switch: denylist every raw-JWT bound to this device (by token hash,
+    # which equals the SHA-256 the live token resolves to in OidcPlug.revoked?) until
+    # its own exp, then drop the binding rows. When this IS the caller's own device,
+    # the caller's CURRENT token hash is SKIPPED so the live request credential survives
+    # to finish the batch (symmetric with the opaque matrix_sessions preserve below).
+    for {token_hash, exp} <- Nebu.Matrix.Session.DeviceBinding.list_for_user_device(user, device_id) do
+      unless device_id == preserve_device and token_hash == preserve_token_hash do
+        Nebu.Web.TokenDenylist.revoke_by_hash(token_hash, exp)
+      end
+    end
+
+    _ = Nebu.Matrix.Session.DeviceBinding.delete_for_user_device(user, device_id)
+
+    # Revoke the opaque session bound to this device (logout-equivalent) UNLESS it is
+    # the live request token's own device (preserve just that one).
+    unless device_id == preserve_device do
+      _ = Nebu.Matrix.Session.MatrixSessionStore.delete_for_user_device(user, device_id)
+    end
+
+    # Remove the device identity + all key material.
+    _ = DeviceKeyStore.delete_device(user, device_id)
+    :ok
+  end
+
+  # The credential MAKING this request, as `{current_device, current_token_hash}` for
+  # the symmetric self-delete preserve. `current_device` is the bound device (opaque or
+  # raw-JWT, set by OidcPlug). `current_token_hash` is the SHA-256 hex of the live
+  # access token (same digest the F-1 kill-switch enumerates and OidcPlug resolves
+  # `revoked?` by), or `nil` when no token is resolvable.
+  defp caller_credential(conn) do
+    token = conn.assigns[:access_token]
+    hash = if is_binary(token), do: Nebu.Matrix.Session.DeviceBinding.hash(token), else: nil
+    {conn.assigns[:device_id], hash}
+  end
+
+  # S2 AC5: throttled, best-effort last_seen refresh for the request's bound device.
+  # Only fires when the token carries a bound device (opaque or raw-JWT via the S2
+  # binding); the DeviceKeyStore write itself is throttled and never raises.
+  defp touch_device_last_seen(conn) do
+    case conn.assigns[:device_id] do
+      did when is_binary(did) and did != "" ->
+        _ = DeviceKeyStore.touch_last_seen(conn.assigns[:current_user], did, client_ip(conn))
+        :ok
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp client_ip(conn) do
+    case conn.remote_ip do
+      ip when is_tuple(ip) -> ip |> :inet.ntoa() |> to_string()
+      _ -> nil
+    end
+  end
+
+  # Lazily bind a raw-JWT access token to the device it publishes keys for, the first
+  # time, when no server-side binding exists yet (token has a "." → JWT; no
+  # conn.assigns[:device_id]). Opaque sessions already carry their device in
+  # matrix_sessions, so they are skipped. Idempotent and best-effort.
+  defp maybe_bind_jwt_device(conn, user, device_id) do
+    token = conn.assigns[:access_token]
+
+    cond do
+      is_binary(conn.assigns[:device_id]) and conn.assigns[:device_id] != "" ->
+        :ok
+
+      is_binary(token) and String.contains?(token, ".") ->
+        # S3 F-1: carry the verified token's exp into the binding so the kill-switch
+        # can denylist it on device delete.
+        exp = (conn.assigns[:oidc_claims] || %{})["exp"]
+        _ = Nebu.Matrix.Session.DeviceBinding.put(token, user, device_id, exp)
+        :ok
+
+      true ->
+        :ok
+    end
+  end
+
   # Per-request key cap for /keys/upload (DoS bound — see handler comment).
   @max_keys_per_upload 100
 
   defp oversized?(map) when is_map(map), do: map_size(map) > @max_keys_per_upload
   defp oversized?(_), do: false
 
-  # device_id for /keys/upload: the body's device_keys.device_id is authoritative
-  # (Required on first upload), then the token's bound device (opaque sessions), then —
-  # for OTK-only top-ups on a raw OIDC JWT (no bound device) — the user's sole registered
-  # device. nil → nothing to attribute (no-op, no DB write).
+  # device_id for /keys/upload (S2 AC4/AC6/G1). The token's server-side bound device
+  # (`conn.assigns[:device_id]`, set by OidcPlug for BOTH opaque and raw-JWT sessions) is
+  # AUTHORITATIVE — this is what removes the old `sole_device_id/1` heuristic that
+  # mis-attributed OTK-only uploads for multi-device users and let a token act as another
+  # device. A contradicting body device_id is already rejected up front in the handler
+  # (G1), so by the time we get here the body device_id (when present) agrees with the
+  # bound device. Order:
+  #   1. the token's bound device (the secure, reliable source), else
+  #   2. the body device_keys.device_id (first upload on a JWT session minted before the
+  #      binding existed — still the device's own claim, never another device's), else
+  #   3. nil → nothing to attribute (no-op, no DB write).
   defp upload_device_id(device_keys, conn) do
     cond do
-      is_map(device_keys) and is_binary(device_keys["device_id"]) and device_keys["device_id"] != "" ->
-        device_keys["device_id"]
-
       is_binary(conn.assigns[:device_id]) and conn.assigns[:device_id] != "" ->
         conn.assigns[:device_id]
 
+      is_map(device_keys) and is_binary(device_keys["device_id"]) and device_keys["device_id"] != "" ->
+        device_keys["device_id"]
+
       true ->
-        DeviceKeyStore.sole_device_id(conn.assigns[:current_user])
+        nil
     end
   end
 

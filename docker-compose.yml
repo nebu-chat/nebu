@@ -74,30 +74,18 @@ services:
       NEBU_INTERNAL_SECRET_FILE: "/run/secrets/internal_secret"
       NEBU_SERVER_NAME: "localhost"
       NEBU_PII_ENCRYPTION_KEY: "${NEBU_PII_ENCRYPTION_KEY:-6465766b65793030303030303030303030303030303030303030303030303030}"
-      # oidc-middleware-migration: Elixir-side OIDC Bearer-token validation
-      # (Nebu.Web.Plugs.OidcPlug + Nebu.Web.JwksCache). The JWKS keys are fetched
-      # from Dex on start and refreshed on NEBU_OIDC_JWKS_TTL (default 300s).
-      NEBU_OIDC_ISSUER: "http://dex:5556/dex"
-      NEBU_OIDC_AUDIENCE: "nebu-gateway"
-      NEBU_OIDC_JWKS_URI: "http://dex:5556/dex/keys"
+      # oidc-bootstrap-only-config (ADR-022): OIDC is configured EXCLUSIVELY through the
+      # Bootstrap Wizard (server_config) — there are NO NEBU_OIDC_* / NEBU_ADMIN_OIDC_*
+      # config variables. A single OIDC client (dev Dex `nebu-gateway`, secret
+      # `nebu-dev-secret`, all redirect URIs registered in dev/dex/config.yaml) serves
+      # both Matrix Bearer validation and admin operator login. On a fresh DB the server
+      # boots fail-closed (all Bearer tokens 401, admin → /bootstrap); run the wizard
+      # once (issuer http://dex:5556/dex, client nebu-gateway / nebu-dev-secret, audience
+      # nebu-gateway, JWKS http://dex:5556/dex/keys) to configure it.
+      #
+      # NEBU_OIDC_JWKS_TTL is the JwksCache refresh interval (a cache-tuning knob, NOT
+      # OIDC issuer/audience/client config) and may stay.
       NEBU_OIDC_JWKS_TTL: "300"
-      # Matrix-client SSO leg (bugfix-fix-matrix-sso-redirect-missing): the m.login.sso →
-      # /_matrix/client/v3/login/sso/redirect flow mints a token validated against the
-      # NEBU_OIDC_AUDIENCE above, so it MUST use the audience-matching `nebu-gateway` Dex
-      # client — whose registered redirect_uri is /_matrix/client/v3/login/sso/redirect/oidc
-      # (dev/dex/config.yaml). This is a DIFFERENT client from the admin UI (nebu-admin),
-      # so it must be configured explicitly rather than reusing the admin bootstrap client.
-      NEBU_OIDC_CLIENT_ID: "nebu-gateway"
-      NEBU_OIDC_CLIENT_SECRET: "nebu-dev-secret"
-      # go-removal-cleanup: the server now owns the admin OIDC Authorization-Code + PKCE login
-      # (Nebu.Admin.Auth), replacing the deleted Go gateway flow. Uses the dedicated
-      # `nebu-admin` Dex client (dev/dex/config.yaml) with the registered redirect_uri.
-      # The redirect_uri is fixed and server-controlled (never derived from request
-      # headers), and must match a redirectURI registered with the IdP.
-      NEBU_ADMIN_OIDC_CLIENT_ID: "nebu-admin"
-      NEBU_ADMIN_OIDC_CLIENT_SECRET: "nebu-admin-secret"
-      NEBU_ADMIN_OIDC_REDIRECT_URI: "http://localhost:8008/admin/callback"
-      NEBU_ADMIN_OIDC_SCOPE: "openid profile email groups"
       # DEV-ONLY: this stack serves the admin UI over plain http://localhost, so the
       # admin session cookie must NOT be Secure (otherwise the login-state cookie is
       # not returned on the OIDC callback in stricter browsers → "Invalid login state").

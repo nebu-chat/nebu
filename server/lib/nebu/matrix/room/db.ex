@@ -264,6 +264,77 @@ defmodule Nebu.Matrix.Room.DB do
     end
   end
 
+  # ─── forget-room-membership-purge: forgotten_rooms per-user preference store ──
+  # The forgotten_rooms table (user_id, room_id, forgotten_at_ms) already exists in
+  # 000001_init.up.sql (PRIMARY KEY (user_id, room_id), ON DELETE CASCADE on user_id).
+  # Forget is orthogonal to room_members: it is a per-user preference that excludes a
+  # left room from /sync until the user re-joins. All queries are parameter-bound (ADR-018).
+  #
+  # These three functions are NOT in Nebu.Matrix.Room.DBBehaviour by design: adding a
+  # behaviour callback would force every injected FakeDB across the test suite to
+  # implement it (warnings-as-errors → broken tests). The sync builders reach them via
+  # a function_exported?/3 guard so injected fakes that lack them safely degrade to "no
+  # forgotten rooms" without an UndefinedFunctionError.
+
+  @sql_insert_forgotten_room """
+  INSERT INTO forgotten_rooms (user_id, room_id)
+  VALUES ($1, $2)
+  ON CONFLICT (user_id, room_id) DO NOTHING
+  """
+
+  @doc """
+  Records that `user_id` has forgotten `room_id`. Idempotent — a repeated forget
+  is a no-op (`ON CONFLICT (user_id, room_id) DO NOTHING`).
+
+  Returns `:ok` on success or `{:error, reason}` on DB failure.
+  """
+  @spec insert_forgotten_room(String.t(), String.t()) :: :ok | {:error, term()}
+  def insert_forgotten_room(user_id, room_id) do
+    case Ecto.Adapters.SQL.query(Nebu.Repo, @sql_insert_forgotten_room, [user_id, room_id]) do
+      {:ok, _} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @sql_get_forgotten_room_ids """
+  SELECT room_id FROM forgotten_rooms WHERE user_id = $1
+  """
+
+  @doc """
+  Returns all room IDs that `user_id` has forgotten.
+
+  Read fresh on every sync to exclude forgotten rooms from the response.
+
+  Returns `{:ok, [room_id]}` — empty list if the user has forgotten nothing.
+  Returns `{:error, reason}` on DB error.
+  """
+  @spec get_forgotten_room_ids(String.t()) :: {:ok, [String.t()]} | {:error, term()}
+  def get_forgotten_room_ids(user_id) do
+    case Ecto.Adapters.SQL.query(Nebu.Repo, @sql_get_forgotten_room_ids, [user_id]) do
+      {:ok, %{rows: rows}} -> {:ok, Enum.map(rows, fn [rid] -> rid end)}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @sql_remove_forgotten_room """
+  DELETE FROM forgotten_rooms WHERE user_id = $1 AND room_id = $2
+  """
+
+  @doc """
+  Removes the forgotten-room record for `(user_id, room_id)` — e.g. when the user
+  re-joins a previously forgotten room (Matrix: a re-joined room is no longer
+  forgotten). Idempotent: deleting an absent row returns `:ok`.
+
+  Returns `:ok` on success or `{:error, reason}` on DB failure.
+  """
+  @spec remove_forgotten_room(String.t(), String.t()) :: :ok | {:error, term()}
+  def remove_forgotten_room(user_id, room_id) do
+    case Ecto.Adapters.SQL.query(Nebu.Repo, @sql_remove_forgotten_room, [user_id, room_id]) do
+      {:ok, _} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
   @sql_set_power_levels """
   UPDATE rooms SET power_levels_json = $2 WHERE room_id = $1
   """

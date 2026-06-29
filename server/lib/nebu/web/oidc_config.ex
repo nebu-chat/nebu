@@ -5,18 +5,17 @@ defmodule Nebu.Web.OidcConfig do
 
   ## Purpose
 
-  When `NEBU_OIDC_ISSUER` / `NEBU_OIDC_AUDIENCE` are not set as environment
-  variables (bootstrap-wizard deployment), `OidcPlug` must still be able to
-  resolve those values after the Bootstrap Wizard writes them to `server_config`.
-  A per-request DB call on the hot token-validation path is unacceptable, so this
-  module caches the values in a named ETS table.
+  OIDC is configured EXCLUSIVELY through the Bootstrap Wizard (ADR-022) — there is
+  no environment-variable config path. After the wizard writes issuer/audience/JWKS
+  URI to `server_config`, `OidcPlug` (and `SsoLogin`/`Admin.Auth`) resolve those
+  values through this cache. A per-request DB call on the hot token-validation path
+  is unacceptable, so this module caches the values in a named ETS table.
 
   ## Interface
 
   - `get/0` — returns `%{issuer: binary() | nil, audience: binary() | nil}`.
   - `jwks_uri/0` — returns the `oidc_jwks_uri` from `server_config` (used by
-    `JwksCache` on bootstrap-wizard deployments where `NEBU_OIDC_JWKS_URI` is
-    not set as an env var).
+    `JwksCache` to resolve the signing-key endpoint).
   - `refresh/0` (or `refresh/1` with pid) — forces a synchronous re-read from
     `server_config` and updates the ETS cache. Called by the Bootstrap Wizard after
     it promotes the draft into `server_config` (AC2, AC5). Also broadcasts to
@@ -58,31 +57,49 @@ defmodule Nebu.Web.OidcConfig do
   Checks, in order:
   1. `:nebu_http, :oidc_config_source` seam (for unit tests)
   2. ETS cache populated by this GenServer
-  3. Falls back to `%{issuer: nil, audience: nil}` when nothing is configured.
-  """
-  @spec get() :: %{issuer: binary() | nil, audience: binary() | nil}
-  def get do
-    case Application.get_env(:nebu_http, :oidc_config_source) do
-      fun when is_function(fun, 0) ->
-        fun.()
+  3. Falls back to `%{issuer: nil, audience: nil, jwks_uri: nil}` when nothing is configured.
 
-      _ ->
-        read_from_ets()
-    end
+  The result always has the `:issuer`, `:audience`, and `:jwks_uri` keys (a partial
+  seam map is normalized with nil defaults) so callers can read them without a KeyError.
+  """
+  @spec get() :: %{issuer: binary() | nil, audience: binary() | nil, jwks_uri: binary() | nil}
+  def get do
+    raw =
+      case Application.get_env(:nebu_http, :oidc_config_source) do
+        fun when is_function(fun, 0) -> fun.()
+        _ -> read_from_ets()
+      end
+
+    %{
+      issuer: Map.get(raw, :issuer),
+      audience: Map.get(raw, :audience),
+      jwks_uri: Map.get(raw, :jwks_uri)
+    }
   end
 
   @doc """
   Returns the cached JWKS URI from `server_config`, or nil when not set.
 
-  Used by `JwksCache` as a fallback when `NEBU_OIDC_JWKS_URI` env var is absent
-  (bootstrap-wizard deployments store the JWKS URI in `server_config` via the
-  wizard's step-2 form field). Falls back to `nil` when not in the ETS cache.
+  Used by `JwksCache` as the sole source of the JWKS URI (ADR-022): the bootstrap
+  wizard stores it in `server_config` via its step-2 form field. Falls back to `nil`
+  when not configured.
   """
   @spec jwks_uri() :: binary() | nil
   def jwks_uri do
-    case read_from_ets() do
-      %{jwks_uri: uri} -> uri
-      _ -> nil
+    # Consult the same `:oidc_config_source` seam as get/0 so unit tests can inject
+    # the JWKS URI without a running GenServer or DB (the seam map carries :jwks_uri).
+    case Application.get_env(:nebu_http, :oidc_config_source) do
+      fun when is_function(fun, 0) ->
+        case fun.() do
+          %{jwks_uri: uri} -> uri
+          _ -> nil
+        end
+
+      _ ->
+        case read_from_ets() do
+          %{jwks_uri: uri} -> uri
+          _ -> nil
+        end
     end
   end
 

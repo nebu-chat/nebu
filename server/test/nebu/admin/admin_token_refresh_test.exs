@@ -71,12 +71,21 @@ defmodule Nebu.Admin.AdminTokenRefreshTest do
   @refresh_window 120
 
   setup do
-    Application.put_env(:nebu_http, :oidc_issuer, @issuer)
-    Application.put_env(:nebu_http, :admin_oidc_client_id, @client_id)
-    Application.put_env(:nebu_http, :admin_oidc_client_secret, "client-secret")
-    Application.put_env(:nebu_http, :admin_oidc_redirect_uri, "http://localhost:8008/admin/callback")
-    # SecretBox derives its AES-256 key from this at-rest secret.
+    # oidc-bootstrap-only-config (ADR-022): issuer via OidcConfig, the single admin
+    # OIDC client via the :admin_oidc_config_reader seam, redirect_uri DERIVED from
+    # :server_name + :admin_session_secure (no env path).
+    Nebu.Web.OidcTestSupport.configure(@issuer, @client_id)
+    # SecretBox + at-rest client-secret encryption derive their key from this secret.
     Application.put_env(:nebu_http, :admin_secret_at_rest, @at_rest_key)
+
+    Application.put_env(:nebu_http, :admin_oidc_config_reader, fn
+      "oidc_client_id" -> @client_id
+      "oidc_client_secret" -> Nebu.Admin.BootstrapLive.encrypt_secret("client-secret")
+      _ -> nil
+    end)
+
+    Application.put_env(:nebu_http, :server_name, "localhost")
+    Application.put_env(:nebu_http, :admin_session_secure, false)
 
     Application.put_env(:nebu_http, :oidc_metadata_override, %{
       "issuer" => @issuer,
@@ -85,13 +94,13 @@ defmodule Nebu.Admin.AdminTokenRefreshTest do
     })
 
     on_exit(fn ->
+      Nebu.Web.OidcTestSupport.clear()
+
       for k <- [
-            :oidc_issuer,
-            :admin_oidc_client_id,
-            :admin_oidc_client_secret,
-            :admin_oidc_redirect_uri,
             :admin_secret_at_rest,
-            :admin_oidc_scope,
+            :admin_oidc_config_reader,
+            :server_name,
+            :admin_session_secure,
             :oidc_metadata_override,
             :admin_oidc_token_override,
             :admin_oidc_refresh_override,

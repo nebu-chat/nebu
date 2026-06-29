@@ -13,7 +13,7 @@
     </thead>
     <tbody>
       <tr :for={user <- @users} data-user-id={user.user_id}>
-        <td>{user.user_id}</td>
+        <td><a href={"/admin/users/" <> URI.encode(user.user_id, &URI.char_unreserved?(&1))} class="text-primary">{user.user_id}</a></td>
         <td>{user.role}</td>
         <td>
           <span

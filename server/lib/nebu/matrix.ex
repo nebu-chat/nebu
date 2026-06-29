@@ -289,6 +289,64 @@ defmodule Nebu.Matrix do
   @spec invalidate_oidc_claim_cache() :: :ok
   defdelegate invalidate_oidc_claim_cache(), to: Nebu.Matrix.OidcClaimCache, as: :refresh
 
+  # ── Device management (device-management S4 — Admin UI per-user devices) ──────
+  #
+  # The Admin domain manages a user's devices through this facade only (ADR-020);
+  # it must never reach into `Nebu.Matrix.DeviceKeyStore` / `Session.DeviceBinding`
+  # directly. The underlying user-scoped operations live in those internal modules.
+
+  @doc """
+  Lists a user's registered devices for the Admin UI (S4 AC1). Each map carries
+  `"device_id"`, and (when present) `"display_name"`, `"last_seen_ts"`,
+  `"last_seen_ip"`, `"created_ts"`. Sourced from the durable `devices` registry,
+  so a keyless device still appears. Read-path: never raises.
+  """
+  @spec list_user_devices(String.t()) :: [map()]
+  defdelegate list_user_devices(user_id), to: Nebu.Matrix.DeviceKeyStore, as: :list_devices
+
+  @doc """
+  Renames a device's display name, scoped to the OWNING `user_id` (S4 AC2). Returns
+  `:ok` when exactly that user's device row was updated, `:error` for an unknown /
+  foreign device (no IDOR — the Admin UI maps `:error` to a flash, never to another
+  user's device).
+  """
+  @spec rename_user_device(String.t(), String.t(), String.t() | nil) :: :ok | :error
+  defdelegate rename_user_device(user_id, device_id, display_name),
+    to: Nebu.Matrix.DeviceKeyStore,
+    as: :rename_device
+
+  @doc """
+  Revokes a user's device (S4 AC3): kills its bound sessions (S3 kill-switch) AND
+  removes all its persisted state (identity row + device/one-time/fallback keys).
+  Both halves are user-scoped (never another user's device — no IDOR) and best-effort
+  (idempotent: revoking an absent device is a no-op). Returns `:ok`.
+
+  The session revocation runs FIRST: any raw-JWT token bound to `(user_id, device_id)`
+  is denylisted until its own expiry, then the binding rows and key material are
+  deleted. One facade call performs both so the Admin controller stays thin.
+  """
+  @spec delete_user_device(String.t(), String.t()) :: :ok
+  def delete_user_device(user_id, device_id)
+      when is_binary(user_id) and is_binary(device_id) do
+    # S3 F-1 kill-switch: denylist every raw-JWT bound to this device (by token hash)
+    # until its own exp, then drop the binding rows. (Unlike the Matrix self-delete
+    # path there is no caller credential to preserve — an admin acts on another user's
+    # device, so EVERY token is revoked.)
+    for {token_hash, exp} <-
+          Nebu.Matrix.Session.DeviceBinding.list_for_user_device(user_id, device_id) do
+      Nebu.Web.TokenDenylist.revoke_by_hash(token_hash, exp)
+    end
+
+    _ = Nebu.Matrix.Session.DeviceBinding.delete_for_user_device(user_id, device_id)
+
+    # Revoke the opaque session bound to this device (logout-equivalent).
+    _ = Nebu.Matrix.Session.MatrixSessionStore.delete_for_user_device(user_id, device_id)
+
+    # Remove the device identity row + all key material.
+    _ = Nebu.Matrix.DeviceKeyStore.delete_device(user_id, device_id)
+    :ok
+  end
+
   # The dispatcher reads the acting identity from the request-context map
   # (Nebu.Matrix.RequestMetadata). In-process callers (HTTP/Admin) pass a minimal
   # context map carrying the trusted identity — same shape as Nebu.Matrix.Http.stream/1.

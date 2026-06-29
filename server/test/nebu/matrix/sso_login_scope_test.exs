@@ -1,34 +1,39 @@
 defmodule Nebu.Matrix.SsoLoginScopeTest do
   @moduledoc """
-  Regression tests for bug `fix-element-login`.
+  Regression tests for the Matrix SSO base scope.
 
-  ## Root cause
+  ## SUPERSEDED decision (read this first)
 
-  `@base_scopes` in `Nebu.Matrix.SsoLogin` was `~w(openid profile email)`.
-  The innoq Keycloak OIDC client does not permit `profile` and `email` scopes
-  by default, causing:
+  This file originally guarded bug `fix-element-login`, which set
+  `@base_scopes` in `Nebu.Matrix.SsoLogin` to the MINIMAL `~w(openid)` and asserted
+  `profile`/`email` MUST NOT appear.
 
-    * Offline mode → "Invalid or expired SSO state" (`M_UNKNOWN` 400) — the IdP
-      rejects the authorization request.
-    * Online mode  → "SSO login failed" (`M_FORBIDDEN` 403) — token verification
-      fails.
+  Story **`oidc-bootstrap-only-e2e-regressions`** (ADR-022 end-to-end fix) REVERSES
+  that decision: the base scope is now the fixed default `~w(openid profile email)`.
+  The `~w(openid)`-only scope broke the live flow — Dex omits the `name` claim unless
+  `profile` is requested, so the configured `oidc_user_id_claim = "name"` could not
+  resolve and the MXID regressed to the opaque `sub` (the regression `df249f8c` had
+  originally fixed, via the now-removed `NEBU_OIDC_EXTRA_SCOPES`). ADR-022 removed the
+  env var, so the scopes must be requested as fixed server-side defaults instead.
 
-  ## Fix applied (commit: fix-element-login)
+  This file is therefore CONVERTED into a regression guard for the NEW default. The
+  authoritative RED-phase test for the new contract is
+  `sso_scope_profile_email_test.exs` (AC4); the assertions here are kept consistent
+  with it so a future change cannot silently revert to the broken `~w(openid)` scope.
 
-  `@base_scopes` was changed from `~w(openid profile email)` to `~w(openid)`.
-  `profile` and `email` are now opt-in via `NEBU_OIDC_EXTRA_SCOPES`.
+  ## Acceptance Criteria covered (new contract)
 
-  ## Acceptance Criteria covered
-
-    * AC1 — Minimal base scope: no extra scopes → scope is `"openid"` (online) or
-      `"openid offline_access"` (offline). `profile` and `email` MUST NOT appear.
-    * AC2 — Extra scopes additive: `NEBU_OIDC_EXTRA_SCOPES=profile email` →
-      `profile` and `email` appear IN ADDITION to the base scope.
+    * AC1 — Base scope contains `openid profile email`: online mode →
+      `openid profile email` (NO `offline_access`); offline mode →
+      `openid profile email offline_access`.
     * AC3 — offline_access behavior unchanged: offline mode still gets
-      `offline_access`; online mode still excludes it. The `:matrix_oidc_refresh_mode_reader`
-      seam already present in `sso_login.ex` is used to control this without a DB.
-    * AC4 — Regression guard: explicit assertion that `"profile"` and `"email"` are
-      NOT in the base scope list.
+      `offline_access`; online mode still excludes it. The
+      `:matrix_oidc_refresh_mode_reader` seam controls this without a DB.
+    * AC4 — Regression guard: explicit assertion that `profile`/`email` ARE present
+      and that the broken `~w(openid)`-only scope is NOT in effect.
+
+  (The former AC2 "extra scopes additive via NEBU_OIDC_EXTRA_SCOPES" tests asserted
+  removed behaviour — ADR-022 deleted that env var — and are gone.)
 
   ## Public surface
 
@@ -36,11 +41,6 @@ defmodule Nebu.Matrix.SsoLoginScopeTest do
   query-param of the 302 redirect built by
   `GET /_matrix/client/v3/login/sso/redirect`, which is the only public caller of
   `scope_list/0`. This style mirrors `sso_scope_mode_test.exs`.
-
-  ## All tests are GREEN after the fix
-
-  AC1 and AC4 pass because `@base_scopes` is now `~w(openid)`, so `"profile"` and
-  `"email"` no longer appear in the scope param when no extra scopes are configured.
   """
   use ExUnit.Case, async: false
   import Plug.Test
@@ -57,10 +57,16 @@ defmodule Nebu.Matrix.SsoLoginScopeTest do
   # ── helpers ─────────────────────────────────────────────────────────────────
 
   defp setup_oidc do
-    Application.put_env(:nebu_http, :oidc_issuer, @issuer)
-    Application.put_env(:nebu_http, :oidc_audience, "nebu-client")
-    Application.put_env(:nebu_http, :matrix_oidc_client_id, "nebu-client")
-    Application.put_env(:nebu_http, :matrix_oidc_client_secret, "shhh")
+    # oidc-bootstrap-only-config (ADR-022): issuer via OidcConfig, the single SSO
+    # OIDC client via the :sso_bootstrap_reader seam. No env config path.
+    Nebu.Web.OidcTestSupport.configure(@issuer, "nebu-client")
+    Application.put_env(:nebu_http, :admin_secret_at_rest, "sso-login-scope-test-key")
+
+    Application.put_env(:nebu_http, :sso_bootstrap_reader, fn
+      "oidc_client_id" -> "nebu-client"
+      "oidc_client_secret" -> Nebu.Admin.BootstrapLive.encrypt_secret("shhh")
+      _ -> nil
+    end)
 
     Application.put_env(:nebu_http, :oidc_metadata_override, %{
       "issuer" => @issuer,
@@ -70,13 +76,12 @@ defmodule Nebu.Matrix.SsoLoginScopeTest do
     })
 
     on_exit(fn ->
+      Nebu.Web.OidcTestSupport.clear()
+
       for k <- [
-            :oidc_issuer,
-            :oidc_audience,
-            :matrix_oidc_client_id,
-            :matrix_oidc_client_secret,
+            :admin_secret_at_rest,
+            :sso_bootstrap_reader,
             :oidc_metadata_override,
-            :oidc_extra_scopes,
             :matrix_oidc_refresh_mode_reader
           ] do
         Application.delete_env(:nebu_http, k)
@@ -114,94 +119,44 @@ defmodule Nebu.Matrix.SsoLoginScopeTest do
   end
 
   # ════════════════════════════════════════════════════════════════════════════
-  # AC1 — Minimal base scope (no extra scopes configured)
+  # AC1 — Base scope is `openid profile email` (NEW default, ADR-022 e2e fix)
   # ════════════════════════════════════════════════════════════════════════════
 
-  describe "AC1 — minimal base scope without extra scopes" do
-    test "online mode: scope is exactly 'openid' — profile and email MUST NOT appear" do
-      # Previously failing — @base_scopes was ~w(openid profile email), which caused
-      # profile and email to appear even without extra scopes; fixed to ~w(openid).
+  describe "AC1 — base scope contains openid profile email" do
+    test "online mode: scope contains openid profile email and NO offline_access" do
+      # SUPERSEDES fix-element-login: the base scope is now ~w(openid profile email) so
+      # Dex releases the `name`/`email` claims (MXID derives from `name`, not `sub`).
       set_mode("online")
       scopes = scope_params()
 
       assert "openid" in scopes,
              "openid must always be present; got: #{inspect(scopes)}"
 
-      refute "profile" in scopes,
-             "profile MUST NOT be in base scope; it is an opt-in extra. Got: #{inspect(scopes)}"
+      assert "profile" in scopes,
+             "profile MUST be in base scope so the `name` claim is released; got: #{inspect(scopes)}"
 
-      refute "email" in scopes,
-             "email MUST NOT be in base scope; it is an opt-in extra. Got: #{inspect(scopes)}"
+      assert "email" in scopes,
+             "email MUST be in base scope; got: #{inspect(scopes)}"
+
+      refute "offline_access" in scopes,
+             "online mode must NOT add offline_access; got: #{inspect(scopes)}"
     end
 
-    test "offline mode: scope is exactly 'openid offline_access' — profile and email MUST NOT appear" do
-      # Previously failing — @base_scopes was ~w(openid profile email), which caused
-      # profile and email to appear alongside offline_access; fixed to ~w(openid).
+    test "offline mode: scope contains openid profile email AND offline_access" do
       set_mode("offline")
       scopes = scope_params()
 
       assert "openid" in scopes,
              "openid must always be present; got: #{inspect(scopes)}"
+
+      assert "profile" in scopes,
+             "profile MUST be in base scope; got: #{inspect(scopes)}"
+
+      assert "email" in scopes,
+             "email MUST be in base scope; got: #{inspect(scopes)}"
 
       assert "offline_access" in scopes,
              "offline_access must be present in offline mode; got: #{inspect(scopes)}"
-
-      refute "profile" in scopes,
-             "profile MUST NOT be in base scope; it is an opt-in extra. Got: #{inspect(scopes)}"
-
-      refute "email" in scopes,
-             "email MUST NOT be in base scope; it is an opt-in extra. Got: #{inspect(scopes)}"
-    end
-  end
-
-  # ════════════════════════════════════════════════════════════════════════════
-  # AC2 — Extra scopes are additive via NEBU_OIDC_EXTRA_SCOPES
-  # ════════════════════════════════════════════════════════════════════════════
-
-  describe "AC2 — extra scopes additive via oidc_extra_scopes" do
-    test "oidc_extra_scopes='profile email' → profile and email appear in scope (online mode)" do
-      # GREEN on current code (profile/email happen to be in @base_scopes), but will
-      # remain GREEN after the fix because they are moved to extra scopes.
-      set_mode("online")
-      Application.put_env(:nebu_http, :oidc_extra_scopes, "profile email")
-      scopes = scope_params()
-
-      assert "openid" in scopes
-      assert "profile" in scopes
-      assert "email" in scopes
-      refute "offline_access" in scopes
-    end
-
-    test "oidc_extra_scopes as list ['profile', 'email'] → profile and email appear (offline mode)" do
-      set_mode("offline")
-      Application.put_env(:nebu_http, :oidc_extra_scopes, ["profile", "email"])
-      scopes = scope_params()
-
-      assert "openid" in scopes
-      assert "profile" in scopes
-      assert "email" in scopes
-      assert "offline_access" in scopes
-    end
-
-    test "oidc_extra_scopes='profile email' → no duplicates in scope string" do
-      set_mode("offline")
-      Application.put_env(:nebu_http, :oidc_extra_scopes, "profile email")
-      scopes = scope_params()
-
-      assert length(scopes) == length(Enum.uniq(scopes)),
-             "scope list must not contain duplicates; got: #{inspect(scopes)}"
-    end
-
-    test "arbitrary extra scopes are appended after the base scope" do
-      set_mode("online")
-      Application.put_env(:nebu_http, :oidc_extra_scopes, "groups custom_claim")
-      scopes = scope_params()
-
-      assert "openid" in scopes
-      assert "groups" in scopes
-      assert "custom_claim" in scopes
-      refute "profile" in scopes
-      refute "email" in scopes
     end
   end
 
@@ -242,31 +197,31 @@ defmodule Nebu.Matrix.SsoLoginScopeTest do
   end
 
   # ════════════════════════════════════════════════════════════════════════════
-  # AC4 — Regression guard: document that the OLD bad value is wrong
+  # AC4 — Regression guard: the broken `~w(openid)`-only scope is NOT in effect
   # ════════════════════════════════════════════════════════════════════════════
 
-  describe "AC4 — regression guard: base scope list is exactly ['openid']" do
-    test "no extra scopes + online mode → scope list is exactly ['openid']" do
-      # Previously failing — @base_scopes was ~w(openid profile email), making the
-      # scope 'openid profile email' instead of 'openid'. This is the explicit
-      # regression guard that the old value ~w(openid profile email) was wrong.
+  describe "AC4 — regression guard: base scope is openid profile email (not openid-only)" do
+    test "online mode → scope list is exactly ['openid', 'profile', 'email'] (order-independent)" do
+      # SUPERSEDES fix-element-login: the OLD @base_scopes ~w(openid) broke the live flow
+      # (Dex omits `name` without `profile` → MXID = sub). The fixed default requests
+      # openid+profile+email so the IdP releases name/email.
       set_mode("online")
       scopes = scope_params()
 
-      assert scopes == ["openid"],
-             "expected base scope to be exactly [\"openid\"] but got: #{inspect(scopes)}. " <>
-               "This is the regression guard: the OLD @base_scopes ~w(openid profile email) " <>
-               "must be replaced with ~w(openid)."
+      assert Enum.sort(scopes) == Enum.sort(["openid", "profile", "email"]),
+             "expected base scope to be exactly [\"openid\", \"profile\", \"email\"] but got: " <>
+               "#{inspect(scopes)}. Regression guard: the OLD @base_scopes ~w(openid) must NOT " <>
+               "be in effect (it omits the `name` claim → MXID regresses to `sub`)."
     end
 
-    test "no extra scopes + offline mode → scope list is exactly ['offline_access', 'openid'] (order-independent)" do
-      # Previously failing — see AC4 above; fixed by reducing @base_scopes to ~w(openid).
+    test "offline mode → scope list is exactly openid+profile+email+offline_access (order-independent)" do
       set_mode("offline")
       scopes = scope_params()
 
-      assert Enum.sort(scopes) == Enum.sort(["openid", "offline_access"]),
-             "expected base scope to be exactly [\"openid\", \"offline_access\"] but got: #{inspect(scopes)}. " <>
-               "The OLD @base_scopes ~w(openid profile email) must be replaced with ~w(openid)."
+      assert Enum.sort(scopes) ==
+               Enum.sort(["openid", "profile", "email", "offline_access"]),
+             "expected base scope to be exactly [\"openid\", \"profile\", \"email\", " <>
+               "\"offline_access\"] but got: #{inspect(scopes)}."
     end
   end
 end

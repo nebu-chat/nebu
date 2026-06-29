@@ -17,8 +17,8 @@ defmodule Nebu.Web.JwksCache do
   `start_link/1` accepts a `:fetcher` option — either a 0-arity fun or a module
   exporting `fetch_jwks/0`, both returning `{:ok, [jwk_map]}` (or a bare key
   list). When absent it falls back to Application env `:nebu_http, :jwks_fetcher`
-  (same shape), and finally to a real HTTP fetch against `:nebu_http,
-  :oidc_jwks_uri`.
+  (same shape), and finally to a real HTTP fetch against the JWKS URI resolved from
+  `server_config` via `Nebu.Web.OidcConfig` (ADR-022 — no env-var config path).
 
   The fetcher is resolved at fetch time (not captured once at start) so the
   Application-env stub survives a crash-induced restart.
@@ -53,6 +53,52 @@ defmodule Nebu.Web.JwksCache do
   def refresh(server \\ __MODULE__) do
     GenServer.call(server, :refresh)
   end
+
+  @doc """
+  Fetches JWKS for an EXPLICIT jwks_uri/issuer WITHOUT touching the GenServer cache
+  or `OidcConfig`.
+
+  Used by the bootstrap operator-login callback (story
+  oidc-bootstrap-only-e2e-regressions): during the wizard the OIDC config lives in the
+  `bootstrap_draft`, not yet in `server_config`, so the global cache cannot be used. This
+  helper reuses the SAME TLS-verifying HTTP fetch + discovery logic as the global path
+  (including the `:jwks_http_fetcher` test seam and `http_opts_for/1` TLS), but reads
+  NOTHING from `OidcConfig` and never mutates the cache — preserving the ADR-022
+  fail-closed invariant.
+
+    * `jwks_uri` a non-empty `http(s)://` binary → fetch directly.
+    * else `issuer` non-empty binary → discover the jwks_uri from the issuer's
+      well-known document, then fetch.
+    * else → `{:ok, []}` (nothing to fetch).
+
+  SSRF hardening (code-review MINOR-1): the explicit `jwks_uri` is scheme-validated to
+  `http(s)://` BEFORE any fetch — parity with the discovery branch's
+  `extract_valid_jwks_uri/1`. A non-`http(s)` draft URI (e.g. `file://`) is rejected with
+  `:error` rather than handed to `:httpc`. A scheme-invalid `jwks_uri` does NOT silently
+  fall through to issuer discovery: an operator who set an explicit (but bad) URI must fix
+  it, not get a surprise discovery fetch against a different endpoint.
+  """
+  @spec fetch_keys_for(String.t() | nil, String.t() | nil) :: {:ok, [map()]} | :error
+  def fetch_keys_for(jwks_uri, issuer) do
+    cond do
+      is_binary(jwks_uri) and jwks_uri != "" ->
+        if http_scheme?(jwks_uri) do
+          fetch_jwks_over_http(jwks_uri)
+        else
+          Logger.warning("JwksCache.fetch_keys_for: rejecting non-http(s) jwks_uri scheme")
+          :error
+        end
+
+      is_binary(issuer) and issuer != "" ->
+        discover_jwks_uri_and_fetch_for(issuer)
+
+      true ->
+        {:ok, []}
+    end
+  end
+
+  defp http_scheme?(uri),
+    do: String.starts_with?(uri, "https://") or String.starts_with?(uri, "http://")
 
   @doc """
   Returns the configured cache TTL in milliseconds.
@@ -161,20 +207,16 @@ defmodule Nebu.Web.JwksCache do
   defp invoke_fetcher(nil), do: http_fetch()
 
   defp http_fetch do
-    # C-2 (oidc-env-optional-bootstrap): resolve the JWKS URI from env first,
-    # then fall back to the DB-backed OidcConfig cache (bootstrap-wizard
-    # deployments where NEBU_OIDC_JWKS_URI is absent but was stored via the
-    # wizard's step-2 form into server_config.oidc_jwks_uri).
-    uri =
-      Application.get_env(:nebu_http, :oidc_jwks_uri) ||
-        Nebu.Web.OidcConfig.jwks_uri()
+    # oidc-bootstrap-only-config (ADR-022): the JWKS URI comes SOLELY from
+    # server_config (stored via the wizard's step-2 form), read through the
+    # DB-backed OidcConfig cache. There is no NEBU_OIDC_JWKS_URI env path.
+    uri = Nebu.Web.OidcConfig.jwks_uri()
 
     case uri do
       nil ->
-        # No explicit JWKS URI configured: try auto-discovery from the OIDC
-        # issuer's well-known openid-configuration document. This handles the
-        # common deployment where only NEBU_OIDC_ISSUER is set (not
-        # NEBU_OIDC_JWKS_URI) — which is valid per the OIDC spec.
+        # No explicit JWKS URI in server_config: try auto-discovery from the OIDC
+        # issuer's well-known openid-configuration document. This handles a bootstrap
+        # config that set only the issuer (not the JWKS URI) — valid per the OIDC spec.
         discover_jwks_uri_and_fetch()
 
       uri ->
@@ -182,29 +224,36 @@ defmodule Nebu.Web.JwksCache do
     end
   end
 
+  # Global path: read the issuer from OidcConfig (server_config), then delegate to the
+  # explicit-issuer discovery shared with fetch_keys_for/2. OidcConfig is read ONLY here,
+  # never inside the explicit-issuer branch.
   defp discover_jwks_uri_and_fetch do
-    issuer =
-      Application.get_env(:nebu_http, :oidc_issuer) ||
-        Nebu.Web.OidcConfig.get()[:issuer]
-
-    case issuer do
+    # oidc-bootstrap-only-config (ADR-022): issuer comes solely from server_config.
+    case Nebu.Web.OidcConfig.get()[:issuer] do
       nil ->
         # No issuer and no explicit JWKS URI: nothing to discover. Treat as
         # an empty (but successful) key set rather than a failure.
         {:ok, []}
 
       issuer ->
-        with {:ok, body} <- Nebu.Matrix.OidcMetadata.fetch(issuer),
-             {:ok, doc} <- Jason.decode(body),
-             {:ok, jwks_uri} <- extract_valid_jwks_uri(doc) do
-          fetch_jwks_over_http(jwks_uri)
-        else
-          _ ->
-            # Return :error so do_fetch/1 keeps the last-known-good key set rather
-            # than overwriting it with an empty list on a transient discovery failure.
-            Logger.warning("JwksCache: could not discover jwks_uri from issuer #{issuer}")
-            :error
-        end
+        discover_jwks_uri_and_fetch_for(issuer)
+    end
+  end
+
+  # Discovery for an EXPLICIT issuer (no OidcConfig read). Shared by the global path
+  # above and the public fetch_keys_for/2 (bootstrap draft) helper.
+  defp discover_jwks_uri_and_fetch_for(issuer) do
+    with {:ok, body} <- Nebu.Matrix.OidcMetadata.fetch(issuer),
+         {:ok, doc} <- Jason.decode(body),
+         {:ok, jwks_uri} <- extract_valid_jwks_uri(doc) do
+      fetch_jwks_over_http(jwks_uri)
+    else
+      _ ->
+        # Return :error so the caller keeps the last-known-good key set (global path)
+        # or fails the bootstrap callback cleanly (fetch_keys_for/2) rather than
+        # overwriting/accepting on a transient discovery failure.
+        Logger.warning("JwksCache: could not discover jwks_uri from issuer #{issuer}")
+        :error
     end
   end
 

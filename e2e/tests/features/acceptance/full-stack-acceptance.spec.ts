@@ -215,9 +215,9 @@ test.describe.serial('@smoke Full-Stack Acceptance: Nebu Happy Path', () => {
     await page.getByRole('textbox', { name: 'OIDC Issuer URL' })
       .fill('http://dex:5556/dex');
     await page.getByRole('textbox', { name: 'OIDC Client ID' })
-      .fill('nebu-admin');
+      .fill('nebu-gateway');
     await page.getByRole('textbox', { name: 'OIDC Client Secret' })
-      .fill('nebu-admin-secret');
+      .fill('nebu-dev-secret');
     await page.getByRole('button', { name: /^next$/i }).click();
     await expect(page.getByRole('heading', { name: /Step 3/ })).toBeVisible({ timeout: 10_000 });
 

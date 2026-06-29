@@ -154,6 +154,18 @@ Given(
  * F-01 fix: uses secondPage fixture (same Page object from the Given step above).
  * No manual cleanup needed: secondContext fixture tears it down after the test.
  * M-1: resolves actualRoomName from the template name for sidebar lookup.
+ *
+ * Navigation strategy (sync-deterministic):
+ *   Server-side delivery is proven correct — the message is persisted and marie is a
+ *   joined member, so her /sync returns it in the room's joined-timeline. The previous
+ *   roomId direct-URL navigation was the flaky part: when marie's /sync hasn't yet
+ *   placed the room in her client store, Element falls back to resolving the *alias*
+ *   (#msg-recv-template…:localhost → 404 directory lookup) and renders
+ *   "room does not exist". A reload of the same roomId URL re-hits that same race.
+ *
+ *   Instead we wait for the room to appear in marie's *synced* sidebar (the entry only
+ *   exists once /sync has delivered the membership) and click it — exactly how Element
+ *   navigates internally, which never degrades to an alias lookup.
  */
 Then(
   '{word} sees {string} in her timeline for {string}',
@@ -163,34 +175,43 @@ Then(
     message: string,
     roomName: string
   ) => {
-    // Navigate by roomId direct-URL (the room is known from Background setup) instead of a
-    // sidebar lookup by name, which races marie's long-poll /sync and is flaky.
     const known = roomIdByScenario.get(roomName);
     if (!known) {
       throw new Error(`Room "${roomName}" not in roomIdByScenario — Background setup must run first`);
     }
-    await secondPage.goto(`${ELEMENT_URL_MSG}/#/room/${encodeURIComponent(known.roomId)}`);
-    await dismissKeySetupDialog(secondPage);
+    const actualName = getActualRoomName(roomName);
 
-    // Handle invite dialog: if the room shows "Do you want to join?" accept the invite first
-    // This happens when marie was invited but hasn't accepted yet in her context.
-    const acceptBtn = secondPage.getByRole('button', { name: /^Accept$/i });
-    if (await acceptBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      await acceptBtn.click();
-      // Wait for timeline to load after accepting
-      await secondPage.locator('.mx_RoomView_timeline, .mx_EventTile, .mx_MBasicMessageWrapper').first()
-        .waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {});
-    }
+    // Open the room from marie's synced sidebar. The sidebar entry only renders once
+    // /sync has delivered her membership, so its presence is the signal that the room
+    // (and its joined-timeline, including alex's message) is in her client store —
+    // unlike a roomId direct-URL, which races sync and can 404 via the alias path.
+    const sidebarEntry = secondPage.locator(
+      `[aria-label="Open room ${actualName}"], [aria-label="Open room ${actualName} invitation."]`
+    );
 
-    // Wait for the message to appear in the timeline. marie opened the room by direct URL
-    // (initialSync returns recent messages); if alex's message hasn't propagated to her
-    // session yet, reload once to re-trigger initialSync and pick it up.
-    const tile = secondPage.locator('.mx_EventTile', { hasText: message });
-    if (!(await tile.first().isVisible({ timeout: 20_000 }).catch(() => false))) {
-      await secondPage.reload();
+    const openRoom = async () => {
+      await sidebarEntry.first().waitFor({ state: 'visible', timeout: 60_000 });
+      await sidebarEntry.first().scrollIntoViewIfNeeded().catch(() => {});
+      await sidebarEntry.first().click();
       await dismissKeySetupDialog(secondPage);
+
+      // If the room opens on a pending invite, accept it to reveal the timeline.
+      const acceptBtn = secondPage.getByRole('button', { name: /^accept$|^join the discussion$/i });
+      if (await acceptBtn.first().isVisible({ timeout: 3_000 }).catch(() => false)) {
+        await acceptBtn.first().click();
+      }
       await secondPage.locator('.mx_RoomView_body').first()
         .waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {});
+    };
+
+    await openRoom();
+
+    // Assert alex's message is in marie's timeline. If it hasn't rendered yet, re-open
+    // the room from the sidebar once more (re-triggers Element's room load against the
+    // already-synced store) — no alias-resolving reload.
+    const tile = secondPage.locator('.mx_EventTile', { hasText: message });
+    if (!(await tile.first().isVisible({ timeout: 20_000 }).catch(() => false))) {
+      await openRoom();
       await expect(tile.first()).toBeVisible({ timeout: 20_000 });
     }
   }

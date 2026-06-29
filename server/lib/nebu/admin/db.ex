@@ -439,6 +439,58 @@ defmodule Nebu.Admin.DB do
     end
   end
 
+  @doc """
+  Atomically sets rooms.status='active' using SELECT FOR UPDATE inside an Ecto
+  transaction. The mirror of `archive_room_atomic/1` for the unarchive path.
+
+  Returns :ok | {:error, :not_found}.
+
+  Contract fix (full-elixir-stack / ADR-021): pre-removal, the Go Gateway wrote
+  rooms.status='active' in the DB *before* calling the unarchive RPC, and the
+  EventDispatcher unarchive handler only (re)started the Room GenServer. When the
+  Gateway was removed, the unarchive handler was left WITHOUT a DB writer — so an
+  unarchive reported success but never flipped rooms.status back to 'active',
+  leaving the room stuck "Archived" in the Admin UI. Core now owns this write,
+  exactly as archive_room_atomic/1 owns the archive write.
+  """
+  @spec unarchive_room_atomic(String.t()) :: :ok | {:error, :not_found | term()}
+  def unarchive_room_atomic(room_id) do
+    result =
+      Nebu.Repo.transaction(fn ->
+        # SELECT FOR UPDATE to prevent concurrent archive/unarchive operations
+        status_result =
+          Ecto.Adapters.SQL.query!(
+            Nebu.Repo,
+            "SELECT status FROM rooms WHERE room_id = $1 FOR UPDATE",
+            [room_id]
+          )
+
+        case status_result.rows do
+          [] ->
+            Nebu.Repo.rollback(:not_found)
+
+          [["active"]] ->
+            # Idempotent — already active, return ok
+            :ok
+
+          [[_other_status]] ->
+            Ecto.Adapters.SQL.query!(
+              Nebu.Repo,
+              "UPDATE rooms SET status = 'active' WHERE room_id = $1",
+              [room_id]
+            )
+
+            :ok
+        end
+      end)
+
+    case result do
+      {:ok, :ok} -> :ok
+      {:error, :not_found} -> {:error, :not_found}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
   # ─── Story rm5-personal-guards-optout: get_personal_room_owner/1 ────────────
 
   @doc """

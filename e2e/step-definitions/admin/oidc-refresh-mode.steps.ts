@@ -97,17 +97,23 @@ Then(
 );
 
 When('the operator sets the admin refresh mode to {string}', async ({ page }: { page: Page }, mode: string) => {
+  // /admin/config is a dead controller form (ConfigLive → ConfigController, admin-http-refactor),
+  // NOT a LiveView — there is no phx-change auto-save. The operator picks the value AND submits
+  // the form (POST /admin/config/refresh-mode), which upserts server_config and redirects back.
   const sel = selectByName(page, 'admin_oidc_refresh_mode');
   await sel.selectOption(mode);
-  // phx-change="save_refresh_mode" → upsert_server_config. Confirm the LiveView reflects the
-  // selected value before asserting persistence (the form re-reads config after the write).
   await expect(sel).toHaveValue(mode, { timeout: 10_000 });
+
+  await Promise.all([
+    page.waitForURL(/\/admin\/config/, { timeout: 15_000 }),
+    page.locator('#oidc-refresh-mode-form button[type="submit"]').click(),
+  ]);
 });
 
 Then('the admin refresh mode is persisted as {string}', async ({ page }: { page: Page }, mode: string) => {
-  // Reload so the value comes from server_config (a fresh dead-render read), not the live
-  // socket — this is what proves the UPDATE actually hit the DB (RLS allowlist / migration
-  // 000007). If the write had been blocked, the reload would show the previous value.
+  // Reload so the value comes from server_config (a fresh dead-render read) — this proves the
+  // POST actually hit the DB (RLS allowlist / migration 000007 must list admin_oidc_refresh_mode).
+  // If the write had been blocked, the reload would show the previous (default) value.
   await page.goto(`${ADMIN_BASE_URL}/admin/config`);
   await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => {});
   await expect(selectByName(page, 'admin_oidc_refresh_mode')).toHaveValue(mode, { timeout: 10_000 });

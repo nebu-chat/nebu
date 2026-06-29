@@ -29,6 +29,7 @@ Individual ADR files live in [`docs/architecture/adr/`](adr/).
 | ADR-020 | Feature domains as module namespaces (`Nebu.Matrix`/`Media`/`Admin`/`Web`/`Compliance`) within the one app | Accepted | 2026-06-17 |
 | ADR-021 | Remove Go entirely — the Elixir/OTP application is the whole system; no gateway↔core process boundary | Accepted | 2026-06-17 |
 | ADR-005 (superseded) | gRPC fully removed (`grpc-removal` epic): `:grpc`/`:protobuf` deps gone, `Core.*` are plain `defstruct` DTOs, `Nebu.Matrix.Error`/`Status` replace `GRPC.RPCError`/`GRPC.Status` | Superseded | 2026-06-22 |
+| [ADR-022](adr/ADR-022-oidc-bootstrap-only-configuration.md) | OIDC configured EXCLUSIVELY via the Bootstrap Wizard (`server_config`, read through `Nebu.Web.OidcConfig`); all `NEBU_OIDC_*`/`NEBU_ADMIN_OIDC_*` env config removed; a SINGLE OIDC client serves both Matrix Bearer validation and admin login; fail-closed until bootstrapped | Accepted | 2026-06-28 |
 
 ## Decision Drivers
 

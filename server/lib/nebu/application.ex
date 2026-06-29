@@ -89,8 +89,13 @@ defmodule Nebu.Application do
 
   # Start the Repo only when its config is present (unit runs without NEBU_DB_URL
   # start zero DB children). Repo config lives under the unified :nebu app key.
+  # S3: the auth-row sweeper (expired jwt_device_bindings + uia_sessions) is started
+  # alongside the Repo — it has nothing to sweep without a DB, and gating it here keeps
+  # the no-DB unit child count unchanged.
   defp repo_children do
-    if Application.get_env(:nebu, Nebu.Repo), do: [Nebu.Repo], else: []
+    if Application.get_env(:nebu, Nebu.Repo),
+      do: [Nebu.Repo, Nebu.Matrix.Session.Sweeper],
+      else: []
   end
 
   # Story 13-6: libcluster Cluster.Supervisor only when topologies are configured

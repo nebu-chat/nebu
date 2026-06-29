@@ -1,0 +1,19 @@
+# Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents.
+# Do not edit manually during an active pipeline run.
+# last_updated: 2026-06-28
+# [bugfix-forget-room-membership-purge] 2026-06-28T08:00Z committed ✓ 9c944a9 (ATDD 7 integ + 3 MINOR fixed 1 cycle + Kassandra CLEAN)
+# [bugfix-forget-room-membership-purge] 2026-06-28T07:55Z arc42-update → corrected Scenario 3c + building-blocks (forget was a stub; now wired; table is in 000001 not 000040)
+# [bugfix-forget-room-membership-purge] 2026-06-28T07:50Z security-review → Kassandra CLEAN (0 CRITICAL/HIGH)
+# [bugfix-forget-room-membership-purge] 2026-06-28T07:45Z code-review → 0 MAJOR, 3 MINOR+2 INFO auto-fixed (unforget on already_member, forget-loud comment, test section comments); re-verified 27/27 integ
+# [bugfix-forget-room-membership-purge] 2026-06-28T07:30Z ci-gate → unit 941/0; forget integ 7/7; lone full-suite fail SearchUsersDBTest is pre-existing shared-DB flake (passes 9/9 isolated)
+# [bugfix-forget-room-membership-purge] 2026-06-28T07:25Z dev-story → done cycle0 (db.ex +3 fns, server.ex forget+sync filter+unforget on join)
+# [bugfix-forget-room-membership-purge] 2026-06-28T07:10Z test-review → PASS (0 MAJOR); 1 MINOR addressed (AC4 control assertion)
+# [bugfix-forget-room-membership-purge] 2026-06-28T07:05Z atdd → 7 failing integration tests (forget_room_membership_purge_test.exs)
+# [bugfix-forget-room-membership-purge] 2026-06-28T06:55Z oracle-gate → spec context captured (M_BAD_STATE valid, sync exclusion incl. include_leave)
+# [bugfix-forget-room-membership-purge] 2026-06-28T00:00Z pipeline started (--bug); classify → matrix=true ui=false sec=required
+story: null
+current_step: null
+completed: []
+cycle_count: 0
+blocked_reason: null
+last_updated: "2026-06-28T07:23Z"

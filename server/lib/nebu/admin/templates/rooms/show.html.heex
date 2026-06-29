@@ -105,7 +105,11 @@
       {@member_error}
     </p>
 
-    <%!-- Add member form: plain text input (no phx-change typeahead, AC#17) --%>
+    <%!-- Add member form: free-text input enhanced by a CSP-safe fetch typeahead
+         (admin-add-user-autocomplete). The input is a plain <input type="text"> so it
+         works without JS (free-text submit, AC#17); app.js progressively upgrades it to
+         an ARIA combobox that fetches GET /admin/users/search and renders the listbox
+         below. No phx-change, no inline JS. --%>
     <form
       id="add-member-form"
       method="post"
@@ -114,7 +118,7 @@
       data-form="add-member"
     >
       <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
-      <div class="form-control grow">
+      <div class="form-control grow relative" data-role="user-autocomplete">
         <label for="add-member-user-id" class="label-text">
           Add user
         </label>
@@ -127,7 +131,18 @@
           data-field="add-member-user-id"
           autocomplete="off"
           aria-label="Matrix user id to add"
+          role="combobox"
+          aria-autocomplete="list"
+          aria-expanded="false"
+          aria-controls="add-member-user-id-listbox"
         />
+        <%!-- Suggestion listbox rendered into here by app.js (CSP-safe external JS). --%>
+        <div
+          data-role="user-suggestions"
+          data-listbox-id="add-member-user-id-listbox"
+          class="absolute left-0 right-0 top-full z-10"
+        >
+        </div>
       </div>
       <button type="submit" class="btn btn-primary" role="button">Add</button>
     </form>

@@ -1,43 +1,27 @@
 defmodule Nebu.Matrix.SsoLoginOidcConfigDbFallbackTest do
   @moduledoc """
-  Regression tests for bug: SSO login fails when Nebu starts without NEBU_OIDC_* env vars.
+  Tests that the Matrix SSO login leg resolves the OIDC issuer + single client
+  SOLELY from `server_config` (ADR-022 — the env-var config path is removed).
 
-  ## Root Cause
-
-  `oidc_config/0` in `Nebu.Matrix.SsoLogin` read the OIDC issuer only from
-  `Application.get_env(:nebu_http, :oidc_issuer)`. When `NEBU_OIDC_ISSUER` is not
-  set (Bootstrap-Wizard deployments), that value is `nil` → `{:error, :issuer_not_configured}`
-  → 503 on every SSO redirect and callback.
-
-  `Nebu.Web.Plugs.OidcPlug` already solves this correctly: its `oidc_issuer/0`
-  private function falls back to `Nebu.Web.OidcConfig.get().issuer` (ETS cache
-  backed by `server_config`) when the env var is absent. The SSO login module must
-  use the same fallback.
-
-  ## Fix
-
-  Apply the same env → OidcConfig fallback pattern used in OidcPlug:
-
-  ```elixir
-  issuer =
-    case Application.get_env(:nebu_http, :oidc_issuer) do
-      v when is_binary(v) and v != "" -> v
-      _ -> Nebu.Web.OidcConfig.get().issuer
-    end
-  ```
+  `Nebu.Matrix.SsoLogin.oidc_config/0` reads the issuer from
+  `Nebu.Web.OidcConfig.get().issuer` (the `server_config`-backed ETS cache) and the
+  single client id/secret from `server_config` (decrypting the at-rest secret). There
+  is no `:oidc_issuer`/`:matrix_oidc_client_*` env fallback; a stale env value is
+  ignored. When `server_config` provides no issuer the redirect fails closed (503).
 
   ## Test Design
 
-  Uses the `:oidc_config_source` seam (`Nebu.Web.OidcConfig.get/0`) to inject DB
-  values without a live Postgres or GenServer. This mirrors the seam already used in
-  admin OIDC tests.
+  Uses the `:oidc_config_source` seam (`Nebu.Web.OidcConfig.get/0`) to inject the DB
+  issuer/audience and the `:sso_bootstrap_reader` seam for the client id/secret —
+  without a live Postgres or GenServer. Mirrors the seams used in the admin OIDC tests.
 
-  ## Acceptance Criteria
+  ## Acceptance Criteria (ADR-022)
 
-  - AC1: When `NEBU_OIDC_ISSUER` env is absent AND OidcConfig returns an issuer from
-    the DB, the SSO redirect succeeds (302 to the IdP authorize endpoint).
-  - AC2: When `NEBU_OIDC_ISSUER` env IS set, it takes priority over the DB value.
-  - AC3: When neither env nor DB provides an issuer, the redirect fails closed (503).
+  - AC1: When OidcConfig returns an issuer from server_config, the SSO redirect
+    succeeds (302 to the IdP authorize endpoint).
+  - AC2: A stale `:oidc_issuer` env value is IGNORED — the server_config issuer (and
+    the single server_config client) is authoritative (ADR-022).
+  - AC3: When server_config provides no issuer, the redirect fails closed (503).
   """
   use ExUnit.Case, async: false
   import Plug.Test
@@ -77,7 +61,8 @@ defmodule Nebu.Matrix.SsoLoginOidcConfigDbFallbackTest do
   end
 
   defp setup_base(pub_jwk) do
-    Application.put_env(:nebu_http, :oidc_audience, @audience)
+    # ADR-022: audience comes from server_config (the OidcConfig seam via inject_db_issuer/1),
+    # not from env. Only non-OIDC-config test scaffolding is set here.
     Application.put_env(:nebu_http, :oidc_jwks, [pub_jwk])
     Application.put_env(:nebu_http, :admin_secret_at_rest, @at_rest_key)
 
@@ -180,39 +165,36 @@ defmodule Nebu.Matrix.SsoLoginOidcConfigDbFallbackTest do
   end
 
   # ════════════════════════════════════════════════════════════════════════════
-  # AC2 — NEBU_OIDC_ISSUER env takes priority over DB value
+  # AC2 — env is IGNORED (ADR-022): server_config issuer is authoritative
   # ════════════════════════════════════════════════════════════════════════════
 
-  describe "AC2 — env issuer takes priority over Bootstrap DB issuer" do
-    test "when NEBU_OIDC_ISSUER is set, DB issuer is not used" do
+  describe "AC2 — a stale :oidc_issuer env is ignored; the server_config issuer wins" do
+    test "when a bogus env issuer is set, the Bootstrap DB issuer is still used" do
       pub_jwk = gen_pub_jwk()
       setup_base(pub_jwk)
 
-      # Set env issuer (different from DB value).
+      # Stale/bogus env values — MUST be ignored after ADR-022 env removal.
       Application.put_env(:nebu_http, :oidc_issuer, @issuer_from_env)
-      Application.put_env(:nebu_http, :matrix_oidc_client_id, "env-client")
-      Application.put_env(:nebu_http, :matrix_oidc_client_secret, "env-secret")
+      Application.put_env(:nebu_http, :matrix_oidc_client_id, "stale-env-client")
+      Application.put_env(:nebu_http, :matrix_oidc_client_secret, "stale-env-secret")
 
-      # Also inject DB issuer — must be ignored when env is set.
+      # The real config comes from server_config (OidcConfig seam).
       inject_db_issuer(@issuer_from_db)
-
-      # Discovery seam must match the env issuer.
-      Application.put_env(:nebu_http, :oidc_metadata_override, %{
-        "issuer" => @issuer_from_env,
-        "authorization_endpoint" => @issuer_from_env <> "/auth",
-        "token_endpoint" => @issuer_from_env <> "/token",
-        "jwks_uri" => @issuer_from_env <> "/jwks"
-      })
 
       conn = call_redirect()
 
       assert conn.status == 302
       loc = location(conn)
-      assert String.starts_with?(loc, @issuer_from_env <> "/auth"),
-             "redirect should use env issuer's authorize URL, got: #{inspect(loc)}"
+      assert String.starts_with?(loc, @authorize),
+             "redirect must use the server_config (DB) issuer's authorize URL, got: #{inspect(loc)}"
 
-      refute String.starts_with?(to_string(loc), @issuer_from_db),
-             "DB issuer must not be used when env is set"
+      refute String.starts_with?(to_string(loc), @issuer_from_env),
+             "the stale env issuer must NOT be used (ADR-022: env is ignored)"
+
+      # The single client comes from the Bootstrap DB (:sso_bootstrap_reader), not env.
+      params = loc |> URI.parse() |> Map.get(:query) |> URI.decode_query()
+      assert params["client_id"] == @client_id,
+             "client must come from server_config, not the stale env client"
     end
   end
 
@@ -220,8 +202,8 @@ defmodule Nebu.Matrix.SsoLoginOidcConfigDbFallbackTest do
   # AC3 — Fail-closed: no issuer from either source → 503
   # ════════════════════════════════════════════════════════════════════════════
 
-  describe "AC3 — fail-closed: no issuer from env or DB → 503" do
-    test "503 when both NEBU_OIDC_ISSUER and OidcConfig.get() return nil" do
+  describe "AC3 — fail-closed: no issuer in server_config → 503" do
+    test "503 when OidcConfig.get() returns nil issuer" do
       pub_jwk = gen_pub_jwk()
       setup_base(pub_jwk)
 

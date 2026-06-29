@@ -81,9 +81,18 @@ defmodule Nebu.Admin.BootstrapOidcFlowTest do
   end
 
   setup do
-    Application.put_env(:nebu_http, :oidc_issuer, @issuer)
-    Application.put_env(:nebu_http, :admin_oidc_client_id, @client_id)
-    Application.put_env(:nebu_http, :admin_oidc_redirect_uri, "http://localhost:8008/admin/callback")
+    # oidc-bootstrap-only-config (ADR-022): bootstrap-mode resolves issuer + client
+    # from the draft; normal-mode resolves issuer via OidcConfig and the single admin
+    # client via the :admin_oidc_config_reader seam. Configure both so the normal-mode
+    # callback can reach the admin-group gate (instead of failing config resolution).
+    Nebu.Web.OidcTestSupport.configure(@issuer, @client_id)
+    Application.put_env(:nebu_http, :admin_oidc_config_reader, fn
+      "oidc_client_id" -> @client_id
+      "oidc_client_secret" -> Nebu.Admin.BootstrapLive.encrypt_secret(@client_secret)
+      _ -> nil
+    end)
+    Application.put_env(:nebu_http, :server_name, "localhost")
+    Application.put_env(:nebu_http, :admin_session_secure, false)
     Application.put_env(:nebu_http, :admin_secret_at_rest, @at_rest_key)
 
     Application.put_env(:nebu_http, :oidc_metadata_override, %{
@@ -93,10 +102,12 @@ defmodule Nebu.Admin.BootstrapOidcFlowTest do
     })
 
     on_exit(fn ->
+      Nebu.Web.OidcTestSupport.clear()
+
       for k <- [
-            :oidc_issuer,
-            :admin_oidc_client_id,
-            :admin_oidc_redirect_uri,
+            :admin_oidc_config_reader,
+            :server_name,
+            :admin_session_secure,
             :admin_secret_at_rest,
             :oidc_metadata_override,
             :admin_bootstrap_store,

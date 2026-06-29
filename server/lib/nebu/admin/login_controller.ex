@@ -73,9 +73,17 @@ defmodule Nebu.Admin.LoginController do
   end
 
   def index(conn, _params) do
-    conn
-    |> put_resp_content_type("text/html")
-    |> send_resp(200, login_html())
+    # Before bootstrap is complete there is no OIDC config, so "Login with SSO"
+    # would fail with 503. Send the operator to the wizard instead.
+    if not Nebu.Admin.Auth.bootstrap_completed?() do
+      conn
+      |> redirect(to: "/admin/bootstrap")
+      |> halt()
+    else
+      conn
+      |> put_resp_content_type("text/html")
+      |> send_resp(200, login_html())
+    end
   end
 
   defp login_html do

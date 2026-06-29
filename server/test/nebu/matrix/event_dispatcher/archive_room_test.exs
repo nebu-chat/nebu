@@ -227,6 +227,13 @@ defmodule Nebu.Matrix.EventDispatcher.ArchiveRoomTest do
       :ok
     end
 
+    def unarchive_room_atomic(_room_id) do
+      # full-elixir-stack contract fix: unarchive_room/2 now owns the DB write
+      # (rooms.status='active') via admin_db_module().unarchive_room_atomic/1.
+      # The test only cares that the GenServer is started; DB write is a no-op here.
+      :ok
+    end
+
     def get_server_config, do: {:ok, %{}}
     def upsert_server_config(_changes), do: :ok
   end

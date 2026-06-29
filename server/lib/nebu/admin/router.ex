@@ -138,6 +138,15 @@ defmodule Nebu.Admin.Router do
 
     # Users
     get "/users", UsersController, :index
+    # Add-member typeahead: JSON user search (admin-add-user-autocomplete). Declared
+    # BEFORE /users/:user_id so "search" is not dispatched as a :user_id parameter.
+    get "/users/search", UsersController, :search
+    # Per-user device management (device-management S4).
+    get "/users/:user_id", UsersController, :show
+    post "/users/:user_id/devices/:device_id/rename", UsersController, :rename_device
+    # Revoke a device: POST + _method=DELETE (Plug.MethodOverride), mirroring the
+    # rooms member-removal destructive-action pattern.
+    delete "/users/:user_id/devices/:device_id", UsersController, :delete_device
 
     # Rooms list + actions
     get "/rooms", RoomsController, :index

@@ -24,7 +24,7 @@ Feature: Admin UI — Bootstrap and Dashboard Happy Path
 
     # Step 2: OIDC config + real OIDC login
     When the operator fills in "OIDC Issuer URL" with the Dex issuer URL
-    And the operator fills in "OIDC Client ID" with "nebu-admin"
+    And the operator fills in "OIDC Client ID" with "nebu-gateway"
     And the operator fills in "OIDC Client Secret" with the configured client secret
     And the operator clicks "Connect with OIDC"
 

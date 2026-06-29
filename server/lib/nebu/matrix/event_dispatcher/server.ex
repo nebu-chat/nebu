@@ -25,6 +25,46 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
     Application.get_env(:event_dispatcher, :rooms_db_module, Nebu.Matrix.Room.DB)
   end
 
+  # ─── forget-room-membership-purge: forgotten-room set for sync exclusion ───────
+  # Returns the MapSet of room_ids the user has forgotten — read fresh on every sync
+  # so a forget (or a re-join that clears it) takes effect on the very next sync.
+  #
+  # get_forgotten_room_ids/1 is intentionally NOT a DBBehaviour callback (adding one
+  # would force every injected FakeDB to implement it → warnings-as-errors). The
+  # function_exported?/3 guard makes injected fakes that lack it degrade safely to the
+  # empty set, so unit tests with a Repo-less FakeDB never hit Ecto here.
+  defp forgotten_room_ids(user_id) do
+    mod = rooms_db_module()
+
+    if function_exported?(mod, :get_forgotten_room_ids, 1) do
+      case mod.get_forgotten_room_ids(user_id) do
+        {:ok, ids} -> MapSet.new(ids)
+        {:error, _reason} -> MapSet.new()
+      end
+    else
+      MapSet.new()
+    end
+  end
+
+  # forget-room-membership-purge (AC6): clear a forgotten-room record on re-join so
+  # the room reappears in sync. Best-effort and idempotent (no-op if not forgotten).
+  #
+  # Guarded two ways so it never breaks Repo-less unit tests of join_room/2:
+  #   - function_exported?/3 — an injected FakeDB lacking the function is skipped.
+  #   - Process.whereis(Nebu.Repo) — the default real DB module is only invoked when a
+  #     Repo is actually running (unit join tests inject a Room FakeDB but leave
+  #     rooms_db_module() defaulting to the real DB, with no Repo started).
+  defp unforget_room(user_id, room_id) do
+    mod = rooms_db_module()
+
+    if function_exported?(mod, :remove_forgotten_room, 2) and
+         Process.whereis(Nebu.Repo) != nil do
+      _ = mod.remove_forgotten_room(user_id, room_id)
+    end
+
+    :ok
+  end
+
   # ─── Configurable alias DB module for testability ─────────────────────────────
   # Override via Application.put_env(:event_dispatcher, :alias_db_module, FakeAliasDB) in tests.
   # Used by create_room/2 to register a room's canonical alias in the room_aliases
@@ -675,6 +715,9 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
 
         case Nebu.Matrix.Room.Server.join(room_id, user_id) do
           :ok ->
+            # forget-room-membership-purge (AC6): re-joining a forgotten room clears
+            # the forget so it reappears in sync. Idempotent — a no-op if not forgotten.
+            unforget_room(user_id, room_id)
             # Mark any pending invitation as accepted so it disappears from
             # rooms.invite in subsequent sync responses (no-op for public joins).
             db_module_invite().accept_invitation(room_id, user_id)
@@ -688,6 +731,11 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
           {:error, :already_member} ->
             # Matrix spec: idempotent — joining an already-joined room is success.
             # No audit log for idempotent joins (AC9 scope decision).
+            # forget-room-membership-purge: also clear any stale forgotten-room row
+            # here — normally unreachable (you cannot hold a forget while joined, per
+            # the forget join-guard), but a raced/stale row must not permanently hide a
+            # room the user is actually in. Idempotent no-op when nothing is forgotten.
+            unforget_room(user_id, room_id)
             %Core.JoinRoomResponse{room_id: room_id}
 
           {:error, :room_full} ->
@@ -2253,10 +2301,13 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
   def get_initial_sync(request, _stream) do
     user_id = request.user_id
 
+    # forget-room-membership-purge: exclude forgotten rooms from every section.
+    forgotten = forgotten_room_ids(user_id)
+
     room_ids =
       case rooms_db_module().get_rooms_for_user(user_id) do
         {:ok, ids} ->
-          ids
+          Enum.reject(ids, &MapSet.member?(forgotten, &1))
 
         {:error, reason} ->
           raise Nebu.Matrix.Error,
@@ -2505,6 +2556,13 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
       end
 
     room_ids = room_ids ++ invited_room_ids ++ declined_room_ids ++ left_room_ids
+
+    # forget-room-membership-purge: drop any forgotten room from the combined set so
+    # it never re-surfaces in any section (notably the recently-left → rooms.leave
+    # path that previously re-surfaced left rooms indefinitely). Read fresh here so a
+    # forget takes effect on the very next incremental sync.
+    forgotten = forgotten_room_ids(user_id)
+    room_ids = Enum.reject(room_ids, &MapSet.member?(forgotten, &1))
 
     # Step 5a: Subscribe to user-level :pg group BEFORE DB check.
     # Receives {:new_invite, room_id} when invite_user/2 sends an invitation — this
@@ -3416,9 +3474,10 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
   2. Verifies caller is NOT currently joined (must leave first).
   3. Returns empty ForgetRoomResponse on success.
 
-  Note: In MVP, forget is a no-op beyond the FailedPrecondition check because
-  GetSyncDelta does not yet filter forgotten rooms. A follow-up story will add
-  the `forgotten_rooms` column to session state and filter in GetSyncDelta.
+  On success the `(user_id, room_id)` pair is recorded in `forgotten_rooms`
+  (idempotent — `ON CONFLICT DO NOTHING`) so the room is excluded from future
+  `/sync` responses (story forget-room-membership-purge). The join-guard rejection
+  path writes nothing.
   """
   def forget_room(request, _stream) do
     room_id = request.room_id
@@ -3433,15 +3492,34 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
       {:ok, _pid} ->
         state = Nebu.Matrix.Room.Server.get_state(room_id)
 
-        # Cannot forget a room while still joined.
+        # Cannot forget a room while still joined. This guard runs BEFORE any
+        # write, so a rejected forget leaves forgotten_rooms untouched (AC2).
         if MapSet.member?(state.members, user_id) do
           raise Nebu.Matrix.Error,
             status: Nebu.Matrix.Status.failed_precondition(),
             message: "user must leave the room before forgetting"
         end
 
-        # Room is not currently joined — forget acknowledged.
-        %Core.ForgetRoomResponse{}
+        # Room is not currently joined — persist the forget. user_id comes from the
+        # validated token (never the request body), so a user can only forget their
+        # own membership. Idempotent: a repeated forget is a no-op.
+        #
+        # This DB call is DELIBERATELY unguarded (no function_exported?/Process.whereis
+        # fallback): forget MUST fail loudly so the client never gets a 200 for a forget
+        # that was not durably recorded — a DB error raises `unavailable` below. This is
+        # the deliberate asymmetry vs unforget_room/2 (best-effort on re-join, may be
+        # silently skipped if the Repo is down): a missed unforget only delays a room
+        # reappearing until the next re-join, whereas a missed forget would silently
+        # re-leak a room the user asked to forget.
+        case rooms_db_module().insert_forgotten_room(user_id, room_id) do
+          :ok ->
+            %Core.ForgetRoomResponse{}
+
+          {:error, reason} ->
+            raise Nebu.Matrix.Error,
+              status: Nebu.Matrix.Status.unavailable(),
+              message: "failed to record forgotten room: #{inspect(reason)}"
+        end
     end
   end
 
@@ -3567,7 +3645,27 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
     room_id = req.room_id
     {actor_id, _system_role} = Nebu.Matrix.RequestMetadata.trusted_identity(stream)
 
-    # Start the Room GenServer so it is immediately available.
+    # Step 1: Atomically update rooms.status='active' in DB (SELECT FOR UPDATE).
+    # Contract fix (full-elixir-stack / ADR-021): pre-removal the Go Gateway wrote
+    # rooms.status='active' before calling this RPC; with the Gateway gone Core must
+    # own this write, mirroring archive_room/2. Without it an unarchive reported
+    # success but left rooms.status='archived', stranding the room as "Archived".
+    case admin_db_module().unarchive_room_atomic(room_id) do
+      :ok ->
+        :ok
+
+      {:error, :not_found} ->
+        raise Nebu.Matrix.Error,
+          status: Nebu.Matrix.Status.not_found(),
+          message: "room not found: #{room_id}"
+
+      {:error, reason} ->
+        raise Nebu.Matrix.Error,
+          status: Nebu.Matrix.Status.internal(),
+          message: "could not unarchive room: #{inspect(reason)}"
+    end
+
+    # Step 2: Start the Room GenServer so it is immediately available.
     # Room.Server.init/1 now calls get_room_status/1 on start:
     #   → {:ok, "active"} means the room is unarchived — init proceeds normally.
     #   → {:ok, "archived"} would be a race condition (DB not yet updated) — init stops.

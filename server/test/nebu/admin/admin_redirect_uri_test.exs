@@ -58,10 +58,18 @@ defmodule Nebu.Admin.RedirectUriTest do
   @authorization_endpoint "https://dex.example.com/dex/auth"
 
   setup do
-    Application.put_env(:nebu_http, :oidc_issuer, @issuer)
-    Application.put_env(:nebu_http, :oidc_audience, @audience)
-    Application.put_env(:nebu_http, :admin_oidc_client_id, @client_id)
-    Application.put_env(:nebu_http, :admin_oidc_client_secret, "client-secret")
+    # oidc-bootstrap-only-config (ADR-022): issuer/audience via OidcConfig, the single
+    # admin OIDC client via the :admin_oidc_config_reader seam. The redirect_uri is
+    # DERIVED from :server_name + :admin_session_secure — there is no
+    # :admin_oidc_redirect_uri env anymore.
+    Nebu.Web.OidcTestSupport.configure(@issuer, @audience)
+    Application.put_env(:nebu_http, :admin_secret_at_rest, "admin-redirect-uri-test-key")
+
+    Application.put_env(:nebu_http, :admin_oidc_config_reader, fn
+      "oidc_client_id" -> @client_id
+      "oidc_client_secret" -> Nebu.Admin.BootstrapLive.encrypt_secret("client-secret")
+      _ -> nil
+    end)
 
     Application.put_env(:nebu_http, :oidc_metadata_override, %{
       "issuer" => @issuer,
@@ -70,12 +78,11 @@ defmodule Nebu.Admin.RedirectUriTest do
     })
 
     on_exit(fn ->
+      Nebu.Web.OidcTestSupport.clear()
+
       for k <- [
-            :oidc_issuer,
-            :oidc_audience,
-            :admin_oidc_client_id,
-            :admin_oidc_client_secret,
-            :admin_oidc_redirect_uri,
+            :admin_secret_at_rest,
+            :admin_oidc_config_reader,
             :admin_session_secure,
             :server_name,
             :oidc_metadata_override
@@ -105,7 +112,8 @@ defmodule Nebu.Admin.RedirectUriTest do
       # → expected: https://my-company.example.com/admin/callback
 
       expected_redirect_uri = "https://my-company.example.com/admin/callback"
-      Application.put_env(:nebu_http, :admin_oidc_redirect_uri, expected_redirect_uri)
+      Application.put_env(:nebu_http, :server_name, "my-company.example.com")
+      Application.put_env(:nebu_http, :admin_session_secure, true)
 
       conn = session_conn(:get, "/admin/login/start") |> Auth.login_start(%{})
 
@@ -133,7 +141,8 @@ defmodule Nebu.Admin.RedirectUriTest do
       # → expected: http://my-company.example.com/admin/callback (no port)
 
       expected_redirect_uri = "http://my-company.example.com/admin/callback"
-      Application.put_env(:nebu_http, :admin_oidc_redirect_uri, expected_redirect_uri)
+      Application.put_env(:nebu_http, :server_name, "my-company.example.com")
+      Application.put_env(:nebu_http, :admin_session_secure, false)
 
       conn = session_conn(:get, "/admin/login/start") |> Auth.login_start(%{})
 
@@ -157,7 +166,8 @@ defmodule Nebu.Admin.RedirectUriTest do
       # → expected: http://localhost:8008/admin/callback (backwards-compatible default)
 
       expected_redirect_uri = "http://localhost:8008/admin/callback"
-      Application.put_env(:nebu_http, :admin_oidc_redirect_uri, expected_redirect_uri)
+      Application.put_env(:nebu_http, :server_name, "localhost")
+      Application.put_env(:nebu_http, :admin_session_secure, false)
 
       conn = session_conn(:get, "/admin/login/start") |> Auth.login_start(%{})
 
@@ -173,48 +183,8 @@ defmodule Nebu.Admin.RedirectUriTest do
     end
   end
 
-  describe "Bug source: runtime.exs default is wrong for non-localhost deployments" do
-    @tag :regression_source
-    test "runtime.exs default 'http://localhost:8008/admin/callback' is hardcoded and ignores NEBU_SERVER_NAME" do
-      # This test documents the BUG at its source in runtime.exs.
-      # It verifies that when :admin_oidc_redirect_uri is NOT explicitly set
-      # (simulating a deployment that relies on the runtime.exs default),
-      # the auth module falls back to the hardcoded localhost URI — which is
-      # WRONG for any non-localhost deployment.
-      #
-      # After the fix, runtime.exs must derive the default from NEBU_SERVER_NAME,
-      # so :admin_oidc_redirect_uri in the app config will be set to the correct
-      # derived value at startup. This test will need to be updated to reflect
-      # the new derivation logic tested through the runtime config.
-      #
-      # For now (pre-fix), we assert what the BUG produces: the fallback in
-      # Nebu.Admin.Auth.redirect_uri/0 always returns the hardcoded string when
-      # :admin_oidc_redirect_uri is not set, ignoring the server name.
-
-      # Simulate a non-localhost deployment where the operator forgot to set
-      # NEBU_ADMIN_OIDC_REDIRECT_URI but DID set NEBU_SERVER_NAME.
-      server_name = "my-company.example.com"
-      Application.put_env(:nebu_http, :server_name, server_name)
-
-      # Do NOT set :admin_oidc_redirect_uri — this is the root-cause scenario.
-      Application.delete_env(:nebu_http, :admin_oidc_redirect_uri)
-
-      conn = session_conn(:get, "/admin/login/start") |> Auth.login_start(%{})
-
-      assert conn.status == 302
-      [location] = get_resp_header(conn, "location")
-      %URI{query: query} = URI.parse(location)
-      params = URI.decode_query(query)
-
-      # The FIX must produce a redirect_uri that contains the server_name.
-      # Pre-fix, this assertion FAILS because the hardcoded fallback is used.
-      assert params["redirect_uri"] =~ server_name,
-             "Bug confirmed: when :admin_oidc_redirect_uri is not explicitly configured " <>
-               "and server_name is '#{server_name}', the redirect_uri must be derived from " <>
-               "the server name (e.g. 'https://#{server_name}/admin/callback'). " <>
-               "Got: '#{params["redirect_uri"]}' — which is the hardcoded localhost fallback " <>
-               "from runtime.exs line 176. Fix: derive the default from NEBU_SERVER_NAME + " <>
-               "NEBU_ADMIN_SESSION_SECURE in runtime.exs instead of hardcoding localhost:8008."
-    end
-  end
+  # NOTE: the former "runtime.exs default is hardcoded" test was DELETED (ADR-022).
+  # There is no :admin_oidc_redirect_uri env / runtime.exs default anymore — the
+  # redirect_uri is ALWAYS derived from :server_name + :admin_session_secure (covered
+  # by the three deployment-scenario tests above).
 end

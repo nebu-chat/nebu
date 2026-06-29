@@ -15,7 +15,8 @@ defmodule Nebu.MixProject do
       test_ignore_filters: [
         &String.ends_with?(&1, "media_test_support.exs"),
         &String.ends_with?(&1, "media_fakes.exs"),
-        &String.ends_with?(&1, "create_room_test_support.exs")
+        &String.ends_with?(&1, "create_room_test_support.exs"),
+        &String.ends_with?(&1, "oidc_test_support.exs")
       ],
       deps: deps(),
       releases: [

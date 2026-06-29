@@ -63,7 +63,7 @@ defmodule Nebu.Web.JwksCacheTest do
       System.delete_env("NEBU_OIDC_JWKS_TTL")
       Application.delete_env(:nebu_http, :jwks_fetcher)
       Application.delete_env(:nebu_http, :oidc_jwks_uri)
-      Application.delete_env(:nebu_http, :oidc_issuer)
+      Nebu.Web.OidcTestSupport.clear()
       Application.delete_env(:nebu_http, :oidc_metadata_override)
     end)
 
@@ -235,7 +235,8 @@ defmodule Nebu.Web.JwksCacheTest do
 
       # No explicit JWKS URI.
       Application.delete_env(:nebu_http, :oidc_jwks_uri)
-      Application.put_env(:nebu_http, :oidc_issuer, issuer)
+      # oidc-bootstrap-only-config (ADR-022): issuer resolves via OidcConfig, not env.
+      Nebu.Web.OidcTestSupport.configure(issuer, nil)
 
       # Install a counting override: when OidcMetadata.fetch/1 is called (via the
       # override seam), it increments the counter and returns a document with jwks_uri.
@@ -278,7 +279,8 @@ defmodule Nebu.Web.JwksCacheTest do
       jwks_uri = "https://dex.example.com/dex/keys"
 
       Application.delete_env(:nebu_http, :oidc_jwks_uri)
-      Application.put_env(:nebu_http, :oidc_issuer, issuer)
+      # oidc-bootstrap-only-config (ADR-022): issuer resolves via OidcConfig, not env.
+      Nebu.Web.OidcTestSupport.configure(issuer, nil)
 
       Application.put_env(:nebu_http, :oidc_metadata_override, %{
         "issuer" => issuer,
@@ -308,13 +310,13 @@ defmodule Nebu.Web.JwksCacheTest do
              "JwksCache must return [] when neither JWKS URI nor issuer is configured"
     end
 
-    test "explicit JWKS URI (oidc_jwks_uri env) takes precedence over issuer-based auto-discovery" do
+    test "explicit JWKS URI from server_config takes precedence over issuer-based auto-discovery" do
       jwk = build_jwk()
       issuer = "https://dex.example.com/dex"
 
-      # Both issuer AND explicit JWKS URI configured — explicit URI wins.
-      Application.put_env(:nebu_http, :oidc_issuer, issuer)
-      Application.put_env(:nebu_http, :oidc_jwks_uri, "https://explicit-jwks.example.com/keys")
+      # ADR-022: both issuer AND explicit JWKS URI come from server_config (OidcConfig
+      # seam). The explicit URI must win over issuer discovery.
+      Nebu.Web.OidcTestSupport.configure(issuer, nil, "https://explicit-jwks.example.com/keys")
 
       # Discovery document claims a different jwks_uri — must NOT be consulted.
       Application.put_env(:nebu_http, :oidc_metadata_override, %{
@@ -322,13 +324,22 @@ defmodule Nebu.Web.JwksCacheTest do
         "jwks_uri" => "https://WRONG-should-not-be-used.example.com/keys"
       })
 
-      # Use the injectable :fetcher seam (not jwks_http_fetcher) since the explicit
-      # URI path goes through the existing fetcher stack, not the auto-discovery path.
-      pid = start_supervised!({Nebu.Web.JwksCache, fetcher: fn -> {:ok, [jwk]} end})
+      # The explicit-URI path stubs the final HTTP key fetch via :jwks_http_fetcher and
+      # asserts it is called with the server_config jwks_uri (not the discovery one).
+      Application.put_env(:nebu_http, :jwks_http_fetcher, fn uri ->
+        assert uri == "https://explicit-jwks.example.com/keys",
+               "JwksCache must fetch the server_config jwks_uri, got: #{uri}"
+
+        {:ok, [jwk]}
+      end)
+
+      on_exit(fn -> Application.delete_env(:nebu_http, :jwks_http_fetcher) end)
+
+      pid = start_supervised!({Nebu.Web.JwksCache, []})
       assert is_pid(pid)
 
       assert Nebu.Web.JwksCache.keys() == [jwk],
-             "Explicit NEBU_OIDC_JWKS_URI must take precedence over issuer discovery"
+             "Explicit server_config jwks_uri must take precedence over issuer discovery"
     end
   end
 

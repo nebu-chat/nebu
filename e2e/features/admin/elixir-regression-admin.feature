@@ -15,11 +15,11 @@ Feature: Elixir Stack Regression — Admin UI (Phoenix LiveView) functional pari
   #   "bootstrap has been completed"                                (admin/bootstrap.steps.ts)
   #   "the operator is logged in as admin"                          (admin/bootstrap.steps.ts)
   #   "a room named {string} exists in the system"                  (admin/auto-join-rooms.steps.ts)
-  #   "room {string} has auto-join disabled"                        (admin/admin-ui-liveview.steps.ts)
-  #   "the operator navigates to the LiveView detail page for room {string}" (admin/admin-ui-liveview.steps.ts)
-  #   "the operator clicks the auto-join toggle for room {string}"  (admin/admin-ui-liveview.steps.ts)
-  #   "the auto-join toggle for room {string} shows as enabled without a full page reload" (admin/admin-ui-liveview.steps.ts)
-  #   "re-loading the LiveView room detail page still shows the auto-join toggle as enabled" (admin/admin-ui-liveview.steps.ts)
+  #   "room {string} has auto-join disabled"                        (admin/auto-join-rooms.steps.ts)
+  #   "the operator navigates to the detail page for room {string}" (admin/auto-join-rooms.steps.ts)
+  #   "the operator enables the auto-join toggle"                   (admin/auto-join-rooms.steps.ts)
+  #   "the page shows the auto-join toggle as enabled"              (admin/auto-join-rooms.steps.ts)
+  #   "re-loading the room detail page still shows the auto-join toggle as enabled" (admin/auto-join-rooms.steps.ts)
   #   "the operator navigates to {string}"                          (admin/bootstrap.steps.ts)
   #   "the page shows {string}"                                     (admin/bootstrap.steps.ts)
   #   "the user list contains at least one entry"                   (admin/users.steps.ts)
@@ -31,15 +31,19 @@ Feature: Elixir Stack Regression — Admin UI (Phoenix LiveView) functional pari
     And bootstrap has been completed
     And the operator is logged in as admin
 
-  # AC3 — Room Management: toggle auto-join (visible, LiveView DOM-diff, reload preserves state).
+  # AC3 — Room Management: toggle auto-join and verify it persists across a reload.
+  # NOTE: RoomsLive was CONVERTED to RoomsController (admin-http-refactor). The toggle is a
+  # per-row form POST on the /admin/rooms list (PRG redirect), not an in-place LiveView
+  # DOM-diff — so the former "no full page reload" sentinel was dropped. The regression
+  # intent (toggle flips + persists) is preserved via the post-redirect list-page outcome.
   @elixir-stack-regression @ac3-room-management
-  Scenario: [AC3] Room Management auto-join toggle persists against Phoenix LiveView
+  Scenario: [AC3] Room Management auto-join toggle persists across a reload
     Given a room named "general" exists in the system
     And room "general" has auto-join disabled
-    When the operator navigates to the LiveView detail page for room "general"
-    And the operator clicks the auto-join toggle for room "general"
-    Then the auto-join toggle for room "general" shows as enabled without a full page reload
-    And re-loading the LiveView room detail page still shows the auto-join toggle as enabled
+    When the operator navigates to the detail page for room "general"
+    And the operator enables the auto-join toggle
+    Then the page shows the auto-join toggle as enabled
+    And re-loading the room detail page still shows the auto-join toggle as enabled
 
   # AC3 — User Overview: imported user count matches the rendered list.
   @elixir-stack-regression @ac3-user-overview

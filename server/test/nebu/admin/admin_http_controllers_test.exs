@@ -497,12 +497,13 @@ defmodule Nebu.Admin.HttpControllersTest do
   # ── MAJOR-1 / AC9: POST /admin/config/refresh-mode ────────────────────────────
 
   test "AC9 — POST /admin/config/refresh-mode with valid value calls writer and redirects" do
-    # RED: no POST route /admin/config/refresh-mode exists yet, and
-    # Nebu.Admin.ConfigController does not exist yet.
+    # The writer seam now receives a map of validated server_config changes (the
+    # config page persists BOTH matrix_oidc_refresh_mode and admin_oidc_refresh_mode
+    # — restored to the bootstrap-wizard contract, oidc-refresh-mode AC5/AC6).
     test_pid = self()
 
-    Application.put_env(:nebu_http, :admin_config_refresh_mode_writer, fn mode ->
-      send(test_pid, {:refresh_mode_called, mode})
+    Application.put_env(:nebu_http, :admin_config_refresh_mode_writer, fn changes ->
+      send(test_pid, {:refresh_mode_changes, changes})
       :ok
     end)
 
@@ -511,20 +512,20 @@ defmodule Nebu.Admin.HttpControllersTest do
     conn =
       build_admin_conn(:post, "/admin/config/refresh-mode")
       |> put_req_header("content-type", "application/x-www-form-urlencoded")
-      |> Map.put(:body_params, %{"refresh_mode" => "offline"})
+      |> Map.put(:body_params, %{"matrix_oidc_refresh_mode" => "offline"})
       |> endpoint_call()
 
     assert conn.status == 302
-    assert_received {:refresh_mode_called, "offline"}
+    assert_received {:refresh_mode_changes, %{"matrix_oidc_refresh_mode" => "offline"}}
   end
 
-  test "AC9 — POST /admin/config/refresh-mode with invalid value does NOT call writer" do
-    # RED: guard in controller must reject unknown refresh_mode values.
-    # The seam must NOT be invoked for garbage input.
+  test "AC9 — POST /admin/config/refresh-mode with invalid value does NOT persist it" do
+    # The guard rejects unknown values per key. A request with only a garbage value
+    # produces no valid change, so the writer is never called.
     test_pid = self()
 
-    Application.put_env(:nebu_http, :admin_config_refresh_mode_writer, fn mode ->
-      send(test_pid, {:refresh_mode_called, mode})
+    Application.put_env(:nebu_http, :admin_config_refresh_mode_writer, fn changes ->
+      send(test_pid, {:refresh_mode_changes, changes})
       :ok
     end)
 
@@ -533,13 +534,103 @@ defmodule Nebu.Admin.HttpControllersTest do
     conn =
       build_admin_conn(:post, "/admin/config/refresh-mode")
       |> put_req_header("content-type", "application/x-www-form-urlencoded")
-      |> Map.put(:body_params, %{"refresh_mode" => "garbage"})
+      |> Map.put(:body_params, %{"matrix_oidc_refresh_mode" => "garbage"})
       |> endpoint_call()
 
-    # Controller rejects unknown values — either re-render (200) or bad-request (400).
-    # The writer must NOT have been called.
-    refute_received {:refresh_mode_called, _}
-    assert conn.status in [200, 400]
+    # No valid change → writer not called. Re-render (200) or redirect (302) is fine.
+    refute_received {:refresh_mode_changes, _}
+    assert conn.status in [200, 302, 400]
+  end
+
+  # ── Regression (oidc-refresh-mode AC5/AC6): /admin/config must keep the FULL ──
+  # two-selector contract the bootstrap wizard has. The admin-http-refactor
+  # (ConfigLive → ConfigController) regressed the page: it dropped the
+  # admin_oidc_refresh_mode <select>, renamed the matrix <select> to "refresh_mode",
+  # and lost the Dex caveat hint. The e2e admin-config scenario in
+  # oidc-refresh-mode.feature asserts the wizard contract on /admin/config, so it
+  # broke. These tests pin the restored contract.
+
+  test "REGRESSION — GET /admin/config renders BOTH refresh-mode selects with offline/online options" do
+    conn = build_admin_conn(:get, "/admin/config") |> endpoint_call()
+
+    assert conn.status == 200
+    body = conn.resp_body
+
+    # Both named selects must exist (e2e selects by name).
+    assert body =~ ~s(name="matrix_oidc_refresh_mode"),
+           "Matrix refresh-mode <select> missing from /admin/config"
+    assert body =~ ~s(name="admin_oidc_refresh_mode"),
+           "Admin refresh-mode <select> missing from /admin/config"
+
+    # Each must offer offline + online options.
+    assert body =~ ~s(value="offline")
+    assert body =~ ~s(value="online")
+
+    # Dex caveat hint must be present (AC6).
+    assert body =~ ~r/Dex issues a refresh token only (when|with).*offline_access/i,
+           "Dex offline_access caveat hint missing from /admin/config"
+  end
+
+  test "REGRESSION — POST /admin/config/refresh-mode persists admin_oidc_refresh_mode" do
+    # AC5: the admin client refresh mode must be changeable at runtime via the
+    # config page, not only matrix. Pin that the admin key is written.
+    test_pid = self()
+
+    Application.put_env(:nebu_http, :admin_config_refresh_mode_writer, fn changes ->
+      send(test_pid, {:refresh_mode_changes, changes})
+      :ok
+    end)
+
+    on_exit(fn -> Application.delete_env(:nebu_http, :admin_config_refresh_mode_writer) end)
+
+    conn =
+      build_admin_conn(:post, "/admin/config/refresh-mode")
+      |> put_req_header("content-type", "application/x-www-form-urlencoded")
+      |> Map.put(:body_params, %{
+        "matrix_oidc_refresh_mode" => "offline",
+        "admin_oidc_refresh_mode" => "offline"
+      })
+      |> endpoint_call()
+
+    assert conn.status == 302
+
+    assert_received {:refresh_mode_changes, changes}
+    assert changes["admin_oidc_refresh_mode"] == "offline"
+    assert changes["matrix_oidc_refresh_mode"] == "offline"
+  end
+
+  test "REGRESSION — POST /admin/config/refresh-mode rejects garbage values per key" do
+    test_pid = self()
+
+    Application.put_env(:nebu_http, :admin_config_refresh_mode_writer, fn changes ->
+      send(test_pid, {:refresh_mode_changes, changes})
+      :ok
+    end)
+
+    on_exit(fn -> Application.delete_env(:nebu_http, :admin_config_refresh_mode_writer) end)
+
+    conn =
+      build_admin_conn(:post, "/admin/config/refresh-mode")
+      |> put_req_header("content-type", "application/x-www-form-urlencoded")
+      |> Map.put(:body_params, %{
+        "matrix_oidc_refresh_mode" => "garbage",
+        "admin_oidc_refresh_mode" => "online"
+      })
+      |> endpoint_call()
+
+    # No valid change to matrix; admin is valid. The writer, if called, must NOT
+    # carry the garbage value. Re-render (200) or redirect (302) are both fine as
+    # long as garbage never reaches the writer.
+    receive do
+      {:refresh_mode_changes, changes} ->
+        refute Map.has_key?(changes, "matrix_oidc_refresh_mode"),
+               "garbage matrix value must not be persisted"
+        assert changes["admin_oidc_refresh_mode"] == "online"
+    after
+      0 -> :ok
+    end
+
+    assert conn.status in [200, 302]
   end
 
   # ── MAJOR-2 / AC12: Converted paths are not served as live/3 routes ────────────

@@ -112,8 +112,8 @@ defmodule Nebu.Matrix.SsoLoginBootstrapCredentialsTest do
     Application.put_env(:nebu_http, :admin_secret_at_rest, @at_rest_key)
     encrypted_secret = Nebu.Admin.BootstrapLive.encrypt_secret(@client_secret)
 
-    Application.put_env(:nebu_http, :oidc_issuer, @issuer)
-    Application.put_env(:nebu_http, :oidc_audience, @audience)
+    # oidc-bootstrap-only-config (ADR-022): issuer/audience via OidcConfig, not env.
+    Nebu.Web.OidcTestSupport.configure(@issuer, @audience)
     Application.put_env(:nebu_http, :oidc_jwks, [pub_jwk])
 
     Application.put_env(:nebu_http, :oidc_metadata_override, %{
@@ -142,15 +142,13 @@ defmodule Nebu.Matrix.SsoLoginBootstrapCredentialsTest do
     end)
 
     on_exit(fn ->
+      Nebu.Web.OidcTestSupport.clear()
+
       for k <- [
-            :oidc_issuer,
-            :oidc_audience,
             :oidc_jwks,
             :oidc_metadata_override,
             :sso_bootstrap_reader,
             :matrix_sso_token_override,
-            :matrix_oidc_client_id,
-            :matrix_oidc_client_secret,
             :admin_secret_at_rest
           ] do
         Application.delete_env(:nebu_http, k)
@@ -246,147 +244,15 @@ defmodule Nebu.Matrix.SsoLoginBootstrapCredentialsTest do
   end
 
   # ════════════════════════════════════════════════════════════════════════════
-  # AC3 — Env path still takes priority over Bootstrap DB path
+  # AC3 (env priority) + AC4 (admin-env fallback) — REMOVED (ADR-022)
+  #
+  # oidc-bootstrap-only-config (ADR-022) removed the NEBU_OIDC_CLIENT_ID env path and
+  # the separate admin-client fallback: a SINGLE wizard-configured client (resolved
+  # solely from server_config) now serves both Matrix Bearer validation and admin
+  # login. There is no env-vs-DB priority chain and no admin-client last resort, so
+  # the former AC3 (env takes priority) and AC4 (admin-env fallback) tests asserted
+  # removed behaviour and were deleted.
   # ════════════════════════════════════════════════════════════════════════════
-
-  describe "AC3 — NEBU_OIDC_CLIENT_ID env takes priority over Bootstrap DB" do
-    test "when matrix_oidc_client_id env is set, DB credentials are NOT used" do
-      {_priv, pub_jwk} = gen_rsa_keypair()
-      spy_key = make_ref()
-      _encrypted = setup_bootstrap_oidc(pub_jwk, spy_key)
-
-      # Override: set env credentials (different from DB values).
-      env_client_id = "env-matrix-client"
-      env_secret = "env-secret-value"
-      Application.put_env(:nebu_http, :matrix_oidc_client_id, env_client_id)
-      Application.put_env(:nebu_http, :matrix_oidc_client_secret, env_secret)
-
-      # Initiate + capture credentials via 1-arity override.
-      init =
-        call(
-          :get,
-          "/_matrix/client/v3/login/sso/redirect?redirectUrl=" <>
-            URI.encode_www_form("http://localhost:7070")
-        )
-
-      assert init.status == 302
-      params = init |> location() |> URI.parse() |> Map.get(:query) |> URI.decode_query()
-      state = params["state"]
-      # nonce not needed — we don't sign a token in this test (credential priority only)
-
-      # Don't need to sign a real token — we're testing credential priority, not
-      # the full flow. Just inject a spy override to capture what was resolved.
-      Application.put_env(:nebu_http, :matrix_sso_token_override, fn cfg ->
-        Process.put(spy_key, %{
-          client_id: cfg.client_id,
-          client_secret: cfg.client_secret
-        })
-
-        # Return error so the callback fails (we only care about credential resolution).
-        {:error, :test_only}
-      end)
-
-      _cb =
-        call(
-          :get,
-          "/_matrix/client/v3/login/sso/redirect/oidc?code=kc-code&state=" <>
-            URI.encode_www_form(state)
-        )
-
-      captured = Process.get(spy_key)
-      assert captured != nil
-
-      # Must use env credentials, not Bootstrap DB credentials.
-      assert captured.client_id == env_client_id,
-             "env credentials must take priority; got client_id=#{inspect(captured.client_id)}"
-
-      assert captured.client_secret == env_secret,
-             "env credentials must take priority; got client_secret=#{inspect(captured.client_secret)}"
-
-      # Must NOT use Bootstrap DB values.
-      refute captured.client_id == @client_id,
-             "Bootstrap DB client_id must not be used when env is set"
-    end
-  end
-
-  # ════════════════════════════════════════════════════════════════════════════
-  # AC4 — Admin-env fallback when both env-path and Bootstrap DB are absent
-  # ════════════════════════════════════════════════════════════════════════════
-
-  describe "AC4 — admin-env credentials used when NEBU_OIDC_CLIENT_ID and Bootstrap DB are absent" do
-    test "admin_oidc_client_id/secret are used as last resort" do
-      admin_client_id = "admin-fallback-client"
-      admin_secret = "admin-fallback-secret"
-
-      # Neither matrix_oidc_client_id env NOR sso_bootstrap_reader (= no DB cred).
-      # Admin cred is the last fallback in resolve_client_credentials/0.
-      Application.put_env(:nebu_http, :oidc_issuer, @issuer)
-      Application.put_env(:nebu_http, :oidc_audience, @audience)
-      Application.put_env(:nebu_http, :oidc_jwks, [%{}])
-      Application.put_env(:nebu_http, :admin_oidc_client_id, admin_client_id)
-      Application.put_env(:nebu_http, :admin_oidc_client_secret, admin_secret)
-
-      Application.put_env(:nebu_http, :oidc_metadata_override, %{
-        "issuer" => @issuer,
-        "authorization_endpoint" => @authorize,
-        "token_endpoint" => @token_endpoint,
-        "jwks_uri" => @issuer <> "/jwks"
-      })
-
-      spy_key = make_ref()
-
-      Application.put_env(:nebu_http, :matrix_sso_token_override, fn cfg ->
-        Process.put(spy_key, %{
-          client_id: cfg.client_id,
-          client_secret: cfg.client_secret
-        })
-
-        {:error, :test_only}
-      end)
-
-      on_exit(fn ->
-        for k <- [
-              :oidc_issuer,
-              :oidc_audience,
-              :oidc_jwks,
-              :oidc_metadata_override,
-              :admin_oidc_client_id,
-              :admin_oidc_client_secret,
-              :matrix_sso_token_override
-            ] do
-          Application.delete_env(:nebu_http, k)
-        end
-      end)
-
-      # Initiate to get a valid state entry in the store.
-      init =
-        call(
-          :get,
-          "/_matrix/client/v3/login/sso/redirect?redirectUrl=" <>
-            URI.encode_www_form("http://localhost:7070")
-        )
-
-      assert init.status == 302
-      state = init |> location() |> URI.parse() |> Map.get(:query) |> URI.decode_query() |> Map.get("state")
-
-      # Trigger callback.
-      _cb =
-        call(
-          :get,
-          "/_matrix/client/v3/login/sso/redirect/oidc?code=code&state=" <>
-            URI.encode_www_form(state)
-        )
-
-      captured = Process.get(spy_key)
-      assert captured != nil, "exchange override was never called"
-
-      assert captured.client_id == admin_client_id,
-             "expected admin fallback client_id, got: #{inspect(captured.client_id)}"
-
-      assert captured.client_secret == admin_secret,
-             "expected admin fallback client_secret, got: #{inspect(captured.client_secret)}"
-    end
-  end
 
   # ════════════════════════════════════════════════════════════════════════════
   # Regression guard — the wrong key name must not silently return a value

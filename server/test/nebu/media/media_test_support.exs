@@ -68,15 +68,15 @@ defmodule Nebu.Web.MediaTestSupport do
     priv_jwk = Map.put(priv_map, "kid", @kid)
 
     Application.put_env(:nebu_http, :server_name, @server_name)
-    Application.put_env(:nebu_http, :oidc_issuer, @issuer)
-    Application.put_env(:nebu_http, :oidc_audience, @audience)
     Application.put_env(:nebu_http, :oidc_jwks, [pub_jwk])
+    # oidc-bootstrap-only-config (ADR-022): issuer/audience resolve from server_config
+    # (OidcConfig DB seam in tests), not from env. OidcPlug reads them via OidcConfig.get/0.
+    Nebu.Web.OidcTestSupport.configure(@issuer, @audience)
 
     ExUnit.Callbacks.on_exit(fn ->
       Application.delete_env(:nebu_http, :server_name)
-      Application.delete_env(:nebu_http, :oidc_issuer)
-      Application.delete_env(:nebu_http, :oidc_audience)
       Application.delete_env(:nebu_http, :oidc_jwks)
+      Nebu.Web.OidcTestSupport.clear()
     end)
 
     priv_jwk

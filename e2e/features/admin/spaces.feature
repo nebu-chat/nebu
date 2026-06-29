@@ -3,13 +3,16 @@ Feature: Admin UI — Spaces management
   I want to create, edit, manage child rooms of, and flag-as-auto-join Spaces
   So that I can organise the instance into Slack-style workspaces from the admin panel
 
-  # Spaces S5 (epic: spaces-elixir) — ATDD, written FIRST (failing).
+  # Spaces S5 (epic: spaces-elixir).
   # Mirrors the rooms admin / auto-join-rooms E2E (playwright-bdd + Cucumber).
   # Step definitions: e2e/step-definitions/admin/spaces.steps.ts
   #
-  # SpacesLive is a LiveView master/detail:
-  #   /admin/spaces            — list + "Create Space" form + per-space auto-join toggle
+  # CURRENT contract (admin-http-refactor / AC12): SpacesController is a dead HTTP
+  # controller — no LiveView socket, no in-place diff. Forms PRG-redirect:
+  #   /admin/spaces            — list (rows carry data-space-id) + "Create space" form;
+  #                              create redirects to the new space DETAIL page.
   #   /admin/spaces/:space_id  — name/topic edit, child add/remove, auto-join toggle
+  #                              (a form-POST <button role="switch">) — each PRG-redirects.
 
   Background:
     Given the Nebu stack is running

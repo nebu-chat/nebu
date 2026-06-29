@@ -4,14 +4,16 @@
   their dedicated pages.
 </p>
 
-<%!-- OIDC refresh mode: POST form (no phx-change) --%>
+<%!-- OIDC refresh mode: POST form. Two native <select>s (Matrix + admin),
+      mirroring the bootstrap wizard contract (story oidc-refresh-mode-config,
+      AC5/AC6). Operators change either client's mode at runtime — no redeploy. --%>
 <form id="oidc-refresh-mode-form" method="post" action="/admin/config/refresh-mode" class="mb-6">
   <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
   <h2 class="text-heading font-semibold mb-2">OIDC refresh mode</h2>
 
   <label class="form-control mt-2">
     <span class="label-text">Matrix client refresh mode</span>
-    <select name="refresh_mode" aria-label="Matrix refresh mode" class="select select-bordered">
+    <select name="matrix_oidc_refresh_mode" aria-label="Matrix refresh mode" class="select select-bordered">
       <option value="offline" selected={refresh_mode(@config, "matrix_oidc_refresh_mode") == "offline"}>
         offline (offline_access)
       </option>
@@ -21,9 +23,23 @@
     </select>
   </label>
 
+  <label class="form-control mt-2">
+    <span class="label-text">Admin client refresh mode</span>
+    <select name="admin_oidc_refresh_mode" aria-label="Admin refresh mode" class="select select-bordered">
+      <option value="offline" selected={refresh_mode(@config, "admin_oidc_refresh_mode") == "offline"}>
+        offline (offline_access)
+      </option>
+      <option value="online" selected={refresh_mode(@config, "admin_oidc_refresh_mode") == "online"}>
+        online
+      </option>
+    </select>
+  </label>
+
   <p class="text-sm text-text-secondary mt-2">
     <strong>offline</strong>: long-lived offline refresh token (survives IdP logout).
     <strong>online</strong>: session-bound refresh token (dies on IdP SSO logout).
+    <strong>Dex issues a refresh token only when <code>offline_access</code> is requested</strong>
+    — so in online mode refresh is disabled on Dex (use offline for Dex).
   </p>
 
   <button type="submit" class="btn btn-primary mt-3">Save refresh mode</button>

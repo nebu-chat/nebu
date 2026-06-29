@@ -1,24 +1,24 @@
-Feature: Admin UI (Phoenix LiveView) — Auto-Join Toggle (live DOM-diff)
+Feature: Admin UI — Auto-Join Toggle (controller form POST)
   As an authenticated admin operator
   I want to flip a room's auto-join state with a single click
-  So that the change applies instantly (LiveView DOM-diff) and is persisted
+  So that the change is persisted (rooms.is_auto_join)
 
-  # ATDD — Written FIRST (before implementation code).
-  # Story: admin-ui-migration (epic: full-elixir-stack)
-  # AC2: admin toggles auto-join → reflected immediately via LiveView DOM-diff
-  #      (no full page reload) AND persisted to the database (rooms.is_auto_join).
+  # Story: admin-ui-migration (epic: full-elixir-stack), kept current for admin-http-refactor.
   #
-  # Why this FAILS now (RED):
-  #   No LiveView handle_event("toggle_auto_join", ...) exists. The Go-template UI
-  #   used a settings <form> with a Save button (POST + redirect, full reload) — the
-  #   LiveView in-place DOM-diff behaviour (no navigation) is a NEW requirement that
-  #   the Go backend cannot satisfy.
+  # CURRENT contract (RoomsLive was CONVERTED to RoomsController):
+  #   The auto-join toggle is rendered ON THE ROOMS LIST (/admin/rooms) as a per-row
+  #   <form method="post" action="/admin/rooms/:room_id/auto-join"> whose submit control is a
+  #   <button role="switch" aria-label="Auto-join <name>" aria-checked=…> ([data-role="auto-join-toggle"]).
+  #   Submitting flips rooms.is_auto_join and PRG-redirects back to /admin/rooms with the new
+  #   state rendered server-side. There is NO LiveView socket and NO in-place DOM-diff — a full
+  #   page render is the correct, expected behaviour, so the old "no full page reload" sentinel
+  #   is removed. Persistence is still verified by reloading the list (no DB shortcut).
   #
   # Persistence is verified through a real page reload (no DB-seeding / raw-SQL shortcut),
   # consistent with the existing auto-join-rooms.feature and CLAUDE.md E2E rules.
   #
   # Test framework: playwright-bdd + Cucumber (admin-ui project).
-  # Step definitions: e2e/step-definitions/admin/admin-ui-liveview.steps.ts
+  # Step definitions: e2e/step-definitions/admin/auto-join-rooms.steps.ts (reused)
 
   Background:
     Given the Nebu stack is running
@@ -28,8 +28,8 @@ Feature: Admin UI (Phoenix LiveView) — Auto-Join Toggle (live DOM-diff)
     And room "general" has auto-join disabled
 
   @admin-ui-migration @ac2-live-toggle
-  Scenario: [AC2] Toggling auto-join updates in place without a full reload and persists
-    When the operator navigates to the LiveView detail page for room "general"
-    And the operator clicks the auto-join toggle for room "general"
-    Then the auto-join toggle for room "general" shows as enabled without a full page reload
-    And re-loading the LiveView room detail page still shows the auto-join toggle as enabled
+  Scenario: [AC2] Toggling auto-join flips the state and persists across a reload
+    When the operator navigates to the detail page for room "general"
+    And the operator enables the auto-join toggle
+    Then the page shows the auto-join toggle as enabled
+    And re-loading the room detail page still shows the auto-join toggle as enabled

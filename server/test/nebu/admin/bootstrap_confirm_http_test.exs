@@ -86,9 +86,6 @@ defmodule Nebu.Admin.BootstrapConfirmHttpTest do
   end
 
   setup do
-    Application.put_env(:nebu_http, :oidc_issuer, @issuer)
-    Application.put_env(:nebu_http, :admin_oidc_client_id, @client_id)
-    Application.put_env(:nebu_http, :admin_oidc_redirect_uri, "http://localhost:8008/admin/callback")
     Application.put_env(:nebu_http, :admin_secret_at_rest, @at_rest_key)
 
     Application.put_env(:nebu_http, :oidc_metadata_override, %{
@@ -99,9 +96,6 @@ defmodule Nebu.Admin.BootstrapConfirmHttpTest do
 
     on_exit(fn ->
       for k <- [
-            :oidc_issuer,
-            :admin_oidc_client_id,
-            :admin_oidc_redirect_uri,
             :admin_secret_at_rest,
             :oidc_metadata_override,
             :admin_bootstrap_store,

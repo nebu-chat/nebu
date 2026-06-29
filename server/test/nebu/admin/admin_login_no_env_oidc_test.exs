@@ -50,23 +50,23 @@ defmodule Nebu.Admin.AdminLoginNoEnvOidcTest do
   @client_id "nebu-admin-from-db"
 
   setup do
-    Application.delete_env(:nebu_http, :oidc_issuer)
-    Application.delete_env(:nebu_http, :admin_oidc_client_id)
-    Application.delete_env(:nebu_http, :admin_oidc_client_secret)
+    # oidc-bootstrap-only-config (ADR-022): start from a clean slate. issuer/audience
+    # resolve via OidcConfig (the :oidc_config_source seam), the single admin OIDC
+    # client via :admin_oidc_config_reader, redirect_uri derived from :server_name +
+    # :admin_session_secure. No env config path remains.
     Application.delete_env(:nebu_http, :admin_oidc_config_reader)
     Application.delete_env(:nebu_http, :oidc_config_source)
     Application.delete_env(:nebu_http, :oidc_metadata_override)
-    Application.put_env(:nebu_http, :admin_oidc_redirect_uri, "http://localhost:8008/admin/callback")
+    Application.put_env(:nebu_http, :server_name, "localhost")
+    Application.put_env(:nebu_http, :admin_session_secure, false)
 
     on_exit(fn ->
       for k <- [
-            :oidc_issuer,
-            :admin_oidc_client_id,
-            :admin_oidc_client_secret,
             :admin_oidc_config_reader,
             :oidc_config_source,
             :oidc_metadata_override,
-            :admin_oidc_redirect_uri,
+            :server_name,
+            :admin_session_secure,
             :admin_oidc_refresh_mode_reader
           ] do
         Application.delete_env(:nebu_http, k)
@@ -102,17 +102,12 @@ defmodule Nebu.Admin.AdminLoginNoEnvOidcTest do
 
   describe "AC1 — admin login reads OIDC config from server_config when env vars absent" do
     test "login_start redirects to IdP (302) when client_id comes from server_config DB" do
-      # No env vars — OIDC config must come entirely from DB.
-      Application.delete_env(:nebu_http, :oidc_issuer)
-      Application.delete_env(:nebu_http, :admin_oidc_client_id)
-      Application.delete_env(:nebu_http, :admin_oidc_client_secret)
-
       # Inject issuer via OidcConfig seam (DB path).
       Application.put_env(:nebu_http, :oidc_config_source, fn ->
         %{issuer: @issuer, audience: @client_id}
       end)
 
-      # Inject client_id / client_secret via the NEW admin_oidc_config_reader seam.
+      # Inject client_id / client_secret via the admin_oidc_config_reader seam.
       Application.put_env(:nebu_http, :admin_oidc_config_reader, fn
         "oidc_client_id" -> @client_id
         "oidc_client_secret" -> ""
@@ -121,7 +116,6 @@ defmodule Nebu.Admin.AdminLoginNoEnvOidcTest do
 
       conn = start_login()
 
-      # WILL FAIL until the DB fallback is wired into oidc_config(_mode).
       refute conn.status == 503,
              "login_start must NOT return 503 when config is in server_config DB; got: #{conn.resp_body}"
 
@@ -137,10 +131,12 @@ defmodule Nebu.Admin.AdminLoginNoEnvOidcTest do
              "Redirect must include the DB-sourced client_id"
     end
 
-    test "login_start uses DB client_id even when issuer comes from env var" do
-      # Issuer from env, client_id from DB — mixed scenario.
-      Application.put_env(:nebu_http, :oidc_issuer, @issuer)
-      Application.delete_env(:nebu_http, :admin_oidc_client_id)
+    test "login_start resolves both issuer and client_id from server_config DB" do
+      # oidc-bootstrap-only-config (ADR-022): issuer AND client both come from
+      # server_config — issuer via the OidcConfig seam, client via the reader seam.
+      Application.put_env(:nebu_http, :oidc_config_source, fn ->
+        %{issuer: @issuer, audience: @client_id}
+      end)
 
       Application.put_env(:nebu_http, :admin_oidc_config_reader, fn
         "oidc_client_id" -> @client_id
@@ -150,54 +146,20 @@ defmodule Nebu.Admin.AdminLoginNoEnvOidcTest do
       conn = start_login()
 
       assert conn.status == 302,
-             "login_start must redirect when issuer is in env and client_id in DB; got: #{conn.status} #{conn.resp_body}"
+             "login_start must redirect when issuer and client_id both come from DB; got: #{conn.status} #{conn.resp_body}"
 
       [location] = get_resp_header(conn, "location")
       assert String.contains?(location, "client_id=#{@client_id}")
     end
   end
 
-  # ── AC2: Env-var deployments unaffected (regression guard) ───────────────────
+  # ── AC2 (env-var deployments) — REMOVED (ADR-022) ────────────────────────────
   #
-  # These tests document behavior that MUST NOT REGRESS after the DB-fallback is
-  # added. They should pass both before and after the fix.
-
-  describe "AC2 — env-var deployments are unaffected (regression)" do
-    test "login_start redirects to IdP when all OIDC config comes from env vars" do
-      Application.put_env(:nebu_http, :oidc_issuer, @issuer)
-      Application.put_env(:nebu_http, :admin_oidc_client_id, "env-client-id")
-      Application.put_env(:nebu_http, :admin_oidc_client_secret, "env-secret")
-
-      conn = start_login()
-
-      assert conn.status == 302,
-             "Regression: env-var deployments must still produce a 302; got: #{conn.status}"
-
-      [location] = get_resp_header(conn, "location")
-      assert String.contains?(location, "client_id=env-client-id")
-    end
-
-    test "env-var client_id takes priority over DB client_id when both are set" do
-      Application.put_env(:nebu_http, :oidc_issuer, @issuer)
-      Application.put_env(:nebu_http, :admin_oidc_client_id, "env-wins")
-
-      Application.put_env(:nebu_http, :admin_oidc_config_reader, fn
-        "oidc_client_id" -> "db-loses"
-        _ -> nil
-      end)
-
-      conn = start_login()
-
-      assert conn.status == 302
-      [location] = get_resp_header(conn, "location")
-
-      assert String.contains?(location, "client_id=env-wins"),
-             "Env var must take priority over DB value; location: #{location}"
-
-      refute String.contains?(location, "db-loses"),
-             "DB value must not override env var when env var is set"
-    end
-  end
+  # oidc-bootstrap-only-config (ADR-022) removed the OIDC env-var config path
+  # entirely: issuer/audience resolve solely via OidcConfig and the single admin
+  # client via server_config. There is no env path and no env-vs-DB priority chain,
+  # so the former AC2 "env-var deployments unaffected" tests asserted removed
+  # behaviour and were deleted.
 
   # ── AC3: Fail-closed when neither env vars nor DB have values ────────────────
   #

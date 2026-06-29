@@ -82,8 +82,9 @@ paths = [
 
   # (a) Matches ExUnit test fixture files inside Elixir application test dirs.
   # (b) These are mock secrets used only within ExUnit sandboxes.
-  # (c) core/apps/*/test/**/*.exs
+  # (c) core/apps/*/test/**/*.exs (legacy path) and server/test/**/*.exs (current single-app layout)
   '''core/apps/.*/test/.*\.exs$''',
+  '''server/test/.*\.exs$''',
 
   # (a) Generic Go testdata directories — matches any testdata sub-path.
   # (b) Testdata directories contain static fixtures, not real credentials.

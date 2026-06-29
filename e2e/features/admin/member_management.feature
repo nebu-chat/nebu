@@ -3,14 +3,21 @@ Feature: Admin UI — Add and remove room members
   I want to add and remove members of a room from the Admin UI
   So that I can manage room membership without opening a Matrix client
 
-  # Story rm4-admin-member-management (epic: room-management-elixir) — ATDD, written FIRST.
-  # Mirrors the create-room / spaces admin E2E (playwright-bdd + Cucumber).
+  # Story rm4-admin-member-management (epic: room-management-elixir).
+  # Rewritten to the CURRENT controller contract (admin-http-refactor:
+  # RoomsLive → RoomsController). The room detail page is plain server-rendered HTML:
+  #   * "Create room" on /admin/rooms is an <a href="/admin/rooms/new"> link
+  #     ([data-role="open-create-room"]) — not a modal; create POSTs to /admin/rooms
+  #     and PRG-redirects to the detail page /admin/rooms/:room_id.
+  #   * The detail page ([data-page="room-detail"]) has a Members section
+  #     [data-section="members"]:
+  #       - an "Add user" form  [data-form="add-member"] (plain <input name="user_id">
+  #         + Add button) → POST /admin/rooms/:room_id/members, PRG redirect
+  #       - one row per member [data-role="member-row"][data-user-id=…]
+  #       - a per-row Remove control: a POST+_method=DELETE form [data-form="remove-member"]
+  #         with a <button data-role="remove-member" data-user-id=…> (NO JS confirm dialog;
+  #         absent for the logged-in admin's own row).
   # Step definitions: e2e/step-definitions/admin/member-management.steps.ts
-  #
-  # The room detail panel (/admin/rooms/:room_id) has a Members section:
-  #   * an "Add user" form  [data-form="add-member"] (input name="user_id" + Add button)
-  #   * one row per current member [data-role="member-row"][data-user-id=...]
-  #   * a per-row Remove control [data-role="remove-member"] (absent for the admin's own row)
 
   Background:
     Given the Nebu stack is running

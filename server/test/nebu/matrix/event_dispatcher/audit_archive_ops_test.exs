@@ -124,10 +124,12 @@ defmodule Nebu.Matrix.EventDispatcher.AuditArchiveOpsTest do
   #
   # Minimal Nebu.Admin.DB fake.
   # archive_room_atomic/1 is called by archive_room/2 before the audit log.
-  # unarchive_room/2 does NOT call admin_db — it only calls start_room/1.
+  # unarchive_room_atomic/1 is called by unarchive_room/2 before the audit log
+  # (full-elixir-stack contract fix — Core now owns the rooms.status='active' write).
 
   defmodule FakeAdminDB do
     def archive_room_atomic(_room_id), do: :ok
+    def unarchive_room_atomic(_room_id), do: :ok
     def list_users(_limit, _cursor, _search), do: {[], ""}
     def get_user(_user_id), do: {:error, :not_found}
     def set_is_active(_user_id, _is_active), do: :ok

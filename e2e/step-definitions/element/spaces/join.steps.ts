@@ -196,34 +196,62 @@ When(
 /**
  * "Then the room {string} appears in alex's room list"
  *
- * Asserts the room tile is visible in the Element Web sidebar / room list.
- * Uses the actual (suffixed) name stored in roomByName.
+ * Confirms alex has successfully JOINED the restricted child room (AC3a:
+ * "alex successfully joins — room appears in sidebar"). For a Space-child room
+ * linked via m.space.child, "appears in alex's room list" means the room is
+ * reachable and shows the JOINED room view (composer / message timeline), NOT a
+ * "you are not in this room" preview and NOT an alias "does not exist" page.
+ *
+ * Why NOT a flat-list aria-label tile + page.reload():
+ *   1. A restricted child room created with a `name` only (no canonical alias)
+ *      cannot be resolved by alias. A destructive page.reload() makes Element
+ *      re-resolve the route and land on "#<name>:localhost does not exist"
+ *      (server returns 404 on GET /directory/room/#alias) — breaking the view.
+ *   2. A child room linked via m.space.child is shown NESTED under the Space in
+ *      Element, not necessarily as a top-level tile in the flat Home room list,
+ *      so `[aria-label="Open room {name}"]` in the Home list is unreliable.
+ *
+ * Deterministic approach: navigate by roomId (never alias), confirm the joined
+ * room view is present and the "does not exist" / join-preview state is absent.
  */
 Then(
   'the room {string} appears in alex\'s room list',
   async ({ page }: { page: Page }, roomName: string) => {
     const entry = roomByName.get(roomName);
-    const actualName = entry?.actualName ?? roomName;
+    if (!entry) throw new Error(`Room "${roomName}" not set up — run the Given step first.`);
 
-    // Element Web 1.12.15+: room tiles use aria-label="Open room {name}"
-    const byAriaLabel = page.locator(`[aria-label="Open room ${actualName}"]`);
-    // Reload-retry: newly joined rooms may not appear in the initial sync immediately.
-    let found = await byAriaLabel.first().waitFor({ state: 'attached', timeout: 20_000 })
-      .then(() => true).catch(() => false);
+    // Navigate by roomId (NOT alias) so Element opens the actual joined room
+    // rather than attempting to resolve a non-existent canonical alias.
+    await page.goto(`${ELEMENT_URL}/#/room/${encodeURIComponent(entry.roomId)}`);
+    await dismissKeySetupDialog(page);
 
-    if (!found) {
-      await page.reload();
-      await dismissKeySetupDialog(page);
-      await page.locator('.mx_LeftPanel').waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {});
-      found = await byAriaLabel.first().waitFor({ state: 'attached', timeout: 20_000 })
-        .then(() => true).catch(() => false);
-    }
+    // The joined room view: message composer (only rendered for joined members)
+    // or the room body timeline. If alex were NOT a member, Element would show a
+    // join-preview bar instead of the composer.
+    const joinedRoomView = page
+      .locator('.mx_BasicMessageComposer_input, .mx_MessageComposer')
+      .first();
+
+    const joined = await joinedRoomView
+      .waitFor({ state: 'visible', timeout: 30_000 })
+      .then(() => true)
+      .catch(() => false);
+
+    // Guard: the alias "does not exist" error page must NOT be showing — that is
+    // the symptom of the old broken alias-resolution path.
+    const roomMissing = await page
+      .getByText(/does not exist/i)
+      .first()
+      .isVisible({ timeout: 1_000 })
+      .catch(() => false);
 
     expect(
-      found,
-      `Room "${actualName}" should appear in the sidebar after a restricted join. ` +
-      `If this fails for a non-member (marie), check that S4 restricted join is enforced. ` +
-      `For a Space member (alex), this should always succeed once the step wiring is committed.`,
+      joined && !roomMissing,
+      `Restricted child room "${entry.actualName}" should be JOINED and open for alex ` +
+      `(MSC3083 member path). Expected the joined room view (composer/timeline) for ` +
+      `roomId ${entry.roomId}. joinedView=${joined} roomMissingError=${roomMissing}. ` +
+      `If joined=false for a Space MEMBER, check S4 restricted-join enforcement (server). ` +
+      `If roomMissingError=true, the test navigated by a non-existent alias instead of roomId.`,
     ).toBe(true);
   },
 );

@@ -78,16 +78,30 @@ export async function doBootstrapAdmin(page: Page): Promise<void> {
  * Called when the browser is already at /admin/bootstrap.
  */
 async function runBootstrapWizard(page: Page): Promise<void> {
+  // The bootstrap wizard is a Phoenix LiveView and every step transition is a
+  // phx-submit event over the LiveView channel. The WebSocket upgrade does not
+  // succeed against the Bandit listener, so LiveView falls back to the longpoll
+  // transport, which only reaches `phx-connected` after a few seconds. Interacting
+  // before the channel is connected silently drops the event (the form never
+  // advances and no error is shown). Wait for the connected marker first.
+  await page.locator('.phx-connected').first().waitFor({ state: 'attached', timeout: 20_000 });
+
   // Step 1: Instance Name
   await page.getByLabel(/instance name/i).fill('test-nebu');
   await page.getByRole('button', { name: /^next$/i }).click();
 
   // Step 2: OIDC configuration (page stays at /admin/bootstrap, re-renders step 2)
   await page.waitForURL(/\/admin\/bootstrap/, { timeout: 10_000 });
+  // oidc-bootstrap-only-config (ADR-022): OIDC is configured EXCLUSIVELY via this wizard
+  // — there is no env-var config path and no env-lock mode, so every field is always
+  // editable and required. A SINGLE OIDC client (Dex `nebu-gateway` / `nebu-dev-secret`,
+  // all redirect URIs registered) serves both Matrix Bearer validation and admin login.
   await page.getByLabel(/oidc issuer url/i).fill(DEX_ISSUER_URL);
-  await page.getByLabel(/oidc client id/i).fill('nebu-admin');
+  await page.getByLabel(/oidc client id/i).fill('nebu-gateway');
+  await page.getByLabel(/oidc audience/i).fill('nebu-gateway');
+  await page.getByLabel(/jwks uri/i).fill(`${DEX_ISSUER_URL}/keys`);
   await page.getByLabel(/oidc client secret/i).fill(
-    process.env.NEBU_OIDC_CLIENT_SECRET ?? 'nebu-admin-secret'
+    process.env.NEBU_OIDC_CLIENT_SECRET ?? 'nebu-dev-secret'
   );
   // Step 2 → Step 3 (Claim Mapping): click "Next" to advance to the claim mapping step.
   // Story 11-10 added Step 3; "Connect with OIDC" is now on Step 3, not Step 2.
