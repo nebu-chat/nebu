@@ -8,11 +8,12 @@ Accepted
 
 Nebu is positioned as a sovereign, self-hosted enterprise chat server. A core promise is digital sovereignty: operators choose their own infrastructure - whether public cloud, European cloud provider, or on-premises data center.
 
-To make this promise deliverable, Nebu requires official deployment templates covering at least three operational scenarios:
+To make this promise deliverable, Nebu requires official deployment templates covering at least four operational scenarios:
 
 1. **AWS** - the most widely used public cloud; many enterprises already run workloads there and want to integrate Nebu seamlessly.
 2. **Stackit** - German GDPR-native cloud (STACKIT, Schwarz Group); the primary option for operators with elevated data protection requirements or public administration contexts.
-3. **Kubernetes / Helm** - a provider-agnostic path for on-premises operation (K3s, RKE2, OpenShift) or any managed Kubernetes offering.
+3. **UpCloud** - European cloud provider with a Terraform-native service structure (VMs, managed PostgreSQL, managed object storage, load balancer); mirrors the StackIT deployment model and targets operators who prefer UpCloud's infrastructure or pricing.
+4. **Kubernetes / Helm** - a provider-agnostic path for on-premises operation (K3s, RKE2, OpenShift) or any managed Kubernetes offering.
 
 ### Constraints
 
@@ -77,6 +78,28 @@ The IaC module provisions:
 - Floating IP + Stackit DNS record
 - TLS certificate on the ALB (Let's Encrypt via `acme` provider or bring-your-own certificate)
 
+#### UpCloud - VMs with Docker Compose + UpCloud Load Balancer
+
+UpCloud follows the same VM + Docker Compose operational model as StackIT. The structure of the
+OpenTofu module is intentionally identical; only the provider-specific resources differ.
+
+The IaC module provisions:
+
+- UpCloud private network (VM ↔ LB communication)
+- 1 VM via the `upcloud` provider (official OpenTofu/Terraform provider, maintained by UpCloud)
+- `cloud-init` script shared with the StackIT example (provider-agnostic bootstrap)
+- **UpCloud Load Balancer** with TCP passthrough (`tls_mode = "none"` / `"acme"`) or HTTP mode with TLS termination (`tls_mode = "alb"`) — same three TLS strategies as StackIT
+- UpCloud Managed PostgreSQL 16 (DBaaS) with auto-generated user credentials
+- UpCloud Managed Object Storage (S3-compatible) for media — credentials fully managed by OpenTofu, no manual portal step required
+- UpCloud DNS records (optional, `dns_mode = "default"`) — CNAME to the LB's stable `dns_name`
+- VM-level firewall rules (attached directly to the server, not a reusable group)
+
+**Key differences from StackIT:**
+- No managed Loki log aggregation (`enable_logs` is not supported — logs stay on the VM journal)
+- Load balancer exposes a stable DNS name rather than a static floating IP; DNS records use CNAME
+- S3 credentials for media storage are generated entirely by OpenTofu (no separate portal credentials step)
+- Firewall rules are attached to the server resource (`upcloud_firewall_rules`), not a standalone security group
+
 #### Kubernetes / Helm
 
 Provider-agnostic deployment path for on-premises Kubernetes clusters (K3s, RKE2, OpenShift) or any managed Kubernetes offering (EKS, AKS, GKE, SKE).
@@ -102,6 +125,7 @@ deploy/
       nebu-shared/        # Shared variables, validations, locals
       nebu-aws/           # ECS Fargate + RDS + S3 + ACM
       nebu-stackit/       # VMs + Docker Compose + DBaaS + Object Storage
+      nebu-upcloud/       # VMs + Docker Compose + Managed DB + Object Storage
       nebu-k8s/           # Helm Release wrapper
     examples/
       aws/
@@ -110,8 +134,14 @@ deploy/
         README.md
       stackit/
         main.tf
+        cloud-init.tftpl  # shared with upcloud/
         terraform.tfvars.example
         README.md
+      upcloud/
+        main.tf
+        terraform.tfvars.example
+        README.md
+        # cloud-init.tftpl referenced from ../stackit/ (shared, provider-agnostic)
       k8s/
         main.tf
         values.yaml.example
@@ -134,16 +164,16 @@ The `nebu-shared` module contains no provider resources - only:
 
 ## Affected Components
 
-| Component           | AWS           | Stackit                  | K8s / Helm            |
-|---------------------|---------------|--------------------------|-----------------------|
-| API Gateway (Go)    | ECS Fargate   | Docker Compose           | Kubernetes Deployment |
-| Media Gateway (Go)  | ECS Fargate   | Docker Compose           | Kubernetes Deployment |
-| Erlang Core         | ECS Fargate   | Docker Compose           | Kubernetes Deployment |
-| PostgreSQL          | RDS           | DBaaS or VM              | External (expected)   |
-| Object Storage      | S3            | Stackit Object Storage   | External (expected)   |
-| TLS                 | ACM + ALB     | Stackit ALB + acme       | cert-manager          |
-| Networking          | VPC + ALB     | VPC + Stackit ALB        | Ingress Controller    |
-| State Backend       | S3 + DynamoDB | Stackit OS + table       | S3-compatible         |
+| Component           | AWS           | Stackit                  | UpCloud                        | K8s / Helm            |
+|---------------------|---------------|--------------------------|--------------------------------|-----------------------|
+| Nebu Server         | ECS Fargate   | Docker Compose           | Docker Compose                 | Kubernetes Deployment |
+| PostgreSQL          | RDS           | DBaaS (PostgresFlex)     | Managed PostgreSQL             | External (expected)   |
+| Object Storage      | S3            | Stackit Object Storage   | Managed Object Storage         | External (expected)   |
+| TLS                 | ACM + ALB     | Stackit ALB + acme       | UpCloud LB + acme              | cert-manager          |
+| Networking          | VPC + ALB     | VPC + Stackit ALB        | Private net + UpCloud LB       | Ingress Controller    |
+| Firewall            | Security Group| Security Group           | Firewall rules (per-server)    | NetworkPolicy         |
+| Log aggregation     | CloudWatch    | Stackit Logs (Loki)      | Not managed (VM journal only)  | External              |
+| State Backend       | S3 + DynamoDB | Stackit OS + table       | UpCloud Managed Object Storage | S3-compatible         |
 
 ## Rejected Alternatives
 
@@ -277,12 +307,13 @@ A full integration test via `kind` (Kubernetes in Docker) in CI is optional and 
 
 ### Summary
 
-| Tier                    | Scope               | When                    | Cost              |
-|-------------------------|---------------------|-------------------------|-------------------|
-| 1 - Static              | All modules + chart | Every push / PR         | Free              |
-| 2 - Integration AWS     | `nebu-aws`          | Nightly / pre-release   | ~$0.50–1 per run  |
-| 2 - Integration Stackit | `nebu-stackit`      | Nightly / pre-release   | Low               |
-| 3 - Smoke Test          | AWS + Stackit       | After Tier 2 apply      | Included in apply |
-| K8s local               | `nebu-k8s` + chart  | Manual / pre-release    | Free              |
+| Tier                     | Scope                | When                    | Cost              |
+|--------------------------|----------------------|-------------------------|-------------------|
+| 1 - Static               | All modules + chart  | Every push / PR         | Free              |
+| 2 - Integration AWS      | `nebu-aws`           | Nightly / pre-release   | ~$0.50–1 per run  |
+| 2 - Integration Stackit  | `nebu-stackit`       | Nightly / pre-release   | Low               |
+| 2 - Integration UpCloud  | `nebu-upcloud`       | Nightly / pre-release   | Low               |
+| 3 - Smoke Test           | AWS + Stackit + UC   | After Tier 2 apply      | Included in apply |
+| K8s local                | `nebu-k8s` + chart   | Manual / pre-release    | Free              |
 
 _Decision date: 2026-05-13_
