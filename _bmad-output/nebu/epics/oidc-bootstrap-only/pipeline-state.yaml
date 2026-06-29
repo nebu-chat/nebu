@@ -1,0 +1,29 @@
+# Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents.
+# Do not edit manually during an active pipeline run.
+# last_updated: 2026-06-28
+# [bugfix-oidc-bootstrap-only-e2e-regressions] 2026-06-28T10:33Z committed ✓ ca4b3cf0 (ATDD 10 tests + 1 MINOR fixed 1 cycle + Kassandra CLEAN; 934 pass EXIT=0; not pushed)
+# [bugfix-oidc-bootstrap-only-e2e-regressions] 2026-06-28T10:32Z arc42-update → 08-concepts (bootstrap local-draft verify + fetch_keys_for/2 + verify_token :issuer/:jwks overrides + corrected scope sets); no new ADR (ADR-022 unchanged)
+# [bugfix-oidc-bootstrap-only-e2e-regressions] 2026-06-28T10:30Z security-review → Kassandra CLEAN (0 CRIT/0 HIGH/0 MED/0 LOW); #1 invariant AC2 fail-closed verified; TLS parity + SSRF gate + override fail-closed confirmed
+# [bugfix-oidc-bootstrap-only-e2e-regressions] 2026-06-28T10:27Z code-review → CLEAN (cycle 1; MINOR-1 jwks_uri scheme guard verified, 934 pass EXIT=0)
+# [bugfix-oidc-bootstrap-only-e2e-regressions] 2026-06-28T10:27Z code-review → APPROVE (0 CRIT/0 MAJOR); MINOR-1 (jwks_uri scheme guard) auto-cycled to dev + fixed (cycle 1); 934 pass EXIT=0
+# [bugfix-oidc-bootstrap-only-e2e-regressions] 2026-06-28T10:24Z ci-gate → ✓ unit-elixir 934 pass + warnings-as-errors MAKE_EXIT=0 (full-stack E2E verified centrally per instructions); 5b UX-gate skipped (ui=false)
+# [bugfix-oidc-bootstrap-only-e2e-regressions] 2026-06-28T10:22Z dev-story → verify_token :issuer/:jwks overrides; JwksCache.fetch_keys_for/2 (no cache warm); admin bootstrap verify local; admin scope +groups; sso @base_scopes openid profile email; reconciled sso_login_scope+sso_scope_mode tests; 934 pass warnings-as-errors EXIT=0 (cycle 0)
+# [bugfix-oidc-bootstrap-only-e2e-regressions] 2026-06-28T10:14Z test-review → APPROVED (0 MAJOR/0 MINOR/3 INFO); AC2 fail-closed guarded; INFO-1 dev must reconcile sso_login_scope_test.exs
+# [bugfix-oidc-bootstrap-only-e2e-regressions] 2026-06-28T10:12Z atdd → 4 files, 10 tests (5 RED: AC1 verify+:no_keys, AC3 groups ×2, AC4 profile/email ×2; 5 green guards: AC2 fail-closed ×2, AC1 bad-iss, AC5 name-claim ×2); flagged sso_login_scope_test.exs conflicts AC4
+# [bugfix-oidc-bootstrap-only-e2e-regressions] 2026-06-28T10:05Z oracle-gate → skipped (matrix=false)
+# [bugfix-oidc-bootstrap-only-e2e-regressions] 2026-06-28T10:04Z pipeline started (bug, sev=critical); classify → matrix=false ui=false sec=required; create-story skipped (pre-written), oracle-gate skipped
+# [oidc-bootstrap-only-config] 2026-06-28T03:00Z committed ✓ 53a3cb4f (ATDD+Code APPROVE+Kassandra CLEAN, 1 cycle, 924 pass)
+# [oidc-bootstrap-only-config] 2026-06-28T02:45Z arc42-update → 09-decisions(ADR-022 row) + 08-concepts(OIDC concept) + 07-deployment(sourcing+IaC note) updated
+# [oidc-bootstrap-only-config] 2026-06-28T02:30Z security-review → Kassandra CLEAN (0 CRIT/0 HIGH/0 MED, 2 LOW addressed); fail-closed verified all consumers; 924 pass
+# [oidc-bootstrap-only-config] 2026-06-28T02:00Z code-review → APPROVE (0 CRITICAL/0 MAJOR); 4 MINOR doc fixes auto-cycled (cycle 1); 923 pass EXIT=0
+# [oidc-bootstrap-only-config] 2026-06-28T01:35Z ci-gate → ✓ unit-elixir 923 pass + warnings-as-errors EXIT=0 + integration-files compile clean (full-stack E2E verified centrally per instructions)
+# [oidc-bootstrap-only-config] 2026-06-28T01:30Z dev-story → env reads removed (runtime/OidcPlug/JwksCache/SsoLogin/Admin.Auth/bootstrap_live/http_public); single client; ~30 tests migrated to OidcConfig seam; compose+dex+CLAUDE+e2e updated; unit 923 pass warnings-as-errors EXIT=0 (cycle 0)
+# [oidc-bootstrap-only-config] 2026-06-28T00:15Z test-review → CLEAN (0 MAJOR)
+# [oidc-bootstrap-only-config] 2026-06-28T00:10Z atdd → new oidc_bootstrap_only_test.exs: 4 RED (Test3 env-ignored, Test4 sso env-ignored, Test5 admin DB-only ×2) + 7 green guards
+# [oidc-bootstrap-only-config] 2026-06-28T00:00Z classify → matrix=false ui=false sec=required; oracle-gate skipped
+story: null
+current_step: null
+completed: []
+cycle_count: 0
+blocked_reason: null
+last_updated: "2026-06-28T10:33Z"

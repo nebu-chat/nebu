@@ -76,8 +76,8 @@ test.describe('Bootstrap — Full Happy Path (OIDC E2E)', () => {
 
     // ── Step 2: OIDC Configuration ────────────────────────────────────────────
     await page.getByRole('textbox', { name: 'OIDC Issuer URL' }).fill('http://dex:5556/dex');
-    await page.getByRole('textbox', { name: 'OIDC Client ID' }).fill('nebu-admin');
-    await page.getByRole('textbox', { name: 'OIDC Client Secret' }).fill('nebu-admin-secret');
+    await page.getByRole('textbox', { name: 'OIDC Client ID' }).fill('nebu-gateway');
+    await page.getByRole('textbox', { name: 'OIDC Client Secret' }).fill('nebu-dev-secret');
     await page.getByRole('button', { name: 'Next' }).click();
     await expect(page.getByRole('heading', { name: /Step 3/ })).toBeVisible();
 
@@ -132,8 +132,8 @@ test.describe('Bootstrap — Full Happy Path (OIDC E2E)', () => {
       await expect(page.getByRole('heading', { name: /Step 2/ })).toBeVisible();
 
       await page.getByRole('textbox', { name: 'OIDC Issuer URL' }).fill('http://dex:5556/dex');
-      await page.getByRole('textbox', { name: 'OIDC Client ID' }).fill('nebu-admin');
-      await page.getByRole('textbox', { name: 'OIDC Client Secret' }).fill('nebu-admin-secret');
+      await page.getByRole('textbox', { name: 'OIDC Client ID' }).fill('nebu-gateway');
+      await page.getByRole('textbox', { name: 'OIDC Client Secret' }).fill('nebu-dev-secret');
       await page.getByRole('button', { name: 'Next' }).click();
       await expect(page.getByRole('heading', { name: /Step 3/ })).toBeVisible();
 

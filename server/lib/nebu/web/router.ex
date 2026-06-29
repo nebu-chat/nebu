@@ -61,6 +61,11 @@ defmodule Nebu.Web.Router do
   # forward above (MINOR-3).
   forward "/_matrix/client/v3/refresh", to: Nebu.Matrix.HttpPublic, init_opts: [action: :refresh]
 
+  # S3 device-management: the UIA m.login.sso auth FALLBACK is UNAUTHENTICATED (it IS
+  # the auth step) — it must be matched BEFORE the catch-all "/_matrix" forward to the
+  # OIDC-protected router. Forwarded to Nebu.Matrix.HttpPublic (no OidcPlug).
+  forward "/_matrix/client/v3/auth", to: Nebu.Matrix.HttpPublic, init_opts: [action: :uia_fallback]
+
   forward "/_matrix/client/v1/auth_issuer",
     to: Nebu.Matrix.HttpPublic,
     init_opts: [action: :auth_issuer]

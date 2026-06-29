@@ -67,8 +67,24 @@ Given(
     const toggle = roomToggle(page, roomName);
     await expect(toggle).toBeVisible({ timeout: 15_000 });
     if (!(await toggle.isChecked())) {
-      await toggle.click(); // phx-click persists immediately
+      await toggle.click(); // form POST persists + PRG-redirects to /admin/rooms
       await expect(toggle).toBeChecked({ timeout: 10_000 });
+    }
+  }
+);
+
+Given(
+  'room {string} has auto-join disabled',
+  async ({ page }: { page: Page }, roomName: string) => {
+    // Ensure the room starts with auto-join DISABLED via the real list-page toggle (no DB
+    // shortcut). Used by admin-ui-room-toggle.feature's Background.
+    currentRoom = roomName;
+    await gotoRooms(page);
+    const toggle = roomToggle(page, roomName);
+    await expect(toggle).toBeVisible({ timeout: 15_000 });
+    if (await toggle.isChecked()) {
+      await toggle.click(); // form POST persists + PRG-redirects to /admin/rooms
+      await expect(toggle).not.toBeChecked({ timeout: 10_000 });
     }
   }
 );

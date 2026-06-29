@@ -419,13 +419,39 @@ defmodule Nebu.Admin.Auth do
         with {:ok, token_endpoint} <- discover(cfg.issuer, "token_endpoint"),
              {:ok, id_token, refresh_token} <-
                exchange_code(token_endpoint, code, login_state["verifier"], cfg),
-             # The admin ID token's `aud` is the admin OAuth client_id (not the Matrix
-             # audience), so verification overrides the expected aud — every other check
-             # (signature/alg/iss/exp/sub) is identical to the Matrix bearer path.
-             {:ok, claims} <- Nebu.Web.Plugs.OidcPlug.verify_token(id_token, audience: cfg.client_id) do
+             {:ok, claims} <- verify_id_token(id_token, login_state["mode"], cfg) do
           {:ok, claims, refresh_token}
         end
     end
+  end
+
+  # Verify the operator ID token. NORMAL mode uses the global caches (post-bootstrap they
+  # ARE warm: issuer from OidcConfig, keys from JwksCache); only the aud is overridden to
+  # the single client_id. Every other check (signature/alg/iss/exp/sub) is identical to
+  # the Matrix bearer path.
+  defp verify_id_token(id_token, "bootstrap", cfg) do
+    # oidc-bootstrap-only-e2e-regressions (AC1/AC2): mid-bootstrap the global
+    # JwksCache/OidcConfig are EMPTY (config still lives in bootstrap_draft). Fetch the
+    # signing keys LOCALLY from the draft's JWKS URI (or discover from the draft issuer)
+    # using the SAME TLS-verifying fetcher JwksCache uses, and verify with the draft
+    # issuer + keys passed as overrides — WITHOUT warming the global caches (the Matrix
+    # API must stay fail-closed until bootstrap completes). A fetch failure is a clean
+    # tagged error so the callback logs + bounces rather than crashing the request.
+    case Nebu.Web.JwksCache.fetch_keys_for(cfg.jwks_uri, cfg.issuer) do
+      {:ok, keys} ->
+        Nebu.Web.Plugs.OidcPlug.verify_token(id_token,
+          issuer: cfg.issuer,
+          audience: cfg.client_id,
+          jwks: keys
+        )
+
+      :error ->
+        {:error, :bootstrap_jwks_unavailable}
+    end
+  end
+
+  defp verify_id_token(id_token, _mode, cfg) do
+    Nebu.Web.Plugs.OidcPlug.verify_token(id_token, audience: cfg.client_id)
   end
 
   # Accept both the legacy 2-tuple and the extended 3-tuple from the override seam.
@@ -756,50 +782,55 @@ defmodule Nebu.Admin.Auth do
 
   # ── OIDC config + discovery ──────────────────────────────────────────────────────
 
-  # Reads the admin OIDC client config. In bootstrap mode the config has NOT yet been
-  # promoted into server_config, so it is read from the bootstrap_draft (Go parity:
-  # loadOIDCConfigFromDraft), decrypting the at-rest secret. In normal mode env vars take
-  # priority; when absent the values are resolved from server_config (Bootstrap-Wizard
-  # deployments that omit env vars). Mirrors OidcPlug and SsoLogin. Fails CLOSED.
+  @doc false
+  # Test-only seam for the oidc-bootstrap-only-config ATDD suite: exposes the private
+  # oidc_config/1 resolution so a unit test can assert DB-only resolution without
+  # driving the full OIDC HTTP flow. Not used in production code paths.
+  def oidc_config_for_test(mode), do: oidc_config(mode)
+
+  # oidc-bootstrap-only-config (ADR-022): the admin operator login uses the SINGLE
+  # wizard-configured OIDC client — the same client that validates Matrix Bearer
+  # tokens. There is no separate admin client and no NEBU_ADMIN_OIDC_* / NEBU_OIDC_*
+  # env config. The /admin/callback redirect_uri is registered on that one client.
+  #
+  # In bootstrap mode the config has NOT yet been promoted into server_config, so the
+  # issuer + client are read from the bootstrap_draft (Go parity: loadOIDCConfigFromDraft),
+  # decrypting the at-rest secret. In normal mode they come from server_config.
+  # Fails CLOSED when issuer or client_id is absent.
   defp oidc_config("bootstrap") do
     draft = load_draft()
     issuer = draft["oidc_issuer"]
-    client_id = draft["oidc_client_id"]
-    client_secret = Nebu.Admin.BootstrapLive.decrypt_secret(draft["oidc_client_secret"] || "")
+    {client_id, client_secret} = bootstrap_operator_client(draft)
     scope = admin_oidc_scope()
+    # oidc-bootstrap-only-e2e-regressions (AC1): surface the draft's explicit JWKS URI so
+    # exchange_and_verify can fetch the operator-token signing keys from the DRAFT (the
+    # global JwksCache is empty mid-bootstrap). May be nil — then keys are discovered from
+    # the draft issuer's well-known document instead.
+    jwks_uri = draft["oidc_jwks_uri"]
 
     cond do
       not is_binary(issuer) or issuer == "" -> {:error, :bootstrap_draft_incomplete}
       not is_binary(client_id) or client_id == "" -> {:error, :bootstrap_draft_incomplete}
-      true -> {:ok, %{issuer: issuer, client_id: client_id, client_secret: client_secret, scope: scope}}
+      true ->
+        {:ok,
+         %{
+           issuer: issuer,
+           client_id: client_id,
+           client_secret: client_secret,
+           scope: scope,
+           jwks_uri: jwks_uri
+         }}
     end
   end
 
   defp oidc_config(_mode) do
-    # Env vars take priority; fall back to server_config DB values when absent.
-    # Mirrors OidcPlug.oidc_issuer/0 (issuer) and SsoLogin.resolve_client_credentials/0 (client pair).
-    issuer =
-      case Application.get_env(:nebu_http, :oidc_issuer) do
-        v when is_binary(v) and v != "" -> v
-        _ -> Nebu.Web.OidcConfig.get().issuer
-      end
-
-    client_id =
-      case Application.get_env(:nebu_http, :admin_oidc_client_id) do
-        v when is_binary(v) and v != "" -> v
-        _ -> admin_config_value("oidc_client_id")
-      end
-
-    client_secret =
-      case Application.get_env(:nebu_http, :admin_oidc_client_secret) do
-        v when is_binary(v) and v != "" ->
-          v
-
-        _ ->
-          encrypted = admin_config_value("oidc_client_secret") || ""
-          Nebu.Admin.BootstrapLive.decrypt_secret(encrypted)
-      end
-
+    # oidc-bootstrap-only-config (ADR-022): issuer + the single client are resolved
+    # SOLELY from server_config (issuer via OidcConfig cache, client via
+    # admin_config_value/1, mirroring SsoLogin.resolve_client_credentials/0). No env path.
+    issuer = Nebu.Web.OidcConfig.get().issuer
+    client_id = admin_config_value("oidc_client_id")
+    encrypted = admin_config_value("oidc_client_secret") || ""
+    client_secret = Nebu.Admin.BootstrapLive.decrypt_secret(encrypted)
     scope = admin_oidc_scope()
 
     cond do
@@ -832,18 +863,36 @@ defmodule Nebu.Admin.Auth do
     end
   end
 
+  # oidc-bootstrap-only-config (ADR-022): the operator-login OIDC client in bootstrap
+  # mode is the SINGLE wizard-configured (draft) client — there is no separate admin
+  # client and no NEBU_ADMIN_OIDC_* env. The /admin/callback redirect_uri is registered
+  # on that one client (eliminating the env-vs-draft mismatch that caused the
+  # "Unregistered redirect_uri" bug class). The at-rest secret is decrypted here.
+  defp bootstrap_operator_client(draft) do
+    draft_secret = Nebu.Admin.BootstrapLive.decrypt_secret(draft["oidc_client_secret"] || "")
+    {draft["oidc_client_id"], draft_secret}
+  end
+
   # The admin authorization scope. `offline_access` is NO LONGER force-added (story
   # oidc-refresh-mode-config, AC3): it is requested iff the server_config key
   # `admin_oidc_refresh_mode` resolves to "offline". DEFAULT is "online" (no forced
   # offline_access → no special IdP approval needed; on Keycloak a session-bound RT
-  # still enables silent refresh). `openid` stays MANDATORY in every mode, and any
-  # operator-configured `:admin_oidc_scope` is honoured. The mode is read LIVE so a
-  # runtime change via /admin/config applies without a redeploy.
+  # still enables silent refresh). `openid` stays MANDATORY in every mode. ADR-022:
+  # the base scope is fixed ("openid profile email") — there is no NEBU_ADMIN_OIDC_SCOPE
+  # env; finer-grained scopes are an IdP-client concern. The refresh mode is read LIVE
+  # so a runtime change via /admin/config applies without a redeploy.
   #
   # Test seam (mirrors OidcClaimCache's :oidc_claim_reader): a 0-arity fun under
   # :admin_oidc_refresh_mode_reader injects the mode; default reads server_config.
   defp admin_oidc_scope do
-    configured = Application.get_env(:nebu_http, :admin_oidc_scope, "openid profile email")
+    # oidc-bootstrap-only-config (ADR-022): no NEBU_ADMIN_OIDC_SCOPE env. The operator
+    # login requests the fixed base scope set; finer-grained scopes are an IdP client
+    # concern.
+    #
+    # oidc-bootstrap-only-e2e-regressions (AC3): `groups` is REQUIRED. Dex only releases
+    # the `groups` claim when the `groups` scope is requested; without it the bootstrap
+    # select-claim page renders no instance_admin option and the wizard cannot complete.
+    configured = "openid profile email groups"
     prefix = if admin_refresh_mode() == "offline", do: ["openid", "offline_access"], else: ["openid"]
 
     configured
@@ -880,12 +929,10 @@ defmodule Nebu.Admin.Auth do
 
   # The redirect_uri MUST be a fixed, server-controlled value registered with the IdP —
   # it is NOT derived from request headers (Host/X-Forwarded-*), which an attacker could
-  # spoof to redirect the auth code elsewhere. Configured via NEBU_ADMIN_OIDC_REDIRECT_URI.
-  # When not explicitly set, derived from :server_name + :admin_session_secure app config.
-  defp redirect_uri do
-    Application.get_env(:nebu_http, :admin_oidc_redirect_uri) ||
-      derive_admin_redirect_uri()
-  end
+  # spoof to redirect the auth code elsewhere. oidc-bootstrap-only-config (ADR-022):
+  # there is no NEBU_ADMIN_OIDC_REDIRECT_URI env; it is always derived from :server_name
+  # + :admin_session_secure app config and registered on the single OIDC client.
+  defp redirect_uri, do: derive_admin_redirect_uri()
 
   defp derive_admin_redirect_uri do
     server_name = Application.get_env(:nebu_http, :server_name, "localhost")
@@ -1250,20 +1297,16 @@ defmodule Nebu.Admin.Auth do
     # MINOR-1 (cycle-2): guard against completing bootstrap without an OIDC audience.
     # A missing audience means OidcPlug fails closed permanently (all Bearer tokens
     # rejected with 401 M_UNKNOWN_TOKEN). Fail here rather than silently creating a
-    # broken instance. The audience is valid if either the draft or the NEBU_OIDC_AUDIENCE
-    # env var (via Application env, set by runtime.exs from NEBU_OIDC_AUDIENCE) provides
-    # a non-empty value.
+    # broken instance. oidc-bootstrap-only-config (ADR-022): the audience comes solely
+    # from the wizard draft — there is no NEBU_OIDC_AUDIENCE env fallback.
     audience_in_draft = is_binary(draft["oidc_audience"]) and draft["oidc_audience"] != ""
-    env_audience = Application.get_env(:nebu_http, :oidc_audience)
-    audience_in_env = is_binary(env_audience) and env_audience != ""
 
-    if not audience_in_draft and not audience_in_env do
+    if not audience_in_draft do
       {:error, :audience_required}
     else
-      # oidc-env-optional-bootstrap (AC4): include oidc_audience and oidc_jwks_uri
-      # in the promoted keys so the Bootstrap Wizard can configure them alongside
-      # the other OIDC fields. oidc_jwks_uri is needed for C-2 (bootstrap-wizard
-      # deployments where NEBU_OIDC_JWKS_URI is not set as an env var).
+      # ADR-022: promote the wizard-configured OIDC fields (issuer, single client
+      # id/secret, audience, jwks_uri, claim mappings) into server_config — the single
+      # source of truth read by OidcPlug / SsoLogin / Admin.Auth.
       keys = ~w(instance_name oidc_issuer oidc_client_id oidc_client_secret
                 oidc_audience oidc_jwks_uri
                 oidc_user_id_claim oidc_displayname_claim oidc_email_claim)

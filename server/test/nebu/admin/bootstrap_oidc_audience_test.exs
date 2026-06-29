@@ -87,9 +87,6 @@ defmodule Nebu.Admin.BootstrapOidcAudienceTest do
 
   setup do
     Application.put_env(:nebu_http, :admin_secret_at_rest, @at_rest_key)
-    Application.put_env(:nebu_http, :oidc_issuer, @issuer)
-    Application.put_env(:nebu_http, :admin_oidc_client_id, @client_id)
-    Application.put_env(:nebu_http, :admin_oidc_redirect_uri, "http://localhost:8008/admin/callback")
 
     Application.put_env(:nebu_http, :oidc_metadata_override, %{
       "issuer" => @issuer,
@@ -100,11 +97,6 @@ defmodule Nebu.Admin.BootstrapOidcAudienceTest do
     on_exit(fn ->
       for k <- [
             :admin_secret_at_rest,
-            :oidc_issuer,
-            :oidc_audience,
-            :matrix_oidc_client_id,
-            :admin_oidc_client_id,
-            :admin_oidc_redirect_uri,
             :oidc_metadata_override,
             :admin_bootstrap_store,
             :admin_oidc_token_override
@@ -123,11 +115,8 @@ defmodule Nebu.Admin.BootstrapOidcAudienceTest do
 
   describe "AC3 — Bootstrap wizard step 2 collects and saves oidc_audience" do
     test "save_step on step 2 writes oidc_audience to the draft" do
-      # Remove env-var OIDC config so the bootstrap form fields are NOT disabled
-      # (they are locked when the env var is set — that's AC4 behavior tested elsewhere).
-      Application.delete_env(:nebu_http, :oidc_issuer)
-      Application.delete_env(:nebu_http, :matrix_oidc_client_id)
-
+      # oidc-bootstrap-only-config (ADR-022): OIDC config comes from the wizard draft
+      # only — there is no env-var config to lock the form fields.
       store = install_store(%{"instance_name" => "test-nebu"})
 
       {:ok, view, _html} =
@@ -162,10 +151,8 @@ defmodule Nebu.Admin.BootstrapOidcAudienceTest do
     end
 
     test "oidc_audience field is present on the step-2 form HTML" do
-      # Remove env-var OIDC config so fields are not locked/disabled.
-      Application.delete_env(:nebu_http, :oidc_issuer)
-      Application.delete_env(:nebu_http, :matrix_oidc_client_id)
-
+      # oidc-bootstrap-only-config (ADR-022): OIDC config comes from the wizard draft
+      # only — there is no env-var config to lock the form fields.
       install_store(%{"instance_name" => "test-nebu"})
 
       {:ok, view, _html} =
@@ -239,17 +226,15 @@ defmodule Nebu.Admin.BootstrapOidcAudienceTest do
                "Auth.do_complete_bootstrap/2 must promote oidc_audience from the draft."
     end
 
-    test "oidc_audience promotion does not overwrite existing value when draft entry is empty" do
+    test "an empty draft oidc_audience is rejected (audience_required) and does not overwrite server_config" do
       encrypted = Nebu.Admin.BootstrapLive.encrypt_secret(@client_secret)
 
-      # Draft has an empty oidc_audience — must NOT overwrite an existing server_config value.
-      # bootstrap_sub + bootstrap_claims are required guard fields (see test above).
-      # MINOR-1 (cycle-2): audience guard in do_complete_bootstrap/2 requires a non-empty
-      # audience from either draft or env. Simulate NEBU_OIDC_AUDIENCE being set (env covers
-      # the empty draft, which is the realistic scenario when an operator re-runs the wizard
-      # on an instance that was originally configured via env vars).
-      Application.put_env(:nebu_http, :oidc_audience, "existing-audience")
-
+      # oidc-bootstrap-only-config (ADR-022): the audience is required from the wizard
+      # DRAFT alone — there is NO NEBU_OIDC_AUDIENCE env fallback. An empty draft
+      # audience therefore always fails closed with {:error, :audience_required}, so
+      # do_complete_bootstrap/2 never promotes anything and never overwrites the
+      # pre-existing server_config value. The confirm bounces to /admin/login (not the
+      # dashboard) rather than silently completing with a missing audience.
       draft = %{
         "instance_name" => "test-nebu",
         "oidc_issuer" => @issuer,
@@ -263,7 +248,7 @@ defmodule Nebu.Admin.BootstrapOidcAudienceTest do
         "bootstrap_claims" => Jason.encode!([["instance_admin", "instance_admin"]])
       }
 
-      # Pre-seed server_config with an existing audience
+      # Pre-seed server_config with an existing audience.
       store = install_store(draft, %{"oidc_audience" => "existing-audience"})
 
       conn =
@@ -274,15 +259,18 @@ defmodule Nebu.Admin.BootstrapOidcAudienceTest do
 
       conn = Auth.bootstrap_confirm_claim(conn, %{"admin_group_claim" => "instance_admin"})
 
-      # Sanity: confirm completed (redirected to dashboard).
+      # Audience guard fires → NOT completed → must NOT redirect to the dashboard.
       assert conn.status == 302
-      assert get_resp_header(conn, "location") == ["/admin/dashboard"]
+      [location] = get_resp_header(conn, "location")
+
+      assert String.starts_with?(location, "/admin/login"),
+             "an empty draft oidc_audience must bounce to /admin/login (audience_required), got #{inspect(location)}"
 
       config = get_config(store)
 
-      # Empty draft value must NOT overwrite the pre-existing server_config value.
+      # Nothing promoted: the pre-existing server_config value is untouched.
       assert config["oidc_audience"] == "existing-audience",
-             "An empty draft oidc_audience must not overwrite an existing server_config value"
+             "a rejected completion must not overwrite the pre-existing server_config value"
     end
   end
 end

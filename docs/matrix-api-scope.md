@@ -35,6 +35,7 @@ cross-referenced with the Matrix Client-Server API specification.
 | GET | `/_matrix/client/v3/login/sso/redirect/oidc` | ✅ | OIDC callback, issues Nebu token |
 | POST | `/_matrix/client/v3/logout` | ✅ | Revokes session token; deletes the user's `matrix_sessions` rows |
 | GET | `/_matrix/client/v3/account/whoami` | ✅ | Returns user_id from JWT or opaque session |
+| GET | `/_matrix/client/v3/auth/m.login.sso/fallback/web` | ✅ | UIA SSO auth fallback (unauthenticated by spec); drives a fresh out-of-band SSO login to complete the `m.login.sso` stage of a pending UIA session, then refreshes `auth_time` (Story s3-matrix-device-endpoints) |
 
 ## Sync
 
@@ -125,11 +126,11 @@ cross-referenced with the Matrix Client-Server API specification.
 
 | Method | Endpoint | Status | Notes |
 |---|---|---|---|
-| GET | `/_matrix/client/v3/devices` | ✅ | Lists devices (backed by sessions table) |
+| GET | `/_matrix/client/v3/devices` | ✅ | Lists the user's devices (backed by the `devices` table, incl. keyless devices — Story s1) |
 | GET | `/_matrix/client/v3/devices/{deviceId}` | ✅ | Get single device |
-| PUT | `/_matrix/client/v3/devices/{deviceId}` | ✅ | Update device display name |
-| DELETE | `/_matrix/client/v3/devices/{deviceId}` | ✅ | Delete device (UIA: m.login.sso) |
-| POST | `/_matrix/client/v3/delete_devices` | ✅ | Delete multiple devices |
+| PUT | `/_matrix/client/v3/devices/{deviceId}` | ✅ | Rename device (`display_name`); owner-scoped, no UIA (Story s3) |
+| DELETE | `/_matrix/client/v3/devices/{deviceId}` | ✅ | Delete a device; **UIA-gated** (`m.login.sso`, 15-min fresh-auth window, Option B). Fires the per-device JWT kill-switch: every JWT bound to `(user, device)` is denylisted until its own `exp` (Story s3) |
+| POST | `/_matrix/client/v3/delete_devices` | ✅ | UIA-gated bulk delete (≤100 devices); same kill-switch per device (Story s3) |
 
 ## Push Notifications
 

@@ -24,7 +24,7 @@ Feature: Admin UI — Bootstrap Wizard
     And the operator clicks "Next"
     Then the progress indicator shows step 2 as active
     When the operator fills in "OIDC Issuer URL" with the Dex issuer URL
-    And the operator fills in "OIDC Client ID" with "nebu-admin"
+    And the operator fills in "OIDC Client ID" with "nebu-gateway"
     And the operator fills in "OIDC Client Secret" with the configured client secret
     And the operator clicks "Next"
     Then the progress indicator shows step 3 as active

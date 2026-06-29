@@ -104,7 +104,7 @@ make redeploy                     # rebuild + restart the server Docker image/co
 Environment variables (prefix: `NEBU_`):
 - `NEBU_DB_URL` — PostgreSQL connection string (migrations: `NEBU_DB_URL_MIGRATE` fallback)
 - `NEBU_POSTGRES_SSL` — set to `"true"` to enable SSL on the PostgreSQL connection (both runtime Repo and migrations); default `"false"`. Use this instead of `?ssl=true` / `?sslmode=require` URL parameters.
-- `NEBU_OIDC_ISSUER` / `NEBU_OIDC_AUDIENCE` — OIDC provider config (validated at boot)
+- OIDC (issuer, audience, JWKS URI, the single client id/secret, claim mappings) is **set via the bootstrap wizard** (persisted in `server_config`), **validated per-operation, fail-closed until bootstrapped** — there are **no `NEBU_OIDC_*` / `NEBU_ADMIN_OIDC_*` config variables** (ADR-022). A single OIDC client serves both Matrix Bearer validation and admin operator login. The server boots without OIDC config; before bootstrap every Bearer token is rejected `401` and the admin UI redirects to `/bootstrap`. (`NEBU_OIDC_JWKS_TTL` is a JwksCache refresh-interval knob, not OIDC config, and may still be set.)
 - `NEBU_PII_ENCRYPTION_KEY` — 32-byte hex key for PII-at-rest encryption
 - `NEBU_INTERNAL_SECRET_FILE` — path to shared node-registration / admin-key-base secret file
 
@@ -127,6 +127,7 @@ Environment variables (prefix: `NEBU_`):
 - `POST /_matrix/client/v3/keys/upload` · `POST /_matrix/client/v3/keys/query` — device-key **directory** (PostgreSQL-backed, `Nebu.Matrix.DeviceKeyStore`). Stores/serves public device + one-time + fallback keys so clients (Element) register a device cleanly. **Not E2EE** — orthogonal to encryption (ADR-011).
 - `GET  /_matrix/client/v3/devices` · `GET /_matrix/client/v3/devices/{deviceId}` — device list for the current user
 - `GET  /_matrix/client/v3/account/whoami` (returns `device_id` for opaque sessions)
+- `POST /_matrix/client/v3/keys/signatures/upload` — stub returning `{"failures": {}}` (cross-signing excluded per ADR-011; Element calls this after device registration)
 
 **E2EE stays OFF (ADR-011):** `m.room.encryption` is rejected/skipped in every state-write path (direct state-PUT → `403 M_FORBIDDEN`; `createRoom` `initial_state` and room-upgrade `copy_state_events` → skipped). The device-key directory does **not** enable encryption.
 
@@ -159,6 +160,7 @@ ADRs are tracked in `docs/architecture/adr/`:
 | 019 | Single OTP Application — no umbrella. One `mix.exs`, one `Nebu.Application`, one supervisor tree. Domains are module namespaces under `lib/nebu/`. |
 | 020 | Clustering Strategy & Module Architecture — `Nebu.Matrix`/`Media`/`Admin` domains with a Public-API rule (only these modules are callable cross-domain); BEAM-native scaling (libcluster + Horde + pg). |
 | 021 | Elixir Consolidation / Go Removal — Go gateway + media gateway removed; whole stack is one Elixir/OTP app. gRPC fully removed (`grpc-removal` epic): no `:grpc`/`:protobuf` deps, the command layer is in-process plain modules + `Core.*` plain structs; native `Nebu.Matrix.Error`/`Status` replaces `GRPC.RPCError`/`GRPC.Status` (supersedes ADR-005). |
+| 022 | OIDC Bootstrap-Only Configuration — OIDC is configured EXCLUSIVELY via the Bootstrap Wizard (`server_config`, read through the `Nebu.Web.OidcConfig` cache); all `NEBU_OIDC_*` / `NEBU_ADMIN_OIDC_*` env config is removed. A SINGLE OIDC client serves both Matrix Bearer validation and admin operator login. Fail-closed until bootstrapped; config validated per-operation, not at boot. |
 
 ## Named Epic Convention (from v0.3.0+)
 

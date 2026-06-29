@@ -80,8 +80,8 @@ defmodule Nebu.Web.RegressionSyncLoadTest do
     priv_jwk = Map.put(priv_map, "kid", @kid)
 
     Application.put_env(:nebu_http, :server_name, @server_name)
-    Application.put_env(:nebu_http, :oidc_issuer, @issuer)
-    Application.put_env(:nebu_http, :oidc_audience, @audience)
+    Nebu.Web.OidcTestSupport.configure(@issuer, @audience)
+
     Application.put_env(:nebu_http, :oidc_jwks, [pub_jwk])
 
     # This is a load test: 200 concurrent /sync requests come from the same
@@ -94,8 +94,7 @@ defmodule Nebu.Web.RegressionSyncLoadTest do
 
     on_exit(fn ->
       Application.delete_env(:nebu_http, :server_name)
-      Application.delete_env(:nebu_http, :oidc_issuer)
-      Application.delete_env(:nebu_http, :oidc_audience)
+      Nebu.Web.OidcTestSupport.clear()
       Application.delete_env(:nebu_http, :oidc_jwks)
       Application.put_env(:nebu_http, :rate_limit_disabled, rl_original)
     end)

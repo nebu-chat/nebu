@@ -28,63 +28,50 @@ credentials. Media access control is a local `room_members` SQL call inside the 
 hop.
 
 **Admin login owned in Elixir:** The admin OIDC Authorization-Code + PKCE login lives in
-`Nebu.Admin.Auth` (`/admin/login/start`, `/admin/callback`, `/admin/logout`). The admin OAuth client
-is configured via `NEBU_ADMIN_OIDC_CLIENT_ID` / `..._CLIENT_SECRET[_FILE]` / `..._REDIRECT_URI` (fixed
-server-controlled redirect target). The session is the signed Phoenix `secret_key_base` cookie
-(http_only, secure, SameSite=Lax), capped at min(idToken.exp, now+8h).
+`Nebu.Admin.Auth` (`/admin/login/start`, `/admin/callback`, `/admin/logout`). ADR-022: it uses the
+**single** wizard-configured OIDC client (the same client that validates Matrix Bearer tokens); there is
+no separate admin client and no `NEBU_ADMIN_OIDC_*` env. The `/admin/callback` redirect_uri is a fixed,
+server-controlled target derived from `:server_name` + `:admin_session_secure`. The session is the signed
+Phoenix `secret_key_base` cookie (http_only, secure, SameSite=Lax), capped at min(idToken.exp, now+8h).
 
-## OIDC Configuration Sourcing (oidc-env-optional-bootstrap)
+## OIDC Configuration Sourcing (ADR-022 — Bootstrap-Only)
 
-**Before Story oidc-env-optional-bootstrap:** `NEBU_OIDC_ISSUER` and `NEBU_OIDC_AUDIENCE` were mandatory
-environment variables at boot time. The application rejected startup if either was unset.
+**OIDC is configured EXCLUSIVELY through the Bootstrap Wizard, persisted in `server_config`.** There are
+no `NEBU_OIDC_*` / `NEBU_ADMIN_OIDC_*` configuration environment variables. The server boots without OIDC
+config and fails closed (config validated per-operation, not at boot): before bootstrap every Bearer token
+is rejected `401 M_UNKNOWN_TOKEN` and the admin UI redirects to `/bootstrap`. A **single** OIDC client
+serves both Matrix Bearer validation and admin operator login.
 
-**After oidc-env-optional-bootstrap:** These environment variables are now **optional**. OIDC configuration
-can be sourced from two places: environment variables (preferred, lock-in) or the `server_config` database
-table (populated by the Bootstrap Wizard or operator). The actual behavior differs per deployment mode:
+| Scenario | Source of truth | Behavior |
+|---|---|---|
+| First-boot (pre-bootstrap) | none | Server boots; all Bearer tokens 401; admin → `/bootstrap`. |
+| Bootstrap wizard step 2 | operator input → `server_config` | Collects issuer, the single client id/secret, audience, JWKS URI (all required). Completion promotes `bootstrap_draft` → `server_config`; `OidcConfig`/`JwksCache` caches refresh; `:pg` invalidates peer nodes. |
+| Post-bootstrap | `server_config` (via `OidcConfig` cache) | OidcPlug / SsoLogin / Admin.Auth / MSC2965 discovery resolve issuer/audience/JWKS-URI/client from the cache. |
 
-| Scenario | NEBU_OIDC_ISSUER | NEBU_OIDC_AUDIENCE | Source of truth | Behavior |
-|---|---|---|---|---|
-| First-boot bootstrap mode | unset | unset | Bootstrap Wizard collects them in step 2; stored in `server_config` | Wizard completion promotes `bootstrap_draft` into `server_config`; `OidcConfig` cache is invalidated and reloaded |
-| Post-bootstrap or env-locked | set | set | Environment variables | OidcPlug uses env-var values directly (ignores `server_config`) |
-| Mixed mode (unusual, not recommended) | set | unset | Environment (issuer) + server_config (audience) | OidcPlug uses issuer from env, falls back to `server_config` for audience |
+**Component: `Nebu.Web.OidcConfig`** — to avoid a per-request DB lookup on the OIDC hot path, config from
+`server_config` is cached in the named ETS table `:nebu_http_oidc_config` (read_concurrency: true). The
+GenServer loads on boot from `server_config` (`oidc_issuer`, `oidc_audience`, `oidc_jwks_uri`), refreshes
+on wizard completion (`OidcConfig.refresh/0`), is cluster-aware via `:pg` (ADR-020, M-3), and returns
+`nil` for any unset key.
 
-**New component: `Nebu.Web.OidcConfig`**
-
-To avoid a per-request database lookup on the OIDC hot path (every Bearer token validation), OIDC config
-sourced from `server_config` is cached in a named ETS table `:nebu_http_oidc_config` (read_concurrency: true).
-
-The `Nebu.Web.OidcConfig` GenServer:
-- **Loads on boot:** Reads `server_config` table for `oidc_issuer`, `oidc_audience`, and `oidc_jwks_uri` keys
-  and populates the ETS cache.
-- **Refreshes on wizard completion:** The Bootstrap Wizard calls `OidcConfig.refresh/0` after promoting
-  the `bootstrap_draft` into `server_config` (AC2/AC5 in story oidc-env-optional-bootstrap).
-- **Cluster-aware via :pg:** When refreshed, broadcasts an invalidation message to peer nodes (ADR-020,
-  pattern M-3) so all nodes in a cluster update their caches.
-- **Fall-through to nil:** If a config key is unset in the DB and no env var is set, the cache returns `nil`.
-
-**OidcPlug resolution logic:**
+**Resolution logic (ADR-022 — server_config only, fail-closed):**
 
 ```
-for issuer and audience:
-  1. Check NEBU_OIDC_ISSUER env var → if set, use it (lock-in)
-  2. Fall through to OidcConfig.get() → reads ETS cache (may be nil)
-  3. Fail-closed: if both env and cache are nil, reject the token with 401 M_UNKNOWN_TOKEN
+issuer / audience (OidcPlug, SsoLogin, Admin.Auth, discovery):
+  OidcConfig.get() → ETS cache (may be nil) → if nil, fail closed (401 / 503 / redirect)
 
-for JWKS URI (used by JwksCache):
-  1. Check NEBU_OIDC_JWKS_URI env var → if set, use it
-  2. Fall through to OidcConfig.jwks_uri() → reads ETS cache (may be nil)
-  3. If both are nil, JwksCache.http_fetch/0 returns {:ok, []} (no keys); all tokens rejected
+JWKS URI (JwksCache):
+  OidcConfig.jwks_uri() → ETS cache → if nil, auto-discover from issuer's
+    /.well-known/openid-configuration → if still nil, no keys → all tokens rejected
+
+single client id/secret (SsoLogin, Admin.Auth):
+  server_config.oidc_client_id + AES-256-GCM-decrypted oidc_client_secret → if unset, fail closed
 ```
 
-**Bootstrap Wizard form changes (Story oidc-env-optional-bootstrap):**
-
-Step 2 now collects two new fields:
-- `oidc_audience` (text input) — required if `NEBU_OIDC_AUDIENCE` env var is not set
-- `oidc_jwks_uri` (text input) — required if `NEBU_OIDC_JWKS_URI` env var is not set
-
-When an env var IS set for a field, the form input is rendered as `disabled` and its value is locked to the
-env var. Disabled fields are omitted from the form submission (browser default behavior), so the wizard
-correctly falls back to the env-var value for locked fields (no overwrite race condition).
+**Bootstrap Wizard form (ADR-022):** Step 2 collects `oidc_issuer`, `oidc_client_id`,
+`oidc_client_secret`, `oidc_audience`, and `oidc_jwks_uri`. All fields are **always editable and
+required** — there is no env-lock/`disabled` mode (the former env-locked-fields behavior is removed).
+The client secret is stored AES-256-GCM encrypted at rest.
 
 On step 3 (finalization), the wizard persists all collected values (including `oidc_audience` and
 `oidc_jwks_uri`) into `server_config` atomically. It then calls `OidcConfig.refresh/0` to invalidate
@@ -748,9 +735,16 @@ The Element location includes WebSocket upgrade headers (`Upgrade`, `Connection`
 
 `NEBU_CORE_GRPC_ADDR` is derived deterministically from the release name as `{release}-nebu-server:9000` - rendered by the ConfigMap template, not a values entry.
 
+> **ADR-022 note (OIDC is bootstrap-configured):** As of ADR-022 the application reads **no** OIDC config
+> from the environment. The `NEBU_OIDC_*` / `NEBU_ADMIN_OIDC_*` values still rendered by the Helm chart and
+> Tofu modules below are **ignored at runtime** — OIDC (issuer, audience, JWKS URI, the single client
+> id/secret, claim mappings) is configured once via the **Bootstrap Wizard** (`server_config`). These IaC
+> artifacts are pending a follow-up cleanup to drop the OIDC env entirely; operators should configure OIDC
+> through the wizard, not via these env values.
+
 **Secret management (ExistingSecret pattern):**
 
-The chart never creates a Kubernetes Secret. Sensitive `NEBU_*` variables (`NEBU_DB_URL`, `NEBU_INTERNAL_SECRET`, `NEBU_OIDC_CLIENT_SECRET`) must be stored in a pre-existing Kubernetes Secret, created out-of-band by the operator:
+The chart never creates a Kubernetes Secret. Sensitive `NEBU_*` variables (`NEBU_DB_URL`, `NEBU_INTERNAL_SECRET`) must be stored in a pre-existing Kubernetes Secret, created out-of-band by the operator (OIDC is configured via the Bootstrap Wizard per ADR-022, not via a `NEBU_OIDC_CLIENT_SECRET` env):
 
 ```bash
 kubectl create secret generic nebu-sensitive \

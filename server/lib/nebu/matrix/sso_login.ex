@@ -25,13 +25,17 @@ defmodule Nebu.Matrix.SsoLogin do
   and verifies it through the same `OidcPlug.verify_token` path — there is exactly
   ONE token-verification code path in the codebase.
 
-  ## OIDC credentials (Go parity `bfd4884f` + `53904df6`)
+  ## OIDC credentials (ADR-022 — bootstrap-only, single client)
 
-  Client id/secret come from the Bootstrap DB (`server_config`) when present, with
-  the `NEBU_OIDC_*` env (`:matrix_oidc_client_id` / `:matrix_oidc_client_secret`)
-  as fallback. The scope list is `openid` (plus `offline_access` when refresh
-  mode is offline) plus any `NEBU_OIDC_EXTRA_SCOPES` (`:oidc_extra_scopes`,
-  e.g. `profile email`).
+  The SINGLE OIDC client's id/secret come SOLELY from the Bootstrap DB
+  (`server_config`); the secret is stored AES-256-GCM encrypted at rest and decrypted
+  on use. There is no `NEBU_OIDC_*` env config path. The scope list is
+  `openid profile email` (plus `offline_access` when the configured refresh mode is
+  offline). `profile`/`email` are requested so the IdP releases the `name`/`email`
+  claims — without `profile`, Dex omits `name`, the configured `oidc_user_id_claim =
+  "name"` cannot resolve, and the MXID regresses to the opaque `sub`
+  (story oidc-bootstrap-only-e2e-regressions, AC4/AC5). This supersedes the earlier
+  `fix-element-login` `~w(openid)` minimal-scope decision.
   """
   import Plug.Conn
   import Nebu.Matrix.Http, only: [error: 4]
@@ -75,7 +79,7 @@ defmodule Nebu.Matrix.SsoLogin do
     end
   end
 
-  defp do_redirect(conn, redirect_url) do
+  defp do_redirect(conn, redirect_url, uia_session \\ nil) do
     with {:ok, cfg} <- oidc_config(),
          {:ok, authorize} <- discover(cfg.issuer, "authorization_endpoint") do
       verifier = pkce_verifier()
@@ -83,22 +87,40 @@ defmodule Nebu.Matrix.SsoLogin do
       state = random_token(16)
       nonce = random_token(32)
 
-      case SsoStore.put_state(state, %{verifier: verifier, nonce: nonce, redirect_url: redirect_url}, @state_ttl_seconds) do
+      case SsoStore.put_state(
+             state,
+             %{verifier: verifier, nonce: nonce, redirect_url: redirect_url, uia_session: uia_session},
+             @state_ttl_seconds
+           ) do
         :ok ->
-          query =
-            URI.encode_query(%{
-              "response_type" => "code",
-              "client_id" => cfg.client_id,
-              "redirect_uri" => callback_url(conn),
-              "scope" => scope_list(),
-              "state" => state,
-              "nonce" => nonce,
-              "code_challenge" => challenge,
-              "code_challenge_method" => "S256",
-              # prompt=login forces the IdP to re-auth (avoids replaying a cached,
-              # already-denylisted id_token after logout) — Go parity.
-              "prompt" => "login"
-            })
+          base_params = %{
+            "response_type" => "code",
+            "client_id" => cfg.client_id,
+            "redirect_uri" => callback_url(conn),
+            "scope" => scope_list(),
+            "state" => state,
+            "nonce" => nonce,
+            "code_challenge" => challenge,
+            "code_challenge_method" => "S256",
+            # prompt=login forces the IdP to re-auth (avoids replaying a cached,
+            # already-denylisted id_token after logout) — Go parity.
+            "prompt" => "login"
+          }
+
+          # M-1: the UIA step-up fallback (uia_session set) must force a GENUINELY fresh
+          # IdP authentication, not silently reuse an existing IdP SSO-session cookie.
+          # `prompt=login` is advisory; several IdPs honour an existing session. Adding
+          # `max_age=0` forces the IdP to re-authenticate the user (or refuse) so the
+          # returned auth_time is trustworthy. ONLY on the UIA-fallback path — the normal
+          # login redirect keeps `prompt=login` alone so login UX is not degraded.
+          params_map =
+            if is_binary(uia_session) and uia_session != "" do
+              Map.put(base_params, "max_age", "0")
+            else
+              base_params
+            end
+
+          query = URI.encode_query(params_map)
 
           conn
           |> put_resp_header("cache-control", "no-store")
@@ -113,6 +135,37 @@ defmodule Nebu.Matrix.SsoLogin do
       {:error, reason} ->
         Logger.error("matrix SSO redirect failed: #{inspect(reason)}")
         error(conn, 503, "M_UNAVAILABLE", "SSO is not available")
+    end
+  end
+
+  # ── GET /_matrix/client/v3/auth/m.login.sso/fallback/web?session=<id> ────────
+
+  @doc """
+  The UIA `m.login.sso` auth FALLBACK (story s3-matrix-device-endpoints, CS v1.18
+  §"Fallback"). The client opens this in a browser for an in-flight UIA `session`;
+  it behaves exactly like `GET /sso/redirect` (302 → IdP authorize) EXCEPT the SSO
+  state is tagged with the UIA session id, so the shared OIDC callback completes
+  THAT UIA session (marks its `m.login.sso` stage complete + refreshes auth_time)
+  instead of minting a normal loginToken. UNAUTHENTICATED (it IS the auth step).
+
+  An unknown/expired UIA session → 400. The `redirect_url` is irrelevant to the
+  re-submit (the client re-submits the original request itself), so a fixed internal
+  marker is used; the callback renders a completion page rather than redirecting back.
+  """
+  def uia_fallback(conn) do
+    session_id = conn.query_params["session"]
+
+    cond do
+      not is_binary(session_id) or session_id == "" ->
+        error(conn, 400, "M_MISSING_PARAM", "session is required")
+
+      match?(:error, Nebu.Matrix.Uia.load(session_id)) ->
+        error(conn, 400, "M_UNKNOWN", "Unknown or expired UIA session")
+
+      true ->
+        # redirect_url is unused for a UIA completion (the callback renders a page),
+        # but do_redirect requires one for the state entry; use an internal marker.
+        do_redirect(conn, "https://uia.local/complete", session_id)
     end
   end
 
@@ -162,24 +215,78 @@ defmodule Nebu.Matrix.SsoLogin do
              {:ok, id_token, oidc_refresh_token} <- exchange(conn, code, entry.verifier, cfg),
              {:ok, claims} <- Nebu.Web.Plugs.OidcPlug.verify_token(id_token),
              :ok <- check_nonce(claims, entry.nonce) do
-          opaque = random_token(32)
+          if is_binary(entry.uia_session) and entry.uia_session != "" do
+            # S3: this was a UIA m.login.sso completion, not a normal login. Complete
+            # the UIA session ONLY when the freshly-authenticated identity matches the
+            # session's bound user (H-1), then render a terminal page; on mismatch
+            # render a failure page WITHOUT marking the stage complete.
+            complete_uia(conn, entry.uia_session, claims)
+          else
+            opaque = random_token(32)
 
-          # oidc-session-refresh: carry the OIDC refresh token through the
-          # single-use loginToken so POST /login can mint a long-lived opaque Nebu
-          # session when the client asks for refresh_token: true. nil → JWT fallback.
-          SsoStore.put_login_token(opaque, id_token, @login_token_ttl_seconds,
-            oidc_refresh_token: oidc_refresh_token
-          )
+            # oidc-session-refresh: carry the OIDC refresh token through the
+            # single-use loginToken so POST /login can mint a long-lived opaque Nebu
+            # session when the client asks for refresh_token: true. nil → JWT fallback.
+            SsoStore.put_login_token(opaque, id_token, @login_token_ttl_seconds,
+              oidc_refresh_token: oidc_refresh_token
+            )
 
-          conn
-          |> put_resp_header("cache-control", "no-store")
-          |> put_resp_header("location", append_login_token(entry.redirect_url, opaque))
-          |> send_resp(302, "")
+            conn
+            |> put_resp_header("cache-control", "no-store")
+            |> put_resp_header("location", append_login_token(entry.redirect_url, opaque))
+            |> send_resp(302, "")
+          end
         else
           {:error, reason} ->
             Logger.warning("matrix SSO callback failed: #{inspect(reason)}")
             error(conn, 403, "M_FORBIDDEN", "SSO login failed")
         end
+    end
+  end
+
+  # S3 (H-1): terminal completion of a UIA m.login.sso stage, IDENTITY-BOUND. The fresh
+  # OIDC login has been verified by the shared verify_token path above; derive the Matrix
+  # user_id from the verified claims THE SAME WAY login does (UserId.from_claims/2 with
+  # the configured server_name — identical derivation incl. sub normalisation) and only
+  # complete the UIA session when that identity matches the session's bound user. On a
+  # match, Uia.complete/2 marks the stage complete + refreshes auth_time → render the
+  # terminal page (status 200; the page runs onAuthDone()); the client then re-submits
+  # the original request with auth: {"session": id}.
+  #
+  # On a mismatch (a DIFFERENT IdP account completing a victim's pending fallback) the
+  # UPDATE matches 0 rows → :error → the stage is NOT marked complete and auth_time is
+  # NOT refreshed. We render an explicit failure page (403) and never call onAuthDone(),
+  # so the step-up cannot be satisfied by an unrelated identity.
+  defp complete_uia(conn, uia_session, claims) do
+    server = Application.get_env(:nebu_http, :server_name, "localhost")
+    authenticated_user = Nebu.Matrix.UserId.from_claims(claims, server)
+
+    case Nebu.Matrix.Uia.complete(uia_session, authenticated_user) do
+      {:ok, _user_id} ->
+        conn
+        |> put_resp_header("cache-control", "no-store")
+        |> put_resp_content_type("text/html")
+        |> send_resp(200, """
+        <!doctype html><html><head><meta charset="utf-8"><title>Authentication complete</title></head>
+        <body><p>Authentication complete. You may return to your client.</p>
+        <script>if (window.onAuthDone) { window.onAuthDone(); }
+        if (window.opener && window.opener.postMessage) { window.opener.postMessage("authDone", "*"); }</script>
+        </body></html>
+        """)
+
+      :error ->
+        # Identity mismatch (or unknown/expired/consumed session). Do NOT mark the
+        # stage complete, do NOT refresh auth_time, do NOT run onAuthDone(). Log a
+        # warning with NO PII / token / session id.
+        Logger.warning("matrix UIA SSO: completion identity did not match the pending request")
+
+        conn
+        |> put_resp_header("cache-control", "no-store")
+        |> put_resp_content_type("text/html")
+        |> send_resp(403, """
+        <!doctype html><html><head><meta charset="utf-8"><title>Authentication did not match</title></head>
+        <body><p>This authentication did not match the request that started it. The operation was not authorised.</p></body></html>
+        """)
     end
   end
 
@@ -246,16 +353,12 @@ defmodule Nebu.Matrix.SsoLogin do
     end
   end
 
-  # ── OIDC config (Bootstrap DB → NEBU_OIDC_* env fallback) ───────────────────
+  # ── OIDC config (server_config only — ADR-022) ──────────────────────────────
 
   defp oidc_config do
-    # Mirrors OidcPlug.oidc_issuer/0: env takes priority; OidcConfig DB cache
-    # fills in when env is absent (Bootstrap-Wizard deployments without NEBU_OIDC_ISSUER).
-    issuer =
-      case Application.get_env(:nebu_http, :oidc_issuer) do
-        v when is_binary(v) and v != "" -> v
-        _ -> Nebu.Web.OidcConfig.get().issuer
-      end
+    # oidc-bootstrap-only-config (ADR-022): the issuer is resolved SOLELY from
+    # server_config via the OidcConfig DB-backed cache. No env-var config path.
+    issuer = Nebu.Web.OidcConfig.get().issuer
 
     {client_id, client_secret} = resolve_client_credentials()
 
@@ -266,33 +369,20 @@ defmodule Nebu.Matrix.SsoLogin do
     end
   end
 
-  # The Matrix-client SSO token is validated against NEBU_OIDC_AUDIENCE, so the OIDC
-  # client used to MINT it must be the audience-matching Matrix client — and that
-  # client's redirect_uri (/_matrix/client/v3/login/sso/redirect/oidc) must be the one
-  # registered at the IdP. The admin Bootstrap wizard configures a DIFFERENT client
-  # (server_config.oidc_client_id = the admin UI client), whose redirect_uri is
-  # /admin/callback — using it for Matrix SSO makes the IdP reject the redirect_uri.
-  #
-  # So resolve the Matrix OIDC client env (NEBU_OIDC_CLIENT_ID/SECRET) FIRST; only when
-  # it is unset do we fall back to the Bootstrap-DB pair (bfd4884f — single-client
-  # deployments where the operator-configured client IS the Matrix client), then the
-  # admin client as a last resort. client_id and secret are ALWAYS taken from the SAME
-  # source so the pair can never mismatch.
+  # oidc-bootstrap-only-config (ADR-022): a SINGLE OIDC client serves both Matrix
+  # Bearer validation and admin operator login. Its id/secret come solely from
+  # server_config (set by the bootstrap wizard); the secret is stored AES-256-GCM
+  # encrypted at rest and decrypted here. There is no NEBU_OIDC_CLIENT_ID env path
+  # and no separate admin client. client_id and secret are always read from the SAME
+  # source so the pair can never mismatch. Fails closed (empty client) when unset.
   defp resolve_client_credentials do
-    matrix_id = Application.get_env(:nebu_http, :matrix_oidc_client_id)
-    bootstrap_id = config_value("oidc_client_id")
+    client_id = config_value("oidc_client_id")
 
-    cond do
-      is_binary(matrix_id) and matrix_id != "" ->
-        {matrix_id, Application.get_env(:nebu_http, :matrix_oidc_client_secret, "")}
-
-      is_binary(bootstrap_id) and bootstrap_id != "" ->
-        encrypted = config_value("oidc_client_secret") || ""
-        {bootstrap_id, Nebu.Admin.BootstrapLive.decrypt_secret(encrypted)}
-
-      true ->
-        {Application.get_env(:nebu_http, :admin_oidc_client_id),
-         Application.get_env(:nebu_http, :admin_oidc_client_secret, "")}
+    if is_binary(client_id) and client_id != "" do
+      encrypted = config_value("oidc_client_secret") || ""
+      {client_id, Nebu.Admin.BootstrapLive.decrypt_secret(encrypted)}
+    else
+      {nil, ""}
     end
   end
 
@@ -319,32 +409,33 @@ defmodule Nebu.Matrix.SsoLogin do
     end
   end
 
-  # ── scope list (openid [+offline_access] + NEBU_OIDC_EXTRA_SCOPES) ─────────────
+  # ── scope list (openid [+offline_access]) ─────────────────────────────────────
   #
-  # `offline_access` is no longer hardcoded: it is included iff the server_config key
-  # `matrix_oidc_refresh_mode` resolves to "offline" (story oidc-refresh-mode-config,
-  # AC2). The mode is read LIVE on each login-start (low frequency) so a runtime change
-  # via /admin/config applies without a redeploy. Absent / any non-"online" value →
-  # DEFAULT "offline" (preserves prior behaviour & refresh on Dex + Keycloak, AC1/AC7).
+  # oidc-bootstrap-only-config (ADR-022): there is no NEBU_OIDC_EXTRA_SCOPES env var.
+  # The base scope set is a FIXED default — `openid profile email`.
+  #
+  # oidc-bootstrap-only-e2e-regressions (AC4/AC5): `profile` and `email` are REQUIRED.
+  # Dex omits the `name` claim unless `profile` is requested; without `name` the
+  # configured `oidc_user_id_claim = "name"` cannot resolve and the MXID falls back to
+  # the opaque `sub` (the regression `df249f8c` originally fixed). This supersedes the
+  # earlier `fix-element-login` `~w(openid)` minimal-scope decision.
+  #
+  # `offline_access` is included iff the server_config key `matrix_oidc_refresh_mode`
+  # resolves to "offline" (story oidc-refresh-mode-config, AC2). The mode is read LIVE
+  # on each login-start (low frequency) so a runtime change via /admin/config applies
+  # without a redeploy. Absent / any non-"online" value → DEFAULT "offline".
   #
   # Test seam (mirrors OidcClaimCache's :oidc_claim_reader): a 0-arity fun under
   # :matrix_oidc_refresh_mode_reader injects the mode; default reads server_config.
 
-  @base_scopes ~w(openid)
+  @base_scopes ~w(openid profile email)
 
   @sql_matrix_refresh_mode "SELECT value FROM server_config WHERE key = 'matrix_oidc_refresh_mode' LIMIT 1"
 
   defp scope_list do
-    extra =
-      case Application.get_env(:nebu_http, :oidc_extra_scopes) do
-        list when is_list(list) -> list
-        str when is_binary(str) -> String.split(str, ~r/[\s,]+/, trim: true)
-        _ -> []
-      end
-
     base = if matrix_refresh_mode() == "offline", do: @base_scopes ++ ["offline_access"], else: @base_scopes
 
-    (base ++ extra)
+    base
     |> Enum.reject(&(&1 == ""))
     |> Enum.uniq()
     |> Enum.join(" ")

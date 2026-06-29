@@ -37,8 +37,8 @@ function restoreBootstrappedState(): void {
         ` ('bootstrap_completed', 'true', ${now}),` +
         ` ('instance_name', 'nebuchadnezzar', ${now}),` +
         ` ('oidc_issuer', 'http://dex:5556/dex', ${now}),` +
-        ` ('oidc_client_id', 'nebu-admin', ${now}),` +
-        ` ('oidc_client_secret', 'nebu-admin-secret', ${now}),` +
+        ` ('oidc_client_id', 'nebu-gateway', ${now}),` +
+        ` ('oidc_client_secret', 'nebu-dev-secret', ${now}),` +
         ` ('oidc_user_id_claim', 'email', ${now}),` +
         ` ('oidc_displayname_claim', 'name', ${now}),` +
         ` ('admin_group_claim', 'instance_admin', ${now})"`,
@@ -174,7 +174,7 @@ test.describe('Bootstrap — Step 2: OIDC Configuration', () => {
   });
 
   test('shows error on missing OIDC Issuer', async ({ page }) => {
-    await page.getByRole('textbox', { name: 'OIDC Client ID' }).fill('nebu-admin');
+    await page.getByRole('textbox', { name: 'OIDC Client ID' }).fill('nebu-gateway');
     await page.getByRole('textbox', { name: 'OIDC Client Secret' }).fill('secret');
     await page.getByRole('button', { name: 'Next' }).click();
     // Browser native required validation fires first; stay on step 2
@@ -183,7 +183,7 @@ test.describe('Bootstrap — Step 2: OIDC Configuration', () => {
 
   test('shows error for invalid (non-URL) issuer', async ({ page }) => {
     await page.getByRole('textbox', { name: 'OIDC Issuer URL' }).fill('not-a-url');
-    await page.getByRole('textbox', { name: 'OIDC Client ID' }).fill('nebu-admin');
+    await page.getByRole('textbox', { name: 'OIDC Client ID' }).fill('nebu-gateway');
     await page.getByRole('textbox', { name: 'OIDC Client Secret' }).fill('secret');
     await page.getByRole('button', { name: 'Next' }).click();
     await expect(page.locator('.alert-error').first()).toBeVisible({ timeout: 5_000 });
@@ -191,7 +191,7 @@ test.describe('Bootstrap — Step 2: OIDC Configuration', () => {
 
   test('shows HTTP warning for http:// issuer on Next', async ({ page }) => {
     await page.getByRole('textbox', { name: 'OIDC Issuer URL' }).fill('http://dex:5556/dex');
-    await page.getByRole('textbox', { name: 'OIDC Client ID' }).fill('nebu-admin');
+    await page.getByRole('textbox', { name: 'OIDC Client ID' }).fill('nebu-gateway');
     await page.getByRole('textbox', { name: 'OIDC Client Secret' }).fill('secret');
     await page.getByRole('button', { name: 'Next' }).click();
     // HTTP issuers show a warning but still advance
@@ -205,8 +205,8 @@ test.describe('Bootstrap — Step 2: OIDC Configuration', () => {
 
   test('preserves OIDC values when navigating back and forward', async ({ page }) => {
     await page.getByRole('textbox', { name: 'OIDC Issuer URL' }).fill('http://dex:5556/dex');
-    await page.getByRole('textbox', { name: 'OIDC Client ID' }).fill('nebu-admin');
-    await page.getByRole('textbox', { name: 'OIDC Client Secret' }).fill('nebu-admin-secret');
+    await page.getByRole('textbox', { name: 'OIDC Client ID' }).fill('nebu-gateway');
+    await page.getByRole('textbox', { name: 'OIDC Client Secret' }).fill('nebu-dev-secret');
     // Back to step 1 — issuer/clientID should be carried via hidden fields
     await page.getByRole('button', { name: 'Back' }).click();
     await expect(page.getByRole('heading', { name: 'Step 1: Instance Name' })).toBeVisible();
@@ -215,7 +215,7 @@ test.describe('Bootstrap — Step 2: OIDC Configuration', () => {
     await expect(page.getByRole('heading', { name: 'Step 2: OIDC Configuration' })).toBeVisible();
     // Issuer and client ID preserved; secret is intentionally NOT re-populated (security)
     await expect(page.getByRole('textbox', { name: 'OIDC Issuer URL' })).toHaveValue('http://dex:5556/dex');
-    await expect(page.getByRole('textbox', { name: 'OIDC Client ID' })).toHaveValue('nebu-admin');
+    await expect(page.getByRole('textbox', { name: 'OIDC Client ID' })).toHaveValue('nebu-gateway');
   });
 });
 
@@ -230,8 +230,8 @@ test.describe('Bootstrap — Step 3: Claim Mapping', () => {
     await page.getByRole('button', { name: 'Next' }).click();
     await expect(page.getByRole('heading', { name: 'Step 2' })).toBeVisible();
     await page.getByRole('textbox', { name: 'OIDC Issuer URL' }).fill('http://dex:5556/dex');
-    await page.getByRole('textbox', { name: 'OIDC Client ID' }).fill('nebu-admin');
-    await page.getByRole('textbox', { name: 'OIDC Client Secret' }).fill('nebu-admin-secret');
+    await page.getByRole('textbox', { name: 'OIDC Client ID' }).fill('nebu-gateway');
+    await page.getByRole('textbox', { name: 'OIDC Client Secret' }).fill('nebu-dev-secret');
     await page.getByRole('button', { name: 'Next' }).click();
     await expect(page.getByRole('heading', { name: 'Step 3' })).toBeVisible();
   });

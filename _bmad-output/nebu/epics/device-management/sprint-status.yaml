@@ -1,0 +1,15 @@
+# Sprint status — device-management epic
+# Authoritative story status lives in each story file's frontmatter; this is a tracking aid.
+# last_updated: 2026-06-28
+# story device-bugfixes done (pipeline: ATDD+Dev 2 cycles; UX ADV-1 fixed; 0 CRIT/MAJOR cycle 2; Kassandra CLEAN; 929 green): 2026-06-28
+# story device-bugfixes review (ATDD+Dev CLEAN, 2 fixes, 6 new tests): 2026-06-28
+# story s4-admin-ui-device-management done (pipeline: ATDD+Dev; UX V1 fixed 1 cycle; 2 MINOR fixed 1 cycle; Kassandra CLEAN): 2026-06-26
+# story s3-matrix-device-endpoints done (pipeline: ATDD+Dev; test-review MAJOR fixed; 1 MINOR fixed 1 cycle; Kassandra HIGH (UIA step-up bypass) fixed cycle 2, re-review CLEAN): 2026-06-26
+# story s2-device-lifecycle-at-login done (pipeline: ATDD+Dev CLEAN, 2 MINOR fixed 1 cycle, Kassandra CLEAN): 2026-06-26
+# story s1-device-registry-model done (pipeline: ATDD+Dev CLEAN; 2 MINOR fixed 1 cycle; Kassandra CLEAN): 2026-06-26
+stories:
+  s1-device-registry-model: done
+  s2-device-lifecycle-at-login: done
+  s3-matrix-device-endpoints: done
+  s4-admin-ui-device-management: review
+  device-bugfixes: review

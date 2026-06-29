@@ -1,7 +1,7 @@
 /**
  * Step definitions for features/admin/create_room.feature
  *
- * Story rm3-admin-create-archive (epic: room-management-elixir) — ATDD, written FIRST.
+ * Story rm3-admin-create-archive (epic: room-management-elixir).
  *
  * Framework: playwright-bdd (importTestFrom: 'fixtures/nebu-fixtures.ts')
  *
@@ -11,29 +11,37 @@
  *   - "the operator is logged in as admin"
  *   - "the operator navigates to {string}"
  *
- * RoomsLive list (/admin/rooms): a "Create room" button toggles a DaisyUI modal
- * (#create-room-modal) holding the create form [data-form="create-room"] with a name
- * input and a visibility <select>. A successful create redirects to the new room's
- * detail panel (/admin/rooms/:room_id).
+ * CURRENT controller contract (admin-http-refactor — RoomsLive → RoomsController):
+ *   /admin/rooms        list page; "Create room" is an <a href="/admin/rooms/new">
+ *                       ([data-role="open-create-room"]) — a link, not a modal toggle.
+ *   /admin/rooms/new    a separate page with <form method="post" action="/admin/rooms">
+ *                       holding a name <input name="name"> and a visibility <select
+ *                       name="visibility">. No LiveView socket, no DaisyUI modal.
+ *   POST /admin/rooms   success → PRG redirect to /admin/rooms/:room_id (the detail page,
+ *                       [data-page="room-detail"]); empty/invalid name → re-render of the
+ *                       list (/admin/rooms) with [data-role="create-error"].
  */
 
 import { When, Then } from '../../fixtures/nebu-fixtures';
 import { expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
 
+// The create form lives on the dedicated /admin/rooms/new page.
 function createForm(page: Page) {
-  return page.locator('[data-form="create-room"]');
+  return page.locator('form[action="/admin/rooms"][method="post"]');
 }
 
-// ─── AC1: open the modal ──────────────────────────────────────────────────────
+// ─── AC1: navigate to the create-room page ────────────────────────────────────
 
-When('the operator opens the create-room modal', async ({ page }: { page: Page }) => {
+When('the operator opens the create-room page', async ({ page }: { page: Page }) => {
+  // The "Create room" control is a plain link to /admin/rooms/new (no modal).
   await page.locator('[data-role="open-create-room"]').click();
+  await page.waitForURL(/\/admin\/rooms\/new$/, { timeout: 15_000 });
   await expect(createForm(page).locator('input[name="name"]')).toBeVisible({ timeout: 15_000 });
 });
 
 Then(
-  'the create-room modal shows a name field and a visibility selector',
+  'the create-room page shows a name field and a visibility selector',
   async ({ page }: { page: Page }) => {
     await expect(createForm(page).locator('input[name="name"]')).toBeVisible({ timeout: 15_000 });
     await expect(createForm(page).locator('select[name="visibility"]')).toBeVisible({
@@ -42,48 +50,63 @@ Then(
   }
 );
 
-// ─── AC2: create + redirect to detail ──────────────────────────────────────────
+// ─── AC2: create + PRG redirect to detail page ────────────────────────────────
 
 When(
   'the operator creates a room named {string} with visibility {string}',
   async ({ page }: { page: Page }, name: string, visibility: string) => {
+    // Go to the dedicated create page, fill the real form, submit. The POST redirects
+    // (Post-Redirect-Get) to the new room's detail page /admin/rooms/:room_id.
     await page.locator('[data-role="open-create-room"]').click();
+    await page.waitForURL(/\/admin\/rooms\/new$/, { timeout: 15_000 });
     await createForm(page).locator('input[name="name"]').fill(name);
-    await createForm(page).locator('select[name="visibility"]').selectOption(visibility.toLowerCase());
+    await createForm(page)
+      .locator('select[name="visibility"]')
+      .selectOption(visibility.toLowerCase());
     await createForm(page).locator('button[type="submit"]').click();
-    // create_room push_navigates to the new room's detail panel.
-    await page.waitForLoadState('networkidle');
-    await expect(page.locator('[data-page="room-detail"] [data-room-id]')).toBeVisible({
-      timeout: 15_000,
-    });
+    // Wait for the PRG redirect away from /new (to the detail page or, for AC4/AC5, the
+    // caller navigates to the list afterwards).
+    await page.waitForLoadState('domcontentloaded');
   }
 );
 
 Then(
-  'the operator is taken to the room detail panel for {string}',
+  'the operator is taken to the room detail page for {string}',
   async ({ page }: { page: Page }, name: string) => {
-    await expect(page.locator('[data-page="room-detail"]')).toBeVisible({ timeout: 15_000 });
-    await expect(page.locator('[data-page="room-detail"]').getByText(name).first()).toBeVisible({
-      timeout: 15_000,
-    });
+    // Full-page redirect lands on the room detail controller page.
+    await expect(page).toHaveURL(/\/admin\/rooms\/[^/]+$/, { timeout: 15_000 });
+    await expect(page).not.toHaveURL(/\/admin\/rooms\/new$/);
+    const detail = page.locator('[data-page="room-detail"]');
+    await expect(detail).toBeVisible({ timeout: 15_000 });
+    await expect(detail.locator('[data-room-id]')).toBeVisible({ timeout: 15_000 });
+    await expect(detail.getByText(name).first()).toBeVisible({ timeout: 15_000 });
   }
 );
 
-// ─── AC3: inline validation ─────────────────────────────────────────────────────
+// ─── AC3: server-side validation error on empty name ──────────────────────────
 
 When('the operator submits the create-room form with an empty name', async ({ page }: { page: Page }) => {
+  await page.locator('[data-role="open-create-room"]').click();
+  await page.waitForURL(/\/admin\/rooms\/new$/, { timeout: 15_000 });
+  // The name input is `required`, which blocks a native submit. Remove the attribute so the
+  // request reaches the server and exercises the controller's server-side validation (the
+  // real defence — clients can always bypass HTML validity).
+  await createForm(page).locator('input[name="name"]').evaluate((el) => {
+    (el as HTMLInputElement).removeAttribute('required');
+  });
   await createForm(page).locator('input[name="name"]').fill('');
   await createForm(page).locator('button[type="submit"]').click();
+  await page.waitForLoadState('domcontentloaded');
 });
 
 Then(
-  'the create-room modal shows the error {string}',
+  'the rooms list shows the create error {string}',
   async ({ page }: { page: Page }, message: string) => {
+    // On an empty name the controller re-renders the rooms list (/admin/rooms) carrying the
+    // inline error. The create form is no longer on this page (it lives on /admin/rooms/new).
     await expect(page.locator('[data-role="create-error"]')).toContainText(message, {
       timeout: 15_000,
     });
-    // The modal stays open — the create form is still on the page.
-    await expect(createForm(page).locator('input[name="name"]')).toBeVisible();
   }
 );
 

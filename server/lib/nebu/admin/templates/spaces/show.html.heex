@@ -123,17 +123,30 @@
         data-form="add-member"
       >
         <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
-        <div class="form-control grow">
-          <label class="label-text">Add user</label>
+        <%!-- Free-text input progressively enhanced by the CSP-safe fetch typeahead in
+             app.js (admin-add-user-autocomplete); shares the rooms widget. --%>
+        <div class="form-control grow relative" data-role="user-autocomplete">
+          <label for="space-add-member-user-id" class="label-text">Add user</label>
           <input
             type="text"
+            id="space-add-member-user-id"
             name="user_id"
             placeholder="@user:server"
             class="input input-bordered w-full"
             data-field="add-member-user-id"
             autocomplete="off"
             aria-label="Matrix user id to add"
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded="false"
+            aria-controls="space-add-member-user-id-listbox"
           />
+          <div
+            data-role="user-suggestions"
+            data-listbox-id="space-add-member-user-id-listbox"
+            class="absolute left-0 right-0 top-full z-10"
+          >
+          </div>
         </div>
         <button type="submit" class="btn btn-primary" role="button">Add</button>
       </form>

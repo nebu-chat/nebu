@@ -207,7 +207,7 @@ When('the operator fills in {string} with the Dex issuer URL', async ({ page }: 
 
 When('the operator fills in {string} with the configured client secret', async ({ page }: { page: Page }, _fieldLabel: string) => {
   const field = page.getByLabel(/oidc client secret/i);
-  const secret = process.env.NEBU_OIDC_CLIENT_SECRET ?? 'nebu-admin-secret';
+  const secret = process.env.NEBU_OIDC_CLIENT_SECRET ?? 'nebu-dev-secret';
   await field.fill(secret);
 });
 

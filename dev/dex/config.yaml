@@ -21,18 +21,17 @@ expiry:
 
 enablePasswordDB: true
 
+# oidc-bootstrap-only-config (ADR-022): a SINGLE OIDC client serves Matrix Bearer
+# validation AND admin operator login. It registers ALL Nebu redirect URIs (Matrix
+# SSO redirect, Element auth.html, and /admin/callback). The former separate
+# `nebu-admin` client is removed — there is no second client.
 staticClients:
   - id: nebu-gateway
-    name: "Nebu Gateway"
+    name: "Nebu"
     secret: nebu-dev-secret
     redirectURIs:
       - "http://localhost:8008/_matrix/client/v3/login/sso/redirect/oidc"
       - "http://localhost:7070/auth.html"
-
-  - id: nebu-admin
-    name: "Nebu Admin UI"
-    secret: nebu-admin-secret
-    redirectURIs:
       - "http://localhost:8008/admin/callback"
 
 staticPasswords:

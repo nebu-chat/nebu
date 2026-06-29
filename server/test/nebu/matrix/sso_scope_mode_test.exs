@@ -5,17 +5,19 @@ defmodule Nebu.Matrix.SsoScopeModeTest do
 
   ## What is under test
 
-  `SsoLogin.@base_scopes` is now `~w(openid)` (fix-element-login). The
-  `offline_access` scope is configurable per the `server_config` key
+  `SsoLogin.@base_scopes` is `~w(openid profile email)` (story
+  `oidc-bootstrap-only-e2e-regressions`, AC4 — supersedes the `fix-element-login`
+  `~w(openid)` minimal scope: Dex omits `name` without `profile`, regressing the MXID
+  to `sub`). The `offline_access` scope is configurable per the `server_config` key
   `matrix_oidc_refresh_mode` (`offline` | `online`), read LIVE on each
   login-start so a runtime change applies without a redeploy:
 
     * `matrix_oidc_refresh_mode = offline` (or unset → default offline) →
       scope INCLUDES `offline_access`.
     * `matrix_oidc_refresh_mode = online` → scope EXCLUDES `offline_access`
-      (just `openid` + extras).
-    * `openid` is always present; `profile` and `email` are opt-in via
-      `NEBU_OIDC_EXTRA_SCOPES` (`:oidc_extra_scopes`).
+      (just the `openid profile email` base).
+    * `openid`, `profile`, and `email` are always present (the fixed ADR-022 default).
+      This test focuses on the `offline_access` refresh-mode toggle.
 
   ## Public surface (no testing of privates)
 
@@ -69,10 +71,16 @@ defmodule Nebu.Matrix.SsoScopeModeTest do
   # ── shared OIDC + discovery seam (mirrors matrix_sso_test.exs) ────────────────
 
   defp setup_oidc do
-    Application.put_env(:nebu_http, :oidc_issuer, @issuer)
-    Application.put_env(:nebu_http, :oidc_audience, "nebu-client")
-    Application.put_env(:nebu_http, :matrix_oidc_client_id, "nebu-client")
-    Application.put_env(:nebu_http, :matrix_oidc_client_secret, "shhh")
+    # oidc-bootstrap-only-config (ADR-022): issuer via OidcConfig, the single SSO
+    # OIDC client via the :sso_bootstrap_reader seam. No env config path.
+    Nebu.Web.OidcTestSupport.configure(@issuer, "nebu-client")
+    Application.put_env(:nebu_http, :admin_secret_at_rest, "sso-scope-mode-test-key")
+
+    Application.put_env(:nebu_http, :sso_bootstrap_reader, fn
+      "oidc_client_id" -> "nebu-client"
+      "oidc_client_secret" -> Nebu.Admin.BootstrapLive.encrypt_secret("shhh")
+      _ -> nil
+    end)
 
     Application.put_env(:nebu_http, :oidc_metadata_override, %{
       "issuer" => @issuer,
@@ -82,13 +90,12 @@ defmodule Nebu.Matrix.SsoScopeModeTest do
     })
 
     on_exit(fn ->
+      Nebu.Web.OidcTestSupport.clear()
+
       for k <- [
-            :oidc_issuer,
-            :oidc_audience,
-            :matrix_oidc_client_id,
-            :matrix_oidc_client_secret,
+            :admin_secret_at_rest,
+            :sso_bootstrap_reader,
             :oidc_metadata_override,
-            :oidc_extra_scopes,
             :matrix_oidc_refresh_mode_reader
           ] do
         Application.delete_env(:nebu_http, k)
@@ -137,9 +144,10 @@ defmodule Nebu.Matrix.SsoScopeModeTest do
       scopes = scope_params()
       assert "openid" in scopes
       refute "offline_access" in scopes
-      # profile and email are opt-in via NEBU_OIDC_EXTRA_SCOPES (fix-element-login).
-      refute "profile" in scopes
-      refute "email" in scopes
+      # oidc-bootstrap-only-e2e-regressions (AC4): profile/email are now part of the fixed
+      # base scope (supersedes fix-element-login). Online mode only toggles offline_access.
+      assert "profile" in scopes
+      assert "email" in scopes
     end
 
     test "unset mode → DEFAULTS to offline (includes offline_access) — AC1/AC7" do
@@ -163,23 +171,6 @@ defmodule Nebu.Matrix.SsoScopeModeTest do
 
       scopes = scope_params()
       assert "openid" in scopes
-      assert "offline_access" in scopes
-    end
-
-    test "extra scopes are still appended in online mode (no offline_access)" do
-      set_mode("online")
-      Application.put_env(:nebu_http, :oidc_extra_scopes, "groups custom_claim")
-      scopes = scope_params()
-      assert "groups" in scopes
-      assert "custom_claim" in scopes
-      refute "offline_access" in scopes
-    end
-
-    test "extra scopes are still appended in offline mode (with offline_access)" do
-      set_mode("offline")
-      Application.put_env(:nebu_http, :oidc_extra_scopes, ["groups"])
-      scopes = scope_params()
-      assert "groups" in scopes
       assert "offline_access" in scopes
     end
   end

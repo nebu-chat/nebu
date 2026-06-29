@@ -8,7 +8,12 @@
 #   _bmad-output/nebu/epics/<epic-name>/pipeline-state.yaml
 # This file is no longer used for named-epic pipeline runs.
 #
-# last_updated: 2026-06-26
+# last_updated: 2026-06-29
+# [bug-login-blocks-bootstrap] 2026-06-29T09:25Z code-review → CLEAN (Patch-1 fixed: Phoenix.Controller.redirect → redirect; 1 defer pre-existing)
+# [bug-login-blocks-bootstrap] 2026-06-29T09:16Z ci-gate → ✓ unit-elixir 959/0 (--warnings-as-errors clean)
+# [bug-login-blocks-bootstrap] 2026-06-29T09:15Z dev-story → done (cycle 0): LoginController.index/2 redirects to /admin/bootstrap when bootstrap_completed? == false
+# [bug-login-blocks-bootstrap] 2026-06-29T09:10Z atdd → 2 failing tests (login_bootstrap_redirect_test.exs: AC1×2)
+# [bug-login-blocks-bootstrap] 2026-06-29T09:00Z pipeline started (--bug: fresh install cannot reach bootstrap wizard — /admin/login shows SSO button with no OIDC configured, no link to /admin/bootstrap)
 # [device-key-registration] 2026-06-26T08:12Z committed ✓ (device-key directory + E2EE guardrail; code-review CLEAN 1 cycle + Kassandra CLEAN)
 # [device-key-registration] 2026-06-26T08:11Z arc42-update → ADR-011 + CLAUDE.md Matrix scope updated
 # [device-key-registration] 2026-06-26T08:09Z code-review → CLEAN (cycle 1); security-review → Kassandra CLEAN (F-1 fixed+verified, F-2 fixed); copy_state_events hardened
@@ -186,9 +191,26 @@
 # [5-30] 2026-05-24T19:49Z atdd → 4 failing tests (auth_extra_scopes_test.go)
 # [5-30] 2026-05-24T19:38Z pipeline started (story pre-created)
 
-story: null
-current_step: null
-completed: []
+story: "bug-login-blocks-bootstrap"
+current_step: "commit"
+completed:
+  - atdd
+  - dev-story
+  - ci-gate
+  - code-review
 cycle_count: 0
+blocked_reason: null
+last_updated: "2026-06-29T09:58Z"
+story: "device-key-registration"
+current_step: "commit"
+completed:
+  - atdd
+  - test-review
+  - dev-story
+  - ci-gate
+  - code-review
+  - security-review
+  - arc42-update
+cycle_count: 1
 blocked_reason: null
 last_updated: "2026-06-26T08:12Z"

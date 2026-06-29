@@ -60,12 +60,22 @@ defmodule Nebu.Web.AdminOidcLoginTest do
 
     priv_map = Map.put(priv_map, "kid", @kid)
 
-    Application.put_env(:nebu_http, :oidc_issuer, @issuer)
-    Application.put_env(:nebu_http, :oidc_audience, @audience)
+    # oidc-bootstrap-only-config (ADR-022): issuer/audience resolve via OidcConfig,
+    # the single admin OIDC client via the :admin_oidc_config_reader seam, and the
+    # redirect_uri is DERIVED from :server_name + :admin_session_secure (no env path).
+    Nebu.Web.OidcTestSupport.configure(@issuer, @audience)
     Application.put_env(:nebu_http, :oidc_jwks, [pub_jwk])
-    Application.put_env(:nebu_http, :admin_oidc_client_id, @client_id)
-    Application.put_env(:nebu_http, :admin_oidc_client_secret, "client-secret")
-    Application.put_env(:nebu_http, :admin_oidc_redirect_uri, "http://localhost:8008/admin/callback")
+    Application.put_env(:nebu_http, :admin_secret_at_rest, "admin-oidc-login-test-key")
+
+    Application.put_env(:nebu_http, :admin_oidc_config_reader, fn
+      "oidc_client_id" -> @client_id
+      "oidc_client_secret" -> Nebu.Admin.BootstrapLive.encrypt_secret("client-secret")
+      _ -> nil
+    end)
+
+    # Derive http://localhost:8008/admin/callback: localhost host + insecure scheme.
+    Application.put_env(:nebu_http, :server_name, "localhost")
+    Application.put_env(:nebu_http, :admin_session_secure, false)
 
     Application.put_env(:nebu_http, :oidc_metadata_override, %{
       "issuer" => @issuer,
@@ -74,13 +84,14 @@ defmodule Nebu.Web.AdminOidcLoginTest do
     })
 
     on_exit(fn ->
+      Nebu.Web.OidcTestSupport.clear()
+
       for k <- [
-            :oidc_issuer,
-            :oidc_audience,
             :oidc_jwks,
-            :admin_oidc_client_id,
-            :admin_oidc_client_secret,
-            :admin_oidc_redirect_uri,
+            :admin_secret_at_rest,
+            :admin_oidc_config_reader,
+            :server_name,
+            :admin_session_secure,
             :oidc_metadata_override
           ] do
         Application.delete_env(:nebu_http, k)

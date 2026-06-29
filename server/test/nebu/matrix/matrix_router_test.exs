@@ -83,14 +83,13 @@ defmodule Nebu.Web.MatrixRouterTest do
     priv_jwk = Map.put(priv_map, "kid", @kid)
 
     Application.put_env(:nebu_http, :server_name, @server_name)
-    Application.put_env(:nebu_http, :oidc_issuer, @issuer)
-    Application.put_env(:nebu_http, :oidc_audience, @audience)
+    Nebu.Web.OidcTestSupport.configure(@issuer, @audience)
+
     Application.put_env(:nebu_http, :oidc_jwks, [pub_jwk])
 
     ExUnit.Callbacks.on_exit(fn ->
       Application.delete_env(:nebu_http, :server_name)
-      Application.delete_env(:nebu_http, :oidc_issuer)
-      Application.delete_env(:nebu_http, :oidc_audience)
+      Nebu.Web.OidcTestSupport.clear()
       Application.delete_env(:nebu_http, :oidc_jwks)
     end)
 
@@ -134,7 +133,11 @@ defmodule Nebu.Web.MatrixRouterTest do
 
   describe "OIDC discovery endpoints (AC5) — unauthenticated, no DB" do
     setup do
-      Application.put_env(:nebu_http, :oidc_issuer, @issuer)
+      # oidc-bootstrap-only-config (ADR-022): the discovery handlers resolve the
+      # issuer via Nebu.Web.OidcConfig.get().issuer, not env. Install the OidcConfig
+      # seam so auth_issuer / auth_metadata can resolve a known issuer without a DB.
+      Nebu.Web.OidcTestSupport.configure(@issuer, @audience)
+
       # MINOR-4: auth_metadata proxies the live provider's discovery document and
       # now fails CLOSED (503) when the provider is unreachable — it no longer
       # synthesises a (Keycloak-shaped, Dex-wrong) fallback. The :oidc_metadata_override
@@ -148,7 +151,7 @@ defmodule Nebu.Web.MatrixRouterTest do
       })
 
       on_exit(fn ->
-        Application.delete_env(:nebu_http, :oidc_issuer)
+        Nebu.Web.OidcTestSupport.clear()
         Application.delete_env(:nebu_http, :oidc_metadata_override)
       end)
 
@@ -191,9 +194,6 @@ defmodule Nebu.Web.MatrixRouterTest do
       # fails. The handler must NOT synthesise wrong endpoint URLs — it returns
       # 503 M_UNAVAILABLE, mirroring the Go authMetadataHandler.
       Application.delete_env(:nebu_http, :oidc_metadata_override)
-      Application.put_env(:nebu_http, :oidc_issuer, "http://127.0.0.1:1/unreachable")
-
-      on_exit(fn -> Application.put_env(:nebu_http, :oidc_issuer, @issuer) end)
 
       conn = call(:get, "/_matrix/client/v1/auth_metadata")
       assert conn.status == 503
@@ -308,8 +308,6 @@ defmodule Nebu.Web.MatrixRouterTest do
   describe "security headers (F-5)" do
     test "every response carries X-Content-Type-Options: nosniff" do
       # /health (200), a 401 envelope, and a discovery 200 should all carry it.
-      Application.put_env(:nebu_http, :oidc_issuer, @issuer)
-      on_exit(fn -> Application.delete_env(:nebu_http, :oidc_issuer) end)
 
       for conn <- [
             call(:get, "/health"),

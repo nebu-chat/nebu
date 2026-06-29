@@ -194,82 +194,16 @@ defmodule Nebu.Admin.BootstrapJwksUriValidationTest do
              "Should not show JWKS URI error when a valid URI is provided"
     end
 
-    test "submitting step 2 without JWKS URI succeeds when NEBU_OIDC_JWKS_URI env var is set" do
-      # Env var is set → field is pre-filled + disabled; blank submission is OK.
-      # When the field is disabled the browser does NOT send it at all (absent from params).
-      Application.put_env(:nebu_http, :oidc_jwks_uri, @jwks_uri)
-      Application.delete_env(:nebu_http, :oidc_issuer)
-      Application.delete_env(:nebu_http, :matrix_oidc_client_id)
-
-      install_store(%{"instance_name" => "test-nebu"})
-
-      {:ok, view, _html} =
-        live_isolated(
-          Plug.Test.conn(:get, "/admin/bootstrap"),
-          Nebu.Admin.BootstrapLive,
-          session: %{"current_user" => %{"admin" => true, "sub" => "admin-1"}}
-        )
-
-      view |> element("button[phx-click='goto_step'][phx-value-step='2']") |> render_click()
-
-      # Simulate real browser behaviour: disabled field is absent from the form payload.
-      # render_submit/2 on the form element (without the disabled field) triggers the event.
-      html =
-        view
-        |> element("form")
-        |> render_submit(%{
-          "oidc_issuer" => @issuer,
-          "oidc_client_id" => @client_id,
-          "oidc_client_secret" => @client_secret,
-          "oidc_audience" => "nebu-audience"
-          # oidc_jwks_uri intentionally absent — disabled browser field is not sent
-        })
-
-      # Should NOT show a JWKS URI error — env var covers the absent submission
-      refute html =~ ~r/JWKS URI is required/i,
-             "JWKS URI should be covered by NEBU_OIDC_JWKS_URI env var; absent field must not error"
-    end
   end
 
-  # ── MAJOR-1 — JWKS URI env_fallback applied in save_oidc/2 ──────────────────
-
-  describe "MAJOR-1 — env_fallback applied to JWKS URI in save_oidc/2" do
-    test "draft saves env JWKS URI value when field is blank (disabled, env-locked)" do
-      Application.put_env(:nebu_http, :oidc_jwks_uri, @jwks_uri)
-      Application.delete_env(:nebu_http, :oidc_issuer)
-      Application.delete_env(:nebu_http, :matrix_oidc_client_id)
-
-      store = install_store(%{"instance_name" => "test-nebu"})
-
-      {:ok, view, _html} =
-        live_isolated(
-          Plug.Test.conn(:get, "/admin/bootstrap"),
-          Nebu.Admin.BootstrapLive,
-          session: %{"current_user" => %{"admin" => true, "sub" => "admin-1"}}
-        )
-
-      view |> element("button[phx-click='goto_step'][phx-value-step='2']") |> render_click()
-
-      # Simulate real browser behaviour: disabled field is absent from the form payload.
-      # env_fallback/2 must substitute the env value when "oidc_jwks_uri" is absent.
-      view
-      |> element("form")
-      |> render_submit(%{
-        "oidc_issuer" => @issuer,
-        "oidc_client_id" => @client_id,
-        "oidc_client_secret" => @client_secret,
-        "oidc_audience" => "nebu-audience"
-        # oidc_jwks_uri intentionally absent — disabled browser field is not sent
-      })
-
-      draft = Agent.get(store, & &1.draft)
-
-      assert draft["oidc_jwks_uri"] == @jwks_uri,
-             "Expected draft[\"oidc_jwks_uri\"] = #{inspect(@jwks_uri)} (from env fallback), " <>
-               "got #{inspect(draft["oidc_jwks_uri"])}. " <>
-               "save_oidc/2 must apply env_fallback/2 to the JWKS URI field."
-    end
-  end
+  # ── env-locked JWKS-URI tests — REMOVED (ADR-022) ───────────────────────────
+  #
+  # oidc-bootstrap-only-config (ADR-022) removed the NEBU_OIDC_JWKS_URI env path and
+  # the env-lock / env_fallback mechanism: the bootstrap wizard is the single source
+  # of truth and the JWKS URI is ALWAYS a required editable field. The former
+  # "succeeds when NEBU_OIDC_JWKS_URI env var is set" and "env_fallback applied to
+  # JWKS URI" tests asserted removed behaviour and were deleted. The positive
+  # "JWKS URI required" validation above still holds (the field is always required).
 
   # ── MINOR-1 — do_complete_bootstrap/2 audience guard ────────────────────────
 
@@ -313,25 +247,10 @@ defmodule Nebu.Admin.BootstrapJwksUriValidationTest do
              "bootstrap_completed must NOT be written when audience guard fires (audience missing)"
     end
 
-    test "bootstrap_confirm_claim succeeds when draft has no audience but NEBU_OIDC_AUDIENCE is set" do
-      # Audience comes from env, not draft
-      Application.put_env(:nebu_http, :oidc_audience, "env-audience")
-
-      draft_no_audience = build_full_draft(audience: "")
-      store = install_store(draft_no_audience)
-
-      conn =
-        session_conn(:post, "/admin/bootstrap/select-claim")
-        |> Auth.bootstrap_confirm_claim(%{"admin_group_claim" => "instance_admin"})
-
-      assert get_resp_header(conn, "location") == ["/admin/dashboard"],
-             "bootstrap_confirm_claim should succeed when NEBU_OIDC_AUDIENCE env var is set"
-
-      config = get_config(store)
-
-      assert config["bootstrap_completed"] == "true",
-             "bootstrap_completed must be written when audience is available via env"
-    end
+    # NOTE: the former "succeeds when draft has no audience but NEBU_OIDC_AUDIENCE is
+    # set" test was DELETED (ADR-022): there is no NEBU_OIDC_AUDIENCE env fallback —
+    # the audience is required from the wizard draft alone. An empty draft audience
+    # now always rejects with :audience_required (covered above).
 
     test "bootstrap_confirm_claim succeeds when draft has a valid audience" do
       Application.delete_env(:nebu_http, :oidc_audience)

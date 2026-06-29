@@ -52,8 +52,8 @@ test.describe('Bootstrap — Connect with OIDC click (regression repro)', () => 
 
     // ── Step 2: OIDC Configuration + Connect with OIDC ─────────────────────
     await page.getByRole('textbox', { name: 'OIDC Issuer URL' }).fill('http://dex:5556/dex');
-    await page.getByRole('textbox', { name: 'OIDC Client ID' }).fill('nebu-admin');
-    await page.getByRole('textbox', { name: 'OIDC Client Secret' }).fill('nebu-admin-secret');
+    await page.getByRole('textbox', { name: 'OIDC Client ID' }).fill('nebu-gateway');
+    await page.getByRole('textbox', { name: 'OIDC Client Secret' }).fill('nebu-dev-secret');
     await page.getByRole('button', { name: 'Connect with OIDC' }).click();
 
     // ── Dex Authorization ──────────────────────────────────────────────────

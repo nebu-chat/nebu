@@ -104,6 +104,36 @@ defmodule Nebu.Web.TokenDenylist do
   end
 
   @doc """
+  Revokes a token by its SHA-256 hex digest (S3 F-1 kill-switch).
+
+  When a device is deleted, the only handle we hold for a JWT bound to it is the
+  `jwt_device_bindings.token_hash` — the raw token was never stored. That hash is
+  `SHA-256(token)` in lowercase hex, the SAME digest `revoked?/2` computes from the
+  LIVE token via `hash_key/1` (ETS `{:hash, hex}`) / `hash_db_key/1` (DB plain hex).
+  So inserting a denylist entry keyed by that hash means the next request carrying
+  the bound JWT resolves `revoked?(jti, token) == true` and OidcPlug rejects it with
+  401 M_UNKNOWN_TOKEN. `exp` (unix seconds) bounds the entry's lifetime; a `nil`/non-
+  integer exp is a no-op (nothing durable to anchor the entry to). Best-effort.
+  """
+  @spec revoke_by_hash(String.t() | nil, integer() | nil) :: :ok
+  def revoke_by_hash(token_hash, exp) when is_binary(token_hash) and token_hash != "" and is_integer(exp) do
+    ensure_table()
+
+    try do
+      :ets.insert(@table, {{:hash, token_hash}, exp})
+    rescue
+      ArgumentError -> :ok
+    end
+
+    # DB key for a hash-based entry is the plain hex string (same encoding hash_db_key
+    # produces), so a cross-node lookup via db_revoked_any? finds it.
+    db_revoke(token_hash, exp)
+    :ok
+  end
+
+  def revoke_by_hash(_token_hash, _exp), do: :ok
+
+  @doc """
   Returns true if the token (by `jti` or by hash) is currently denylisted.
 
   An entry whose `exp` is in the past is treated as absent and lazily deleted.

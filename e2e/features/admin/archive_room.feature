@@ -3,13 +3,16 @@ Feature: Admin UI — Archive and unarchive a room
   I want to archive and unarchive a room from the Admin UI
   So that I can retire stale rooms and bring them back without a Matrix client
 
-  # Story rm3-admin-create-archive (epic: room-management-elixir) — ATDD, written FIRST.
+  # Story rm3-admin-create-archive (epic: room-management-elixir).
   # Mirrors the room-visibility / spaces admin E2E (playwright-bdd + Cucumber).
   # Step definitions: e2e/step-definitions/admin/archive-room.steps.ts
   #
-  # RoomsLive detail panel (/admin/rooms/:room_id):
-  #   active room   → "Archive room" control (confirm dialog) + Active/Stale badge
-  #   archived room → "Archived" badge + "Unarchive" control
+  # CURRENT contract (admin-http-refactor / AC12): RoomsController is a dead HTTP
+  # controller — no LiveView socket, no confirm dialog. Every action is a form-POST
+  # that PRG-redirects to the room detail page (/admin/rooms/:room_id):
+  #   active room   → form-POST "Archive room" control + Active/Stale badge
+  #   archived room → "Archived" badge + form-POST "Unarchive" control
+  # Success/error render as a server-side flash (alert-success / alert-error).
 
   Background:
     Given the Nebu stack is running

@@ -1,13 +1,17 @@
 /**
- * Step definitions for the admin-ui-migration story (Phoenix LiveView Admin UI).
+ * Step definitions for the admin-ui-migration story (Admin UI rooms page + auth gate).
  *
  * Features:
  *   - features/admin/admin-ui-liveview.feature     (AC1 — rooms list + toggles)
- *   - features/admin/admin-ui-room-toggle.feature  (AC2 — live DOM-diff toggle + persistence)
  *   - features/admin/admin-ui-auth-gate.feature    (AC3 — admin claim gate)
  *
- * RED PHASE: these steps fail until the Phoenix LiveView Admin UI is implemented in
- * the nebu_http OTP app and /admin/* is served by Phoenix (Go admin backend removed).
+ * NOTE (admin-http-refactor): RoomsLive was CONVERTED to RoomsController. /admin/rooms is
+ * now plain server-rendered HTML — the auto-join toggle is a per-row <form method="post">
+ * button on the LIST page (role="switch", aria-label="Auto-join <name>"), and create-room
+ * lives on a separate /admin/rooms/new page. The former AC2 "live DOM-diff toggle" feature
+ * (admin-ui-room-toggle.feature) was rewritten to the controller contract and now reuses the
+ * list-page toggle steps in admin/auto-join-rooms.steps.ts — its bespoke steps (detail-page
+ * navigation, "no full page reload" sentinel) were removed from this file.
  *
  * REUSE: The following steps are already defined elsewhere and are intentionally NOT
  * redefined here (Cucumber would error on a duplicate):
@@ -18,6 +22,7 @@
  *   - "the page shows {string}"              → admin/bootstrap.steps.ts
  *   - "the room list contains at least one entry" → admin/rooms.steps.ts
  *   - "a room named {string} exists in the system" → admin/auto-join-rooms.steps.ts
+ *   - "room {string} has auto-join disabled" / list-page toggle steps → admin/auto-join-rooms.steps.ts
  *
  * Framework: playwright-bdd (importTestFrom: 'fixtures/nebu-fixtures.ts')
  * OIDC: Authorization Code + PKCE via Dex only (no ROPC) — per CLAUDE.md.
@@ -34,36 +39,14 @@ const ADMIN_BASE_URL = process.env.NEBU_ADMIN_URL ?? 'http://localhost:8008';
 // "alex" is a regular user and must be rejected by the admin claim gate.
 const NON_ADMIN_EMAIL = process.env.NEBU_NON_ADMIN_EMAIL ?? 'alex@example.com';
 
-// ─── AC2 Background: ensure the room starts with auto-join DISABLED ───────────
-// Mirrors "room {string} has auto-join enabled" (auto-join-rooms.steps.ts) but for
-// the disabled starting state required by the toggle scenario. No DB shortcut: the
-// state is read/changed through the real LiveView control.
-Given(
-  'room {string} has auto-join disabled',
-  async ({ page }: { page: Page }, roomName: string) => {
-    await page.goto(`${ADMIN_BASE_URL}/admin/rooms`);
-    await page.waitForLoadState('networkidle');
-    await page.locator('td, li, a').filter({ hasText: roomName }).first().click();
-    await page.waitForLoadState('networkidle');
-    const toggle = liveToggle(page, roomName);
-    if (await toggle.isChecked().catch(() => false)) {
-      await toggle.click();
-      // LiveView pushes a DOM-diff; await the unchecked state rather than a hard wait.
-      await expect(toggle).not.toBeChecked({ timeout: 10_000 });
-    }
-  }
-);
-
 // ─── AC1 assertions ───────────────────────────────────────────────────────────
 
 Then(
   'each room row shows an auto-join toggle control',
   async ({ page }: { page: Page }) => {
-    // Every room entry must expose a per-room auto-join toggle. Accept either a
-    // LiveView phx-click control or a checkbox bound to the auto-join state.
-    const toggles = page.locator(
-      '[phx-click="toggle_auto_join"], input[name="is_auto_join"], [data-role="auto-join-toggle"]'
-    );
+    // Every room entry must expose a per-room auto-join toggle. The converted controller
+    // renders it as a form-POST button [data-role="auto-join-toggle"].
+    const toggles = page.locator('[data-role="auto-join-toggle"]');
     await expect(toggles.first()).toBeVisible({ timeout: 15_000 });
     expect(await toggles.count()).toBeGreaterThan(0);
   }
@@ -72,61 +55,13 @@ Then(
 Then(
   'the page is served by the Phoenix LiveView admin app',
   async ({ page }: { page: Page }) => {
-    // A LiveView page bootstraps a stateful socket: the root carries data-phx-* attributes
-    // and the page loads the phoenix_live_view client. The Go-template admin UI has neither.
-    const liveRoot = page.locator('[data-phx-main], [data-phx-session], [id^="phx-"]');
-    await expect(liveRoot.first()).toBeAttached({ timeout: 15_000 });
-  }
-);
-
-// ─── AC2: live toggle (DOM-diff, no full reload) + persistence ────────────────
-
-When(
-  'the operator navigates to the LiveView detail page for room {string}',
-  async ({ page }: { page: Page }, roomName: string) => {
-    await page.goto(`${ADMIN_BASE_URL}/admin/rooms`);
-    await page.waitForLoadState('networkidle');
-    await page.locator('td, li, a').filter({ hasText: roomName }).first().click();
-    await page.waitForLoadState('networkidle');
-  }
-);
-
-When(
-  'the operator clicks the auto-join toggle for room {string}',
-  async ({ page }: { page: Page }, roomName: string) => {
-    // Mark the document so we can prove no full navigation happened (see "without a
-    // full page reload"). A full reload discards this window flag; a LiveView DOM-diff
-    // keeps it. This is a deterministic, wait-free reload sentinel.
-    await page.evaluate(() => {
-      (window as unknown as { __nebuNoReload?: boolean }).__nebuNoReload = true;
-    });
-    await liveToggle(page, roomName).click();
-  }
-);
-
-Then(
-  'the auto-join toggle for room {string} shows as enabled without a full page reload',
-  async ({ page }: { page: Page }, roomName: string) => {
-    // 1) LiveView DOM-diff: the toggle reflects the new state in place.
-    await expect(liveToggle(page, roomName)).toBeChecked({ timeout: 10_000 });
-    // 2) No full page reload: the sentinel set before the click survived.
-    const survived = await page.evaluate(
-      () => (window as unknown as { __nebuNoReload?: boolean }).__nebuNoReload === true
-    );
-    expect(survived, 'a full page reload occurred — expected an in-place LiveView DOM-diff').toBe(true);
-  }
-);
-
-// The feature uses the parameterless form of this step (no room name in the text).
-Then(
-  're-loading the LiveView room detail page still shows the auto-join toggle as enabled',
-  async ({ page }: { page: Page }) => {
-    await page.reload();
-    await page.waitForLoadState('networkidle');
-    const toggle = page.locator(
-      '[phx-click="toggle_auto_join"], input[name="is_auto_join"], [data-role="auto-join-toggle"]'
-    ).first();
-    await expect(toggle).toBeChecked({ timeout: 10_000 });
+    // STALE-SPEC REWRITE: RoomsLive was CONVERTED to RoomsController (admin-http-refactor),
+    // so /admin/rooms is now a plain server-rendered admin page with NO LiveView socket —
+    // it carries none of the data-phx-* attributes the old LiveView assertion looked for.
+    // AC1's intent ("the rooms page is served by the admin app") is preserved by asserting
+    // the controller-rendered rooms page marker instead.
+    await expect(page.locator('[data-page="rooms"]')).toBeVisible({ timeout: 15_000 });
+    await expect(page).toHaveURL(/\/admin\/rooms/, { timeout: 15_000 });
   }
 );
 
@@ -196,17 +131,3 @@ Then(
   }
 );
 
-// ─── helpers ────────────────────────────────────────────────────────────────
-
-/**
- * Locator for the auto-join toggle of a specific room on the LiveView detail page.
- * Accepts the LiveView phx-click control (preferred) or a checkbox bound to
- * is_auto_join, scoped to the room when a row marker is present.
- */
-function liveToggle(page: Page, _roomName: string) {
-  return page
-    .locator(
-      '[phx-click="toggle_auto_join"], input[name="is_auto_join"], [data-role="auto-join-toggle"]'
-    )
-    .first();
-}

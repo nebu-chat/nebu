@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-06-25T12:00:00Z",
-  "generator": "bmad-maintain-arc42 skill (admin-http-refactor delta)",
+  "generated_at": "2026-06-28T10:31:36Z",
+  "generator": "bmad-maintain-arc42 skill (bugfix-oidc-bootstrap-only-e2e-regressions delta)",
   "source_artifacts": [
     "_bmad-output/planning-artifacts/architecture.md",
     "_bmad-output/planning-artifacts/prd.md",
@@ -37,7 +37,7 @@
     },
     "docs/architecture/05-building-blocks.md": {
       "editable": false,
-      "generated_at": "2026-06-25T12:00:00Z",
+      "generated_at": "2026-06-26T20:48:09Z",
       "source": "_bmad-output/planning-artifacts/architecture.md",
       "arc42_section": "05 Building Block View"
     },
@@ -55,7 +55,7 @@
     },
     "docs/architecture/08-concepts.md": {
       "editable": false,
-      "generated_at": "2026-06-25T12:00:00Z",
+      "generated_at": "2026-06-28T10:31:36Z",
       "source": "_bmad-output/planning-artifacts/architecture.md",
       "arc42_section": "08 Cross-cutting Concepts"
     },
@@ -157,7 +157,7 @@
     },
     "docs/matrix-api-scope.md": {
       "editable": false,
-      "generated_at": "2026-06-22T22:44:57Z",
+      "generated_at": "2026-06-26T19:43:55Z",
       "source": "gateway/cmd/gateway/main.go",
       "arc42_section": "Matrix API Scope"
     },

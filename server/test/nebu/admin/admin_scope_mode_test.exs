@@ -57,10 +57,19 @@ defmodule Nebu.Admin.AdminScopeModeTest do
   @client_id "nebu-admin"
 
   setup do
-    Application.put_env(:nebu_http, :oidc_issuer, @issuer)
-    Application.put_env(:nebu_http, :admin_oidc_client_id, @client_id)
-    Application.put_env(:nebu_http, :admin_oidc_client_secret, "client-secret")
-    Application.put_env(:nebu_http, :admin_oidc_redirect_uri, "http://localhost:8008/admin/callback")
+    # oidc-bootstrap-only-config (ADR-022): issuer via OidcConfig, the single admin
+    # OIDC client via the :admin_oidc_config_reader seam. No env config path.
+    Nebu.Web.OidcTestSupport.configure(@issuer, @client_id)
+    Application.put_env(:nebu_http, :admin_secret_at_rest, "admin-scope-mode-test-key")
+
+    Application.put_env(:nebu_http, :admin_oidc_config_reader, fn
+      "oidc_client_id" -> @client_id
+      "oidc_client_secret" -> Nebu.Admin.BootstrapLive.encrypt_secret("client-secret")
+      _ -> nil
+    end)
+
+    Application.put_env(:nebu_http, :server_name, "localhost")
+    Application.put_env(:nebu_http, :admin_session_secure, false)
 
     Application.put_env(:nebu_http, :oidc_metadata_override, %{
       "issuer" => @issuer,
@@ -69,13 +78,14 @@ defmodule Nebu.Admin.AdminScopeModeTest do
     })
 
     on_exit(fn ->
+      Nebu.Web.OidcTestSupport.clear()
+
       for k <- [
-            :oidc_issuer,
-            :admin_oidc_client_id,
-            :admin_oidc_client_secret,
-            :admin_oidc_redirect_uri,
+            :admin_secret_at_rest,
+            :admin_oidc_config_reader,
+            :server_name,
+            :admin_session_secure,
             :oidc_metadata_override,
-            :admin_oidc_scope,
             :admin_oidc_refresh_mode_reader
           ] do
         Application.delete_env(:nebu_http, k)
@@ -151,8 +161,9 @@ defmodule Nebu.Admin.AdminScopeModeTest do
 
     test "openid is always present even with a custom configured scope in online mode" do
       set_mode("online")
-      # An operator-configured scope WITHOUT openid must still get openid force-added.
-      Application.put_env(:nebu_http, :admin_oidc_scope, "profile email")
+      # oidc-bootstrap-only-config (ADR-022): the admin scope is a fixed base set
+      # ("openid profile email"); there is no operator-configurable :admin_oidc_scope
+      # env anymore. openid stays mandatory and offline_access is absent in online mode.
       scopes = scope_params()
       assert "openid" in scopes
       refute "offline_access" in scopes

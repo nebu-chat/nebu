@@ -65,11 +65,17 @@ defmodule Nebu.Matrix.MatrixSsoTest do
     priv_jwk = Map.put(priv_map, "kid", @kid)
 
     Application.put_env(:nebu_http, :server_name, @server_name)
-    Application.put_env(:nebu_http, :oidc_issuer, @issuer)
-    Application.put_env(:nebu_http, :oidc_audience, @audience)
+    # oidc-bootstrap-only-config (ADR-022): issuer/audience via OidcConfig, the single
+    # SSO OIDC client via the :sso_bootstrap_reader seam. No env config path.
+    Nebu.Web.OidcTestSupport.configure(@issuer, @audience)
     Application.put_env(:nebu_http, :oidc_jwks, [pub_jwk])
-    Application.put_env(:nebu_http, :matrix_oidc_client_id, "nebu-client")
-    Application.put_env(:nebu_http, :matrix_oidc_client_secret, "shhh")
+    Application.put_env(:nebu_http, :admin_secret_at_rest, "matrix-sso-test-key")
+
+    Application.put_env(:nebu_http, :sso_bootstrap_reader, fn
+      "oidc_client_id" -> "nebu-client"
+      "oidc_client_secret" -> Nebu.Admin.BootstrapLive.encrypt_secret("shhh")
+      _ -> nil
+    end)
 
     # Discovery seam: OidcMetadata.fetch returns this document (no network).
     Application.put_env(:nebu_http, :oidc_metadata_override, %{
@@ -80,13 +86,13 @@ defmodule Nebu.Matrix.MatrixSsoTest do
     })
 
     on_exit(fn ->
+      Nebu.Web.OidcTestSupport.clear()
+
       for k <- [
             :server_name,
-            :oidc_issuer,
-            :oidc_audience,
             :oidc_jwks,
-            :matrix_oidc_client_id,
-            :matrix_oidc_client_secret,
+            :admin_secret_at_rest,
+            :sso_bootstrap_reader,
             :oidc_metadata_override,
             :matrix_sso_token_override
           ] do

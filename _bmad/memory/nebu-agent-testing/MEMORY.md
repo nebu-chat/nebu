@@ -41,6 +41,39 @@
 
 ## Session Log
 
+### 2026-06-26 — CI Gate: s3-matrix-device-endpoints (feature/device-management)
+
+**Gate result:** PASS — all real suites green; no regressions. No known flakes fired.
+
+- build-server: PASS (exit 0, no warnings-as-errors abort).
+- unit-elixir: PASS — exit 0, **905 passed / 2 skipped / 187 excluded** (excluded rose 168→187 = +19 new `:integration` S3 tests, expected). Verified via EXIT CODE.
+- integration (FRESH volume): PASS — exit 0, **1094 tests, 0 failures, 2 skipped** (count 1075→1094 = +19 S3 device endpoint tests).
+- S3 target `device_endpoints_test.exs` in isolation (--trace): **19 tests, 0 failures** — AC2 rename+IDOR, AC3 DELETE+revoke+fresh-auth, AC4 bulk-delete+IDOR+edge, AC5 UIA window G1/G2 (single-use no-replay), F-1 JWT kill-switch, F-2 device_id ingress validation.
+
+**Migration / image gotcha (IMPORTANT, reconfirmed):** S3 added migration 000012_device_management_uia. The dev step's `make redeploy` image (built 18:31:47Z) PREDATED the latest source edits to uia.ex (18:35Z) and router.ex (18:46Z) — i.e. stale despite a redeploy, because edits continued after the build. Endpoint probes returned S3 responses but the image was not guaranteed current. Fix: re-ran `make redeploy` (new image 18:55:39Z, newer than all source), then fresh-volume `down --volumes && up -d --wait`, then confirmed `SELECT max(version) FROM schema_migrations` = 12 AND `to_regclass('public.uia_sessions')` non-null BEFORE trusting integration. ALWAYS compare image build time to source mtime, not just "redeploy ran".
+
+**S3 code was staged but UNCOMMITTED** at gate time (working tree had uia.ex/device_id.ex/sweeper.ex/000012/router etc.). Docker COPYs the working tree so the rebuild picked them up; gate is valid for the staged tree.
+
+### 2026-06-26 — CI Gate: s2-device-lifecycle-at-login (feature/device-management)
+
+**Gate result:** PASS — all real suites green; no regressions.
+
+- build-server: PASS (exit 0, no warnings-as-errors abort)
+- unit-elixir (`make test-unit-elixir`): PASS — exit 0, 905 passed / 2 skipped / 168 excluded (the 168 excluded = `:integration`-tagged, run in the integration container). Confirmed via EXIT CODE, not the passed line.
+- integration (`make test-integration`, FRESH volume): PASS — exit 0, **1075 tests, 0 failures, 2 skipped**. Full suite.
+- Target suites re-run in isolation against live stack: device_lifecycle_login_test (13) + login_refresh_test + device_keys_test + release_test = **47 tests, 0 failures**. Primary target device_lifecycle_login_test alone = **13 tests, 0 failures**.
+
+**Known flakes did NOT fire** (fresh volume + no host CPU saturation):
+- matrix_sso PII-key flake cleared on fresh volume (as predicted by S1 log / project memory).
+- regression_sync_load latency gate passed.
+- admin SearchUsers passed.
+
+**Infra note (NOT a code issue):** `make redeploy`'s `--no-cache` server image build FAILED twice on `mix deps.get` with hex.pm tarball-fetch timeouts (hex.pm degraded — single tarball took ~19.7s / 200 OK). The host-mounted build/unit containers were unaffected (deps cached on host); only the clean image build hit it. Worked around by temporarily wrapping the Dockerfile `mix deps.get --only prod` step with `HEX_HTTP_CONCURRENCY=1 HEX_HTTP_TIMEOUT=300` + a 5x retry loop, building, then **reverting the Dockerfile to pristine** (git diff clean). If hex.pm flakiness recurs, consider making this retry permanent in server/Dockerfile.
+
+**Env hygiene:** orphan `nebu-element-1` (Up 3 days) was holding `nebu_default` open after `down --volumes` — stopped+removed it and the stale network before rebuild (recurring quirk, already in memory).
+
+**Stack note (current full-Elixir era):** `make test-integration` itself does `docker compose up -d --wait` (postgres/dex/minio/server over nebu_default) then `docker compose down` (NOT --volumes). `make redeploy` only `--no-cache` builds + force-recreates the `server` service — it does not bring up deps. The old ci_gate.py reference (Go targets, Keycloak:8080 health check) is stale; drive the gate via the Makefile.
+
 ### 2026-05-27 — Full CI Gate Run (Bugfix/fix-short-oidc-sessions Branch)
 
 **Gate result:** FAIL

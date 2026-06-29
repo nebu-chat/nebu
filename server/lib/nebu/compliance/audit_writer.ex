@@ -52,6 +52,8 @@ defmodule Nebu.Compliance.AuditWriter do
     room_visibility_changed
     member_added
     member_removed
+    device_renamed
+    device_deleted
     server_config_updated
     room_upgraded
     gdpr_deletion
@@ -95,15 +97,34 @@ defmodule Nebu.Compliance.AuditWriter do
     if changeset.valid? do
       entry = Ecto.Changeset.apply_changes(changeset)
 
-      case repo().transaction(fn -> repo().insert!(entry) end) do
-        {:ok, _} ->
-          :ok
+      # never-raise (moduledoc Error policy): a transaction against an unstarted /
+      # missing Repo raises RuntimeError from Ecto.Repo.Registry.lookup. Catch it so
+      # a down DB degrades to {:error, :audit_write_failed} instead of crashing the
+      # caller (e.g. an Admin device action when the Repo is unavailable).
+      try do
+        case repo().transaction(fn -> repo().insert!(entry) end) do
+          {:ok, _} ->
+            :ok
 
-        {:error, reason} ->
-          Logger.error("AuditWriter: failed to write audit log",
+          {:error, reason} ->
+            Logger.error("AuditWriter: failed to write audit log",
+              action: action,
+              actor: actor_user_id,
+              reason: inspect(reason)
+            )
+            {:error, :audit_write_failed}
+        end
+      rescue
+        # Only degrade the documented case (RuntimeError from
+        # Ecto.Repo.Registry.lookup on an unstarted/missing Repo) to a generic
+        # audit-write failure. Narrowing to RuntimeError keeps genuine logic bugs
+        # (FunctionClauseError/ArgumentError/etc.) surfacing instead of being
+        # masked as :audit_write_failed.
+        e in [RuntimeError] ->
+          Logger.error("AuditWriter: failed to write audit log (raised)",
             action: action,
             actor: actor_user_id,
-            reason: inspect(reason)
+            reason: inspect(e)
           )
           {:error, :audit_write_failed}
       end

@@ -17,3 +17,11 @@ Feature: Admin UI — Users Page
     When the operator navigates to "/admin/users"
     Then the page shows "Users"
     And the user list contains at least one entry
+
+  # device-bugfixes story — AC1/AC2/AC3/AC4 (Playwright/Gherkin guard for UI link regression)
+  @ac-users-link
+  Scenario: Each user row in the users list links to the device management page
+    When the operator navigates to "/admin/users"
+    Then each user row contains a link to the user detail page
+    When the operator clicks the link for user "@alex:localhost"
+    Then the device management page for "@alex:localhost" is shown

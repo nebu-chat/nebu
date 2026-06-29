@@ -88,16 +88,26 @@ defmodule Nebu.Matrix.LoginRefreshTest do
     priv_jwk = Map.put(priv_map, "kid", @kid)
 
     Application.put_env(:nebu_http, :server_name, @server_name)
-    Application.put_env(:nebu_http, :oidc_issuer, @issuer)
-    Application.put_env(:nebu_http, :oidc_audience, @audience)
+    Nebu.Web.OidcTestSupport.configure(@issuer, @audience)
+
     Application.put_env(:nebu_http, :oidc_jwks, [pub_jwk])
-    Application.put_env(:nebu_http, :matrix_oidc_client_id, "nebu-client")
-    Application.put_env(:nebu_http, :matrix_oidc_client_secret, "shhh")
     # oidc-session-refresh: the login path encrypts the captured OIDC refresh token
     # at rest via Nebu.Web.SecretBox, which derives its AES-256 key from the internal
     # secret. Inject a non-empty test secret through the same seam the admin helper
     # uses (:admin_secret_at_rest) so encryption succeeds without a real env file.
     Application.put_env(:nebu_http, :admin_secret_at_rest, "login-refresh-test-internal-secret")
+
+    # The SSO single client comes from the Bootstrap DB via the :sso_bootstrap_reader
+    # seam (ADR-022) — NOT from removed :matrix_oidc_client_* env keys. The redirect
+    # leg needs it to build the authorize URL; the token exchange itself is stubbed by
+    # :matrix_sso_token_override.
+    encrypted_secret = Nebu.Admin.BootstrapLive.encrypt_secret("shhh")
+
+    Application.put_env(:nebu_http, :sso_bootstrap_reader, fn
+      "oidc_client_id" -> "nebu-client"
+      "oidc_client_secret" -> encrypted_secret
+      _ -> nil
+    end)
 
     Application.put_env(:nebu_http, :oidc_metadata_override, %{
       "issuer" => @issuer,
@@ -107,13 +117,12 @@ defmodule Nebu.Matrix.LoginRefreshTest do
     })
 
     on_exit(fn ->
+      Nebu.Web.OidcTestSupport.clear()
+
       for k <- [
             :server_name,
-            :oidc_issuer,
-            :oidc_audience,
             :oidc_jwks,
-            :matrix_oidc_client_id,
-            :matrix_oidc_client_secret,
+            :sso_bootstrap_reader,
             :oidc_metadata_override,
             :matrix_sso_token_override,
             :admin_secret_at_rest

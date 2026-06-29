@@ -59,15 +59,14 @@ defmodule Nebu.Web.OidcPlugTest do
 
     # Configure server_name + OIDC validation params for deterministic assertions.
     Application.put_env(:nebu_http, :server_name, @server_name)
-    Application.put_env(:nebu_http, :oidc_issuer, @issuer)
-    Application.put_env(:nebu_http, :oidc_audience, @audience)
+    Nebu.Web.OidcTestSupport.configure(@issuer, @audience)
+
     # Inject the public JWK so JwksCache.keys/0 returns it (no network).
     Application.put_env(:nebu_http, :oidc_jwks, [pub_jwk])
 
     on_exit(fn ->
       Application.delete_env(:nebu_http, :server_name)
-      Application.delete_env(:nebu_http, :oidc_issuer)
-      Application.delete_env(:nebu_http, :oidc_audience)
+      Nebu.Web.OidcTestSupport.clear()
       Application.delete_env(:nebu_http, :oidc_jwks)
     end)
 

@@ -129,12 +129,19 @@ defmodule Nebu.Web.Plugs.OidcPlug do
           deny(conn, "M_UNKNOWN_TOKEN", "Account has been deactivated")
 
         _ ->
+          # S2 AC3 / SECURITY G1: resolve the device this JWT was bound to at login
+          # from the server-side binding (never from request input). May be nil for a
+          # JWT minted before this binding existed, or when the DB is unavailable —
+          # downstream then behaves as "no bound device", same as before S2.
+          device_id = Nebu.Matrix.Session.DeviceBinding.get_device(token)
+
           conn
           # Stash the raw token + verified claims so POST /logout can revoke
           # exactly the token that authenticated this request (F-1).
           |> assign(:access_token, token)
           |> assign(:current_user, user_id)
           |> assign(:oidc_claims, claims)
+          |> assign(:device_id, device_id)
       end
     else
       {:error, :missing_token} ->
@@ -207,17 +214,18 @@ defmodule Nebu.Web.Plugs.OidcPlug do
     display_name = claims["preferred_username"] || claims["name"] || ""
     email = claims["email"] || ""
 
-    # MAJOR-1: warn operators when OIDC claims are absent so they know to set
-    # NEBU_OIDC_EXTRA_SCOPES. Only logged on first provisioning (cache miss), not every request.
+    # MAJOR-1: warn operators when OIDC claims are absent. Scopes are configured via
+    # the IdP client + bootstrap wizard claim mapping (ADR-022), not env vars. Only
+    # logged on first provisioning (cache miss), not every request.
     if email == "" do
       Logger.warning(
-        "OIDC: email claim absent for #{user_id} — set NEBU_OIDC_EXTRA_SCOPES=profile email if email is required"
+        "OIDC: email claim absent for #{user_id} — ensure the IdP client grants the profile/email scopes if email is required"
       )
     end
 
     if display_name == "" do
       Logger.warning(
-        "OIDC: preferred_username/name claim absent for #{user_id} — set NEBU_OIDC_EXTRA_SCOPES=profile if display name is required"
+        "OIDC: preferred_username/name claim absent for #{user_id} — ensure the IdP client grants the profile scope if display name is required"
       )
     end
 
@@ -327,23 +335,48 @@ defmodule Nebu.Web.Plugs.OidcPlug do
   missing sub, malformed token, iss/aud not configured).
 
   `opts` may carry `:audience` to override the expected `aud` claim — used by the
-  admin OIDC login (Nebu.Admin.Auth), whose ID token is issued to the dedicated
-  admin OAuth client (a different `aud` than the Matrix `:oidc_audience`). All other
-  checks (alg allowlist, JWKS signature, fail-closed iss, exp, sub) are IDENTICAL —
-  there is still exactly one verification code path. The override is still fail-closed:
+  admin OIDC login (Nebu.Admin.Auth). Under ADR-022 there is a SINGLE OIDC client, so
+  the admin ID token's `aud` is that client's id; the override lets admin login validate
+  against `client_id` while Matrix Bearer validation uses the configured
+  `server_config` audience. All other checks (alg allowlist, JWKS signature,
+  fail-closed iss, exp, sub) are IDENTICAL — there is still exactly one verification
+  code path. The override is still fail-closed:
   a nil/empty override yields `:audience_not_configured`, and a token whose aud does
   not match is rejected.
+
+  `opts` may also carry `:issuer` and `:jwks` overrides — used ONLY by the bootstrap
+  operator-login callback (Nebu.Admin.Auth bootstrap mode, story
+  oidc-bootstrap-only-e2e-regressions). During the bootstrap wizard the OIDC config
+  lives in the `bootstrap_draft`, NOT yet in `server_config`, so the global
+  `OidcConfig`/`JwksCache` are still empty. These overrides let the bootstrap callback
+  verify the operator ID token using the DRAFT's issuer + JWKS (fetched locally from the
+  draft's `oidc_jwks_uri`/`oidc_issuer`) WITHOUT warming the global caches — preserving
+  the ADR-022 fail-closed invariant that the Matrix API rejects every Bearer token until
+  bootstrap completes. Both overrides are fail-closed exactly like `:audience`:
+
+    * `:issuer` — when a non-empty binary, the token `iss` is checked against the
+      OVERRIDE instead of the global `OidcConfig` issuer. A nil/empty override with no
+      global issuer configured still yields `:issuer_not_configured`; a token whose `iss`
+      does not match yields `:bad_issuer`.
+    * `:jwks` — when a non-nil list, signing-key selection uses THIS key list instead of
+      the global `:oidc_jwks` app-env / `JwksCache.keys()`. An empty list still yields
+      `:no_keys`. When absent/nil, key resolution is UNCHANGED.
+
+  All other checks (alg allowlist, signature, exp, sub) are IDENTICAL — there is still
+  exactly one verification code path, and only the bootstrap callback passes these opts.
   """
   @spec verify_token(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def verify_token(token, opts \\ []) do
     audience_override = Keyword.get(opts, :audience)
+    issuer_override = Keyword.get(opts, :issuer)
+    jwks_override = Keyword.get(opts, :jwks)
 
     with {:ok, header} <- peek_header(token),
          :ok <- check_alg(header["alg"]),
-         {:ok, jwk} <- select_key(header["kid"]),
+         {:ok, jwk} <- select_key(header["kid"], jwks_override),
          {:ok, %{verified?: true, claims: claims}} <- assent_verify(token, jwk),
          :ok <- check_exp(claims),
-         :ok <- check_issuer(claims),
+         :ok <- check_issuer(claims, issuer_override),
          :ok <- check_audience(claims, audience_override),
          :ok <- check_subject(claims) do
       {:ok, claims}
@@ -374,8 +407,11 @@ defmodule Nebu.Web.Plugs.OidcPlug do
     end
   end
 
-  defp select_key(kid) do
-    keys = available_keys()
+  # `jwks_override` (a list of JWK maps) is passed ONLY by the bootstrap callback so
+  # key selection uses the draft-sourced keys instead of the global cache. When it is
+  # nil the global resolution (available_keys/0) is used — normal request path unchanged.
+  defp select_key(kid, jwks_override) do
+    keys = if is_list(jwks_override), do: jwks_override, else: available_keys()
 
     cond do
       keys == [] ->
@@ -419,12 +455,19 @@ defmodule Nebu.Web.Plugs.OidcPlug do
 
   # MEDIUM-3: fail CLOSED. A missing issuer config means we cannot validate the
   # token's origin, so we reject rather than letting it through.
-  defp check_issuer(claims) do
-    case oidc_issuer() do
+  #
+  # An explicit `override` (bootstrap callback) takes precedence over the global
+  # OidcConfig issuer; nil/empty either way → rejected (never fails open).
+  defp check_issuer(claims, override) do
+    case issuer_or_nil(override) || oidc_issuer() do
       nil -> {:error, :issuer_not_configured}
+      "" -> {:error, :issuer_not_configured}
       issuer -> if claims["iss"] == issuer, do: :ok, else: {:error, :bad_issuer}
     end
   end
+
+  defp issuer_or_nil(override) when is_binary(override) and override != "", do: override
+  defp issuer_or_nil(_), do: nil
 
   # MEDIUM-3: fail CLOSED for audience as well. An explicit override (admin login)
   # takes precedence over the configured Matrix audience; nil/empty either way →
@@ -453,23 +496,14 @@ defmodule Nebu.Web.Plugs.OidcPlug do
 
   defp server_name, do: Application.get_env(:nebu_http, :server_name, "localhost")
 
-  # oidc-env-optional-bootstrap: issuer/audience fall back to server_config (via
-  # OidcConfig cache) when the env var is absent. Env var takes precedence; DB value
-  # fills in when env is nil. Fail-closed invariant (MEDIUM-3) is preserved: if both
-  # sources are nil, check_issuer/check_audience return {:error, :*_not_configured}.
-  defp oidc_issuer do
-    case Application.get_env(:nebu_http, :oidc_issuer) do
-      v when is_binary(v) and v != "" -> v
-      _ -> Nebu.Web.OidcConfig.get().issuer
-    end
-  end
+  # oidc-bootstrap-only-config (ADR-022): issuer/audience are resolved SOLELY from
+  # server_config via the OidcConfig DB-backed cache. There is no environment-variable
+  # config path. Fail-closed invariant (MEDIUM-3) is preserved: when server_config has
+  # no issuer/audience, OidcConfig.get/0 returns nil and check_issuer/check_audience
+  # reject every token ({:error, :*_not_configured}).
+  defp oidc_issuer, do: Nebu.Web.OidcConfig.get().issuer
 
-  defp oidc_audience do
-    case Application.get_env(:nebu_http, :oidc_audience) do
-      v when is_binary(v) and v != "" -> v
-      _ -> Nebu.Web.OidcConfig.get().audience
-    end
-  end
+  defp oidc_audience, do: Nebu.Web.OidcConfig.get().audience
 
   # ── Failure response ────────────────────────────────────────────────────
 

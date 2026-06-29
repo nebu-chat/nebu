@@ -70,13 +70,24 @@ server/lib/nebu/
 │   │                   per-device since tokens, forgotten-rooms exclusion, global account_data,
 │   │                   bundled m.relations), send, createRoom/join, /forget, profile, presence,
 │   │                   /search, single-event fetch, /relations (all variants), MSC2965 OIDC discovery,
-│   │                   typing, receipts, messages, keys
+│   │                   typing, receipts, messages, keys, device management (PUT/DELETE /devices/{id},
+│   │                   POST /delete_devices — UIA-gated; GET /auth/m.login.sso/fallback/web)
+│   ├── uia.ex        ← Nebu.Matrix.Uia — User-Interactive-Authentication gate for sensitive device
+│   │                   writes; single `m.login.sso` stage, Option B fresh-auth window
+│   │                   (NEBU_UIA_FRESH_AUTH_SECONDS, default 900s); DB-backed single-use `uia_sessions`
+│   │                   bound to (user_id, op, params) — cluster-correct (ADR-020), Story s3
+│   ├── device_id.ex ← Nebu.Matrix.DeviceId — device_id ingress validation (≤255 bytes, no control
+│   │                   chars) at POST /login + POST /keys/upload (Story s3, F-2)
 │   ├── room/         ← Horde.DynamicSupervisor + Room GenServer (state, history, power levels);
 │   │                   inline-SQL DB module: events, relations (fetch_events_by_relation/5,
 │   │                   count_thread_children/2, event_in_room?/2, fetch_event/2)
 │   ├── session/      ← ETS + PostgreSQL hybrid since-token manager (per-device, composite
 │   │                   (user_id, device_id) key); BulkImporter (admin bulk OIDC provisioning, same
-│   │                   flow as first-login provisioning)
+│   │                   flow as first-login provisioning); DeviceBinding (token→device store for
+│   │                   raw OIDC-JWT sessions, keyed by SHA-256(token), per-node 60s TTL ETS cache,
+│   │                   PostgreSQL source of truth — Story s2-device-lifecycle-at-login);
+│   │                   Sweeper (hourly best-effort eviction of expired jwt_device_bindings +
+│   │                   uia_sessions rows — Story s3, supervised under Nebu.Repo's children)
 │   ├── presence/     ← Presence status (online/offline/unavailable)
 │   ├── signature/    ← Ed25519 signing (:crypto eddsa), Nebu.EventId.generate/1 (SHA-256 content
 │   │                   hash), RFC 8785 canonical JSON
@@ -118,7 +129,13 @@ server/lib/nebu/
 │   │                   server_config.admin_group_claim (default instance_admin, inline SQL, ADR-018);
 │   │                   mints the Phoenix session (renew, 8h cap)
 │   ├── rooms_controller.ex      ← Room Management HTTP controller (PRG pattern; inline SQL, ADR-018)
-│   ├── users_controller.ex      ← User overview HTTP controller (OIDC-imported users, inline SQL)
+│   ├── users_controller.ex      ← User overview + per-user device management HTTP controller
+│   │                   (OIDC-imported users, inline SQL); index/2 (GET /users) plus the S4
+│   │                   device-management handlers show/2 (GET /users/:user_id), rename_device/2
+│   │                   (POST .../devices/:device_id/rename) and delete_device/2 (POST
+│   │                   .../devices/:device_id + _method=DELETE) — PRG, :require_admin-gated, CSRF;
+│   │                   reaches devices ONLY through the Nebu.Matrix facade (ADR-020), never
+│   │                   DeviceKeyStore directly; audits on success + failure (device-management S4)
 │   ├── spaces_controller.ex     ← Spaces management HTTP controller
 │   ├── config_controller.ex     ← Server configuration HTTP controller
 │   ├── claim_mapping_controller.ex ← OIDC claim mapping HTTP controller
@@ -144,10 +161,13 @@ server/lib/nebu/
 > mapped to HTTP 500 by `Nebu.Matrix.Http.call_core/1`. A top-level `try/rescue` writes a failure
 > entry to the audit trail before reraising.
 
-> **PostgreSQL tables added in Story 9-19:** `forgotten_rooms (user_id, room_id, forgotten_at_ms BIGINT)`
-> - migration 000040. Tracks rooms the user has permanently dismissed via `POST /forget`.
-> Excluded from all `/sync` sections (join, leave, invite). Primary key `(user_id, room_id)`;
-> cascade delete on `users` removal.
+> **PostgreSQL table `forgotten_rooms (user_id, room_id, forgotten_at_ms BIGINT)`:** defined in
+> the canonical schema `000001_init.up.sql` (the table pre-existed; it is not a separate
+> migration). Tracks rooms the user has dismissed via `POST /forget`. The Elixir wiring landed
+> in the `forget-room-membership-purge` bugfix epic (Story 9-19 shipped only a no-op stub):
+> `forget_room/2` inserts (after the not-joined guard), both sync builders reject the forgotten
+> room_ids in-process, and `join_room/2` removes the row on re-join. Excluded from all `/sync`
+> sections (join, leave, invite). Primary key `(user_id, room_id)`; cascade delete on `users` removal.
 
 > **`sync_tokens` schema change in Story 9-22:** migration 000041 adds `device_id TEXT NOT NULL DEFAULT ''`
 > and replaces the `user_id`-only primary key with a composite `(user_id, device_id)` PK.
@@ -178,6 +198,77 @@ server/lib/nebu/
 > sub-millisecond bursts). The synthetic token is never persisted to `sync_tokens`; if the client
 > sends it on the next request, `get_sync_delta` finds no matching row and triggers a safe full
 > re-sync (FallbackToInitial). No schema change.
+
+> **`devices` table — device as a first-class entity (Story s1-device-registry-model):** migration
+> `000010_devices.up.sql` adds a `devices` table (`PRIMARY KEY (user_id, device_id)`; `display_name`,
+> `last_seen_ts`, `last_seen_ip`, `created_at`, `updated_at`) that holds device IDENTITY + management
+> metadata, SEPARATE from the crypto-key blob in `device_keys` (migration 000009). A `devices` row may
+> exist with NO key material (a *keyless* device). Because 000009 is shipped/immutable (it reached the
+> operator's Stackit install), 000010 is a NEW forward migration that BACKFILLS `devices` from existing
+> `device_keys` rows (`INSERT … SELECT … ON CONFLICT DO NOTHING`; `last_seen_ip` has no source there →
+> NULL). `Nebu.Matrix.DeviceKeyStore` (in `matrix/`) gains `upsert_device/3`; `list_devices/1`,
+> `get_device/2`, and `sole_device_id/1` now read device identity from `devices` (so `GET /devices`
+> lists keyless devices), while `query_devices/1` INNER-JOINs `devices` + `device_keys` so
+> `POST /keys/query` still returns ONLY key-bearing devices (Matrix semantics unchanged).
+> `put_device_keys/4` upserts the `devices` row FIRST, then the `device_keys` row — device existence is
+> independent of keys, and a crash between the two writes leaves only a valid keyless device. Inline SQL
+> (ADR-018), PostgreSQL-backed/cluster-correct (ADR-020), orthogonal to E2EE (ADR-011). Foundation for
+> the device-management epic (S2–S4). No new ADR.
+
+> **`jwt_device_bindings` table — token→device binding for raw-JWT sessions (Story
+> s2-device-lifecycle-at-login):** migration `000011_jwt_device_bindings.up.sql` adds
+> `jwt_device_bindings (token_hash TEXT PK, user_id TEXT, device_id TEXT, created_at BIGINT)`
+> (forward migration; 000010 from S1 is immutable). It backs `Nebu.Matrix.Session.DeviceBinding`:
+> an opaque Nebu session already records its device in `matrix_sessions.device_id`, but a raw OIDC
+> JWT is issued by the IdP and carries no Nebu `device_id`, so login persists the `token→device_id`
+> association here and `OidcPlug` looks it up on every authenticated request. The row is keyed by
+> `SHA-256(access_token)` — the cleartext token is **never** stored, so a DB dump exposes no usable
+> bearer tokens. A per-node 60s-TTL ETS cache (mirroring `OidcPlug`'s provision cache) keeps the
+> per-request lookup off the DB hot path; PostgreSQL remains the source of truth so login and a later
+> request may land on different nodes (cluster-correct, ADR-020). Writes are best-effort — a missing
+> table or DB hiccup degrades to "no bound device" (handled like an unbound token) and never crashes
+> login. Inline SQL (ADR-018). Orthogonal to E2EE (ADR-011). No new ADR.
+
+> **`000012_device_management_uia` — UIA + kill-switch schema (Story s3-matrix-device-endpoints):**
+> migration `000012_device_management_uia.up.sql` is a NEW forward migration (000009–000011 are
+> shipped/immutable; idempotent `ADD COLUMN IF NOT EXISTS` / `CREATE … IF NOT EXISTS`). It adds the
+> columns + table that back UIA-gated device writes and the per-device JWT kill-switch:
+> - `matrix_sessions.auth_time BIGINT` (nullable) — the user's last FRESH authentication time (unix
+>   seconds), set at login from the id_token's `auth_time`/`iat`. The 15-min freshness gate compares
+>   `now - auth_time`; token refresh copies it **verbatim** (`MatrixSessionStore.refresh_auth_time/2`)
+>   so a refresh can never reset freshness. A row with no `auth_time` is always treated as stale.
+> - `jwt_device_bindings.exp BIGINT` — the verified JWT's expiry, written by `DeviceBinding.put/3`;
+>   the kill-switch denylists each bound token until its own `exp`, and `Session.Sweeper` evicts rows
+>   whose `exp` has passed.
+> - `idx_jwt_device_bindings_user_device` on `(user_id, device_id)` — serves the kill-switch's
+>   enumeration of every binding for a deleted device.
+> - `uia_sessions (session_id PK, user_id, op, params, stage_complete, consumed, created_at,
+>   expires_at)` — server-issued, single-use UIA sessions bound to `(user_id, op, params)`. **DB-backed,
+>   not node-local ETS (ADR-020):** a session is minted on one node, its `m.login.sso` stage completed
+>   by the browser SSO callback on possibly another node, and the re-submit may hit a third — every node
+>   reads the same authoritative row, and single-use is enforced by an atomic
+>   `consumed = TRUE WHERE consumed = FALSE` UPDATE. Inline SQL (ADR-018). Orthogonal to E2EE (ADR-011).
+>   No new ADR.
+
+> **`Nebu.Matrix` device facade — the ADR-020 cross-domain entry point for device management
+> (Story s4-admin-device-management):** S4's Admin UI consumes devices through three NEW public
+> functions on the `Nebu.Matrix` facade, never by reaching into `Nebu.Matrix.DeviceKeyStore` or
+> `Session.*` directly (Public-API rule, ADR-020):
+> - `list_user_devices/1` — lists a user's devices from the durable `devices` registry (keyless
+>   devices included); read-path, never raises. `created_at` is now surfaced (alongside
+>   `display_name`/`last_seen_ts`/`last_seen_ip`) so the detail page can show a "created" column.
+> - `rename_user_device/3` — renames a device's `display_name`, scoped to the OWNING `user_id`;
+>   returns `:ok` on a hit, `:error` for an unknown/foreign device (no IDOR — `:error` maps to a flash).
+> - `delete_user_device/2` — revoke + delete in one call: fires the **S3 per-device JWT kill-switch
+>   first** (`TokenDenylist.revoke_by_hash/2` for every `jwt_device_bindings` row of the pair, then
+>   drops the bindings + the opaque session), then removes the device identity row and all key
+>   material. User-scoped, best-effort/idempotent, returns `:ok`. Unlike the Matrix self-delete path
+>   it preserves no caller credential — an admin acts on another user's device, so EVERY bound token
+>   is revoked.
+>
+> The facade keeps the Admin controller thin and the cross-domain boundary explicit: Admin → `Nebu.Matrix`
+> facade → (DeviceKeyStore / TokenDenylist / DeviceBinding / MatrixSessionStore). No new migration
+> (S4 reuses S1–S3 schema), no new ADR. Orthogonal to E2EE (ADR-011).
 
 ## Level 2 - In-Process Command & DTO Layer
 

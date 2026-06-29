@@ -65,6 +65,15 @@ defmodule Nebu.Matrix.HttpPublic do
   # GetSSORedirect/GetSSOCallback. The callback route is listed FIRST so the
   # literal "oidc" segment wins over the `:idp` wildcard.
 
+  # GET /_matrix/client/v3/auth/m.login.sso/fallback/web?session=<id> (S3 UIA).
+  # The parent forwards "/_matrix/client/v3/auth", so this arrives with the prefix
+  # stripped: path_info ["m.login.sso", "fallback", "web"]. UNAUTHENTICATED — it IS
+  # the auth step. Drives the SAME SSO machinery as /sso/redirect, tagged so the
+  # shared OIDC callback completes the UIA session instead of minting a loginToken.
+  get "/m.login.sso/fallback/web" do
+    conn |> Plug.Conn.fetch_query_params() |> Nebu.Matrix.SsoLogin.uia_fallback()
+  end
+
   # GET /sso/redirect/oidc — OIDC callback (?code=&state= → mint loginToken).
   get "/sso/redirect/oidc" do
     conn |> Plug.Conn.fetch_query_params() |> Nebu.Matrix.SsoLogin.callback()
@@ -141,7 +150,9 @@ defmodule Nebu.Matrix.HttpPublic do
   # ── Discovery handlers ────────────────────────────────────────────────────
 
   defp auth_issuer(conn) do
-    case Application.get_env(:nebu_http, :oidc_issuer) do
+    # oidc-bootstrap-only-config (ADR-022): the issuer comes solely from server_config
+    # via the OidcConfig cache — fail closed (503) until the wizard configures it.
+    case Nebu.Web.OidcConfig.get().issuer do
       nil -> error(conn, 503, "M_UNAVAILABLE", "OIDC issuer not configured")
       issuer -> send_json(conn, 200, %{"issuer" => issuer})
     end
@@ -156,7 +167,8 @@ defmodule Nebu.Matrix.HttpPublic do
   # document: the previous Keycloak-shaped paths are WRONG for Dex (the project's
   # dev IdP), and serving incorrect endpoint URLs is worse than failing closed.
   defp auth_metadata(conn) do
-    case Application.get_env(:nebu_http, :oidc_issuer) do
+    # oidc-bootstrap-only-config (ADR-022): issuer from server_config (OidcConfig cache).
+    case Nebu.Web.OidcConfig.get().issuer do
       nil ->
         error(conn, 503, "M_UNAVAILABLE", "OIDC issuer not configured")
 
@@ -230,12 +242,35 @@ defmodule Nebu.Matrix.HttpPublic do
     # legacy raw-JWT response (AC7).
     refresh_requested = params["refresh_token"] == true
 
+    # S2 AC2: honour a client-supplied device_id (Matrix allows reuse "provided the
+    # user remains the same") so a returning client keeps the SAME device row instead
+    # of spawning a new one each login. Absent/blank → server generates one.
+    client_device_id =
+      case params["device_id"] do
+        d when is_binary(d) and d != "" -> d
+        _ -> nil
+      end
+
+    # S2 AC1: initial_device_display_name names the device on FIRST creation only.
+    initial_display_name =
+      case params["initial_device_display_name"] do
+        d when is_binary(d) and d != "" -> d
+        _ -> nil
+      end
+
     cond do
       type != "m.login.token" ->
         error(conn, 400, "M_UNKNOWN", "Unsupported login type")
 
       not is_binary(token) or token == "" ->
         error(conn, 400, "M_UNKNOWN", "Missing login token")
+
+      # S3 F-2: a client-supplied device_id that is oversized (>255 bytes) or carries
+      # control characters is rejected at the ingress boundary, BEFORE the token is
+      # verified or the user provisioned. An absent/blank device_id (server-generated)
+      # is fine — only a PRESENT-but-invalid value is rejected.
+      is_present_invalid_device_id?(params["device_id"]) ->
+        error(conn, 400, "M_INVALID_PARAM", "Invalid device_id")
 
       true ->
         # bugfix-fix-matrix-sso-redirect-missing: the m.login.token value can be
@@ -254,10 +289,18 @@ defmodule Nebu.Matrix.HttpPublic do
             error(conn, 403, "M_FORBIDDEN", "Invalid or expired token")
 
           {:ok, claims} ->
-            provision_and_respond(conn, claims, id_token, refresh_requested, oidc_refresh_token)
+            provision_and_respond(conn, claims, id_token, refresh_requested, oidc_refresh_token,
+              client_device_id: client_device_id,
+              initial_display_name: initial_display_name
+            )
         end
     end
   end
+
+  # S3 F-2: only a PRESENT device_id that fails validation is rejected; an absent /
+  # blank value (server will generate one) is not "invalid".
+  defp is_present_invalid_device_id?(d) when is_binary(d) and d != "", do: not Nebu.Matrix.DeviceId.valid?(d)
+  defp is_present_invalid_device_id?(_), do: false
 
   # An opaque loginToken (32-byte hex, no JWT dots) is redeemed single-use from the
   # SSO store and replaced with the verified id_token it maps to (plus any OIDC
@@ -279,7 +322,7 @@ defmodule Nebu.Matrix.HttpPublic do
   # Nebu.Web.SessionConfig.matrix_session_ttl_seconds/0 so it can be shortened for tests
   # (NEBU_MATRIX_SESSION_TTL_SECONDS, validated in runtime.exs). Both the login and the
   # /v3/refresh re-mint paths read it through the accessor — no hardcoded ceiling remains.
-  defp provision_and_respond(conn, claims, token, refresh_requested, oidc_refresh_token) do
+  defp provision_and_respond(conn, claims, token, refresh_requested, oidc_refresh_token, opts) do
     server = Application.get_env(:nebu_http, :server_name, "localhost")
     user_id = Nebu.Matrix.UserId.from_claims(claims, server)
 
@@ -293,7 +336,11 @@ defmodule Nebu.Matrix.HttpPublic do
         dn = if display_name == "", do: nil, else: display_name
         _ = Nebu.Matrix.Profile.DB.upsert_profile(user.user_id, dn, nil)
 
-        device_id = generate_device_id()
+        # S2 AC2: reuse the client-supplied device_id (keeps the same device row), else
+        # generate a fresh one. S2 AC1: login OWNS device creation — register the device
+        # in `devices` now (created_at on first sight via S1's COALESCE upsert).
+        device_id = opts[:client_device_id] || generate_device_id()
+        register_device(user.user_id, device_id, opts[:initial_display_name], conn)
 
         respond_login(
           conn,
@@ -329,6 +376,11 @@ defmodule Nebu.Matrix.HttpPublic do
         user_id: user_id,
         device_id: device_id,
         expires_at: expires_at,
+        # S3: persist the fresh-auth time for the UIA window. Prefer the id_token's
+        # auth_time claim (the IdP's real authentication time); fall back to iat
+        # (issued-at) when the IdP does not emit auth_time. A token refresh copies
+        # this verbatim (rotate_tokens) — only a fresh login sets it.
+        auth_time: login_auth_time(claims),
         oidc_refresh_token: Nebu.Web.SecretBox.encrypt(oidc_refresh_token)
       })
 
@@ -344,7 +396,7 @@ defmodule Nebu.Matrix.HttpPublic do
     })
   end
 
-  defp respond_login(conn, user_id, device_id, jwt, _claims, refresh_requested, _oidc_refresh_token) do
+  defp respond_login(conn, user_id, device_id, jwt, claims, refresh_requested, _oidc_refresh_token) do
     # AC7 fallback: no refresh requested, or refresh requested but no OIDC RT
     # available (e.g. the IdP did not grant offline_access). Return the verified
     # OIDC JWT verbatim, exactly as before — no opaque session row.
@@ -358,6 +410,14 @@ defmodule Nebu.Matrix.HttpPublic do
       )
     end
 
+    # S2 AC3 / SECURITY G1: a raw OIDC JWT carries no Nebu device_id, so bind this
+    # token to the device SERVER-SIDE. OidcPlug.call_jwt reads the device back from
+    # this binding on every authenticated request — the device a request acts as is
+    # never taken from attacker-controllable request input.
+    # S3 F-1: persist the verified token's exp so the device-delete kill-switch can
+    # denylist exactly this token until its own expiry.
+    _ = Nebu.Matrix.Session.DeviceBinding.put(jwt, user_id, device_id, claims["exp"])
+
     send_json(conn, 200, %{
       "user_id" => user_id,
       # No opaque session: return the verified OIDC token as the access_token (the
@@ -366,6 +426,32 @@ defmodule Nebu.Matrix.HttpPublic do
       "device_id" => device_id,
       "token_type" => "Bearer"
     })
+  end
+
+  # S2 AC1: login registers the device in `devices` (S1 device-registry-model).
+  # display_name is passed ONLY when the device is first created — on reuse (AC2) we
+  # pass nil so S1's COALESCE keeps the original name (initial_device_display_name is
+  # ignored on reuse, per the spec). last_seen_ts/last_seen_ip are refreshed on every
+  # login. Best-effort: never block login on the device registry.
+  defp register_device(user_id, device_id, initial_display_name, conn) do
+    existing = Nebu.Matrix.DeviceKeyStore.get_device(user_id, device_id)
+    display_name = if is_nil(existing), do: initial_display_name, else: nil
+
+    _ =
+      Nebu.Matrix.DeviceKeyStore.upsert_device(user_id, device_id,
+        display_name: display_name,
+        last_seen_ts: System.system_time(:millisecond),
+        last_seen_ip: client_ip(conn)
+      )
+
+    :ok
+  end
+
+  defp client_ip(conn) do
+    case conn.remote_ip do
+      ip when is_tuple(ip) -> ip |> :inet.ntoa() |> to_string()
+      _ -> nil
+    end
   end
 
   # Nebu session expiry = min(oidc_exp, now + 8h). oidc_exp is the verified `exp`
@@ -386,6 +472,22 @@ defmodule Nebu.Matrix.HttpPublic do
 
   defp expires_in_ms(%DateTime{} = expires_at) do
     DateTime.diff(expires_at, DateTime.utc_now(), :millisecond) |> max(0)
+  end
+
+  # S3: the fresh-auth time (unix seconds) for the UIA window. Prefer the OIDC
+  # auth_time claim (real IdP authentication time); fall back to iat. nil only if
+  # the token carries neither (then the session reads as "stale" → always challenge).
+  defp login_auth_time(claims) do
+    case claims["auth_time"] do
+      t when is_integer(t) ->
+        t
+
+      _ ->
+        case claims["iat"] do
+          t when is_integer(t) -> t
+          _ -> nil
+        end
+    end
   end
 
   # ── POST /_matrix/client/v3/refresh (oidc-session-refresh, Matrix CS v1.3) ────

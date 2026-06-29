@@ -101,17 +101,25 @@ is read from `sync_tokens.updated_at` (the wall-clock timestamp of the previous 
 Only rooms where `left_at > sinceMs` OR `rejected_at > sinceMs` are returned.
 Initial sync passes `sinceMs = 0` to include all ever-left rooms.
 
-## Scenario 3c: POST /forget - Persistent Room Exclusion (GAP-FORGET, Story 9-19)
+## Scenario 3c: POST /forget - Persistent Room Exclusion (GAP-FORGET, Story 9-19; wired in `forget-room-membership-purge`)
 
 After `POST /rooms/{roomId}/forget`, the room must not appear in any subsequent sync response
-(`rooms.join`, `rooms.leave`, `rooms.invite`).
+(`rooms.join`, `rooms.leave`, `rooms.invite`) until the user re-joins.
+
+> **Implementation note:** Story 9-19 described this design but the Elixir
+> `forget_room/2` shipped as a no-op stub (it only ran the join-state guard and returned
+> `{}` without persisting). The `forget-room-membership-purge` bugfix epic wired up the
+> real behavior against the already-existing `forgotten_rooms` table. There is **no
+> GenServer state** — forget is a DB write at `/forget` time and a DB read at sync time.
 
 ```
 Matrix Client      Nebu app                        PostgreSQL
      │                   │                                │
      │  POST /forget     │                                │
-     │──────────────────►│  gRPC LeaveRoom precondition   │
+     │──────────────────►│  join-state guard (must be     │
+     │                   │  not-joined → else M_BAD_STATE) │
      │                   │  INSERT INTO forgotten_rooms    │
+     │                   │  ON CONFLICT DO NOTHING          │
      │                   │──────────────────────────────►│
      │  200 {}           │                                │
      │◄──────────────────│                                │
@@ -119,13 +127,25 @@ Matrix Client      Nebu app                        PostgreSQL
      │  GET /sync        │                                │
      │──────────────────►│  SELECT room_id FROM forgotten_rooms WHERE user_id = $1
      │                   │──────────────────────────────►│
-     │                   │  excluded from join/leave/invite
+     │                   │  in-process MapSet reject of those room_ids in BOTH sync
+     │                   │  builders (get_initial_sync + do_incremental_sync,
+     │                   │  incl. the recently-left list) — keeps the existing
+     │                   │  query shapes unchanged
      │  200 (room absent)│                                │
      │◄──────────────────│                                │
 ```
 
-**DB table:** `forgotten_rooms (user_id, room_id, forgotten_at_ms BIGINT)` - migration 000040.
-Insert is idempotent (`ON CONFLICT DO NOTHING`). Cascade delete on `users` row removal.
+**Re-join clears the forget:** on a successful `POST /rooms/{id}/join`, `join_room/2`
+calls `remove_forgotten_room(user_id, room_id)` so a re-joined room reappears in sync
+(Matrix: a re-joined room is no longer forgotten).
+
+**DB table:** `forgotten_rooms (user_id, room_id, forgotten_at_ms BIGINT)` — defined in
+the canonical schema `000001_init.up.sql` (NOT a separate 000040 migration; the table
+pre-existed and only needed wiring). PRIMARY KEY `(user_id, room_id)`; insert is
+idempotent (`ON CONFLICT DO NOTHING`); `ON DELETE CASCADE` on `users` row removal. All
+queries (`Nebu.Matrix.Room.DB.insert_forgotten_room/2`, `get_forgotten_room_ids/1`,
+`remove_forgotten_room/2`) are parameter-bound (ADR-018) and keyed strictly on the
+token's `user_id` (per-user isolation).
 
 ## Scenario 3d: Per-Device Sync Token Isolation (GAP-SINCE-IGNORED, Story 9-22)
 

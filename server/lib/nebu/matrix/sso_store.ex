@@ -274,7 +274,11 @@ defmodule Nebu.Matrix.SsoStore do
     %{
       verifier: entry[:verifier] || entry["verifier"],
       nonce: entry[:nonce] || entry["nonce"],
-      redirect_url: entry[:redirect_url] || entry["redirect_url"]
+      redirect_url: entry[:redirect_url] || entry["redirect_url"],
+      # S3: a UIA auth-fallback flow tags the state with the UIA session id so the
+      # shared OIDC callback can complete THAT UIA session instead of minting a
+      # normal loginToken. nil for an ordinary login redirect.
+      uia_session: entry[:uia_session] || entry["uia_session"]
     }
   end
 

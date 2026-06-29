@@ -1,0 +1,5 @@
+# Sprint status — epic forget-room-membership-purge
+# last_updated: 2026-06-28
+# story bugfix-forget-room-membership-purge done (pipeline: ATDD 7 integ + Dev + Code 0 MAJOR (3 MINOR fixed 1 cycle) + Kassandra CLEAN): 2026-06-28
+stories:
+  bugfix-forget-room-membership-purge: done

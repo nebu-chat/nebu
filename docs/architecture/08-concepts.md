@@ -34,7 +34,11 @@ Components in `Nebu.Web` (the shared HTTP plumbing):
   `conn.assigns.current_user = "@<sub>:<server_name>"` (plus `access_token` and `oidc_claims`, so
   `POST /logout` can revoke exactly the token that authenticated the request) and idempotently
   provisions the user row (TTL-cached, 60s, kept off the `/sync` hot path). On failure it returns a
-  Matrix-error JSON envelope (`M_MISSING_TOKEN` / `M_UNKNOWN_TOKEN`) and halts.
+  Matrix-error JSON envelope (`M_MISSING_TOKEN` / `M_UNKNOWN_TOKEN`) and halts. The verification core,
+  `OidcPlug.verify_token/2`, accepts optional `:issuer` and `:jwks` overrides; only the bootstrap
+  operator-login callback passes them (to verify against the bootstrap draft's issuer + locally-fetched
+  keys before `server_config` exists). All checks remain fail-closed and the single verification code
+  path is preserved — the overrides change only where the issuer/keys come from, not the validation.
 - **`Nebu.Web.TokenDenylist` (logout revocation, F-1)** — OidcPlug returns the verified OIDC token
   verbatim as the `access_token`, so destroying the session GenServer alone would NOT stop the token
   from re-validating on the next request; without a denylist, logout would be a no-op until the token's
@@ -67,23 +71,29 @@ Components in `Nebu.Web` (the shared HTTP plumbing):
   by the forwarded sub-routers and CORSPlug's halted preflight. All Nebu responses are
   `application/json` Matrix envelopes, so this prevents any MIME-sniffing edge case on a misbehaving
   client.
-- **`Nebu.Web.OidcConfig`** — a GenServer + ETS cache for OIDC issuer, audience, and JWKS URI
-  (oidc-env-optional-bootstrap story). When `NEBU_OIDC_ISSUER`, `NEBU_OIDC_AUDIENCE`, and/or
-  `NEBU_OIDC_JWKS_URI` are unset as environment variables (bootstrap-wizard deployments), `OidcPlug` and
-  `JwksCache` fall back to the `server_config` database table via this cache. Caching in ETS
-  `:nebu_http_oidc_config` avoids per-request DB lookups on the hot OIDC path. The cache is refreshed
-  by the Bootstrap Wizard after configuration is written to `server_config`, and cluster-aware invalidation
-  via `:pg` ensures all nodes stay synchronized (ADR-020, M-3). When both env vars and DB values are
-  absent, the config returns `nil` and OidcPlug fails closed (F-4 — all tokens rejected with 401).
+- **`Nebu.Web.OidcConfig`** — a GenServer + ETS cache for OIDC issuer, audience, and JWKS URI.
+  **ADR-022: OIDC is configured EXCLUSIVELY via the Bootstrap Wizard** (`server_config`) — there is no
+  environment-variable OIDC config path. `OidcPlug`, `JwksCache`, `SsoLogin`, and `Admin.Auth` resolve
+  issuer/audience/JWKS-URI **solely** through this cache (and the bootstrap draft during the wizard flow).
+  Caching in ETS `:nebu_http_oidc_config` avoids per-request DB lookups on the hot OIDC path. The cache is
+  refreshed by the Bootstrap Wizard after configuration is written to `server_config`, and cluster-aware
+  invalidation via `:pg` ensures all nodes stay synchronized (ADR-020, M-3). When `server_config` has no
+  OIDC config (pre-bootstrap), the cache returns `nil` and every consumer **fails closed** (F-4 — all
+  Bearer tokens rejected with 401; admin → `/bootstrap`). A test-only `:oidc_config_source` seam injects
+  values without a live DB.
 - **`Nebu.Web.JwksCache`** — a GenServer that fetches the OIDC provider JWKS on start and refreshes
-  it on a TTL (`NEBU_OIDC_JWKS_TTL`, default 300s). The JWKS URI is resolved in priority order:
-  (1) `NEBU_OIDC_JWKS_URI` env var / `OidcConfig` DB cache (bootstrap mode),
-  (2) auto-discovered from the issuer's `/.well-known/openid-configuration` document (when only
-  `NEBU_OIDC_ISSUER` is set — valid per OIDC spec). The discovered `jwks_uri` is validated to use
-  `https://` or `http://` scheme only (SSRF guard). On a refresh failure it keeps the last-known-good
-  keys rather than blanking the cache, so transient JWKS outages do not reject otherwise-valid tokens.
-  The JWKS HTTP fetch uses TLS peer verification for `https` endpoints. Its state is volatile and
-  is recovered by a fresh fetch when the supervisor restarts it.
+  it on a TTL (`NEBU_OIDC_JWKS_TTL`, default 300s — a cache-tuning knob, not OIDC config). The JWKS URI
+  is resolved (ADR-022) from `server_config` via `OidcConfig.jwks_uri/0`; when only the issuer is
+  configured (no explicit JWKS URI) it is auto-discovered from the issuer's
+  `/.well-known/openid-configuration` document. The discovered `jwks_uri` is validated to use `https://`
+  or `http://` scheme only (SSRF guard). On a refresh failure it keeps the last-known-good keys rather
+  than blanking the cache, so transient JWKS outages do not reject otherwise-valid tokens. The JWKS HTTP
+  fetch uses TLS peer verification for `https` endpoints. Its state is volatile and is recovered by a
+  fresh fetch when the supervisor restarts it. A public helper `JwksCache.fetch_keys_for/2` performs an
+  explicit, TLS-verifying fetch for a given `jwks_uri`/`issuer` **without mutating the global cache** —
+  used by the bootstrap operator-login callback so it can verify an ID token against the bootstrap
+  draft's keys before `server_config` exists, without warming the global cache and thereby breaking the
+  fail-closed-until-bootstrap-completes invariant (F-4).
 - **Router scoping** — `Nebu.Web.Router` keeps `GET /health` open, forwards the unauthenticated Matrix
   routes (`POST /login`, `GET /profile`, MSC2965 discovery) to `Nebu.Matrix.HttpPublic`, and forwards
   everything else under `/_matrix` to the protected sub-router `Nebu.Matrix.Http.Protected` whose
@@ -91,86 +101,39 @@ Components in `Nebu.Web` (the shared HTTP plumbing):
 
 Both request-time ETS tables (token denylist, rate-limit buckets) are created eagerly at
 `Nebu.Application` boot so the lazy `ensure_table` fast path never has to race under concurrent
-first requests (closing a brief fail-open window, R-2). **Fail-loud config:** `runtime.exs` no longer
-**requires** `NEBU_OIDC_ISSUER` and `NEBU_OIDC_AUDIENCE` at boot (oidc-env-optional-bootstrap story) —
-these are now optional, sourced from either environment variables (preferred) or `server_config` database
-(populated by Bootstrap Wizard or operator). However, `NEBU_DB_URL` and `NEBU_PII_ENCRYPTION_KEY` remain
-mandatory at boot. When both env vars and DB values are absent, OidcPlug fails closed (F-4) and rejects
-all tokens with 401 — the Bootstrap Wizard validates at form submission (AC2/AC5) to prevent completing
-into this broken state.
+first requests (closing a brief fail-open window, R-2). **Config validated per-operation, not at boot
+(ADR-022):** `runtime.exs` reads no OIDC config — the server boots without OIDC and fails closed until
+the Bootstrap Wizard writes `server_config`. `NEBU_DB_URL` and `NEBU_PII_ENCRYPTION_KEY` remain
+mandatory at boot. When `server_config` has no OIDC config, OidcPlug fails closed (F-4) and rejects
+all Bearer tokens with 401; the wizard validates required fields (issuer, single client id/secret,
+audience, JWKS URI) at form submission to prevent completing into a broken state.
 
-Relevant configuration (server service): `NEBU_OIDC_ISSUER`, `NEBU_OIDC_AUDIENCE`,
-`NEBU_OIDC_JWKS_URI`, `NEBU_OIDC_JWKS_TTL`, `NEBU_OIDC_DISPLAY_NAME` (advertised IdP name for
-`POST /login` `m.login.sso`), `NEBU_RATE_LIMIT_DISABLED`, and `NEBU_SERVER_NAME` (used to build the
-`@<sub>:<server_name>` Matrix user ID).
+Relevant configuration (server service): all OIDC config (issuer, audience, JWKS URI, the single
+client id/secret, claim mappings) is set via the **Bootstrap Wizard** (`server_config`), never env.
+Remaining env knobs: `NEBU_OIDC_JWKS_TTL` (JwksCache refresh interval), `NEBU_OIDC_DISPLAY_NAME`
+(advertised IdP name for `POST /login` `m.login.sso`), `NEBU_SSO_REDIRECT_SCHEMES`,
+`NEBU_RATE_LIMIT_DISABLED`, and `NEBU_SERVER_NAME` (used to build the `@<sub>:<server_name>` Matrix
+user ID and to derive the admin `/admin/callback` redirect_uri).
 
 **Bootstrap mode:** First OIDC login automatically receives `instance_admin`. Bootstrap mode is
 permanently disabled after the first admin setup. No default password, no insecure fallback.
 
-**Configurable OIDC Extra Scopes (Bug 5-30 + Bug 5-31):**
+**Single OIDC client (ADR-022):** ONE OIDC client serves both Matrix Bearer-token validation and the
+admin operator login. The wizard configures it (`server_config.oidc_client_id` + AES-256-GCM-encrypted
+`oidc_client_secret`); the IdP-side client registers all Nebu redirect URIs (Matrix SSO redirect,
+Element `auth.html`, and `/admin/callback`). There is no separate admin client and no env credential
+fallback — `SsoLogin.resolve_client_credentials/0` and `Admin.Auth.oidc_config/1` read the single
+client from `server_config` only (or the bootstrap draft during the wizard flow), decrypting the
+at-rest secret on use. The admin `/admin/callback` redirect_uri is server-derived from `:server_name`
++ `:admin_session_secure` (never from request headers).
 
-The OIDC authorization request scope list is configurable per deployment. The standard base scope
-is `openid` only (`offline_access` is appended when Matrix refresh mode is "offline"). `profile` and
-`email` are opt-in extras — not requested by default. Additional scopes are appended at runtime via
-`NEBU_OIDC_EXTRA_SCOPES` (e.g. `profile email groups`). Two flows use this mechanism:
-
-**Admin auth flow (Bug 5-30) — two-level precedence, live DB override:**
-
-1. **DB key `oidc_extra_scopes`** (in `server_config` or `bootstrap_draft`) - present value wins,
-   even when empty (explicit "no extra scopes" override for providers that reject non-standard scopes).
-2. **`NEBU_OIDC_EXTRA_SCOPES` env var** - fallback when the DB key is absent (`sql.ErrNoRows`).
-3. **`""`** (empty string) - default when neither source is configured (standard scopes only).
-
-`buildScopeList(extraScopes string) []string` deduplicates extra tokens against the base set before
-appending. `resolveExtraScopes(dbVal string, dbAbsent bool) string` encodes the precedence logic.
-An operator can override the env var default by inserting the `oidc_extra_scopes` key into
-`server_config` via the Bootstrap Wizard or direct DB update — the DB value takes unconditional
-precedence without a gateway restart.
-
-**Matrix SSO flow (Bug 5-31) — live Application env, no restart required:**
-
-`GET /_matrix/client/v3/login/sso/redirect` (and the callback) also request configurable extra
-scopes via `Nebu.Matrix.SsoLogin.scope_list/0`. The Elixir implementation reads configuration
-live on every login-start request — no gateway restart is needed to pick up changes:
-
-1. **Base scope** — always `openid` only (`profile` and `email` are opt-in, not in the base).
-2. **`NEBU_OIDC_EXTRA_SCOPES` env var** — read via `Application.get_env(:nebu_http, :oidc_extra_scopes)` (set from `runtime.exs`); appended after deduplication.
-3. **`offline_access`** — appended when the Matrix OIDC refresh mode is `"offline"`; the mode is read live from `server_config` per login-start request via the injectable `:matrix_oidc_refresh_mode_reader` seam (default = DB lookup). No restart required for mode changes.
-
-**OIDC Client Credential Source Hierarchy (bugfix-sso-bootstrap-credentials):**
-
-The Bootstrap Admin Wizard stores `oidc_client_id` and `oidc_client_secret` in `server_config`
-(AES-256-GCM encrypted for the secret). Prior to this fix, `LoginHandler` ignored these values and
-always used static environment variables. The fix introduces two TTL-cached loaders in `main.go`:
-
-| Loader | Key read from `server_config` | Fallback |
-|---|---|---|
-| `newServerConfigClientIDLoader` | `oidc_client_id` | `NEBU_OIDC_CLIENT_ID` env var |
-| `newServerConfigClientSecretLoader` | `oidc_client_secret` (encrypted) | `NEBU_OIDC_CLIENT_SECRET` env var |
-
-**Precedence chain (both loaders):**
-
-1. **`server_config.oidc_client_id` / `oidc_client_secret`** (Bootstrap-configured) — DB value wins when present.
-2. **`NEBU_OIDC_CLIENT_ID` / `NEBU_OIDC_CLIENT_SECRET` env vars** — fallback for pre-bootstrap deployments or when the DB key is absent.
-
-The secret loader calls `admin.DecryptAES256GCM(internalSecret, encryptedValue)`. If decryption
-fails (corrupted or tampered value), a `slog.Warn` is emitted and the env-var fallback is used —
-no panic, no 500 error (AC5). The 60-second TTL cache (`claimLoader`) ensures at most one DB read
-per minute per credential (AC4). A gateway restart is **not** required when credentials are
-updated via the Bootstrap Wizard: the new values are visible within 60 seconds.
-
-**Differs from the claim-loader precedence (Story 11-10):** For OIDC claims, the env var
-(`NEBU_OIDC_USER_ID_CLAIM`) bypasses the DB entirely. For client credentials, DB takes unconditional
-precedence over the env var — Bootstrap-configured values always override the env var, which is
-treated purely as a pre-bootstrap fallback.
-
-**Startup observability check:** At gateway startup, before the `LoginHandler` is constructed,
-`main.go` performs a one-shot check:
-
-```
-if NEBU_OIDC_CLIENT_ID == "" && server_config.oidc_client_id == "" →
-    slog.Warn("OIDC client_id not configured: set NEBU_OIDC_CLIENT_ID or complete the Bootstrap wizard")
-```
+**OIDC scopes (ADR-022):** the admin/bootstrap authorization request asks for `openid profile email
+groups`; the Matrix SSO authorization request asks for `openid profile email`. Both add `offline_access`
+when their configured refresh mode is `"offline"` (read live from `server_config` via the
+`:matrix_oidc_refresh_mode_reader` / `admin_oidc_refresh_mode` seams). These scope sets are fixed in code
+(no env config — ADR-022 holds, there is no `NEBU_OIDC_EXTRA_SCOPES`); the additional claims they unlock
+(e.g. `profile`/`email` for a configured `name` user-id claim, `groups` for admin role mapping) must be
+granted by the IdP client registration.
 
 A matching warning is emitted for `client_secret`. This ensures operators can detect a misconfigured
 SSO flow immediately from startup logs before the first login attempt.
@@ -369,6 +332,14 @@ When the bearer token is opaque:
 
 When the bearer token contains a dot, routing continues on the existing OIDC JWT path (backward compat).
 
+**Device assigned on EVERY authenticated request (Story s2-device-lifecycle-at-login):**
+`OidcPlug` now populates `conn.assigns[:device_id]` for **both** session shapes — opaque sessions
+read it from `matrix_sessions.device_id`, raw-JWT sessions read it from
+`Nebu.Matrix.Session.DeviceBinding.get_device/1` (the `jwt_device_bindings` row keyed by
+`SHA-256(token)`). This closes the prior gap where raw-JWT sessions had no server-side device. The
+device a request acts as is therefore **server-authoritative** for all sessions (see *Device Identity
+vs Device Keys* below).
+
 **Session creation (`POST /login`):**
 
 When the client sends `refresh_token: true`:
@@ -444,6 +415,11 @@ compliance export tokens. Survives Elixir restarts (unlike the ephemeral `:nebu_
 All administrative actions and compliance access events are written to an append-only `audit_log`
 table. Entries are Ed25519-signed for tamper evidence. Retention is configurable (default: 2555 days / 7 years).
 
+`Nebu.Compliance.AuditWriter` validates every `action` against a `@known_actions` allowlist and rejects
+an unregistered action with `{:error, :audit_unknown_action}` *before* any DB call — so a new audited
+operation MUST add its action there or its entries are silently dropped. The Admin device-management
+operations (Story s4) registered `device_renamed` and `device_deleted` accordingly.
+
 **Append-only enforcement model (Story 13-14):**
 
 The `audit_log` table uses `ENABLE ROW LEVEL SECURITY` with two blocking policies - `audit_log_no_update USING (false)` and `audit_log_no_delete USING (false)`. `FORCE ROW LEVEL SECURITY` is intentionally **not** set in the squashed single-role migration.
@@ -510,6 +486,149 @@ in the `sync_tokens` table (composite PK, migration 000041).
 `POST /logout` invalidates the session in-process via `SessionSupervisor.destroy_session/2` (a
 DB transaction that deletes the `sync_tokens` + `sessions` rows for that device). ETS is NOT evicted
 (other devices may still be active).
+
+## Device Identity vs Device Keys (Story s1-device-registry-model)
+
+A **device** is a first-class entity, modelled separately from the cryptographic key blob a client
+may publish. Two tables back this split, both keyed on `(user_id, device_id)`:
+
+| Table | Migration | Holds | A row exists when |
+|---|---|---|---|
+| `devices` | 000010 | Device IDENTITY + management metadata (`display_name`, `last_seen_ts`, `last_seen_ip`, `created_at`, `updated_at`) | The device is known to the server — even with no published keys (*keyless* device) |
+| `device_keys` | 000009 | The signed device-key blob (`device_keys_json`) + OTK/fallback keys (in sibling tables) | The client uploaded keys via `POST /keys/upload` |
+
+**Design invariants:**
+
+- **Device existence is independent of keys.** `Nebu.Matrix.DeviceKeyStore.put_device_keys/4` upserts
+  the `devices` row FIRST, then the `device_keys` row (the two writes are deliberately NOT in a
+  transaction: writing `devices` first means the only intermediate state after a crash between them is
+  a valid keyless device, which is permitted; the reverse order could leave a `device_keys` row with no
+  `devices` row).
+- **`GET /devices` / `GET /devices/{deviceId}` read from `devices`** (`list_devices/1`, `get_device/2`,
+  `sole_device_id/1`), so a keyless device is listed and manageable.
+- **`POST /keys/query` reads the JOIN** (`query_devices/1` INNER-JOINs `devices` + `device_keys`), so it
+  returns ONLY key-bearing devices — Matrix `/keys/query` semantics are unchanged. The JOIN can never
+  hide a current key-bearing device because every `device_keys` row is guaranteed a `devices` row (the
+  000010 backfill + the put-order invariant above).
+- **Backfill of a shipped schema.** Migration 000009 reached the operator's Stackit deployment and is
+  immutable; 000010 is a NEW forward migration that backfills `devices` from existing `device_keys` rows
+  (`last_seen_ip` has no source there → NULL) and is idempotent (`IF NOT EXISTS` / `ON CONFLICT DO
+  NOTHING`).
+
+This split is the foundation of the device-management epic (S2 session-driven device existence, S3, S4).
+It is **orthogonal to E2EE** (ADR-011): persisting device identity encrypts nothing. PostgreSQL-backed
+and cluster-correct (ADR-020); inline SQL with no schema/repository layer (ADR-018). No new ADR.
+
+### Login owns the device lifecycle; the acting device is server-authoritative (Story s2-device-lifecycle-at-login)
+
+S2 makes **login** the single owner of device creation and makes the **acting device
+server-authoritative** on every authenticated request:
+
+- **Login owns device creation.** `Nebu.Matrix.HttpPublic` honours a client-supplied `device_id`
+  (reuse — Matrix permits it) or generates one, then upserts the `devices` row (`display_name` taken
+  from `initial_device_display_name` on first sight only; `last_seen` refreshed on every login). For a
+  raw-JWT session it additionally persists the `token→device` binding via
+  `Nebu.Matrix.Session.DeviceBinding` (opaque sessions already carry the device in
+  `matrix_sessions.device_id`). The binding write is best-effort and never crashes login.
+- **The acting device is read from the token, never the request body.** `OidcPlug` assigns
+  `conn.assigns[:device_id]` for ALL authenticated sessions from the token's server-side binding
+  (opaque → `matrix_sessions`, raw-JWT → `DeviceBinding`). Handlers read the device from there.
+- **`POST /keys/upload` rejects cross-device transfer.** The device a key write is attributed to is
+  taken SOLELY from `conn.assigns[:device_id]`. A body `device_keys.device_id` that *contradicts* the
+  bound device is rejected with `403 M_FORBIDDEN` **before any write** — a token bound to device A can
+  never publish keys for device B (the prior `sole_device_id/1` heuristic is removed). With no bound
+  device and no body device_id the upload is a no-op (empty counts, no DB touch).
+- **`GET /sync`** performs a best-effort, throttled (60s) update of `devices.last_seen_ts` /
+  `last_seen_ip`.
+
+**Security property:** the device a request acts as is **server-authoritative** — derived from the
+token's server-side binding, never from attacker-controllable request input — which prevents
+cross-device session/token transfer. The binding stores the access token only as a **SHA-256 hash**
+(no cleartext bearer token at rest). Cluster-correct (PostgreSQL is the source of truth, per ADR-020);
+inline SQL (ADR-018). Still **orthogonal to E2EE** (ADR-011) — the device-key directory is a public-key
+directory, not encryption. No new ADR.
+
+### Device management endpoints, UIA step-up, and the per-device JWT kill-switch (Story s3-matrix-device-endpoints)
+
+S3 adds the WRITE side of Matrix device management — `PUT /_matrix/client/v3/devices/{deviceId}`
+(rename), `DELETE /_matrix/client/v3/devices/{deviceId}`, and `POST /_matrix/client/v3/delete_devices`
+(bulk, capped at ≤100 target devices) — all owner-scoped (a user can only touch their own devices).
+Delete and bulk-delete are gated by **User-Interactive Authentication (UIA)**; rename is not.
+
+**UIA fresh-auth step-up via `m.login.sso` (Option B).** Nebu is OIDC-only, so the single UIA stage is
+`m.login.sso` (CS API §"SSO during User-Interactive Authentication"). The gate is **Option B**: a recent
+fresh login satisfies UIA directly. `Nebu.Matrix.Uia` compares `now - matrix_sessions.auth_time` against
+a configurable window (`NEBU_UIA_FRESH_AUTH_SECONDS`, default **900s / 15 min**); within the window the
+write proceeds, otherwise the caller is challenged (`401` with a `m.login.sso` flow + a server-issued
+`session` id). The challenged client completes a fresh SSO login out-of-band via
+`GET /_matrix/client/v3/auth/m.login.sso/fallback/web` (unauthenticated by spec) and re-submits.
+
+- **`auth_time` tracking.** Set at login from the id_token's `auth_time`/`iat` (unix seconds, migration
+  `000012`). A **token refresh copies it verbatim** (`MatrixSessionStore.refresh_auth_time/2` is only
+  called on a fresh SSO completion, never on rotation), so refreshing a token can NOT reset freshness or
+  defeat the gate. A session with no `auth_time` is always stale → challenge.
+- **UIA session store (DB-backed, ADR-020).** A `uia_sessions` row is server-issued (256-bit random
+  `session_id`) and bound to `(user_id, op, params)` (params = the canonical-JSON sorted device-id list).
+  It is **single-use**: `consume/4` flips `consumed = TRUE WHERE consumed = FALSE` atomically, so a replay
+  loses the race and is rejected. The store is in PostgreSQL — not node-local ETS — because mint
+  (challenged request) → complete (SSO callback) → consume (re-submit) can each land on a different node.
+- **Identity-bound completion (security, H-1).** `Uia.complete/2` marks the `m.login.sso` stage complete
+  ONLY when the freshly-verified `sub` (the Matrix user derived from the verified id_token) equals the UIA
+  session's bound `user_id` — enforced in SQL by `AND user_id = $authenticated_user`. Without this, a
+  holder of a victim's open access token could complete the fallback with their OWN IdP account and
+  satisfy the step-up for the victim's pending sensitive op. A mismatch matches 0 rows and returns
+  `:error` (no stage completion, no `auth_time` refresh).
+
+**Per-device JWT kill-switch (F-1).** Deleting a device (single or bulk) **denylists every JWT bound to
+that `(user_id, device_id)`** so an in-flight bearer token cannot outlive the device. The handler
+enumerates `jwt_device_bindings` rows for the pair (served by `idx_jwt_device_bindings_user_device`) and
+calls `Nebu.Web.TokenDenylist.revoke_by_hash/2` for each, keyed by the binding's `token_hash` until that
+token's stored `exp`. The hash is **the same `SHA-256(token)` lowercase-hex digest** `OidcPlug.revoked?/2`
+computes from an incoming token and that `DeviceBinding` stores — so the next request carrying the bound
+JWT resolves as revoked and is rejected `401 M_UNKNOWN_TOKEN`. Bindings for the deleted device are then
+removed. The companion `Nebu.Matrix.Session.Sweeper` (hourly, supervised) evicts `jwt_device_bindings`
+rows whose `exp` has passed and expired `uia_sessions` rows.
+
+**`device_id` ingress validation (F-2).** `Nebu.Matrix.DeviceId.valid?/1` rejects a client-supplied
+`device_id` longer than 255 bytes or containing control characters (`\x00`–`\x1f`, `\x7f`) at the two
+ingress points that accept one — `POST /login` and `POST /keys/upload` — so a device_id can never inject
+log/header/path artifacts downstream.
+
+All inline SQL (ADR-018), cluster-correct (ADR-020). **Orthogonal to E2EE (ADR-011):** none of these
+endpoints store key material or can enable encryption — they manage device identity and session
+lifecycle only. No new ADR.
+
+### Admin UI per-user device management (Story s4-admin-device-management)
+
+S4 gives operators the same device-management capabilities over **another user's** devices, from the
+Admin UI (Phoenix dead-view / HTTP controller, not the Matrix CS API). A user-detail page
+(`GET /admin/users/:user_id`) lists every device (semantic table: device id, display name, last-seen,
+created), with a rename form and a revoke form (native confirm) per row. All three routes are
+`:require_admin`-gated, CSRF-protected, and follow the PRG (Post/Redirect/Get) pattern; revoke uses
+`POST .../devices/:device_id` with `_method=DELETE` (`Plug.MethodOverride`), mirroring the rooms
+member-removal destructive-action pattern.
+
+- **The Admin domain consumes devices ONLY through the `Nebu.Matrix` facade (ADR-020)** —
+  `list_user_devices/1`, `rename_user_device/3`, `delete_user_device/2` — never `DeviceKeyStore` or
+  `Session.*` directly (see §05 building blocks for the facade contract).
+- **Revoke reuses the S3 kill-switch.** `delete_user_device/2` runs the per-device JWT kill-switch
+  FIRST (denylist every token bound to `(user_id, device_id)` until its own `exp` via
+  `TokenDenylist.revoke_by_hash/2`, drop the bindings + the opaque session), THEN deletes the device
+  identity row and all key material. Because an admin acts on *another* user's device there is no
+  caller credential to preserve — EVERY bound token is revoked (unlike the Matrix self-delete path).
+- **No IDOR.** Rename and delete are user-scoped in SQL; a `device_id` that does not belong to the
+  path `:user_id` maps to `:error`/no-op and a flash — never to another user's device.
+
+**Audit on success AND failure.** Each successful rename/revoke writes a `device_renamed` /
+`device_deleted` audit entry (actor = admin, target user + device); a failed attempt is also audited.
+Both actions are registered in `Nebu.Compliance.AuditWriter`'s `@known_actions` allowlist — an
+unregistered action is rejected with `{:error, :audit_unknown_action}` *before* any DB call, so a
+missing registration would silently drop the entry (see *Audit Logging* below). The `do_log` rescue is
+narrowed to `RuntimeError` (the documented missing-`Repo` degradation) so genuine logic bugs in the
+audit path still crash rather than being swallowed.
+
+No new migration (S4 reuses the S1–S3 schema), inline SQL (ADR-018), cluster-correct (ADR-020),
+orthogonal to E2EE (ADR-011). No new ADR.
 
 ## Error Handling
 
