@@ -134,6 +134,44 @@
       />
     </label>
 
+    <%!-- OIDC scopes (story configurable-oidc-scopes, AC2/AC6). Two text inputs so the
+          operator can configure which scopes are requested per client at bootstrap.
+          openid is always included. Defaults: Matrix = "profile email",
+          Admin = "profile email groups" (groups required for Dex claim release). --%>
+    <fieldset class="mt-4 border border-base-300 rounded p-3">
+      <legend class="label-text font-semibold px-1">OIDC scopes</legend>
+
+      <label class="form-control mt-2">
+        <span class="label-text">Matrix client scopes</span>
+        <input
+          type="text"
+          name="matrix_oidc_extra_scopes"
+          aria-label="Matrix client scopes"
+          value={@draft["matrix_oidc_extra_scopes"] || "profile email"}
+          placeholder="profile email"
+          class="input input-bordered"
+        />
+        <span class="label-text-alt mt-1 text-base-content/70">
+          Space-separated scope names. <code>openid</code> is always included. Example: <code>profile email groups</code>
+        </span>
+      </label>
+
+      <label class="form-control mt-2">
+        <span class="label-text">Admin client scopes</span>
+        <input
+          type="text"
+          name="admin_oidc_extra_scopes"
+          aria-label="Admin client scopes"
+          value={@draft["admin_oidc_extra_scopes"] || "profile email groups"}
+          placeholder="profile email groups"
+          class="input input-bordered"
+        />
+        <span class="label-text-alt mt-1 text-base-content/70">
+          Space-separated scope names. <code>openid</code> is always included. Example: <code>profile email groups</code>
+        </span>
+      </label>
+    </fieldset>
+
     <%!-- OIDC refresh mode (story oidc-refresh-mode-config, AC4/AC6). Two native
           <select>s so the operator can pick offline/online per client at bootstrap;
           defaults Matrix=offline / Admin=online preselected. --%>

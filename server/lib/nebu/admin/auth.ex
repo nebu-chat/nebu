@@ -921,22 +921,51 @@ defmodule Nebu.Admin.Auth do
   #
   # Test seam (mirrors OidcClaimCache's :oidc_claim_reader): a 0-arity fun under
   # :admin_oidc_refresh_mode_reader injects the mode; default reads server_config.
+  @default_admin_extra_scopes "profile email groups"
+
   defp admin_oidc_scope do
     # oidc-bootstrap-only-config (ADR-022): no NEBU_ADMIN_OIDC_SCOPE env. The operator
-    # login requests the fixed base scope set; finer-grained scopes are an IdP client
-    # concern.
+    # login requests scopes from server_config (configurable-oidc-scopes); finer-grained
+    # scopes are an IdP client concern.
     #
-    # oidc-bootstrap-only-e2e-regressions (AC3): `groups` is REQUIRED. Dex only releases
-    # the `groups` claim when the `groups` scope is requested; without it the bootstrap
-    # select-claim page renders no instance_admin option and the wizard cannot complete.
-    configured = "openid profile email groups"
+    # oidc-bootstrap-only-e2e-regressions (AC3): `groups` is REQUIRED in the default.
+    # Dex only releases the `groups` claim when the `groups` scope is requested; without
+    # it the bootstrap select-claim page renders no instance_admin option and the wizard
+    # cannot complete. Operators who remove `groups` lose group-based admin assignment.
+    extra = admin_extra_scopes()
     prefix = if admin_refresh_mode() == "offline", do: ["openid", "offline_access"], else: ["openid"]
 
-    configured
-    |> String.split(" ", trim: true)
-    |> then(&(prefix ++ &1))
+    (prefix ++ String.split(extra, " ", trim: true))
+    |> Enum.reject(&(&1 == ""))
     |> Enum.uniq()
     |> Enum.join(" ")
+  end
+
+  defp admin_extra_scopes do
+    reader =
+      Application.get_env(
+        :nebu_http,
+        :admin_oidc_extra_scopes_reader,
+        &default_admin_extra_scopes/0
+      )
+
+    case reader.() do
+      s when is_binary(s) and s != "" -> s
+      _ -> @default_admin_extra_scopes
+    end
+  end
+
+  @sql_admin_extra_scopes "SELECT value FROM server_config WHERE key = 'admin_oidc_extra_scopes' LIMIT 1"
+
+  defp default_admin_extra_scopes do
+    if running?(Nebu.Repo) do
+      case Ecto.Adapters.SQL.query(Nebu.Repo, @sql_admin_extra_scopes, []) do
+        {:ok, %{rows: [[value]]}} when is_binary(value) -> value
+        _ -> @default_admin_extra_scopes
+      end
+    else
+      @default_admin_extra_scopes
+    end
   end
 
   @sql_admin_refresh_mode "SELECT value FROM server_config WHERE key = 'admin_oidc_refresh_mode' LIMIT 1"
@@ -1359,6 +1388,27 @@ defmodule Nebu.Admin.Auth do
         case draft[key] do
           v when v in ["offline", "online"] -> put_config(key, v)
           _ -> :ok
+        end
+      end)
+
+      # Story configurable-oidc-scopes (AC6): promote the operator's chosen OIDC extra scopes.
+      # SECURITY: validate each scope token against the character whitelist
+      # [a-zA-Z0-9_:.-] before writing. An invalid draft value is silently skipped
+      # (not promoted) so injection via a tampered draft cannot reach server_config.
+      Enum.each(~w(matrix_oidc_extra_scopes admin_oidc_extra_scopes), fn key ->
+        case draft[key] do
+          v when is_binary(v) and v != "" ->
+            # Validate each scope token.
+            scopes = String.split(v, " ", trim: true)
+            all_valid = Enum.all?(scopes, &String.match?(&1, ~r/^[a-zA-Z0-9_:.\-]+\z/))
+            if all_valid do
+              put_config(key, v)
+            else
+              Logger.warning("configurable-oidc-scopes: skipping #{key} promotion — invalid scope token in draft value: #{inspect(v)}")
+            end
+
+          _ ->
+            :ok
         end
       end)
 

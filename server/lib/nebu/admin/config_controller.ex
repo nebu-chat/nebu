@@ -20,6 +20,11 @@ defmodule Nebu.Admin.ConfigController do
   # server_config keys this page may write, with their valid value set.
   @refresh_mode_keys ["matrix_oidc_refresh_mode", "admin_oidc_refresh_mode"]
   @valid_modes ["offline", "online"]
+  @scope_keys ["matrix_oidc_extra_scopes", "admin_oidc_extra_scopes"]
+  @scope_defaults %{
+    "matrix_oidc_extra_scopes" => "profile email",
+    "admin_oidc_extra_scopes" => "profile email groups"
+  }
 
   def index(conn, _params) do
     render_config(conn)
@@ -55,9 +60,67 @@ defmodule Nebu.Admin.ConfigController do
     end
   end
 
+  def save_scopes(conn, params) do
+    # Validate each submitted scope key against the [a-zA-Z0-9_:.-] character whitelist.
+    errors =
+      @scope_keys
+      |> Enum.flat_map(fn key ->
+        value = params[key] || ""
+        scopes = String.split(value, " ", trim: true)
+
+        Enum.flat_map(scopes, fn s ->
+          if String.match?(s, ~r/^[a-zA-Z0-9_:.\-]+\z/), do: [], else: [s]
+        end)
+      end)
+
+    if errors == [] do
+      changes =
+        @scope_keys
+        |> Map.new(fn key ->
+          raw = String.trim(params[key] || "")
+          value = if raw == "", do: @scope_defaults[key], else: raw
+          {key, value}
+        end)
+
+      case persist_scopes(changes) do
+        :ok ->
+          conn
+          |> put_flash(:info, "Scopes saved")
+          |> redirect(to: "/admin/config")
+
+        _ ->
+          conn
+          |> put_flash(:error, "Failed to save scopes")
+          |> redirect(to: "/admin/config")
+      end
+    else
+      conn
+      |> put_status(200)
+      |> put_flash(
+        :error,
+        "Scope '#{hd(errors)}' contains invalid characters. Only alphanumeric, underscore, colon, period, and dash are allowed."
+      )
+      |> render_config()
+    end
+  end
+
   # Persist via the injectable writer seam (tests) or the DB (runtime).
   defp persist(changes) do
     case Application.get_env(:nebu_http, :admin_config_refresh_mode_writer) do
+      writer when is_function(writer, 1) ->
+        writer.(changes)
+
+      _ ->
+        if Process.whereis(Nebu.Repo) do
+          Nebu.Admin.DB.upsert_server_config(changes)
+        else
+          {:error, :no_repo}
+        end
+    end
+  end
+
+  defp persist_scopes(changes) do
+    case Application.get_env(:nebu_http, :admin_config_scopes_writer) do
       writer when is_function(writer, 1) ->
         writer.(changes)
 
@@ -81,9 +144,18 @@ defmodule Nebu.Admin.ConfigController do
   end
 
   defp load_config do
-    case Process.whereis(Nebu.Repo) && Nebu.Admin.DB.get_server_config() do
-      {:ok, cfg} -> Enum.sort(cfg)
-      _ -> []
+    case Application.get_env(:nebu_http, :admin_server_config_reader) do
+      reader when is_function(reader, 0) ->
+        case reader.() do
+          {:ok, cfg} -> Enum.sort(cfg)
+          _ -> []
+        end
+
+      _ ->
+        case Process.whereis(Nebu.Repo) && Nebu.Admin.DB.get_server_config() do
+          {:ok, cfg} -> Enum.sort(cfg)
+          _ -> []
+        end
     end
   end
 

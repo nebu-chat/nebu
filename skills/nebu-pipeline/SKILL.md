@@ -229,6 +229,44 @@ Show: `✓ Step 1b: Oracle consulted — Matrix spec context captured.`
 
 ---
 
+### Step 1d: Baseline Integration Test
+
+**Direct bash — no LLM. Mandatory.**
+
+Run the full integration test suite against the current codebase BEFORE any code changes.
+This establishes a clean baseline and surfaces pre-existing failures that are NOT caused by this story.
+
+```bash
+make redeploy
+make test-integration 2>&1 | tee $STEP_RESULTS_DIR/[STORY_ID]/baseline-integration.log
+BASELINE_EXIT=$?
+```
+
+**If `BASELINE_EXIT != 0`:**
+```
+⚠ Baseline integration tests failing BEFORE any changes.
+This means pre-existing failures exist in the codebase.
+Document these as known failures and continue — do NOT abort the story.
+Failing tests at baseline will be clearly distinguished from story-introduced failures in Step 5.
+```
+Log the result:
+```bash
+python3 skills/nebu-pipeline/scripts/pipeline_state.py \
+  --file $STATE_FILE \
+  --log "[STORY_ID] TIMESTAMP baseline-integration → ⚠ FAILING (pre-existing)"
+```
+
+**If `BASELINE_EXIT == 0`:**
+```bash
+python3 skills/nebu-pipeline/scripts/pipeline_state.py \
+  --file $STATE_FILE \
+  --log "[STORY_ID] TIMESTAMP baseline-integration → ✓ clean"
+```
+
+Show: `✓ Step 1d: Baseline integration test complete.`
+
+---
+
 ### Step 2: atdd — Generate Failing Tests
 
 **Skill:** `bmad-testarch-atdd` | **Model:** sonnet | **Fresh context** | **Mandatory**
@@ -340,36 +378,52 @@ Show: `✓ Step 4: Implementation complete. Cycle: [CYCLE_COUNT]`
 
 ### Step 5: ci-gate — CI Verification
 
-**Agent:** `nebu-agent-testing` | **Model:** haiku | **Fresh context**
+**Direct bash — no LLM. Mandatory.**
 
-Primary path — run the CI script directly:
+Rebuild the server image and run the full integration test suite against a fresh database.
+This is the definitive quality gate — unit tests alone are not sufficient.
+
 ```bash
-python3 skills/nebu-agent-testing/scripts/ci_gate.py --story [STORY_ID]
+# 1. Rebuild Docker image with the new code
+make redeploy
+
+# 2. Run full integration test suite (Gherkin E2E against real stack + fresh DB)
+make test-integration 2>&1 | tee $STEP_RESULTS_DIR/[STORY_ID]/ci-integration.log
+INTEGRATION_EXIT=$?
 ```
 
-Parse the JSON output. **Fallback if script unavailable:**
+**If `INTEGRATION_EXIT != 0`:**
+
+Compare failures against the baseline log from Step 1d:
 ```bash
-STEP_DESC=$(python3 skills/nebu-pipeline/scripts/select_pipeline_step.py --step ci-gate)
+diff $STEP_RESULTS_DIR/[STORY_ID]/baseline-integration.log \
+     $STEP_RESULTS_DIR/[STORY_ID]/ci-integration.log | grep "^>" | head -20
 ```
-Inject `[STEP_DESC]` into subagent (no substitutions needed).
 
-**If CI fails:**
 ```
-🔴 CI Gate failed (see report above).
+🔴 CI Gate failed — integration tests failing after implementation.
+See: $STEP_RESULTS_DIR/[STORY_ID]/ci-integration.log
+
 Pipeline stopped. Fix the failing tests, then restart from Step 4 or Step 5.
 Type "continue" to skip the CI gate (not recommended).
 ```
 Stop and wait.
 
+**If `INTEGRATION_EXIT == 0`:** additionally run the fast unit test suite:
+```bash
+python3 skills/nebu-agent-testing/scripts/ci_gate.py --story [STORY_ID] 2>/dev/null || \
+  make test-unit-elixir
+```
+
 ```bash
 python3 skills/nebu-pipeline/scripts/pipeline_state.py \
   --file $STATE_FILE \
   --step code-review --done ci-gate \
-  --log "[STORY_ID] TIMESTAMP ci-gate → ✓ build+unit-go+unit-elixir+e2e+integration"
-# or: --log "[STORY_ID] TIMESTAMP ci-gate → FAILED: [failing suite]"
+  --log "[STORY_ID] TIMESTAMP ci-gate → ✓ redeploy+integration+unit"
+# or: --log "[STORY_ID] TIMESTAMP ci-gate → FAILED: [failing test name(s)]"
 ```
 
-Show: `✓ Step 5: CI gate passed.`
+Show: `✓ Step 5: CI gate passed (full stack integration + unit tests).`
 
 ---
 

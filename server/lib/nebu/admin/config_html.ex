@@ -16,6 +16,10 @@ defmodule Nebu.Admin.ConfigHTML do
     end
   end
 
+  defp scope_value(config, key) do
+    config_value(config, key) || ""
+  end
+
   defp config_value(config, key) when is_list(config) do
     case List.keyfind(config, key, 0) do
       {_, v} -> v

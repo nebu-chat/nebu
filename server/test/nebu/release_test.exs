@@ -20,7 +20,7 @@ defmodule Nebu.ReleaseTest do
       result = Release.list_up_migrations(dir)
 
       versions = result |> Enum.map(&elem(&1, 0)) |> Enum.sort()
-      # priv/migrations now ships 000001–000012 (000004 add_room_type,
+      # priv/migrations now ships 000001–000013 (000004 add_room_type,
       # 000005 space_hierarchy_index, 000006 auto_join_opt_outs,
       # 000007 config_refresh_mode_mutable, 000008 room_aliases,
       # 000009 device_keys, 000010 devices — the device-registry-model story S1
@@ -30,8 +30,9 @@ defmodule Nebu.ReleaseTest do
       # 000012 — device-management story S3 (Matrix device endpoints): adds the
       # auth_time / fresh-auth-tracking + UIA-session columns the DELETE/delete_devices
       # endpoints need (and the bound-JWT kill-switch denylist forward migration).
-      # RED until the 000012 migration file lands.
-      assert versions == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+      # 000013 — configurable-oidc-scopes: extends config_update_mutable RLS policy
+      # to allow runtime UPDATE of matrix_oidc_extra_scopes / admin_oidc_extra_scopes.
+      assert versions == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
 
       # Only *.up.sql files are returned — *.down.sql are excluded.
       assert Enum.all?(result, fn {_v, path} -> String.ends_with?(path, ".up.sql") end)

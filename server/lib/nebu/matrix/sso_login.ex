@@ -428,17 +428,45 @@ defmodule Nebu.Matrix.SsoLogin do
   # Test seam (mirrors OidcClaimCache's :oidc_claim_reader): a 0-arity fun under
   # :matrix_oidc_refresh_mode_reader injects the mode; default reads server_config.
 
-  @base_scopes ~w(openid profile email)
+  @default_matrix_extra_scopes "profile email"
 
   @sql_matrix_refresh_mode "SELECT value FROM server_config WHERE key = 'matrix_oidc_refresh_mode' LIMIT 1"
+  @sql_matrix_extra_scopes "SELECT value FROM server_config WHERE key = 'matrix_oidc_extra_scopes' LIMIT 1"
 
   defp scope_list do
-    base = if matrix_refresh_mode() == "offline", do: @base_scopes ++ ["offline_access"], else: @base_scopes
+    extra = matrix_extra_scopes()
+    base = ["openid"] ++ String.split(extra, " ", trim: true)
+    base = if matrix_refresh_mode() == "offline", do: base ++ ["offline_access"], else: base
 
     base
     |> Enum.reject(&(&1 == ""))
     |> Enum.uniq()
     |> Enum.join(" ")
+  end
+
+  defp matrix_extra_scopes do
+    reader =
+      Application.get_env(
+        :nebu_http,
+        :matrix_oidc_extra_scopes_reader,
+        &default_matrix_extra_scopes/0
+      )
+
+    case reader.() do
+      s when is_binary(s) and s != "" -> s
+      _ -> @default_matrix_extra_scopes
+    end
+  end
+
+  defp default_matrix_extra_scopes do
+    if running?(Nebu.Repo) do
+      case Ecto.Adapters.SQL.query(Nebu.Repo, @sql_matrix_extra_scopes, []) do
+        {:ok, %{rows: [[value]]}} when is_binary(value) -> value
+        _ -> @default_matrix_extra_scopes
+      end
+    else
+      @default_matrix_extra_scopes
+    end
   end
 
   # Resolves the Matrix refresh mode to the validated enum "offline" | "online".
