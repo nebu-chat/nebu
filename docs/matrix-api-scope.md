@@ -1,8 +1,9 @@
 # Matrix API Scope
 
 This document provides a full inventory of Matrix Client-Server API endpoints and their
-implementation status in Nebu. Derived from `gateway/cmd/gateway/main.go` route registrations,
-cross-referenced with the Matrix Client-Server API specification.
+implementation status in Nebu. Derived from `server/lib/nebu/web/router/protected.ex` and
+`server/lib/nebu/web/router.ex` route registrations, cross-referenced with the Matrix
+Client-Server API specification.
 
 **Legend:**
 - ✅ Implemented - real handler with database-backed logic
@@ -19,9 +20,9 @@ cross-referenced with the Matrix Client-Server API specification.
 | GET | `/_matrix/client/versions` | ✅ | Returns v1.1–v1.11 |
 | GET | `/.well-known/matrix/client` | ✅ | Dynamic base_url from request Host |
 | GET | `/_matrix/client/v3/capabilities` | 🔶 | Returns change_password: false, room_versions: {6: stable} |
-| GET | `/_matrix/client/unstable/org.matrix.msc2965/auth_issuer` | ✅ | Returns `{"issuer":"<NEBU_OIDC_ISSUER>"}` - MSC2965 OIDC discovery (Story 13-7) |
+| GET | `/_matrix/client/unstable/org.matrix.msc2965/auth_issuer` | ✅ | Returns OIDC issuer from `server_config` (Bootstrap Wizard) - MSC2965 OIDC discovery (Story 13-7) |
 | GET | `/_matrix/client/v1/auth_issuer` | ✅ | Stable v1 path - same handler as unstable (Story 13-7) |
-| GET | `/_matrix/client/unstable/org.matrix.msc2965/auth_metadata` | ✅ | Proxies OIDC discovery document from `<NEBU_OIDC_ISSUER>/.well-known/openid-configuration`; 5-min TTL cache; 503 M_UNAVAILABLE on provider failure (Story 13-7) |
+| GET | `/_matrix/client/unstable/org.matrix.msc2965/auth_metadata` | ✅ | Proxies OIDC discovery document from the issuer in `server_config`; 5-min TTL cache; 503 M_UNAVAILABLE on provider failure (Story 13-7) |
 | GET | `/_matrix/client/v1/auth_metadata` | ✅ | Stable v1 path - same handler as unstable (Story 13-7) |
 
 ## Authentication
@@ -47,23 +48,23 @@ cross-referenced with the Matrix Client-Server API specification.
 
 | Method | Endpoint | Status | Notes |
 |---|---|---|---|
-| POST | `/_matrix/client/v3/createRoom` | ✅ | Creates room via gRPC CreateRoom |
+| POST | `/_matrix/client/v3/createRoom` | ✅ | Creates room via `EventDispatcher.Server.create_room/2` (in-process) |
 | POST | `/_matrix/client/v3/join/{roomIdOrAlias}` | ✅ | Join by room ID or alias |
 | POST | `/_matrix/client/v3/rooms/{roomId}/join` | ✅ | Accept invitation |
-| POST | `/_matrix/client/v3/rooms/{roomId}/leave` | ✅ | Leave room via gRPC LeaveRoom |
+| POST | `/_matrix/client/v3/rooms/{roomId}/leave` | ✅ | Leave room |
 | POST | `/_matrix/client/v3/rooms/{roomId}/invite` | ✅ | Invite user |
 | POST | `/_matrix/client/v3/rooms/{roomId}/kick` | ✅ | Kick user (power level check) |
 | POST | `/_matrix/client/v3/rooms/{roomId}/ban` | ✅ | Ban user |
 | POST | `/_matrix/client/v3/rooms/{roomId}/unban` | ✅ | Unban user |
 | POST | `/_matrix/client/v3/rooms/{roomId}/forget` | ✅ | Forget room |
-| POST | `/_matrix/client/v3/rooms/{roomId}/upgrade` | 🔶 | Returns 501 Not Implemented |
+| POST | `/_matrix/client/v3/rooms/{roomId}/upgrade` | ✅ | Full Matrix §11.35.1 upgrade flow (tombstone, new room, copy state, invite members, archive old room) — Story 9-27 |
 | GET | `/_matrix/client/v3/joined_rooms` | 🔶 | Returns empty list (use /sync instead) |
 
 ## Messaging and Events
 
 | Method | Endpoint | Status | Notes |
 |---|---|---|---|
-| PUT | `/_matrix/client/v3/rooms/{roomId}/send/{eventType}/{txnId}` | ✅ | Sends event via gRPC SendEvent |
+| PUT | `/_matrix/client/v3/rooms/{roomId}/send/{eventType}/{txnId}` | ✅ | Sends event via `EventDispatcher.Server.send_event/5` (in-process) |
 | GET | `/_matrix/client/v3/rooms/{roomId}/messages` | ✅ | Paginated message history |
 | PUT | `/_matrix/client/v3/rooms/{roomId}/state/{eventType}/{stateKey}` | ✅ | Set room state event |
 | PUT | `/_matrix/client/v3/rooms/{roomId}/state/{eventType}` | ✅ | Set state (no stateKey) |
@@ -156,6 +157,12 @@ cross-referenced with the Matrix Client-Server API specification.
 | DELETE | `/_matrix/client/v3/directory/room/{roomAlias}` | 🔶 | Acknowledged |
 | GET | `/_matrix/client/v3/directory/room/{roomAlias}` | 🔶 | Returns 404 (no alias storage) |
 
+## Full-Text Search
+
+| Method | Endpoint | Status | Notes |
+|---|---|---|---|
+| POST | `/_matrix/client/v3/search` | ✅ | PostgreSQL `tsvector`/`tsquery` FTS on `events` table (GIN index, migration 000042); room filter, pagination, `order_by` (rank/recent); member-only access enforced — Epic 11 / ADR-010 |
+
 ## User Directory
 
 | Method | Endpoint | Status | Notes |
@@ -171,9 +178,10 @@ cross-referenced with the Matrix Client-Server API specification.
 | GET | `/_matrix/client/v3/voip/turnServer` | 🔶 | Returns 404 (TURN not configured) |
 | GET | `/_matrix/media/v3/config` | ✅ | Returns `{"m.upload.size": N}` - unauthenticated, deprecated (Story 12.16) |
 
-## Media Repository (Media Gateway)
+## Media Repository
 
-These endpoints are served by the **Media Gateway** (`media/cmd/media/main.go`), not the API Gateway.
+These endpoints are served by **`Nebu.Media.*`** (in-process within the single Elixir/OTP
+application), behind the same Bandit listener as the Matrix API.
 
 **Deprecated unauthenticated endpoints (v3) - backward compatibility:**
 
@@ -221,26 +229,24 @@ the roadmap toward Managed E2EE.
 | GET | `/_matrix/client/unstable/org.matrix.msc3814.v1/dehydrated_device` | 🔶 | Returns 404 M_NOT_FOUND (MSC3814 not supported) |
 | GET | `/_matrix/client/unstable/org.matrix.msc4143/rtc/transports` | 🔶 | Returns 404 M_NOT_FOUND (MSC4143 not supported) |
 
-## Spaces (Phase 3 - MSC1772 / MSC2946 / MSC3083)
+## Spaces (MSC1772 / MSC2946 / MSC3083) — epic: spaces-elixir
 
-These endpoints are planned for Phase 3 (Epic 12). Not yet implemented.
+Matrix Spaces are implemented as part of the `spaces-elixir` epic.
 
 | Method | Endpoint | Status | Notes |
 |---|---|---|---|
-| POST | `/_matrix/client/v3/createRoom` (with `creation_content.type: "m.space"`) | ⏳ | Space creation via existing endpoint - `type` field added to `m.room.create`; see [spaces-spec §4.2](stories/phase3/spaces-spec.md) |
-| PUT | `/_matrix/client/v3/rooms/{roomId}/state/m.space.child/{childRoomId}` | ⏳ | Add/remove child room from space; validated in Core (power level + `via` field) |
-| PUT | `/_matrix/client/v3/rooms/{roomId}/state/m.space.parent/{parentSpaceId}` | ⏳ | Link child room to parent space; security check: sender must have PL in parent space |
-| GET | `/_matrix/client/v1/rooms/{roomId}/hierarchy` | ⏳ | MSC2946 - BFS traversal over `m.space.child` state events; `limit`, `max_depth`, `suggested_only`, `from` params; paginated SpaceSummary response |
+| POST | `/_matrix/client/v3/createRoom` (with `creation_content.type: "m.space"`) | ✅ | Space creation via existing `createRoom` endpoint — `type: "m.space"` added to `m.room.create` |
+| PUT | `/_matrix/client/v3/rooms/{roomId}/state/m.space.child/{childRoomId}` | ✅ | Add/remove child room from space; power level check |
+| PUT | `/_matrix/client/v3/rooms/{roomId}/state/m.space.parent/{parentSpaceId}` | ✅ | Link child room to parent space |
+| GET | `/_matrix/client/v1/rooms/{roomId}/hierarchy` | ✅ | MSC2946 BFS traversal over `m.space.child` state events; `limit`, `max_depth`, `suggested_only`, `from` params; paginated SpaceSummary response |
 
-**Dependent changes to existing endpoints (Phase 3):**
+**Dependent changes to existing endpoints:**
 
 | Method | Endpoint | Change |
 |---|---|---|
 | GET | `/_matrix/client/v3/capabilities` | Room versions extended to 6–10, default `"10"` (required for `restricted` join rules) |
 | POST | `/_matrix/client/v3/join/{roomIdOrAlias}` | Restricted join rule enforcement (MSC3083): checks caller membership in `allow`-listed spaces |
 | POST | `/_matrix/client/v3/rooms/{roomId}/join` | Same restricted join rule check |
-
-_Source: [docs/stories/phase3/spaces-spec.md](stories/phase3/spaces-spec.md) - full endpoint, event schema, and architecture spec_
 
 ---
 
@@ -255,5 +261,4 @@ identity services.
 | `/_matrix/federation/*` | No federation - see [README §No Federation](../README.md#no-federation) (closed-network data-sovereignty model; Phase 3 vision) |
 | `/_matrix/identity/*` | No identity server - email/phone binding not supported |
 | `/_matrix/key/v2/server` | Server key exchange only needed for federation |
-| `POST /_matrix/client/v3/search` | Requires ADR-010 (FTS strategy) decision first - see [ADR-010](architecture/adr/ADR-010-fts-strategy.md) |
 

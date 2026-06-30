@@ -53,20 +53,27 @@ export default async function globalSetup(): Promise<void> {
   // The Elixir core auto-bootstraps (sets bootstrap_completed=true without OIDC config)
   // on the first Matrix login. Admin bootstrap must run first to write OIDC config.
   // This is idempotent: if bootstrap is already complete with OIDC config, it's a no-op.
-  const adminBrowser = await chromium.launch();
-  try {
-    const adminCtx  = await adminBrowser.newContext();
-    const adminPage = await adminCtx.newPage();
+  //
+  // NEBU_SKIP_BOOTSTRAP=1 — used when running bootstrap wizard scenarios on a fresh DB.
+  // These scenarios test the wizard itself and must run BEFORE bootstrap is complete.
+  if (process.env.NEBU_SKIP_BOOTSTRAP === '1') {
+    console.log('[global-setup] NEBU_SKIP_BOOTSTRAP=1 — skipping doBootstrapAdmin (bootstrap wizard scenarios).');
+  } else {
+    const adminBrowser = await chromium.launch();
     try {
-      console.log('[global-setup] Ensuring admin bootstrap is complete (with OIDC config)...');
-      await doBootstrapAdmin(adminPage);
-      console.log('[global-setup] Admin bootstrap complete.');
+      const adminCtx  = await adminBrowser.newContext();
+      const adminPage = await adminCtx.newPage();
+      try {
+        console.log('[global-setup] Ensuring admin bootstrap is complete (with OIDC config)...');
+        await doBootstrapAdmin(adminPage);
+        console.log('[global-setup] Admin bootstrap complete.');
+      } finally {
+        await adminPage.close();
+        await adminCtx.close();
+      }
     } finally {
-      await adminPage.close();
-      await adminCtx.close();
+      await adminBrowser.close();
     }
-  } finally {
-    await adminBrowser.close();
   }
 
   // M-5 fix: skip warm-up only when all active users are fresh (state + sidecar both present)

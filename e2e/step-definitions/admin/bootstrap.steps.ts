@@ -227,7 +227,23 @@ When('the operator selects the claim value {string} as the admin group claim', a
   { page }: { page: Page },
   claimValue: string
 ) => {
-  await page.getByRole('option', { name: claimValue }).click();
+  // Current select-claim HTML uses radio inputs with value=claimValue.
+  // Click via the associated label to avoid intercept issues; fall back to check({ force: true }).
+  const radio = page.locator(`input[type="radio"][name="admin_group_claim"][value="${claimValue}"]`);
+  if (await radio.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    const radioId = await radio.getAttribute('id').catch(() => null);
+    const label = radioId
+      ? page.locator(`label[for="${radioId}"]`)
+      : radio.locator('xpath=ancestor::label').first();
+    if (await label.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await label.click();
+    } else {
+      await radio.check({ force: true });
+    }
+  } else {
+    // Fallback: <option> inside a <select> (legacy / alternative rendering)
+    await page.getByRole('option', { name: claimValue }).click();
+  }
 });
 
 Then('the browser is redirected to {string}', async ({ page }: { page: Page }, urlPath: string) => {
@@ -270,12 +286,16 @@ Then('the progress indicator shows step {int} as active', async ({ page }: { pag
 });
 
 Then('the page shows the discovered OIDC claims', async ({ page }: { page: Page }) => {
-  await expect(page.locator('[class*="claim"], select, [role="listbox"]').first())
-    .toBeVisible({ timeout: 15_000 });
+  // The select-claim page renders radio inputs with name="admin_group_claim".
+  // Fallback: any element with "claim" in its class, a <select>, or a listbox.
+  await expect(
+    page.locator('input[name="admin_group_claim"], [data-page="bootstrap-select-claim"], [class*="claim"], select, [role="listbox"]').first()
+  ).toBeVisible({ timeout: 15_000 });
 });
 
 Then('the page shows at least one claim value as a selectable option', async ({ page }: { page: Page }) => {
-  await expect(page.locator('option, [role="option"]').first())
+  // Radio inputs (current select-claim HTML) or <option> elements (legacy/fallback).
+  await expect(page.locator('input[name="admin_group_claim"], option, [role="option"]').first())
     .toBeVisible({ timeout: 15_000 });
 });
 
@@ -327,4 +347,65 @@ Given('an admin is logged into the Admin UI', async ({ page }: { page: Page }) =
 
 When('the admin navigates to {string}', async ({ page }: { page: Page }, urlPath: string) => {
   await page.goto(`${ADMIN_BASE_URL}${urlPath}`);
+});
+
+// ── RED PHASE step definitions ─────────────────────────────────────────────────
+// These steps support the @ac12-bootstrap-controller scenario introduced as the
+// RED PHASE for the BootstrapLive → plain HTTP controller conversion.
+//
+// Bug 1: /admin/bootstrap is inside live_session :admin with require_admin on_mount,
+//        causing an infinite redirect loop on unauthenticated access before bootstrap.
+// Bug 2: LiveView reconnection clears form data (plain POST forms don't).
+// Bug 3: JWKS URI field should be removed; auto-discovered from the well-known endpoint.
+//
+// These steps will FAIL against the current LiveView implementation and PASS
+// after the controller conversion.
+
+Then('the bootstrap page loads without an infinite redirect', async ({ page }: { page: Page }) => {
+  // RED PHASE: fails against current LiveView implementation.
+  // The current /admin/bootstrap is in live_session :admin with on_mount require_admin.
+  // Without an admin session, on_mount redirects to /admin/login, which redirects back
+  // to /admin/bootstrap when bootstrap is not complete — infinite redirect loop.
+  // After the fix: the bootstrap route is outside the :admin live_session and returns
+  // 200 without authentication when bootstrap is not yet complete.
+  const response = await page.request.get(`${ADMIN_BASE_URL}/admin/bootstrap`, {
+    maxRedirects: 5
+  });
+  // Must reach the bootstrap page with status 200 (not a redirect loop or 302 to login).
+  expect(response.status()).toBe(200);
+  await expect(page).toHaveURL(/\/admin\/bootstrap/, { timeout: 10_000 });
+});
+
+Then('the bootstrap page is not a LiveView page', async ({ page }: { page: Page }) => {
+  // RED PHASE: fails against current LiveView implementation.
+  // The current page renders a Phoenix LiveView: the DOM contains phx-* attributes
+  // and the LiveSocket connects. After the fix (plain HTTP controller), there must be
+  // no LiveView socket connection — no data-phx-main, no phx-* form attributes.
+  const phxMainLocator = page.locator('[data-phx-main]');
+  const isLiveView = await phxMainLocator.count().then((c) => c > 0);
+  expect(isLiveView).toBe(false);
+  // Also verify no phx-submit on the step-1 form (plain <form action=...> instead).
+  const phxSubmitLocator = page.locator('form[phx-submit]');
+  const hasPhxSubmit = await phxSubmitLocator.count().then((c) => c > 0);
+  expect(hasPhxSubmit).toBe(false);
+});
+
+When('the operator submits the bootstrap step 1 form via plain POST', async ({ page }: { page: Page }) => {
+  // RED PHASE: the current LiveView uses phx-submit which fires over the LiveSocket.
+  // After the fix: the form has a real action="/admin/bootstrap/step/1" and
+  // method="post" so a normal click on the submit button triggers a plain POST.
+  await page.getByRole('button', { name: /^next$/i }).click();
+  // Wait for the page to reload to step 2 (plain HTTP redirect, not a LiveView patch).
+  await page.waitForURL(/\/admin\/bootstrap/, { timeout: 10_000 });
+  await page.waitForLoadState('domcontentloaded', { timeout: 10_000 });
+});
+
+Then('the JWKS URI field is not present on the OIDC configuration form', async ({ page }: { page: Page }) => {
+  // RED PHASE: fails against current LiveView implementation.
+  // The current step 2 form renders a "JWKS URI" input (aria-label="JWKS URI") that
+  // operators must fill manually. After the fix: JWKS URI is auto-discovered from
+  // {issuer}/.well-known/openid-configuration server-side — the field is removed.
+  const jwksField = page.getByLabel(/jwks uri/i);
+  const count = await jwksField.count();
+  expect(count).toBe(0);
 });

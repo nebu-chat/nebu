@@ -1,0 +1,181 @@
+<div class="admin-bootstrap" data-page="bootstrap" data-step={@step} data-step-active={@step}>
+  <h1 class="text-2xl font-bold mb-2">Bootstrap Setup</h1>
+
+  <%!-- Progress indicator: each step is marked; the active one carries
+        data-progress-step matching the current step + aria-current for a11y. --%>
+  <ol class="steps mb-6" data-progress aria-label="Bootstrap progress">
+    <li
+      :for={s <- @steps}
+      class={["step", s <= @step && "step-primary"]}
+      data-progress-step={if(s == @step, do: s, else: nil)}
+      aria-current={if(s == @step, do: "step", else: nil)}
+    >
+      <span class={if(s == @step, do: "font-semibold", else: "")}>
+        {@step_labels[s]}
+      </span>
+    </li>
+  </ol>
+
+  <div :if={@error} class="alert alert-error mb-4" role="alert">{@error}</div>
+
+  <div :if={@completed} class="alert alert-success" role="status">
+    Bootstrap complete. The instance is configured.
+  </div>
+
+  <form :if={not @completed and @step == 1} id="bootstrap-step-1" method="post" action="/admin/bootstrap/step/1">
+    <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+    <label class="form-control">
+      <span class="label-text">Instance Name</span>
+      <input
+        type="text"
+        name="instance_name"
+        aria-label="Instance Name"
+        value={@draft["instance_name"]}
+        class="input input-bordered"
+        required
+      />
+    </label>
+    <button type="submit" class="btn btn-primary mt-4">Next</button>
+  </form>
+
+  <form :if={not @completed and @step == 2} id="bootstrap-step-2" method="post" action="/admin/bootstrap/step/2">
+    <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+    <%!-- oidc-bootstrap-only-config (ADR-022): OIDC is configured EXCLUSIVELY via
+          this wizard (server_config). There is no env-var config path and no
+          env-lock mode — every field is always editable and required. --%>
+    <label class="form-control">
+      <span class="label-text">OIDC Issuer URL</span>
+      <input
+        type="url"
+        name="oidc_issuer"
+        aria-label="OIDC Issuer URL"
+        value={@draft["oidc_issuer"]}
+        class="input input-bordered"
+        required
+      />
+    </label>
+    <label class="form-control mt-2">
+      <span class="label-text">OIDC Client ID</span>
+      <input
+        type="text"
+        name="oidc_client_id"
+        aria-label="OIDC Client ID"
+        value={@draft["oidc_client_id"]}
+        class="input input-bordered"
+        required
+      />
+    </label>
+    <label class="form-control mt-2">
+      <span class="label-text">OIDC Client Secret</span>
+      <input
+        type="password"
+        name="oidc_client_secret"
+        aria-label="OIDC Client Secret"
+        class="input input-bordered"
+        required
+      />
+    </label>
+    <%!-- Audience is REQUIRED — an absent audience permanently breaks Matrix
+          Bearer-token validation (OidcPlug fail-closed). --%>
+    <label class="form-control mt-2">
+      <span class="label-text">OIDC Audience</span>
+      <input
+        type="text"
+        name="oidc_audience"
+        aria-label="OIDC Audience"
+        value={@draft["oidc_audience"]}
+        class="input input-bordered"
+        required
+      />
+    </label>
+    <%!-- JWKS URI is auto-discovered from {issuer}/.well-known/openid-configuration.
+          Operators do not need to provide it manually. --%>
+    <p class="text-sm text-base-content/60 mt-2">
+      The JWKS URI will be auto-discovered from the issuer's OpenID Connect discovery document.
+    </p>
+    <button type="submit" class="btn btn-primary mt-4">Next</button>
+  </form>
+
+  <%!-- Step 3: claim mapping defaults + "Connect with OIDC" (Go parity). The button
+        persists the claim mapping then redirects to the bootstrap-mode OIDC login. --%>
+  <form :if={not @completed and @step == 3} id="bootstrap-step-3" method="post" action="/admin/bootstrap/step/3">
+    <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+    <p class="mb-4 text-base-content/70">
+      Map your IdP's claims (defaults shown), then authenticate to pick the admin group claim.
+    </p>
+    <label class="form-control">
+      <span class="label-text">User-ID claim</span>
+      <input
+        type="text"
+        name="oidc_user_id_claim"
+        aria-label="User-ID claim"
+        value={@draft["oidc_user_id_claim"] || "name"}
+        class="input input-bordered"
+      />
+    </label>
+    <label class="form-control mt-2">
+      <span class="label-text">Display-name claim</span>
+      <input
+        type="text"
+        name="oidc_displayname_claim"
+        aria-label="Display-name claim"
+        value={@draft["oidc_displayname_claim"] || "name"}
+        class="input input-bordered"
+      />
+    </label>
+    <label class="form-control mt-2">
+      <span class="label-text">Email claim</span>
+      <input
+        type="text"
+        name="oidc_email_claim"
+        aria-label="Email claim"
+        value={@draft["oidc_email_claim"] || "email"}
+        class="input input-bordered"
+      />
+    </label>
+
+    <%!-- OIDC refresh mode (story oidc-refresh-mode-config, AC4/AC6). Two native
+          <select>s so the operator can pick offline/online per client at bootstrap;
+          defaults Matrix=offline / Admin=online preselected. --%>
+    <fieldset class="mt-4 border border-base-300 rounded p-3">
+      <legend class="label-text font-semibold px-1">OIDC refresh mode</legend>
+
+      <label class="form-control mt-2">
+        <span class="label-text">Matrix client refresh mode</span>
+        <select name="matrix_oidc_refresh_mode" aria-label="Matrix refresh mode" class="select select-bordered">
+          <option value="offline" selected={(@draft["matrix_oidc_refresh_mode"] || "offline") == "offline"}>
+            offline (offline_access)
+          </option>
+          <option value="online" selected={@draft["matrix_oidc_refresh_mode"] == "online"}>
+            online
+          </option>
+        </select>
+      </label>
+
+      <label class="form-control mt-2">
+        <span class="label-text">Admin client refresh mode</span>
+        <select name="admin_oidc_refresh_mode" aria-label="Admin refresh mode" class="select select-bordered">
+          <option value="offline" selected={@draft["admin_oidc_refresh_mode"] == "offline"}>
+            offline (offline_access)
+          </option>
+          <option value="online" selected={(@draft["admin_oidc_refresh_mode"] || "online") == "online"}>
+            online
+          </option>
+        </select>
+      </label>
+
+      <p class="text-sm text-base-content/70 mt-2">
+        <strong>offline</strong>: long-lived offline refresh token (survives IdP logout);
+        works on Dex &amp; Keycloak. Nebu stores the refresh token AES-256-GCM-encrypted
+        (server-side for Matrix, in the signed cookie for admin) and caps its own session at 8h.
+        <strong>online</strong>: session-bound refresh token (dies on IdP SSO logout).
+        <strong>Dex issues a refresh token only when <code>offline_access</code> is requested</strong>
+        — so in online mode refresh is disabled on Dex (use offline for Dex).
+      </p>
+    </fieldset>
+
+    <button type="submit" class="btn btn-primary mt-4">
+      Connect with OIDC
+    </button>
+  </form>
+</div>

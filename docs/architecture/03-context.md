@@ -54,11 +54,14 @@ no inter-process boundary. The domain namespaces (`Nebu.Matrix`, `Nebu.Media`, `
 | Elixir app → PostgreSQL | PostgreSQL wire protocol (TLS) via `Nebu.Repo` (Ecto pool) | Read/Write for all business logic, sessions, media keys, migrations |
 | `Nebu.Media` → MinIO / S3 | S3 API (ExAws/Finch, TLS) | Media blob storage (encrypted at rest) |
 
-> **Historical note:** ADR-005 originally defined a gRPC streaming boundary between a stateless Go
-> gateway and the Elixir server. The Go layer was removed (ADR-021) and consolidated into the single
-> Elixir/OTP application; the former gRPC command/DTO layer survives only as an in-process module
-> (`Nebu.Matrix.EventDispatcher.Server` + generated `Core.*` structs) that the HTTP routers call
-> directly. A network gRPC listener on port 9000 still starts but nothing dials it (vestige).
+> **Historical note (ADR-005 → ADR-021):** ADR-005 originally defined a gRPC streaming boundary
+> between a stateless Go gateway and the Elixir server. The Go layer was removed (ADR-021,
+> `full-elixir-stack` / `otp-consolidation` epics) and gRPC was fully removed in the `grpc-removal`
+> epic (2026-06-22): `:grpc`/`:protobuf` deps deleted, no network listener on any port.
+> The command/DTO layer survives in-process as `Nebu.Matrix.EventDispatcher.Server` (plain Elixir
+> module) and `Core.*` (plain `defstruct` DTOs in `server/lib/pb/`), called directly by the HTTP
+> routers. `Nebu.Matrix.Error` / `Nebu.Matrix.Status` replace the former `GRPC.RPCError` /
+> `GRPC.Status`.
 
 **Not in scope (explicit exclusions):**
 - `/_matrix/federation/*` - no Server-Server API

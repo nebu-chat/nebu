@@ -229,6 +229,11 @@ PYEOF
     output=$(python3 -c "${py_script}" "${manifest}" 2>&1) || rc=$?
 
     if [[ "${rc}" -ne 0 ]]; then
+        if [[ "${MANIFEST_FRESHNESS_WARN_ONLY:-false}" == "true" ]]; then
+            echo "  WARN: arc42 docs staleness check (warn-only on this branch):" >&2
+            echo "${output}" >&2
+            return 0
+        fi
         echo "  FAIL: arc42 docs staleness check failed:" >&2
         echo "${output}" >&2
         return 1

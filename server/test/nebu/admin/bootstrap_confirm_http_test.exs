@@ -166,16 +166,29 @@ defmodule Nebu.Admin.BootstrapConfirmHttpTest do
 
     cookie = login_state_cookie()
 
-    conn =
+    # Step 1: callback now PRG-redirects to /admin/bootstrap/select-claim
+    redirect_conn =
       router_call(:get, "/admin/callback?code=auth-code&state=the-state", nil, [
         {"cookie", cookie}
       ])
 
-    assert conn.status == 200, "callback should render select-claim page, got #{conn.status}"
+    assert redirect_conn.status == 302,
+           "callback should redirect to select-claim, got #{redirect_conn.status}"
+
+    # Pick up the session cookie written by the callback (stashes bootstrap_claims)
+    callback_cookie = session_cookie(redirect_conn) || cookie
+
+    # Step 2: follow the redirect — select-claim page renders the HTML with the CSRF token
+    conn =
+      router_call(:get, "/admin/bootstrap/select-claim", nil, [
+        {"cookie", callback_cookie}
+      ])
+
+    assert conn.status == 200, "select-claim page should return 200, got #{conn.status}"
     body = conn.resp_body
     assert body =~ ~s(name="admin_group_claim")
 
-    {csrf_token(body), session_cookie(conn)}
+    {csrf_token(body), session_cookie(conn) || callback_cookie}
   end
 
   # Seeds the in-flight OIDC login state into a signed _nebu_admin_key cookie (as

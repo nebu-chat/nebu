@@ -11,9 +11,9 @@ without copyleft restrictions.
 |---|---|---|
 | 1 | Matrix Client-Server API compatibility | Standard clients (Element, FluffyChat, Cinny) work without modification |
 | 2 | Data sovereignty | All data resides in operator-controlled PostgreSQL; no cloud service required |
-| 3 | Minimal operational footprint | Go + Elixir/OTP replace Redis, NATS, Kafka; `docker compose up` in ≤10 min |
+| 3 | Minimal operational footprint | Single Elixir/OTP application replaces Redis, NATS, Kafka, and the former Go layer; `docker compose up` in ≤10 min |
 | 4 | Enterprise compliance-ready | Append-only audit log, four-eyes principle, Ed25519 non-repudiation built-in |
-| 5 | Horizontal scalability | Stateless Go gateway, clustered Elixir core (libcluster + Horde) |
+| 5 | Horizontal scalability | Single clustered Elixir/OTP application (libcluster + Horde) — no separate gateway process |
 
 ## Stakeholders
 
@@ -33,14 +33,11 @@ without copyleft restrictions.
           └───────────────────┬──────────────────────┘
                               │ HTTPS / WSS (TLS 1.3)
           ┌───────────────────▼──────────────────────┐
-          │  Go Gateway        │  Go Media Gateway   │
-          │  (stateless)       │  (AES-256-GCM)      │
-          └───────────────────┬──────────────────────┘
-                              │ gRPC
-          ┌───────────────────▼──────────────────────┐
-          │  Elixir/OTP Core                         │
+          │  Nebu — single Elixir/OTP application    │
+          │  Bandit/Plug · Phoenix LiveView           │
+          │  Nebu.Matrix · Nebu.Media                │
+          │  Nebu.Admin  · Nebu.Web                  │
           │  Horde · libcluster · ETS · pg groups    │
-          │  GenServers for rooms, sessions, presence│
           └───────────────────┬──────────────────────┘
                               │
           ┌───────────────────▼──────────────────────┐
@@ -49,8 +46,9 @@ without copyleft restrictions.
           └──────────────────────────────────────────┘
 ```
 
-**Three runtime components:** a Go binary (gateway + media), an Elixir release (core), and PostgreSQL.
-No Redis, no NATS, no Kafka.
+**Two runtime components:** an Elixir/OTP release (the whole system — Matrix C-S API, media, Admin UI, all
+stateful chat logic) and PostgreSQL. No Redis, no NATS, no Kafka, no separate gateway process.
+MinIO / S3-compatible object store for media blobs is optional but recommended in production.
 
 ## Functional Requirements Overview
 

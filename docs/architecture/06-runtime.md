@@ -279,18 +279,13 @@ Matrix spec §6.3 requires a top-level `account_data` key in every sync response
 `m.*` events (e.g. `m.push_rules`, `m.ignored_user_list`). Without this field, Element Web
 cannot apply push rule customisations or ignored-user lists set by the client.
 
-All four sync paths now call `injectGlobalAccountData` before serialising the response:
+All three sync paths now call the account data query before serialising the response:
 
-| Sync path | Call site in `sync.go` |
+| Sync path | Call site in `Nebu.Matrix.Http*` |
 |---|---|
-| Initial sync (`GetInitialSync`) | `GetSync` handler |
-| Incremental delta sync (`GetSyncDelta`) | `handleIncrementalSync` - normal delta path |
-| Fallback-to-initial (`FallbackToInitial = true`) | `handleIncrementalSync` - fallback branch |
-| Buffer fast-path (local ring buffer drain) | `buildResponseFromBufferedEvents` - returns empty section (no DB call) |
-
-The buffer fast-path intentionally skips the DB query: global account data changes are rare, and
-the next non-buffered sync cycle will deliver them. This keeps the buffer hot path at zero extra
-DB queries.
+| Initial sync | `get_initial_sync` → `build_sync_response` |
+| Incremental delta sync | `do_incremental_sync` - normal delta path |
+| Fallback-to-initial | `do_incremental_sync` - fallback branch |
 
 ```
 Matrix Client      Nebu app                                  PostgreSQL
@@ -315,62 +310,18 @@ Matrix Client      Nebu app                                  PostgreSQL
      │◄──────────────────│                                          │
 ```
 
-**RLS invariant:** `ListGlobalAccountData` uses `withUserDB` to set the `app.user_id` GUC inside
-a transaction before querying. The RLS policy on `room_account_data` (migration 000033) filters
-by `current_setting('app.user_id', true)`. Without this GUC the policy silently returns zero rows.
+**Account data query:** `Nebu.Matrix.EventDispatcher.Server` queries `room_account_data` with
+`room_id = ''` for global-scope account data. The `app.user_id` GUC (PostgreSQL RLS) is set
+inside the transaction; the policy on `room_account_data` (migration 000033) filters by
+`current_setting('app.user_id', true)`. Without this GUC the policy silently returns zero rows.
 
-**Empty-section guarantee:** `syncResponse.AccountData` is typed `syncAccountDataSection`
-(not a pointer) and never carries `omitempty`. Even when no global account data exists, the
-response always contains `"account_data": {"events": []}` - a JSON-null or missing key would
-break `matrix-js-sdk`.
-
-## Scenario 3h: Buffer Fast-Path - Synthetic next_batch Token (GAP-BUFFER-NEXT-BATCH, Story 9-25)
-
-When events are already present in the local ring buffer, `handleIncrementalSync` drains
-the buffer and returns immediately without a gRPC round-trip to Domain. Prior to this
-fix, `buildResponseFromBufferedEvents` echoed the client's `since=` token back as
-`next_batch`, causing a stuck-token loop: the client re-sent the same token, the buffer
-re-delivered the same delta, and `sync_tokens.updated_at` was never advanced.
-
-**Fix:** `syntheticNextBatch()` (added in Story 9-25) generates a `buf_<unix_ms>_<seq>`
-token on every buffer-path response. The token is:
-
-- **Monotonically advancing** - Unix-ms timestamp plus an `atomic.Int64` sequence counter
-  ensures uniqueness even for sub-millisecond bursts across goroutines.
-- **Opaque to the client** - the `buf_` prefix makes it clearly synthetic; it does not
-  collide with Elixir's `v1_<base64url>` since-tokens.
-- **Never persisted** - `sync_tokens` is not written from the buffer path. When the client
-  sends `?since=buf_<ts>_<seq>` on the next poll, Elixir's `GetSyncDelta` finds no matching
-  `sync_tokens` row → `fallback_to_initial = true` → the existing `FallbackToInitial` branch
-  issues a safe full re-sync with a fresh real token.
-
-```
-Matrix Client      Nebu app (sync fast-path)
-     │                   │
-     │  GET /sync?since=s42_1
-     │──────────────────►│
-     │                   │  buffer.DrainFor(userID) → [events]
-     │                   │  syntheticNextBatch() → "buf_1746518400000_7"
-     │  200 {next_batch: "buf_1746518400000_7", rooms: {...}}
-     │◄──────────────────│
-     │                   │
-     │  GET /sync?since=buf_1746518400000_7
-     │──────────────────►│
-     │                   │  buffer empty → gRPC GetSyncDelta(user_id, "buf_...", device_id)
-     │                   │  Elixir: no sync_tokens row for "buf_..." → FallbackToInitial=true
-     │                   │  GetInitialSync → fresh real token
-     │  200 {next_batch: "s99_3", rooms: {...}}   ← real token resumes normal cycle
-     │◄──────────────────│
-```
-
-**No stuck-token loops:** Each buffer-path response carries a distinct `next_batch`, so
-`matrix-js-sdk` always issues a fresh `since=` on the next poll. The fallback-to-initial
-safety net was already production-tested before this story.
+**Empty-section guarantee:** Even when no global account data exists, the response always contains
+`"account_data": {"events": []}` — a missing key would break `matrix-js-sdk`.
 
 ## Scenario 3i: Room Upgrade - Matrix §11.35.1 (Story 9-27)
 
-`POST /rooms/{oldRoomId}/upgrade` triggers `gRPC UpgradeRoom` which executes the full
-Matrix spec §11.35.1 sequence inside `upgrade_room/2` in `event_dispatcher/server.ex`.
+`POST /rooms/{oldRoomId}/upgrade` calls `Nebu.Matrix.EventDispatcher.Server.upgrade_room/2`
+(in-process), which executes the full Matrix spec §11.35.1 sequence.
 
 ```
 Matrix Client      Nebu app          Domain (upgrade_room/2)         PostgreSQL
@@ -572,9 +523,9 @@ entries in the generated gRPC service stub; that stub no longer exists after the
 
 ## Scenario 3l: Matrix Login - Configurable OIDC Claim Mapping (Story 11-10)
 
-When a user authenticates via `POST /_matrix/client/v3/login`, the Matrix user ID is now derived
+When a user authenticates via `POST /_matrix/client/v3/login`, the Matrix user ID is derived
 from the claim configured in `server_config.oidc_user_id_claim` (loaded with a 60-second TTL cache
-via `claimLoader` in `main.go`) rather than being hardcoded to the `name` claim.
+via `Nebu.Web.OidcConfig`) rather than being hardcoded to the `name` claim.
 
 ```
 Matrix Client      Nebu app (login + OIDC plug)        PostgreSQL (server_config)
@@ -598,16 +549,11 @@ Matrix Client      Nebu app (login + OIDC plug)        PostgreSQL (server_config
 ```
 
 **Fallback chain:**
-1. `claimLoader` returns the value of `oidc_user_id_claim` from `server_config` (cached 60s).
-2. If the DB key is absent or the loader returns `""`, the gateway falls back to `"name"` - identical
-   to pre-11-10 behavior (AC7 backward compatibility guarantee).
-3. `NEBU_OIDC_USER_ID_CLAIM` env var overrides the DB value as a last-resort escape hatch.
-4. Inside `FormatUserIDFromClaims`: if `claims[claimName]` is empty or fails `sanitiseLocalpart`,
-   the function falls back to `FormatUserID(sub, serverName)` (SHA-256 opaque localpart).
-
-**JWTMiddleware** follows the same loader pattern for the `Authorization: Bearer` path (Matrix API
-requests after login). The `userIDClaimLoader` function is injected as the 5th parameter; `nil`
-activates the backward-compat `"name"` claim path.
+1. `Nebu.Web.OidcConfig` returns the value of `oidc_user_id_claim` from `server_config` (TTL-cached).
+2. If the DB key is absent or the loader returns `""`, the handler falls back to `"name"` — identical
+   to pre-11-10 behaviour (AC7 backward compatibility guarantee).
+3. Inside the claim mapper: if `claims[claimName]` is empty or fails the localpart validator,
+   the function falls back to an SHA-256 opaque localpart derived from `sub`.
 
 **Identity stability warning:** The Matrix user ID is a permanent identifier. Changing
 `oidc_user_id_claim` after users have registered will generate different Matrix user IDs for the

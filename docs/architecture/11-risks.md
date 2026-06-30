@@ -15,7 +15,6 @@
 
 | ADR | Blocking Feature | Impact |
 |---|---|---|
-| ADR-010 (FTS strategy) | `POST /_matrix/client/v3/search` not implemented | Users cannot search message history |
 | ADR-011 (Managed E2EE) | E2EE stubs only (keys/upload acknowledged, not stored) | No end-to-end encryption |
 
 ### Security Risks
@@ -60,9 +59,9 @@
 ## Monitoring Recommendations
 
 Items that should be set up before production:
-- Prometheus alerts for gRPC stream GELB/ROT status transitions
-- Alert on `message_buffer` table row count exceeding threshold
-- Alert on `message_dead_letter` table non-zero count
+- Prometheus alerts for Elixir process memory growth (Horde room GenServers, ETS tables)
+- Alert on PostgreSQL connection pool saturation (`Nebu.Repo` pool — Ecto Telemetry)
+- Alert on sync handler P99 latency (long-poll queue depth)
 - Audit log retention cron alert if purge job fails
 
-_Source: `_bmad-output/implementation-artifacts/sprint-status.yaml`, deferred items and security findings; `_bmad-output/planning-artifacts/prd.md`, §Risk Mitigations; Story 11-7 (Safari re-login bug resolved: nonce replay prevention, Cache-Control: no-store, denylist check at login)_
+_Source: `_bmad-output/implementation-artifacts/sprint-status.yaml`, deferred items and security findings; `_bmad-output/planning-artifacts/prd.md`, §Risk Mitigations; Story 11-7 (Safari re-login bug resolved: nonce replay prevention, Cache-Control: no-store, denylist check at login). ADR-010 (FTS strategy) accepted 2026-05-08; `POST /search` implemented in Epic 11._

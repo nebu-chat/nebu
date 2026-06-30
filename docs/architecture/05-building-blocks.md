@@ -120,14 +120,16 @@ server/lib/nebu/
 │   │                   forwards the /admin subtree by calling it, so admin pages ride the same Bandit
 │   │                   port (4000) as Matrix/media
 │   ├── router.ex     ← Phoenix.Router; :admin pipeline with require_admin plug; CRUD pages use
-│   │                   get/post/delete routes; LiveViews (Dashboard, AuditLog, Bootstrap) use
-│   │                   live_session :admin; /admin/login + /admin/login/start are public
+│   │                   get/post/delete routes; LiveViews (Dashboard, AuditLog) use live_session :admin;
+│   │                   /admin/login + /admin/login/start + /admin/bootstrap are public (no admin gate)
 │   ├── auth.ex       ← admin OIDC Authorization-Code + PKCE login (login_start/callback/logout) +
-│   │                   require_admin plug (for HTTP controllers) + on_mount admin gate (for LiveViews);
-│   │                   PKCE S256 + state + nonce in the signed session; constant-time state
-│   │                   validation; verifies the ID token via the shared OidcPlug verify; gates on
-│   │                   server_config.admin_group_claim (default instance_admin, inline SQL, ADR-018);
-│   │                   mints the Phoenix session (renew, 8h cap)
+│   │                   require_admin plug (for HTTP controllers) + bootstrap_gate plug (for bootstrap
+│   │                   controller; open while bootstrap incomplete, locked post-setup) +
+│   │                   on_mount admin gate (for LiveViews; all unauthenticated LiveView mounts now
+│   │                   redirect — BootstrapLive is no longer a routed LiveView); PKCE S256 + state +
+│   │                   nonce in the signed session; constant-time state validation; verifies the ID
+│   │                   token via the shared OidcPlug verify; gates on server_config.admin_group_claim
+│   │                   (default instance_admin, inline SQL, ADR-018); mints the Phoenix session (renew, 8h cap)
 │   ├── rooms_controller.ex      ← Room Management HTTP controller (PRG pattern; inline SQL, ADR-018)
 │   ├── users_controller.ex      ← User overview + per-user device management HTTP controller
 │   │                   (OIDC-imported users, inline SQL); index/2 (GET /users) plus the S4
@@ -143,9 +145,15 @@ server/lib/nebu/
 │   ├── compliance_controller.ex    ← Compliance settings HTTP controller
 │   ├── dashboard_live.ex        ← Dashboard LiveView (real-time metrics; remains as LiveView)
 │   ├── audit_log_live.ex        ← Audit log LiveView (live-streaming audit events; remains as LiveView)
-│   └── bootstrap_live.ex        ← 4-step Bootstrap Wizard LiveView (state in bootstrap_draft +
-│                       server_config k/v; oidc_client_secret AES-256-GCM encrypted at rest,
-│                       fail-closed if no secret; remains as LiveView)
+│   ├── bootstrap_controller.ex  ← Bootstrap Wizard plain HTTP controller (fix-bootstrap-wizard-liveview-bugs):
+│   │                   replaces BootstrapLive for routing; accessible unauthenticated when bootstrap
+│   │                   incomplete (bootstrap_gate plug); step 2 auto-discovers JWKS URI from
+│   │                   {issuer}/.well-known/openid-configuration (no manual JWKS URI field); plain
+│   │                   HTML POST forms (no LiveView socket → no field-clearing on reconnect);
+│   │                   oidc_client_secret AES-256-GCM encrypted at rest via BootstrapLive.encrypt_secret/1
+│   └── bootstrap_live.ex        ← Bootstrap Wizard LiveView (DEAD-ROUTED — no longer in router.ex);
+│                       kept because Auth.oidc_config/1 and SsoLogin call encrypt_secret/decrypt_secret;
+│                       will be refactored to Nebu.Web.SecretBox in a follow-up story
 │
 └── compliance/       ← Nebu.Compliance.* — four-eyes access, append-only audit-log writers, signed
                         export, GDPR erasure orchestration (deactivate → delete keys → anonymize →

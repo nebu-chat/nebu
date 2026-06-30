@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-06-28T10:31:36Z",
-  "generator": "bmad-maintain-arc42 skill (bugfix-oidc-bootstrap-only-e2e-regressions delta)",
+  "generated_at": "2026-06-30T00:00:00Z",
+  "generator": "bmad-generate-arc42 skill (bugfix/bootstrap-post-form full regen)",
   "source_artifacts": [
     "_bmad-output/planning-artifacts/architecture.md",
     "_bmad-output/planning-artifacts/prd.md",
@@ -8,24 +8,25 @@
     "_bmad-output/implementation-artifacts/sprint-status.yaml",
     "CLAUDE.md",
     "README.md",
-    "gateway/cmd/gateway/main.go"
+    "server/lib/nebu/web/router.ex",
+    "server/lib/nebu/web/router/protected.ex"
   ],
   "files": {
     "docs/architecture/README.md": {
       "editable": false,
-      "generated_at": "2026-05-01T00:00:00Z",
+      "generated_at": "2026-06-30T00:00:00Z",
       "source": "_bmad-output/planning-artifacts/prd.md",
       "arc42_section": "01 Introduction and Goals"
     },
     "docs/architecture/02-constraints.md": {
       "editable": false,
-      "generated_at": "2026-05-01T00:00:00Z",
+      "generated_at": "2026-06-30T00:00:00Z",
       "source": "_bmad-output/planning-artifacts/architecture.md",
       "arc42_section": "02 Architecture Constraints"
     },
     "docs/architecture/03-context.md": {
       "editable": false,
-      "generated_at": "2026-05-01T00:00:00Z",
+      "generated_at": "2026-06-30T00:00:00Z",
       "source": "_bmad-output/planning-artifacts/architecture.md",
       "arc42_section": "03 Context and Scope"
     },
@@ -43,7 +44,7 @@
     },
     "docs/architecture/06-runtime.md": {
       "editable": false,
-      "generated_at": "2026-06-25T12:00:00Z",
+      "generated_at": "2026-06-30T00:00:00Z",
       "source": "_bmad-output/planning-artifacts/architecture.md",
       "arc42_section": "06 Runtime View"
     },
@@ -73,7 +74,7 @@
     },
     "docs/architecture/11-risks.md": {
       "editable": false,
-      "generated_at": "2026-05-11T00:00:00Z",
+      "generated_at": "2026-06-30T00:00:00Z",
       "source": "_bmad-output/implementation-artifacts/sprint-status.yaml",
       "arc42_section": "11 Risks and Technical Debt"
     },
@@ -85,55 +86,55 @@
     },
     "docs/architecture/adr/ADR-001-elixir-otp.md": {
       "editable": false,
-      "generated_at": "2026-05-01T00:00:00Z",
+      "generated_at": "2026-06-30T00:00:00Z",
       "source": "_bmad-output/planning-artifacts/architecture.md",
       "arc42_section": "ADR-001"
     },
     "docs/architecture/adr/ADR-002-no-redis-nats.md": {
       "editable": false,
-      "generated_at": "2026-05-01T00:00:00Z",
+      "generated_at": "2026-06-30T00:00:00Z",
       "source": "_bmad-output/planning-artifacts/architecture.md",
       "arc42_section": "ADR-002"
     },
     "docs/architecture/adr/ADR-003-content-hash-event-id.md": {
       "editable": false,
-      "generated_at": "2026-05-01T00:00:00Z",
+      "generated_at": "2026-06-30T00:00:00Z",
       "source": "_bmad-output/planning-artifacts/architecture.md",
       "arc42_section": "ADR-003"
     },
     "docs/architecture/adr/ADR-004-horde-registry.md": {
       "editable": false,
-      "generated_at": "2026-05-01T00:00:00Z",
+      "generated_at": "2026-06-30T00:00:00Z",
       "source": "_bmad-output/planning-artifacts/architecture.md",
       "arc42_section": "ADR-004"
     },
     "docs/architecture/adr/ADR-005-grpc-eventbus.md": {
       "editable": false,
-      "generated_at": "2026-05-01T00:00:00Z",
+      "generated_at": "2026-06-30T00:00:00Z",
       "source": "_bmad-output/planning-artifacts/architecture.md",
       "arc42_section": "ADR-005"
     },
     "docs/architecture/adr/ADR-006-message-buffer-drain.md": {
       "editable": false,
-      "generated_at": "2026-05-01T00:00:00Z",
+      "generated_at": "2026-06-30T00:00:00Z",
       "source": "_bmad-output/planning-artifacts/architecture.md",
       "arc42_section": "ADR-006"
     },
     "docs/architecture/adr/ADR-007-ed25519-x25519-keypairs.md": {
       "editable": false,
-      "generated_at": "2026-05-01T00:00:00Z",
+      "generated_at": "2026-06-30T00:00:00Z",
       "source": "_bmad-output/planning-artifacts/architecture.md",
       "arc42_section": "ADR-007"
     },
     "docs/architecture/adr/ADR-008-node-registration-psk.md": {
       "editable": false,
-      "generated_at": "2026-05-01T00:00:00Z",
+      "generated_at": "2026-06-30T00:00:00Z",
       "source": "_bmad-output/planning-artifacts/architecture.md",
       "arc42_section": "ADR-008"
     },
     "docs/architecture/adr/ADR-009-openapi-spec-first.md": {
       "editable": false,
-      "generated_at": "2026-05-01T00:00:00Z",
+      "generated_at": "2026-06-30T00:00:00Z",
       "source": "_bmad-output/planning-artifacts/architecture.md",
       "arc42_section": "ADR-009"
     },
@@ -145,25 +146,25 @@
     },
     "docs/architecture/adr/ADR-011-managed-e2ee-key-escrow.md": {
       "editable": true,
-      "generated_at": "2026-05-01T00:00:00Z",
+      "generated_at": "2026-06-30T00:00:00Z",
       "source": "Story 9-11 Dev Notes",
       "arc42_section": "ADR-011 (Proposed)"
     },
     "docs/getting-started.md": {
       "editable": true,
-      "generated_at": "2026-05-01T00:00:00Z",
+      "generated_at": "2026-06-30T00:00:00Z",
       "source": "README.md",
       "arc42_section": "Getting Started"
     },
     "docs/matrix-api-scope.md": {
       "editable": false,
-      "generated_at": "2026-06-26T19:43:55Z",
-      "source": "gateway/cmd/gateway/main.go",
+      "generated_at": "2026-06-30T00:00:00Z",
+      "source": "server/lib/nebu/web/router/protected.ex",
       "arc42_section": "Matrix API Scope"
     },
     "docs/roadmap.md": {
       "editable": false,
-      "generated_at": "2026-05-01T00:00:00Z",
+      "generated_at": "2026-06-30T00:00:00Z",
       "source": "_bmad-output/planning-artifacts/epics.md",
       "arc42_section": "Roadmap"
     }

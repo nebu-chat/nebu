@@ -78,13 +78,11 @@ export async function doBootstrapAdmin(page: Page): Promise<void> {
  * Called when the browser is already at /admin/bootstrap.
  */
 async function runBootstrapWizard(page: Page): Promise<void> {
-  // The bootstrap wizard is a Phoenix LiveView and every step transition is a
-  // phx-submit event over the LiveView channel. The WebSocket upgrade does not
-  // succeed against the Bandit listener, so LiveView falls back to the longpoll
-  // transport, which only reaches `phx-connected` after a few seconds. Interacting
-  // before the channel is connected silently drops the event (the form never
-  // advances and no error is shown). Wait for the connected marker first.
-  await page.locator('.phx-connected').first().waitFor({ state: 'attached', timeout: 20_000 });
+  // RED PHASE: removed the .phx-connected wait that was needed for LiveView.
+  // After the fix (plain HTTP controller), there is no LiveView socket and no
+  // .phx-connected class. Waiting for it would hang indefinitely on the new
+  // implementation. This comment documents the intentional removal.
+  // Previously: await page.locator('.phx-connected').first().waitFor({ state: 'attached', timeout: 20_000 });
 
   // Step 1: Instance Name
   await page.getByLabel(/instance name/i).fill('test-nebu');
@@ -99,7 +97,11 @@ async function runBootstrapWizard(page: Page): Promise<void> {
   await page.getByLabel(/oidc issuer url/i).fill(DEX_ISSUER_URL);
   await page.getByLabel(/oidc client id/i).fill('nebu-gateway');
   await page.getByLabel(/oidc audience/i).fill('nebu-gateway');
-  await page.getByLabel(/jwks uri/i).fill(`${DEX_ISSUER_URL}/keys`);
+  // RED PHASE: JWKS URI field fill removed. After the fix (Bug 3), the JWKS URI is
+  // auto-discovered server-side from the OIDC well-known endpoint and the field no
+  // longer exists in step 2. Filling it here would fail with a locator-not-found
+  // error on the new implementation.
+  // Previously: await page.getByLabel(/jwks uri/i).fill(`${DEX_ISSUER_URL}/keys`);
   await page.getByLabel(/oidc client secret/i).fill(
     process.env.NEBU_OIDC_CLIENT_SECRET ?? 'nebu-dev-secret'
   );
