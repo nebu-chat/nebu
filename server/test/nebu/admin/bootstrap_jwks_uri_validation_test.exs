@@ -36,13 +36,10 @@ defmodule Nebu.Admin.BootstrapJwksUriValidationTest do
 
   use ExUnit.Case, async: false
 
-  import Phoenix.LiveViewTest
   import Plug.Test
   import Plug.Conn
 
   alias Nebu.Admin.Auth
-
-  @endpoint Nebu.Admin.Endpoint
 
   @issuer "https://idp.example.com"
   @client_id "nebu-test"
@@ -121,89 +118,23 @@ defmodule Nebu.Admin.BootstrapJwksUriValidationTest do
     :ok
   end
 
-  # ── MAJOR-1 — JWKS URI validation in save_oidc/2 ────────────────────────────
-
-  describe "MAJOR-1 — save_oidc/2 requires JWKS URI when env var not set" do
-    test "submitting step 2 without JWKS URI and without NEBU_OIDC_JWKS_URI env returns an error" do
-      # Ensure env var is NOT set
-      Application.delete_env(:nebu_http, :oidc_jwks_uri)
-      Application.delete_env(:nebu_http, :oidc_issuer)
-      Application.delete_env(:nebu_http, :matrix_oidc_client_id)
-
-      install_store(%{"instance_name" => "test-nebu"})
-
-      {:ok, view, _html} =
-        live_isolated(
-          Plug.Test.conn(:get, "/admin/bootstrap"),
-          Nebu.Admin.BootstrapLive,
-          session: %{"current_user" => %{"admin" => true, "sub" => "admin-1"}}
-        )
-
-      # Navigate to step 2
-      view |> element("button[phx-click='goto_step'][phx-value-step='2']") |> render_click()
-
-      # Submit without JWKS URI (blank field, no env var)
-      html =
-        view
-        |> form("form", %{
-          "oidc_issuer" => @issuer,
-          "oidc_client_id" => @client_id,
-          "oidc_client_secret" => @client_secret,
-          "oidc_audience" => "nebu-audience",
-          "oidc_jwks_uri" => ""
-        })
-        |> render_submit()
-
-      # Should show an error about JWKS URI being required
-      assert html =~ ~r/JWKS URI/i,
-             "Expected an error mentioning JWKS URI when field is blank and NEBU_OIDC_JWKS_URI is not set, got: #{html}"
-
-      # Should NOT have advanced to step 3 (still on step 2 with an error)
-      assert html =~ ~r/step.*2|oidc_jwks_uri/i or html =~ "required"
-    end
-
-    test "submitting step 2 with JWKS URI provided succeeds" do
-      Application.delete_env(:nebu_http, :oidc_jwks_uri)
-      Application.delete_env(:nebu_http, :oidc_issuer)
-      Application.delete_env(:nebu_http, :matrix_oidc_client_id)
-
-      install_store(%{"instance_name" => "test-nebu"})
-
-      {:ok, view, _html} =
-        live_isolated(
-          Plug.Test.conn(:get, "/admin/bootstrap"),
-          Nebu.Admin.BootstrapLive,
-          session: %{"current_user" => %{"admin" => true, "sub" => "admin-1"}}
-        )
-
-      view |> element("button[phx-click='goto_step'][phx-value-step='2']") |> render_click()
-
-      html =
-        view
-        |> form("form", %{
-          "oidc_issuer" => @issuer,
-          "oidc_client_id" => @client_id,
-          "oidc_client_secret" => @client_secret,
-          "oidc_audience" => "nebu-audience",
-          "oidc_jwks_uri" => @jwks_uri
-        })
-        |> render_submit()
-
-      # Should NOT show a JWKS URI required error — form advanced to step 3
-      refute html =~ ~r/JWKS URI is required/i,
-             "Should not show JWKS URI error when a valid URI is provided"
-    end
-
-  end
+  # ── MAJOR-1 — JWKS URI validation — SUPERSEDED (fix-bootstrap-wizard-liveview-bugs) ─
+  #
+  # The step-2 JWKS URI input field was removed in the BootstrapLive → BootstrapController
+  # conversion. JWKS URI is now auto-discovered server-side from
+  # `{issuer}/.well-known/openid-configuration`. The BootstrapLive.save_oidc/2 tests that
+  # asserted "blank JWKS URI returns an error" tested the old LiveView behavior (which is
+  # no longer the production code path — the route was removed). They were deleted to avoid
+  # false confidence from tests that exercise dead code.
+  #
+  # Coverage of the new auto-discovery behavior lives in:
+  #   server/test/nebu/admin/bootstrap_controller_test.exs
+  #   "POST /admin/bootstrap/step/2 succeeds without a jwks_uri parameter (JWKS auto-discovered)"
 
   # ── env-locked JWKS-URI tests — REMOVED (ADR-022) ───────────────────────────
   #
   # oidc-bootstrap-only-config (ADR-022) removed the NEBU_OIDC_JWKS_URI env path and
-  # the env-lock / env_fallback mechanism: the bootstrap wizard is the single source
-  # of truth and the JWKS URI is ALWAYS a required editable field. The former
-  # "succeeds when NEBU_OIDC_JWKS_URI env var is set" and "env_fallback applied to
-  # JWKS URI" tests asserted removed behaviour and were deleted. The positive
-  # "JWKS URI required" validation above still holds (the field is always required).
+  # the env-lock / env_fallback mechanism. The JWKS URI is now auto-discovered (see above).
 
   # ── MINOR-1 — do_complete_bootstrap/2 audience guard ────────────────────────
 

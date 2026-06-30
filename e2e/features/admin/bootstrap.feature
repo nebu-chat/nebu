@@ -25,6 +25,7 @@ Feature: Admin UI — Bootstrap Wizard
     Then the progress indicator shows step 2 as active
     When the operator fills in "OIDC Issuer URL" with the Dex issuer URL
     And the operator fills in "OIDC Client ID" with "nebu-gateway"
+    And the operator fills in "OIDC Audience" with "nebu-gateway"
     And the operator fills in "OIDC Client Secret" with the configured client secret
     And the operator clicks "Next"
     Then the progress indicator shows step 3 as active
@@ -41,6 +42,26 @@ Feature: Admin UI — Bootstrap Wizard
     Then the browser is redirected to "/admin/dashboard"
     And the page shows "Dashboard"
     And the operator is authenticated (no redirect to login)
+
+  # RED PHASE: fails against current LiveView implementation.
+  # Bug 1: /admin/bootstrap is behind live_session :admin with require_admin on_mount,
+  #         which causes an infinite redirect loop before bootstrap is complete.
+  # Bug 2: LiveView reconnection clears in-progress form data (plain POST forms don't).
+  # Bug 3: Step 2 still shows a JWKS URI field that should be auto-discovered.
+  # These three assertions will PASS once BootstrapLive is converted to a plain
+  # HTTP controller that is routed OUTSIDE the :admin live_session gate.
+  @ac12-bootstrap-controller
+  Scenario: Bootstrap wizard is accessible without authentication and has no JWKS URI field
+    Given the Nebu admin UI is accessible at the admin URL
+    And no bootstrap has been completed yet
+    When the operator navigates to "/admin/bootstrap"
+    Then the bootstrap page loads without an infinite redirect
+    And the page shows "Bootstrap Setup"
+    And the bootstrap page is not a LiveView page
+    When the operator fills in "Instance Name" with "test-nebu"
+    And the operator submits the bootstrap step 1 form via plain POST
+    Then the progress indicator shows step 2 as active
+    And the JWKS URI field is not present on the OIDC configuration form
 
   @ac12-bootstrap-admin-login
   Scenario: Admin logs in via OIDC and reaches dashboard

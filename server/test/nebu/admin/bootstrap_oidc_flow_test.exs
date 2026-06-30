@@ -192,11 +192,18 @@ defmodule Nebu.Admin.BootstrapOidcFlowTest do
     assert conn.halted
     # Not a 403 (admin gate skipped) and not a redirect to /admin/login.
     refute conn.status == 403
-    body = conn.resp_body || ""
-    refute body =~ "Access denied"
 
-    # Renders the select-claim page listing the token's discovered claim values as options.
-    assert conn.status == 200
+    # PRG: callback now redirects to /admin/bootstrap/select-claim (stashes claims in draft)
+    assert conn.status == 302
+    assert get_resp_header(conn, "location") == ["/admin/bootstrap/select-claim"]
+
+    # Follow the redirect: select-claim page renders the discovered claim values as options.
+    select_conn =
+      session_conn(:get, "/admin/bootstrap/select-claim")
+      |> Auth.select_claim_page(%{})
+
+    assert select_conn.status == 200
+    body = select_conn.resp_body || ""
     assert body =~ "instance_admin"
     assert body =~ ~s(name="admin_group_claim")
     assert body =~ ~s(value="instance_admin")

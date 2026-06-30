@@ -76,12 +76,17 @@ defmodule Nebu.Admin.AuthBootstrapGateTest do
       :ok
     end
 
-    test "is allowed through ({:cont, _}) — no redirect to /admin/login" do
+    # The Bootstrap Wizard is now a plain HTTP controller (BootstrapController),
+    # not a LiveView (fix-bootstrap-wizard-liveview-bugs). BootstrapLive is a
+    # dead-routed module kept only for encrypt_secret/decrypt_secret. All LiveViews —
+    # including a hypothetical mount of BootstrapLive — are funnelled to /admin/bootstrap
+    # (the plain HTTP controller), not allowed through unauthenticated.
+    test "is now funnelled to /admin/bootstrap (not allowed through — wizard is HTTP controller)" do
       result =
         Auth.on_mount(:require_admin, %{}, %{}, socket_for(@bootstrap_view))
 
-      assert {:cont, socket} = result
-      assert redirect_target(socket) == nil
+      assert {:halt, socket} = result
+      assert redirect_target(socket) == "/admin/bootstrap"
     end
   end
 
@@ -161,10 +166,14 @@ defmodule Nebu.Admin.AuthBootstrapGateTest do
       assert redirect_target(socket) == "/admin/bootstrap"
     end
 
-    test "BootstrapLive itself is allowed through ({:cont, _})" do
+    # The Bootstrap Wizard is now a plain HTTP controller. Authenticated admins
+    # accessing bootstrap while incomplete are funnelled to /admin/bootstrap
+    # (the HTTP controller) — LiveView mounts of the dead-routed BootstrapLive
+    # are treated as any other admin LiveView.
+    test "BootstrapLive is funnelled to /admin/bootstrap (wizard is now HTTP controller)" do
       session = %{"current_user" => %{"admin" => true, "sub" => "admin-1"}}
-      assert {:cont, socket} = Auth.on_mount(:require_admin, %{}, session, socket_for(@bootstrap_view))
-      assert redirect_target(socket) == nil
+      assert {:halt, socket} = Auth.on_mount(:require_admin, %{}, session, socket_for(@bootstrap_view))
+      assert redirect_target(socket) == "/admin/bootstrap"
     end
   end
 end

@@ -68,6 +68,12 @@ defmodule Nebu.Admin.HttpControllersTest do
   import Plug.Test
   import Plug.Conn
 
+  setup do
+    Application.put_env(:nebu_http, :admin_csrf_bypass, true)
+    on_exit(fn -> Application.delete_env(:nebu_http, :admin_csrf_bypass) end)
+    :ok
+  end
+
   @endpoint Nebu.Admin.Endpoint
   @secret_key_base String.duplicate("nebu-admin-test-secret-key-base!", 2)
 

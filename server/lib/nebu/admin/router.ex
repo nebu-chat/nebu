@@ -50,7 +50,9 @@ defmodule Nebu.Admin.Router do
   The following LiveViews REMAIN (real-time requirement):
     - DashboardLive  — future PubSub/metric push
     - AuditLogLive   — compliance live scroll
-    - BootstrapLive  — multi-step wizard state
+
+  The following LiveView has been CONVERTED to a plain HTTP controller (fix-bootstrap-wizard-liveview-bugs):
+    - BootstrapLive   → BootstrapController (GET /bootstrap, POST /bootstrap/step/1-3)
   """
   # AC12 compat shim: must be declared BEFORE `use Phoenix.Router` so that this
   # hook runs FIRST during the before_compile phase (hooks run FIFO in declaration
@@ -74,7 +76,7 @@ defmodule Nebu.Admin.Router do
     plug :protect_from_forgery
     plug :put_secure_browser_headers
     # Content-Security-Policy for the admin UI. ws:/wss: kept in connect-src because
-    # DashboardLive, AuditLogLive, BootstrapLive still use WebSocket/longpoll. The
+    # DashboardLive and AuditLogLive still use WebSocket/longpoll. The
     # directive is NOT tightened until all LiveViews are converted (AC19 deferred).
     plug :admin_csp
     plug Nebu.Admin.Auth, :fetch_current_user
@@ -130,6 +132,15 @@ defmodule Nebu.Admin.Router do
     # Bootstrap-mode OIDC claim selection (outside the admin gate — first-time setup).
     get "/bootstrap/select-claim", LoginController, :select_claim
     post "/bootstrap/select-claim", LoginController, :confirm_claim
+
+    # ── Bootstrap Wizard (plain HTTP controller, outside live_session :admin) ──
+    # No admin session required — accessible before bootstrap is complete.
+    # The :bootstrap_gate plug in BootstrapController redirects to /admin/login
+    # once bootstrap IS complete (the wizard must be locked after first-time setup).
+    get "/bootstrap", BootstrapController, :index
+    post "/bootstrap/step/1", BootstrapController, :save_step1
+    post "/bootstrap/step/2", BootstrapController, :save_step2
+    post "/bootstrap/step/3", BootstrapController, :save_step3
 
     get "/", LoginController, :root_redirect
 
@@ -191,7 +202,6 @@ defmodule Nebu.Admin.Router do
     live_session :admin, on_mount: {Nebu.Admin.Auth, :require_admin} do
       live "/dashboard", DashboardLive, :index
       live "/audit-log", AuditLogLive, :index
-      live "/bootstrap", BootstrapLive, :index
     end
   end
 end

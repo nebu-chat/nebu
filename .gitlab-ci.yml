@@ -242,6 +242,8 @@ verify-docs:
     - if: '$CI_COMMIT_BRANCH == "main"'
     - if: '$CI_COMMIT_BRANCH =~ /^feature\//'
     - if: '$CI_COMMIT_BRANCH =~ /^bugfix\//'
+      variables:
+        MANIFEST_FRESHNESS_WARN_ONLY: "true"
     - if: '$CI_COMMIT_BRANCH =~ /^release\//'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
 

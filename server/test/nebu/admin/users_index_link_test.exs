@@ -75,12 +75,11 @@ defmodule Nebu.Admin.UsersIndexLinkTest do
 
   defp enc(id), do: URI.encode(id, &URI.char_unreserved?(&1))
 
-  # Set up CSRF bypass and a fake users loader before each test.
+  # Set up a fake users loader before each test.
+  # :admin_csrf_bypass is set globally in config/test.exs — do not touch it here,
+  # as Application.delete_env would destroy the global setting for subsequent tests.
   setup do
-    Application.put_env(:nebu_http, :admin_csrf_bypass, true)
-
     on_exit(fn ->
-      Application.delete_env(:nebu_http, :admin_csrf_bypass)
       Application.delete_env(:nebu_http, :admin_users_loader)
     end)
 

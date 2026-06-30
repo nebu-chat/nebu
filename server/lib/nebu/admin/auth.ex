@@ -74,6 +74,7 @@ defmodule Nebu.Admin.Auth do
   @impl Plug
   def call(conn, :fetch_current_user), do: fetch_current_user(conn, [])
   def call(conn, :require_admin), do: require_admin(conn, [])
+  def call(conn, :bootstrap_gate), do: bootstrap_gate(conn, [])
   def call(conn, _opts), do: fetch_current_user(conn, [])
 
   @doc """
@@ -91,6 +92,22 @@ defmodule Nebu.Admin.Auth do
         |> Phoenix.Controller.put_flash(:error, "Admin access required")
         |> Phoenix.Controller.redirect(to: "/admin/login")
         |> halt()
+    end
+  end
+
+  @doc """
+  Plug for the Bootstrap Wizard controller: allows access when bootstrap is NOT complete,
+  redirects to `/admin/login` when it IS complete (the wizard would allow re-configuration
+  of OIDC + admin-group claim, so it must be locked after setup). Must run AFTER
+  `:fetch_current_user` (which is placed in the `:browser` pipeline and runs for all routes).
+  """
+  def bootstrap_gate(conn, _opts) do
+    if bootstrap_completed?() do
+      conn
+      |> Phoenix.Controller.redirect(to: "/admin/login")
+      |> halt()
+    else
+      conn
     end
   end
 
@@ -511,8 +528,7 @@ defmodule Nebu.Admin.Auth do
         put_draft("bootstrap_claims", encode_discovered_claims(claims))
 
         conn
-        |> put_resp_content_type("text/html")
-        |> send_resp(200, select_claim_html(claims))
+        |> Phoenix.Controller.redirect(to: "/admin/bootstrap/select-claim")
         |> halt()
     end
   end
@@ -640,7 +656,28 @@ defmodule Nebu.Admin.Auth do
     if bootstrap_completed?() do
       conn |> Phoenix.Controller.redirect(to: "/admin/login") |> halt()
     else
-      conn |> Phoenix.Controller.redirect(to: "/admin/bootstrap") |> halt()
+      draft = load_draft()
+      case Jason.decode(draft["bootstrap_claims"] || "") do
+        {:ok, pairs} when is_list(pairs) and pairs != [] ->
+          # Reconstruct a claims map from stashed pairs so select_claim_html/1
+          # can call extract_discovered_claims/1 on it and produce the same options.
+          claims =
+            pairs
+            |> Enum.group_by(fn [k, _v] -> k end, fn [_k, v] -> v end)
+            |> Enum.map(fn
+              {k, [v]} -> {k, v}
+              {k, vs} -> {k, vs}
+            end)
+            |> Map.new()
+
+          conn
+          |> put_resp_content_type("text/html")
+          |> send_resp(200, select_claim_html(claims))
+          |> halt()
+
+        _ ->
+          conn |> Phoenix.Controller.redirect(to: "/admin/bootstrap") |> halt()
+      end
     end
   end
 
@@ -1021,8 +1058,10 @@ defmodule Nebu.Admin.Auth do
             )
 
           # Bootstrap gate (Go parity): an instance that has not finished the bootstrap
-          # wizard funnels EVERY admin page into /admin/bootstrap until setup is done.
-          if not completed and socket.view != Nebu.Admin.BootstrapLive do
+          # wizard funnels EVERY LiveView into /admin/bootstrap until setup is done.
+          # The wizard itself is now a plain HTTP controller (BootstrapController) and
+          # is no longer a LiveView — so all LiveViews here require a completed bootstrap.
+          if not completed do
             {:halt, redirect(socket, to: "/admin/bootstrap")}
           else
             {:cont, socket}
@@ -1033,28 +1072,17 @@ defmodule Nebu.Admin.Auth do
         end
 
       _ ->
-        # Unauthenticated (or non-admin) mount. The bootstrap deadlock fix
-        # (fix-bootstrap-wizard-unreachable):
+        # Unauthenticated (or non-admin) mount.
         #
-        #   * While bootstrap is INCOMPLETE the operator has no way to mint an admin
-        #     session yet (OIDC + admin-group claim are written BY the wizard), so the
-        #     wizard must be reachable unauthenticated:
-        #       - BootstrapLive       → {:cont, _} (AC1, wizard renders unauthenticated)
-        #       - any other admin view → funnel to /admin/bootstrap (AC2, not /login)
-        #
-        #   * Once bootstrap is COMPLETE the wizard is admin-gated again — it can
-        #     re-write OIDC/admin-claim config, so it must NOT stay world-reachable
-        #     (AC3). Every unauthenticated mount then redirects to /admin/login.
-        cond do
-          completed ->
-            {:halt, redirect(socket, to: "/admin/login")}
-
-          socket.view == Nebu.Admin.BootstrapLive ->
-            {:cont,
-             Phoenix.Component.assign(socket, current_user: nil, bootstrap_completed: false)}
-
-          true ->
-            {:halt, redirect(socket, to: "/admin/bootstrap")}
+        # The bootstrap wizard is now a plain HTTP controller (BootstrapController,
+        # fix-bootstrap-wizard-liveview-bugs) — it is not a LiveView anymore.
+        # All LiveViews require authentication:
+        #   * bootstrap incomplete → funnel to /admin/bootstrap (plain HTTP, no gate)
+        #   * bootstrap complete   → funnel to /admin/login
+        if completed do
+          {:halt, redirect(socket, to: "/admin/login")}
+        else
+          {:halt, redirect(socket, to: "/admin/bootstrap")}
         end
     end
   end
