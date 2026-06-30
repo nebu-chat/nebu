@@ -4,6 +4,46 @@
   their dedicated pages.
 </p>
 
+<%!-- OIDC scopes: POST form (story configurable-oidc-scopes, AC7/AC8).
+      Operators change scope strings at runtime — no redeploy needed.
+      openid is always included by scope_list/0 and admin_oidc_scope/0. --%>
+<form id="oidc-scopes-form" method="post" action="/admin/config/scopes" class="mb-6">
+  <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+  <h2 class="text-heading font-semibold mb-2">OIDC scopes</h2>
+
+  <label class="form-control mt-2">
+    <span class="label-text">Matrix client scopes</span>
+    <input
+      type="text"
+      name="matrix_oidc_extra_scopes"
+      aria-label="Matrix client scopes"
+      value={scope_value(@config, "matrix_oidc_extra_scopes")}
+      placeholder="profile email"
+      class="input input-bordered"
+    />
+    <span class="label-text-alt mt-1 text-base-content/70">
+      Space-separated scope names. <code>openid</code> is always included.
+    </span>
+  </label>
+
+  <label class="form-control mt-2">
+    <span class="label-text">Admin client scopes</span>
+    <input
+      type="text"
+      name="admin_oidc_extra_scopes"
+      aria-label="Admin client scopes"
+      value={scope_value(@config, "admin_oidc_extra_scopes")}
+      placeholder="profile email groups"
+      class="input input-bordered"
+    />
+    <span class="label-text-alt mt-1 text-base-content/70">
+      Space-separated scope names. <code>openid</code> is always included.
+    </span>
+  </label>
+
+  <button type="submit" class="btn btn-primary mt-3">Save scopes</button>
+</form>
+
 <%!-- OIDC refresh mode: POST form. Two native <select>s (Matrix + admin),
       mirroring the bootstrap wizard contract (story oidc-refresh-mode-config,
       AC5/AC6). Operators change either client's mode at runtime — no redeploy. --%>

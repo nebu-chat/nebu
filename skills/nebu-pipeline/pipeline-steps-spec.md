@@ -100,9 +100,13 @@ Finish after completing the implementation.
 
 ## ci-gate
 
-Read and follow skills/nebu-agent-testing/SKILL.md.
-Load references/ci-gate.md and run the full CI gate verification.
-Report pass/fail per suite and finish.
+Run `make redeploy` to rebuild the server image, then `make test-integration` to run
+the full Gherkin E2E test suite against a fresh database and real stack.
+
+Compare results against the baseline log from Step 1d
+($STEP_RESULTS_DIR/[STORY_ID]/baseline-integration.log).
+Report pass/fail per suite. If integration passes, also run `make test-unit-elixir`.
+Finish after reporting.
 
 ---
 

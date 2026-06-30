@@ -1,0 +1,33 @@
+{
+  "hooks": {
+    "SubagentStop": [
+      {
+        "matcher": "nebu-dev-story",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 skills/nebu-pipeline/scripts/invariant_check.py --auto --lib server/lib/"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 skills/nebu-pipeline/scripts/pipeline_state.py --log-subagent-stop 2>/dev/null || true"
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 skills/nebu-pipeline/scripts/pipeline_state.py --log-subagent-start 2>/dev/null || true"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -159,10 +159,34 @@ defmodule Nebu.Admin.BootstrapController do
 
   @doc """
   Saves the claim mapping (step 3) and redirects to the bootstrap-mode OIDC login.
+  Validates scope values against the [a-zA-Z0-9_:.-] character whitelist (AC3).
   """
   def save_step3(conn, params) do
-    save_claim_mapping(params)
-    redirect(conn, to: "/admin/login/start?mode=bootstrap")
+    matrix_scopes = params["matrix_oidc_extra_scopes"] || ""
+    admin_scopes = params["admin_oidc_extra_scopes"] || ""
+
+    with :ok <- validate_scope_string(matrix_scopes),
+         :ok <- validate_scope_string(admin_scopes) do
+      save_claim_mapping(params)
+      redirect(conn, to: "/admin/login/start?mode=bootstrap")
+    else
+      {:error, msg} ->
+        draft = load_draft()
+
+        conn
+        |> assign(:step, 3)
+        |> assign(:steps, @steps)
+        |> assign(:step_labels, @step_labels)
+        |> assign(:draft, draft)
+        |> assign(:error, msg)
+        |> assign(:completed, false)
+        |> assign(:bootstrap_completed, false)
+        |> assign(:page_title, "Bootstrap")
+        |> assign(:active_nav, "bootstrap")
+        |> put_layout(html: {Nebu.Admin.Layouts, :live})
+        |> put_status(200)
+        |> render(:index)
+    end
   end
 
   # ── JWKS auto-discovery ───────────────────────────────────────────────────────
@@ -179,6 +203,11 @@ defmodule Nebu.Admin.BootstrapController do
 
   # ── Claim mapping persistence ─────────────────────────────────────────────────
 
+  @scope_defaults %{
+    "matrix_oidc_extra_scopes" => "profile email",
+    "admin_oidc_extra_scopes" => "profile email groups"
+  }
+
   defp save_claim_mapping(params) do
     Enum.each(@default_claim_mapping, fn {key, default} ->
       value = params[key] |> to_string() |> String.trim()
@@ -189,6 +218,33 @@ defmodule Nebu.Admin.BootstrapController do
       value = params[key] |> to_string()
       put_draft(key, if(value in ["offline", "online"], do: value, else: default))
     end)
+
+    # Persist OIDC scope values (configurable-oidc-scopes, AC6).
+    # Validation already ran in save_step3/2; here we just store the (trimmed) values.
+    Enum.each(@scope_defaults, fn {key, default} ->
+      value = String.trim(params[key] || "")
+      put_draft(key, if(value == "", do: default, else: value))
+    end)
+  end
+
+  # Validates that each space-separated scope token contains only characters in
+  # [a-zA-Z0-9_:.-]. An empty string is valid (runtime will fall back to defaults).
+  defp validate_scope_string(scope_string) do
+    scopes = String.split(scope_string, " ", trim: true)
+
+    invalid =
+      Enum.find(scopes, fn s ->
+        not String.match?(s, ~r/^[a-zA-Z0-9_:.\-]+\z/)
+      end)
+
+    case invalid do
+      nil ->
+        :ok
+
+      bad ->
+        {:error,
+         "Scope '#{bad}' contains invalid characters. Only alphanumeric, underscore, colon, period, and dash are allowed."}
+    end
   end
 
   # ── Re-render helpers ─────────────────────────────────────────────────────────

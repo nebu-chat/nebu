@@ -127,13 +127,15 @@ client from `server_config` only (or the bootstrap draft during the wizard flow)
 at-rest secret on use. The admin `/admin/callback` redirect_uri is server-derived from `:server_name`
 + `:admin_session_secure` (never from request headers).
 
-**OIDC scopes (ADR-022):** the admin/bootstrap authorization request asks for `openid profile email
-groups`; the Matrix SSO authorization request asks for `openid profile email`. Both add `offline_access`
-when their configured refresh mode is `"offline"` (read live from `server_config` via the
-`:matrix_oidc_refresh_mode_reader` / `admin_oidc_refresh_mode` seams). These scope sets are fixed in code
-(no env config — ADR-022 holds, there is no `NEBU_OIDC_EXTRA_SCOPES`); the additional claims they unlock
-(e.g. `profile`/`email` for a configured `name` user-id claim, `groups` for admin role mapping) must be
-granted by the IdP client registration.
+**OIDC scopes (ADR-022):** the admin/bootstrap authorization request asks for `openid` + the
+operator-configured extra scopes (default: `profile email groups`); the Matrix SSO authorization
+request asks for `openid` + operator-configured extra scopes (default: `profile email`). Both add
+`offline_access` when their configured refresh mode is `"offline"` (read live from `server_config`
+via the `:matrix_oidc_refresh_mode_reader` / `admin_oidc_refresh_mode` seams). `openid` is always
+mandatory (cannot be removed); all other scopes are **operator-configurable** via the Bootstrap
+Wizard and `/admin/config` (Story configurable-oidc-scopes, `server_config` keys
+`matrix_oidc_extra_scopes` / `admin_oidc_extra_scopes`). There is no `NEBU_OIDC_EXTRA_SCOPES` env
+var (ADR-022: bootstrap-only config).
 
 A matching warning is emitted for `client_secret`. This ensures operators can detect a misconfigured
 SSO flow immediately from startup logs before the first login attempt.
@@ -150,13 +152,14 @@ loader when set, otherwise return the static fields. All usages in `sso.go` (`Ge
 `GetSSOCallback`) and `login.go` (`PostLogin` verifier) call these methods — the static-field
 fallback preserves backward compatibility for test setups and deployments without a Bootstrap DB.
 
-**Deployment-specific defaults (injected by cloud-init / docker-compose, apply to both flows):**
+**Deployment-specific scope defaults (Bootstrap Wizard, no env var):**
 
-| Environment | `NEBU_OIDC_EXTRA_SCOPES` value | Reason |
+| Client | Default extra scopes | Key in `server_config` |
 |---|---|---|
-| Local dev (Dex) | `groups offline_access` | Dex group claim + refresh token support |
-| Stackit prod (`oidc_mode = "dex"`) | `groups offline_access` | Same as local dev |
-| Stackit prod (`oidc_mode = "external"`) | `""` (empty) | External providers (Keycloak, Azure AD) may reject unknown scopes |
+| Matrix SSO | `profile email` | `matrix_oidc_extra_scopes` |
+| Admin login | `profile email groups` | `admin_oidc_extra_scopes` |
+
+`groups` in the admin default is required for Dex to release the groups claim used by `admin_group_claim` matching. Operators who remove it lose group-based admin assignment. These defaults apply on first-use (no row in `server_config`); Bootstrap Wizard writes explicit values; `/admin/config` allows runtime update without redeploy.
 
 **Configurable OIDC Refresh Mode (Story oidc-refresh-mode-config):**
 
@@ -179,6 +182,26 @@ per client** rather than hardcoded. Two `server_config` keys, each `offline | on
 - **IdP caveat:** **Dex** issues a refresh token *only* when `offline_access` is requested, so admin
   `online` mode disables silent refresh on Dex. **Keycloak** supports session-bound online refresh, so
   `online` mode there can still keep the session alive.
+
+**Configurable OIDC Extra Scopes (Story configurable-oidc-scopes):**
+
+Which OIDC scopes Nebu requests beyond the mandatory `openid` is **operator-configurable** per
+client, set in the Bootstrap Wizard (Step 3, before refresh-mode) and changeable at runtime via
+`/admin/config`. Two `server_config` keys drive it:
+
+| Key | Default | Scope builder |
+|---|---|---|
+| `matrix_oidc_extra_scopes` | `profile email` | `Nebu.Matrix.SsoLogin.scope_list/0` |
+| `admin_oidc_extra_scopes` | `profile email groups` | `Nebu.Admin.Auth.admin_oidc_scope/0` |
+
+- **`openid` is always injected** by the scope builders — it cannot be removed by operator config.
+- `offline_access` is still controlled by `{matrix,admin}_oidc_refresh_mode` (unchanged).
+- Scope tokens are validated against `[a-zA-Z0-9_:.\-]+` (anchored with `\z` — trailing-newline
+  safe) at every write boundary (bootstrap wizard, admin config page, bootstrap promotion).
+- Migration `000013` extends the `config_update_mutable` RLS policy to include both new keys,
+  mirroring the `000007` pattern for refresh-mode keys.
+- Runtime injection via `:{matrix,admin}_oidc_extra_scopes_reader` seams (0-arity fun) mirrors the
+  `:{matrix,admin}_oidc_refresh_mode_reader` pattern for test isolation.
 
 **Configurable Nebu session-lifetime ceiling (Story e2e-session-refresh-suites):**
 
