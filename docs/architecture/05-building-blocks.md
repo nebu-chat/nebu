@@ -183,6 +183,36 @@ server/lib/nebu/
 > sync checkpoint, preventing parallel sessions on different devices from overwriting each other's
 > `since` token.
 
+> **Cross-signing key directory (story `cross-signing-readback`):** migration 000010 adds
+> `cross_signing_keys`, keyed by `user_id`, storing the opaque `master_keys` / `self_signing_keys`
+> / `user_signing_keys` objects plus a consume-once `cross_signing_changed BOOLEAN` flag.
+> `Nebu.Matrix.CrossSigningKeyStore` (plain module, inline parameterised SQL via `Nebu.Repo`,
+> ADR-018) mirrors `Nebu.Matrix.DeviceKeyStore` (migration 000009): `keys/device_signing/upload`
+> persists, `keys/query` echoes the stored objects, `keys/signatures/upload` merges signatures
+> (validate-then-persist, caller-identity guard), and `/sync` surfaces the uploading user's own ID
+> in `device_lists.changed` by consuming the flag. A cross-signing key ID colliding with an
+> existing device ID is rejected (`400 M_INVALID_PARAM`) before any write. All material is opaque
+> — this is an E2EE-readiness directory orthogonal to encryption; `m.room.encryption` is still
+> rejected (`403 M_FORBIDDEN`, ADR-011).
+
+> **Durable global account data (story `account-data-durability`):** migration 000011 adds
+> `account_data`, keyed by `(user_id, type)`, storing the account-data value verbatim in a TEXT
+> `content_json` column (opaque, ADR-011 — never parsed or decrypted) plus a consume-once
+> `changed BOOLEAN` flag. This replaces the previous volatile, node-local **ETS** stub:
+> `Nebu.Matrix.AccountDataStore` is now a plain module with inline parameterised SQL via
+> `Nebu.Repo` (ADR-018), mirroring `CrossSigningKeyStore`. `PUT/GET
+> /user/{userId}/account_data/{type}` now persist/read the durable row (survive restart,
+> cluster-correct per ADR-020); the `user==auth` IDOR guard and 404-absent behaviour are
+> unchanged. `GET /sync` delivers the top-level `account_data.events` from this store via
+> `put_global_account_data/3` in `Nebu.Web.Router.Protected`: an INITIAL sync (no `since`)
+> returns ALL entries (`list_all_and_clear/1`); an INCREMENTAL sync returns only entries whose
+> `changed` flag is set, read-and-cleared atomically (`UPDATE … RETURNING`,
+> `list_changed_and_clear/1`). This closes the recovery-durability gap that
+> `cross-signing-readback` deliberately left out — Element's `m.secret_storage.*` /
+> `m.cross_signing.*` recovery material now survives restarts and is delivered to the client.
+> (Supersedes the volatile-ETS description and the Go-era Story 9-24 `room_account_data WHERE
+> room_id = ''` approach noted below, which the Elixir stack does not use for global account data.)
+
 > **Full-text search column in Story 11-1 (ADR-010):** migration 000042 adds a `search_vector tsvector`
 > column to the `events` table, populated by a PL/pgSQL trigger (`events_search_vector_trigger`)
 > on every `INSERT OR UPDATE OF content`. The trigger calls

@@ -22,8 +22,23 @@ Then('the room list is visible', async ({ page }: { page: Page }) => {
 /**
  * "Then no error dialog appears"
  * Asserts that no .mx_Dialog with error content is visible.
+ *
+ * AC4 (element-login-dismiss-verification): explicitly also fails on the key-setup error
+ * dialog ("could not set up keys" / "Schlüssel können nicht eingerichtet werden"). The login
+ * dismiss pattern is deliberately broad (skip/continue/close/…) and could otherwise click that
+ * error away; this assertion guarantees a genuine key-setup failure is caught, not masked.
  */
 Then('no error dialog appears', async ({ page }: { page: Page }) => {
+  const keySetupError = page.getByText(
+    /could not set up (your )?keys|unable to set up keys|error setting up (secure )?keys|schlüssel können nicht eingerichtet werden|schlüssel konnten nicht eingerichtet werden/i,
+  );
+  if (await keySetupError.first().isVisible({ timeout: 1_000 }).catch(() => false)) {
+    const detail = await keySetupError.first().textContent().catch(() => null);
+    throw new Error(
+      `Key-setup error dialog appeared after login: ${detail?.trim() ?? '<could not read dialog text>'}`,
+    );
+  }
+
   const errorDialog = page.locator('.mx_Dialog .mx_Dialog_content:has-text("error"), .mx_ErrorMessage');
   const count = await errorDialog.count();
   expect(count).toBe(0);

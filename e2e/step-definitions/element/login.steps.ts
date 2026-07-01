@@ -88,22 +88,68 @@ When(
     // Wait for redirect back to Element Web
     await page.waitForURL(/localhost:7070/, { timeout: 30_000 });
 
-    // Dismiss key-setup dialog if it appears (first login)
+    // Dismiss key-setup / device-verification dialog if it appears (first login).
+    // Element Web 1.12.15 shows a "Confirm your digital identity / Verify this device"
+    // screen with a "Skip verification for now" button once the account has a cross-signing
+    // identity (which it now does — the server persists & echoes cross-signing keys, epic
+    // client-crypto-setup). The old /cancel|abbrechen/ pattern did not match that button, so
+    // .mx_LeftPanel was never reached. Broaden to the same set dex-auth.ts uses, plus the
+    // verification-skip wording.
+    const dismissPattern = /skip verification|skip|überspringen|cancel|abbrechen|not now|later|close|schließen|continue/i;
     await Promise.race([
       page.locator('.mx_LeftPanel').waitFor({ state: 'visible', timeout: 25_000 }),
-      page.getByRole('button', { name: /cancel|abbrechen/i })
-        .waitFor({ state: 'visible', timeout: 25_000 }),
+      page.getByRole('button', { name: dismissPattern })
+        .first().waitFor({ state: 'visible', timeout: 25_000 }),
     ]).catch((e: Error) => { if (!e.message?.includes('Timeout')) throw e; });
 
-    const cancelBtn = page.getByRole('button', { name: /cancel|abbrechen/i });
-    if (await cancelBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      await cancelBtn.click();
+    // AC4: a "Skip verification for now" prompt is EXPECTED (the account has a cross-signing
+    // identity and we deliberately skip the in-browser verification). A "could not set up keys"
+    // dialog is a genuine FAILURE — the server's device-key directory broke. We must NOT let the
+    // broad dismiss pattern (continue/close/…) click that error away and pass silently: assert it
+    // is absent BEFORE dismissing, and fail loudly if present.
+    await assertNoKeySetupError(page);
+
+    const cancelBtn = page.getByRole('button', { name: dismissPattern });
+    if (await cancelBtn.first().isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await cancelBtn.first().click({ timeout: 5_000 }).catch(() => { /* dialog self-closed */ });
     }
+
+    // Re-check after dismissing: dismissing the verification screen must not surface a
+    // key-setup error either.
+    await assertNoKeySetupError(page);
 
     // Confirm .mx_LeftPanel is now visible
     await page.locator('.mx_LeftPanel').waitFor({ state: 'visible', timeout: 20_000 });
   }
 );
+
+/**
+ * AC4 guard — fail if Element shows a real key-setup ERROR rather than the (expected,
+ * skippable) device-verification screen.
+ *
+ * Element Web surfaces a "could not set up keys" / "Schlüssel können nicht eingerichtet werden"
+ * dialog when server-side cross-signing/device-key setup fails. The login dismiss pattern is
+ * deliberately broad (skip/continue/close/…) so it could otherwise click that error dialog away
+ * and let the scenario pass silently. This helper detects the error text and throws so the
+ * scenario fails with a clear message instead.
+ *
+ * Exported so other element step files (e.g. the @ac6-safari-relogin step) can reuse it.
+ */
+export async function assertNoKeySetupError(page: Page): Promise<void> {
+  // Match the failure wording (EN + DE) anywhere on the page — Element renders it inside an
+  // .mx_Dialog / .mx_ErrorDialog, but text-based matching is robust across Element versions.
+  const keySetupError = page.getByText(
+    /could not set up (your )?keys|unable to set up keys|error setting up (secure )?keys|schlüssel können nicht eingerichtet werden|schlüssel konnten nicht eingerichtet werden/i,
+  );
+  // Quick probe (not a hard wait): if such text is present right now, fail.
+  if (await keySetupError.first().isVisible({ timeout: 1_000 }).catch(() => false)) {
+    const detail = await keySetupError.first().textContent().catch(() => null);
+    throw new Error(
+      `AC4: Element showed a key-setup ERROR after login (not the skippable verification screen): ` +
+      `${detail?.trim() ?? '<could not read dialog text>'}`,
+    );
+  }
+}
 
 /**
  * "When alex opens the user menu and clicks {string}"
@@ -279,19 +325,25 @@ When(
     // Wait for redirect back to Element Web
     await page.waitForURL(/localhost:7070/, { timeout: 30_000 });
 
-    // Element may show a key-setup / encryption dialog — dismiss it so the
-    // room list can appear. This mirrors the loginViaOidcBrowser() helper.
+    // Element may show a key-setup / device-verification dialog — dismiss it so the
+    // room list can appear. This mirrors loginViaOidcBrowser() and the SSO-login step:
+    // once the account has a cross-signing identity, Element shows "Skip verification for now",
+    // which /cancel|abbrechen/ alone did not match.
+    const reloginDismissPattern = /skip verification|skip|überspringen|cancel|abbrechen|not now|later|close|schließen|continue/i;
     await Promise.race([
       page.locator('.mx_LeftPanel').waitFor({ state: 'visible', timeout: 25_000 }),
-      page.getByRole('button', { name: /cancel|abbrechen/i })
-        .waitFor({ state: 'visible', timeout: 25_000 }),
+      page.getByRole('button', { name: reloginDismissPattern })
+        .first().waitFor({ state: 'visible', timeout: 25_000 }),
     ]).catch((e: Error) => {
       throw new Error(`@ac6-safari-relogin: post-login state not reached — ${e.message}`);
     });
 
-    const cancelBtn = page.getByRole('button', { name: /cancel|abbrechen/i });
-    if (await cancelBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      await cancelBtn.click();
+    // AC4: a key-setup error after re-login is a genuine failure — do not dismiss it silently.
+    await assertNoKeySetupError(page);
+
+    const cancelBtn = page.getByRole('button', { name: reloginDismissPattern });
+    if (await cancelBtn.first().isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await cancelBtn.first().click({ timeout: 5_000 }).catch(() => { /* dialog self-closed */ });
     }
   }
 );

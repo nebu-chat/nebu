@@ -116,6 +116,9 @@ defmodule Nebu.Admin.DeviceManagementTest do
 
   # ── Session helpers (mirror admin_http_controllers_test.exs) ─────────────────
 
+  defp restore_csrf_bypass(nil), do: Application.delete_env(:nebu_http, :admin_csrf_bypass)
+  defp restore_csrf_bypass(val), do: Application.put_env(:nebu_http, :admin_csrf_bypass, val)
+
   defp build_admin_conn(method, path) do
     %{conn(method, path) | secret_key_base: @secret_key_base}
     |> Nebu.Admin.Endpoint.admin_session([])
@@ -438,7 +441,12 @@ defmodule Nebu.Admin.DeviceManagementTest do
   describe "CSRF (SECURITY-3)" do
     setup do
       # Turn the test bypass OFF so real protect_from_forgery runs for these conns.
+      # MUST restore the prior value in on_exit — without it, `admin_csrf_bypass = false`
+      # leaks into every admin test that runs LATER in the full suite (order/seed-dependent
+      # → spurious InvalidCSRFTokenError in admin_http_controllers_test etc.).
+      prior_csrf = Application.get_env(:nebu_http, :admin_csrf_bypass)
       Application.put_env(:nebu_http, :admin_csrf_bypass, false)
+      on_exit(fn -> restore_csrf_bypass(prior_csrf) end)
       :ok
     end
 

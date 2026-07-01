@@ -333,6 +333,63 @@ integration-test:
       when: manual
       allow_failure: true
 
+# ─── Element Web Browser E2E ───────────────────────────────────────────────────
+# Story e2e-browser-ci-and-dex-reliability (epic e2e-test-rehab) — AC3.
+#
+# Runs the `element-web` Playwright/BDD project against a real Element Web SPA
+# driven through the full OIDC Authorization-Code + PKCE flow with Dex up.
+#
+# Why this job (and why amd64):
+#   The `dexidp/dex` image is amd64. On developer Apple-Silicon machines it runs
+#   under emulation and is too slow to be a reliable gate — the browser login
+#   warmup times out before Dex finishes redirecting. This job pins the work to a
+#   docker-tagged amd64 runner where Dex runs NATIVELY, so it is the dependable
+#   gate for browser verification (local emulated runs are best-effort only).
+#
+#   It is pinned to runners tagged `docker` (DinD) because `make test-e2e-element-ci`
+#   uses docker compose (Dex + server + element sidecar) and runs Playwright in a
+#   host-networked container so the browser reaches the localhost:7070 / :8008 /
+#   :5556 origins that the Element config and Dex redirect URIs are registered for.
+#
+# The Makefile target runs `npm run preflight` first (AC1) — if Dex did not come
+# up the job fails fast with "Dex unreachable" instead of a 30s navigation timeout.
+#
+# Manual + allow_failure so pipelines on plain K8s runners are never blocked;
+# trigger on a docker-tagged amd64 runner. Mirrors the integration-test policy.
+e2e-element-web:
+  stage: integration
+  tags:
+    - docker
+  image: docker:latest
+  services:
+    - name: docker:dind
+      command: ["--tls=false"]
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+    # amd64 native Dex — default timeouts are fine; raise here if a runner is slow.
+    NEBU_E2E_NAV_TIMEOUT_MS: "60000"
+  before_script:
+    - apk add --no-cache make openssl
+    - until docker info; do sleep 1; done
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+    - echo "$DOCKER_REGISTRY_PASS" | docker login "$DOCKER_REGISTRY" --username "$DOCKER_REGISTRY_USER" --password-stdin
+  script:
+    - make test-e2e-element-ci
+  artifacts:
+    when: always
+    paths:
+      - e2e/playwright-report/
+      - e2e/test-results/
+    expire_in: 1 week
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual
+      allow_failure: true
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: manual
+      allow_failure: true
+
 # Daemonless alternative to integration-test for plain K8s runners (no DinD).
 # Uses podman-compose instead of docker compose — no Docker daemon required.
 # Requires the runner pod to have user namespaces enabled (/dev/fuse + SYS_ADMIN)

@@ -65,6 +65,74 @@ ZWEI verschiedene Schlüssel — nie verwechseln:
   NICHT der Geräteschlüssel/Cross-Signing-Key. Geräteschlüssel taugt NICHT für Erasure (Server hat
   keinen privaten Teil). Empfehlung: Multi-Device behalten, Erasure über user_keys-X25519.
 
+### Strategic Direction — Two Postures + Escrow E2EE (2026-06-28)
+Phil reframed ADR-011: Nebu is NOT managed-only forever. It evolves into a full Matrix
+server / easy-to-host Synapse alternative with TWO postures:
+- **Compliance Mode**: E2EE off (server rejects `m.room.encryption`) + Element well-known
+  `io.element.e2ee.force_disable: true`; federation planned WITHOUT E2EE but with mTLS.
+- **Normal Mode**: native Matrix — full E2EE + federation.
+LONG-TERM (#2 strategy): **E2EE WITH ESCROW** via a SPECIAL FORKED Matrix client that
+supports server-side key escrow → reconciles E2EE + compliance in one product. This is the
+real endgame of ADR-011 (Managed E2EE key escrow). "Überall einsetzbar."
+Federation caveats I raised (Server-Server API, outside my CS-API authority): native
+federation auth = signed `X-Matrix` headers + Ed25519 server keys, NOT mTLS — mTLS-only =
+Nebu-private, not interoperable with Synapse/Dendrite. "E2EE off" not enforceable across
+federation (remote clients can send `m.room.encryption`). Needs its own ADR.
+
+### Cross-Signing / Recovery Setup — why Element errors "Schlüssel können nicht eingerichtet werden" (2026-06-28)
+- `/keys/signatures/upload` + `/keys/device_signing/upload` are **Cross-signing** (§cross-signing),
+  under **End-to-End Encryption** — NOT under §Device Management (which is only `/devices*`).
+  Three layers: `/keys/upload`=device keys; `/keys/device_signing/upload`=cross-signing KEYS
+  (MSK/USK/SSK); `/keys/signatures/upload`=cross-signing SIGNATURES.
+- Stub SHAPES are already spec-correct: device_signing/upload→`{}`; signatures/upload→`{"failures":{}}`.
+  Shape is NOT the bug.
+- ROOT CAUSE = write-then-read-back contract. §cross-signing: uploaded keys MUST appear in
+  `/sync` `device_lists.changed` + be returned by `/keys/query` (master/self/user_signing). Nebu's
+  `/keys/query` HARDCODES those maps empty (`server/lib/nebu/web/router/protected.ex:288-294`) →
+  Element uploads cross-signing keys, reads back empty → "keys cannot be set up". A pure no-op
+  stub CANNOT satisfy this contract.
+- `io.element.e2ee` (well-known `/.well-known/matrix/client`) is ELEMENT-PROPRIETARY (formerly
+  `im.vector.riot.e2ee`), NOT Matrix spec — other clients ignore it. `force_disable:true` kills
+  ROOM encryption UX but does NOT stop the RECOVERY setup nag: Element REMOVED
+  `secure_backup_required`/`secure_backup_setup_methods`; recovery is "always recommended"
+  (one-off toast + red dot). So the recovery/cross-signing bootstrap still runs → still errors
+  until the read-back is fixed. True E2EE-off enforcement = rejecting `m.room.encryption` (server),
+  well-known is only a client hint.
+- Cross-signing/device-verification is MECHANICALLY INDEPENDENT of room E2EE — you can persist
+  cross-signing opaquely (clients get verified-session UX) while every room stays unencrypted.
+  So the opaque store is modus-agnostic infra, compatible with Compliance Mode.
+- Current stub state: device_signing/upload→{} (protected.ex:236); signatures/upload→{"failures":{}}
+  (:366); keys/query cross-signing maps empty (:288); account_data ETS volatile node-local + NOT in
+  /sync (:489 + :729 `"account_data" => []`); room_keys/version→404 (:217); well-known only
+  `m.homeserver` (router.ex:115). MUST when persisting cross-signing: device IDs must not collide
+  with cross-signing key IDs (shared `ed25519:` namespace).
+
+### Epic DONE — client-crypto-setup / E2EE-readiness (2026-06-28)
+Mini-epic via nebu-pipeline-epic, COMPLETE. SCOPE GUARDRAIL (Phil insisted): ONLY proper client
+setup / E2EE-readiness — NOT the mode-toggle feature. Two stories, both done + all gates green:
+- (1) `wellknown-e2ee-default` (commit 95769d84): `io.element.e2ee.force_disable:true` in
+  `/.well-known/matrix/client` (router.ex). Static default, mode-prep. Kassandra CLEAN.
+- (2) `cross-signing-readback` (commits f45126cc + 52c64cf1): `Nebu.Matrix.CrossSigningKeyStore`
+  (PostgreSQL, **migration 000010**) + reworked device_signing/upload (persist, idempotent,
+  403 on unauth overwrite), keys/query echoes the 3 cross-signing maps, signatures/upload
+  validate-then-persist merge, /sync device_lists.changed, MUST-guard ID-namespace collision.
+  ADR-011 intact (opaque, m.room.encryption still 403). Kassandra SEC Gate 1 + Gate 2 CLEAN
+  (epic report: _bmad-output/implementation-artifacts/epic-client-crypto-setup-security-review-2026-06-28.md).
+NOT done in scope (explicit follow-ups): account_data durability + /sync account_data extension;
+Compliance/Normal mode switch; federation; mTLS; escrow client.
+DEPLOY: needs `make redeploy` so migration 000010 applies; then verify Element recovery/cross-
+signing bootstrap actually completes (the real acceptance is Element no longer showing
+"Schlüssel können nicht eingerichtet werden").
+
+### OPEN spec-fidelity follow-up — collision errcode 400 vs 403 (2026-06-28)
+In `cross-signing-readback` AC6 I (Oracle) specified the device↔cross-signing ID-namespace
+collision to return **400 M_INVALID_PARAM**. The dev gate flagged: §device_signing/upload defines
+a **403 M_FORBIDDEN "Key ID in use"** response, which is the closer spec precedent for an
+ID-already-in-use rejection. The spec gives NO explicit errcode for the device-vs-cross-signing
+MUST-guard specifically, so 400 is defensible but 403 M_FORBIDDEN is more spec-aligned. Story
+honored my 400 choice; logged here as a small fidelity follow-up for the team to confirm or
+switch. NOT a security/functional bug.
+
 ## Known Spec Decisions
 _Deliberate implementation choices — accepted deviations, spec ambiguity resolutions. Not re-flagged as findings._
 

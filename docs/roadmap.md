@@ -1,222 +1,110 @@
 # Nebu Roadmap
 
 This document provides a roadmap derived from Nebu's epic structure and current sprint status.
-Epics 1–16 are tracked; see per-epic state in `_bmad-output/nebu/epics/<name>/sprint-status.yaml`
-for named epics.
+Since v0.3.0 the project uses **named epics** (no numeric identifiers — see CLAUDE.md, "Named Epic
+Convention"). The historical numbered MVP epics (1–8) are complete; development since then proceeds
+as a stream of named feature epics, each on its own `feature/<epic-name>` branch (ADR-017).
 
 ## Current Status (2026-06-30)
 
-**Pre-1.0.** Core chat functionality is fully implemented, the Elixir single-application
-consolidation is complete, and the stack is Element Web + FluffyChat compatible.
-Active development focus: room management rework, deployment polish.
+**Pre-alpha, single Elixir/OTP stack.** Core chat functionality plus a spec-faithful client
+surface (device-key directory, cross-signing key directory, account_data, devices, whoami) is
+implemented, and real clients (Element Web) register and run cleanly. Not production-ready —
+see [Current Limitations](../README.md#current-limitations).
+
+The architecture is now **one Elixir/OTP application** (`:nebu`, `Nebu.Application`), not an
+umbrella (ADR-019). The former Go gateway + Go media gateway and the entire gRPC/protobuf layer
+have been **removed** (ADR-021): the command/DTO layer is in-process plain Elixir modules
+(`Nebu.Matrix.EventDispatcher.Server` + `Core.*` structs). Migrations are **raw SQL** run by
+`Nebu.Release.migrate/0` before boot (ADR-018) — no ORM, no golang-migrate. No Redis, no NATS,
+no Kafka (ETS + pg process groups, ADR-002).
 
 ---
 
-## Completed Epics
+## Completed Foundation (numbered MVP epics 1–8)
 
-### Epics 1–2: Foundation + OIDC Login
+The original numbered epics built the MVP and reached public open-source readiness. These remain
+in `docs/stories/mvp/`, `phase2/`, `phase3/` and are not renumbered.
 
-**Status:** Done
-
-- Single Elixir/OTP application (`Nebu.Application`); Bandit + Plug HTTP server
-- OIDC authentication via Dex / Keycloak (Authorization Code + PKCE)
-- Bootstrap Wizard (first-run experience, first admin OIDC setup)
-- PostgreSQL schema migrations (raw SQL via `Nebu.Release`)
-- Horde Registry + DynamicSupervisor for Room GenServers (ADR-004)
-- ETS session cache + pg Process Groups pub/sub (ADR-002)
-
-**Key FRs:** FR1–6 (Identity & Authentication), FR43–47 (Server Operations)
-
----
-
-### Epic 3: Ed25519 Signatures + Audit Log + Media
-
-**Status:** Done
-
-- Ed25519 keypair generation per user (Signing + X25519 Encryption)
-- Message signing via `Nebu.Signature` (all events)
-- Content-hash event IDs (`Nebu.EventId.generate/1`)
-- Append-only audit log with Ed25519-signed entries
-- Media: AES-256-GCM upload/download via `Nebu.Media.*` (in-process)
-
-**Key FRs:** FR25–29 (Cryptographic Identity), FR34–35 (Audit Log)
-
----
-
-### Epic 4: Full Matrix Client-Server API MVP
-
-**Status:** Done
-
-- `/sync` long-poll with ETS + pg groups
-- `PUT /rooms/{id}/send` → `EventDispatcher.Server.send_event/5` (in-process)
-- `GET /rooms/{id}/messages` (paginated)
-- `POST /createRoom`, `POST /join`, presence, typing, receipts
-- Profile (GET/PUT displayname + avatar_url)
-- `GET /presence/{userId}/status`
-
-**Key FRs:** FR7–16 (Messaging & Rooms)
-
----
-
-### Epic 5: Security Hardening + Compliance Access
-
-**Status:** Done
-
-- Rate limiting (per-IP, 5 tiers), body size limits, CSRF, security headers
-- Compliance Access API (four-eyes approval, 24h session)
-- Compliance Data Export (Ed25519-signed JSON/PDF)
-- GDPR User Key Deletion + PII Anonymization
-- Audit log retention scheduler (configurable, default 7 years)
-
-**Key FRs:** FR30–35 (Compliance & Audit)
-
----
-
-### Epic 6: Admin API (OpenAPI Spec-First)
-
-**Status:** Done
-
-- Admin API: users (cursor pagination), deactivation/reactivation, role assignment
-- Room List + Get API
-
-**Key FRs:** FR36–40 (User & Room Administration), FR51–52 (Admin API)
-
----
-
-### Epic 7: Admin UI (Full Day-to-Day Operations)
-
-**Status:** Done
-
-- Dashboard with SSE live metrics (message throughput, active sessions)
-- User/Room management UI, Compliance Access Requests, Audit Log
-- Server Configuration, Role Mapping, Claim Mapping pages
-- All Matrix API gap stories closed (push rules, devices, account_data, tags,
-  public rooms, event context, notifications, moderation, room state)
-
-**Key FRs:** FR48–50 (Admin UI), complete Matrix API surface
-
----
-
-### Epic 8: Public Open-Source Release
-
-**Status:** Done
-
-- README, CONTRIBUTING.md, SECURITY.md, CODE_OF_CONDUCT.md
-- GitLab CI + GitHub Actions dual-host CI
-- Full-Stack Acceptance Test (Playwright + Gherkin E2E, 6 flows)
-
----
-
-### Epics 9–11: Arc42 Docs + FTS + Matrix API Gaps
-
-**Status:** Done
-
-- arc42 documentation (`docs/`) auto-generated from BMAD artifacts; `bmad-generate-arc42` skill
-- ADR-010 (FTS strategy) accepted 2026-05-08; FTS on PostgreSQL `tsvector`/`tsquery` (GIN index)
-- `POST /_matrix/client/v3/search` implemented
-- Matrix API gaps: GET event, GET relations (+ dir/recurse/from), bundled thread aggregations,
-  single-event fetch (Story 11-8), configurable OIDC claim mapping (Story 11-10)
-- Read receipts start-on-demand fix (Story 11-11)
-
----
-
-### Epics 12–13: Media + Deployment
-
-**Status:** Done (media fully implemented; deployment docs complete)
-
-- `Nebu.Media.*` fully in-process: AES-256-GCM, ExAws/Finch, thumbnails, CSP/CORP headers
-- Authenticated v1 media endpoints (`/_matrix/client/v1/media/*`)
-- Deployment docs: Docker Compose (primary), AWS ECS Fargate, Stackit VMs (ADR-014)
-- UpCloud deployment support (`upcloud-deployment` epic)
-
----
-
-### Named Epic: full-elixir-stack / otp-consolidation / grpc-removal
-
-**Status:** Done (2026-06-22)
-
-The key consolidation epics:
-- `full-elixir-stack`: Go gateway deleted; all HTTP surfaces moved into Elixir/OTP (ADR-021)
-- `otp-consolidation`: Umbrella removed (ADR-019); one `mix.exs`, one `Nebu.Application`
-- `grpc-removal`: `:grpc`/`:protobuf` deps deleted; no network gRPC listener; `Core.*` are plain
-  `defstruct` DTOs; `Nebu.Matrix.Error`/`Status` replace `GRPC.RPCError`/`GRPC.Status` (ADR-021)
-
----
-
-### Named Epic: oidc-bootstrap-only (ADR-022)
-
-**Status:** Done (2026-06-28)
-
-- OIDC configured exclusively via Bootstrap Wizard (`server_config`); all `NEBU_OIDC_*` env vars removed
-- Single OIDC client for both Matrix Bearer validation and admin operator login
-- Fail-closed until bootstrapped; OIDC config validated per-operation, not at boot
-
----
-
-### Named Epic: device-management
-
-**Status:** Done
-
-- Device table (`devices`), device list/get/rename endpoints
-- UIA-gated device delete + bulk delete (`m.login.sso`, 15-min fresh-auth window)
-- Per-device JWT kill-switch on delete; per-device sync token isolation
-
----
-
-### Named Epic: element-compat
-
-**Status:** Done
-
-- Element Web login spinner fix (XFF rate limit, profile tier, `revocation_endpoint`, CORS)
-- OIDC session refresh (opaque Matrix tokens, 8h lifetime, grace period rotation)
-- Admin silent OIDC refresh; configurable `admin_oidc_refresh_mode` / `matrix_oidc_refresh_mode`
-- SSO nonce + denylist (Story 11-7); Bootstrap dynamic OIDC credentials
-
----
-
-### Named Epic: spaces-elixir
-
-**Status:** Done (2026-06-22)
-
-- Matrix Spaces (MSC1772/MSC2946/MSC3083) fully in Elixir
-- Space creation, `m.space.child`/`m.space.parent` state events
-- `GET /hierarchy` BFS traversal, restricted join enforcement (MSC3083)
-- Admin Spaces UI; Element Web E2E coverage
-
----
-
-### Named Epic: room-naming-and-default-rooms
-
-**Status:** Done
-
-- Room canonical aliases auto-generated from name (Story `room-canonical-alias-from-name`)
-- Room summary (`m.heroes`) in sync response (Story `direct-room-heroes`)
-- Auto-join rooms at first login + bulk import (Stories `admin-auto-join-rooms`, `auto-join-on-user-import`)
-- Creator provisioning + orphan cleanup (`admin-room-creator-provisioning`)
-- Admin user autocomplete for room/space add-member (`admin-add-user-autocomplete`)
-
----
-
-## Active / Recent Work
-
-### Named Epic: rework-room-management
-
-**Status:** In progress
-
-Room management refactor: improved room CRUD flows, membership management,
-and room settings in the Admin UI.
-
----
-
-## Planned / Backlog
-
-| Feature | Epic / Story | Priority |
+| Epic | Scope | Key FRs |
 |---|---|---|
-| Multi-node clustering validation | Phase 2 (post-MVP loadtest) | Medium |
-| Apple/Google push notifications | PRD §Growth Features | Growth |
-| Matrix Federation protocol | PRD §Phase 3 Vision | Vision |
-| Platinum-tier scale (>5000 users) | Phase 3 | Vision |
-| MCP support | PRD §Phase 3 Vision | Vision |
+| 1–2 | OTP core (rooms, sessions, presence, event dispatch), OIDC login (Auth Code + PKCE), Bootstrap Wizard, PostgreSQL schema | FR1–6, FR43–47 |
+| 3 | Ed25519 signing + X25519 keypairs (ADR-007), content-hash event IDs (ADR-003), append-only audit log, minimal Media Gateway (AES-256-GCM) | FR25–29, FR34–35 |
+| 4 | Full Matrix Client-Server API MVP — `/sync`, send, messages, createRoom, join, presence, typing, receipts, profile | FR7–16 |
+| 5 | Security hardening + Compliance Access (rate limiting, body-size limits, CSRF, security headers, four-eyes compliance, signed export, GDPR deletion) | FR30–35 |
+| 6 | Admin API (OpenAPI spec-first, ADR-009) — users, rooms, roles, deactivation/reactivation | FR36–40, FR51–52 |
+| 7 | Admin UI — dashboard, user/room management, compliance requests, audit log, server config, role mapping; full Matrix API gap closure | FR48–50 |
+| 8 | Public open-source release — README, CONTRIBUTING, SECURITY, CI (GitHub + GitLab), secret scanning, e2e acceptance suite | — |
+
+> Note: epics 1–8 originally described a Go gateway, gRPC EventBus, golang-migrate, and an Elixir
+> umbrella. Those implementation choices were **superseded** by the consolidation work below
+> (ADR-019/020/021/018). The functional requirements they delivered still hold; the runtime shape
+> changed.
+
+---
+
+## Completed Consolidation & Named Feature Epics
+
+Done since the numbered MVP — each a named epic (see `_bmad-output/nebu/epics/<name>/` and
+`docs/stories/<name>/`).
+
+| Epic | What it delivered | Decision |
+|---|---|---|
+| `otp-consolidation` | Collapsed the Elixir umbrella into a single OTP app | ADR-019 |
+| `full-elixir-stack` | Removed the Go gateway + Go media gateway; the whole stack is one Elixir/OTP app | ADR-021 |
+| `grpc-removal` | Removed the last gRPC/protobuf deps; command layer is in-process plain modules + `Core.*` structs; native `Nebu.Matrix.Error`/`Status` | ADR-021 (supersedes ADR-005) |
+| `media-gateway-stackit-objectstore-support` | S3-compatible media backend (MinIO / Stackit object store) via ExAws/Finch | ADR-013 |
+| `room-naming-and-default-rooms` | Room naming + default-room behavior fixes | — |
+| `spaces-elixir` | Matrix Spaces support in the Elixir room layer | — |
+| `element-compat` | Element Web compatibility — MSC2965 OIDC discovery, `/.well-known/matrix/client` advertising `io.element.e2ee.force_disable`, clean client bootstrap | ADR-011 |
+| `device-management` | Device-key **directory** (PostgreSQL-backed `DeviceKeyStore`), `keys/upload`/`keys/query`, `/devices`, `/account/whoami` — not E2EE | ADR-011 |
+| `oidc-bootstrap-only` | OIDC configured exclusively via the Bootstrap Wizard (`server_config`); all `NEBU_OIDC_*`/`NEBU_ADMIN_OIDC_*` env vars removed; single OIDC client for both Matrix Bearer + admin login; fail-closed until bootstrapped | ADR-022 |
+| `client-crypto-setup` | Opaque cross-signing key directory (upload/read-back) so clients complete crypto setup cleanly while E2EE stays off | ADR-011, ADR-023 (draft) |
+| `forget-room-membership-purge` | `POST /rooms/{id}/forget` — persist + purge forgotten rooms from `/sync` | — |
+| `upcloud-deployment` | UpCloud deployment posture / IaC | ADR-014 |
+
+A series of bugfix epics (`fix-bootstrap-wizard-*`, `fix-matrix-sso-redirect-missing`,
+`fix-missing-matrix-room-routes`, `fix-jwt-denylist-persistence`, `fix-short-oidc-sessions`,
+`fix-admin-member-audit-actions`, `room-list-not-updated-after-leafe`,
+`bugfix-admin-login-without-env-oidc-variables`) hardened the OIDC bootstrap and Matrix flows.
+
+---
+
+## In Progress
+
+| Epic | Description | Status |
+|---|---|---|
+| `client-crypto-setup` | Cross-signing key-directory polish + 400/403 fidelity follow-up | In progress (SEC Gate 2 clean) |
+| `e2e-test-rehab` | Stabilize the brittle admin/Element Playwright suite (shared login steps, room seeding) — a dedicated test-rehab workstream | In progress |
+| account_data durability | Durable PostgreSQL `account_data` + `/sync` delivery | Recently landed |
+
+---
+
+## Planned / Vision
+
+### Near-term
+
+- **Deployment postures (ADR-023, draft):** make the **Compliance Mode** (E2EE off, server-readable
+  content) vs. **Normal Mode** (E2EE on, native federation) boundary an explicit, named decision
+  before more code assumes "managed forever". Federation-auth and key-escrow mechanisms require the
+  architect (Open Questions in ADR-023).
+- **Clustering hardening:** multi-node via `libcluster` + `Horde` + `pg` (ADR-020) — behave
+  identically on one node and in a cluster.
+- **Managed E2EE key escrow (ADR-011):** server-side decryption model — NOT true E2EE. ADR-011
+  must be accepted before implementation.
+- **Full-Text Search (ADR-010):** PostgreSQL `tsvector` + GIN index (migration 000042 groundwork
+  exists); roll out search UX.
+
+### Phase 3 Vision (Future)
+
+| Feature | Description |
+|---|---|
+| Matrix Federation | Server-Server API — the "Normal Mode" endgame (ADR-023) |
+| E2EE-with-escrow | Special forked Matrix client performing E2EE while escrowing keys to the server (ADR-011 + ADR-023) |
+| Apple/Google Push | APNs/FCM push notifications for mobile clients |
+| Admin-UI-as-Chat-Agent | Room-based admin interaction via Nebu itself |
+| MCP Support | Integration in the AI tooling ecosystem |
+| Platinum-Tier Scale | >5000 concurrent users per node in cluster |
 
 ---
 
@@ -225,9 +113,11 @@ and room settings in the Admin UI.
 | Tier | Target | Gate |
 |---|---|---|
 | Silver | >500 concurrent users / m5.large | MVP release gate |
-| Gold | >1000 concurrent users / cluster | Phase 2 |
+| Gold | >1000 concurrent users / cluster | Clustering hardening |
 | Platinum | >5000 concurrent users / cluster | Phase 3 |
 
 Traffic mix for loadtest: 60% sync, 20% send, 10% presence+typing, 5% room ops, 5% profile+misc.
 
-_Source: `_bmad-output/planning-artifacts/epics.md`; `_bmad-output/planning-artifacts/prd.md`, §Scoping & Release Strategy; `_bmad-output/implementation-artifacts/sprint-status.yaml`; named epic state files in `_bmad-output/nebu/epics/`_
+_Source: `_bmad-output/nebu/epics/<epic-name>/`; `docs/stories/<epic-name>/`;
+`_bmad-output/planning-artifacts/prd.md`, §Scoping & Release Strategy; CLAUDE.md (§ADR table,
+§Named Epic Convention); `docs/architecture/adr/`_

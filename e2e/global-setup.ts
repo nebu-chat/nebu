@@ -31,6 +31,7 @@ import { chromium, request as playwrightRequest } from '@playwright/test';
 import { ensureStorageState, getApiSession, createRoom } from './fixtures/dex-auth';
 import { doBootstrapAdmin } from './fixtures/admin-bootstrap';
 import { NEBU_USERS } from './fixtures/users';
+import { assertDexReachable } from './fixtures/dex-preflight';
 
 const AUTH_STATE_DIR = path.join(__dirname, 'auth-state');
 const MAX_AGE_MS = 12 * 60 * 60 * 1000; // 12 hours
@@ -48,6 +49,14 @@ export default async function globalSetup(): Promise<void> {
   if (!fs.existsSync(AUTH_STATE_DIR)) {
     fs.mkdirSync(AUTH_STATE_DIR, { recursive: true });
   }
+
+  // AC1: fail fast if the OIDC stack (Dex + server SSO redirect) is unreachable.
+  // Without this, a missing Dex turns every OIDC flow below into a silent 30s
+  // browser navigation timeout. The preflight aborts in a few seconds with an
+  // actionable "Dex unreachable" message naming the URL and the fix (`make dev`).
+  console.log('[global-setup] Preflight: checking OIDC stack (Dex + server SSO redirect) reachability...');
+  await assertDexReachable();
+  console.log('[global-setup] Preflight OK — OIDC stack reachable.');
 
   // BUG-E2E-11 fix: complete admin bootstrap BEFORE any Element Web user logins.
   // The Elixir core auto-bootstraps (sets bootstrap_completed=true without OIDC config)

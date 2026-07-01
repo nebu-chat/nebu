@@ -40,3 +40,5 @@ ADR-020-clustering-and-module-architecture:
   title: "ADR-020 - Clustering Strategy & Module Architecture"
 ADR-021-elixir-consolidation-go-removal:
   title: "ADR-021 - Elixir Consolidation / Go Removal"
+ADR-023-deployment-postures-compliance-vs-normal:
+  title: "ADR-023 - Deployment Postures: Compliance vs. Normal (DRAFT)"

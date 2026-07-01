@@ -29,6 +29,34 @@ const ELEMENT_URL   = process.env.NEBU_ELEMENT_URL ?? 'http://localhost:7070';
 const MATRIX_BASE   = process.env.NEBU_MATRIX_BASE ?? 'http://localhost:8008';
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Configurable login/navigation timeouts (Story e2e-browser-ci-and-dex-reliability, AC2)
+//
+// On Apple Silicon the `dexidp/dex` image is amd64-emulated and slow; the default
+// 30–45s navigation waits time out before Dex finishes redirecting, so the token
+// sidecar never gets written. These knobs let local emulated runs raise the
+// *navigation* waits (Dex redirect, return-to-Element, panel load) WITHOUT also
+// inflating the short detection waits (consent button, setup-dialog dismiss) —
+// stretching those would just mask genuine hangs.
+//
+// Env knobs (milliseconds):
+//   NEBU_E2E_NAV_TIMEOUT_MS   — Dex redirect + return-to-Element navigations.
+//                               Default 60_000 (was 30_000/45_000) to tolerate
+//                               emulated Dex. Set higher (e.g. 90_000) on very
+//                               slow hosts; lower in fast amd64 CI if desired.
+//   NEBU_E2E_FORM_TIMEOUT_MS  — waiting for the Dex login form to appear.
+//                               Default 60_000.
+//   NEBU_E2E_PANEL_TIMEOUT_MS — waiting for Element's .mx_LeftPanel post-login.
+//                               Default 45_000.
+//
+// Short, deliberately-tight waits (consent detection ~6s, dialog dismiss ~2s) are
+// NOT configurable — they are quick "is this optional element here?" probes, and
+// keeping them short is what prevents masking real hangs.
+// ─────────────────────────────────────────────────────────────────────────────
+const NAV_TIMEOUT_MS   = Number(process.env.NEBU_E2E_NAV_TIMEOUT_MS   ?? 60_000);
+const FORM_TIMEOUT_MS  = Number(process.env.NEBU_E2E_FORM_TIMEOUT_MS  ?? 60_000);
+const PANEL_TIMEOUT_MS = Number(process.env.NEBU_E2E_PANEL_TIMEOUT_MS ?? 45_000);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Internal: token sidecar helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -139,6 +167,7 @@ export async function loginViaOidcBrowser(
     const alreadyAtDex = await page.waitForURL(/dex.*\/auth/i, { timeout: 15_000 })
       .then(() => true)
       .catch(() => false);
+    // (15s is a quick "did Element auto-redirect?" probe, not a Dex-load wait — kept short.)
 
     if (!alreadyAtDex) {
       // Normal flow: Element shows welcome screen → click "Sign in" → "Continue with SSO"
@@ -155,13 +184,14 @@ export async function loginViaOidcBrowser(
       await ssoBtn.first().waitFor({ state: 'visible', timeout: 15_000 });
       await ssoBtn.first().click();
 
-      // Dex login page (give Dex extra time under load — 4+ rapid OIDC logins can saturate it)
-      await page.waitForURL(/dex.*\/auth/i, { timeout: 45_000 });
+      // Dex login page (give Dex extra time under load — 4+ rapid OIDC logins can
+      // saturate it; emulated arm64 Dex is slower still — configurable via NAV_TIMEOUT_MS).
+      await page.waitForURL(/dex.*\/auth/i, { timeout: NAV_TIMEOUT_MS });
     }
     // Dex may auto-navigate from /dex/auth to /dex/auth/local (single-connector redirect).
     // Wait for the page load to complete then wait for the login form.
-    await page.waitForLoadState('domcontentloaded', { timeout: 30_000 }).catch(() => {});
-    await page.locator('input[name="login"]').waitFor({ state: 'visible', timeout: 60_000 });
+    await page.waitForLoadState('domcontentloaded', { timeout: NAV_TIMEOUT_MS }).catch(() => {});
+    await page.locator('input[name="login"]').waitFor({ state: 'visible', timeout: FORM_TIMEOUT_MS });
     await page.locator('input[name="login"]').fill(email);
     await page.locator('input[name="password"]').fill(password);
     await page.locator('button[type="submit"]').click();
@@ -172,17 +202,36 @@ export async function loginViaOidcBrowser(
       await consentBtn.click();
     }
 
-    // Wait for redirect back to Element Web (the /login POST fires here → captures token)
-    await page.waitForURL(/localhost:7070/, { timeout: 30_000 });
+    // Wait for redirect back to Element Web (the /login POST fires here → captures token).
+    // Configurable via NAV_TIMEOUT_MS — emulated Dex's token exchange is slow.
+    await page.waitForURL(/localhost:7070/, { timeout: NAV_TIMEOUT_MS });
 
     // Give Element time to process the login token and fire the /login POST.
     // Then dismiss any setup/encryption dialogs that may appear before .mx_LeftPanel.
-    // Handles: "Cancel", "Skip", "Not now", "Later", "Close" button variants.
-    const dismissPattern = /cancel|abbrechen|skip|überspringen|not now|later|close|schließen/i;
+    // Handles the device-verification screen too: once the account has a cross-signing
+    // identity (epic client-crypto-setup), Element shows "Confirm your digital identity /
+    // Verify this device" with a "Skip verification for now" button. Keep this pattern in
+    // sync with login.steps.ts so both paths reach .mx_LeftPanel (AC2).
+    const dismissPattern = /skip verification|skip|überspringen|cancel|abbrechen|not now|later|close|schließen|continue/i;
     await Promise.race([
-      page.locator('.mx_LeftPanel').waitFor({ state: 'visible', timeout: 40_000 }),
-      page.getByRole('button', { name: dismissPattern }).waitFor({ state: 'visible', timeout: 40_000 }),
+      page.locator('.mx_LeftPanel').waitFor({ state: 'visible', timeout: PANEL_TIMEOUT_MS }),
+      page.getByRole('button', { name: dismissPattern }).waitFor({ state: 'visible', timeout: PANEL_TIMEOUT_MS }),
     ]).catch((e: Error) => { if (!e.message?.includes('Timeout')) throw e; });
+
+    // AC4: a "could not set up keys" / "Schlüssel können nicht eingerichtet werden" dialog is a
+    // genuine key-setup failure, not the skippable verification screen. The broad dismiss pattern
+    // above (continue/close/…) could otherwise click it away and let session-warming "succeed"
+    // against a broken server. Fail loudly instead.
+    const keySetupError = page.getByText(
+      /could not set up (your )?keys|unable to set up keys|error setting up (secure )?keys|schlüssel können nicht eingerichtet werden|schlüssel konnten nicht eingerichtet werden/i,
+    );
+    if (await keySetupError.first().isVisible({ timeout: 1_000 }).catch(() => false)) {
+      const detail = await keySetupError.first().textContent().catch(() => null);
+      throw new Error(
+        `loginViaOidcBrowser: Element showed a key-setup ERROR after login for "${user.name}": ` +
+        `${detail?.trim() ?? '<could not read dialog text>'}`,
+      );
+    }
 
     // Dismiss any visible setup dialog.
     // Non-fatal click: Element may auto-close the dialog before Playwright can click,
@@ -200,7 +249,7 @@ export async function loginViaOidcBrowser(
     // Wait for .mx_LeftPanel — but only if token not yet captured (if we have the token,
     // Element is loaded enough; skip the hard UI wait to avoid flakiness with setup dialogs).
     if (!capturedToken) {
-      await page.locator('.mx_LeftPanel').waitFor({ state: 'visible', timeout: 30_000 });
+      await page.locator('.mx_LeftPanel').waitFor({ state: 'visible', timeout: PANEL_TIMEOUT_MS });
     } else {
       // Soft wait: give Element a moment to settle, but don't fail if panel takes longer
       await page.locator('.mx_LeftPanel').waitFor({ state: 'visible', timeout: 10_000 })

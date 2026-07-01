@@ -75,11 +75,20 @@ defmodule Nebu.Admin.UsersIndexLinkTest do
 
   defp enc(id), do: URI.encode(id, &URI.char_unreserved?(&1))
 
-  # Set up a fake users loader before each test.
-  # :admin_csrf_bypass is set globally in config/test.exs — do not touch it here,
-  # as Application.delete_env would destroy the global setting for subsequent tests.
+  defp restore_env(key, nil), do: Application.delete_env(:nebu_http, key)
+  defp restore_env(key, val), do: Application.put_env(:nebu_http, key, val)
+
+  # Set up CSRF bypass and a fake users loader before each test.
   setup do
+    # Save + restore the prior value rather than delete_env: the test baseline
+    # (config/test.exs) is `admin_csrf_bypass: true`; `delete_env` would drop it to the
+    # `false` default and leak CSRF enforcement into admin tests that run LATER in the full
+    # suite (order/seed-dependent → spurious InvalidCSRFTokenError).
+    prior_csrf = Application.get_env(:nebu_http, :admin_csrf_bypass)
+    Application.put_env(:nebu_http, :admin_csrf_bypass, true)
+
     on_exit(fn ->
+      restore_env(:admin_csrf_bypass, prior_csrf)
       Application.delete_env(:nebu_http, :admin_users_loader)
     end)
 

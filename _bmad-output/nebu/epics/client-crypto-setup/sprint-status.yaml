@@ -1,0 +1,17 @@
+# generated: 2026-06-28
+# Epic: client-crypto-setup
+# story account-data-durability done (pipeline: ATDD+Dev+Code+Kassandra CLEAN — durable account_data (PG migration 000011) + /sync delivery (initial full, incremental changed-only); 78+21 integration green): 2026-06-29
+# story cross-signing-readback done (pipeline: ATDD+Dev CLEAN; 1 MAJOR fixed (validate-then-persist CS merge) 1 cycle + Kassandra CLEAN): 2026-06-28
+project: nebu
+epic: client-crypto-setup
+epic_status: in-progress
+
+# SCOPE GUARDRAIL: only proper client crypto setup / E2EE-readiness.
+# NOT the Compliance/Normal mode-toggle feature, NOT federation, NOT mTLS, NOT escrow.
+# Server keeps rejecting m.room.encryption (ADR-011 unchanged).
+
+development_status:
+  wellknown-e2ee-default: done
+  cross-signing-readback: done
+  account-data-durability: done # 2026-06-29 — durable PG account_data + /sync delivery
+  epic-client-crypto-setup-retrospective: done # retro 2026-06-28

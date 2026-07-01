@@ -153,11 +153,13 @@ defmodule Nebu.Web.SignaturesUploadTest do
              "response body must be {\"failures\": {}}"
     end
 
-    test "AC5/AC6 — returns 200 with {\"failures\": {}} for a realistic signature body",
+    test "AC5/AC6 — realistic body for an UNSTORED key → 200 with per-key M_INVALID_SIGNATURE",
          %{token: token} do
-      # RED: same as above — route not yet defined.
-      # A realistic Element-style body: keys/signatures/upload carries a user_id
-      # → device_id → signature mapping. The stub ignores the body entirely.
+      # client-crypto-setup (cross-signing-readback) replaced the no-op stub with a real
+      # validate-then-merge handler: a signature whose target key is not stored for the user
+      # cannot be validated, so it is reported under `failures` with errcode
+      # M_INVALID_SIGNATURE (Matrix CS §/keys/signatures/upload). MYDEVICEID was never
+      # uploaded for this user, so this body fails by design — still HTTP 200.
       realistic_body = %{
         "@sig-upload-user:test.local" => %{
           "ed25519:MYDEVICEID" => %{
@@ -186,8 +188,15 @@ defmodule Nebu.Web.SignaturesUploadTest do
       assert conn.status == 200,
              "expected 200 but got #{conn.status} — route is likely missing (still RED)"
 
-      assert json(conn) == %{"failures" => %{}},
-             "response body must be exactly {\"failures\": {}}"
+      user_failures = json(conn)["failures"]["@sig-upload-user:test.local"]
+
+      assert is_map(user_failures) and map_size(user_failures) > 0,
+             "an unstored target key must be reported under failures"
+
+      assert Enum.any?(user_failures, fn {_key_id, entry} ->
+               entry["errcode"] == "M_INVALID_SIGNATURE"
+             end),
+             "unstored/unverifiable key must yield errcode M_INVALID_SIGNATURE"
     end
   end
 

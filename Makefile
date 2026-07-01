@@ -244,12 +244,45 @@ build-element-e2e:
 
 ## test-e2e-element: Run Element Web Browser-First BDD tests (story 9-26, Phase 2).
 ## Story 9-26 AC5: canonical target name (also aliased as test-e2e-element-bdd).
-## Requires: stack running (`make dev`) + `127.0.0.1 dex` in /etc/hosts
+## Requires: FULL stack running via `make dev` (NOT just `make redeploy`) + `127.0.0.1 dex`
+##   in /etc/hosts. `make redeploy` only rebuilds/restarts the server container and does NOT
+##   start Dex — browser OIDC then fails (econnrefused dex:5556, empty JWKS). The Playwright
+##   global-setup runs a Dex preflight (Story e2e-browser-ci-and-dex-reliability, AC1) and
+##   aborts fast with "Dex unreachable" if Dex is down, instead of a silent 30s timeout.
 test-e2e-element:
 	cd e2e && npm install --silent && \
 	npx playwright install chromium --with-deps && \
 	npx bddgen && \
 	npx playwright test --project=element-web --reporter=list
+
+## test-e2e-element-ci: Run the Element Web browser-first BDD project in CI (amd64).
+## Story e2e-browser-ci-and-dex-reliability (epic e2e-test-rehab) — AC3.
+##
+## Why a dedicated target:
+##   The Element SPA (docker/element-config.json) and the Dex redirect URIs
+##   (dev/dex/config.yaml) are pinned to localhost:7070 / localhost:8008. The
+##   browser MUST therefore reach those exact origins. We bring up the full stack
+##   incl. Dex + the element sidecar (--profile e2e), then run Playwright in a
+##   host-networked node container so `localhost:7070`/`localhost:8008` resolve to
+##   the published compose ports — preserving the registered redirect URIs.
+##
+## On amd64 CI Dex runs natively (not emulated), so the default timeouts are fine;
+## NEBU_E2E_NAV_TIMEOUT_MS can still be tuned. The preflight (npm run preflight)
+## fails fast with "Dex unreachable" if Dex did not come up.
+##
+## Runs on a docker-tagged (amd64) runner via DinD. See .gitlab-ci.yml e2e-element-web.
+test-e2e-element-ci: setup
+	NEBU_RATE_LIMIT_DISABLED=true docker compose --profile e2e up -d --wait && \
+	docker run --rm --network=host --add-host=dex:127.0.0.1 -v $(PWD):/workspace -w /workspace/e2e \
+		-e NEBU_BASE_URL=http://localhost:8008 \
+		-e NEBU_MATRIX_BASE=http://localhost:8008 \
+		-e NEBU_ELEMENT_URL=http://localhost:7070 \
+		-e NEBU_OIDC_ISSUER=http://dex:5556/dex \
+		mcr.microsoft.com/playwright:v1.44.0-jammy \
+		sh -c "npm install --silent && npm run preflight && npx bddgen && npx playwright test --project=element-web --reporter=list"; \
+	EXIT=$$?; \
+	docker compose --profile e2e down; \
+	exit $$EXIT
 
 ## test-e2e-element-legacy: Run old Element Web E2E tests (non-BDD, pre-story-9-26).
 ## Requires: stack running + element sidecar via --profile e2e.

@@ -4,6 +4,15 @@
 
 Accepted - 2026-03-18
 
+> **Superseded in part — 2026-06-30.** This ADR was written when a stateless **Go Gateway**
+> registered the Elixir Core over gRPC and validated `/internal/*` with the PSK. The Go layer and
+> all gRPC were removed (ADR-021, `full-elixir-stack` / `grpc-removal` epics) — there is no longer
+> a Gateway↔Core node-registration handshake to authenticate. The PSK (`NEBU_INTERNAL_SECRET_FILE`)
+> survives only as the shared node-registration / admin-key-base secret within the single OTP app
+> and across clustered BEAM nodes (ADR-020). The "Phase 2 — Ephemeral mTLS" direction is now folded
+> into the hardened-transport posture of **ADR-023** (Deployment Postures: Compliance vs. Normal
+> Mode, draft). The decision below is retained as the historical record.
+
 ## Context
 
 The Elixir Core must register itself with the Go Gateway at startup so the Gateway knows where

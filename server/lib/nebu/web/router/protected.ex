@@ -24,6 +24,7 @@ defmodule Nebu.Web.Router.Protected do
   import Nebu.Matrix.Http
 
   alias Nebu.Matrix.DeviceKeyStore
+  alias Nebu.Matrix.CrossSigningKeyStore
 
   plug Nebu.Web.Plugs.OidcPlug
   plug :fetch_query_params
@@ -94,7 +95,55 @@ defmodule Nebu.Web.Router.Protected do
         {initial.since_token, initial.rooms}
       end
 
-    send_json(conn, 200, put_device_e2e_counts(sync_response(next_batch, rooms), conn))
+    response =
+      sync_response(next_batch, rooms)
+      |> put_device_e2e_counts(conn)
+      |> put_cross_signing_device_lists(conn, since)
+      |> put_global_account_data(conn, since)
+
+    send_json(conn, 200, response)
+  end
+
+  # Top-level `account_data.events` (Matrix CS §GET /sync). Global account data is
+  # durable (PostgreSQL, story account-data-durability) so Element's secret-storage /
+  # recovery material survives restarts and is delivered to the client. Initial sync
+  # (no `since`) delivers ALL of the user's global account data; incremental sync
+  # (`since` present) delivers ONLY entries changed since the prior sync — the store
+  # uses a consume-once `changed` flag, read-and-cleared atomically. Each entry is
+  # `{type, content}`; content is opaque (ADR-011 — never parsed/decrypted here).
+  defp put_global_account_data(response, conn, since) do
+    user = conn.assigns[:current_user]
+
+    entries =
+      if is_binary(since) and since != "" do
+        Nebu.Matrix.AccountDataStore.list_changed_and_clear(user)
+      else
+        Nebu.Matrix.AccountDataStore.list_all_and_clear(user)
+      end
+
+    events = Enum.map(entries, fn {type, content} -> %{"type" => type, "content" => content} end)
+    Map.put(response, "account_data", %{"events" => events})
+  end
+
+  # AC5: after a cross-signing key change, the uploading user's OWN id must appear in
+  # device_lists.changed of their next INCREMENTAL /sync (CS §Cross-signing). The store
+  # carries a consume-once `cross_signing_changed` flag per user; an incremental sync
+  # reads-and-clears it (atomic UPDATE ... RETURNING, cluster-correct) and surfaces the
+  # user once. Initial sync (no since) does not consume the flag.
+  defp put_cross_signing_device_lists(response, conn, since) do
+    if is_binary(since) and since != "" do
+      user = conn.assigns[:current_user]
+
+      if CrossSigningKeyStore.consume_changed_flag(user) do
+        update_in(response, ["device_lists", "changed"], fn changed ->
+          Enum.uniq([user | changed || []])
+        end)
+      else
+        response
+      end
+    else
+      response
+    end
   end
 
   # E2E extension to /sync (Matrix CS §e2e-extensions-to-sync): report the unclaimed
@@ -230,11 +279,13 @@ defmodule Nebu.Web.Router.Protected do
     error(conn, 404, "M_NOT_FOUND", "No RTC transports")
   end
 
-  # POST /keys/device_signing/upload — cross-signing key upload stub.
-  # ADR-011: managed E2EE model; accept and acknowledge, no-op store.
-  # Spec 200 response is {} (Matrix CS §Cross-signing, added v1.1).
+  # POST /keys/device_signing/upload — cross-signing key upload (Matrix CS §Cross-signing).
+  # Persists the supplied master/self/user signing keys (opaque objects) in the
+  # cross-signing directory so /keys/query reads them back and Element's cross-signing
+  # bootstrap completes. This is the key DIRECTORY only — it does NOT enable E2EE
+  # (ADR-011): the server never decrypts and never gains a private part.
   post "/client/v3/keys/device_signing/upload" do
-    send_json(conn, 200, %{})
+    do_device_signing_upload(conn)
   end
 
   # GET /capabilities — advertise supported room versions + which actions are allowed.
@@ -271,27 +322,44 @@ defmodule Nebu.Web.Router.Protected do
     send_json(conn, 200, @empty_pushrules)
   end
 
-  # POST /keys/query — device-key lookup (Matrix CS §/keys/query). Echoes back the
-  # device_keys objects published via /keys/upload so a client (incl. Element querying
-  # its OWN user) sees its device as registered. Cross-signing maps stay empty (no
-  # cross-signing). This is the key DIRECTORY only — it does not enable E2EE (ADR-011).
+  # POST /keys/query — device-key + cross-signing lookup (Matrix CS §/keys/query).
+  # Echoes back the device_keys objects published via /keys/upload AND the
+  # cross-signing keys published via /keys/device_signing/upload, so a client (incl.
+  # Element querying its OWN user) sees its device registered and its cross-signing
+  # state set up. Users without cross-signing keys get empty maps. This is the key
+  # DIRECTORY only — it does not enable E2EE (ADR-011).
   post "/client/v3/keys/query" do
     requested = body_params(conn)["device_keys"]
 
-    device_keys =
+    {device_keys, cross_signing} =
       if is_map(requested) and map_size(requested) > 0 do
-        query_device_keys(requested)
+        {query_device_keys(requested),
+         CrossSigningKeyStore.query_cross_signing(Map.keys(requested))}
       else
-        %{}
+        {%{}, %{}}
       end
+
+    master_keys = collect_cross_signing(cross_signing, "master")
+    self_signing_keys = collect_cross_signing(cross_signing, "self_signing")
+    user_signing_keys = collect_cross_signing(cross_signing, "user_signing")
 
     send_json(conn, 200, %{
       "device_keys" => device_keys,
-      "master_keys" => %{},
-      "self_signing_keys" => %{},
-      "user_signing_keys" => %{},
+      "master_keys" => master_keys,
+      "self_signing_keys" => self_signing_keys,
+      "user_signing_keys" => user_signing_keys,
       "failures" => %{}
     })
+  end
+
+  # POST /keys/signatures/upload — merge cross-signing / device signatures (Matrix CS
+  # §/keys/signatures/upload). Each (user_id, key_id, signedObject) carries new signatures
+  # to merge into the stored key object (a device key or a cross-signing key). On a match
+  # the new signatures are merged and persisted; on a mismatch (the non-signatures parts
+  # differ, or no stored key) a per-(user,key) M_INVALID_SIGNATURE goes into `failures`.
+  # Always 200 with {"failures": …}. Directory only — does not enable E2EE (ADR-011).
+  post "/client/v3/keys/signatures/upload" do
+    do_signatures_upload(conn)
   end
 
   # POST /keys/upload — publish device identity keys, one-time keys, and fallback keys
@@ -357,20 +425,6 @@ defmodule Nebu.Web.Router.Protected do
             send_json(conn, 200, %{"one_time_key_counts" => DeviceKeyStore.otk_counts(user, device_id)})
         end
     end
-  end
-
-  # POST /keys/signatures/upload — cross-signing signature upload stub.
-  # ADR-011: managed E2EE model; cross-signing signatures are not persisted.
-  # Element Web calls this after device registration (cross-signing bootstrap flow).
-  # Per spec the response is {"failures": {}} (Matrix CS §/keys/signatures/upload).
-  #
-  # Body is intentionally ignored — cross-signing is excluded (ADR-011). OidcPlug
-  # has already validated auth. Nebu.Web.Plugs.JsonBody (in the top-level pipeline)
-  # has already parsed the request: a malformed JSON body sets `json_parse_error: true`
-  # on the conn (no raised exception), so this stub reaches `send_json` safely even
-  # for non-JSON bodies — Plug never raises here.
-  post "/client/v3/keys/signatures/upload" do
-    send_json(conn, 200, %{"failures" => %{}})
   end
 
   # GET /devices — the user's registered devices (Matrix CS §/devices). Sourced from the
@@ -489,9 +543,12 @@ defmodule Nebu.Web.Router.Protected do
     send_json(conn, 200, %{})
   end
 
-  # GET/PUT /user/{userId}/account_data/{type} — ETS-backed per-user account data stub.
-  # PUT stores the JSON body; GET reads it back. Volatile (in-memory ETS, lost on restart).
-  # ADR-011: managed E2EE stub; ADR-002: ETS for volatile data.
+  # GET/PUT /user/{userId}/account_data/{type} — DURABLE per-user global account data
+  # (PostgreSQL, story account-data-durability). PUT stores the opaque JSON body; GET
+  # reads it back; both survive a restart and are delivered via /sync. The user==auth
+  # guard rejects cross-user access (403 M_FORBIDDEN); absent GET → 404 M_NOT_FOUND.
+  # ADR-011: content is opaque (client-encrypted secret-storage / cross-signing keys);
+  # the server never parses or decrypts it. Storing it enables NO encryption.
   put "/client/v3/user/:user_id/account_data/:type" do
     authenticated_user = conn.assigns[:current_user]
     decoded_user = URI.decode_www_form(user_id)
@@ -1455,6 +1512,202 @@ defmodule Nebu.Web.Router.Protected do
       true ->
         nil
     end
+  end
+
+  # ── cross-signing (story: cross-signing-readback) ──────────────────────────
+
+  # device_signing/upload: MUST-guard the device/cross-signing ID namespace, then
+  # persist with first-upload / idempotent / overwrite-protection handling.
+  defp do_device_signing_upload(conn) do
+    user = conn.assigns[:current_user]
+    body = body_params(conn)
+
+    # AC6 MUST-GUARD FIRST, before any write: a cross-signing key whose ID collides
+    # with an existing device ID is rejected (shared ed25519: namespace, CS spec).
+    existing_device_ids = MapSet.new(DeviceKeyStore.device_ids(user))
+    upload_key_ids = CrossSigningKeyStore.key_ids_in_upload(body)
+
+    cond do
+      Enum.any?(upload_key_ids, &MapSet.member?(existing_device_ids, &1)) ->
+        error(conn, 400, "M_INVALID_PARAM", "Key ID in use as a device ID")
+
+      true ->
+        do_persist_cross_signing(conn, user, body)
+    end
+  end
+
+  defp do_persist_cross_signing(conn, user, body) do
+    stored = CrossSigningKeyStore.get_keys(user)
+    supplied = Map.take(body, ["master_key", "self_signing_key", "user_signing_key"])
+
+    cond do
+      # AC2: first upload (no existing master key) → persist, plain 200 {} (no UIA).
+      # INFO-1: the first-upload gate is keyed on master_key presence — real clients
+      # always upload the master key first, so its absence reliably means "no keys yet".
+      is_nil(stored["master_key"]) ->
+        :ok = CrossSigningKeyStore.put_keys(user, supplied)
+        send_json(conn, 200, %{})
+
+      # AC2: idempotent re-upload of the SAME keys → 200 {} (no UIA).
+      cross_signing_unchanged?(stored, supplied) ->
+        send_json(conn, 200, %{})
+
+      # AC2: overwriting existing DIFFERENT keys without valid auth → 403 M_FORBIDDEN.
+      # (Full UIA is out of scope for this story — minimal 403 contract per CS spec.)
+      true ->
+        error(conn, 403, "M_FORBIDDEN", "Cannot replace existing cross-signing keys")
+    end
+  end
+
+  defp cross_signing_unchanged?(stored, supplied) do
+    Enum.all?(["master_key", "self_signing_key", "user_signing_key"], fn k ->
+      stored[k] == supplied[k]
+    end)
+  end
+
+  # signatures/upload: merge each supplied signature into the targeted stored key
+  # object (device key or cross-signing key); build a per-(user,key) failures map.
+  defp do_signatures_upload(conn) do
+    body = body_params(conn)
+    caller = conn.assigns[:current_user]
+
+    failures =
+      Enum.reduce(body, %{}, fn {user_id, keyed}, acc ->
+        merge_user_signatures(caller, user_id, keyed, acc)
+      end)
+
+    send_json(conn, 200, %{"failures" => failures})
+  end
+
+  # MINOR-1: a user may only upload signatures attached to their OWN keys in this
+  # story scope (cross-user signing is out of scope per the story guardrail). For a
+  # body keyed under another user, mark every one of that user's keys M_FORBIDDEN
+  # and touch NO storage.
+  defp merge_user_signatures(caller, user_id, keyed, acc)
+       when is_map(keyed) and user_id != caller do
+    Enum.reduce(keyed, acc, fn {key_id, _signed_object}, inner ->
+      put_forbidden_failure(inner, user_id, key_id)
+    end)
+  end
+
+  defp merge_user_signatures(_caller, user_id, keyed, acc) when is_map(keyed) do
+    Enum.reduce(keyed, acc, fn {key_id, signed_object}, inner ->
+      case merge_one_signature(user_id, key_id, signed_object) do
+        :ok -> inner
+        :invalid -> put_signature_failure(inner, user_id, key_id)
+      end
+    end)
+  end
+
+  defp merge_user_signatures(_caller, _user_id, _keyed, acc), do: acc
+
+  # The signed_object MUST match the stored key object for that key_id EXCEPT its
+  # `signatures` (which carries the new sigs to merge). Try device key first, then
+  # cross-signing key. Both paths are validate-THEN-persist: a mismatch (or no
+  # stored key) writes NOTHING.
+  defp merge_one_signature(user_id, key_id, signed_object) when is_map(signed_object) do
+    new_sigs = Map.get(signed_object, "signatures", %{})
+
+    case merge_device_key_signature(user_id, key_id, signed_object, new_sigs) do
+      :ok ->
+        :ok
+
+      :not_found ->
+        merge_cross_signing_signature(user_id, key_id, signed_object, new_sigs)
+
+      :mismatch ->
+        :invalid
+    end
+  end
+
+  defp merge_one_signature(_user_id, _key_id, _signed_object), do: :invalid
+
+  # A device-key signature merge. Returns :ok | :not_found | :mismatch.
+  defp merge_device_key_signature(user_id, key_id, signed_object, new_sigs) do
+    case DeviceKeyStore.query_devices([user_id]) do
+      %{^user_id => devices} ->
+        case Map.get(devices, key_id) do
+          nil ->
+            :not_found
+
+          stored ->
+            stored_clean = stored |> Map.delete("signatures") |> Map.delete("unsigned")
+            # MINOR-2: drop `unsigned` from the submitted object too, so a client that
+            # includes `unsigned` does not falsely mismatch (symmetric with stored_clean).
+            submitted_clean = signed_object |> Map.delete("signatures") |> Map.delete("unsigned")
+
+            if stored_clean == submitted_clean do
+              merged_sigs = deep_merge_sig_map(Map.get(stored, "signatures", %{}), new_sigs)
+              # Persist the device key with merged signatures (drop the read-only `unsigned`).
+              to_store =
+                stored
+                |> Map.delete("unsigned")
+                |> Map.put("signatures", merged_sigs)
+
+              DeviceKeyStore.put_device_keys(user_id, key_id, to_store)
+              :ok
+            else
+              :mismatch
+            end
+        end
+
+      _ ->
+        :not_found
+    end
+  end
+
+  # MAJOR-1: a cross-signing signature merge, mirroring the device-key path exactly —
+  # validate FIRST, persist ONLY on a match. Returns :ok | :invalid. The store's
+  # find_key_object/2 returns the stored cross-signing key object for key_id (or nil).
+  # We compare the non-signatures parts (dropping `signatures` AND `unsigned` on both
+  # sides) BEFORE writing; on a mismatch (or no stored key) NOTHING is persisted.
+  defp merge_cross_signing_signature(user_id, key_id, signed_object, new_sigs) do
+    case CrossSigningKeyStore.find_key_object(user_id, key_id) do
+      nil ->
+        :invalid
+
+      stored ->
+        stored_clean = stored |> Map.delete("signatures") |> Map.delete("unsigned")
+        submitted_clean = signed_object |> Map.delete("signatures") |> Map.delete("unsigned")
+
+        if stored_clean == submitted_clean do
+          :ok = CrossSigningKeyStore.merge_signatures(user_id, key_id, new_sigs)
+          :ok
+        else
+          :invalid
+        end
+    end
+  end
+
+  defp deep_merge_sig_map(existing, new) when is_map(existing) and is_map(new) do
+    Map.merge(existing, new, fn _signer, old_map, new_map ->
+      Map.merge(old_map || %{}, new_map || %{})
+    end)
+  end
+
+  defp deep_merge_sig_map(_existing, new) when is_map(new), do: new
+  defp deep_merge_sig_map(existing, _new), do: existing
+
+  defp put_signature_failure(failures, user_id, key_id) do
+    entry = %{"errcode" => "M_INVALID_SIGNATURE", "error" => "Signature does not match stored key"}
+    Map.update(failures, user_id, %{key_id => entry}, &Map.put(&1, key_id, entry))
+  end
+
+  # MINOR-1: caller-identity guard failure — uploading signatures for another user.
+  defp put_forbidden_failure(failures, user_id, key_id) do
+    entry = %{"errcode" => "M_FORBIDDEN", "error" => "Cannot upload signatures for another user"}
+    Map.update(failures, user_id, %{key_id => entry}, &Map.put(&1, key_id, entry))
+  end
+
+  # Builds a /keys/query cross-signing map (master_keys/self_signing_keys/user_signing_keys)
+  # from CrossSigningKeyStore.query_cross_signing/1 output, selecting the given short key.
+  defp collect_cross_signing(cross_signing, short_key) do
+    Enum.reduce(cross_signing, %{}, fn {uid, entry}, acc ->
+      case Map.get(entry, short_key) do
+        nil -> acc
+        obj -> Map.put(acc, uid, obj)
+      end
+    end)
   end
 
   # Resolves a /keys/query `device_keys` request (`%{user_id => [device_ids]}`) against
