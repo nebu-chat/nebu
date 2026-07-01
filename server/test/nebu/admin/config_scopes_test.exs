@@ -194,7 +194,10 @@ defmodule Nebu.Admin.ConfigScopesTest do
       assert conn.resp_body =~ ~r/invalid|Invalid|scope/i
     end
 
-    test "empty scope values are accepted (valid, no invalid chars) and redirect" do
+    test "empty scope values persist empty string — NOT replaced with defaults (OIDC Scopes Law)" do
+      # OIDC Scopes Law: empty scope must be stored as "" so runtime reads "" from
+      # server_config and produces ONLY "openid". Must NOT fall back to "profile email".
+      # bugfix-remove-default-scopes: remove `@scope_defaults` fallback in save_scopes/2.
       test_pid = self()
 
       Application.put_env(:nebu_http, :admin_config_scopes_writer, fn changes ->
@@ -202,9 +205,6 @@ defmodule Nebu.Admin.ConfigScopesTest do
         :ok
       end)
 
-      # Empty string contains no invalid chars — controller persists and redirects.
-      # Runtime scope_list/0 and admin_oidc_scope/0 fall back to their defaults
-      # when the DB value is empty.
       conn =
         build_admin_conn(:post, "/admin/config/scopes")
         |> Map.put(:body_params, %{
@@ -215,6 +215,12 @@ defmodule Nebu.Admin.ConfigScopesTest do
 
       assert conn.status == 302,
              "Empty scope values must redirect (valid input); got #{conn.status}"
+
+      assert_received {:scopes_written, changes}
+      assert changes["matrix_oidc_extra_scopes"] == "",
+             "Empty matrix scope must persist \"\" not \"profile email\"; got: #{inspect(changes)}"
+      assert changes["admin_oidc_extra_scopes"] == "",
+             "Empty admin scope must persist \"\" not \"profile email groups\"; got: #{inspect(changes)}"
     end
 
     test "route POST /admin/config/scopes exists (not 404/405)" do

@@ -1,37 +1,18 @@
 defmodule Nebu.Matrix.SsoScopeProfileEmailTest do
   @moduledoc """
-  RED-phase ATDD test for bug `bugfix-oidc-bootstrap-only-e2e-regressions`, AC4.
+  ATDD test originally for bug `bugfix-oidc-bootstrap-only-e2e-regressions`, AC4.
 
-  ## Background (root cause)
+  ## SUPERSEDED — bugfix-remove-default-scopes
 
-  ADR-022 reduced `Nebu.Matrix.SsoLogin`'s `@base_scopes` to `~w(openid)`. Without
-  `profile`, Dex omits the `name` claim, so the configured `oidc_user_id_claim = "name"`
-  cannot resolve and the MXID falls back to `sub` — the exact regression previously
-  fixed by `df249f8c`.
+  Bug `bugfix-remove-default-scopes` applies the OIDC Scopes Law: "default scope is
+  ONLY 'openid'; no hardcoded extra scopes." The `@default_matrix_extra_scopes` constant
+  is now `""`, so `profile`/`email` are NOT in the default scope unless the operator
+  configures them explicitly.
 
-  ## AC4 / AC5 — Matrix SSO must request `openid profile email`
-
-  `scope_list/0` (a `defp`) base becomes `~w(openid profile email)`, keeping the
-  `offline_access`-when-offline logic. The OBSERVABLE surface is the `scope` query
-  param of the 302 redirect built by `GET /_matrix/client/v3/login/sso/redirect`,
-  the only public caller of `scope_list/0`.
-
-    * online mode  → scope contains `openid profile email`, NO `offline_access`.
-    * offline mode → ADDITIONALLY contains `offline_access` (refresh-mode behavior
-      unchanged — regression guard).
-
-  RED NOW: `@base_scopes ~w(openid)`, so `"profile"`/`"email"` are absent. The
-  `openid` and offline_access assertions are already GREEN — kept as regression
-  guards that the fix does not drop them.
-
-  ## ⚠ CONFLICT — sso_login_scope_test.exs asserts the OPPOSITE
-
-  `server/test/nebu/matrix/sso_login_scope_test.exs` is a PRE-EXISTING test from the
-  old `fix-element-login` bug. It asserts the Matrix base scope is EXACTLY
-  `["openid"]` and that `"profile"`/`"email"` MUST NOT appear. This story (AC4/AC5)
-  DELIBERATELY changes the default to `openid profile email`, directly contradicting
-  that test. The dev step that implements AC4 MUST update/replace
-  `sso_login_scope_test.exs` — its assertions are now stale. (Not deleted here.)
+  This file is updated to verify the OIDC Scopes Law: without configured extra scopes,
+  `profile` and `email` must NOT appear. The `openid` and `offline_access` behavior
+  (refresh-mode) is unchanged. Operators who need `profile`/`email` must configure them
+  explicitly via the bootstrap wizard or /admin/config.
 
   ## Crash/restart — NOT APPLICABLE
 
@@ -65,6 +46,9 @@ defmodule Nebu.Matrix.SsoScopeProfileEmailTest do
       "jwks_uri" => @issuer <> "/jwks"
     })
 
+    # Isolate from server_config DB — OIDC Scopes Law: default is empty (openid only).
+    Application.put_env(:nebu_http, :matrix_oidc_extra_scopes_reader, fn -> nil end)
+
     on_exit(fn ->
       Nebu.Web.OidcTestSupport.clear()
 
@@ -72,7 +56,8 @@ defmodule Nebu.Matrix.SsoScopeProfileEmailTest do
             :admin_secret_at_rest,
             :sso_bootstrap_reader,
             :oidc_metadata_override,
-            :matrix_oidc_refresh_mode_reader
+            :matrix_oidc_refresh_mode_reader,
+            :matrix_oidc_extra_scopes_reader
           ] do
         Application.delete_env(:nebu_http, k)
       end
@@ -111,39 +96,35 @@ defmodule Nebu.Matrix.SsoScopeProfileEmailTest do
   # AC4 — Matrix SSO base scope is `openid profile email`
   # ════════════════════════════════════════════════════════════════════════════
 
-  describe "AC4 — Matrix SSO requests profile + email" do
-    test "online mode: scope contains openid profile email and NO offline_access" do
+  describe "AC4 — Matrix SSO default scope is openid only (OIDC Scopes Law)" do
+    test "online mode: scope is openid only, no profile/email/offline_access" do
+      # bugfix-remove-default-scopes: OIDC Scopes Law. profile/email are NOT defaults.
       set_mode("online")
       scopes = scope_params()
 
-      # Already-green guard.
       assert "openid" in scopes
 
-      # RED NOW: @base_scopes is ~w(openid), so profile/email are absent.
-      assert "profile" in scopes,
-             "Matrix SSO must request `profile` so the `name` claim is present; got: #{inspect(scopes)}"
+      refute "profile" in scopes,
+             "profile must NOT be in default scope (OIDC Scopes Law); got: #{inspect(scopes)}"
 
-      assert "email" in scopes,
-             "Matrix SSO must request `email`; got: #{inspect(scopes)}"
+      refute "email" in scopes,
+             "email must NOT be in default scope (OIDC Scopes Law); got: #{inspect(scopes)}"
 
-      # online mode never adds offline_access (already-green guard).
       refute "offline_access" in scopes
     end
 
-    test "offline mode: scope contains openid profile email AND offline_access" do
+    test "offline mode: scope is openid + offline_access only, no profile/email" do
       set_mode("offline")
       scopes = scope_params()
 
       assert "openid" in scopes
 
-      # RED NOW: profile/email absent under the reduced base scope.
-      assert "profile" in scopes,
-             "offline mode must still request `profile`; got: #{inspect(scopes)}"
+      refute "profile" in scopes,
+             "profile must NOT be in default scope (OIDC Scopes Law); got: #{inspect(scopes)}"
 
-      assert "email" in scopes,
-             "offline mode must still request `email`; got: #{inspect(scopes)}"
+      refute "email" in scopes,
+             "email must NOT be in default scope (OIDC Scopes Law); got: #{inspect(scopes)}"
 
-      # Regression guard — refresh-mode behavior unchanged (already-green).
       assert "offline_access" in scopes,
              "offline mode must still include offline_access; got: #{inspect(scopes)}"
     end

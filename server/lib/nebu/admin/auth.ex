@@ -914,24 +914,17 @@ defmodule Nebu.Admin.Auth do
   # oidc-refresh-mode-config, AC3): it is requested iff the server_config key
   # `admin_oidc_refresh_mode` resolves to "offline". DEFAULT is "online" (no forced
   # offline_access → no special IdP approval needed; on Keycloak a session-bound RT
-  # still enables silent refresh). `openid` stays MANDATORY in every mode. ADR-022:
-  # the base scope is fixed ("openid profile email") — there is no NEBU_ADMIN_OIDC_SCOPE
-  # env; finer-grained scopes are an IdP-client concern. The refresh mode is read LIVE
-  # so a runtime change via /admin/config applies without a redeploy.
+  # still enables silent refresh). `openid` stays MANDATORY in every mode.
   #
-  # Test seam (mirrors OidcClaimCache's :oidc_claim_reader): a 0-arity fun under
+  # OIDC Scopes Law (bugfix-remove-default-scopes): extra scopes default to EMPTY.
+  # Do NOT add a fallback default — "openid" only when server_config has no value.
+  # All additional scopes come exclusively from server_config (ADR-022).
+  #
+  # Test seam: a 0-arity fun under :admin_oidc_extra_scopes_reader injects extra
+  # scopes; default reads server_config. A 0-arity fun under
   # :admin_oidc_refresh_mode_reader injects the mode; default reads server_config.
-  @default_admin_extra_scopes "profile email groups"
 
   defp admin_oidc_scope do
-    # oidc-bootstrap-only-config (ADR-022): no NEBU_ADMIN_OIDC_SCOPE env. The operator
-    # login requests scopes from server_config (configurable-oidc-scopes); finer-grained
-    # scopes are an IdP client concern.
-    #
-    # oidc-bootstrap-only-e2e-regressions (AC3): `groups` is REQUIRED in the default.
-    # Dex only releases the `groups` claim when the `groups` scope is requested; without
-    # it the bootstrap select-claim page renders no instance_admin option and the wizard
-    # cannot complete. Operators who remove `groups` lose group-based admin assignment.
     extra = admin_extra_scopes()
     prefix = if admin_refresh_mode() == "offline", do: ["openid", "offline_access"], else: ["openid"]
 
@@ -951,7 +944,7 @@ defmodule Nebu.Admin.Auth do
 
     case reader.() do
       s when is_binary(s) and s != "" -> s
-      _ -> @default_admin_extra_scopes
+      _ -> ""
     end
   end
 
@@ -961,10 +954,10 @@ defmodule Nebu.Admin.Auth do
     if running?(Nebu.Repo) do
       case Ecto.Adapters.SQL.query(Nebu.Repo, @sql_admin_extra_scopes, []) do
         {:ok, %{rows: [[value]]}} when is_binary(value) -> value
-        _ -> @default_admin_extra_scopes
+        _ -> ""
       end
     else
-      @default_admin_extra_scopes
+      ""
     end
   end
 

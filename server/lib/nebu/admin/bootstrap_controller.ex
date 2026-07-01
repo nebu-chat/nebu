@@ -203,10 +203,7 @@ defmodule Nebu.Admin.BootstrapController do
 
   # ── Claim mapping persistence ─────────────────────────────────────────────────
 
-  @scope_defaults %{
-    "matrix_oidc_extra_scopes" => "profile email",
-    "admin_oidc_extra_scopes" => "profile email groups"
-  }
+  @scope_keys ~w(matrix_oidc_extra_scopes admin_oidc_extra_scopes)
 
   defp save_claim_mapping(params) do
     Enum.each(@default_claim_mapping, fn {key, default} ->
@@ -221,14 +218,15 @@ defmodule Nebu.Admin.BootstrapController do
 
     # Persist OIDC scope values (configurable-oidc-scopes, AC6).
     # Validation already ran in save_step3/2; here we just store the (trimmed) values.
-    Enum.each(@scope_defaults, fn {key, default} ->
+    # An empty string is valid (runtime produces 'openid' only).
+    Enum.each(@scope_keys, fn key ->
       value = String.trim(params[key] || "")
-      put_draft(key, if(value == "", do: default, else: value))
+      put_draft(key, value)
     end)
   end
 
   # Validates that each space-separated scope token contains only characters in
-  # [a-zA-Z0-9_:.-]. An empty string is valid (runtime will fall back to defaults).
+  # [a-zA-Z0-9_:.-]. An empty string is valid (runtime produces 'openid' only).
   defp validate_scope_string(scope_string) do
     scopes = String.split(scope_string, " ", trim: true)
 

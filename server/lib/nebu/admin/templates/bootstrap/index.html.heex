@@ -136,8 +136,8 @@
 
     <%!-- OIDC scopes (story configurable-oidc-scopes, AC2/AC6). Two text inputs so the
           operator can configure which scopes are requested per client at bootstrap.
-          openid is always included. Defaults: Matrix = "profile email",
-          Admin = "profile email groups" (groups required for Dex claim release). --%>
+          openid is always included. Both fields default to empty (OIDC Scopes Law:
+          no extra scopes unless explicitly configured). --%>
     <fieldset class="mt-4 border border-base-300 rounded p-3">
       <legend class="label-text font-semibold px-1">OIDC scopes</legend>
 
@@ -147,7 +147,7 @@
           type="text"
           name="matrix_oidc_extra_scopes"
           aria-label="Matrix client scopes"
-          value={@draft["matrix_oidc_extra_scopes"] || "profile email"}
+          value={@draft["matrix_oidc_extra_scopes"] || ""}
           placeholder="profile email"
           class="input input-bordered"
         />
@@ -162,7 +162,7 @@
           type="text"
           name="admin_oidc_extra_scopes"
           aria-label="Admin client scopes"
-          value={@draft["admin_oidc_extra_scopes"] || "profile email groups"}
+          value={@draft["admin_oidc_extra_scopes"] || ""}
           placeholder="profile email groups"
           class="input input-bordered"
         />

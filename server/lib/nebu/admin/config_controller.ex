@@ -21,10 +21,6 @@ defmodule Nebu.Admin.ConfigController do
   @refresh_mode_keys ["matrix_oidc_refresh_mode", "admin_oidc_refresh_mode"]
   @valid_modes ["offline", "online"]
   @scope_keys ["matrix_oidc_extra_scopes", "admin_oidc_extra_scopes"]
-  @scope_defaults %{
-    "matrix_oidc_extra_scopes" => "profile email",
-    "admin_oidc_extra_scopes" => "profile email groups"
-  }
 
   def index(conn, _params) do
     render_config(conn)
@@ -78,8 +74,7 @@ defmodule Nebu.Admin.ConfigController do
         @scope_keys
         |> Map.new(fn key ->
           raw = String.trim(params[key] || "")
-          value = if raw == "", do: @scope_defaults[key], else: raw
-          {key, value}
+          {key, raw}
         end)
 
       case persist_scopes(changes) do

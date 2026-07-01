@@ -5,18 +5,17 @@ defmodule Nebu.Matrix.SsoScopeModeTest do
 
   ## What is under test
 
-  `SsoLogin.@base_scopes` is `~w(openid profile email)` (story
-  `oidc-bootstrap-only-e2e-regressions`, AC4 — supersedes the `fix-element-login`
-  `~w(openid)` minimal scope: Dex omits `name` without `profile`, regressing the MXID
-  to `sub`). The `offline_access` scope is configurable per the `server_config` key
+  `SsoLogin.@default_matrix_extra_scopes` is `""` (OIDC Scopes Law — `bugfix-remove-default-scopes`).
+  The base scope is `openid` only; operators configure extra scopes via the bootstrap wizard or
+  /admin/config. The `offline_access` scope is configurable per the `server_config` key
   `matrix_oidc_refresh_mode` (`offline` | `online`), read LIVE on each
   login-start so a runtime change applies without a redeploy:
 
     * `matrix_oidc_refresh_mode = offline` (or unset → default offline) →
       scope INCLUDES `offline_access`.
     * `matrix_oidc_refresh_mode = online` → scope EXCLUDES `offline_access`
-      (just the `openid profile email` base).
-    * `openid`, `profile`, and `email` are always present (the fixed ADR-022 default).
+      (just `openid`; no profile/email in default).
+    * `openid` is always present. `profile`/`email` are NOT hardcoded defaults.
       This test focuses on the `offline_access` refresh-mode toggle.
 
   ## Public surface (no testing of privates)
@@ -89,6 +88,9 @@ defmodule Nebu.Matrix.SsoScopeModeTest do
       "jwks_uri" => @issuer <> "/jwks"
     })
 
+    # Isolate from server_config DB — OIDC Scopes Law: default is empty (openid only).
+    Application.put_env(:nebu_http, :matrix_oidc_extra_scopes_reader, fn -> nil end)
+
     on_exit(fn ->
       Nebu.Web.OidcTestSupport.clear()
 
@@ -96,7 +98,8 @@ defmodule Nebu.Matrix.SsoScopeModeTest do
             :admin_secret_at_rest,
             :sso_bootstrap_reader,
             :oidc_metadata_override,
-            :matrix_oidc_refresh_mode_reader
+            :matrix_oidc_refresh_mode_reader,
+            :matrix_oidc_extra_scopes_reader
           ] do
         Application.delete_env(:nebu_http, k)
       end
@@ -144,10 +147,10 @@ defmodule Nebu.Matrix.SsoScopeModeTest do
       scopes = scope_params()
       assert "openid" in scopes
       refute "offline_access" in scopes
-      # oidc-bootstrap-only-e2e-regressions (AC4): profile/email are now part of the fixed
-      # base scope (supersedes fix-element-login). Online mode only toggles offline_access.
-      assert "profile" in scopes
-      assert "email" in scopes
+      # bugfix-remove-default-scopes: OIDC Scopes Law — profile/email are NOT hardcoded
+      # defaults. Online mode only toggles offline_access; base scope is openid only.
+      refute "profile" in scopes
+      refute "email" in scopes
     end
 
     test "unset mode → DEFAULTS to offline (includes offline_access) — AC1/AC7" do

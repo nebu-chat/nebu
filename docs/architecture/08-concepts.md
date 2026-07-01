@@ -128,8 +128,9 @@ at-rest secret on use. The admin `/admin/callback` redirect_uri is server-derive
 + `:admin_session_secure` (never from request headers).
 
 **OIDC scopes (ADR-022):** the admin/bootstrap authorization request asks for `openid` + the
-operator-configured extra scopes (default: `profile email groups`); the Matrix SSO authorization
-request asks for `openid` + operator-configured extra scopes (default: `profile email`). Both add
+operator-configured extra scopes (empty by default — no extra scopes unless the operator configured
+them via Bootstrap Wizard or `/admin/config`); the Matrix SSO authorization request asks for
+`openid` + operator-configured extra scopes (same: empty by default). Both add
 `offline_access` when their configured refresh mode is `"offline"` (read live from `server_config`
 via the `:matrix_oidc_refresh_mode_reader` / `admin_oidc_refresh_mode` seams). `openid` is always
 mandatory (cannot be removed); all other scopes are **operator-configurable** via the Bootstrap
@@ -152,14 +153,17 @@ loader when set, otherwise return the static fields. All usages in `sso.go` (`Ge
 `GetSSOCallback`) and `login.go` (`PostLogin` verifier) call these methods — the static-field
 fallback preserves backward compatibility for test setups and deployments without a Bootstrap DB.
 
-**Deployment-specific scope defaults (Bootstrap Wizard, no env var):**
+**OIDC Scopes Law (bugfix-remove-default-scopes):** extra scopes default to `""` (empty). When
+`server_config` has no value (nil or missing row), the scope is `openid` only — no `profile`,
+`email`, or `groups` defaults. Operators configure scopes explicitly via the Bootstrap Wizard or
+`/admin/config`; only then are the configured scopes appended to `openid`.
 
-| Client | Default extra scopes | Key in `server_config` |
+| Client | Runtime key in `server_config` | Default (no row) |
 |---|---|---|
-| Matrix SSO | `profile email` | `matrix_oidc_extra_scopes` |
-| Admin login | `profile email groups` | `admin_oidc_extra_scopes` |
+| Matrix SSO | `matrix_oidc_extra_scopes` | `""` (openid only) |
+| Admin login | `admin_oidc_extra_scopes` | `""` (openid only) |
 
-`groups` in the admin default is required for Dex to release the groups claim used by `admin_group_claim` matching. Operators who remove it lose group-based admin assignment. These defaults apply on first-use (no row in `server_config`); Bootstrap Wizard writes explicit values; `/admin/config` allows runtime update without redeploy.
+Bootstrap Wizard writes explicit values; `/admin/config` allows runtime update without redeploy.
 
 **Configurable OIDC Refresh Mode (Story oidc-refresh-mode-config):**
 
@@ -191,8 +195,8 @@ client, set in the Bootstrap Wizard (Step 3, before refresh-mode) and changeable
 
 | Key | Default | Scope builder |
 |---|---|---|
-| `matrix_oidc_extra_scopes` | `profile email` | `Nebu.Matrix.SsoLogin.scope_list/0` |
-| `admin_oidc_extra_scopes` | `profile email groups` | `Nebu.Admin.Auth.admin_oidc_scope/0` |
+| `matrix_oidc_extra_scopes` | `""` (empty) | `Nebu.Matrix.SsoLogin.scope_list/0` |
+| `admin_oidc_extra_scopes` | `""` (empty) | `Nebu.Admin.Auth.admin_oidc_scope/0` |
 
 - **`openid` is always injected** by the scope builders — it cannot be removed by operator config.
 - `offline_access` is still controlled by `{matrix,admin}_oidc_refresh_mode` (unchanged).

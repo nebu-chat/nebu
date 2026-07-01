@@ -29,13 +29,12 @@ defmodule Nebu.Matrix.SsoLogin do
 
   The SINGLE OIDC client's id/secret come SOLELY from the Bootstrap DB
   (`server_config`); the secret is stored AES-256-GCM encrypted at rest and decrypted
-  on use. There is no `NEBU_OIDC_*` env config path. The scope list is
-  `openid profile email` (plus `offline_access` when the configured refresh mode is
-  offline). `profile`/`email` are requested so the IdP releases the `name`/`email`
-  claims — without `profile`, Dex omits `name`, the configured `oidc_user_id_claim =
-  "name"` cannot resolve, and the MXID regresses to the opaque `sub`
-  (story oidc-bootstrap-only-e2e-regressions, AC4/AC5). This supersedes the earlier
-  `fix-element-login` `~w(openid)` minimal-scope decision.
+  on use. There is no `NEBU_OIDC_*` env config path.
+
+  OIDC Scopes Law (bugfix-remove-default-scopes): the base scope is always `openid`;
+  extra scopes come exclusively from `server_config.matrix_oidc_extra_scopes`.
+  When that key is absent or empty, the scope is `openid` only (no profile/email
+  defaults). `offline_access` is added when `matrix_oidc_refresh_mode` is "offline".
   """
   import Plug.Conn
   import Nebu.Matrix.Http, only: [error: 4]
@@ -409,26 +408,20 @@ defmodule Nebu.Matrix.SsoLogin do
     end
   end
 
-  # ── scope list (openid [+offline_access]) ─────────────────────────────────────
+  # ── scope list (openid [+extra_scopes] [+offline_access]) ───────────────────
   #
-  # oidc-bootstrap-only-config (ADR-022): there is no NEBU_OIDC_EXTRA_SCOPES env var.
-  # The base scope set is a FIXED default — `openid profile email`.
-  #
-  # oidc-bootstrap-only-e2e-regressions (AC4/AC5): `profile` and `email` are REQUIRED.
-  # Dex omits the `name` claim unless `profile` is requested; without `name` the
-  # configured `oidc_user_id_claim = "name"` cannot resolve and the MXID falls back to
-  # the opaque `sub` (the regression `df249f8c` originally fixed). This supersedes the
-  # earlier `fix-element-login` `~w(openid)` minimal-scope decision.
+  # OIDC Scopes Law (bugfix-remove-default-scopes): default extra scopes are EMPTY.
+  # "openid" is always included; all additional scopes come from server_config only.
+  # Do NOT add a fallback default here — that would violate the law.
   #
   # `offline_access` is included iff the server_config key `matrix_oidc_refresh_mode`
   # resolves to "offline" (story oidc-refresh-mode-config, AC2). The mode is read LIVE
   # on each login-start (low frequency) so a runtime change via /admin/config applies
   # without a redeploy. Absent / any non-"online" value → DEFAULT "offline".
   #
-  # Test seam (mirrors OidcClaimCache's :oidc_claim_reader): a 0-arity fun under
+  # Test seam: a 0-arity fun under :matrix_oidc_extra_scopes_reader injects extra
+  # scopes; default reads server_config. A 0-arity fun under
   # :matrix_oidc_refresh_mode_reader injects the mode; default reads server_config.
-
-  @default_matrix_extra_scopes "profile email"
 
   @sql_matrix_refresh_mode "SELECT value FROM server_config WHERE key = 'matrix_oidc_refresh_mode' LIMIT 1"
   @sql_matrix_extra_scopes "SELECT value FROM server_config WHERE key = 'matrix_oidc_extra_scopes' LIMIT 1"
@@ -454,7 +447,7 @@ defmodule Nebu.Matrix.SsoLogin do
 
     case reader.() do
       s when is_binary(s) and s != "" -> s
-      _ -> @default_matrix_extra_scopes
+      _ -> ""
     end
   end
 
@@ -462,10 +455,10 @@ defmodule Nebu.Matrix.SsoLogin do
     if running?(Nebu.Repo) do
       case Ecto.Adapters.SQL.query(Nebu.Repo, @sql_matrix_extra_scopes, []) do
         {:ok, %{rows: [[value]]}} when is_binary(value) -> value
-        _ -> @default_matrix_extra_scopes
+        _ -> ""
       end
     else
-      @default_matrix_extra_scopes
+      ""
     end
   end
 

@@ -175,9 +175,12 @@ defmodule Nebu.Admin.BootstrapLiveTest do
   # AC12-2 — Default values pre-filled
   # ════════════════════════════════════════════════════════════════════════════
 
-  describe "AC12-2: scope fields pre-filled with correct defaults" do
-    test "matrix_oidc_extra_scopes pre-filled with 'profile email'",
+  describe "AC12-2: scope fields must NOT be pre-filled (OIDC Scopes Law — empty by default)" do
+    test "matrix_oidc_extra_scopes must be empty — NOT pre-filled with 'profile email'",
          %{store: store} do
+      # OIDC Scopes Law: default scope is ONLY "openid". The wizard must not pre-fill
+      # extra scopes — the operator must explicitly choose what they want.
+      # bugfix-remove-default-scopes: remove `|| "profile email"` from template value attr.
       seed_step2_draft(store)
 
       conn =
@@ -187,13 +190,18 @@ defmodule Nebu.Admin.BootstrapLiveTest do
       assert conn.status == 200
       html = conn.resp_body
 
-      # The default value "profile email" must appear as the input value.
-      assert html =~ "profile email",
-             "matrix_oidc_extra_scopes must be pre-filled with 'profile email'; got:\n#{html}"
+      refute html =~ ~s(value="profile email"),
+             "matrix_oidc_extra_scopes must NOT be pre-filled with 'profile email' (OIDC Scopes Law violation); got:\n#{html}"
+
+      assert html =~ ~s(name="matrix_oidc_extra_scopes" aria-label="Matrix client scopes" value=""),
+             "matrix_oidc_extra_scopes value attr must be empty (\"\") after the fix; got:\n#{html}"
     end
 
-    test "admin_oidc_extra_scopes pre-filled with 'profile email groups'",
+    test "admin_oidc_extra_scopes must be empty — NOT pre-filled with 'profile email groups'",
          %{store: store} do
+      # OIDC Scopes Law: default scope is ONLY "openid". The wizard must not pre-fill
+      # extra scopes — the operator must explicitly choose what they want.
+      # bugfix-remove-default-scopes: remove `|| "profile email groups"` from template value attr.
       seed_step2_draft(store)
 
       conn =
@@ -203,8 +211,11 @@ defmodule Nebu.Admin.BootstrapLiveTest do
       assert conn.status == 200
       html = conn.resp_body
 
-      assert html =~ "profile email groups",
-             "admin_oidc_extra_scopes must be pre-filled with 'profile email groups'; got:\n#{html}"
+      refute html =~ ~s(value="profile email groups"),
+             "admin_oidc_extra_scopes must NOT be pre-filled with 'profile email groups' (OIDC Scopes Law violation); got:\n#{html}"
+
+      assert html =~ ~s(name="admin_oidc_extra_scopes" aria-label="Admin client scopes" value=""),
+             "admin_oidc_extra_scopes value attr must be empty (\"\") after the fix; got:\n#{html}"
     end
   end
 
@@ -417,6 +428,35 @@ defmodule Nebu.Admin.BootstrapLiveTest do
 
       refute Map.has_key?(draft, "matrix_oidc_extra_scopes"),
              "Invalid scope must NOT be persisted; got draft: #{inspect(draft)}"
+    end
+
+    test "empty scope fields persist empty string — NOT replaced with defaults (OIDC Scopes Law)",
+         %{store: store} do
+      # OIDC Scopes Law: when the operator submits empty scope fields, the draft must
+      # store "" (no extra scopes), NOT "profile email" or "profile email groups".
+      # bugfix-remove-default-scopes: remove @scope_defaults fallback in save_claim_mapping/1.
+      seed_step2_draft(store)
+
+      conn =
+        build_conn(:post, "/admin/bootstrap/step/3")
+        |> Map.put(:body_params, %{
+          "matrix_oidc_extra_scopes" => "",
+          "admin_oidc_extra_scopes" => "",
+          "matrix_oidc_refresh_mode" => "offline",
+          "admin_oidc_refresh_mode" => "online"
+        })
+        |> endpoint_call()
+
+      assert conn.status == 302,
+             "Empty scope fields must be accepted and redirect; got #{conn.status}"
+
+      draft = Agent.get(store, & &1.draft)
+
+      assert draft["matrix_oidc_extra_scopes"] == "",
+             "Empty matrix scope must persist \"\" not \"profile email\"; got draft: #{inspect(draft)}"
+
+      assert draft["admin_oidc_extra_scopes"] == "",
+             "Empty admin scope must persist \"\" not \"profile email groups\"; got draft: #{inspect(draft)}"
     end
   end
 end

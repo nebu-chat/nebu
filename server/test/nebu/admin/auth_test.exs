@@ -9,8 +9,8 @@ defmodule Nebu.Admin.AuthTest do
     1. Read `admin_oidc_extra_scopes` from `server_config` (via the
        `:admin_oidc_extra_scopes_reader` seam — mirrors `:admin_oidc_refresh_mode_reader`).
     2. Always include `"openid"` (OIDC-mandatory).
-    3. Append the extra scopes from server_config (default `"profile email groups"` if
-       NULL/empty).
+    3. Append the extra scopes from server_config (default `""` if NULL/empty —
+       OIDC Scopes Law: only "openid").
     4. Add `"offline_access"` only if `admin_refresh_mode() == "offline"`.
     5. Return space-separated, de-duplicated, filtered string.
 
@@ -107,13 +107,13 @@ defmodule Nebu.Admin.AuthTest do
   end
 
   # ════════════════════════════════════════════════════════════════════════════
-  # AC11-5 — No extra scopes → returns "openid profile email groups" (admin default)
+  # AC11-5 — No extra scopes → returns "openid" only (OIDC Scopes Law: default is ONLY openid)
   # ════════════════════════════════════════════════════════════════════════════
 
-  describe "AC11-5: no extra scopes configured → default openid profile email groups (online)" do
-    test "nil extra scopes + online mode → openid profile email groups, no offline_access" do
-      # The :admin_oidc_extra_scopes_reader seam does NOT exist today → RED.
-      # After implementation: nil/missing extra scopes fall back to "profile email groups".
+  describe "AC11-5: no extra scopes configured → openid only (OIDC Scopes Law)" do
+    test "nil extra scopes + online mode → openid only, no profile/email/groups/offline_access" do
+      # OIDC Scopes Law: default scope is ONLY "openid". No fallback to "profile email groups".
+      # bugfix-remove-default-scopes: @default_admin_extra_scopes must be "" not "profile email groups".
       set_extra_scopes(nil)
       set_mode("online")
 
@@ -122,29 +122,30 @@ defmodule Nebu.Admin.AuthTest do
       assert "openid" in scopes,
              "openid must always be present; got: #{inspect(scopes)}"
 
-      assert "profile" in scopes,
-             "profile must be in default admin extra scopes; got: #{inspect(scopes)}"
+      refute "profile" in scopes,
+             "profile must NOT be in default scopes (OIDC Scopes Law violation); got: #{inspect(scopes)}"
 
-      assert "email" in scopes,
-             "email must be in default admin extra scopes; got: #{inspect(scopes)}"
+      refute "email" in scopes,
+             "email must NOT be in default scopes (OIDC Scopes Law violation); got: #{inspect(scopes)}"
 
-      assert "groups" in scopes,
-             "groups must be in default admin extra scopes (required for Dex claim release); got: #{inspect(scopes)}"
+      refute "groups" in scopes,
+             "groups must NOT be in default scopes (OIDC Scopes Law violation); got: #{inspect(scopes)}"
 
       refute "offline_access" in scopes,
              "online mode must not add offline_access; got: #{inspect(scopes)}"
     end
 
-    test "empty string extra scopes + online mode → defaults to openid profile email groups" do
+    test "empty string extra scopes + online mode → openid only, no fallback to profile email groups" do
+      # OIDC Scopes Law: empty string means no extra scopes — do not fall back to defaults.
       set_extra_scopes("")
       set_mode("online")
 
       scopes = scope_params()
 
       assert "openid" in scopes
-      assert "profile" in scopes
-      assert "email" in scopes
-      assert "groups" in scopes
+      refute "profile" in scopes
+      refute "email" in scopes
+      refute "groups" in scopes
       refute "offline_access" in scopes
     end
   end
@@ -205,16 +206,18 @@ defmodule Nebu.Admin.AuthTest do
              "offline mode must include offline_access; got: #{inspect(scopes)}"
     end
 
-    test "offline mode with nil extra scopes uses default + offline_access" do
+    test "offline mode with nil extra scopes → openid + offline_access only (no defaults)" do
+      # OIDC Scopes Law: nil extra scopes must NOT fall back to "profile email groups".
+      # Only "openid" + "offline_access" for offline mode when no custom scopes set.
       set_extra_scopes(nil)
       set_mode("offline")
 
       scopes = scope_params()
 
       assert "openid" in scopes
-      assert "profile" in scopes
-      assert "email" in scopes
-      assert "groups" in scopes
+      refute "profile" in scopes
+      refute "email" in scopes
+      refute "groups" in scopes
       assert "offline_access" in scopes
     end
   end
