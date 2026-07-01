@@ -10,7 +10,7 @@ defmodule Nebu.Matrix.SsoLoginTest do
        `:matrix_oidc_extra_scopes_reader` seam — mirrors the existing
        `:matrix_oidc_refresh_mode_reader` pattern).
     2. Always include `"openid"` (OIDC-mandatory).
-    3. Append the extra scopes (default `"profile email"` if NULL/empty).
+    3. Append the extra scopes (default `""` if NULL/empty — OIDC Scopes Law: only "openid").
     4. Add `"offline_access"` iff `matrix_refresh_mode() == "offline"`.
     5. Return space-separated, de-duplicated, filtered string.
 
@@ -114,13 +114,13 @@ defmodule Nebu.Matrix.SsoLoginTest do
   end
 
   # ════════════════════════════════════════════════════════════════════════════
-  # AC11-1 — No extra scopes → returns "openid profile email" (online mode)
+  # AC11-1 — No extra scopes → returns "openid" only (OIDC Scopes Law: default is ONLY openid)
   # ════════════════════════════════════════════════════════════════════════════
 
-  describe "AC11-1: no extra scopes configured → default openid profile email (online)" do
-    test "nil extra scopes + online mode → openid profile email, no offline_access" do
-      # The :matrix_oidc_extra_scopes_reader seam does NOT exist today → RED.
-      # After implementation: nil/missing scopes fall back to "profile email" default.
+  describe "AC11-1: no extra scopes configured → openid only (OIDC Scopes Law)" do
+    test "nil extra scopes + online mode → openid only, no profile/email/offline_access" do
+      # OIDC Scopes Law: default scope is ONLY "openid". No fallback to "profile email".
+      # bugfix-remove-default-scopes: @default_matrix_extra_scopes must be "" not "profile email".
       set_extra_scopes(nil)
       set_mode("online")
 
@@ -129,25 +129,26 @@ defmodule Nebu.Matrix.SsoLoginTest do
       assert "openid" in scopes,
              "openid must always be present; got: #{inspect(scopes)}"
 
-      assert "profile" in scopes,
-             "profile must be in default extra scopes; got: #{inspect(scopes)}"
+      refute "profile" in scopes,
+             "profile must NOT be in default scopes (OIDC Scopes Law violation); got: #{inspect(scopes)}"
 
-      assert "email" in scopes,
-             "email must be in default extra scopes; got: #{inspect(scopes)}"
+      refute "email" in scopes,
+             "email must NOT be in default scopes (OIDC Scopes Law violation); got: #{inspect(scopes)}"
 
       refute "offline_access" in scopes,
              "online mode must not add offline_access; got: #{inspect(scopes)}"
     end
 
-    test "empty string extra scopes + online mode → defaults to openid profile email" do
+    test "empty string extra scopes + online mode → openid only, no fallback to profile email" do
+      # OIDC Scopes Law: empty string means no extra scopes — do not fall back to defaults.
       set_extra_scopes("")
       set_mode("online")
 
       scopes = scope_params()
 
       assert "openid" in scopes
-      assert "profile" in scopes
-      assert "email" in scopes
+      refute "profile" in scopes
+      refute "email" in scopes
       refute "offline_access" in scopes
     end
   end
@@ -205,15 +206,17 @@ defmodule Nebu.Matrix.SsoLoginTest do
              "offline mode must include offline_access; got: #{inspect(scopes)}"
     end
 
-    test "offline mode with nil extra scopes includes offline_access and defaults" do
+    test "offline mode with nil extra scopes → openid + offline_access only (no defaults)" do
+      # OIDC Scopes Law: nil extra scopes must NOT fall back to "profile email".
+      # Only "openid" + "offline_access" for offline mode when no custom scopes set.
       set_extra_scopes(nil)
       set_mode("offline")
 
       scopes = scope_params()
 
       assert "openid" in scopes
-      assert "profile" in scopes
-      assert "email" in scopes
+      refute "profile" in scopes
+      refute "email" in scopes
       assert "offline_access" in scopes
     end
   end

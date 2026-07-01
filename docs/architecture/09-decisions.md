@@ -145,12 +145,13 @@ approval). IdP caveat: **Dex** issues a refresh token only when `offline_access`
 
 **Configurable OIDC extra scopes (Story configurable-oidc-scopes):** which scopes Nebu requests
 beyond `openid` is now **operator-configurable per client** via Bootstrap Wizard and `/admin/config`.
-Two `server_config` keys — `matrix_oidc_extra_scopes` (default `profile email`) and
-`admin_oidc_extra_scopes` (default `profile email groups`) — control it. `openid` is always injected
-by the scope builders and cannot be removed. Scope tokens are whitelist-validated (`[a-zA-Z0-9_:.-]+`,
-`\z`-anchored) at all three write boundaries: wizard save, config-page POST, and bootstrap promotion.
-Migration `000013` extends the `config_update_mutable` RLS policy. This replaces the former
-`NEBU_OIDC_EXTRA_SCOPES` env approach (removed by ADR-022).
+Two `server_config` keys — `matrix_oidc_extra_scopes` and `admin_oidc_extra_scopes` — control it.
+Both default to `""` (empty): when no row exists, the scope is `openid` only (OIDC Scopes Law,
+bugfix-remove-default-scopes). `openid` is always injected by the scope builders and cannot be
+removed. Scope tokens are whitelist-validated (`[a-zA-Z0-9_:.-]+`, `\z`-anchored) at all three
+write boundaries: wizard save, config-page POST, and bootstrap promotion. Migration `000013`
+extends the `config_update_mutable` RLS policy. This replaces the former `NEBU_OIDC_EXTRA_SCOPES`
+env approach (removed by ADR-022).
 
 ## Matrix Session Storage Pattern (Story oidc-session-refresh)
 

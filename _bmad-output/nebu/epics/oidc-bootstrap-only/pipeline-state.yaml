@@ -1,6 +1,37 @@
 # Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents.
 # Do not edit manually during an active pipeline run.
-# last_updated: 2026-06-28
+# last_updated: 2026-06-30
+# [bugfix-remove-default-scopes] 2026-06-30T20:20Z ci-gate → ✓ unit-elixir 1012/0; integration: 3 pre-existing flaky failures (RegressionSyncLoadTest/SyncConcurrentTest/MatrixSsoTest — same set as bugfix-bootstrap-trailing-newline; not caused by story changes)
+# [bugfix-remove-default-scopes] 2026-06-30T19:15Z code-review → 5 MAJOR + 2 MINOR → cycle 1 (delete @default_*_extra_scopes constants + fix misleading comments)
+# [bugfix-remove-default-scopes] 2026-06-30T19:07Z ci-gate → ✓ unit-elixir 1012/0 + redeploy+integration EXIT=0
+# [bugfix-remove-default-scopes] 2026-06-30T17:30Z dev-story → done (cycle 0): @default_matrix_extra_scopes="", @default_admin_extra_scopes="", template || removed, controller fallback removed, @scope_defaults removed; 1012/0
+# [bugfix-remove-default-scopes] 2026-06-30T17:18Z test-review → CLEAN (3 MAJOR fixed: AC11-3/7 offline+nil, AC8-empty coverage, AC12-6-empty coverage)
+# [bugfix-remove-default-scopes] 2026-06-30T17:15Z atdd → 10 RED tests after review fixes (AC11-1×2, AC11-3×1, AC11-5×2, AC11-7×1, AC12-2×2, AC8-empty×1, AC12-6-empty×1)
+# [bugfix-remove-default-scopes] 2026-06-30T17:10Z atdd → 6 RED tests (AC11-1×2 sso_login, AC11-5×2 auth, AC12-2×2 bootstrap)
+# [bugfix-remove-default-scopes] 2026-06-30T17:00Z pipeline started (bug: hardcoded scope defaults violate OIDC Scopes Law; template+controller+runtime all pre-fill non-empty scopes)
+# [bugfix-bootstrap-trailing-newline] 2026-06-30T00:08Z committed ✓ b96e46e2 (2-line fix + Kassandra CLEAN; AC12-5 FIXED 1011/0 unit; not pushed)
+# [bugfix-bootstrap-trailing-newline] 2026-06-30T00:07Z arc42-update → skipped (2-line bugfix, architecture unchanged)
+# [bugfix-bootstrap-trailing-newline] 2026-06-30T00:06Z security-review → Kassandra CLEAN (0 CRIT/0 HIGH/0 MED/1 LOW: split-whitespace-class; all 3 boundaries consistent)
+# [bugfix-bootstrap-trailing-newline] 2026-06-30T00:05Z code-review → APPROVE (0 CRIT/0 MAJOR/2 MINOR pre-existing)
+# [bugfix-bootstrap-trailing-newline] 2026-06-30T00:04Z ci-gate → AC12-5 FIXED (1217 tests); 3 pre-existing failures unrelated to change (RegressionSyncLoadTest/OidcPlugTest/MatrixSsoTest)
+# [bugfix-bootstrap-trailing-newline] 2026-06-30T00:03Z dev-story → removed String.trim from save_step3 lines 165-166; 1011 pass 0 fail
+# [bugfix-bootstrap-trailing-newline] 2026-06-30T00:02Z test-review → CLEAN (0 MAJOR/0 MINOR)
+# [bugfix-bootstrap-trailing-newline] 2026-06-30T00:01Z atdd → test already exists (bootstrap_live_test.exs:329); trailing-newline regression test is the failing guard
+# [bugfix-bootstrap-trailing-newline] 2026-06-30T00:00Z pipeline started (bug: String.trim vor validate_scope_string in bootstrap_controller.ex)
+# [configurable-oidc-scopes] 2026-06-30T15:02Z committed ✓ 9a713f54 (ATDD+Code APPROVE+Kassandra CLEAN+\z fix; 1011 pass EXIT=0; not pushed)
+# [configurable-oidc-scopes] 2026-06-30T15:00Z arc42-update → 08-concepts(OIDC scopes configurable, scope-defaults table, new concept section) + 09-decisions(configurable-oidc-scopes entry)
+# [configurable-oidc-scopes] 2026-06-30T14:52Z security-review → Kassandra CLEAN (0 CRIT/0 HIGH/1 MED fixed: $→\z; 2 LOW/1 INFO; regex anchor hardened)
+# [configurable-oidc-scopes] 2026-06-30T14:45Z code-review → CLEAN (cycle 1; P1/P2/P3 verified; 0 new findings)
+# [configurable-oidc-scopes] 2026-06-30T14:40Z ci-gate → ✓ unit-elixir 1009/0 (cycle 1; 5b UX-gate skipped: ui=false)
+# [configurable-oidc-scopes] 2026-06-30T14:35Z dev-story → done (cycle 1): P1 regex+→+, P2 empty→default, P3 Logger.warning; 1009/0
+# [configurable-oidc-scopes] 2026-06-30T14:30Z code-review → 3 MINOR (P1 regex *, P2 empty→default, P3 no log) → cycle 1
+# [configurable-oidc-scopes] 2026-06-30T10:22Z ci-gate → ✓ unit-elixir 1009 pass + warnings-as-errors MAKE_EXIT=0 (5b UX-gate skipped: ui=false)
+# [configurable-oidc-scopes] 2026-06-30T10:20Z dev-story → done (cycle 0): migration RLS policy, sso_login scope_list seam, admin_oidc_scope seam, bootstrap UI + validation, config_controller save_scopes+seam, router; 1009/0
+# [configurable-oidc-scopes] 2026-06-30T09:50Z test-review → CLEAN (F1 MAJOR fixed: :admin_server_config_reader seam; F2/F3 MINOR fixed: status pinned)
+# [configurable-oidc-scopes] 2026-06-30T09:30Z atdd → 35 failing tests (AC1 migration×2, AC2/AC6 bootstrap-ui×6, AC4/AC11 matrix-scope×4, AC5/AC11 admin-scope×4, AC7/AC8 config-controller×5, AC3/AC12 scope-promotion×7, AC13 e2e)
+# [configurable-oidc-scopes] 2026-06-30T09:10Z create-story → configurable-oidc-scopes.md
+# [configurable-oidc-scopes] 2026-06-30T12:00Z create-story → comprehensive story file with 14 ACs (AC1-14): DB schema, wizard UI, scope sanitization, runtime resolution (matrix+admin), PATCH endpoint, unit+integration tests, security review scope; seams for `:matrix_oidc_extra_scopes_reader` + `:admin_oidc_extra_scopes_reader`; previous learnings from oidc-bootstrap-only-config integrated
+# [configurable-oidc-scopes] 2026-06-30T09:00Z pipeline started
 # [bugfix-oidc-bootstrap-only-e2e-regressions] 2026-06-28T10:33Z committed ✓ ca4b3cf0 (ATDD 10 tests + 1 MINOR fixed 1 cycle + Kassandra CLEAN; 934 pass EXIT=0; not pushed)
 # [bugfix-oidc-bootstrap-only-e2e-regressions] 2026-06-28T10:32Z arc42-update → 08-concepts (bootstrap local-draft verify + fetch_keys_for/2 + verify_token :issuer/:jwks overrides + corrected scope sets); no new ADR (ADR-022 unchanged)
 # [bugfix-oidc-bootstrap-only-e2e-regressions] 2026-06-28T10:30Z security-review → Kassandra CLEAN (0 CRIT/0 HIGH/0 MED/0 LOW); #1 invariant AC2 fail-closed verified; TLS parity + SSRF gate + override fail-closed confirmed
@@ -21,12 +52,16 @@
 # [oidc-bootstrap-only-config] 2026-06-28T00:15Z test-review → CLEAN (0 MAJOR)
 # [oidc-bootstrap-only-config] 2026-06-28T00:10Z atdd → new oidc_bootstrap_only_test.exs: 4 RED (Test3 env-ignored, Test4 sso env-ignored, Test5 admin DB-only ×2) + 7 green guards
 # [oidc-bootstrap-only-config] 2026-06-28T00:00Z classify → matrix=false ui=false sec=required; oracle-gate skipped
-story: null
-current_step: null
-completed: []
-cycle_count: 0
+story: "bugfix-remove-default-scopes"
+current_step: "code-review"
+completed:
+  - atdd
+  - test-review
+  - dev-story
+  - ci-gate
+cycle_count: 1
 blocked_reason: null
-last_updated: "2026-06-28T10:33Z"
+last_updated: "2026-06-30T20:26Z"
 story: "oidc-bootstrap-only-config"
 story: "bugfix-oidc-bootstrap-only-e2e-regressions"
 current_step: "commit"

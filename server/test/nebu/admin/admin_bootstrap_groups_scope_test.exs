@@ -74,6 +74,8 @@ defmodule Nebu.Admin.AdminBootstrapGroupsScopeTest do
 
     # Pin online so offline_access is absent and the test is purely about groups + base.
     Application.put_env(:nebu_http, :admin_oidc_refresh_mode_reader, fn -> "online" end)
+    # Isolate from server_config DB — OIDC Scopes Law: default is empty (openid only).
+    Application.put_env(:nebu_http, :admin_oidc_extra_scopes_reader, fn -> nil end)
 
     on_exit(fn ->
       Nebu.Web.OidcTestSupport.clear()
@@ -85,6 +87,7 @@ defmodule Nebu.Admin.AdminBootstrapGroupsScopeTest do
             :admin_session_secure,
             :oidc_metadata_override,
             :admin_oidc_refresh_mode_reader,
+            :admin_oidc_extra_scopes_reader,
             :admin_bootstrap_store
           ] do
         Application.delete_env(:nebu_http, k)
@@ -140,36 +143,39 @@ defmodule Nebu.Admin.AdminBootstrapGroupsScopeTest do
   # AC3 — admin/bootstrap scope requests `groups` (and openid profile email)
   # ════════════════════════════════════════════════════════════════════════════
 
-  describe "AC3 — admin scope includes groups (normal admin login)" do
-    test "normal-mode login scope contains groups AND openid profile email" do
+  describe "AC3 — admin scope default is openid only (OIDC Scopes Law)" do
+    test "normal-mode login scope contains openid only (no groups/profile/email by default)" do
+      # bugfix-remove-default-scopes: OIDC Scopes Law — profile/email/groups are NOT defaults.
+      # Operators who need groups for Dex must configure admin_oidc_extra_scopes explicitly.
       scopes = scope_params(%{})
 
-      # RED NOW: groups is missing (admin_oidc_scope/0 returns "openid profile email").
-      assert "groups" in scopes,
-             "admin login must request the `groups` scope so the token carries the groups " <>
-               "claim (Dex only releases it when requested); got: #{inspect(scopes)}"
-
-      # Already-green regression guards — the fix must not drop these.
       assert "openid" in scopes
-      assert "profile" in scopes
-      assert "email" in scopes
+
+      refute "groups" in scopes,
+             "groups must NOT be in default scope (OIDC Scopes Law); got: #{inspect(scopes)}"
+
+      refute "profile" in scopes,
+             "profile must NOT be in default scope (OIDC Scopes Law); got: #{inspect(scopes)}"
+
+      refute "email" in scopes,
+             "email must NOT be in default scope (OIDC Scopes Law); got: #{inspect(scopes)}"
     end
   end
 
-  describe "AC3 — admin scope includes groups (bootstrap operator login)" do
-    test "bootstrap-mode login scope contains groups AND openid profile email" do
+  describe "AC3 — admin scope default is openid only (bootstrap operator login)" do
+    test "bootstrap-mode login scope contains openid only (no groups/profile/email by default)" do
+      # bugfix-remove-default-scopes: OIDC Scopes Law — same rule applies in bootstrap mode.
       install_bootstrap_store()
 
       scopes = scope_params(%{"mode" => "bootstrap"})
 
-      # RED NOW: same missing `groups` — bootstrap shares admin_oidc_scope/0.
-      assert "groups" in scopes,
-             "bootstrap operator login must request `groups` so the select-claim page can " <>
-               "render the instance_admin option; got: #{inspect(scopes)}"
-
       assert "openid" in scopes
-      assert "profile" in scopes
-      assert "email" in scopes
+
+      refute "groups" in scopes,
+             "groups must NOT be in default scope (OIDC Scopes Law); got: #{inspect(scopes)}"
+
+      refute "profile" in scopes
+      refute "email" in scopes
     end
   end
 end

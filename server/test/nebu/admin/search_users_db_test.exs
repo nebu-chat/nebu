@@ -82,7 +82,7 @@ defmodule Nebu.Admin.SearchUsersDBTest do
   end
 
   test "search_users matches a prefix term" do
-    rows = DB.search_users("alic", 10)
+    rows = DB.search_users("#{@run_id}_alic", 10)
     assert uid(@alice_local) in ids(rows)
     refute uid(@alex_local) in ids(rows)
   end

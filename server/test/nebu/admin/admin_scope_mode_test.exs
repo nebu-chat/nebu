@@ -13,8 +13,10 @@ defmodule Nebu.Admin.AdminScopeModeTest do
 
     * `admin_oidc_refresh_mode = offline` → scope INCLUDES `offline_access`.
     * `admin_oidc_refresh_mode = online` (or unset → DEFAULT online) → scope is
-      `openid profile email`, with NO `offline_access`.
+      `openid` only (OIDC Scopes Law), with NO `offline_access`.
     * `openid` is ALWAYS present (mandatory), in every mode.
+    * `profile`/`email`/`groups` are NOT hardcoded defaults (OIDC Scopes Law —
+      `bugfix-remove-default-scopes`); operators configure them explicitly.
 
   Note the DEFAULT differs from Matrix: admin defaults to `online` (no forced
   offline_access → no special IdP approval needed), Matrix defaults to
@@ -77,6 +79,9 @@ defmodule Nebu.Admin.AdminScopeModeTest do
       "token_endpoint" => @token_endpoint
     })
 
+    # Isolate from server_config DB — OIDC Scopes Law: default is empty (openid only).
+    Application.put_env(:nebu_http, :admin_oidc_extra_scopes_reader, fn -> nil end)
+
     on_exit(fn ->
       Nebu.Web.OidcTestSupport.clear()
 
@@ -86,7 +91,8 @@ defmodule Nebu.Admin.AdminScopeModeTest do
             :server_name,
             :admin_session_secure,
             :oidc_metadata_override,
-            :admin_oidc_refresh_mode_reader
+            :admin_oidc_refresh_mode_reader,
+            :admin_oidc_extra_scopes_reader
           ] do
         Application.delete_env(:nebu_http, k)
       end
@@ -125,12 +131,13 @@ defmodule Nebu.Admin.AdminScopeModeTest do
       assert "offline_access" in scopes
     end
 
-    test "online mode → openid profile email, NO offline_access" do
+    test "online mode → openid only, NO offline_access" do
+      # bugfix-remove-default-scopes: OIDC Scopes Law — profile/email are NOT hardcoded defaults.
       set_mode("online")
       scopes = scope_params()
       assert "openid" in scopes
-      assert "profile" in scopes
-      assert "email" in scopes
+      refute "profile" in scopes
+      refute "email" in scopes
       refute "offline_access" in scopes
     end
 
