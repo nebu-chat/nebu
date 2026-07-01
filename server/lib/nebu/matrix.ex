@@ -289,6 +289,19 @@ defmodule Nebu.Matrix do
   @spec invalidate_oidc_claim_cache() :: :ok
   defdelegate invalidate_oidc_claim_cache(), to: Nebu.Matrix.OidcClaimCache, as: :refresh
 
+  @doc """
+  Returns the space-separated extra OIDC scopes configured for the Matrix SSO
+  login flow (bugfix-unify-admin-matrix-oidc-identity).
+
+  `Nebu.Admin.Auth.admin_oidc_scope/0` folds this into the admin flow's own
+  requested scope (union, not replace) so the admin ID token is always a
+  claim-superset of the Matrix ID token — this is the Public-API entry point
+  (ADR-020) that call site must use instead of reaching into
+  `Nebu.Matrix.SsoLogin` directly.
+  """
+  @spec matrix_oidc_extra_scopes() :: String.t()
+  defdelegate matrix_oidc_extra_scopes(), to: Nebu.Matrix.SsoLogin, as: :matrix_extra_scopes
+
   # ── Device management (device-management S4 — Admin UI per-user devices) ──────
   #
   # The Admin domain manages a user's devices through this facade only (ADR-020);

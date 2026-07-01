@@ -1648,14 +1648,7 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
         # Non-blocking: the login response is not delayed.
         # Non-fatal: any DB error inside these helpers logs a warning and returns :ok.
         is_new = Map.get(user, :is_new, false)
-        Task.start(fn ->
-          ensure_personal_room(user_id)
-          if is_new do
-            ensure_auto_join_memberships(user_id)
-            # Spaces S5 (AC6): auto-join flagged Spaces alongside flagged rooms.
-            ensure_auto_join_space_memberships(user_id)
-          end
-        end)
+        run_post_login_provisioning(user_id, is_new)
 
         %Core.ValidateTokenResponse{
           user_id: user.user_id,
@@ -2915,10 +2908,55 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
     end
   end
 
+  # ─── bugfix-autojoin-real-login-path: shared post-login provisioning entry point ──
+  #
+  # ROOT CAUSE (bugfix "Autojoin funktioniert nicht"): the real Matrix client
+  # login endpoint `POST /_matrix/client/v3/login` (Nebu.Matrix.HttpPublic.do_login)
+  # calls Nebu.Matrix.Session.TokenValidator.validate/4 DIRECTLY — it never goes
+  # through this module's validate_token/2. The personal-room + auto-join Task.start
+  # trigger lived ONLY inside validate_token/2, which turned out to have no
+  # production caller at all (verified via a full-repo grep): every real login
+  # (Element Web, FluffyChat, any Matrix client) skipped auto-join entirely, so a
+  # brand-new user's very first login never joined `is_auto_join=true` rooms/spaces.
+  #
+  # Fix: extract the fire-and-forget provisioning into this single public function
+  # so BOTH callers — validate_token/2 (kept for parity/tests) and
+  # Nebu.Matrix.HttpPublic.provision_and_respond/6 (the actual production login
+  # path) — trigger the same behaviour. `is_new` gates auto-join exactly as before;
+  # the personal room is (idempotently) ensured on every login regardless.
+  @spec run_post_login_provisioning(String.t(), boolean()) :: :ok
+  def run_post_login_provisioning(user_id, is_new) do
+    case Task.start(fn ->
+           ensure_personal_room(user_id)
+
+           if is_new do
+             ensure_auto_join_memberships(user_id)
+             # Spaces S5 (AC6): auto-join flagged Spaces alongside flagged rooms.
+             ensure_auto_join_space_memberships(user_id)
+           end
+         end) do
+      {:ok, _pid} ->
+        :ok
+
+      {:error, reason} ->
+        # Task.start/1 itself failing to spawn (as opposed to the spawned task
+        # crashing) means post-login provisioning silently never ran at all —
+        # this must be observable, since it is now the single shared entry
+        # point for validate_token/2, bulk_import_users/2, and the real
+        # /login HTTP path (http_public.ex).
+        Logger.warning(
+          "run_post_login_provisioning: Task.start failed to spawn for #{user_id}: #{inspect(reason)}"
+        )
+    end
+
+    :ok
+  end
+
   # ─── Story personal-self-room: ensure_personal_room/1 ───────────────────────
 
   # Idempotently ensures a personal self-room exists for `user_id`.
-  # Called from validate_token/2 via Task.start (fire-and-forget, non-blocking).
+  # Called from run_post_login_provisioning/2 via Task.start (fire-and-forget,
+  # non-blocking).
   #
   # Flow:
   #   1. Extract localpart from user_id (e.g. "alice" from "@alice:nebu.local").
@@ -2975,7 +3013,9 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
   # ─── Story admin-auto-join-rooms: ensure_auto_join_memberships/1 ─────────────
   #
   # Public so that ExUnit AC5/AC6 tests can call it directly in isolation.
-  # Called from validate_token/2 via Task.start for new users only (is_new: true).
+  # Called from run_post_login_provisioning/2 via Task.start for new users only
+  # (is_new: true) — the shared entry point invoked from 3 places: validate_token/2,
+  # bulk_import_users/2, and Nebu.Matrix.HttpPublic's real /login path.
   # Non-fatal: any error logs a warning and returns :ok — login is never blocked.
   #
   # Flow:
@@ -3005,13 +3045,16 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
               :ok -> :ok
               {:error, :already_member} -> :ok
               {:error, reason} ->
-                Logger.warning(
+                # A genuine (non-idempotent) join failure means the user did NOT get
+                # auto-joined to a room they should have — this must be observable in
+                # production (bugfix: "Autojoin funktioniert nicht"), so log at :error.
+                Logger.error(
                   "ensure_auto_join_memberships: join #{room_id} for #{user_id} failed: #{inspect(reason)}"
                 )
             end
           catch
             :exit, reason ->
-              Logger.warning(
+              Logger.error(
                 "ensure_auto_join_memberships: join #{room_id} for #{user_id} exited: #{inspect(reason)}"
               )
           end
@@ -3029,9 +3072,11 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
   # ─── Spaces S5: ensure_auto_join_space_memberships/1 ───────────────────────
   #
   # Public so that ExUnit AC6 tests can call it directly in isolation.
-  # Called from validate_token/2 (and bulk_import_users/2) for new users only,
-  # right next to ensure_auto_join_memberships/1. Non-fatal: any error logs a
-  # warning and returns :ok — login is never blocked.
+  # Called from run_post_login_provisioning/2 for new users only, right next to
+  # ensure_auto_join_memberships/1 — the shared entry point invoked from 3
+  # places: validate_token/2, bulk_import_users/2, and Nebu.Matrix.HttpPublic's
+  # real /login path. Non-fatal: any error logs a warning and returns :ok —
+  # login is never blocked.
   #
   # A Space is a room (room_type = 'm.space'), so the join machinery is identical
   # to ensure_auto_join_memberships/1; only the source list differs
@@ -3066,13 +3111,15 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
               :ok -> :ok
               {:error, :already_member} -> :ok
               {:error, reason} ->
-                Logger.warning(
+                # See ensure_auto_join_memberships/1: a genuine join failure must be
+                # visible in production, not just a warning that gets filtered out.
+                Logger.error(
                   "ensure_auto_join_space_memberships: join #{space_id} for #{user_id} failed: #{inspect(reason)}"
                 )
             end
           catch
             :exit, reason ->
-              Logger.warning(
+              Logger.error(
                 "ensure_auto_join_space_memberships: join #{space_id} for #{user_id} exited: #{inspect(reason)}"
               )
           end
@@ -4961,16 +5008,9 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
           )
 
         # Story auto-join-on-user-import: fire-and-forget room setup for each newly-imported user.
-        # Identical to the validate_token/2 pattern for new first-login users.
+        # Identical to the run_post_login_provisioning/2 pattern for new first-login users.
         # Non-blocking and non-fatal — import response is not delayed by these tasks.
-        Enum.each(imported_user_ids, fn uid ->
-          Task.start(fn ->
-            ensure_personal_room(uid)
-            ensure_auto_join_memberships(uid)
-            # Spaces S5 (AC6): imported users also land in flagged Spaces.
-            ensure_auto_join_space_memberships(uid)
-          end)
-        end)
+        Enum.each(imported_user_ids, fn uid -> run_post_login_provisioning(uid, true) end)
 
         %Core.BulkImportUsersResponse{
           imported: imported,

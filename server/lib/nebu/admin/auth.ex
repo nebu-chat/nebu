@@ -232,6 +232,14 @@ defmodule Nebu.Admin.Auth do
   Stores the authenticated operator into the session after a successful OIDC login.
   `claims` is the verified ID-token claims map. The `admin` flag is derived from the
   configured admin group claim (server_config) just like the Go backend.
+
+  `"matrix_user_id"` is derived via `Nebu.Matrix.UserId.from_claims/2`, which resolves
+  differently depending on which claims are present in `claims` (bugfix-unify-admin-
+  matrix-oidc-identity: `admin_oidc_scope/0` now folds in the Matrix flow's extra
+  scopes so both flows request the same claim superset going forward). This is NOT
+  retroactive: an operator whose admin and Matrix sessions already resolved to
+  different `matrix_user_id` values under the old (pre-fix) scope drift keeps that
+  split identity — only logins that happen after this fix are unified.
   """
   def put_current_user(conn, claims) when is_map(claims) do
     user = %{
@@ -920,18 +928,51 @@ defmodule Nebu.Admin.Auth do
   # Do NOT add a fallback default — "openid" only when server_config has no value.
   # All additional scopes come exclusively from server_config (ADR-022).
   #
+  # bugfix-unify-admin-matrix-oidc-identity: the admin scope ALSO always includes
+  # whatever extra scopes the Matrix flow requests, fetched via the Public-API facade
+  # `Nebu.Matrix.matrix_oidc_extra_scopes/0` (ADR-020 — never call `Nebu.Matrix.SsoLogin`
+  # directly from here). Root cause of the "one person, two identities" bug: an operator
+  # could set `matrix_oidc_extra_scopes` and `admin_oidc_extra_scopes` to DIFFERENT values
+  # (e.g. Matrix gets "profile" so preferred_username/name resolve, admin gets only
+  # "groups"). The SAME real person then gets ID tokens with DIFFERENT claim sets from the
+  # two login flows, so Nebu.Matrix.UserId.from_claims/2 (which is claim-priority-driven —
+  # configured claim → preferred_username → name → sub) derives TWO DIFFERENT Matrix
+  # user_ids for one person: the admin session falls back further down the priority chain
+  # (or all the way to the opaque `sub`) than the Matrix client session that actually
+  # carries the richer scope. Folding the Matrix extra scopes into the admin request
+  # (union, not replace — the admin UI field is kept so an operator can additionally
+  # request admin-gate-only scopes like a groups claim) guarantees the admin ID token is
+  # always a claim-superset of the Matrix ID token, so from_claims/2 resolves identically
+  # for both flows. Note: this does NOT retroactively fix identities that already split
+  # under the old drift (a previously-created split user row keeps its own row); only NEW
+  # logins after this fix are unified going forward — see the limitation note on
+  # `put_current_user/2`.
+  #
   # Test seam: a 0-arity fun under :admin_oidc_extra_scopes_reader injects extra
   # scopes; default reads server_config. A 0-arity fun under
   # :admin_oidc_refresh_mode_reader injects the mode; default reads server_config.
+  # Nebu.Matrix.SsoLogin.matrix_extra_scopes/0 (reached via the facade above) honours
+  # its OWN independent test seam (:matrix_oidc_extra_scopes_reader), so admin-flow
+  # tests that don't care about Matrix scopes are unaffected (it defaults to "" when
+  # unset / Repo not running).
 
   defp admin_oidc_scope do
-    extra = admin_extra_scopes()
+    extra = union_scopes(admin_extra_scopes(), Nebu.Matrix.matrix_oidc_extra_scopes())
     prefix = if admin_refresh_mode() == "offline", do: ["openid", "offline_access"], else: ["openid"]
 
     (prefix ++ String.split(extra, " ", trim: true))
     |> Enum.reject(&(&1 == ""))
     |> Enum.uniq()
     |> Enum.join(" ")
+  end
+
+  # Space-separated union of two scope strings, order-preserving (admin's own scopes
+  # first, then any Matrix-only scopes not already present) so the resulting scope
+  # string is deterministic and stable across calls with the same inputs.
+  defp union_scopes(a, b) do
+    a_list = String.split(a, " ", trim: true)
+    b_list = String.split(b, " ", trim: true)
+    Enum.join(a_list ++ (b_list -- a_list), " ")
   end
 
   defp admin_extra_scopes do
@@ -1035,23 +1076,62 @@ defmodule Nebu.Admin.Auth do
   defp describe(reason) when is_atom(reason), do: Atom.to_string(reason)
   defp describe(reason), do: inspect(reason)
 
+  # SEC NOTE (Kassandra MEDIUM, bugfix-unify-admin-matrix-oidc-identity, 2026-07-01;
+  # scope updated bugfix-nested-oidc-claim-support, 2026-07-01):
+  # `admin_oidc_scope/0` now folds the Matrix flow's extra scopes (e.g. `profile`) into
+  # the admin OIDC request, so claims like `name`/`preferred_username` can appear in the
+  # admin session's claims map where they never did before. Since `admin_claim?/1` scans
+  # ALL claim values regardless of key — and, per `claim_value_matches?/2` below, now
+  # recurses into every value at EVERY nesting depth, not just flat top-level ones — a
+  # non-admin who can self-set such a claim at the IdP (common on some connectors) could
+  # in theory set it (or a NESTED sub-value, e.g. under `resource_access.<client>.*` or
+  # a nested profile/address claim) to the admin marker value and be misclassified as
+  # admin. Accepted as a known, non-blocking risk (Kassandra: 0 CRITICAL/HIGH) rather
+  # than patched with a claim-key denylist here: the bootstrap wizard
+  # (`extract_discovered_claims/1` / `bootstrap_confirm_claim/2`) stores only the
+  # SELECTED CLAIM VALUE, not its source key, so a hardcoded denylist could silently
+  # break a legitimately-configured admin_group_claim without warning (see code-review
+  # cycle 2 MAJOR M2). The real fix — track the claim KEY (and its full path) alongside
+  # the value, scope the check to only that key, and centralize OIDC scope/claim
+  # resolution so admin and Matrix never diverge in the first place — is tracked as a
+  # follow-up architecture item, not squeezed into this bug fix.
   @doc """
   True when the configured admin group claim is present anywhere in the OIDC claims.
   Parity with `auth.MatchesAdminGroupClaim` (Go): checks string and string-list claims.
+
+  Claim values are searched recursively through arbitrary nesting depth, so IdP-shaped
+  claims such as Keycloak's `realm_access.roles` (map of list) or
+  `resource_access.<client>.roles` (map of map of list) are matched the same way as a
+  flat Dex-style `"groups" => [...]` claim — the marker only needs to appear as (or
+  inside) SOME value in the claims tree, at any depth.
   """
   def admin_claim?(claims) when is_map(claims) do
     target = admin_group_claim()
-
-    Enum.any?(claims, fn {_k, v} ->
-      case v do
-        ^target when is_binary(target) -> true
-        list when is_list(list) -> target in list
-        _ -> false
-      end
-    end)
+    claim_value_matches?(claims, target)
   end
 
   def admin_claim?(_), do: false
+
+  # Recursively walks a claims value (map, list, or scalar) looking for `target` as a
+  # string value, or as a member of a list of strings, at any nesting depth.
+  #
+  # Non-tail-recursive with no explicit depth guard: acceptable because (a) `target`
+  # (from `admin_group_claim/0`) is always a binary — DB-guarded or the literal
+  # default — never attacker-controlled, and (b) the recursion depth is bounded in
+  # practice by the JSON structure of a trusted, signature-verified IdP token, not by
+  # adversarial input in any sense that matters here — the IdP is already the trust
+  # anchor for the whole authentication flow.
+  defp claim_value_matches?(target, target) when is_binary(target), do: true
+
+  defp claim_value_matches?(map, target) when is_map(map) do
+    Enum.any?(map, fn {_k, v} -> claim_value_matches?(v, target) end)
+  end
+
+  defp claim_value_matches?(list, target) when is_list(list) do
+    target in list or Enum.any?(list, &claim_value_matches?(&1, target))
+  end
+
+  defp claim_value_matches?(_, _), do: false
 
   # A session with no recorded expiry (legacy/pre-go-removal session) is treated as
   # live for backward-compat; a recorded expiry is enforced.
@@ -1421,18 +1501,39 @@ defmodule Nebu.Admin.Auth do
   # token is attacker-influenceable (it comes from the IdP), so an unescaped value could
   # inject markup into this server-rendered page.
 
-  @doc false
+  @doc """
+  Flattens an OIDC claims map into `{key, value}` pairs selectable in the Bootstrap
+  Wizard's claim-picker UI (`select_claim_html/1`). Descends recursively through
+  arbitrary nesting so IdP-shaped claims such as Keycloak's `realm_access.roles` or
+  `resource_access.<client>.roles` are surfaced too, not just flat Dex-style claims.
+  Nested entries use a dot-path key (e.g. `"realm_access.roles"`) so the operator can
+  see where each discovered value came from; flat claims keep their original bare key
+  exactly as before (backward compatible with existing callers/tests).
+  """
   def extract_discovered_claims(claims) when is_map(claims) do
     claims
-    |> Enum.flat_map(fn {k, v} ->
-      case v do
-        s when is_binary(s) and s != "" -> [{k, s}]
-        list when is_list(list) -> for item <- list, is_binary(item) and item != "", do: {k, item}
-        _ -> []
-      end
-    end)
+    |> flatten_discovered_claims(nil)
     |> Enum.uniq()
   end
+
+  defp flatten_discovered_claims(map, prefix) when is_map(map) do
+    Enum.flat_map(map, fn {k, v} ->
+      flatten_discovered_claims(v, dot_path(prefix, k))
+    end)
+  end
+
+  defp flatten_discovered_claims(list, prefix) when is_list(list) do
+    Enum.flat_map(list, fn item -> flatten_discovered_claims(item, prefix) end)
+  end
+
+  defp flatten_discovered_claims(s, prefix) when is_binary(s) and s != "" do
+    [{prefix, s}]
+  end
+
+  defp flatten_discovered_claims(_, _), do: []
+
+  defp dot_path(nil, key), do: key
+  defp dot_path(prefix, key), do: "#{prefix}.#{key}"
 
   # HTML-escape a value (the token is attacker-influenceable — escape every interpolation).
   defp esc(s), do: s |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()

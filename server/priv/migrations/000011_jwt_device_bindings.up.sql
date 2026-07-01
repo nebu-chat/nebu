@@ -22,3 +22,6 @@ CREATE TABLE IF NOT EXISTS jwt_device_bindings (
 );
 
 CREATE INDEX IF NOT EXISTS idx_jwt_device_bindings_user ON jwt_device_bindings (user_id);
+
+-- ─── Runtime grants (dual-role: nebu_migrate owns, nebu_app operates) ────────
+GRANT SELECT, INSERT, UPDATE, DELETE ON jwt_device_bindings TO nebu_app;

@@ -507,7 +507,7 @@ write_files:
           image: vectorim/element-web:v1.12.22
           restart: unless-stopped
           volumes:
-            - /opt/nebu/element-config.json:/app/config.json:ro
+            - /opt/nebu/element-config.json:/usr/share/nginx/html/config.json:ro
 %{ if tls_mode == "acme" ~}
           ports:
             - "127.0.0.1:7070:80"

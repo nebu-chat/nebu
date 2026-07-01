@@ -1,6 +1,10 @@
 # Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents.
 # Do not edit manually during an active pipeline run.
-# last_updated: 2026-06-30
+# last_updated: 2026-07-01
+# [bugfix-remove-default-scopes] 2026-07-01T08:25Z committed ✓ 873aec46 (ATDD+Code APPROVE+Kassandra CLEAN; 1012/0 unit; not pushed)
+# [bugfix-remove-default-scopes] 2026-07-01T08:20Z arc42-update → 08-concepts(OIDC Scopes Law table + 3 stale default entries corrected) + 09-decisions(extra scopes default corrected to empty)
+# [bugfix-remove-default-scopes] 2026-07-01T08:10Z security-review → Kassandra CLEAN (0 CRIT/0 HIGH/0 MED/0 LOW/1 INFO: scope-narrowing MXID fallback; all 5 focus areas cleared)
+# [bugfix-remove-default-scopes] 2026-07-01T08:00Z code-review → APPROVE (cycle 2; 0 MAJOR/0 MINOR/2 INFO; OIDC Scopes Law fully satisfied)
 # [bugfix-remove-default-scopes] 2026-06-30T20:20Z ci-gate → ✓ unit-elixir 1012/0; integration: 3 pre-existing flaky failures (RegressionSyncLoadTest/SyncConcurrentTest/MatrixSsoTest — same set as bugfix-bootstrap-trailing-newline; not caused by story changes)
 # [bugfix-remove-default-scopes] 2026-06-30T19:15Z code-review → 5 MAJOR + 2 MINOR → cycle 1 (delete @default_*_extra_scopes constants + fix misleading comments)
 # [bugfix-remove-default-scopes] 2026-06-30T19:07Z ci-gate → ✓ unit-elixir 1012/0 + redeploy+integration EXIT=0
@@ -52,16 +56,12 @@
 # [oidc-bootstrap-only-config] 2026-06-28T00:15Z test-review → CLEAN (0 MAJOR)
 # [oidc-bootstrap-only-config] 2026-06-28T00:10Z atdd → new oidc_bootstrap_only_test.exs: 4 RED (Test3 env-ignored, Test4 sso env-ignored, Test5 admin DB-only ×2) + 7 green guards
 # [oidc-bootstrap-only-config] 2026-06-28T00:00Z classify → matrix=false ui=false sec=required; oracle-gate skipped
-story: "bugfix-remove-default-scopes"
-current_step: "code-review"
-completed:
-  - atdd
-  - test-review
-  - dev-story
-  - ci-gate
-cycle_count: 1
+story: null
+current_step: null
+completed: []
+cycle_count: 0
 blocked_reason: null
-last_updated: "2026-06-30T20:26Z"
+last_updated: "2026-07-01T06:41Z"
 story: "oidc-bootstrap-only-config"
 story: "bugfix-oidc-bootstrap-only-e2e-regressions"
 current_step: "commit"

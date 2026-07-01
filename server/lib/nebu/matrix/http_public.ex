@@ -336,6 +336,16 @@ defmodule Nebu.Matrix.HttpPublic do
         dn = if display_name == "", do: nil, else: display_name
         _ = Nebu.Matrix.Profile.DB.upsert_profile(user.user_id, dn, nil)
 
+        # bugfix-autojoin-real-login-path: THIS is the real Matrix client login path
+        # (Element Web, FluffyChat, any client hitting POST /_matrix/client/v3/login).
+        # Nebu.Matrix.EventDispatcher.Server.validate_token/2 — the ONLY place this
+        # provisioning used to run — has no production caller; without this call a
+        # brand-new user's first login never got a personal room or auto-join
+        # room/space memberships. is_new defaults to false when the TokenValidator
+        # implementation omits the key (existing-user re-logins never auto-join).
+        is_new = Map.get(user, :is_new, false)
+        Nebu.Matrix.EventDispatcher.Server.run_post_login_provisioning(user.user_id, is_new)
+
         # S2 AC2: reuse the client-supplied device_id (keeps the same device row), else
         # generate a fresh one. S2 AC1: login OWNS device creation — register the device
         # in `devices` now (created_at on first sight via S1's COALESCE upsert).

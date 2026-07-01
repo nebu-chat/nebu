@@ -1052,40 +1052,64 @@ automatically joined to all such rooms at first login, without manual invite.
 
 **New-user auto-join flow (at first login):**
 
-1. OIDC login → `validate_token` in-process call reaches `Nebu.Matrix.EventDispatcher.Server.validate_token/2`.
-2. `Nebu.Session.TokenValidator.Postgres.validate/4`:
+> **Bugfix note (bugfix-autojoin-first-login-race, 2026-07-01):** the flow below
+> previously described a `ValidateToken gRPC` hop that no longer exists post
+> gRPC-removal (ADR-021), and — more importantly — described behavior that was
+> **only ever reachable from `EventDispatcher.Server.validate_token/2`, which had
+> zero production callers**. The real, publicly-reachable `POST
+> /_matrix/client/v3/login` path (`Nebu.Matrix.HttpPublic.do_login/1` →
+> `provision_and_respond/6`) called `TokenValidator.validate/4` directly and
+> never triggered auto-join at all. This is why the auto-join unit test suite
+> was green while the feature was completely broken for real clients. The fix
+> extracts the shared logic into `run_post_login_provisioning/2` and calls it
+> from all three real/test entry points. The flow below reflects the
+> post-fix, corrected state.
+
+1. Real Matrix client login (`POST /_matrix/client/v3/login`) is handled by
+   `Nebu.Matrix.HttpPublic.do_login/1` → `provision_and_respond/6`, which calls
+   `Nebu.Matrix.Session.TokenValidator.Postgres.validate/4` in-process (no gRPC —
+   single OTP app, ADR-019/021).
+2. `TokenValidator.Postgres.validate/4`:
    - `lookup_user/1` returns `nil` (user not in DB) → `provision_new_user/4` → returns `is_new: true`.
    - Existing user → `decrypt_and_return/1` → returns `is_new: false`.
-3. In `validate_token/2`: `is_new = Map.get(user, :is_new, false)`. A `Task.start` fire-and-forget is launched:
+3. `provision_and_respond/6` calls `Nebu.Matrix.EventDispatcher.Server.run_post_login_provisioning(user_id, is_new)`.
+   `run_post_login_provisioning/2` is the single shared entry point, also called from
+   `validate_token/2` (test/legacy in-process path) and `bulk_import_users/2` (Scenario 3q).
+   It launches a `Task.start` fire-and-forget:
    - Always: `ensure_personal_room/1` (Story personal-self-room).
-   - Only when `is_new = true`: `ensure_auto_join_memberships/1`.
+   - Only when `is_new = true`: `ensure_auto_join_memberships/1` + `ensure_auto_join_space_memberships/1`.
+   - If `Task.start/1` itself fails to spawn, that is now logged (`Logger.warning`) instead of silently dropped.
 4. `ensure_auto_join_memberships/1`:
    - `messages_db_module().list_auto_join_rooms()` → `SELECT room_id FROM rooms WHERE is_auto_join = true AND status = 'active'`.
    - For each room_id: `Nebu.Room.RoomSupervisor.start_room(room_id)` (idempotent) + `Nebu.Room.Server.join(room_id, user_id)`.
-   - `{:error, :already_member}` → silently `:ok` (pre-invited edge case).
-   - All errors are non-fatal (warning log, `:ok` returned) — login always succeeds.
+   - `{:error, :already_member}` (or `:noproc` in test env) → silently `:ok` (idempotent, non-fatal).
+   - Any other genuine join failure is now logged at `Logger.error` (was `Logger.warning`) so a real
+     provisioning failure is observable in production; `list_auto_join_rooms` DB-listing failures
+     remain `Logger.warning`. Login always succeeds regardless.
 
 ```
-Client          Nebu app          Domain                  PostgreSQL
-  │  POST /login   │                     │                            │
-  │───────────────▶│  ValidateToken gRPC │                            │
-  │                │────────────────────▶│                            │
-  │                │                     │  lookup_user(@new:...)     │
-  │                │                     │───────────────────────────▶│
-  │                │                     │  nil (not found)           │
-  │                │                     │◀───────────────────────────│
-  │                │                     │  provision_user (encrypt)  │
-  │                │                     │  is_new: true              │
-  │                │                     │  Task.start:               │
-  │                │                     │   ensure_personal_room     │
-  │                │                     │   ensure_auto_join_memberships
-  │                │                     │    list_auto_join_rooms    │
-  │                │                     │───────────────────────────▶│
-  │                │                     │  [room_id1, room_id2]      │
-  │                │                     │◀───────────────────────────│
-  │                │                     │  Room.Server.join (each)   │
-  │  200 {access_token} │               │                            │
-  │◀───────────────│◀────────────────────│                            │
+Client          Nebu app (HttpPublic)   EventDispatcher.Server         PostgreSQL
+  │  POST /login   │                          │                            │
+  │───────────────▶│  TokenValidator.validate │                            │
+  │                │─────────────────────────▶│                            │
+  │                │                          │  lookup_user(@new:...)     │
+  │                │                          │───────────────────────────▶│
+  │                │                          │  nil (not found)           │
+  │                │                          │◀───────────────────────────│
+  │                │                          │  provision_user (encrypt)  │
+  │                │                          │  is_new: true              │
+  │                │  run_post_login_provisioning(user_id, is_new)         │
+  │                │─────────────────────────▶│                            │
+  │                │                          │  Task.start:               │
+  │                │                          │   ensure_personal_room     │
+  │                │                          │   ensure_auto_join_memberships
+  │                │                          │    list_auto_join_rooms    │
+  │                │                          │───────────────────────────▶│
+  │                │                          │  [room_id1, room_id2]      │
+  │                │                          │◀───────────────────────────│
+  │                │                          │  Room.Server.join (each)   │
+  │  200 {access_token} │                     │                            │
+  │◀───────────────│                          │                            │
 ```
 
 **Security notes:**
@@ -1093,6 +1117,11 @@ Client          Nebu app          Domain                  PostgreSQL
 - `list_auto_join_rooms` results are never returned to Matrix clients.
 - `ensure_auto_join_memberships` only runs for users with `is_new: true` — set server-side only during DB provisioning.
 - Partial index `rooms_auto_join_idx ON rooms (is_auto_join) WHERE is_auto_join = true` keeps the query fast.
+
+**Regression coverage:** `server/test/nebu/matrix/event_dispatcher/auto_join_first_login_regression_test.exs`
+exercises the real HTTP `/login` route end-to-end (not just the in-process function), synchronized via
+the room's `:pg` broadcast group plus a direct `room_members` row assertion — specifically to prevent a
+recurrence of "unit-green, production-dead" auto-join code.
 
 **Bulk import provisioning path:** See Scenario 3q below for the identical fire-and-forget pattern triggered by the `bulk_import_users/2` in-process call.
 

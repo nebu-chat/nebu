@@ -1,0 +1,652 @@
+#cloud-config
+# Nebu bootstrap — cloud-init template rendered by OpenTofu templatefile().
+# Variables injected at apply time; no hardcoded secrets.
+# cloud-init reference: https://cloudinit.readthedocs.io/
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - ca-certificates
+  - curl
+  - gnupg
+  - lsb-release
+%{ if tls_mode == "acme" ~}
+  - nginx
+  - certbot
+  - python3-certbot-nginx
+%{ endif ~}
+
+write_files:
+  # ── /opt/nebu/.secrets/internal_secret ────────────────────────────────────
+  # Quoted scalar — no trailing newline added by YAML block scalar.
+  - path: /opt/nebu/.secrets/internal_secret
+    owner: root:root
+    permissions: "0600"
+    content: "${internal_secret}"
+
+%{ if enable_media_gateway ~}
+  - path: /opt/nebu/.secrets/s3_access_key
+    owner: root:root
+    permissions: "0600"
+    content: "${s3_access_key}"
+
+  - path: /opt/nebu/.secrets/s3_secret_key
+    owner: root:root
+    permissions: "0600"
+    content: "${s3_secret_key}"
+
+%{ endif ~}
+  # ── /opt/nebu/.env ─────────────────────────────────────────────────────────
+  # Mode 0600 — contains secrets; readable only by root / docker compose.
+  # Database credentials provided by UpCloud Managed PostgreSQL.
+  # NOTE: pg_password must not contain URL-reserved characters (@, :, /, ?, #).
+  - path: /opt/nebu/.env
+    owner: root:root
+    permissions: "0600"
+    content: |
+%{ if oidc_issuer != "" ~}
+      NEBU_OIDC_ISSUER=${oidc_issuer}
+%{ endif ~}
+%{ if oidc_audience != "" ~}
+      NEBU_OIDC_AUDIENCE=${oidc_audience}
+%{ endif ~}
+%{ if oidc_client_secret != "" ~}
+      NEBU_ADMIN_OIDC_CLIENT_SECRET=${oidc_client_secret}
+%{ endif ~}
+%{ if oidc_client_id != "" ~}
+      NEBU_ADMIN_OIDC_CLIENT_ID=${oidc_client_id}
+%{ endif ~}
+      NEBU_SERVER_NAME=${server_name}
+      NEBU_IMAGE_REGISTRY=${image_registry}
+      NEBU_VERSION=${nebu_version}
+      NEBU_PII_ENCRYPTION_KEY=${pii_encryption_key}
+
+%{ if oidc_mode == "dex" ~}
+  # ── /opt/nebu/dex/config.yaml ──────────────────────────────────────────────
+  # Dex static configuration — no database required.
+  # Static OIDC client id "nebu-gateway" (registered client identifier, unchanged
+  # for backwards compatibility) with the oidc_client_secret from tfvars. Its
+  # redirect URIs point at the server service (login SSO callback + /admin/callback).
+  # Static user: operator@example.com — see RUNBOOK.md 'OIDC Profiles' to rotate the password hash.
+  - path: /opt/nebu/dex/config.yaml
+    owner: root:root
+    permissions: "0644"
+    content: |
+      issuer: "${oidc_issuer}"
+
+      storage:
+        type: memory
+
+      web:
+        http: 0.0.0.0:5556
+
+      oauth2:
+        responseTypes: [code]
+        skipApprovalScreen: true
+        grantTypes:
+          - authorization_code
+          - refresh_token
+
+      enablePasswordDB: true
+
+      staticClients:
+        - id: nebu-gateway
+          secret: "${oidc_client_secret}"
+          redirectURIs:
+            - "${gateway_scheme}://${server_name}${gateway_port}/_matrix/client/v3/login/sso/redirect/oidc"
+            - "${gateway_scheme}://${server_name}${gateway_port}/admin/callback"
+          name: Nebu Gateway
+
+      staticPasswords:
+        - email: "operator@example.com"
+          hash: "${dex_static_password_hash}"
+          username: "operator"
+          userID: "operator-00000000-0000-0000-0000-000000000001"
+          groups:
+            - instance_admin
+%{ if dex_user1_password_hash != null ~}
+        - email: "alice@example.com"
+          hash: "${dex_user1_password_hash}"
+          username: "alice"
+          userID: "alice-00000000-0000-0000-0000-000000000002"
+          groups:
+            - users
+%{ endif ~}
+%{ if dex_user2_password_hash != null ~}
+        - email: "bob@example.com"
+          hash: "${dex_user2_password_hash}"
+          username: "bob"
+          userID: "bob-000000-0000-0000-0000-000000000003"
+          groups:
+            - users
+%{ endif ~}
+%{ if dex_compliance_password_hash != null ~}
+        - email: "compliance@example.com"
+          hash: "${dex_compliance_password_hash}"
+          username: "compliance"
+          userID: "compliance-0000-0000-0000-000000000004"
+          groups:
+            - compliance_officer
+%{ endif ~}
+
+%{ endif ~}
+%{ if enable_element_web ~}
+  # ── /opt/nebu/element-config.json ─────────────────────────────────────────
+  # Element Web configuration. base_url points to the server service (Matrix CS API).
+  # When TLS is enabled, server is served at https://<server_name>.
+  # When TLS is disabled, element is on its own port 7070 so the Matrix API
+  # is at http://<server_name> (behind the same host, no TLS).
+  - path: /opt/nebu/element-config.json
+    owner: root:root
+    permissions: "0644"
+    content: |
+      {
+        "default_server_config": {
+          "m.homeserver": {
+            "base_url": "${gateway_scheme}://${server_name}${gateway_port}",
+            "server_name": "${server_name}"
+          }
+        },
+        "brand": "Nebu",
+        "disable_custom_urls": true,
+        "disable_guests": true,
+        "disable_3pid_login": true,
+        "default_federate": false,
+        "default_theme": "dark",
+        "room_directory": { "servers": ["${server_name}"] },
+        "integrations_ui_url": null,
+        "integrations_rest_url": null,
+        "integrations_widgets_urls": [],
+        "sso_redirect_options": {
+          "immediate": false
+        },
+        "setting_defaults": {
+          "UIFeature.registration": false,
+          "UIFeature.passwordReset": false,
+          "UIFeature.identityServer": false,
+          "UIFeature.thirdPartyId": false,
+          "breadcrumbs": true
+        }
+      }
+
+%{ endif ~}
+%{ if tls_mode == "alb" ~}
+  # ── /opt/nebu/nginx-proxy.conf ─────────────────────────────────────────────
+  # Docker Compose nginx proxy — plain HTTP on port 80.
+  # TLS is terminated at the UpCloud Load Balancer; this proxy only does L7 path routing.
+  # X-Forwarded-Proto: https is set explicitly so server sees the correct scheme.
+  # Always deployed for tls_mode = "alb" — the UpCloud LB does not forward
+  # X-Forwarded-Proto on its own, so nginx is required for all ALB deployments
+  # (not just element_web or dex) to ensure OIDC redirect_uri uses https://.
+  - path: /opt/nebu/nginx-proxy.conf
+    owner: root:root
+    permissions: "0644"
+    content: |
+      map $http_upgrade $connection_upgrade {
+          default upgrade;
+          ''      close;
+      }
+
+      server {
+          listen 80;
+          server_name ${server_name};
+
+          client_max_body_size 50m;
+          proxy_read_timeout    90s;
+          proxy_send_timeout    90s;
+          proxy_connect_timeout 10s;
+%{ if oidc_mode == "dex" ~}
+
+          location /dex/ {
+              proxy_pass         http://dex:5556;
+              proxy_http_version 1.1;
+              proxy_set_header   Host              $host;
+              proxy_set_header   X-Real-IP         $remote_addr;
+              proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+              proxy_set_header   X-Forwarded-Proto https;
+          }
+%{ endif ~}
+%{ if enable_element_web ~}
+
+          location /_matrix/ {
+              proxy_pass         http://server:4000;
+              proxy_http_version 1.1;
+              proxy_set_header   Host              $host;
+              proxy_set_header   X-Real-IP         $remote_addr;
+              proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+              proxy_set_header   X-Forwarded-Proto https;
+              proxy_set_header   Upgrade           $http_upgrade;
+              proxy_set_header   Connection        $connection_upgrade;
+              client_max_body_size 50m;
+          }
+
+          location /.well-known/matrix/ {
+              proxy_pass         http://server:4000;
+              proxy_http_version 1.1;
+              proxy_set_header   Host              $host;
+              proxy_set_header   X-Real-IP         $remote_addr;
+              proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+              proxy_set_header   X-Forwarded-Proto https;
+          }
+
+          location /admin/ {
+              proxy_pass         http://server:4000;
+              proxy_http_version 1.1;
+              proxy_set_header   Host              $host;
+              proxy_set_header   X-Real-IP         $remote_addr;
+              proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+              proxy_set_header   X-Forwarded-Proto https;
+              proxy_set_header   Upgrade           $http_upgrade;
+              proxy_set_header   Connection        $connection_upgrade;
+          }
+
+          location /api/v1/ {
+              proxy_pass         http://server:4000;
+              proxy_http_version 1.1;
+              proxy_set_header   Host              $host;
+              proxy_set_header   X-Real-IP         $remote_addr;
+              proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+              proxy_set_header   X-Forwarded-Proto https;
+          }
+
+          location / {
+              proxy_pass         http://element:80;
+              proxy_http_version 1.1;
+              proxy_set_header   Host              $host;
+              proxy_set_header   X-Real-IP         $remote_addr;
+              proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+              proxy_set_header   X-Forwarded-Proto https;
+              proxy_set_header   Upgrade           $http_upgrade;
+              proxy_set_header   Connection        $connection_upgrade;
+          }
+%{ else ~}
+
+          location / {
+              proxy_pass         http://server:4000;
+              proxy_http_version 1.1;
+              proxy_set_header   Host              $host;
+              proxy_set_header   X-Real-IP         $remote_addr;
+              proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+              proxy_set_header   X-Forwarded-Proto https;
+              proxy_set_header   Upgrade           $http_upgrade;
+              proxy_set_header   Connection        $connection_upgrade;
+              client_max_body_size 50m;
+          }
+%{ endif ~}
+      }
+
+%{ endif ~}
+%{ if tls_mode == "acme" ~}
+  # ── /etc/nginx/sites-available/nebu ────────────────────────────────────────
+  # certbot --nginx runs after nginx starts and adds the SSL server block + redirect.
+  # This initial config contains only the port-80 server with proxy settings.
+  - path: /etc/nginx/sites-available/nebu
+    owner: root:root
+    permissions: "0644"
+    content: |
+      map $http_upgrade $connection_upgrade {
+          default upgrade;
+          ''      close;
+      }
+
+      server {
+          listen 80;
+          server_name ${server_name};
+
+          client_max_body_size 50m;
+
+          # Matrix /sync uses long-polling — generous timeouts required.
+          proxy_read_timeout    90s;
+          proxy_send_timeout    90s;
+          proxy_connect_timeout 10s;
+%{ if oidc_mode == "dex" ~}
+
+          # Dex OIDC provider — accessible via path prefix (nginx proxies to local port 5556).
+          location /dex/ {
+              proxy_pass         http://127.0.0.1:5556;
+              proxy_http_version 1.1;
+              proxy_set_header   Host              $host;
+              proxy_set_header   X-Real-IP         $remote_addr;
+              proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+              proxy_set_header   X-Forwarded-Proto https;
+          }
+%{ endif ~}
+%{ if enable_element_web ~}
+
+          location /_matrix/ {
+              proxy_pass         http://127.0.0.1:8008;
+              proxy_http_version 1.1;
+              proxy_set_header   Host              $host;
+              proxy_set_header   X-Real-IP         $remote_addr;
+              proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+              proxy_set_header   X-Forwarded-Proto https;
+              proxy_set_header   Upgrade           $http_upgrade;
+              proxy_set_header   Connection        $connection_upgrade;
+              client_max_body_size 50m;
+          }
+
+          location /.well-known/matrix/ {
+              proxy_pass         http://127.0.0.1:8008;
+              proxy_http_version 1.1;
+              proxy_set_header   Host              $host;
+              proxy_set_header   X-Real-IP         $remote_addr;
+              proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+              proxy_set_header   X-Forwarded-Proto https;
+          }
+
+          location /admin/ {
+              proxy_pass         http://127.0.0.1:8008;
+              proxy_http_version 1.1;
+              proxy_set_header   Host              $host;
+              proxy_set_header   X-Real-IP         $remote_addr;
+              proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+              proxy_set_header   X-Forwarded-Proto https;
+              proxy_set_header   Upgrade           $http_upgrade;
+              proxy_set_header   Connection        $connection_upgrade;
+          }
+
+          # Internal/compliance API paths — routed to server (not Element).
+          location /api/v1/ {
+              proxy_pass         http://127.0.0.1:8008;
+              proxy_http_version 1.1;
+              proxy_set_header   Host              $host;
+              proxy_set_header   X-Real-IP         $remote_addr;
+              proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+              proxy_set_header   X-Forwarded-Proto https;
+          }
+
+          # Everything else — Element Web client.
+          location / {
+              proxy_pass         http://127.0.0.1:7070;
+              proxy_http_version 1.1;
+              proxy_set_header   Host              $host;
+              proxy_set_header   X-Real-IP         $remote_addr;
+              proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+              proxy_set_header   X-Forwarded-Proto https;
+              proxy_set_header   Upgrade           $http_upgrade;
+              proxy_set_header   Connection        $connection_upgrade;
+          }
+%{ else ~}
+
+          location / {
+              proxy_pass         http://127.0.0.1:8008;
+              proxy_http_version 1.1;
+              proxy_set_header   Host              $host;
+              proxy_set_header   X-Real-IP         $remote_addr;
+              proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+              proxy_set_header   X-Forwarded-Proto https;
+              proxy_set_header   Upgrade           $http_upgrade;
+              proxy_set_header   Connection        $connection_upgrade;
+              client_max_body_size 50m;
+          }
+%{ endif ~}
+      }
+
+%{ endif ~}
+  # ── /opt/nebu/docker-compose.yml ───────────────────────────────────────────
+  # Mode 0600 — tightened for security.
+  - path: /opt/nebu/docker-compose.yml
+    owner: root:root
+    permissions: "0600"
+    content: |
+      name: nebu
+
+      secrets:
+        internal_secret:
+          file: .secrets/internal_secret
+%{ if enable_media_gateway ~}
+        s3_access_key:
+          file: .secrets/s3_access_key
+        s3_secret_key:
+          file: .secrets/s3_secret_key
+%{ endif ~}
+
+      services:
+%{ if oidc_mode == "dex" ~}
+        dex:
+          image: dexidp/dex:v2.45.1
+          restart: unless-stopped
+          command: ["dex", "serve", "/etc/dex/config.yaml"]
+          volumes:
+            - /opt/nebu/dex/config.yaml:/etc/dex/config.yaml:ro
+          ports:
+            - "5556:5556"
+          healthcheck:
+            # dexidp/dex:v2.45.1 is Alpine-based and includes busybox wget
+            test: ["CMD", "wget", "-qO-", "http://localhost:5556/dex/.well-known/openid-configuration"]
+            interval: 10s
+            timeout: 5s
+            retries: 3
+            start_period: 10s
+          deploy:
+            resources:
+              limits:
+                cpus: '${dex_cpu_limit}'
+                memory: ${dex_memory_limit}
+%{ endif ~}
+        server:
+          image: $${NEBU_IMAGE_REGISTRY}/nebu-server:$${NEBU_VERSION}
+          restart: unless-stopped
+          # No depends_on: postgres — managed PostgreSQL is always available
+%{ if fetch_postgres_ca ~}
+          volumes:
+            - /opt/nebu/postgres-ca.pem:/opt/nebu/postgres-ca.pem:ro
+%{ endif ~}
+%{ if enable_media_gateway ~}
+          secrets:
+            - internal_secret
+            - s3_access_key
+            - s3_secret_key
+%{ else ~}
+          secrets: [internal_secret]
+%{ endif ~}
+          environment:
+            NEBU_DB_URL: "postgresql://${pg_user}:${pg_password}@${pg_host}:${pg_port}/nebu"
+            NEBU_DB_URL_MIGRATE: "postgresql://${pg_migrate_user}:${pg_migrate_password}@${pg_host}:${pg_port}/nebu"
+            NEBU_POSTGRES_SSL: "true"
+            NEBU_INTERNAL_SECRET_FILE: "/run/secrets/internal_secret"
+            NEBU_SERVER_NAME: $${NEBU_SERVER_NAME}
+%{ if oidc_issuer != "" ~}
+            NEBU_OIDC_ISSUER: $${NEBU_OIDC_ISSUER}
+%{ endif ~}
+%{ if oidc_audience != "" ~}
+            NEBU_OIDC_AUDIENCE: $${NEBU_OIDC_AUDIENCE}
+%{ endif ~}
+%{ if oidc_client_secret != "" ~}
+            NEBU_ADMIN_OIDC_CLIENT_SECRET: $${NEBU_ADMIN_OIDC_CLIENT_SECRET}
+%{ endif ~}
+%{ if oidc_client_id != "" ~}
+            NEBU_ADMIN_OIDC_CLIENT_ID: $${NEBU_ADMIN_OIDC_CLIENT_ID}
+%{ endif ~}
+%{ if enable_media_gateway ~}
+            # Media object storage — server serves /_matrix/media from the S3 bucket.
+            NEBU_MINIO_ENDPOINT: "${s3_endpoint}"
+            NEBU_MINIO_ACCESS_KEY_FILE: "/run/secrets/s3_access_key"
+            NEBU_MINIO_SECRET_KEY_FILE: "/run/secrets/s3_secret_key"
+            NEBU_MINIO_BUCKET: "${s3_bucket}"
+            NEBU_MINIO_USE_SSL: "true"
+%{ endif ~}
+          env_file:
+            - .env
+          ports:
+            - "8008:4000"
+            - "8080:4000"
+          healthcheck:
+            test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+            interval: 10s
+            timeout: 5s
+            retries: 3
+            start_period: 30s
+          deploy:
+            resources:
+              limits:
+                cpus: '${server_cpu_limit}'
+                memory: ${server_memory_limit}
+%{ if enable_element_web ~}
+
+        element:
+          image: vectorim/element-web:v1.12.22
+          restart: unless-stopped
+          volumes:
+            - /opt/nebu/element-config.json:/usr/share/nginx/html/config.json:ro
+%{ if tls_mode == "acme" ~}
+          ports:
+            - "127.0.0.1:7070:80"
+%{ endif ~}
+%{ if tls_mode == "none" ~}
+          ports:
+            - "0.0.0.0:7070:80"
+%{ endif ~}
+          depends_on:
+            server:
+              condition: service_healthy
+          healthcheck:
+            # vectorim/element-web is nginx-alpine-based and includes busybox wget.
+            test: ["CMD", "wget", "-qO-", "http://localhost/"]
+            interval: 10s
+            timeout: 5s
+            retries: 3
+            start_period: 10s
+          deploy:
+            resources:
+              limits:
+                cpus: '${element_cpu_limit}'
+                memory: ${element_memory_limit}
+%{ endif ~}
+%{ if tls_mode == "alb" ~}
+
+        proxy:
+          image: nginx:alpine
+          restart: unless-stopped
+          volumes:
+            - /opt/nebu/nginx-proxy.conf:/etc/nginx/conf.d/default.conf:ro
+          ports:
+            - "0.0.0.0:80:80"
+          depends_on:
+            server:
+              condition: service_healthy
+%{ if enable_element_web ~}
+            element:
+              condition: service_healthy
+%{ endif ~}
+          healthcheck:
+            test: ["CMD", "wget", "-qO-", "http://localhost/"]
+            interval: 10s
+            timeout: 5s
+            retries: 3
+            start_period: 5s
+          deploy:
+            resources:
+              limits:
+                cpus: '0.25'
+                memory: 64m
+%{ endif ~}
+
+  # ── /etc/systemd/system/nebu.service ───────────────────────────────────────
+  # Type=simple: systemd manages the docker compose process directly (no -d flag).
+  # This allows systemd to track health and restart on failure correctly.
+  - path: /etc/systemd/system/nebu.service
+    owner: root:root
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Nebu Chat Server (Docker Compose)
+      Requires=docker.service
+      After=docker.service network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=simple
+      WorkingDirectory=/opt/nebu
+      ExecStart=/usr/bin/docker compose -f /opt/nebu/docker-compose.yml up
+      ExecStop=/usr/bin/docker compose -f /opt/nebu/docker-compose.yml down
+      Restart=on-failure
+      RestartSec=10
+
+      [Install]
+      WantedBy=multi-user.target
+
+runcmd:
+  # ── Docker CE install ───────────────────────────────────────────────────────
+  - install -m 0755 -d /etc/apt/keyrings
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  - chmod a+r /etc/apt/keyrings/docker.asc
+  - |
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+      https://download.docker.com/linux/ubuntu \
+      $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
+      > /etc/apt/sources.list.d/docker.list
+  - apt-get update -y
+  - apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+  # ── Nebu directory + secrets ────────────────────────────────────────────────
+  - mkdir -p /opt/nebu/.secrets
+%{ if oidc_mode == "dex" ~}
+  - mkdir -p /opt/nebu/dex
+%{ endif ~}
+  - chmod 0700 /opt/nebu/.secrets
+  - chmod 0700 /opt/nebu
+  - chmod 0600 /opt/nebu/docker-compose.yml
+
+%{ if tls_mode == "acme" ~}
+  # ── nginx + certbot TLS setup ───────────────────────────────────────────────
+  - ln -sf /etc/nginx/sites-available/nebu /etc/nginx/sites-enabled/nebu
+  - rm -f /etc/nginx/sites-enabled/default
+  - nginx -t
+  - systemctl enable nginx
+  - systemctl start nginx
+  # certbot --nginx: HTTP-01 challenge via the LB port-80 listener.
+  # Retry up to 5 times (60 s apart) to allow DNS propagation + LB warm-up.
+  # On success certbot: adds SSL to the nginx config, redirects HTTP→HTTPS, schedules renewal.
+  - |
+    for i in 1 2 3 4 5; do
+      certbot --nginx \
+        --non-interactive \
+        --agree-tos \
+        --email ${acme_email} \
+        --domains ${server_name} \
+        --redirect \
+%{ if acme_staging ~}
+        --test-cert \
+%{ endif ~}
+        && break
+      echo "certbot attempt $i failed — retrying in 60 s"
+      sleep 60
+    done
+
+%{ endif ~}
+%{ if fetch_postgres_ca ~}
+  # ── Fetch PostgreSQL server CA certificate ──────────────────────────────────
+  # UpCloud Managed PostgreSQL uses Aiven's internal CA — not in the system
+  # trust store. Extract the TLS certificate chain from the DB host at boot time
+  # via the private SDN. All certs in the chain are saved so Postgrex verify_peer
+  # can validate the server certificate.
+  # NEBU_POSTGRES_CA_CERT_FILE is appended to .env before the container starts.
+  # 36 attempts × 10 s = 6 minutes — enough for UpCloud managed DB provisioning.
+  - |
+    for i in $(seq 1 36); do
+      CERTS=$(echo Q | openssl s_client -connect ${pg_host}:${pg_port} -showcerts 2>/dev/null \
+        | sed -n '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/p')
+      if [ -n "$CERTS" ]; then
+        printf '%s\n' "$CERTS" > /opt/nebu/postgres-ca.pem
+        chmod 0644 /opt/nebu/postgres-ca.pem
+        echo "NEBU_POSTGRES_CA_CERT_FILE=/opt/nebu/postgres-ca.pem" >> /opt/nebu/.env
+        echo "[nebu-bootstrap] PostgreSQL CA cert saved to /opt/nebu/postgres-ca.pem"
+        break
+      fi
+      echo "[nebu-bootstrap] DB not reachable yet (attempt $i/36), waiting 10s..."
+      sleep 10
+    done
+    if [ ! -f /opt/nebu/postgres-ca.pem ]; then
+      echo "[nebu-bootstrap] WARNING: Could not fetch PostgreSQL CA cert after 36 attempts." >&2
+      echo "[nebu-bootstrap] WARNING: Server will start with verify_none (encrypted, unverified)." >&2
+    fi
+
+%{ endif ~}
+  # ── Enable + start nebu.service ─────────────────────────────────────────────
+  - systemctl daemon-reload
+  - systemctl enable nebu.service
+  - systemctl start docker.service
+  - sleep 2
+  - systemctl start nebu.service

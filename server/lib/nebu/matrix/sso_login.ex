@@ -437,7 +437,13 @@ defmodule Nebu.Matrix.SsoLogin do
     |> Enum.join(" ")
   end
 
-  defp matrix_extra_scopes do
+  @doc false
+  # bugfix-unify-admin-matrix-oidc-identity: exposed (was private) so
+  # Nebu.Admin.Auth can fold the Matrix flow's configured extra scopes into the
+  # admin flow's requested scope — see Nebu.Admin.Auth.admin_oidc_scope/0 for why.
+  # Test seam (:matrix_oidc_extra_scopes_reader) is unchanged and shared by both
+  # call sites, so a test that injects it observes the same value here.
+  def matrix_extra_scopes do
     reader =
       Application.get_env(
         :nebu_http,

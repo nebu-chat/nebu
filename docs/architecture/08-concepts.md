@@ -207,6 +207,35 @@ client, set in the Bootstrap Wizard (Step 3, before refresh-mode) and changeable
 - Runtime injection via `:{matrix,admin}_oidc_extra_scopes_reader` seams (0-arity fun) mirrors the
   `:{matrix,admin}_oidc_refresh_mode_reader` pattern for test isolation.
 
+**Admin/Matrix identity unification (bugfix-unify-admin-matrix-oidc-identity, 2026-07-01):**
+Because `matrix_oidc_extra_scopes` and `admin_oidc_extra_scopes` are independently configurable,
+an operator could set them to different values — e.g. Matrix requests `profile` (so
+`preferred_username`/`name` resolve) while Admin requests only `groups`. The SAME real person then
+gets ID tokens with different claim sets from the two flows, and `Nebu.Matrix.UserId.from_claims/2`
+(claim-priority: configured claim → `preferred_username` → `name` → `sub`) derives **two different**
+Matrix user_ids for one person — a split identity, visible as two rows in the admin Users list.
+
+Fix: `Nebu.Admin.Auth.admin_oidc_scope/0` now unions its own configured extra scopes with the
+Matrix flow's (`Nebu.Matrix.matrix_oidc_extra_scopes/0`, exposed via the `Nebu.Matrix` facade per
+ADR-020 — never call `Nebu.Matrix.SsoLogin` directly from `Nebu.Admin`), guaranteeing the admin ID
+token is always a claim-superset of the Matrix ID token. The union is **one-directional**: Matrix's
+own `scope_list/0` is untouched, so admin-only scopes (e.g. a `groups` claim source not needed by
+Matrix clients) never leak into the Matrix authorization request. The two `server_config` keys stay
+separate — this only changes what admin additionally *requests*, not what Matrix requests.
+
+**Known limitation:** this fix prevents NEW divergence only. It does not retroactively merge
+identities that already split under the old drift in an existing deployment (room memberships,
+devices, and audit-log actor rows tied to a stray opaque-`sub` user_id are untouched — a data
+migration for that is a separate, riskier follow-up). Kassandra security review (2026-07-01) also
+flagged a non-blocking MEDIUM: widening the admin scope means claims like `name`/`preferred_username`
+now reach `Nebu.Admin.Auth.admin_claim?/1`'s any-key claim-value scan for the first time, so a
+non-admin whose IdP lets them self-set such a claim could in theory match the admin marker value.
+Accepted as a known risk rather than patched with a claim-key denylist here — the bootstrap wizard
+stores only the *value* an operator selected as the admin marker, not its source key, so a
+hardcoded denylist could silently break a legitimate config. The proper fix (track the claim key,
+scope the check to it, and centralize OIDC scope/claim resolution so admin and Matrix never diverge
+by construction) is tracked as a follow-up architecture item, not squeezed into this bug fix.
+
 **Configurable Nebu session-lifetime ceiling (Story e2e-session-refresh-suites):**
 
 The Nebu-controlled session ceiling — the Matrix opaque-session expiry (`min(oidc_exp, ceiling)` on
@@ -997,6 +1026,19 @@ from `Nebu.Web.Router`. Key security controls:
   Both check the signed Phoenix session for a valid admin claim derived from
   `server_config.admin_group_claim` (default `instance_admin`) via an inline SQL check (ADR-018).
   Unauthenticated access is redirected to `/admin/login`.
+  **Nested claim support (bugfix-nested-oidc-claim-support, 2026-07-01):** `admin_claim?/1`
+  recursively searches the OIDC claims tree at arbitrary nesting depth for the configured marker
+  value — not just flat top-level claims. This is required for **Keycloak**, whose role claims are
+  nested (`realm_access: {roles: [...]}`, `resource_access: {<client>: {roles: [...]}}`), unlike
+  Dex's flat `groups: [...]`. The Bootstrap Wizard's claim-picker (`extract_discovered_claims/1`)
+  likewise flattens nested claims into dot-path-keyed options (e.g. `realm_access.roles`) so an
+  operator can select them during setup. Backward compatible — flat claim configs are unaffected.
+  Accepted risk (unchanged in kind, only in scope — see Kassandra review 2026-07-01): a non-admin
+  who can self-set a claim (at any nesting depth) matching the marker value could be misclassified
+  as admin; not exploitable via IdP-managed role claims like `realm_access.roles`, only via
+  self-service-editable profile claims, which are typically flat regardless. Properly scoping the
+  check to a specific claim *path* (not just a value) is deferred to the planned OIDC-centralization
+  epic.
 - **CRUD page rendering (admin-http-refactor):** Users, Rooms, Spaces, Config, ClaimMapping,
   RoleMapping, and Compliance pages are now rendered by Phoenix HTTP controllers following the
   Post-Redirect-Get (PRG) pattern. Each controller module has a corresponding HTML view module and
