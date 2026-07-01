@@ -28,3 +28,6 @@ CREATE TABLE IF NOT EXISTS auto_join_opt_outs (
 -- candidate auto-join rooms against this user's opt-outs on every first login.
 CREATE INDEX IF NOT EXISTS idx_auto_join_opt_outs_user
     ON auto_join_opt_outs (user_id);
+
+-- ─── Runtime grants (dual-role: nebu_migrate owns, nebu_app operates) ────────
+GRANT SELECT, INSERT, UPDATE, DELETE ON auto_join_opt_outs TO nebu_app;

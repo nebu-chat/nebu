@@ -29,3 +29,6 @@ CREATE TABLE IF NOT EXISTS room_aliases (
 -- future alias-management surface; the alias → room direction is served by the PK.
 CREATE INDEX IF NOT EXISTS idx_room_aliases_room
     ON room_aliases (room_id);
+
+-- ─── Runtime grants (dual-role: nebu_migrate owns, nebu_app operates) ────────
+GRANT SELECT, INSERT, UPDATE, DELETE ON room_aliases TO nebu_app;

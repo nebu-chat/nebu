@@ -60,3 +60,6 @@ CREATE TABLE IF NOT EXISTS uia_sessions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_uia_sessions_expires_at ON uia_sessions (expires_at);
+
+-- ─── Runtime grants (dual-role: nebu_migrate owns, nebu_app operates) ────────
+GRANT SELECT, INSERT, UPDATE, DELETE ON uia_sessions TO nebu_app;

@@ -68,8 +68,7 @@ resource "upcloud_server" "nebu" {
     create_password = false
   }
 
-  # The cloud-init template is shared with the StackIT example (provider-agnostic bootstrap).
-  user_data = templatefile("${path.module}/../stackit/cloud-init.tftpl", {
+  user_data = templatefile("${path.module}/cloud-init.tftpl", {
     internal_secret              = var.internal_secret
     oidc_client_secret           = var.oidc_client_secret != null ? var.oidc_client_secret : ""
     oidc_client_id               = var.oidc_client_id != null ? var.oidc_client_id : ""

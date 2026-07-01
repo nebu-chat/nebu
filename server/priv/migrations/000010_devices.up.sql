@@ -43,3 +43,6 @@ INSERT INTO devices (user_id, device_id, display_name, last_seen_ts, created_at,
 SELECT user_id, device_id, display_name, last_seen_ts, created_at, updated_at
 FROM device_keys
 ON CONFLICT (user_id, device_id) DO NOTHING;
+
+-- ─── Runtime grants (dual-role: nebu_migrate owns, nebu_app operates) ────────
+GRANT SELECT, INSERT, UPDATE, DELETE ON devices TO nebu_app;

@@ -273,6 +273,107 @@ defmodule Nebu.Web.AdminOidcLoginTest do
     assert {:error, :bad_audience} = Nebu.Web.Plugs.OidcPlug.verify_token(token, audience: @client_id)
   end
 
+  # ── admin gate: nested (Keycloak-shaped) claims ─────────────────────────────────
+  #
+  # Keycloak's standard role claims are nested (`realm_access.roles`,
+  # `resource_access.<client>.roles`) rather than flat top-level string/list-of-strings
+  # like Dex's `groups`. `admin_claim?/1` must find the configured marker anywhere in
+  # the claims tree, at any nesting depth, while remaining backward compatible with
+  # flat claims (see the `groups` tests above, still unchanged).
+
+  test "admin gate matches a Keycloak-shaped token via realm_access.roles (one level of nesting)" do
+    claims = %{
+      "iss" => @issuer,
+      "aud" => @client_id,
+      "sub" => "kai",
+      "realm_access" => %{"roles" => ["instance_admin", "offline_access"]}
+    }
+
+    assert Auth.admin_claim?(claims)
+  end
+
+  test "admin gate denies a Keycloak-shaped token without the admin marker anywhere" do
+    claims = %{
+      "iss" => @issuer,
+      "aud" => @client_id,
+      "sub" => "alex",
+      "realm_access" => %{"roles" => ["offline_access"]},
+      "resource_access" => %{"nebu-admin" => %{"roles" => ["uma_authorization"]}}
+    }
+
+    refute Auth.admin_claim?(claims)
+  end
+
+  test "admin gate matches resource_access.<client>.roles (two levels of nesting)" do
+    claims = %{
+      "iss" => @issuer,
+      "aud" => @client_id,
+      "sub" => "kai",
+      "realm_access" => %{"roles" => ["offline_access"]},
+      "resource_access" => %{"nebu-admin" => %{"roles" => ["instance_admin"]}}
+    }
+
+    assert Auth.admin_claim?(claims)
+  end
+
+  test "admin gate still matches flat Dex-style groups claims (backward compatibility)" do
+    assert Auth.admin_claim?(%{"sub" => "kai", "groups" => ["instance_admin"]})
+    refute Auth.admin_claim?(%{"sub" => "alex", "groups" => ["users"]})
+  end
+
+  test "admin gate still matches a bare top-level string claim (backward compatibility)" do
+    assert Auth.admin_claim?(%{"sub" => "kai", "role" => "instance_admin"})
+    refute Auth.admin_claim?(%{"sub" => "alex", "role" => "user"})
+  end
+
+  # Pins the SEC NOTE's (now-updated) accepted-risk scope above `admin_claim?/1`: since
+  # the scan recurses into every claim value at any nesting depth regardless of key, a
+  # non-admin whose IdP lets them self-set a NESTED claim value matching the admin
+  # marker is misclassified as admin under the current design — same accepted-risk
+  # class as the flat-claim tests above (e.g. "admin gate still matches a bare
+  # top-level string claim"), now demonstrated one level deeper. This test documents
+  # the current, accepted behavior; it is not asserting a fix.
+  test "admin gate matches a nested attacker-influenceable claim (accepted risk, documented in SEC NOTE)" do
+    claims = %{
+      "sub" => "alex",
+      "profile" => %{"custom_role" => "instance_admin"}
+    }
+
+    assert Auth.admin_claim?(claims)
+  end
+
+  # ── extract_discovered_claims: nested (Keycloak-shaped) claim discovery ─────────
+
+  test "extract_discovered_claims surfaces nested realm_access.roles as selectable options" do
+    claims = %{
+      "sub" => "kai",
+      "realm_access" => %{"roles" => ["instance_admin", "offline_access"]}
+    }
+
+    discovered = Auth.extract_discovered_claims(claims)
+
+    assert {"realm_access.roles", "instance_admin"} in discovered
+    assert {"realm_access.roles", "offline_access"} in discovered
+    assert {"sub", "kai"} in discovered
+  end
+
+  test "extract_discovered_claims surfaces resource_access.<client>.roles (two levels of nesting)" do
+    claims = %{
+      "resource_access" => %{"nebu-admin" => %{"roles" => ["instance_admin"]}}
+    }
+
+    discovered = Auth.extract_discovered_claims(claims)
+
+    assert {"resource_access.nebu-admin.roles", "instance_admin"} in discovered
+  end
+
+  test "extract_discovered_claims still surfaces flat Dex-style claims unchanged (backward compatibility)" do
+    discovered = Auth.extract_discovered_claims(%{"sub" => "kai", "groups" => ["instance_admin"]})
+
+    assert {"sub", "kai"} in discovered
+    assert {"groups", "instance_admin"} in discovered
+  end
+
   # ── session minting + expiry cap (session fixation / unbounded session) ─────────
 
   test "put_current_user caps session_exp at min(idToken.exp, now+8h)" do

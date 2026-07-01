@@ -8,7 +8,10 @@
 #   _bmad-output/nebu/epics/<epic-name>/sprint-status.yaml
 # ═══════════════════════════════════════════════════════════════════════════════
 # generated: 2026-03-20
-# last_updated: 2026-06-25
+# last_updated: 2026-07-01
+# story bugfix-nested-oidc-claim-support done (pipeline: Dev 1 MAJOR+2 MINOR fixed 1 cycle+Kassandra CLEAN (widening risk reassessed, unchanged verdict)): 2026-07-01
+# story bugfix-unify-admin-matrix-oidc-identity done (pipeline: ATDD adapted (live-repro)+Dev 1 MAJOR fixed 1 cycle+Kassandra HIGH-CLEAN (1 MEDIUM accepted, follow-up epic)): 2026-07-01
+# story bugfix-autojoin-first-login-race done (pipeline: ATDD adapted (live-repro-first)+Dev 2 cycles CLEAN+Kassandra CLEAN): 2026-07-01
 # story bug-fix-element-login done (pipeline: ATDD+Code 2 cycles CLEAN+Kassandra CLEAN; base_scopes openid-only+warn on absent claims): 2026-06-25
 # story bug-redirect-jwks done (pipeline: ATDD+Code CLEAN; Kassandra 1 HIGH fixed (SSRF scheme guard), 2 MED advisory): 2026-06-25
 # story admin-http-refactor done (pipeline: ATDD+Dev+Code 2 cycles+Kassandra CLEAN — 7 LiveViews → HTTP controllers): 2026-06-25

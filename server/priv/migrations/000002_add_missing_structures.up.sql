@@ -380,3 +380,21 @@ INSERT INTO server_config (key, value, set_at) VALUES
     ('oidc_directory_enabled',  'false', (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint),
     ('oidc_directory_endpoint', '',      (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint)
 ON CONFLICT (key) DO NOTHING;
+
+-- ─── Runtime grants (dual-role: nebu_migrate owns, nebu_app operates) ────────
+GRANT SELECT, INSERT, UPDATE, DELETE ON matrix_sessions TO nebu_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON audit_log TO nebu_app;
+GRANT USAGE, SELECT ON SEQUENCE audit_log_id_seq TO nebu_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON compliance_requests TO nebu_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON compliance_sessions TO nebu_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON room_account_data TO nebu_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON notifications TO nebu_app;
+GRANT USAGE, SELECT ON SEQUENCE notifications_id_seq TO nebu_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON push_rules TO nebu_app;
+GRANT USAGE, SELECT ON SEQUENCE push_rules_id_seq TO nebu_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON pushers TO nebu_app;
+GRANT USAGE, SELECT ON SEQUENCE pushers_id_seq TO nebu_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON role_overrides TO nebu_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON room_defaults TO nebu_app;
+GRANT USAGE, SELECT ON SEQUENCE room_defaults_id_seq TO nebu_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON forgotten_rooms TO nebu_app;

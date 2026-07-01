@@ -61,3 +61,8 @@ CREATE TABLE IF NOT EXISTS device_fallback_keys (
     created_at BIGINT  NOT NULL,
     PRIMARY KEY (user_id, device_id, algorithm)
 );
+
+-- ─── Runtime grants (dual-role: nebu_migrate owns, nebu_app operates) ────────
+GRANT SELECT, INSERT, UPDATE, DELETE ON device_keys TO nebu_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON device_one_time_keys TO nebu_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON device_fallback_keys TO nebu_app;
