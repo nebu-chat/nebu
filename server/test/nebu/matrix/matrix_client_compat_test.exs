@@ -326,18 +326,10 @@ defmodule Nebu.Web.MatrixClientCompatTest do
       assert json(conn) == %{}
     end
 
-    test "PUT /user/{userId}/account_data/{type} → 200 {}", %{user_id: uid, token: token} do
-      conn =
-        call(
-          :put,
-          "/_matrix/client/v3/user/#{URI.encode_www_form(uid)}/account_data/m.breadcrumbs",
-          %{"recent_rooms" => []},
-          auth(token)
-        )
-
-      assert conn.status == 200
-      assert json(conn) == %{}
-    end
+    # NOTE: the "PUT account_data → 200 {}" no-DB contract test was removed in the
+    # account-data-durability story — PUT now persists to PostgreSQL, so its happy
+    # path needs the live Repo and lives in the `:integration` block below
+    # ("account_data store — PostgreSQL") and in Nebu.Web.AccountDataTest.
 
     # ── NEW: Element startup-phase endpoints (AC 1–6) ─────────────────────
     # These six tests will FAIL until the routes are added to Protected and
@@ -387,34 +379,41 @@ defmodule Nebu.Web.MatrixClientCompatTest do
       assert body["error"] == "No RTC transports"
     end
 
-    # AC 6 — keys/device_signing/upload: 200 {} (accept and acknowledge, no-op)
-    test "POST /keys/device_signing/upload with valid Bearer → 200 {}", %{token: token} do
-      conn = call(:post, "/_matrix/client/v3/keys/device_signing/upload", %{}, auth(token))
-      assert conn.status == 200
-      assert json(conn) == %{}
-    end
+    # AC 6 — keys/device_signing/upload: 200 {} contract.
+    #
+    # The former static no-DB stub test was removed in the `cross-signing-readback`
+    # story: device_signing/upload is now DB-backed (CrossSigningKeyStore.put_keys →
+    # Nebu.Repo), so it can no longer be asserted at the DB-less unit layer. The
+    # plain 200 {} contract is now covered against a real DB by the integration
+    # suite in cross_signing_test.exs (AC2 "first upload (no existing MSK) →
+    # plain 200 {} (no UIA)").
   end
 
   # ══════════════════════════════════════════════════════════════════════════
-  # account_data ETS store — no DB
+  # account_data store (PostgreSQL-backed — integration)
   #
-  # These tests cover AC2–AC6 for the GET /user/{userId}/account_data/{type}
-  # endpoint and the ETS-backed PUT+GET round-trip:
+  # These tests cover the PUT+GET round-trip + IDOR guards for
+  # /user/{userId}/account_data/{type}. As of the account-data-durability story,
+  # Nebu.Matrix.AccountDataStore is PostgreSQL-backed (durable, read-on-start)
+  # rather than volatile ETS, so the round-trip + 404 cases need the live Repo
+  # and run as `:integration` (mirrors cross_signing_test.exs). The
+  # reject-before-DB IDOR cases would pass without a DB too, but the block is
+  # tagged uniformly for simplicity.
   #
   #   AC1 — PUT stores body and returns 200 {}
-  #   AC2 — GET reads from ETS and returns 200 <stored body>
+  #   AC2 — GET reads it back and returns 200 <stored body>
   #   AC3 — GET returns 404 M_NOT_FOUND when no data was stored
-  #   AC4 — OidcPlug enforces auth (tested in auth-gate describe above)
-  #   AC5 — data survives multiple PUT-then-GET round trips (overwrite)
-  #   AC6 — no regression: existing PUT still returns 200 {}
+  #   AC4 — user==auth guard: 403 on cross-user read/write (IDOR)
+  #   AC5 — second PUT overwrites the first
+  #   AC6 — regression: PUT still returns 200 {}
   #
-  # All tests in this block are RED until:
-  #   1. Nebu.Matrix.AccountDataStore (ETS) is implemented
-  #   2. GET /client/v3/user/:user_id/account_data/:type is wired in protected.ex
-  #   3. PUT /client/v3/user/:user_id/account_data/:type writes to ETS
+  # Durability across a process boundary, opacity, and /sync delivery live in
+  # Nebu.Web.AccountDataTest.
   # ══════════════════════════════════════════════════════════════════════════
 
-  describe "account_data ETS store — no DB" do
+  describe "account_data store — PostgreSQL (integration)" do
+    @describetag :integration
+
     setup do
       priv = setup_oidc_keys()
       {uid_alice, token_alice} = bearer_for("alice", priv)

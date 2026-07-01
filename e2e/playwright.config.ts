@@ -26,6 +26,13 @@ import { defineBddConfig, defineBddProject } from 'playwright-bdd';
 const DEFAULT_E2E_TAGS = 'not @pending-feature and not @short-ttl';
 const E2E_TAGS = process.env.NEBU_E2E_TAGS ?? DEFAULT_E2E_TAGS;
 
+// Story e2e-browser-ci-and-dex-reliability (AC2): emulation-tolerant, env-configurable
+// timeouts. Defaults are raised enough to tolerate arm64-emulated Dex locally; amd64 CI
+// can lower them. These bound *navigation* and per-action waits, not the short element
+// detection probes inside the login fixture (those stay tight to avoid masking hangs).
+const NAV_TIMEOUT_MS = Number(process.env.NEBU_E2E_NAV_TIMEOUT_MS ?? 60_000);
+const ACTION_TIMEOUT_MS = Number(process.env.NEBU_E2E_ACTION_TIMEOUT_MS ?? 20_000);
+
 // Use defineBddProject() which correctly returns { name, testDir } for multi-project setups.
 // This avoids the "please manually provide different outputDir" error.
 // importTestFrom points bddgen to the custom test instance (fixture file).
@@ -91,8 +98,8 @@ export default defineConfig({
       use: {
         ...devices['Desktop Chrome'],
         baseURL: process.env.NEBU_ADMIN_URL ?? 'http://localhost:8008',
-        actionTimeout: 20_000,
-        navigationTimeout: 45_000,
+        actionTimeout: ACTION_TIMEOUT_MS,
+        navigationTimeout: NAV_TIMEOUT_MS,
       },
       // 180s ceiling: the @short-ttl admin session-refresh scenarios deliberately wait across
       // several short token lifetimes (~105s for three). Fast admin tests still finish fast —
@@ -106,8 +113,8 @@ export default defineConfig({
       use: {
         ...devices['Desktop Chrome'],
         baseURL: process.env.NEBU_ELEMENT_URL ?? 'http://localhost:7070',
-        actionTimeout: 20_000,
-        navigationTimeout: 45_000,
+        actionTimeout: ACTION_TIMEOUT_MS,
+        navigationTimeout: NAV_TIMEOUT_MS,
       },
       timeout: 300_000,
     },

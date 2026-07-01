@@ -363,6 +363,20 @@ defmodule Nebu.Matrix.DeviceKeyStore do
     :ok
   end
 
+  @doc """
+  Returns the list of device IDs registered for a user. Used by the cross-signing
+  upload MUST-guard to reject a cross-signing key whose ID collides with an
+  existing device ID (CS §Cross-signing key-and-signature security: device IDs and
+  cross-signing key IDs share one `ed25519:` namespace).
+  """
+  @spec device_ids(String.t()) :: [String.t()]
+  def device_ids(user_id) when is_binary(user_id) do
+    case safe_query("SELECT device_id FROM device_keys WHERE user_id = $1", [user_id]) do
+      {:ok, %{rows: rows}} -> Enum.map(rows, fn [device_id] -> device_id end)
+      _ -> []
+    end
+  end
+
   @doc "Returns one device for `GET /devices/{deviceId}`, or `nil` if unknown (sourced from `devices`)."
   @spec get_device(String.t(), String.t()) :: map() | nil
   def get_device(user_id, device_id) when is_binary(user_id) and is_binary(device_id) do

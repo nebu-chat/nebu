@@ -1,0 +1,19 @@
+# Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents.
+# Do not edit manually during an active pipeline run.
+# last_updated: 2026-06-29
+# [element-cross-signing-recovery-scenario] 2026-06-29T07:10Z committed ✓ 7220d5d1 (test-only: recovery-setup.feature+steps, all structural gates green)
+# [element-cross-signing-recovery-scenario] 2026-06-29T07:06Z arc42-update → no arch changes (e2e test only)
+# [element-cross-signing-recovery-scenario] 2026-06-29T00:00Z classify → matrix:false ui:false sec:not-needed (test-only deliverable)
+# [element-login-dismiss-verification] 2026-06-29T10:10Z committed ✓ (dismiss verification screen broadened in login.steps.ts + dex-auth.ts; AC4 assertNoKeySetupError guard added; tsc/bddgen/elixir exit0)
+# [e2e-browser-ci-and-dex-reliability] 2026-06-29T06:55Z committed ✓ 40751f65 (Dev+Code CLEAN; preflight + TS fix 1498→0 + amd64 element-web CI)
+# [e2e-browser-ci-and-dex-reliability] 2026-06-29T06:54Z arc42-update → no arch changes (e2e tooling + CI config only)
+# [e2e-browser-ci-and-dex-reliability] 2026-06-29T06:54Z code-review → CLEAN (0 findings); security-review skipped (not-needed)
+# [e2e-browser-ci-and-dex-reliability] 2026-06-29T06:54Z ci-gate → ✓ typecheck exit0 + bddgen/list exit0 + make test-unit-elixir exit0
+# [e2e-browser-ci-and-dex-reliability] 2026-06-29T06:54Z dev-story → done (cycle 0); typecheck 1498→0 errors, preflight fast-fail verified
+# [e2e-browser-ci-and-dex-reliability] 2026-06-29T06:45Z pipeline started — infra/test-tooling story (atdd/test-review reinterpreted per env notes)
+story: null
+current_step: null
+completed: []
+cycle_count: 0
+blocked_reason: null
+last_updated: "2026-06-29T07:08Z"

@@ -1,0 +1,48 @@
+# Nebu Pipeline State — client-crypto-setup epic
+# Do not edit manually during an active pipeline run.
+# last_updated: 2026-06-29
+# [account-data-durability] 2026-06-29T09:25Z arc42-update → done (matrix-api-scope.md account_data GET/PUT + /sync rows; 05-building-blocks.md migration 000011 durable account_data note, supersedes ETS + stale Story 9-24 note)
+# [account-data-durability] 2026-06-29T09:15Z security-review → Kassandra CLEAN (0 CRIT/HIGH/MED/LOW; SQL parameterized, IDOR guard intact, no secret logging, ADR-011 opacity upheld)
+# [account-data-durability] 2026-06-29T09:05Z code-review → CLEAN (cycle 0, 0 CRIT/MAJOR/MINOR, 2 INFO non-blocking; all 7 ACs verified green)
+# [account-data-durability] 2026-06-29T08:55Z ci-gate → ✓ unit 911 exit0; migration 000011 applied (ver 11, account_data table exists); integration 78+21 green (account_data durability/opacity/initial+incremental sync, cross_signing/compat/release regression, sync_concurrent/room_routes no regression)
+# [account-data-durability] 2026-06-29T08:45Z dev-story → done (cycle 0): migration 000011_account_data + AccountDataStore→PostgreSQL (put/get/list_all_and_clear/list_changed_and_clear, consume-once changed flag) + /sync put_global_account_data; release_test 1..11; compat ETS block→:integration, obsolete no-DB PUT removed; unit 911 exit0
+# [account-data-durability] 2026-06-29T08:25Z test-review → CLEAN (0 MAJOR, all 7 ACs covered, 2 MINOR notes: ETS-must-go for true durability, consume-once flag for incremental)
+# [account-data-durability] 2026-06-29T08:20Z atdd → new account_data_test.exs (durability/opacity/initial-sync/incremental-sync + auth guards); converted compat ETS block → :integration; unit 912 passed exit0
+# [account-data-durability] 2026-06-29T08:05Z oracle-gate → spec captured (top-level account_data.events {type,content}; consume-once changed flag for incremental; no divergence)
+# [account-data-durability] 2026-06-29T08:00Z classify → matrix=true ui=false sec=required
+# [cross-signing-readback] 2026-06-28T23:00Z committed ✓ f45126cc (MAJOR fixed 1 cycle + Kassandra CLEAN, 13/13 integration green)
+# [cross-signing-readback] 2026-06-28T22:50Z arc42-update → done (matrix-api-scope.md key-directory section + 05-building-blocks.md migration 000010 note)
+# [cross-signing-readback] 2026-06-28T22:35Z security-review → Kassandra CLEAN (0 CRIT/HIGH/MED, 3 LOW advisory non-blocking)
+# [cross-signing-readback] 2026-06-28T22:15Z ci-gate → ✓ cross_signing 13/13 green (incl new CS-mismatch); migration 000010 applied ver10; only unrelated perf test (RegressionSyncLoad 206ms) flaky
+# [cross-signing-readback] 2026-06-28T21:45Z code-review → CLEAN (cycle 2, MAJOR-1 RESOLVED, 0 MAJOR/MINOR, 1 INFO non-blocking)
+# [cross-signing-readback] 2026-06-28T21:30Z dev-story → done (cycle 2): validate-then-persist CS merge + caller-id guard + symmetric unsigned drop + CS-mismatch regression test; unit 916 exit0
+# [cross-signing-readback] 2026-06-28T21:05Z code-review → 1 MAJOR (CS sig-merge persist-before-validate) + 2 MINOR → fix → cycle 2
+# [cross-signing-readback] 2026-06-28T20:55Z ci-gate → ✓ unit 916 exit0 + integration suite exit0; cross_signing_test.exs 12/12 green; migration 000010 applied (table exists, ver 10); server image rebuilt
+# [cross-signing-readback] 2026-06-28T20:30Z dev-story → done (cycle 1): fixed release_test [1..10] + deleted obsolete compat_test:392; unit 916 passed exit 0
+# [cross-signing-readback] 2026-06-28T20:10Z ci-gate → FAIL: 2 real (release_test [1..10], compat_test:392 now-DB-backed) + stale DB vol (need down -v); cross_signing tests blocked by unapplied migration 000010
+# [cross-signing-readback] 2026-06-28T19:55Z dev-story → done (cycle 0): CrossSigningKeyStore + migration 000010 + 4 handlers + /sync device_lists; --warnings-as-errors clean
+# [cross-signing-readback] 2026-06-28T19:25Z test-review → 1 MAJOR (durability round-trip) fixed in red phase + 3 MINOR noted → CLEAN
+# [cross-signing-readback] 2026-06-28T19:15Z atdd → 12 failing tests (cross_signing_test.exs)
+# [cross-signing-readback] 2026-06-28T19:05Z oracle-gate → spec captured; flagged AC6 status divergence (403 vs story 400)
+# [cross-signing-readback] 2026-06-28T19:00Z classify → matrix=true ui=false sec=required
+# [wellknown-e2ee-default] 2026-06-28T18:45Z security-review → CLEAN (Kassandra, 0 CRITICAL/HIGH) → story done
+# [wellknown-e2ee-default] 2026-06-28T18:44Z code-review → CLEAN (cycle 0, 0 MAJOR, 2 INFO)
+# [wellknown-e2ee-default] 2026-06-28T18:43Z ci-gate → ✓ unit-elixir 916 passed (--warnings-as-errors clean, exit 0)
+# [wellknown-e2ee-default] 2026-06-28T18:42Z dev-story → done (cycle 0): +io.element.e2ee.force_disable in router.ex well-known; 4/4 green
+# [wellknown-e2ee-default] 2026-06-28T18:42Z test-review → CLEAN (0 MAJOR, all 4 ACs covered)
+# [wellknown-e2ee-default] 2026-06-28T18:41Z atdd → 4 tests, 2 RED (missing io.element.e2ee.force_disable), 2 baseline GREEN (base_url+CORS)
+# [wellknown-e2ee-default] 2026-06-28T18:40Z oracle-gate → spec context captured (inline in story)
+story: "account-data-durability"
+current_step: "commit"
+completed:
+  - create-story
+  - atdd
+  - test-review
+  - dev-story
+  - ci-gate
+  - code-review
+  - security-review
+  - arc42-update
+last_updated: "2026-06-29T06:41Z"
+cycle_count: 0
+blocked_reason: null

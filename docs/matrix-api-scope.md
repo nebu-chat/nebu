@@ -42,7 +42,7 @@ Client-Server API specification.
 
 | Method | Endpoint | Status | Notes |
 |---|---|---|---|
-| GET | `/_matrix/client/v3/sync` | ✅ | Long-poll (max 25s cap, was 30s); initial sync parallel room fetch (Task.async_stream, max_concurrency: 5); account_data included |
+| GET | `/_matrix/client/v3/sync` | ✅ | Long-poll (max 25s cap, was 30s); initial sync parallel room fetch (Task.async_stream, max_concurrency: 5); top-level global `account_data.events` delivered from durable PostgreSQL store — full on initial sync, changed-only on incremental (consume-once `changed` flag; account-data-durability) |
 
 ## Room Management
 
@@ -113,8 +113,8 @@ Client-Server API specification.
 
 | Method | Endpoint | Status | Notes |
 |---|---|---|---|
-| GET | `/_matrix/client/v3/user/{userId}/account_data/{type}` | ✅ | ETS-backed (volatile); 404 M_NOT_FOUND if unset; IDOR guard |
-| PUT | `/_matrix/client/v3/user/{userId}/account_data/{type}` | ✅ | Stores in ETS (volatile, lost on restart); IDOR guard |
+| GET | `/_matrix/client/v3/user/{userId}/account_data/{type}` | ✅ | PostgreSQL-backed (durable, `Nebu.Matrix.AccountDataStore`, migration 000011); returns stored bytes verbatim; 404 M_NOT_FOUND if unset; IDOR guard (account-data-durability) |
+| PUT | `/_matrix/client/v3/user/{userId}/account_data/{type}` | ✅ | Persists to PostgreSQL (durable, survives restart, opaque per ADR-011); IDOR guard; delivered via /sync (account-data-durability) |
 | GET | `/_matrix/client/v3/user/{userId}/rooms/{roomId}/account_data/{type}` | ✅ | Per-room account data |
 | PUT | `/_matrix/client/v3/user/{userId}/rooms/{roomId}/account_data/{type}` | ✅ | Per-room account data |
 | GET | `/_matrix/client/v3/user/{userId}/rooms/{roomId}/tags` | ✅ | Room tags |
@@ -209,6 +209,29 @@ application), behind the same Bandit listener as the Matrix API.
 | Missing / non-Bearer Authorization header | 401 | `M_MISSING_TOKEN` |
 | Invalid or expired Bearer token | 401 | `M_UNKNOWN_TOKEN` |
 
+## Key Directory (E2EE-ready, not E2EE)
+
+A PostgreSQL-backed **key directory** that persists and reads back opaque client key
+material so Matrix clients (Element Web / Element X) complete device registration and
+cross-signing bootstrap cleanly. This is an **E2EE-readiness** facility, **orthogonal to
+encryption**: all stored material is opaque, the server never decrypts and never holds a
+private part, and persisting these keys does **not** enable room encryption —
+`m.room.encryption` is still rejected (`403 M_FORBIDDEN`) per
+[ADR-011](architecture/adr/ADR-011-managed-e2ee-key-escrow.md).
+
+| Method | Endpoint | Status | Behavior |
+|---|---|---|---|
+| POST | `/_matrix/client/v3/keys/upload` | ✅ | Persists device + one-time + fallback public keys (`Nebu.Matrix.DeviceKeyStore`, migration 000009) |
+| POST | `/_matrix/client/r0/keys/upload` | ✅ | Same as v3 (legacy compatibility) |
+| POST | `/_matrix/client/v3/keys/query` | ✅ | Echoes stored `device_keys` (DeviceKeyStore) **and** stored `master_keys` / `self_signing_keys` / `user_signing_keys` (CrossSigningKeyStore); empty maps for users without keys |
+| POST | `/_matrix/client/v3/keys/device_signing/upload` | ✅ | Persists opaque master/self/user cross-signing keys per user (`Nebu.Matrix.CrossSigningKeyStore`, migration 000010); `200 {}`. MUST-guard: a cross-signing key ID colliding with an existing device ID → `400 M_INVALID_PARAM` before any write. Idempotent re-upload of identical keys is allowed without UIA; overwriting different keys without `auth` → `403 M_FORBIDDEN` (cross-signing-readback story) |
+| POST | `/_matrix/client/v3/keys/signatures/upload` | ✅ | Validate-then-persist: merges supplied signatures into the stored device/cross-signing key objects (caller-identity guard); `200 {"failures": {}}` on success, per-(user,key) `M_INVALID_SIGNATURE` under `failures` on mismatch. Merged signatures are visible on the next `keys/query` |
+
+After a successful `device_signing/upload`, the uploading user's own ID is surfaced in
+`device_lists.changed` of their next incremental `/sync` (consume-once `cross_signing_changed`
+flag on the `cross_signing_keys` table). Both stores follow ADR-018 (inline parameterised SQL
+via `Nebu.Repo`, no Ecto schema). `CrossSigningKeyStore` mirrors `DeviceKeyStore`.
+
 ## Current E2EE Stubs
 
 These endpoints are implemented as stubs to prevent Matrix client error dialogs. No actual
@@ -217,13 +240,8 @@ the roadmap toward Managed E2EE.
 
 | Method | Endpoint | Status | Stub Behavior |
 |---|---|---|---|
-| POST | `/_matrix/client/v3/keys/upload` | 🔶 | Returns fake key counts (curve25519: 50) |
-| POST | `/_matrix/client/r0/keys/upload` | 🔶 | Same as v3 (legacy compatibility) |
-| POST | `/_matrix/client/v3/keys/query` | 🔶 | Returns empty device_keys for known users |
 | POST | `/_matrix/client/v3/keys/claim` | 🔶 | Returns empty one_time_keys |
 | GET | `/_matrix/client/v3/keys/changes` | 🔶 | Returns changed: [], left: [] |
-| POST | `/_matrix/client/v3/keys/device_signing/upload` | 🔶 | Returns `200 {}` (no-op; ADR-011 managed E2EE) |
-| POST | `/_matrix/client/v3/keys/signatures/upload` | 🔶 | Returns failures: {} |
 | GET | `/_matrix/client/v3/room_keys/version` | 🔶 | Returns 404 M_NOT_FOUND (no backup configured) |
 | POST | `/_matrix/client/v3/room_keys/version` | 🔶 | Returns version: "1" (not stored) |
 | GET | `/_matrix/client/unstable/org.matrix.msc3814.v1/dehydrated_device` | 🔶 | Returns 404 M_NOT_FOUND (MSC3814 not supported) |

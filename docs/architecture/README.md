@@ -11,9 +11,9 @@ without copyleft restrictions.
 |---|---|---|
 | 1 | Matrix Client-Server API compatibility | Standard clients (Element, FluffyChat, Cinny) work without modification |
 | 2 | Data sovereignty | All data resides in operator-controlled PostgreSQL; no cloud service required |
-| 3 | Minimal operational footprint | Single Elixir/OTP application replaces Redis, NATS, Kafka, and the former Go layer; `docker compose up` in ≤10 min |
+| 3 | Minimal operational footprint | Single Elixir/OTP app replaces Redis, NATS, Kafka (ETS + pg groups); `docker compose up` in ≤10 min |
 | 4 | Enterprise compliance-ready | Append-only audit log, four-eyes principle, Ed25519 non-repudiation built-in |
-| 5 | Horizontal scalability | Single clustered Elixir/OTP application (libcluster + Horde) — no separate gateway process |
+| 5 | Horizontal scalability | One clustered Elixir/OTP app — libcluster + Horde + pg (ADR-019/020/021) |
 
 ## Stakeholders
 
@@ -33,22 +33,22 @@ without copyleft restrictions.
           └───────────────────┬──────────────────────┘
                               │ HTTPS / WSS (TLS 1.3)
           ┌───────────────────▼──────────────────────┐
-          │  Nebu — single Elixir/OTP application    │
-          │  Bandit/Plug · Phoenix LiveView           │
-          │  Nebu.Matrix · Nebu.Media                │
-          │  Nebu.Admin  · Nebu.Web                  │
+          │  Elixir/OTP application (:nebu)          │
+          │  Bandit/Plug HTTP · Phoenix LiveView     │
+          │  Nebu.Matrix · Nebu.Media · Nebu.Admin   │
           │  Horde · libcluster · ETS · pg groups    │
+          │  (AES-256-GCM media; all in-process)     │
           └───────────────────┬──────────────────────┘
-                              │
+                              │ PostgreSQL protocol / S3
           ┌───────────────────▼──────────────────────┐
-          │  PostgreSQL 16+                          │
+          │  PostgreSQL 16+      ·   MinIO / S3       │
           │  event log · signatures · audit · FTS    │
           └──────────────────────────────────────────┘
 ```
 
-**Two runtime components:** an Elixir/OTP release (the whole system — Matrix C-S API, media, Admin UI, all
-stateful chat logic) and PostgreSQL. No Redis, no NATS, no Kafka, no separate gateway process.
-MinIO / S3-compatible object store for media blobs is optional but recommended in production.
+**Two core runtime components:** one Elixir/OTP release (`:nebu` — Matrix C-S API, media, Admin UI,
+all in-process; ADR-019/021) and PostgreSQL (plus MinIO/S3 for media blobs and an OIDC provider).
+No Go layer, no gRPC, no Redis, no NATS, no Kafka.
 
 ## Functional Requirements Overview
 

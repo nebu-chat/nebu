@@ -128,7 +128,17 @@ defmodule Nebu.Web.Router do
     conn
     |> put_resp_header("access-control-allow-origin", "*")
     |> put_resp_content_type("application/json")
-    |> send_resp(200, Jason.encode!(%{"m.homeserver" => %{"base_url" => scheme <> "://" <> host}}))
+    |> send_resp(
+      200,
+      Jason.encode!(%{
+        "m.homeserver" => %{"base_url" => scheme <> "://" <> host},
+        # Element-proprietary well-known hint (NOT Matrix spec; ignored by other
+        # clients). Tells Element-family clients not to offer per-room encryption,
+        # matching the server's managed posture which rejects m.room.encryption
+        # (ADR-011). Static current default — see story wellknown-e2ee-default.
+        "io.element.e2ee" => %{"force_disable" => true}
+      })
+    )
   end
 
   # ── AUTHENTICATED Matrix routes ───────────────────────────────────────────

@@ -1,0 +1,19 @@
+# generated: 2026-06-29
+# Epic: e2e-test-rehab
+# story element-cross-signing-recovery-scenario done (pipeline: recovery-setup.feature + steps — walks Element recovery to completion; AC3 /keys/query read-back; tsc/bddgen/pw-list/elixir all green): 2026-06-29
+# story element-login-dismiss-verification done (pipeline: dismiss verification screen + AC4 key-setup-error guard; tsc/bddgen/elixir green): 2026-06-29
+# story e2e-browser-ci-and-dex-reliability done (pipeline: Dev+Code CLEAN — Dex preflight, TS toolchain fix (1498→0), env-tunable timeouts, amd64 element-web CI job): 2026-06-29
+project: nebu
+epic: e2e-test-rehab
+epic_status: backlog
+
+# Origin: client-crypto-setup verification (2026-06-29) surfaced that the Element/Playwright
+# e2e harness cannot browser-verify the cross-signing/recovery flow as-is. The SERVER fix is
+# verified (916 unit + 13/13 integration, real Element cross-signing identity persisted &
+# read back). These stories rehab the browser harness so it can prove the flow in CI.
+
+development_status:
+  element-login-dismiss-verification: done
+  element-cross-signing-recovery-scenario: done
+  e2e-browser-ci-and-dex-reliability: done
+  integration-suite-global-env-isolation: backlog # 2026-06-30 — pre-existing main debt: OidcPlug/MatrixSso order-dependent isolation failures (same class as the admin_csrf_bypass leak fixed in client-crypto-setup)
