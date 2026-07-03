@@ -1,12 +1,23 @@
 defmodule Nebu.Web.OidcPlugExpiredTest do
   @moduledoc """
-  RED-phase ATDD test for the oidc-middleware-migration story.
+  Regression/pinning test for the oidc-middleware-migration story, covering the
+  bugfix-jwt-soft-logout bug fix.
 
-  AC2: An expired Bearer token → 401 with
-       {"errcode":"M_UNKNOWN_TOKEN","error":"Access token has expired"}.
+  AC2 (original): An expired Bearer token → 401 with errcode M_UNKNOWN_TOKEN
+       and error "Access token has expired".
 
-  References `Nebu.Web.Plugs.OidcPlug` / `Nebu.Web.JwksCache`, which do not
-  exist yet — this test MUST FAIL until the dev phase implements them.
+  bugfix-jwt-soft-logout AC1: a raw OIDC JWT that fails `call_jwt/2`
+  verification specifically because `check_exp/1` returns `{:error, :expired}`
+  MUST ALSO receive `"soft_logout" => true` in the 401 body — mirroring
+  `call_opaque/1`'s already-correct behavior for expired opaque sessions (see
+  `deny_soft_logout/3` in `Nebu.Web.Plugs.OidcPlug`). Per the Matrix
+  Client-Server API spec (v1.18, soft logout), the underlying Nebu session
+  (device binding, user, device_id) is still intact server-side for a JWT that
+  merely expired naturally, so the client should be told it can recover via
+  refresh/re-auth instead of wiping all local state (E2EE/device data).
+
+  This pins the fix: `call_jwt/2`'s `{:error, :expired}` branch now calls
+  `deny_soft_logout/3` instead of the plain `deny/3` (no `soft_logout` key).
 
   See `oidc_plug_test.exs` for the JWKS injectability design notes.
   """
@@ -57,7 +68,8 @@ defmodule Nebu.Web.OidcPlugExpiredTest do
 
   @opts Nebu.Web.Plugs.OidcPlug.init([])
 
-  test "expired token → 401 M_UNKNOWN_TOKEN with 'Access token has expired'", %{priv_jwk: priv_jwk} do
+  test "expired token → 401 M_UNKNOWN_TOKEN with 'Access token has expired' and soft_logout: true",
+       %{priv_jwk: priv_jwk} do
     claims = %{
       "iss" => @issuer,
       "aud" => @audience,
@@ -84,9 +96,13 @@ defmodule Nebu.Web.OidcPlugExpiredTest do
 
     body = Jason.decode!(conn.resp_body)
 
+    # bugfix-jwt-soft-logout AC1: a naturally-expired JWT is a SOFT logout —
+    # the underlying Nebu session is still intact, so the client should be
+    # told it can recover (refresh/re-auth) instead of wiping all local state.
     assert body == %{
              "errcode" => "M_UNKNOWN_TOKEN",
-             "error" => "Access token has expired"
+             "error" => "Access token has expired",
+             "soft_logout" => true
            }
   end
 end

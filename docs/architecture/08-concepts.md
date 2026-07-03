@@ -471,7 +471,7 @@ When the bearer token is opaque:
    `soft_logout: true` so the client can silently re-auth without dropping the device
 5. If found and valid: populate `conn.assigns` (user_id, device_id) from the session row
 
-When the bearer token contains a dot, routing continues on the existing OIDC JWT path (backward compat).
+When the bearer token contains a dot, routing continues on the existing OIDC JWT path (backward compat); if the raw JWT has expired, `call_jwt/2` returns `401 M_UNKNOWN_TOKEN` with `soft_logout: true` (matching the opaque-session expiry path's behavior), allowing clients to recover via re-authentication.
 
 **Device assigned on EVERY authenticated request (Story s2-device-lifecycle-at-login):**
 `OidcPlug` now populates `conn.assigns[:device_id]` for **both** session shapes — opaque sessions

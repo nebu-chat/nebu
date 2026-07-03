@@ -477,6 +477,105 @@ defmodule Nebu.Web.OidcPlugTest do
     end
   end
 
+  # ── bugfix-jwt-soft-logout MAJOR-1 (test-review gap): primary deactivation
+  # branch of call_jwt/2 ───────────────────────────────────────────────────
+  #
+  # This is DISTINCT from the "provisioning cache TTL" describe block above:
+  # that block proves the ~60s TTL'd provisioned-user CACHE RE-CHECK path
+  # (oidc_plug.ex ~447-477, reached via `provisioned?/1` reading a seeded,
+  # expired cache entry) also rejects a since-deactivated user. This test
+  # instead exercises the PRIMARY, non-cached `case provision(user_id, claims)
+  # do :deactivated -> ...` clause directly inside `call_jwt/2`
+  # (oidc_plug.ex:126-129) — a brand-new user_id with no cache entry at all,
+  # so `provision/2` falls straight through to `do_provision/2` on the very
+  # first request.
+  #
+  # AC2 of bugfix-jwt-soft-logout requires every call_jwt/2 failure branch
+  # OTHER than {:error, :expired} to never gain `soft_logout`. A deactivated
+  # account is a HARD logout (the operator explicitly disabled the account,
+  # it is not a merely-aged-out token), so this pins that the response must
+  # NOT carry `soft_logout` — guarding against a future overly-broad fix.
+  describe "deactivated account (primary, non-cached call_jwt/2 branch)" do
+    @provisioned_table :nebu_http_provisioned_users
+
+    defmodule FakeDeactivatedValidatorPrimary do
+      @moduledoc false
+      @behaviour Nebu.Matrix.Session.TokenValidator
+
+      @impl true
+      def validate(_user_id, _role, _display_name, _email), do: {:error, :deactivated}
+    end
+
+    setup do
+      # Make `running?(Nebu.Repo)` true without a real Ecto repo, so `provision/2`
+      # does not short-circuit to `:ok` via the `not running?(Nebu.Repo)` guard.
+      {:ok, repo_pid} = Agent.start_link(fn -> :ok end)
+
+      previously_registered =
+        case Process.whereis(Nebu.Repo) do
+          nil ->
+            Process.register(repo_pid, Nebu.Repo)
+            false
+
+          _ ->
+            true
+        end
+
+      Application.put_env(:session_manager, :validator_module, FakeDeactivatedValidatorPrimary)
+
+      # Clean cache table so no stale/fresh entry from another test lets this
+      # brand-new user_id short-circuit provisioning via the cache-hit path.
+      if :ets.whereis(@provisioned_table) != :undefined do
+        :ets.delete_all_objects(@provisioned_table)
+      end
+
+      on_exit(fn ->
+        Application.delete_env(:session_manager, :validator_module)
+
+        if not previously_registered and Process.alive?(repo_pid) do
+          Agent.stop(repo_pid)
+        end
+
+        if :ets.whereis(@provisioned_table) != :undefined do
+          :ets.delete_all_objects(@provisioned_table)
+        end
+      end)
+
+      :ok
+    end
+
+    test "a valid, non-expired, correctly-signed JWT for a deactivated user → 401 M_UNKNOWN_TOKEN with NO soft_logout",
+         %{priv_jwk: priv_jwk} do
+      # Distinct sub from every other test in this file so there is no chance
+      # of an ETS provisioned-cache entry leaking in from a different test.
+      claims = %{
+        "iss" => @issuer,
+        "aud" => @audience,
+        "sub" => "deactivated-user-primary",
+        "exp" => future_exp()
+      }
+
+      token = sign_jwt(claims, priv_jwk)
+
+      conn =
+        conn(:get, "/_matrix/client/v3/sync")
+        |> put_req_header("authorization", "Bearer " <> token)
+        |> Nebu.Web.Plugs.OidcPlug.call(@opts)
+
+      assert conn.halted, "a deactivated account must halt"
+      assert conn.status == 401
+
+      body = Jason.decode!(conn.resp_body)
+      assert body["errcode"] == "M_UNKNOWN_TOKEN"
+      assert body["error"] == "Account has been deactivated"
+
+      refute Map.has_key?(body, "soft_logout"),
+             "a deactivated account is a HARD logout — soft_logout must not be present"
+
+      refute conn.assigns[:current_user]
+    end
+  end
+
   # ── matrix-api-migration F-1: logout token denylist ───────────────────────
   #
   # A token that verifies (signature + alg + iss + aud + exp) but has been
@@ -528,6 +627,32 @@ defmodule Nebu.Web.OidcPlugTest do
       assert denied.status == 401
       assert Jason.decode!(denied.resp_body)["errcode"] == "M_UNKNOWN_TOKEN"
       refute denied.assigns[:current_user]
+    end
+
+    # bugfix-jwt-soft-logout AC2: ONLY the `check_exp/1` → `{:error, :expired}`
+    # branch of call_jwt/2 gains `soft_logout`. A revoked/denylisted token is a
+    # HARD logout (the token was explicitly invalidated, not merely aged out) —
+    # this pins that a future blanket "always add soft_logout" fix would be
+    # wrong, by asserting the key is entirely absent here.
+    test "a denylisted token (by jti) → 401 response has NO soft_logout key",
+         %{priv_jwk: priv_jwk} do
+      exp = future_exp()
+      claims = %{"iss" => @issuer, "aud" => @audience, "sub" => "kai", "exp" => exp, "jti" => "tok-2"}
+      token = sign_jwt(claims, priv_jwk)
+
+      Nebu.Web.TokenDenylist.revoke("tok-2", token, exp)
+
+      denied =
+        conn(:get, "/_matrix/client/v3/sync")
+        |> put_req_header("authorization", "Bearer " <> token)
+        |> Nebu.Web.Plugs.OidcPlug.call(@opts)
+
+      assert denied.halted
+      assert denied.status == 401
+      body = Jason.decode!(denied.resp_body)
+      assert body["errcode"] == "M_UNKNOWN_TOKEN"
+      refute Map.has_key?(body, "soft_logout"),
+             "a revoked/denylisted token is a HARD logout — soft_logout must not be present"
     end
 
     test "a denylisted token (by hash, no jti claim) → 401 M_UNKNOWN_TOKEN",
