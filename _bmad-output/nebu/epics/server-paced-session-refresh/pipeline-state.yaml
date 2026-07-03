@@ -1,0 +1,25 @@
+# Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents.
+# Do not edit manually during an active pipeline run.
+# last_updated: 2026-07-03
+# [background-session-refresh-worker] 2026-07-03T14:40Z committed ✓ (ATDD+Dev CLEAN, code-review 3 cycles+Kassandra 3 rounds HIGH+2 MEDIUM resolved+1 LOW accepted, APPROVED)
+# [background-session-refresh-worker] 2026-07-03T14:38Z arc42-update → done (05-building-blocks.md, 08-concepts.md updated, manifest refreshed)
+# [background-session-refresh-worker] 2026-07-03T14:35Z security-review → Kassandra APPROVED (0 CRITICAL, 0 HIGH, 0 open MEDIUM, 1 accepted LOW) after 3 fix cycles (M1 hard-delete mirroring, cluster-race row-scoping, transient-error classification incl. 5xx/429)
+# [background-session-refresh-worker] 2026-07-03T14:29Z security-review re-review → HIGH #1 CLOSED, MEDIUM #2 CLOSED, NEW MEDIUM #4 (5xx/429 IdP responses still misclassified as confirmed rejection) → fixing (not formally blocking, security_review:required warrants closing it) → cycle 3
+# [background-session-refresh-worker] 2026-07-03T14:23Z code-review cycle 3 → CLEAN (HIGH/MEDIUM fixes verified correctly closing the race; 1 trivial MINOR, 2 INFO non-blocking) → re-invoking security-review
+# [background-session-refresh-worker] 2026-07-03T14:06Z security-review → Kassandra HIGH (Finding #1: cluster-race hard-delete not row-scoped) + MEDIUM (Finding #2: transient IdP outage misclassified) + LOW (Finding #3) → BLOCKED, fixing per normal flow → cycle 2
+# [background-session-refresh-worker] 2026-07-03T13:59Z code-review → CLEAN (cycle 1 fixes verified: M1 confirmed-rejection hard-delete mirrored, 3 MINOR resolved)
+# [background-session-refresh-worker] 2026-07-03T13:43Z code-review → 1 MAJOR (M1: reused-fn error-branch narrowing on confirmed rejection) + 3 MINOR → decision: mirror hard-delete on confirmed rejection, TTL remains fail-safe for ambiguous errors → cycle 1
+# [background-session-refresh-worker] 2026-07-03T13:37Z ci-gate → PASS (9/9 story tests green; integration-suite flakes confirmed pre-existing via baseline reproduction on stashed main)
+# [background-session-refresh-worker] 2026-07-03T13:14Z dev-story → done (cycle 0), 9/9 story tests green, unit suite clean, oidc_plug.ex untouched
+# [background-session-refresh-worker] 2026-07-03T12:23Z test-review → CLEAN (0 MAJOR, 3 MINOR noted for dev-story)
+# [background-session-refresh-worker] 2026-07-03T12:19Z atdd → 9 failing tests (red phase confirmed, missing-module reason)
+# [background-session-refresh-worker] 2026-07-03T12:04Z baseline-integration → PRE-EXISTING FAILURES (exit 2, unrelated to this story; documented, continuing per pipeline policy)
+# [background-session-refresh-worker] 2026-07-03T11:57Z oracle-gate → spec context captured (no new API surface; M_UNKNOWN_TOKEN/soft_logout invariants apply)
+# [background-session-refresh-worker] 2026-07-03T11:55Z create-story → background-session-refresh-worker.md
+# [session-refresh-worker] 2026-07-03T11:50Z pipeline started
+story: null
+current_step: null
+completed: []
+cycle_count: 0
+blocked_reason: null
+last_updated: "2026-07-03T14:40Z"

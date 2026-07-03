@@ -92,9 +92,12 @@ defmodule Nebu.Application do
   # S3: the auth-row sweeper (expired jwt_device_bindings + uia_sessions) is started
   # alongside the Repo — it has nothing to sweep without a DB, and gating it here keeps
   # the no-DB unit child count unchanged.
+  # server-paced-session-refresh: RefreshWorker (proactive background renewal of
+  # opaque matrix_sessions rows nearing their bound expires_at) is started the
+  # same way — it has nothing to refresh without a DB either.
   defp repo_children do
     if Application.get_env(:nebu, Nebu.Repo),
-      do: [Nebu.Repo, Nebu.Matrix.Session.Sweeper],
+      do: [Nebu.Repo, Nebu.Matrix.Session.Sweeper, Nebu.Matrix.Session.RefreshWorker],
       else: []
   end
 

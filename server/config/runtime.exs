@@ -21,6 +21,24 @@ for {env_name, cfg_key} <- [
   end
 end
 
+# ─── server-paced-session-refresh: background refresh worker knobs ───────────
+# NEBU_MATRIX_REFRESH_WORKER_INTERVAL_MS / NEBU_MATRIX_REFRESH_WORKER_LOOKAHEAD_SECONDS
+# let operators tune Nebu.Matrix.Session.RefreshWorker's cycle cadence and how far
+# ahead of a session's expires_at it proactively redeems the stored upstream OIDC
+# refresh token. Same defensive parsing precedent as the TTL vars above (via the
+# same generic parse_ttl/1 — any strictly positive integer string); unset / junk /
+# <= 0 leaves the worker's compiled-in defaults (5 min / 1h) untouched. Never
+# raises — must not break application boot.
+for {env_name, cfg_key} <- [
+      {"NEBU_MATRIX_REFRESH_WORKER_INTERVAL_MS", :matrix_refresh_worker_interval_ms},
+      {"NEBU_MATRIX_REFRESH_WORKER_LOOKAHEAD_SECONDS", :matrix_refresh_worker_lookahead_seconds}
+    ] do
+  case Nebu.Web.SessionConfig.parse_ttl(System.get_env(env_name)) do
+    {:ok, value} -> config :nebu_http, [{cfg_key, value}]
+    :invalid -> :ok
+  end
+end
+
 # ─── oidc-bootstrap-only-config (ADR-022): OIDC config is bootstrap-only ──────
 # OIDC is configured EXCLUSIVELY through the Bootstrap Wizard (server_config), read
 # at runtime via the DB-backed Nebu.Web.OidcConfig cache. There are NO NEBU_OIDC_* /
@@ -78,6 +96,7 @@ if config_env() in [:prod, :dev] do
 
   minio_endpoint = System.get_env("NEBU_MINIO_ENDPOINT", "minio:9000")
   use_ssl? = System.get_env("NEBU_MINIO_USE_SSL", "false") == "true"
+
   {host, port} =
     case String.split(minio_endpoint, ":", parts: 2) do
       [h, p] -> {h, String.to_integer(p)}
@@ -155,7 +174,11 @@ if config_env() in [:prod, :dev] do
       path = System.get_env("NEBU_INTERNAL_SECRET_FILE") ->
         # Stretch the (possibly short) internal secret to >= 64 bytes via SHA-512 hex
         # so Plug.Session's key-derivation has enough entropy.
-        path |> File.read!() |> String.trim() |> then(&:crypto.hash(:sha512, &1)) |> Base.encode16()
+        path
+        |> File.read!()
+        |> String.trim()
+        |> then(&:crypto.hash(:sha512, &1))
+        |> Base.encode16()
 
       config_env() == :dev ->
         Base.encode16(:crypto.strong_rand_bytes(48))
@@ -236,6 +259,7 @@ if config_env() in [:prod, :dev] do
       "kubernetes" ->
         k8s_namespace = System.get_env("KUBERNETES_NAMESPACE", "default")
         k8s_selector = System.get_env("KUBERNETES_SELECTOR", "app.kubernetes.io/name=nebu-server")
+
         [
           nebu: [
             strategy: Cluster.Strategy.Kubernetes.DNS,

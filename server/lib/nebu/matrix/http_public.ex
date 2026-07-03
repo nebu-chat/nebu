@@ -467,7 +467,16 @@ defmodule Nebu.Matrix.HttpPublic do
   # Nebu session expiry = min(oidc_exp, now + 8h). oidc_exp is the verified `exp`
   # claim (always an integer post-verification — OidcPlug.check_exp rejects a
   # missing/non-integer exp); the 8h ceiling is the hard upper bound.
-  defp session_expires_at(claims) do
+  #
+  # `def` (not `defp`): reused verbatim by `Nebu.Matrix.Session.RefreshWorker`
+  # (server-paced-session-refresh) so the background refresh path computes the
+  # bounded rolling TTL with the SAME formula as login/`/refresh`, never a
+  # second/duplicated ceiling calculation. Still an internal, same-domain call
+  # (both modules live under `Nebu.Matrix`) — not a new cross-domain public API
+  # (ADR-020 is unaffected).
+  @doc false
+  @spec session_expires_at(map()) :: DateTime.t()
+  def session_expires_at(claims) do
     now = System.system_time(:second)
     ceiling = now + SessionConfig.matrix_session_ttl_seconds()
 
@@ -606,8 +615,17 @@ defmodule Nebu.Matrix.HttpPublic do
   # analogous to the admin refresh path's check_admin/1 re-evaluation — a
   # deprovisioned user must lose access at the next refresh even when the IdP
   # itself still happily honors the refresh_token grant.
-  defp revalidate_with_idp(%{oidc_refresh_token: enc_rt} = sess)
-       when is_binary(enc_rt) and enc_rt != "" do
+  # `def` (not `defp`): reused verbatim by `Nebu.Matrix.Session.RefreshWorker`
+  # (server-paced-session-refresh) — the background worker calls through this
+  # SAME decrypt + IdP-exchange + still-active-recheck path (including the
+  # `:matrix_oidc_refresh_override` test seam inside `exchange_oidc_refresh_token/1`)
+  # instead of duplicating the redemption logic. Same-domain call, not a new
+  # cross-domain public API (ADR-020 unaffected).
+  @doc false
+  @spec revalidate_with_idp(map()) ::
+          {:ok, map(), String.t() | nil} | {:error, term()}
+  def revalidate_with_idp(%{oidc_refresh_token: enc_rt} = sess)
+      when is_binary(enc_rt) and enc_rt != "" do
     with {:ok, plaintext_rt} <- Nebu.Web.SecretBox.decrypt(enc_rt),
          {:ok, claims, new_rt} <- exchange_oidc_refresh_token(plaintext_rt),
          :ok <- check_still_active(sess.user_id, claims) do
@@ -615,7 +633,7 @@ defmodule Nebu.Matrix.HttpPublic do
     end
   end
 
-  defp revalidate_with_idp(_sess), do: {:error, :no_oidc_refresh_token}
+  def revalidate_with_idp(_sess), do: {:error, :no_oidc_refresh_token}
 
   # code-review cycle-1 MAJOR fix: TokenValidator.validate/4 is NOT read-only —
   # Postgres.validate/4 has a `signing_key_id: nil` branch (an existing user not
@@ -715,11 +733,17 @@ defmodule Nebu.Matrix.HttpPublic do
     end
   end
 
-  defp maybe_put_new_oidc_rt(params, new_rt) when is_binary(new_rt) and new_rt != "" do
+  # `def` (not `defp`): reused verbatim by `Nebu.Matrix.Session.RefreshWorker`
+  # so a provider-rotated OIDC RT returned by the background redemption is
+  # encrypted and threaded into `rotate_tokens/1` the SAME way `/refresh` does
+  # (no second encrypt-and-thread copy). Same-domain call (ADR-020 unaffected).
+  @doc false
+  @spec maybe_put_new_oidc_rt(map(), String.t() | nil) :: map()
+  def maybe_put_new_oidc_rt(params, new_rt) when is_binary(new_rt) and new_rt != "" do
     Map.put(params, :new_oidc_refresh_token, Nebu.Web.SecretBox.encrypt(new_rt))
   end
 
-  defp maybe_put_new_oidc_rt(params, _no_new_rt), do: params
+  def maybe_put_new_oidc_rt(params, _no_new_rt), do: params
 
   # AC2 (spec SHOULD parity with the existing expired-opaque-AT 401 envelope,
   # OidcPlug.deny_soft_logout/2): every fail-closed rejection path on /refresh
