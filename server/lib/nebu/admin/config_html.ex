@@ -20,6 +20,12 @@ defmodule Nebu.Admin.ConfigHTML do
     config_value(config, key) || ""
   end
 
+  # Story fix-and-configure-sso-redirect-schemes (AC8): mirrors scope_value/2 —
+  # returns the current sso_extra_redirect_schemes config value, or "" when unset.
+  defp sso_schemes_value(config, key) do
+    config_value(config, key) || ""
+  end
+
   defp config_value(config, key) when is_list(config) do
     case List.keyfind(config, key, 0) do
       {_, v} -> v

@@ -254,4 +254,247 @@ defmodule Nebu.Matrix.SsoLoginTest do
              "email must appear exactly once; got: #{inspect(scopes)}"
     end
   end
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # Story `fix-and-configure-sso-redirect-schemes` — RED-phase tests below.
+  #
+  # AC12.1 (bugfix regression), AC12.2 (feature: cache-backed extra schemes),
+  # AC10 (callback_url/1 independence regression), and an additional near-miss
+  # scheme rejection test required by the Oracle spec-compliance gate
+  # (RFC 8252 §8.6 — exact-string matching only, no substring/prefix match).
+  #
+  # These exercise the ONLY public surface of the allowlist:
+  # `Nebu.Matrix.SsoLogin.redirect_url_allowed?/1` (currently `@doc false` but
+  # already called directly by other test files in this suite — see the module
+  # docs above; this module makes it public-in-practice for tests). The
+  # `:sso_redirect_schemes_reader` seam introduced here does NOT exist in the
+  # implementation yet (`extra_redirect_schemes/0` still reads
+  # `Application.get_env(:nebu_http, :sso_redirect_schemes)`), so
+  # AC12.2 tests are expected to fail (RED) until AC6/AC7 are implemented.
+  # ════════════════════════════════════════════════════════════════════════════
+
+  alias Nebu.Matrix.SsoLogin
+
+  defp set_extra_schemes_seam(fun) when is_function(fun, 0),
+    do: Application.put_env(:nebu_http, :sso_redirect_schemes_reader, fun)
+
+  defp clear_extra_schemes_seam,
+    do: Application.delete_env(:nebu_http, :sso_redirect_schemes_reader)
+
+  # ── AC12.1 — Bugfix Regression Tests (corrected default deep-link schemes) ──
+
+  describe "AC12.1: corrected default deep-link schemes (bugfix)" do
+    test "test_redirect_url_allowed_im_fluffychat_auth" do
+      assert SsoLogin.redirect_url_allowed?("im.fluffychat.auth://open?loginToken=abc")
+    end
+
+    test "test_redirect_url_allowed_schildichat" do
+      assert SsoLogin.redirect_url_allowed?("schildichat://open?loginToken=xyz")
+    end
+
+    test "test_redirect_url_not_allowed_io_element_fluffychat" do
+      refute SsoLogin.redirect_url_allowed?("io.element.fluffychat://open?loginToken=abc")
+    end
+
+    test "test_redirect_url_not_allowed_bare_fluffychat" do
+      refute SsoLogin.redirect_url_allowed?("fluffychat://open?loginToken=abc")
+    end
+
+    test "test_redirect_url_allowed_element" do
+      assert SsoLogin.redirect_url_allowed?("element://open?loginToken=abc")
+    end
+  end
+
+  # ── AC12.2 — Feature Tests (Cache + Extra Schemes) ──────────────────────────
+
+  describe "AC12.2: extra_redirect_schemes/0 cache + seam behaviour" do
+    setup do
+      on_exit(&clear_extra_schemes_seam/0)
+      :ok
+    end
+
+    test "test_extra_redirect_schemes_empty_when_not_set" do
+      # No seam, no server_config value: the cache-backed read must yield [] so
+      # only the hardcoded defaults + denylist govern the allowlist decision.
+      #
+      # This must be proven as a REAL toggle, not merely "myorg-matrix is
+      # rejected" (which would pass vacuously even if the seam is never read
+      # at all, e.g. a stubbed extra_redirect_schemes/0 that always returns
+      # []). So: first prove the seam IS consulted (custom scheme allowed
+      # while the seam is set), THEN clear the seam and prove the SAME
+      # scheme flips back to rejected. Only an implementation that actually
+      # reads the seam/cache on every call can pass both halves.
+      set_extra_schemes_seam(fn -> ["myorg-matrix"] end)
+      assert SsoLogin.redirect_url_allowed?("myorg-matrix://login?token=x")
+
+      clear_extra_schemes_seam()
+      refute SsoLogin.redirect_url_allowed?("myorg-matrix://login?token=x")
+    end
+
+    test "test_extra_redirect_schemes_from_cache" do
+      # When the :sso_redirect_schemes_reader seam returns a list, extra scheme
+      # membership must be honoured (downcase'd) by redirect_url_allowed?/1.
+      set_extra_schemes_seam(fn -> ["myorg-matrix"] end)
+      assert SsoLogin.redirect_url_allowed?("myorg-matrix://login?token=x")
+    end
+
+    test "test_extra_redirect_schemes_case_insensitive" do
+      # Seam may return mixed-case, comma-separated-looking tokens already split;
+      # the allowlist check itself downcases the incoming URL scheme, so a
+      # mixed-case seam entry must still match a lowercase incoming scheme.
+      set_extra_schemes_seam(fn -> ["MyOrg-Matrix", "Custom-App"] end)
+
+      assert SsoLogin.redirect_url_allowed?("myorg-matrix://login?token=x")
+      assert SsoLogin.redirect_url_allowed?("custom-app://login?token=x")
+    end
+
+    test "test_redirect_url_allowed_custom_scheme_from_cache" do
+      set_extra_schemes_seam(fn -> ["myorg-matrix"] end)
+      assert SsoLogin.redirect_url_allowed?("myorg-matrix://login?token=x")
+    end
+
+    test "test_redirect_url_rejected_custom_scheme_not_in_cache" do
+      # Proves the seam value is used as a MEMBERSHIP list, not merely
+      # "truthy seam set => allow everything": with a seam that returns
+      # exactly ["myorg-matrix"], a DIFFERENT custom scheme not in that
+      # list must still be rejected, while "myorg-matrix" itself is allowed.
+      set_extra_schemes_seam(fn -> ["myorg-matrix"] end)
+
+      assert SsoLogin.redirect_url_allowed?("myorg-matrix://login?token=x")
+      refute SsoLogin.redirect_url_allowed?("unknown-scheme://login?token=x")
+    end
+  end
+
+  # ── AC12.3 — Denylist (Existing, Preserved) ─────────────────────────────────
+  # NOTE: the underlying denylist BEHAVIOUR (javascript/data/file/vbscript/blob
+  # always rejected) is pre-existing and unchanged by this story — these are
+  # NOT duplicate test artifacts; this is the first test file in the repo to
+  # assert on redirect_url_allowed?/1 directly (grep confirms), so these are
+  # newly-added tests under the exact AC12.3 names for traceability with the
+  # story's explicit test list. They must keep passing unmodified before AND
+  # after this story's changes (AC2).
+
+  describe "AC12.3: denylist (exact test names from AC12)" do
+    test "test_redirect_url_denied_javascript" do
+      refute SsoLogin.redirect_url_allowed?("javascript:alert(1)")
+    end
+
+    test "test_redirect_url_denied_data" do
+      refute SsoLogin.redirect_url_allowed?("data:text/html,<script>alert(1)</script>")
+    end
+
+    test "test_redirect_url_denied_file" do
+      refute SsoLogin.redirect_url_allowed?("file:///etc/passwd")
+    end
+
+    test "test_redirect_url_denied_vbscript" do
+      refute SsoLogin.redirect_url_allowed?("vbscript:msgbox(1)")
+    end
+
+    test "test_redirect_url_denied_blob" do
+      refute SsoLogin.redirect_url_allowed?("blob:https://example.com/uuid")
+    end
+  end
+
+  # ── AC12.4 — Denylist Wins Over Custom Allowlist ────────────────────────────
+
+  describe "AC12.4: denylist wins over any custom allowlist entry" do
+    setup do
+      on_exit(&clear_extra_schemes_seam/0)
+      :ok
+    end
+
+    test "test_redirect_url_denied_javascript_even_if_custom_allows_it" do
+      # Even if an operator misconfigures the extra-schemes allowlist to include
+      # a denylisted scheme, the hardcoded denylist must win (security-critical:
+      # AC2, AC14 checklist item 2).
+      set_extra_schemes_seam(fn -> ["javascript"] end)
+      refute SsoLogin.redirect_url_allowed?("javascript:alert(1)")
+    end
+  end
+
+  # ── Oracle spec-compliance gate — near-miss scheme rejection ────────────────
+  # RFC 8252 §8.6 scheme-squatting mitigation depends on EXACT-STRING allowlist
+  # membership, never substring/prefix matching. A scheme that merely CONTAINS
+  # or is PREFIXED/SUFFIXED by an allowed scheme name must still be rejected.
+  # This is an ADDITIONAL edge case beyond the story's own AC12 list, per the
+  # Oracle spec-compliance step-result for this story.
+
+  describe "near-miss scheme rejection (exact-match only, RFC 8252 section 8.6)" do
+    test "element-evil scheme is rejected despite containing the allowed 'element' scheme" do
+      refute SsoLogin.redirect_url_allowed?("element-evil://open?loginToken=abc")
+    end
+
+    test "xelement scheme is rejected despite ending in the allowed 'element' scheme" do
+      refute SsoLogin.redirect_url_allowed?("xelement://open?loginToken=abc")
+    end
+  end
+
+  # ── AC10 — Regression: callback_url/1 Untouched & Independent ──────────────
+  # callback_url/1 is currently a private function (defp) in Nebu.Matrix.SsoLogin.
+  # It is exercised indirectly today via the 302 Location header's redirect_uri
+  # query param on the outbound IdP-authorize redirect (see setup_oidc/scope_params
+  # above for the harness pattern). This regression test asserts independence from
+  # the client-facing allowlist: even when the client redirectUrl is REJECTED,
+  # the IdP-facing callback_url (used internally to build "redirect_uri") is
+  # never reached/exercised on that path, AND when a redirect IS accepted, the
+  # callback_url embedded in the outbound authorize request is Nebu's own fixed
+  # per-request-host URL, entirely independent of the (allowed) client redirectUrl
+  # value used to reach that point.
+  describe "AC10: callback_url/1 is independent from client redirectUrl validation" do
+    test "rejected client redirectUrl never produces an IdP-authorize redirect (callback_url is never used)" do
+      conn =
+        conn(
+          :get,
+          "/_matrix/client/v3/login/sso/redirect?redirectUrl=" <>
+            URI.encode_www_form("javascript:alert(1)")
+        )
+
+      conn = Nebu.Web.Router.call(conn, @router_opts)
+
+      # Rejected before do_redirect/2 (which computes callback_url/1) is ever reached.
+      assert conn.status == 400
+      assert get_resp_header(conn, "location") == []
+    end
+
+    test "callback_url embedded in the IdP redirect_uri is derived from request host, independent of the allowed client redirectUrl value" do
+      if Process.whereis(SsoStore) == nil, do: start_supervised!(SsoStore)
+      setup_oidc()
+
+      # NOTE: Plug.Conn/Plug.Test forbid setting the "host" *request header*
+      # directly via put_req_header/3 (Plug.Conn.InvalidHeaderError — "host" is
+      # a pseudo-header derived from the connection, not a settable header on
+      # Plug.Adapters.Test.Conn). callback_url/1 reads get_req_header(conn,
+      # "host") first and falls back to "#{conn.host}:#{conn.port}" — so to
+      # exercise the fallback path (the realistic case for a direct, unproxied
+      # request) we build the conn against a URL with an explicit host/port,
+      # which Plug.Test derives conn.host/conn.port from, and assert against
+      # THAT derived value instead of hardcoding "example.com".
+      conn =
+        conn(
+          :get,
+          "http://example.com:4000/_matrix/client/v3/login/sso/redirect?redirectUrl=" <>
+            URI.encode_www_form("https://app.example.com/#/home")
+        )
+
+      assert conn.host == "example.com"
+
+      conn = Nebu.Web.Router.call(conn, @router_opts)
+      assert conn.status == 302
+
+      loc = conn |> get_resp_header("location") |> List.first()
+      %URI{query: q} = URI.parse(loc)
+      redirect_uri = URI.decode_query(q)["redirect_uri"]
+
+      # callback_url/1 is built from the request scheme+host (here, via the
+      # conn.host/conn.port fallback since no "host" header is present), NOT
+      # from the client's redirectUrl ("https://app.example.com/..."). It must
+      # point at THIS server's own fixed callback path on the request's own host.
+      assert redirect_uri == "http://example.com:4000/_matrix/client/v3/login/sso/redirect/oidc",
+             "callback_url must be derived solely from request host/scheme, never from the client redirectUrl; got: #{inspect(redirect_uri)}"
+
+      refute String.contains?(redirect_uri, "app.example.com"),
+             "callback_url must never leak/embed the client's redirectUrl host"
+    end
+  end
 end

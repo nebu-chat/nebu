@@ -187,6 +187,7 @@ defmodule Nebu.Admin.Router do
     get "/config", ConfigController, :index
     post "/config/refresh-mode", ConfigController, :save_refresh_mode
     post "/config/scopes", ConfigController, :save_scopes
+    post "/config/sso-schemes", ConfigController, :save_sso_schemes
 
     # Claim mapping
     get "/config/claim-mapping", ClaimMappingController, :index

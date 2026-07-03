@@ -22,6 +22,13 @@ defmodule Nebu.Web.OidcConfig do
     of a second, independent cache — the four scope/refresh-mode keys live in the
     SAME ETS table and are refreshed/broadcast by the SAME `refresh/0` path as
     issuer/audience/jwks_uri.
+  - `get_sso_extra_redirect_schemes/0` — returns the raw (unsplit) comma-separated
+    `sso_extra_redirect_schemes` string from `server_config`, or `nil` when unset
+    (story `fix-and-configure-sso-redirect-schemes`, AC6/AC7). Consumed by
+    `Nebu.Matrix.SsoLogin.extra_redirect_schemes/0`. Reuses this SAME ETS table /
+    GenServer / `:pg` broadcast — the SSO redirect allowlist is, like OIDC scopes,
+    a bootstrap-only, infrequently-changed, hot-request-path SSO setting; a
+    dedicated cache module would just duplicate this exact machinery.
   - `refresh/0` (or `refresh/1` with pid) — forces a synchronous re-read from
     `server_config` and updates the ETS cache. Called by the Bootstrap Wizard after
     it promotes the draft into `server_config` (AC2, AC5). Also broadcasts to
@@ -66,7 +73,8 @@ defmodule Nebu.Web.OidcConfig do
     matrix_oidc_extra_scopes: nil,
     matrix_oidc_refresh_mode: nil,
     admin_oidc_extra_scopes: nil,
-    admin_oidc_refresh_mode: nil
+    admin_oidc_refresh_mode: nil,
+    sso_extra_redirect_schemes: nil
   }
 
   # ── Public API ──────────────────────────────────────────────────────────────
@@ -164,6 +172,26 @@ defmodule Nebu.Web.OidcConfig do
   end
 
   @doc """
+  Returns the raw `sso_extra_redirect_schemes` string from `server_config` (comma-
+  separated, un-split), or `nil` when not set (story
+  `fix-and-configure-sso-redirect-schemes`, AC6/AC7).
+
+  Reads through the SAME ETS table as `get/0`/`get_scopes/0` when the owning
+  GenServer is running; falls back to a direct, uncached `server_config` read when
+  the ETS table does not exist yet (e.g. gated off under plain `mix test`).
+  """
+  @spec get_sso_extra_redirect_schemes() :: binary() | nil
+  def get_sso_extra_redirect_schemes do
+    raw =
+      case :ets.whereis(@table) do
+        :undefined -> load_from_db()
+        _ -> read_from_ets()
+      end
+
+    Map.get(raw, :sso_extra_redirect_schemes)
+  end
+
+  @doc """
   Forces a synchronous re-read from `server_config` and updates the ETS cache.
   Also broadcasts an invalidation to peer nodes via `:pg` (ADR-020 / M-3).
   Pass a pid when targeting a non-registered instance (e.g. in tests).
@@ -250,7 +278,8 @@ defmodule Nebu.Web.OidcConfig do
   WHERE key IN (
     'oidc_issuer', 'oidc_audience', 'oidc_jwks_uri',
     'matrix_oidc_extra_scopes', 'matrix_oidc_refresh_mode',
-    'admin_oidc_extra_scopes', 'admin_oidc_refresh_mode'
+    'admin_oidc_extra_scopes', 'admin_oidc_refresh_mode',
+    'sso_extra_redirect_schemes'
   )
   """
 
@@ -271,7 +300,10 @@ defmodule Nebu.Web.OidcConfig do
             matrix_oidc_extra_scopes: map["matrix_oidc_extra_scopes"] || "",
             matrix_oidc_refresh_mode: nilify(map["matrix_oidc_refresh_mode"]),
             admin_oidc_extra_scopes: map["admin_oidc_extra_scopes"] || "",
-            admin_oidc_refresh_mode: nilify(map["admin_oidc_refresh_mode"])
+            admin_oidc_refresh_mode: nilify(map["admin_oidc_refresh_mode"]),
+            # story fix-and-configure-sso-redirect-schemes (AC6/AC7): nil when unset
+            # (Nebu.Matrix.SsoLogin.extra_redirect_schemes/0 treats nil/"" as []).
+            sso_extra_redirect_schemes: nilify(map["sso_extra_redirect_schemes"])
           }
 
         {:error, reason} ->

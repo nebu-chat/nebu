@@ -1,0 +1,12 @@
+# generated: 2026-07-03
+# Epic: configurable-sso-redirect-schemes
+# story fix-and-configure-sso-redirect-schemes done (pipeline: ATDD+Code review 1 cycle+Kassandra CLEAN): 2026-07-03
+project: nebu
+epic: configurable-sso-redirect-schemes
+epic_status: in-progress
+
+development_status:
+  # Stories are added as they complete.
+  # Format:
+  #   <story-slug>: done | in-progress | ready-for-dev | backlog
+  fix-and-configure-sso-redirect-schemes: done

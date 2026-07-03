@@ -31,14 +31,19 @@ end
 #
 # Only non-config presentation/operational knobs remain here:
 #   - NEBU_OIDC_DISPLAY_NAME — advertised IdP label for GET /v3/login (m.login.sso)
-#   - NEBU_SSO_REDIRECT_SCHEMES — allowed non-http client redirect schemes
 #   - NEBU_OIDC_JWKS_TTL — JwksCache refresh interval (read in Nebu.Web.JwksCache)
+#
+# story fix-and-configure-sso-redirect-schemes (AC3): NEBU_SSO_REDIRECT_SCHEMES has
+# been REMOVED. Additional client-facing SSO redirect schemes (beyond the hardcoded
+# defaults element/schildichat/im.fluffychat.auth) are now bootstrap-only, configured
+# via the Admin UI (/admin/config) and read through Nebu.Web.OidcConfig's cache
+# (server_config.sso_extra_redirect_schemes) — no env var config path, consistent
+# with ADR-022.
 if config_env() in [:prod, :dev] do
   config :nebu_http,
     server_name: System.get_env("NEBU_SERVER_NAME", "localhost"),
     # Advertised IdP display name for GET /_matrix/client/v3/login (m.login.sso).
     oidc_display_name: System.get_env("NEBU_OIDC_DISPLAY_NAME", "SSO"),
-    sso_redirect_schemes: System.get_env("NEBU_SSO_REDIRECT_SCHEMES", ""),
     start_jwks_cache: true
 
   # ── device-management S3: UIA fresh-auth window (Option B) ──────────────────

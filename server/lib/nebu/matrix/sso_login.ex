@@ -53,8 +53,12 @@ defmodule Nebu.Matrix.SsoLogin do
   # an allowlist — they can exfiltrate the loginToken via script/file/opaque-data URIs.
   @scheme_denylist ~w(javascript data file vbscript blob)
 
-  # Default Matrix-client deep-link schemes always accepted (Element / FluffyChat).
-  @default_deep_link_schemes ~w(element io.element.fluffychat fluffychat)
+  # Default Matrix-client deep-link schemes always accepted (Element / SchildiChat /
+  # FluffyChat). Corrected (story fix-and-configure-sso-redirect-schemes, AC1): the
+  # previous list contained two schemes that do not match any real client
+  # ("io.element.fluffychat", "fluffychat") — SchildiChat's real scheme is
+  # "schildichat" and FluffyChat's real scheme is "im.fluffychat.auth".
+  @default_deep_link_schemes ~w(element schildichat im.fluffychat.auth)
 
   # ── GET /sso/redirect[/:idp] ────────────────────────────────────────────────
 
@@ -293,6 +297,15 @@ defmodule Nebu.Matrix.SsoLogin do
 
   # ── redirectUrl allowlist (open-redirect protection — Go isRedirectURLAllowed) ─
 
+  @doc """
+  Exposes the hardcoded scheme denylist (`javascript`, `data`, `file`, `vbscript`,
+  `blob`) so `Nebu.Admin.ConfigController` can reject an operator's attempt to
+  allowlist one of them at SAVE time (AC5/AC9), without duplicating the literal
+  list (single source of truth — ADR-018/ADR-021).
+  """
+  @spec scheme_denylist() :: [String.t()]
+  def scheme_denylist, do: @scheme_denylist
+
   @doc false
   def redirect_url_allowed?(raw) when is_binary(raw) and raw != "" do
     uri = URI.parse(raw)
@@ -316,11 +329,29 @@ defmodule Nebu.Matrix.SsoLogin do
 
   def redirect_url_allowed?(_), do: false
 
+  # AC6/AC7 (story fix-and-configure-sso-redirect-schemes): the extra allowlist is
+  # now runtime-configurable via the Admin UI (`server_config.sso_extra_redirect_schemes`),
+  # read through the SAME cluster-aware ETS cache as OIDC config
+  # (`Nebu.Web.OidcConfig`) — no per-request DB call, no NEBU_SSO_REDIRECT_SCHEMES
+  # env var (ADR-022, removed). The `:sso_redirect_schemes_reader` 0-arity seam lets
+  # unit tests inject a scheme list directly without a running cache/GenServer/DB.
   defp extra_redirect_schemes do
-    case Application.get_env(:nebu_http, :sso_redirect_schemes) do
-      list when is_list(list) -> Enum.map(list, &String.downcase/1)
-      str when is_binary(str) -> str |> String.split(",", trim: true) |> Enum.map(&(&1 |> String.trim() |> String.downcase()))
-      _ -> []
+    case Application.get_env(:nebu_http, :sso_redirect_schemes_reader) do
+      fun when is_function(fun, 0) ->
+        fun.() |> List.wrap() |> Enum.map(&String.downcase/1)
+
+      _ ->
+        case Nebu.Web.OidcConfig.get_sso_extra_redirect_schemes() do
+          str when is_binary(str) and str != "" ->
+            str
+            |> String.split(",", trim: true)
+            |> Enum.map(&(&1 |> String.trim() |> String.downcase()))
+            |> Enum.reject(&(&1 == ""))
+            |> Enum.uniq()
+
+          _ ->
+            []
+        end
     end
   end
 
