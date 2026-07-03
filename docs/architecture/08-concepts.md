@@ -138,6 +138,28 @@ Wizard and `/admin/config` (Story configurable-oidc-scopes, `server_config` keys
 `matrix_oidc_extra_scopes` / `admin_oidc_extra_scopes`). There is no `NEBU_OIDC_EXTRA_SCOPES` env
 var (ADR-022: bootstrap-only config).
 
+**`Nebu.Web.OidcScopes` (Story centralize-scope-resolution, epic oidc-simplification, 2026-07-01):**
+scope resolution + validation for BOTH `Nebu.Matrix` and `Nebu.Admin` is centralized in a single
+`Nebu.Web` shared-infra module (`server/lib/nebu/web/oidc_scopes.ex`), analogous to `OidcConfig` /
+`JwksCache`:
+
+- `resolve_scope(:matrix | :admin) :: String.t()` — `"openid"` + that client's OWN configured extra
+  scopes + `"offline_access"` iff that client's OWN refresh mode is `"offline"`, deduplicated,
+  space-separated. Reads through `Nebu.Web.OidcConfig`'s extended ETS cache (see below) — no ad-hoc
+  SQL in `OidcScopes` itself.
+- `validate_scope_string(String.t()) :: :ok | {:error, String.t()}` — the ONE validator
+  (`~r/^[a-zA-Z0-9_:.\-]+\z/` per token), replacing the two previously-duplicated regex copies in
+  `bootstrap_controller.ex` and `admin/auth.ex`.
+- `Nebu.Matrix.SsoLogin.scope_list/0` and `Nebu.Admin.Auth.admin_oidc_scope/0` are now THIN
+  DELEGATES to `OidcScopes.resolve_scope/1`; `bootstrap_controller.ex`/`config_controller.ex` call
+  `OidcScopes.validate_scope_string/1` instead of a local regex.
+- The existing four per-domain reader seams (`:{matrix,admin}_oidc_{extra_scopes,refresh_mode}_reader`)
+  migrated house to `OidcScopes` UNCHANGED in name/shape, so the pre-existing regression suites keep
+  passing without modification.
+
+This supersedes the "Admin/Matrix identity unification" scope-union fold below: `Nebu.Matrix.matrix_oidc_extra_scopes/0`
+(the Public-API facade delegate that fold used) is **removed** — see the dedicated note further down.
+
 A matching warning is emitted for `client_secret`. This ensures operators can detect a misconfigured
 SSO flow immediately from startup logs before the first login attempt.
 
@@ -172,15 +194,19 @@ per client** rather than hardcoded. Two `server_config` keys, each `offline | on
 
 | Key | Default | Builder reading it live | `offline_access` requested? |
 |---|---|---|---|
-| `matrix_oidc_refresh_mode` | `offline` | `Nebu.Matrix.SsoLogin.scope_list/0` | iff mode = `offline` |
-| `admin_oidc_refresh_mode` | `online` | `Nebu.Admin.Auth.admin_oidc_scope/0` | iff mode = `offline` |
+| `matrix_oidc_refresh_mode` | `offline` | `Nebu.Matrix.SsoLogin.scope_list/0` → `Nebu.Web.OidcScopes.resolve_scope(:matrix)` | iff mode = `offline` |
+| `admin_oidc_refresh_mode` | `online` | `Nebu.Admin.Auth.admin_oidc_scope/0` → `Nebu.Web.OidcScopes.resolve_scope(:admin)` | iff mode = `offline` |
 
 - **Set at bootstrap** (Bootstrap Wizard) **and changeable at runtime** via `/admin/config`
   (`Nebu.Admin.ConfigLive`). Runtime changes apply to **subsequent logins** — no redeploy.
-- The scope builders read the mode **live** (per request, via an injectable
-  `:{matrix,admin}_oidc_refresh_mode_reader`, default = `server_config` lookup). `openid` is always
-  mandatory; `offline_access` is appended only when the client's mode is `offline`. Any
-  operator-configured base scope (`:admin_oidc_scope`) and `NEBU_OIDC_EXTRA_SCOPES` are still honoured.
+- Post-`centralize-scope-resolution`, `Nebu.Web.OidcScopes` reads the mode through
+  `Nebu.Web.OidcConfig`'s shared ETS cache (or the injectable
+  `:{matrix,admin}_oidc_refresh_mode_reader` seam in unit tests) instead of an ad-hoc per-call SQL
+  query — an Admin-Config write to any of the 4 scope/refresh-mode keys now forces a synchronous
+  cache refresh + `:pg` cluster broadcast via `Nebu.Admin.DB.upsert_server_config/1` (mirroring the
+  `oidc_user_id_claim` cache-invalidation pattern), so a runtime change is visible on the very next
+  login without a stale-cache window, even on multi-node deployments. `openid` is always mandatory;
+  `offline_access` is appended only when the client's mode is `offline`.
 - The admin client **no longer force-requests `offline_access`** — its `online` default means no
   special IdP client approval is needed for standard admin sign-in.
 - **IdP caveat:** **Dex** issues a refresh token *only* when `offline_access` is requested, so admin
@@ -195,19 +221,27 @@ client, set in the Bootstrap Wizard (Step 3, before refresh-mode) and changeable
 
 | Key | Default | Scope builder |
 |---|---|---|
-| `matrix_oidc_extra_scopes` | `""` (empty) | `Nebu.Matrix.SsoLogin.scope_list/0` |
-| `admin_oidc_extra_scopes` | `""` (empty) | `Nebu.Admin.Auth.admin_oidc_scope/0` |
+| `matrix_oidc_extra_scopes` | `""` (empty) | `Nebu.Matrix.SsoLogin.scope_list/0` → `Nebu.Web.OidcScopes.resolve_scope(:matrix)` |
+| `admin_oidc_extra_scopes` | `""` (empty) | `Nebu.Admin.Auth.admin_oidc_scope/0` → `Nebu.Web.OidcScopes.resolve_scope(:admin)` |
 
-- **`openid` is always injected** by the scope builders — it cannot be removed by operator config.
-- `offline_access` is still controlled by `{matrix,admin}_oidc_refresh_mode` (unchanged).
+- **`openid` is always injected** by `Nebu.Web.OidcScopes.resolve_scope/1` — it cannot be removed by
+  operator config, and no literal scope beyond `"openid"` is ever hardcoded there (OIDC Scopes Law,
+  mechanically pinned by a grep test in `oidc_scopes_test.exs`).
+- `offline_access` is still controlled by `{matrix,admin}_oidc_refresh_mode`, and — as of
+  `centralize-scope-resolution` — is scoped strictly to each client's OWN refresh mode; it can no
+  longer be requested by one client via the other's `*_extra_scopes` configuration (see the
+  superseded identity-unification note below for the leak this closes).
 - Scope tokens are validated against `[a-zA-Z0-9_:.\-]+` (anchored with `\z` — trailing-newline
-  safe) at every write boundary (bootstrap wizard, admin config page, bootstrap promotion).
+  safe) via the ONE validator, `Nebu.Web.OidcScopes.validate_scope_string/1`, at every write boundary
+  (bootstrap wizard, admin config page, bootstrap promotion) — no local regex copies remain.
 - Migration `000013` extends the `config_update_mutable` RLS policy to include both new keys,
   mirroring the `000007` pattern for refresh-mode keys.
 - Runtime injection via `:{matrix,admin}_oidc_extra_scopes_reader` seams (0-arity fun) mirrors the
-  `:{matrix,admin}_oidc_refresh_mode_reader` pattern for test isolation.
+  `:{matrix,admin}_oidc_refresh_mode_reader` pattern for test isolation; both pairs of seams now live
+  on `Nebu.Web.OidcScopes` (unchanged name/shape) rather than being duplicated per domain module.
 
-**Admin/Matrix identity unification (bugfix-unify-admin-matrix-oidc-identity, 2026-07-01):**
+**Admin/Matrix identity unification (bugfix-unify-admin-matrix-oidc-identity, 2026-07-01) — SUPERSEDED
+by story `centralize-scope-resolution` (same date):**
 Because `matrix_oidc_extra_scopes` and `admin_oidc_extra_scopes` are independently configurable,
 an operator could set them to different values — e.g. Matrix requests `profile` (so
 `preferred_username`/`name` resolve) while Admin requests only `groups`. The SAME real person then
@@ -215,26 +249,77 @@ gets ID tokens with different claim sets from the two flows, and `Nebu.Matrix.Us
 (claim-priority: configured claim → `preferred_username` → `name` → `sub`) derives **two different**
 Matrix user_ids for one person — a split identity, visible as two rows in the admin Users list.
 
-Fix: `Nebu.Admin.Auth.admin_oidc_scope/0` now unions its own configured extra scopes with the
+Original fix: `Nebu.Admin.Auth.admin_oidc_scope/0` unioned its own configured extra scopes with the
 Matrix flow's (`Nebu.Matrix.matrix_oidc_extra_scopes/0`, exposed via the `Nebu.Matrix` facade per
-ADR-020 — never call `Nebu.Matrix.SsoLogin` directly from `Nebu.Admin`), guaranteeing the admin ID
-token is always a claim-superset of the Matrix ID token. The union is **one-directional**: Matrix's
-own `scope_list/0` is untouched, so admin-only scopes (e.g. a `groups` claim source not needed by
-Matrix clients) never leak into the Matrix authorization request. The two `server_config` keys stay
-separate — this only changes what admin additionally *requests*, not what Matrix requests.
+ADR-020), guaranteeing the admin ID token was always a claim-superset of the Matrix ID token.
 
-**Known limitation:** this fix prevents NEW divergence only. It does not retroactively merge
-identities that already split under the old drift in an existing deployment (room memberships,
-devices, and audit-log actor rows tied to a stray opaque-`sub` user_id are untouched — a data
-migration for that is a separate, riskier follow-up). Kassandra security review (2026-07-01) also
-flagged a non-blocking MEDIUM: widening the admin scope means claims like `name`/`preferred_username`
-now reach `Nebu.Admin.Auth.admin_claim?/1`'s any-key claim-value scan for the first time, so a
-non-admin whose IdP lets them self-set such a claim could in theory match the admin marker value.
-Accepted as a known risk rather than patched with a claim-key denylist here — the bootstrap wizard
-stores only the *value* an operator selected as the admin marker, not its source key, so a
-hardcoded denylist could silently break a legitimate config. The proper fix (track the claim key,
-scope the check to it, and centralize OIDC scope/claim resolution so admin and Matrix never diverge
-by construction) is tracked as a follow-up architecture item, not squeezed into this bug fix.
+**This fold is REMOVED as of `centralize-scope-resolution`** (2026-07-01): it was itself the root
+cause of a Kassandra LOW finding (AC3 of that story) — `offline_access` configured under
+`matrix_oidc_extra_scopes` could leak into the Admin OIDC request via the unfiltered fold, even when
+the admin client's own refresh mode was `"online"`. `Nebu.Admin.Auth.union_scopes/2` and the
+`Nebu.Matrix.matrix_oidc_extra_scopes/0` facade delegate are both deleted; `Nebu.Web.OidcScopes`
+resolves each client's scope from ONLY that client's own `server_config` keys — no cross-client
+union. An operator who independently configures `matrix_oidc_extra_scopes` and
+`admin_oidc_extra_scopes` can once again see two different Matrix user_ids for the same person (the
+original bug this fold fixed); identity/claim unification across independently-scoped flows is
+tracked as a separate, claim-mapping-centric follow-up (see `centralize-scope-resolution`'s
+Non-Goals: "Kein Claim-Mapping"), not re-solved via scope folding.
+
+**Known limitation (historical, from the original fix):** it prevented NEW divergence only, never
+retroactively merged identities that already split under the old drift in an existing deployment
+(room memberships, devices, and audit-log actor rows tied to a stray opaque-`sub` user_id remain
+untouched either way). Kassandra's non-blocking MEDIUM about the admin `admin_claim?/1` any-key scan
+seeing a wider claim set is now largely moot for admin logins (the admin scope no longer widens via
+the Matrix fold); the underlying any-key-scan risk itself is RESOLVED by story
+`scope-admin-claim-to-path` (2026-07-02, see the "Path-scoped gate" note above) for deployments that
+have (re-)run bootstrap claim selection since — pre-existing deployments remain on the documented
+fallback until they do.
+
+**Bootstrap-completion session identity fix (Story fix-bootstrap-admin-session-identity, epic
+oidc-simplification, 2026-07-01):**
+
+A second, independent `matrix_user_id`-divergence class from the one above: `Nebu.Admin.Auth.
+bootstrap_confirm_claim/2` (the handler for `POST /admin/bootstrap/select-claim`, which completes
+the setup wizard) minted the admin session via a **second, hand-rolled** `user` map
+(`sub`/`email`/`admin`/`session_exp`/`refresh_grace_exp`) that never included `"matrix_user_id"` —
+unlike `put_current_user/2` (used by the ordinary `normal_callback/2` login), which derives it via
+`Nebu.Matrix.UserId.from_claims/2`. An operator who created a room via the Admin UI immediately
+after finishing bootstrap (before ever logging in as a Matrix client) was attributed as the raw
+opaque OIDC `sub` instead of their canonical Matrix user_id — `RoomsController.actor_id/1` /
+`UsersController.actor_id/1` both fall back to `sub` when `matrix_user_id` is absent/empty.
+
+**Fix:** `bootstrap_confirm_claim/2` now mints the session via the SAME `put_current_user/2`
+builder `normal_callback/2` uses — no second map construction. Making this possible required
+extending what the bootstrap draft carries: `bootstrap_callback/2` (the OIDC-callback leg, mode
+`"bootstrap"`) now additionally stashes the FULL verified ID-token claims map as JSON under a new
+draft key `bootstrap_full_claims` (the pre-existing `bootstrap_claims` key is a dot-path-flattened
+projection built for the claim-picker UI and is not usable as input to `UserId.from_claims/2`'s
+flat-key lookups; both keys are kept, serving their separate purposes). A private
+`bootstrap_claims/1` decodes `bootstrap_full_claims`, falling back to reconstructing a flat claims
+map from the legacy flattened `bootstrap_claims` list (bare/non-dot-path keys only) for a bootstrap
+that was already in-flight when this fix deployed — this keeps such an in-flight setup from being
+bricked. The reconstruction/decode-failure guard is checked in `bootstrap_confirm_claim/2`'s `cond`
+chain BEFORE `complete_bootstrap/2` runs, so `bootstrap_completed` can never be set `"true"` from a
+state that would then fail to mint a session.
+
+Because both login paths now converge on one builder with the same claims-derivation logic, the
+guarantee that a bootstrap-completion session's `matrix_user_id` equals a subsequent normal
+re-login's is now **structural** (one shared code path), not incidental — the same closure this
+story's sibling `bugfix-unify-admin-matrix-oidc-identity`/`centralize-scope-resolution` sought for
+scope-driven claim divergence, but for a session-construction duplication instead.
+
+**Considered and rejected:** a defense-in-depth fallback in `RoomsController.actor_id/1` /
+`UsersController.actor_id/1` that would derive `matrix_user_id` from a synthetic `sub`/`email`-only
+claims map when the session lacks `matrix_user_id` (e.g. a stale session minted before this fix
+deploys), instead of falling back to the raw `sub`. Rejected in code review: for an instance with a
+non-default `oidc_user_id_claim` (e.g. `preferred_username`), that claim is absent from a stale
+session, so the fallback would have silently derived a *plausible but wrong* Matrix user_id — worse
+than today's visibly-wrong raw-`sub` fallback, which at least fails obviously. `actor_id/1` in both
+controllers ships unchanged. The residual — a session minted before this fix deploys still shows
+the pre-fix behavior until the operator's next login — is bounded (sessions are TTL-capped) and
+self-healing (every session minted after deployment now carries `matrix_user_id`), not a new or
+worse exposure. Kassandra SEC Gate 1: CLEAN (see
+`docs/stories/oidc-simplification/security-reports/fix-bootstrap-admin-session-identity-security-review-2026-07-01.md`).
 
 **Configurable Nebu session-lifetime ceiling (Story e2e-session-refresh-suites):**
 
@@ -410,19 +495,83 @@ When the client sends `refresh_token: true`:
 When the client omits `refresh_token: true`, the raw OIDC JWT is returned as `access_token` and no
 session row is written (original stateless behaviour).
 
-**Session refresh (`POST /_matrix/client/v3/refresh`):**
+**Requested-but-not-granted fallback (Story fix-matrix-login-missing-refresh-token):** if the client
+DOES send `refresh_token: true` but the IdP's token response carries no `refresh_token` despite
+`offline_access` having been requested (e.g. the Keycloak client lacks the "Offline Access"
+capability — an IdP-side misconfiguration, not a Nebu bug per RFC 6749 §3.3, granting fewer scopes
+than requested is legal), the login silently degrades to the same JWT-only response as the
+omitted-flag case above (no session row, no `refresh_token`/`expires_in_ms` in the response — both
+spec-OPTIONAL per Matrix v1.3). This was previously a silent WARNING with no actionable detail;
+`respond_login/7`'s fallback now logs a message with the same information content as the admin-side
+parity message (`Nebu.Admin.Auth.store_refresh_token/2`): *"...ensure the IdP grants offline_access
+to the matrix client"* — naming the specific client an operator needs to reconfigure, without
+logging any token/id_token content. Investigating this diagnosability gap confirmed
+`Nebu.Web.OidcScopes.resolve_scope/1` and `Nebu.Matrix.SsoLogin.extract_id_token/1` were already
+correct (no scope-construction or parsing bug existed) — the fix is diagnosis-only, not behavioral.
+A distinct follow-up story (`matrix-refresh-revalidates-with-idp`, now implemented — see below) tracked
+the separately-identified observation that `/refresh` extended sessions purely locally and never
+re-contacted the OIDC token endpoint.
+
+**Session refresh (`POST /_matrix/client/v3/refresh`) — now IdP-revalidating (story
+`matrix-refresh-revalidates-with-idp`):**
 
 Registered OUTSIDE the auth pipeline (unauthenticated by spec) but **rate-limited** via the per-IP
-`Nebu.Web.Plugs.RateLimit` token bucket:
+`Nebu.Web.Plugs.RateLimit` token bucket. `/refresh` no longer just extends the Nebu-local opaque
+session — it now re-validates against the OIDC provider on **every** refresh, closing the Matrix-side
+"Nebu loses its OIDC-resource-server posture" gap the Oracle flagged: the admin refresh path
+(`Nebu.Admin.Auth.refresh_admin_session/1`) already re-contacted the IdP on every silent refresh;
+Matrix previously did not, leaving up to 8h between a deprovisioning event at the IdP and Nebu
+noticing it (`deactivate_user`'s immediate opaque-session hard-delete was the only other kill-switch).
+That detection-latency gap is now "next refresh attempt", matching the admin side:
 
-1. Extract `refresh_token` from the request body
-2. Look up the session by `refresh_token` (including grace-window state)
-3. If not found or the grace window has expired: `401 M_UNKNOWN_TOKEN` with `soft_logout: true`
-4. Generate a new opaque `access_token` + `refresh_token`
-5. Compute `expires_at = min(oidc_exp, NOW() + 8h)`
-6. Rotate atomically: write the new tokens and mark the old row `revoked_at = NOW()`,
-   `grace_until = NOW() + 60s`
-7. Return `200 {"access_token", "refresh_token", "expires_in_ms"}`
+1. Extract `refresh_token` from the request body; look up the session (including grace-window state).
+   Not found / grace-expired → `401 M_UNKNOWN_TOKEN` with `soft_logout: true` (unchanged).
+2. **(AC1) IdP re-validation, BEFORE any local rotation:** decrypt the session's stored
+   `oidc_refresh_token` (`Nebu.Web.SecretBox`) and redeem it at the IdP token endpoint
+   (`grant_type=refresh_token`) via the shared `Nebu.Web.OidcTokenExchange.refresh/2` — the SAME
+   HTTP-POST + response-parse + `Nebu.Web.Plugs.OidcPlug.verify_token/2` logic
+   `Nebu.Admin.Auth.exchange_refresh_token/1` uses (extracted once, called by both domains — no second
+   independent copy). A `:matrix_oidc_refresh_override` test seam (1-arity fun over the decrypted RT,
+   mirroring `:admin_oidc_refresh_override`) short-circuits the HTTP+JWT-verify leg in tests.
+3. **(AC2) Fail-closed on ANY failure, with two distinct branches depending on WHY it failed** — IdP
+   rejection/network error, decrypt failure, no stored OIDC RT, or the user having since been
+   deactivated (re-checked via the SAME `Nebu.Matrix.Session.TokenValidator.validate/4` gate the login
+   path uses) all respond `401 M_UNKNOWN_TOKEN` with `soft_logout: true`. What happens to the opaque
+   session row differs:
+   - **Confirmed rejection/deprovisioning** (IdP rejects the RT, decrypt failure, no stored OIDC RT, or
+     a confirmed `{:error, :deactivated}` verdict): immediately hard-delete the opaque session row for
+     that `(user_id, device_id)` (`MatrixSessionStore.delete_for_user_device/2`) so neither a retried
+     `/refresh` nor the still-live old opaque access token can succeed afterwards.
+   - **Transient re-check failure** (`check_still_active/2`'s call to `TokenValidator.validate/4` fails
+     with anything other than a confirmed `{:error, :deactivated}` — e.g. a DB hiccup — wrapped as
+     `{:error, {:transient_check_failed, reason}}`): this is NOT proof of deprovisioning, so the session
+     row is left intact. This one request still fails closed (401), but a later `/refresh` attempt can
+     succeed once the transient issue clears, instead of a legitimate session being permanently killed
+     over an unrelated infra blip.
+
+   There is no local-only fallback in either branch — a failed IdP round-trip never silently degrades
+   to the old purely-local extension behavior.
+4. **(AC3) On success**, the new opaque tokens' lifetime is computed via the SAME
+   `session_expires_at/1` function login uses (`min(fresh_id_token.exp, now + ceiling)`), fed the
+   FRESH claims returned by the IdP round-trip — not a flat ceiling. This restores login/refresh
+   lifetime symmetry (previously an asymmetry the Oracle had flagged) as a side effect of the IdP now
+   genuinely being asked on every refresh.
+5. **(AC4)** A provider-rotated OIDC refresh token (some IdPs rotate on refresh, some don't) is
+   re-encrypted and threaded through `MatrixSessionStore.rotate_tokens/1`'s pre-existing
+   `:new_oidc_refresh_token` param; when the IdP returns none, the previous encrypted OIDC RT is
+   carried over unchanged (that carry-over was already `rotate_tokens/1`'s behavior — this story is
+   the first caller to ever actually populate the fresh-RT side of it).
+6. Rotate atomically: write the new opaque tokens and mark the old row `revoked_at = NOW()`,
+   `grace_until = NOW() + 60s` (unchanged, `rotate_tokens/1`).
+7. Return `200 {"access_token", "refresh_token", "expires_in_ms"}`.
+
+**Shared IdP token exchange (`Nebu.Web.OidcTokenExchange`):** extracts the ~20-line
+`grant_type=refresh_token` HTTP-POST + JSON-parse + `verify_token/2` leg out of
+`Nebu.Admin.Auth.exchange_refresh_token/1` into a module both the Admin and Matrix refresh paths call
+with their own resolved config (issuer/client_id/client_secret) — same pattern as
+`centralize-scope-resolution`/`centralize-claim-resolution`, applied to the refresh grant. Each domain
+keeps its OWN test seam (`:admin_oidc_refresh_override` / `:matrix_oidc_refresh_override`) since
+audience/client-config context can differ between the two flows.
 
 **Grace period semantics (Spec MUST):**
 
@@ -1033,12 +1182,27 @@ from `Nebu.Web.Router`. Key security controls:
   Dex's flat `groups: [...]`. The Bootstrap Wizard's claim-picker (`extract_discovered_claims/1`)
   likewise flattens nested claims into dot-path-keyed options (e.g. `realm_access.roles`) so an
   operator can select them during setup. Backward compatible — flat claim configs are unaffected.
-  Accepted risk (unchanged in kind, only in scope — see Kassandra review 2026-07-01): a non-admin
-  who can self-set a claim (at any nesting depth) matching the marker value could be misclassified
-  as admin; not exploitable via IdP-managed role claims like `realm_access.roles`, only via
-  self-service-editable profile claims, which are typically flat regardless. Properly scoping the
-  check to a specific claim *path* (not just a value) is deferred to the planned OIDC-centralization
-  epic.
+  **Path-scoped gate (story `scope-admin-claim-to-path`, epic `oidc-simplification`, 2026-07-02 —
+  RESOLVES the any-key-scan risk above):** the Bootstrap Wizard now persists the selected claim's
+  dot-PATH (`server_config.admin_group_claim_path`, e.g. `"realm_access.roles"` or a flat
+  `"groups"`) alongside its value (`admin_group_claim`), via a new
+  `Nebu.Web.OidcClaims.claim_at_path_matches?/3` (server/lib/nebu/web/oidc_claims.ex). When a path
+  is configured, `admin_claim?/1` resolves ONLY that path and matches the marker there — a hit
+  anywhere else in the claims tree (e.g. a self-editable `name`/`preferred_username` claim) no
+  longer counts. This is an allowlist of the ONE path the operator themselves selected during
+  bootstrap, not a claim-key denylist (a denylist was rejected during
+  `bugfix-unify-admin-matrix-oidc-identity` code review as unsafe — it could silently break a
+  legitimately-configured admin_group_claim). The path is now MANDATORY on every bootstrap
+  completion — `bootstrap_confirm_claim/2` rejects a completion POST that omits a verified claim
+  path (code-review MAJOR M1 fix during this story's own pipeline run) rather than silently
+  persisting a path-less config, so a fresh instance can never end up on the fallback below.
+  **Fallback (not a regression, pre-existing deployments only):** a deployment bootstrapped BEFORE
+  this story shipped has no `admin_group_claim_path` in `server_config` and cannot acquire one
+  retroactively (bootstrap runs exactly once) — for those, `admin_claim?/1` falls back to the
+  pre-story any-key scan unchanged, logging at INFO level (no PII) so operators can see that a
+  fresh re-bootstrap would harden the gate. Migration `000016_config_admin_group_claim_path` widens
+  the `config_update_mutable` RLS policy so the key is runtime-mutable, mirroring
+  `000013_config_oidc_scopes_mutable`'s pattern.
 - **CRUD page rendering (admin-http-refactor):** Users, Rooms, Spaces, Config, ClaimMapping,
   RoleMapping, and Compliance pages are now rendered by Phoenix HTTP controllers following the
   Post-Redirect-Get (PRG) pattern. Each controller module has a corresponding HTML view module and
@@ -1092,8 +1256,71 @@ refreshed claims** (a revoked admin loses access on the next refresh), recompute
 `session_exp = min(new id_token.exp, now+8h)`, renews the session and rotates the stored RT. On refresh
 failure or lost group it clears the session and redirects to `/admin/login`. This replaces the previous
 behaviour where the admin session was capped at the short `id_token.exp` with no refresh, causing a
-forced re-login roughly every 5 minutes against Keycloak. **Known limitation:** the refresh fires on
-HTTP round-trips, not over the persistent LiveView websocket.
+forced re-login roughly every 5 minutes against Keycloak.
+
+**LiveView-idle session refresh (admin-liveview-session-refresh):** the silent refresh above is an HTTP
+Plug, so it only re-runs on a genuine HTTP round-trip — an operator idling on an open LiveView
+(Dashboard, AuditLog) with zero new HTTP requests would otherwise be force-logged-out at
+`id_token.exp` regardless of `admin_oidc_refresh_mode`, since nothing on the persistent WebSocket
+connection ever re-triggered `fetch_current_user/2`. Fixed with a client-side heartbeat rather than a
+new server-side refresh path (Phoenix session cookies cannot be set over WebSocket anyway): a `phx-hook`
+(`SessionKeepalive`, `server/priv/static/assets/app.js`) mounted in the shared LiveView layout
+(`Nebu.Admin.Layouts.live/1`) polls a minimal `GET /admin/keepalive` endpoint every 60 s — well inside
+the 120 s pre-expiry window — while any admin LiveView tab is open. The endpoint
+(`Nebu.Admin.KeepaliveController`) sits behind the exact same `:browser` pipeline + `require_admin`
+gate as every other admin route, returns a bare `204 No Content`, and introduces no business logic of
+its own: simply reaching it means `fetch_current_user/2` already ran earlier in the pipeline and had
+the chance to perform its existing silent refresh. Separately, `Nebu.Admin.Auth.on_mount/4` now treats
+a session with an elapsed `session_exp` as refreshable (mount proceeds instead of forcing logout)
+rather than calling the token endpoint itself — the socket handshake has no HTTP response to persist a
+rotated refresh token into, so the actual token-endpoint exchange stays exclusively on the keepalive
+HTTP path.
+
+**Security hardening (Kassandra HIGH finding, 2026-07-01):** the initial version of this fix gated the
+grace purely on the stored refresh token still being *decryptable* — but decryptability has no time
+component (`Nebu.Web.SecretBox`/AES-256-GCM never expires a ciphertext), so a de-provisioned admin who
+deliberately severed their own heartbeat (disabling JS, blocking `/admin/keepalive`, backgrounding the
+tab) could keep an open Dashboard/AuditLog LiveView alive **indefinitely** across socket reconnects,
+bypassing the only other server-side bound (`session_exp`). Fixed with an independent, non-bypassable
+`refresh_grace_exp` timestamp (`session_exp + 180s`) written into the signed session cookie at login
+and on every successful HTTP-path refresh — never on the socket path itself, so a severed heartbeat
+cannot extend it. `on_mount/4`'s refreshability check now requires BOTH the refresh token decrypts
+**and** `now <= refresh_grace_exp`; decryptability alone is necessary but no longer sufficient. A
+healthy 60 s heartbeat keeps re-extending the bound well before it lapses (idle-tab UX preserved,
+AC2), while a severed heartbeat now hard-expires the session within ~3 minutes of the last successful
+refresh instead of never. See
+`docs/stories/oidc-simplification/security-reports/admin-liveview-session-refresh-security-review-2026-07-01.md`
+for the full finding and independent re-verification.
+
+**Admin login provisions the Matrix identity (provision-matrix-identity-on-admin-login):** a
+successful admin OIDC login (`Nebu.Admin.Auth.normal_callback/2` OR `bootstrap_confirm_claim/2`) now
+provisions the SAME `users`-row the real Matrix `POST /_matrix/client/v3/login` path provisions, for
+the SAME `matrix_user_id` the admin session carries (`Nebu.Matrix.UserId.from_claims/2` — single
+source of truth for both flows). Previously an operator who only ever logged into the Admin UI (never
+a Matrix client) had no `users` row at all and was invisible to `GET /admin/users`
+(`Nebu.Admin.DB.list_users/3` reads exclusively from that table), even though their `matrix_user_id`
+could already act via room writes (creator/actor attribution) after the prior story
+`fix-bootstrap-admin-session-identity`.
+
+The provisioning call is routed through a new `Nebu.Matrix.provision_identity/2` facade function
+(ADR-020 — `Nebu.Admin` never calls `Nebu.Matrix.Session.TokenValidator` or `Nebu.Matrix.Profile.DB`
+directly). Internally it performs the same `TokenValidator.validate/4` → `Profile.DB.upsert_profile/3`
+pair the real Matrix `/login` path's `provision_and_respond/6` uses — idempotent (a re-provisioned
+existing row is a no-op upsert, never an error) and nil-safe for the profile's `COALESCE` upsert (a
+later Matrix login carrying no displayname claim never clobbers a displayname the user set
+themselves).
+
+**Architecture decision (AC2) — no auto-join for admin-only provisioning:** unlike the real Matrix
+login path, `provision_identity/2` deliberately does **not** call
+`Nebu.Matrix.EventDispatcher.Server.run_post_login_provisioning/2` (personal room + auto-join into
+`is_auto_join` rooms/spaces). Rationale: an admin who authenticates once in the Admin UI is not
+necessarily a communication participant, and unconditionally auto-joining them into every
+`is_auto_join` room — some of which may hold confidential content — would be an unwanted (and, per
+the story's security considerations, a potential information-disclosure) side effect of an
+administrative action. Only the `users`-row + profile provisioning happens; auto-join remains
+exclusive to the real Matrix client login flow. This is a recommendation, not a hard architectural
+constraint — a future story may revisit it with an explicit, documented justification (see
+`docs/stories/oidc-simplification/provision-matrix-identity-on-admin-login.md`, AC2).
 
 ## Testing Architecture (Story 9-26)
 

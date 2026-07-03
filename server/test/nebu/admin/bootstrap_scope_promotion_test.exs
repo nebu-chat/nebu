@@ -96,6 +96,14 @@ defmodule Nebu.Admin.BootstrapScopePromotionTest do
 
   defp session_conn(method, path), do: conn(method, path) |> init_test_session(%{})
 
+  # scope-admin-claim-to-path (code-review MAJOR M1 fix): a claim path is now mandatory
+  # on bootstrap completion. Builds the JSON-encoded "admin_group_claim_choice" param
+  # select_claim_html/1 now emits, matching the {path, value} pair stashed in
+  # "bootstrap_claims" by install_store/1 above (["groups", "instance_admin"]).
+  defp confirm_params(value, path) do
+    %{"admin_group_claim_choice" => Jason.encode!(%{"value" => value, "path" => path})}
+  end
+
   # ════════════════════════════════════════════════════════════════════════════
   # AC6 — bootstrap completion promotes BOTH scope keys into server_config
   # ════════════════════════════════════════════════════════════════════════════
@@ -105,7 +113,7 @@ defmodule Nebu.Admin.BootstrapScopePromotionTest do
 
     conn =
       session_conn(:post, "/admin/bootstrap/select-claim")
-      |> Auth.bootstrap_confirm_claim(%{"admin_group_claim" => "instance_admin"})
+      |> Auth.bootstrap_confirm_claim(confirm_params("instance_admin", "groups"))
 
     assert conn.status == 302
     assert get_resp_header(conn, "location") == ["/admin/dashboard"]
@@ -122,7 +130,7 @@ defmodule Nebu.Admin.BootstrapScopePromotionTest do
 
     conn =
       session_conn(:post, "/admin/bootstrap/select-claim")
-      |> Auth.bootstrap_confirm_claim(%{"admin_group_claim" => "instance_admin"})
+      |> Auth.bootstrap_confirm_claim(confirm_params("instance_admin", "groups"))
 
     assert conn.status == 302
 
@@ -145,7 +153,7 @@ defmodule Nebu.Admin.BootstrapScopePromotionTest do
 
     conn =
       session_conn(:post, "/admin/bootstrap/select-claim")
-      |> Auth.bootstrap_confirm_claim(%{"admin_group_claim" => "instance_admin"})
+      |> Auth.bootstrap_confirm_claim(confirm_params("instance_admin", "groups"))
 
     assert conn.status == 302
 
@@ -166,7 +174,7 @@ defmodule Nebu.Admin.BootstrapScopePromotionTest do
 
     conn =
       session_conn(:post, "/admin/bootstrap/select-claim")
-      |> Auth.bootstrap_confirm_claim(%{"admin_group_claim" => "instance_admin"})
+      |> Auth.bootstrap_confirm_claim(confirm_params("instance_admin", "groups"))
 
     assert conn.status == 302
 
@@ -189,7 +197,7 @@ defmodule Nebu.Admin.BootstrapScopePromotionTest do
 
     conn =
       session_conn(:post, "/admin/bootstrap/select-claim")
-      |> Auth.bootstrap_confirm_claim(%{"admin_group_claim" => "instance_admin"})
+      |> Auth.bootstrap_confirm_claim(confirm_params("instance_admin", "groups"))
 
     # Must complete bootstrap normally (not crash).
     assert conn.status == 302

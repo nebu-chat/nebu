@@ -2924,30 +2924,27 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
   # Nebu.Matrix.HttpPublic.provision_and_respond/6 (the actual production login
   # path) — trigger the same behaviour. `is_new` gates auto-join exactly as before;
   # the personal room is (idempotently) ensured on every login regardless.
+  # Task.start/1 (unlike Task.start_link/1) has typespec dynamic({:ok, pid()}) — its
+  # return value is never tagged {:error, reason}, so there is no failure branch to
+  # pattern-match on here. Confirmed by the compiler's own type checker (Elixir 1.20
+  # set-theoretic types): a prior {:error, reason} -> Logger.warning(...) clause was
+  # flagged as "will never match" and removed — see bugfix-remove-unused-confirm-default.
+  # Note: this does NOT mean spawning can never fail (VM-level resource exhaustion is
+  # always possible) — only that Task.start/1 does not surface such failures as a
+  # return value for us to branch on. If that telemetry gap ever matters (e.g. for
+  # alerting), a system-level probe (:erlang.system_info/1 process/memory limits) would
+  # be the right tool, not a case clause here.
   @spec run_post_login_provisioning(String.t(), boolean()) :: :ok
   def run_post_login_provisioning(user_id, is_new) do
-    case Task.start(fn ->
-           ensure_personal_room(user_id)
+    Task.start(fn ->
+      ensure_personal_room(user_id)
 
-           if is_new do
-             ensure_auto_join_memberships(user_id)
-             # Spaces S5 (AC6): auto-join flagged Spaces alongside flagged rooms.
-             ensure_auto_join_space_memberships(user_id)
-           end
-         end) do
-      {:ok, _pid} ->
-        :ok
-
-      {:error, reason} ->
-        # Task.start/1 itself failing to spawn (as opposed to the spawned task
-        # crashing) means post-login provisioning silently never ran at all —
-        # this must be observable, since it is now the single shared entry
-        # point for validate_token/2, bulk_import_users/2, and the real
-        # /login HTTP path (http_public.ex).
-        Logger.warning(
-          "run_post_login_provisioning: Task.start failed to spawn for #{user_id}: #{inspect(reason)}"
-        )
-    end
+      if is_new do
+        ensure_auto_join_memberships(user_id)
+        # Spaces S5 (AC6): auto-join flagged Spaces alongside flagged rooms.
+        ensure_auto_join_space_memberships(user_id)
+      end
+    end)
 
     :ok
   end

@@ -20,7 +20,7 @@ defmodule Nebu.ReleaseTest do
       result = Release.list_up_migrations(dir)
 
       versions = result |> Enum.map(&elem(&1, 0)) |> Enum.sort()
-      # priv/migrations now ships 000001–000015 (000004 add_room_type,
+      # priv/migrations now ships 000001–000016 (000004 add_room_type,
       # 000005 space_hierarchy_index, 000006 auto_join_opt_outs,
       # 000007 config_refresh_mode_mutable, 000008 room_aliases,
       # 000009 device_keys, 000010 devices — the device-registry-model story S1
@@ -35,7 +35,9 @@ defmodule Nebu.ReleaseTest do
       # 000014 cross_signing_keys — client-crypto-setup story cross-signing-readback.
       # 000015 account_data — client-crypto-setup story account-data-durability.
       # (000014/000015 renumbered on rebase onto configurable-oidc-scopes.)
-      assert versions == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+      # 000016 — scope-admin-claim-to-path: extends config_update_mutable RLS policy
+      # to allow runtime UPDATE of admin_group_claim_path (path-scoped admin gate).
+      assert versions == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
 
       # Only *.up.sql files are returned — *.down.sql are excluded.
       assert Enum.all?(result, fn {_v, path} -> String.ends_with?(path, ".up.sql") end)

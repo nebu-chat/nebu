@@ -35,6 +35,8 @@ defmodule Nebu.Matrix.SsoLogin do
   extra scopes come exclusively from `server_config.matrix_oidc_extra_scopes`.
   When that key is absent or empty, the scope is `openid` only (no profile/email
   defaults). `offline_access` is added when `matrix_oidc_refresh_mode` is "offline".
+  Scope resolution itself is centralized in `Nebu.Web.OidcScopes.resolve_scope/1`
+  (story `centralize-scope-resolution`) — this module only calls it.
   """
   import Plug.Conn
   import Nebu.Matrix.Http, only: [error: 4]
@@ -354,6 +356,15 @@ defmodule Nebu.Matrix.SsoLogin do
 
   # ── OIDC config (server_config only — ADR-022) ──────────────────────────────
 
+  @doc false
+  # matrix-refresh-revalidates-with-idp: exposes the Matrix-side OIDC config
+  # resolution (issuer + the single client's id/secret, ADR-022) so
+  # `Nebu.Matrix.HttpPublic.do_refresh_with/2` can resolve the SAME config this
+  # module's own login/SSO flow uses when calling the shared
+  # `Nebu.Web.OidcTokenExchange.refresh/2`. Honours the `:sso_bootstrap_reader`
+  # test seam (unchanged).
+  def oidc_config_for_refresh, do: oidc_config()
+
   defp oidc_config do
     # oidc-bootstrap-only-config (ADR-022): the issuer is resolved SOLELY from
     # server_config via the OidcConfig DB-backed cache. No env-var config path.
@@ -410,86 +421,14 @@ defmodule Nebu.Matrix.SsoLogin do
 
   # ── scope list (openid [+extra_scopes] [+offline_access]) ───────────────────
   #
-  # OIDC Scopes Law (bugfix-remove-default-scopes): default extra scopes are EMPTY.
-  # "openid" is always included; all additional scopes come from server_config only.
-  # Do NOT add a fallback default here — that would violate the law.
-  #
-  # `offline_access` is included iff the server_config key `matrix_oidc_refresh_mode`
-  # resolves to "offline" (story oidc-refresh-mode-config, AC2). The mode is read LIVE
-  # on each login-start (low frequency) so a runtime change via /admin/config applies
-  # without a redeploy. Absent / any non-"online" value → DEFAULT "offline".
-  #
-  # Test seam: a 0-arity fun under :matrix_oidc_extra_scopes_reader injects extra
-  # scopes; default reads server_config. A 0-arity fun under
-  # :matrix_oidc_refresh_mode_reader injects the mode; default reads server_config.
-
-  @sql_matrix_refresh_mode "SELECT value FROM server_config WHERE key = 'matrix_oidc_refresh_mode' LIMIT 1"
-  @sql_matrix_extra_scopes "SELECT value FROM server_config WHERE key = 'matrix_oidc_extra_scopes' LIMIT 1"
-
-  defp scope_list do
-    extra = matrix_extra_scopes()
-    base = ["openid"] ++ String.split(extra, " ", trim: true)
-    base = if matrix_refresh_mode() == "offline", do: base ++ ["offline_access"], else: base
-
-    base
-    |> Enum.reject(&(&1 == ""))
-    |> Enum.uniq()
-    |> Enum.join(" ")
-  end
-
-  @doc false
-  # bugfix-unify-admin-matrix-oidc-identity: exposed (was private) so
-  # Nebu.Admin.Auth can fold the Matrix flow's configured extra scopes into the
-  # admin flow's requested scope — see Nebu.Admin.Auth.admin_oidc_scope/0 for why.
-  # Test seam (:matrix_oidc_extra_scopes_reader) is unchanged and shared by both
-  # call sites, so a test that injects it observes the same value here.
-  def matrix_extra_scopes do
-    reader =
-      Application.get_env(
-        :nebu_http,
-        :matrix_oidc_extra_scopes_reader,
-        &default_matrix_extra_scopes/0
-      )
-
-    case reader.() do
-      s when is_binary(s) and s != "" -> s
-      _ -> ""
-    end
-  end
-
-  defp default_matrix_extra_scopes do
-    if running?(Nebu.Repo) do
-      case Ecto.Adapters.SQL.query(Nebu.Repo, @sql_matrix_extra_scopes, []) do
-        {:ok, %{rows: [[value]]}} when is_binary(value) -> value
-        _ -> ""
-      end
-    else
-      ""
-    end
-  end
-
-  # Resolves the Matrix refresh mode to the validated enum "offline" | "online".
-  # Any value other than "online" (incl. absent / junk) collapses to the "offline"
-  # default — so a stray server_config value can never inject an arbitrary scope.
-  defp matrix_refresh_mode do
-    reader = Application.get_env(:nebu_http, :matrix_oidc_refresh_mode_reader, &default_matrix_refresh_mode/0)
-
-    case reader.() do
-      "online" -> "online"
-      _ -> "offline"
-    end
-  end
-
-  defp default_matrix_refresh_mode do
-    if running?(Nebu.Repo) do
-      case Ecto.Adapters.SQL.query(Nebu.Repo, @sql_matrix_refresh_mode, []) do
-        {:ok, %{rows: [[value]]}} when is_binary(value) and value != "" -> value
-        _ -> "offline"
-      end
-    else
-      "offline"
-    end
-  end
+  # Story centralize-scope-resolution: scope resolution (validation, extra-scopes
+  # read, refresh-mode read) is now centralized in Nebu.Web.OidcScopes — the SINGLE
+  # source of OIDC scope resolution for both Matrix and Admin. This is a thin
+  # delegate (AC4); SsoLogin no longer runs its own server_config SQL reads or
+  # scope-validation regex. The pre-existing :matrix_oidc_extra_scopes_reader /
+  # :matrix_oidc_refresh_mode_reader test seams are honoured by OidcScopes itself,
+  # unchanged in name/shape, so existing tests keep passing.
+  defp scope_list, do: Nebu.Web.OidcScopes.resolve_scope(:matrix)
 
   # ── token exchange (PKCE + Basic auth) — mirrors Nebu.Admin.Auth.exchange_code ─
 

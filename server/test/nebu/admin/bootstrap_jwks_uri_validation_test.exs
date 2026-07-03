@@ -80,6 +80,14 @@ defmodule Nebu.Admin.BootstrapJwksUriValidationTest do
 
   defp session_conn(method, path), do: conn(method, path) |> init_test_session(%{})
 
+  # scope-admin-claim-to-path (code-review MAJOR M1 fix): a claim path is now mandatory
+  # on bootstrap completion. Builds the JSON-encoded "admin_group_claim_choice" param
+  # select_claim_html/1 now emits, matching the {path, value} pair stashed in
+  # "bootstrap_claims" by build_full_draft/1 above (["instance_admin", "instance_admin"]).
+  defp confirm_params(value, path) do
+    %{"admin_group_claim_choice" => Jason.encode!(%{"value" => value, "path" => path})}
+  end
+
   defp build_full_draft(opts) do
     encrypted = Nebu.Admin.BootstrapLive.encrypt_secret(@client_secret)
 
@@ -149,7 +157,7 @@ defmodule Nebu.Admin.BootstrapJwksUriValidationTest do
 
       conn =
         session_conn(:post, "/admin/bootstrap/select-claim")
-        |> Auth.bootstrap_confirm_claim(%{"admin_group_claim" => "instance_admin"})
+        |> Auth.bootstrap_confirm_claim(confirm_params("instance_admin", "instance_admin"))
 
       # Should NOT have completed → must NOT redirect to dashboard
       refute get_resp_header(conn, "location") == ["/admin/dashboard"],
@@ -170,7 +178,7 @@ defmodule Nebu.Admin.BootstrapJwksUriValidationTest do
       store = install_store(draft_no_audience)
 
       session_conn(:post, "/admin/bootstrap/select-claim")
-      |> Auth.bootstrap_confirm_claim(%{"admin_group_claim" => "instance_admin"})
+      |> Auth.bootstrap_confirm_claim(confirm_params("instance_admin", "instance_admin"))
 
       config = get_config(store)
 
@@ -191,7 +199,7 @@ defmodule Nebu.Admin.BootstrapJwksUriValidationTest do
 
       conn =
         session_conn(:post, "/admin/bootstrap/select-claim")
-        |> Auth.bootstrap_confirm_claim(%{"admin_group_claim" => "instance_admin"})
+        |> Auth.bootstrap_confirm_claim(confirm_params("instance_admin", "instance_admin"))
 
       assert get_resp_header(conn, "location") == ["/admin/dashboard"],
              "bootstrap_confirm_claim should succeed when draft has a valid audience"

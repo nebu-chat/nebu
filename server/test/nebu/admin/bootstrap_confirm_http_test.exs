@@ -186,9 +186,36 @@ defmodule Nebu.Admin.BootstrapConfirmHttpTest do
 
     assert conn.status == 200, "select-claim page should return 200, got #{conn.status}"
     body = conn.resp_body
-    assert body =~ ~s(name="admin_group_claim")
+    # scope-admin-claim-to-path (AC2, code-review MAJOR M1 fix): the radio's name is now
+    # "admin_group_claim_choice" (a single JSON-encoded value carrying both the claim
+    # value and its dot-path) — a path is now MANDATORY on every bootstrap completion, so
+    # POST bodies in this file must submit the REAL rendered choice value (extracted by
+    # discovered_choice/2 below), not the pre-story bare "admin_group_claim" param.
+    assert body =~ ~s(name="admin_group_claim_choice")
 
-    {csrf_token(body), session_cookie(conn) || callback_cookie}
+    {csrf_token(body), session_cookie(conn) || callback_cookie, body}
+  end
+
+  # Extracts the exact `value="..."` attribute the server rendered for the radio whose
+  # visible option text contains `value_substring` (e.g. "instance_admin") — i.e. exactly
+  # what a real browser would submit when the operator clicks that option. HTML-decodes
+  # the attribute (Phoenix.HTML escapes it on render) so the returned string is the raw
+  # JSON `admin_group_claim_choice` value ready to re-encode into a POST body.
+  defp discovered_choice(html, value_substring) do
+    ~r/name="admin_group_claim_choice" value="([^"]+)"[^>]*\/>\s*<span><code>[^<]*<\/code>:\s*#{Regex.escape(value_substring)}</
+    |> Regex.run(html)
+    |> case do
+      [_, raw] ->
+        raw
+        |> String.replace("&amp;", "&")
+        |> String.replace("&#39;", "'")
+        |> String.replace("&quot;", "\"")
+        |> String.replace("&lt;", "<")
+        |> String.replace("&gt;", ">")
+
+      nil ->
+        flunk("no rendered admin_group_claim_choice option found for value #{inspect(value_substring)} in:\n#{html}")
+    end
   end
 
   # Seeds the in-flight OIDC login state into a signed _nebu_admin_key cookie (as
@@ -223,12 +250,17 @@ defmodule Nebu.Admin.BootstrapConfirmHttpTest do
 
   test "POST select-claim with a valid CSRF token + discovered claim → 302 /admin/dashboard" do
     store = install_store(false)
-    {token, cookie} = render_select_claim_page()
+    {token, cookie, page_body} = render_select_claim_page()
 
     refute token in [nil, ""]
     refute cookie in [nil, ""]
 
-    body = URI.encode_query(%{"_csrf_token" => token, "admin_group_claim" => "instance_admin"})
+    # scope-admin-claim-to-path (code-review MAJOR M1 fix): a path is now MANDATORY on
+    # bootstrap completion — submit the REAL rendered "admin_group_claim_choice" value
+    # (exactly what a browser radio click would POST), not the pre-story bare
+    # "admin_group_claim" param (which is now refused).
+    choice = discovered_choice(page_body, "instance_admin")
+    body = URI.encode_query(%{"_csrf_token" => token, "admin_group_claim_choice" => choice})
 
     conn =
       router_call(:post, "/admin/bootstrap/select-claim", body, [
@@ -242,6 +274,7 @@ defmodule Nebu.Admin.BootstrapConfirmHttpTest do
 
     config = Agent.get(store, & &1.config)
     assert config["admin_group_claim"] == "instance_admin"
+    assert config["admin_group_claim_path"] == "groups"
     assert config["bootstrap_completed"] == "true"
     assert config["oidc_issuer"] == @issuer
 
@@ -253,7 +286,7 @@ defmodule Nebu.Admin.BootstrapConfirmHttpTest do
 
   test "POST select-claim WITHOUT a CSRF token is rejected (CSRF protection intact)" do
     store = install_store(false)
-    {_token, cookie} = render_select_claim_page()
+    {_token, cookie, _body} = render_select_claim_page()
 
     body = URI.encode_query(%{"admin_group_claim" => "instance_admin"})
 
@@ -290,7 +323,7 @@ defmodule Nebu.Admin.BootstrapConfirmHttpTest do
 
   test "POST select-claim with a claim value NOT in the verified token is rejected" do
     store = install_store(false)
-    {token, cookie} = render_select_claim_page()
+    {token, cookie, _body} = render_select_claim_page()
 
     body = URI.encode_query(%{"_csrf_token" => token, "admin_group_claim" => "all"})
 

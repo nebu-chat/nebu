@@ -199,6 +199,13 @@ defmodule Nebu.Admin.Router do
     # Compliance
     get "/compliance", ComplianceController, :index
 
+    # Keepalive heartbeat (admin-liveview-session-refresh AC3/AC4): polled by a
+    # client-side JS hook while any admin LiveView tab is open, so the existing
+    # fetch_current_user/2 silent-refresh leg (which runs earlier in the :browser
+    # pipeline, before this action) re-fires for otherwise-idle LiveView sockets.
+    # Same admin auth gate as every other route (require_admin), minimal 204 response.
+    get "/keepalive", KeepaliveController, :index
+
     # ── Remaining LiveViews (real-time requirement) ────────────────────────────
     live_session :admin, on_mount: {Nebu.Admin.Auth, :require_admin} do
       live "/dashboard", DashboardLive, :index

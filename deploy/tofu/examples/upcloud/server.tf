@@ -122,7 +122,7 @@ resource "upcloud_server" "nebu" {
     s3_bucket            = var.s3_bucket
     # UpCloud managed PostgreSQL uses Aiven's internal CA — not in the system
     # trust store. Extract the TLS cert chain at boot via the private SDN.
-    fetch_postgres_ca = true
+    fetch_postgres_ca = false
   })
 
   lifecycle {

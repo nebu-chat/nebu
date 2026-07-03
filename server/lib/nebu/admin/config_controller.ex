@@ -57,16 +57,18 @@ defmodule Nebu.Admin.ConfigController do
   end
 
   def save_scopes(conn, params) do
-    # Validate each submitted scope key against the [a-zA-Z0-9_:.-] character whitelist.
+    # Story centralize-scope-resolution (AC5): validate each submitted scope key via
+    # the ONE validator (Nebu.Web.OidcScopes.validate_scope_string/1) instead of a
+    # local regex copy.
     errors =
       @scope_keys
       |> Enum.flat_map(fn key ->
         value = params[key] || ""
-        scopes = String.split(value, " ", trim: true)
 
-        Enum.flat_map(scopes, fn s ->
-          if String.match?(s, ~r/^[a-zA-Z0-9_:.\-]+\z/), do: [], else: [s]
-        end)
+        case Nebu.Web.OidcScopes.validate_scope_string(value) do
+          :ok -> []
+          {:error, msg} -> [msg]
+        end
       end)
 
     if errors == [] do
@@ -91,10 +93,7 @@ defmodule Nebu.Admin.ConfigController do
     else
       conn
       |> put_status(200)
-      |> put_flash(
-        :error,
-        "Scope '#{hd(errors)}' contains invalid characters. Only alphanumeric, underscore, colon, period, and dash are allowed."
-      )
+      |> put_flash(:error, hd(errors))
       |> render_config()
     end
   end

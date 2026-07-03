@@ -1,52 +1,36 @@
 defmodule Nebu.Admin.AdminMatrixIdentityUnificationTest do
   @moduledoc """
-  Regression tests for bug `bugfix-unify-admin-matrix-oidc-identity`.
+  Regression tests for bug `bugfix-unify-admin-matrix-oidc-identity`, UPDATED by
+  story `centralize-scope-resolution` (epic `oidc-simplification`).
 
-  ## The bug (confirmed live against the real dev Dex stack)
+  ## History
 
-  An operator who is both an `instance_admin` (admin login) and a Matrix user
-  (Matrix SSO login) could end up with TWO different Matrix `user_id`s for the
-  SAME real-world identity (same `sub` at the same issuer):
+  `bugfix-unify-admin-matrix-oidc-identity` originally fixed a "two identities for
+  one person" bug by making `Nebu.Admin.Auth.admin_oidc_scope/0` UNION the admin's
+  own configured extra scopes with the Matrix flow's extra scopes (via the
+  `Nebu.Matrix.matrix_oidc_extra_scopes/0` facade), so both ID tokens carried the
+  same claim superset.
 
-    * `Nebu.Admin.Auth.admin_oidc_scope/0` and `Nebu.Matrix.SsoLogin.scope_list/0`
-      each read their OWN independent `server_config` key
-      (`admin_oidc_extra_scopes` vs `matrix_oidc_extra_scopes`, OIDC Scopes Law —
-      both default to `""`/`openid`-only, but an operator may configure them
-      DIFFERENTLY, e.g. Matrix gets `"profile"` so `preferred_username`/`name`
-      resolve, admin gets only `"groups"`).
-    * `Nebu.Matrix.UserId.from_claims/2` derives the localpart from the
-      configured claim, falling back through `preferred_username` → `name` →
-      `sub`. Two ID tokens for the SAME person with DIFFERENT claim sets (because
-      the two flows requested different scopes) therefore land on DIFFERENT
-      Matrix user_ids — one from a real username claim, one from the opaque
-      `sub` fallback.
+  That fold was itself the root cause of a new, worse problem (AC3 of
+  `centralize-scope-resolution`, Kassandra LOW): it let `offline_access` configured
+  under `matrix_oidc_extra_scopes` leak into the Admin OIDC request even when the
+  admin client's own refresh mode was `"online"` — i.e. one client's OIDC scope
+  configuration silently altered another client's authorization request.
 
-  Live evidence (this bug's investigation): with
-  `admin_oidc_extra_scopes = "profile groups"` and `matrix_oidc_extra_scopes = ""`,
-  `oidc_user_id_claim = "name"`, logging in as Dex user `kai` (same `sub`) via
-  the admin flow resolved to `@kai:localhost` while the Matrix SSO flow resolved
-  to the opaque sanitized-`sub` fallback `@ciqwmdaw...:localhost` — two
-  identities for one person.
+  `centralize-scope-resolution` removes the fold entirely (`union_scopes/2` is
+  deleted from `Nebu.Admin.Auth`; `Nebu.Web.OidcScopes.resolve_scope/1` resolves
+  each client's scope from ONLY that client's own `server_config` keys). Each
+  client is independently responsible for requesting whatever scopes it needs to
+  drive its own claim-derived identity — there is no cross-client union. The
+  identity-unification claim-mapping problem this bug originally reported is
+  tracked separately (see story Non-Goals: "Kein Claim-Mapping" — a future
+  `centralize-claim-resolution`-style story, not scope resolution).
 
-  ## The fix
-
-  `Nebu.Admin.Auth.admin_oidc_scope/0` now UNIONS the admin's own configured
-  extra scopes with `Nebu.Matrix.SsoLogin.matrix_extra_scopes/0` (exposed for
-  this purpose) before building the authorize-request `scope` parameter. The
-  admin ID token is therefore always a claim-SUPERSET of whatever the Matrix
-  flow would receive, so `UserId.from_claims/2` — which is claim-priority-driven,
-  not scope-driven — resolves IDENTICALLY for both flows for the same person.
-  This does NOT retroactively merge identities that already split under the old
-  drift (out of scope — see the bug report); it only stops NEW divergence.
-
-  ## Public surface (no testing of privates)
-
-  `admin_oidc_scope/0` and `scope_list/0` are both `defp`. We assert via the
-  observable `scope` query-param of each flow's 302 redirect (mirrors
-  `admin_scope_mode_test.exs` / `sso_login_scope_test.exs`), AND via the
-  end-to-end claims → `user_id` derivation exercised through
-  `Auth.put_current_user/2` (admin) and `Nebu.Matrix.UserId.from_claims/2`
-  (Matrix / OidcPlug path) — the same derivation `POST /login` uses.
+  This file keeps the parts of the original suite that remain valid (OIDC Scopes
+  Law defaults, dedup, `UserId.from_claims/2` end-to-end derivation) and replaces
+  the "admin scope is a superset of Matrix scope" assertions with "no cross-client
+  leakage" assertions — the mirror image, on the admin side, of the AC3 tests in
+  `test/nebu/web/oidc_scopes_test.exs`.
   """
   use ExUnit.Case, async: false
   import Plug.Test
@@ -161,11 +145,12 @@ defmodule Nebu.Admin.AdminMatrixIdentityUnificationTest do
   end
 
   # ══════════════════════════════════════════════════════════════════════════
-  # Scope unification: admin scope is always a superset of the Matrix scope
+  # Post-centralize-scope-resolution: admin and Matrix scopes are INDEPENDENT
+  # (no cross-client union/fold — AC3/AC4 of centralize-scope-resolution)
   # ══════════════════════════════════════════════════════════════════════════
 
-  describe "admin_oidc_scope/0 always includes matrix_oidc_extra_scopes (root-cause fix)" do
-    test "operator configures DIFFERENT admin vs matrix extra scopes → admin request is a superset" do
+  describe "admin_oidc_scope/0 resolves ONLY its own configured extra scopes (no Matrix fold)" do
+    test "operator configures DIFFERENT admin vs matrix extra scopes → neither leaks into the other" do
       set_admin_extra_scopes("groups")
       set_matrix_extra_scopes("profile")
 
@@ -174,17 +159,14 @@ defmodule Nebu.Admin.AdminMatrixIdentityUnificationTest do
 
       assert "openid" in admin_scopes
       assert "groups" in admin_scopes
-      # THE FIX: admin also requests what Matrix requests, so the SAME claims land
-      # in both ID tokens for the same person.
-      assert "profile" in admin_scopes,
-             "admin scope must include the Matrix flow's extra scopes so the ID tokens " <>
-               "carry the same claims for the same person; got admin scopes: #{inspect(admin_scopes)}"
+      # Post-fix (centralize-scope-resolution, AC3/AC4): the admin scope no longer
+      # folds in the Matrix flow's extra scopes — each client is independent.
+      refute "profile" in admin_scopes,
+             "admin scope must NOT include the Matrix flow's extra scopes (the fold that " <>
+               "caused the AC3 offline_access leak was removed); got: #{inspect(admin_scopes)}"
 
       assert "openid" in matrix_scopes
       assert "profile" in matrix_scopes
-      # The union is one-directional: Matrix scope is NEVER polluted with
-      # admin-only scopes (e.g. an admin-gate-only "groups" claim request must not
-      # leak into the Matrix client's authorization request).
       refute "groups" in matrix_scopes
     end
 
@@ -200,14 +182,14 @@ defmodule Nebu.Admin.AdminMatrixIdentityUnificationTest do
       refute "email" in admin_scopes
     end
 
-    test "admin has no extra scopes configured, matrix requests profile → admin still gets profile" do
+    test "admin has no extra scopes configured, matrix requests profile → admin does NOT inherit it" do
       set_admin_extra_scopes(nil)
       set_matrix_extra_scopes("profile")
 
       admin_scopes = admin_login_scope()
 
-      assert "openid" in admin_scopes
-      assert "profile" in admin_scopes
+      assert admin_scopes == ["openid"]
+      refute "profile" in admin_scopes
     end
 
     test "both unconfigured → both flows request openid only (OIDC Scopes Law preserved)" do
@@ -218,8 +200,8 @@ defmodule Nebu.Admin.AdminMatrixIdentityUnificationTest do
       assert Enum.sort(matrix_login_scope()) == ["openid"]
     end
 
-    test "duplicate scope tokens across admin+matrix config are de-duplicated" do
-      set_admin_extra_scopes("profile groups")
+    test "duplicate scope tokens within a single client's own config are de-duplicated" do
+      set_admin_extra_scopes("profile groups profile")
       set_matrix_extra_scopes("profile")
 
       admin_scopes = admin_login_scope()
@@ -229,84 +211,61 @@ defmodule Nebu.Admin.AdminMatrixIdentityUnificationTest do
   end
 
   # ══════════════════════════════════════════════════════════════════════════
-  # End-to-end identity unification: same sub/issuer → same Matrix user_id
+  # End-to-end identity derivation: UserId.from_claims/2 behaves identically for
+  # the same claim set regardless of which flow produced it (unaffected by the
+  # scope-resolution refactor — claim mapping itself is out of scope here).
   # ══════════════════════════════════════════════════════════════════════════
 
-  describe "same OIDC identity resolves to the same Matrix user_id across both login flows" do
-    test "admin login (put_current_user) and Matrix identity derivation (UserId.from_claims) agree" do
-      # oidc_user_id_claim = "preferred_username" (a realistic operator config that
-      # requires the "profile" scope to actually be present in the token).
+  describe "UserId.from_claims/2 resolves consistently for a given claim set" do
+    test "admin login (put_current_user) and Matrix identity derivation (UserId.from_claims) agree when claims match" do
       set_user_id_claim("preferred_username")
 
-      # BEFORE the fix, an operator could configure these two independently and end
-      # up with drifted claim sets. AFTER the fix, admin_oidc_scope/0 always folds in
-      # whatever Matrix requests, so both flows' ID tokens carry "preferred_username"
-      # once ANY of the two configs requests "profile".
-      set_admin_extra_scopes("groups")
-      set_matrix_extra_scopes("profile")
-
-      # Simulates the claims the IdP would return under the ACTUAL admin scope
-      # (openid + groups + profile, because of the fix) for one real person.
-      admin_id_token_claims = %{
+      # Same claims presented to both flows (e.g. because the operator configured
+      # BOTH admin_oidc_extra_scopes and matrix_oidc_extra_scopes to include
+      # "profile" independently) resolve to the same Matrix user_id.
+      shared_claims = %{
         "sub" => "00000000-0000-0000-0000-000000000001",
         "preferred_username" => "kai",
-        "email" => "kai@example.com",
-        "groups" => ["instance_admin"]
+        "email" => "kai@example.com"
       }
 
-      # Simulates the claims the IdP returns under the Matrix scope (openid + profile)
-      # for the SAME real person (same sub/issuer).
-      matrix_id_token_claims = %{
-        "sub" => "00000000-0000-0000-0000-000000000001",
-        "preferred_username" => "kai"
-      }
-
-      admin_conn =
-        session_conn(:get, "/admin/callback") |> Auth.put_current_user(admin_id_token_claims)
-
+      admin_conn = session_conn(:get, "/admin/callback") |> Auth.put_current_user(shared_claims)
       admin_user = get_session(admin_conn, "current_user")
 
-      matrix_user_id = Nebu.Matrix.UserId.from_claims(matrix_id_token_claims, "localhost")
+      matrix_user_id = Nebu.Matrix.UserId.from_claims(shared_claims, "localhost")
 
       assert admin_user["matrix_user_id"] == matrix_user_id
       assert admin_user["matrix_user_id"] == "@kai:localhost"
-      assert matrix_user_id == "@kai:localhost"
     end
 
-    test "REGRESSION: without the fix's scope union, drifted scopes would have produced two identities" do
-      # This test documents the OLD broken behaviour by directly modelling what each
-      # flow's ID token would contain WITHOUT the scope union (i.e. computing the
-      # matrix and admin claim sets independently, as the old code did structurally).
-      # It is a documentation/regression guard, not a call into private scope
-      # functions — it shows why the fix is necessary. If someone reverts the fix,
-      # `admin_login_scope/0` above already fails; this test asserts the DOWNSTREAM
-      # consequence in terms of derived identities that motivated the fix.
+    test "DOCUMENTED trade-off: independently-configured scopes CAN yield divergent claim sets post-refactor" do
+      # Post-centralize-scope-resolution, admin_oidc_extra_scopes and
+      # matrix_oidc_extra_scopes are fully independent (AC3/AC4) — an operator who
+      # configures them differently can once again see two different Matrix
+      # user_ids for the same real person, because each flow's ID token now only
+      # ever carries the claims ITS OWN configured scope requested. This is an
+      # accepted, documented trade-off of removing the cross-client fold (the fold
+      # was removed because it caused the AC3 offline_access leak); unifying
+      # identity across independently-scoped flows is tracked as a separate,
+      # claim-mapping-centric story (see this story's Non-Goals).
       set_user_id_claim("preferred_username")
 
-      # Old-world simulation: admin ID token WITHOUT profile (only "groups" was
-      # configured for admin) → no preferred_username claim → falls back to sub.
-      admin_id_token_claims_pre_fix = %{
+      admin_id_token_claims = %{
         "sub" => "00000000-0000-0000-0000-000000000001",
         "groups" => ["instance_admin"]
       }
 
-      # Matrix ID token WITH profile → preferred_username present.
       matrix_id_token_claims = %{
         "sub" => "00000000-0000-0000-0000-000000000001",
         "preferred_username" => "kai"
       }
 
-      pre_fix_admin_user_id =
-        Nebu.Matrix.UserId.from_claims(admin_id_token_claims_pre_fix, "localhost")
-
+      admin_user_id = Nebu.Matrix.UserId.from_claims(admin_id_token_claims, "localhost")
       matrix_user_id = Nebu.Matrix.UserId.from_claims(matrix_id_token_claims, "localhost")
 
-      refute pre_fix_admin_user_id == matrix_user_id,
-             "sanity check: this demonstrates the pre-fix divergence this bug fixes"
-
-      # With the fix, admin_oidc_scope/0 ensures the admin ID token is NEVER missing
-      # a claim the Matrix flow would have — this is asserted end-to-end in the test
-      # above ("admin login (put_current_user) and Matrix identity derivation agree").
+      refute admin_user_id == matrix_user_id,
+             "documents the accepted post-refactor trade-off: independently-configured " <>
+               "scopes can yield divergent claim sets and thus divergent derived identities"
     end
   end
 end

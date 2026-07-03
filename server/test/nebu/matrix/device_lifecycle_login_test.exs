@@ -251,6 +251,23 @@ defmodule Nebu.Matrix.DeviceLifecycleLoginTest do
     body
   end
 
+  # matrix-refresh-revalidates-with-idp: /refresh now contacts the IdP before
+  # re-minting opaque tokens. These G2/G3 regression tests are about device
+  # binding / opaque-token rotation mechanics, not the IdP-contact behavior
+  # itself (covered by login_refresh_test.exs) — stub the round-trip with a
+  # far-future fresh id_token.exp so it does not interfere with these
+  # assertions. Mirrors login_refresh_test.exs's put_matrix_oidc_refresh_override/1.
+  defp put_matrix_oidc_refresh_override(fun) do
+    Application.put_env(:nebu_http, :matrix_oidc_refresh_override, fun)
+    on_exit(fn -> Application.delete_env(:nebu_http, :matrix_oidc_refresh_override) end)
+  end
+
+  defp stub_matrix_oidc_refresh_ok do
+    put_matrix_oidc_refresh_override(fn _decrypted_rt ->
+      {:ok, %{"sub" => current_sub(), "exp" => future_exp()}, nil}
+    end)
+  end
+
   defp device_keys_obj(uid, device_id) do
     %{
       "algorithms" => ["m.olm.v1.curve25519-aes-sha2", "m.megolm.v1.aes-sha2"],
@@ -635,6 +652,7 @@ defmodule Nebu.Matrix.DeviceLifecycleLoginTest do
         device_before = json(who_before)["device_id"]
         assert device_before == "DEV_A"
 
+        stub_matrix_oidc_refresh_ok()
         refresh = call(:post, "/_matrix/client/v3/refresh", %{"refresh_token" => rt})
         assert refresh.status == 200
         at_after = json(refresh)["access_token"]
@@ -669,6 +687,7 @@ defmodule Nebu.Matrix.DeviceLifecycleLoginTest do
         login = login_opaque(priv)
         rt = login["refresh_token"]
 
+        stub_matrix_oidc_refresh_ok()
         refresh = call(:post, "/_matrix/client/v3/refresh", %{"refresh_token" => rt})
         assert refresh.status == 200
         rbody = json(refresh)
@@ -692,6 +711,7 @@ defmodule Nebu.Matrix.DeviceLifecycleLoginTest do
         login = login_opaque(priv)
         rt_a = login["refresh_token"]
 
+        stub_matrix_oidc_refresh_ok()
         refresh = call(:post, "/_matrix/client/v3/refresh", %{"refresh_token" => rt_a})
         assert refresh.status == 200
         at_b = json(refresh)["access_token"]

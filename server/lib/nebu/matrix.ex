@@ -34,6 +34,91 @@ defmodule Nebu.Matrix do
   alias Nebu.Matrix.EventDispatcher.Server, as: Dispatcher
 
   @doc """
+  Provisions (or re-provisions, idempotently) a Matrix `users`-row for `user_id`,
+  WITHOUT triggering auto-join / personal-room onboarding (story
+  `provision-matrix-identity-on-admin-login`, epic `oidc-simplification`).
+
+  This is the narrow, non-onboarding half of the real Matrix `/login`
+  provisioning flavor (`Nebu.Matrix.HttpPublic.provision_and_respond/6`):
+  `Nebu.Matrix.Session.TokenValidator.validate/4` (creates the row on first
+  sight, else a no-op idempotent lookup) followed by
+  `Nebu.Matrix.Profile.DB.upsert_profile/3` (nil-safe `COALESCE` upsert — never
+  clobbers a displayname the person set themselves). Unlike
+  `provision_and_respond/6`, this function deliberately does NOT call
+  `Nebu.Matrix.EventDispatcher.Server.run_post_login_provisioning/2` — see the
+  "Implementation Decision" note under AC2 of the story for the rationale
+  (admin-only logins should not auto-join a person into every `is_auto_join`
+  room merely because they authenticated once in the Admin UI).
+
+  ADR-020: this is the ONLY way `Nebu.Admin` may reach this provisioning logic
+  — it must never call `Nebu.Matrix.Session.TokenValidator` or
+  `Nebu.Matrix.Profile.DB` directly.
+
+  Grants no Matrix permissions beyond what any freshly-provisioned `user_id`
+  already has (room actions remain gated by their own membership/power-level
+  checks) — provisioning alone is not a privilege-escalation path.
+
+  Returns `{:ok, user_id}` on success (including the idempotent re-provisioning
+  case), or `{:error, reason}` (e.g. `{:error, :deactivated}` for a
+  deprovisioned identity).
+  """
+  @spec provision_identity(String.t(), keyword()) :: {:ok, String.t()} | {:error, term()}
+  def provision_identity(user_id, opts \\ []) when is_binary(user_id) do
+    if repo_reachable?() do
+      system_role = opts[:system_role] || "user"
+      display_name = opts[:display_name] || ""
+      email = opts[:email] || ""
+
+      case Nebu.Matrix.Session.TokenValidator.validate(user_id, system_role, display_name, email) do
+        {:ok, user} ->
+          dn = if display_name in [nil, ""], do: nil, else: display_name
+          maybe_upsert_profile(user.user_id, dn)
+          {:ok, user.user_id}
+
+        {:error, _reason} = err ->
+          err
+      end
+    else
+      {:error, :repo_not_started}
+    end
+  end
+
+  # `TokenValidator.validate/4` is DI-swappable per-test (the SAME
+  # `:session_manager, :validator_module` seam the real Matrix /login path
+  # uses) — a test-injected fake is safe to call with no live Repo. The
+  # DEFAULT `Postgres` implementation, however, always issues a real
+  # `Ecto.Adapters.SQL.query(Nebu.Repo, ...)` call, which RAISES (not
+  # `{:error, _}`) when `Nebu.Repo` is not started (plain unit test runs, no
+  # `NEBU_DB_URL`) — so does `Profile.DB.upsert_profile/3` further down this
+  # same call graph. Only skip the whole provisioning attempt when we are
+  # about to hit the real (non-test-overridden) Postgres path with no Repo
+  # running; a test-injected validator_module always proceeds regardless of
+  # Repo state, matching the ATDD seam's contract.
+  defp repo_reachable? do
+    Process.whereis(Nebu.Repo) != nil or validator_overridden_for_test?()
+  end
+
+  defp validator_overridden_for_test? do
+    Application.get_env(:session_manager, :validator_module) not in [nil, Nebu.Matrix.Session.TokenValidator.Postgres]
+  end
+
+  # Mirrors provision_and_respond/6's unconditional upsert_profile/3 call, guarded
+  # by the same live-Repo check: `Profile.DB.upsert_profile/3` always issues a real
+  # `Ecto.Adapters.SQL.query(Nebu.Repo, ...)` call (no DI seam), which would raise
+  # if reached without a running Repo — this can only be reached here when
+  # `repo_reachable?/0` already confirmed either a running Repo or a test-injected
+  # validator (whose ATDD seam's fake `validate/4` never touches Profile.DB itself,
+  # only the real Postgres validator's callers do), so skip it defensively when
+  # Repo genuinely is not running (test-injected-validator path).
+  defp maybe_upsert_profile(user_id, display_name) do
+    if Process.whereis(Nebu.Repo) != nil do
+      _ = Nebu.Matrix.Profile.DB.upsert_profile(user_id, display_name, nil)
+    end
+
+    :ok
+  end
+
+  @doc """
   Creates a Matrix Space (a room with `creation_content.type = "m.space"`), with
   `creator_id` as the creator (power level 100). `name` may be `nil`/`""`.
 
@@ -288,19 +373,6 @@ defmodule Nebu.Matrix do
   """
   @spec invalidate_oidc_claim_cache() :: :ok
   defdelegate invalidate_oidc_claim_cache(), to: Nebu.Matrix.OidcClaimCache, as: :refresh
-
-  @doc """
-  Returns the space-separated extra OIDC scopes configured for the Matrix SSO
-  login flow (bugfix-unify-admin-matrix-oidc-identity).
-
-  `Nebu.Admin.Auth.admin_oidc_scope/0` folds this into the admin flow's own
-  requested scope (union, not replace) so the admin ID token is always a
-  claim-superset of the Matrix ID token — this is the Public-API entry point
-  (ADR-020) that call site must use instead of reaching into
-  `Nebu.Matrix.SsoLogin` directly.
-  """
-  @spec matrix_oidc_extra_scopes() :: String.t()
-  defdelegate matrix_oidc_extra_scopes(), to: Nebu.Matrix.SsoLogin, as: :matrix_extra_scopes
 
   # ── Device management (device-management S4 — Admin UI per-user devices) ──────
   #

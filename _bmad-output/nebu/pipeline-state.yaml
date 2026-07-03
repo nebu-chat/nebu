@@ -8,7 +8,65 @@
 #   _bmad-output/nebu/epics/<epic-name>/pipeline-state.yaml
 # This file is no longer used for named-epic pipeline runs.
 #
-# last_updated: 2026-06-29
+# last_updated: 2026-07-02
+# [bugfix-remove-unused-confirm-default] 2026-07-02T22:52Z committed ✓ ec1a84e3 (ATDD skip-reasoned+Dev 1 MINOR fixed 1 cycle+Kassandra CLEAN; mix test --warnings-as-errors exit 0 restored, 2 own-code warnings fixed)
+# [bugfix-remove-unused-confirm-default] 2026-07-02T22:51Z arc42-update → done (06-runtime.md ln1081 stale Task.start/1 error-logging claim corrected to reflect dead-branch removal)
+# [bugfix-remove-unused-confirm-default] 2026-07-02T22:51Z security-review → Kassandra CLEAN (0 CRIT/HIGH/MEDIUM/LOW); dead-branch removal has no exploitable delta, test-oracle strictly stricter
+# [bugfix-remove-unused-confirm-default] 2026-07-02T22:48Z code-review → CLEAN (cycle 1); MINOR-1 resolved (softened Task.start/1 comment)
+# [bugfix-remove-unused-confirm-default] 2026-07-02T22:47Z dev-story → done (cycle 1): softened Task.start/1 comment per MINOR-1, re-verified mix test --warnings-as-errors exit 0 (1198p/2s/254x, 0 warnings)
+# [bugfix-remove-unused-confirm-default] 2026-07-02T22:47Z code-review → 0 MAJOR, 1 MINOR (comment overstated Task.start/1 failure certainty), 5 INFO → cycle 1
+# [bugfix-remove-unused-confirm-default] 2026-07-02T22:44Z ci-gate → ✓ unit exit 0 (1198p/2s/254x, 0 own-code warnings, identical to baseline) + integration exit 2 (3 pre-existing failures, verified as strict subset of 6-failure pre-fix baseline, no regression)
+# [bugfix-remove-unused-confirm-default] 2026-07-02T22:44Z dev-story → done (cycle 0): removed unused default confirm(claim) + dead {:error,reason} clause in run_post_login_provisioning/2; 2/2 own-code warnings eliminated
+# [bugfix-remove-unused-confirm-default] 2026-07-02T22:18Z test-review → CLEAN (agreed: no dedicated test needed for either fix)
+# [bugfix-remove-unused-confirm-default] 2026-07-02T22:18Z atdd → skipped-with-reasoning (2 root causes: confirm/1 unused default + run_post_login_provisioning/2 dead {:error,reason} clause, both provably dead code, no synthetic test — mix test --warnings-as-errors itself is the regression check)
+# [bugfix-remove-unused-confirm-default] 2026-07-02T22:15Z pipeline started (--bug: mix test --warnings-as-errors aborts entire suite due to unused default value in defp confirm(claim \\ "instance_admin") at bootstrap_admin_session_identity_test.exs:173; all 11 call sites pass explicit arg)
+# [bugfix-nested-oidc-claim-support] 2026-07-01T12:28Z committed ✓ 83ea6e69 (1 MAJOR+2 MINOR fixed 1 cycle+Kassandra CLEAN; Keycloak realm_access.roles/resource_access nested claims now supported)
+# [bugfix-nested-oidc-claim-support] 2026-07-01T12:28Z arc42-update → done (08-concepts.md Admin UI Security section extended with nested-claim support note)
+# [bugfix-nested-oidc-claim-support] 2026-07-01T12:27Z security-review → Kassandra CLEAN (0 CRIT/HIGH, 1 MEDIUM pre-accepted+widened, 2 LOW informational); widening doesn't change prior accepted-risk verdict
+# [bugfix-nested-oidc-claim-support] 2026-07-01T12:24Z code-review → CLEAN (cycle 1); MAJOR (stale SEC NOTE) + 2 MINOR fixed, 1 MINOR accepted (cosmetic dot-path collision)
+# [bugfix-nested-oidc-claim-support] 2026-07-01T12:21Z ci-gate → ✓ redeploy+test-integration cycle 1 (exit 0)
+# [bugfix-nested-oidc-claim-support] 2026-07-01T12:15Z dev-story → done (cycle 1): MAJOR fixed (SEC NOTE scope updated to reflect nested-claim scan), MINOR fixed (depth-bound comment + pinning test for nested attacker-influenceable claim); 22/22 pass
+# [bugfix-nested-oidc-claim-support] 2026-07-01T12:12Z code-review → 1 MAJOR (stale SEC NOTE at auth.ex:1079 doesn't reflect widened nested-claim scan surface), 2 MINOR (missing doc on recursion depth bound; missing test for nested attacker-influenceable claim), 1 MINOR accepted (dot-path collision, cosmetic-only) → cycle 1
+# [bugfix-nested-oidc-claim-support] 2026-07-01T12:08Z ci-gate → ✓ redeploy+test-integration (exit 0)
+# [bugfix-nested-oidc-claim-support] 2026-07-01T12:03Z dev-story → done (cycle 0): admin_claim?/1 + extract_discovered_claims/1 now recursively descend arbitrary nesting depth via claim_value_matches?/2 + flatten_discovered_claims/2 (dot-path keys); backward compatible with flat Dex-style claims; 8 new tests, 1074/1074 full unit suite pass
+# [bugfix-nested-oidc-claim-support] 2026-07-01T11:57Z pipeline started (--bug: admin_claim?/1 + extract_discovered_claims/1 only scan flat top-level claim values; Keycloak's realm_access.roles/resource_access.<client>.roles are nested maps, silently invisible; confirmed root cause of admin role never being granted on the UpCloud/identity.innoq.io Keycloak deployment)
+# [bugfix-unify-admin-matrix-oidc-identity] 2026-07-01T11:49Z committed ✓ 81155881 (ADR-020 fixed 1 cycle+Kassandra HIGH-CLEAN 1 MEDIUM accepted; cycle-2 hardening attempt reverted per user decision — proper fix deferred to OIDC-centralization epic)
+# [bugfix-unify-admin-matrix-oidc-identity] 2026-07-01T11:48Z arc42-update → done (08-concepts.md OIDC Scopes Law section extended with identity-unification fix + known-limitations note)
+# [bugfix-unify-admin-matrix-oidc-identity] 2026-07-01T11:48Z ci-gate → ✓ post-revert redeploy+test-integration (exit 0); code-review+security-review already CLEAN/HIGH-CLEAN at cycle-1 state
+# [bugfix-unify-admin-matrix-oidc-identity] 2026-07-01T11:44Z dev-story → reverted cycle-2 hardening per user decision (option 3: proper centralized OIDC fix deferred to separate epic; MEDIUM finding accepted with written justification in code comment); back to clean cycle-1 state (ADR-020 fix + scope union); admin_oidc_login_test.exs 13/13 pass
+# [bugfix-unify-admin-matrix-oidc-identity] 2026-07-01T10:48Z ci-gate → ✓ redeploy+test-integration cycle 2 (exit 0)
+# [bugfix-unify-admin-matrix-oidc-identity] 2026-07-01T10:44Z dev-story → done (cycle 2): MEDIUM hardened — admin_claim?/1 now excludes self-service-editable claim keys (name/preferred_username/email/etc.) from the admin-marker value scan; groups-claim admin path unaffected; 3 new tests, 206/206 admin suite pass
+# [bugfix-unify-admin-matrix-oidc-identity] 2026-07-01T10:41Z security-review → Kassandra HIGH-CLEAN (0 CRIT/HIGH), 1 MEDIUM (admin_claim?/1 any-key claim-value scan now reachable by folded-in Matrix scopes — self-service-editable claims like name/preferred_username could match admin marker), 1 LOW (manual offline_access string could fold in) → not policy-blocking but fixing MEDIUM proactively since this diff caused the widening → cycle 2
+# [bugfix-unify-admin-matrix-oidc-identity] 2026-07-01T10:37Z code-review → CLEAN (cycle 1); MAJOR (ADR-020) + MINOR fixed
+# [bugfix-unify-admin-matrix-oidc-identity] 2026-07-01T10:35Z ci-gate → ✓ redeploy+test-integration cycle 1 (exit 0)
+# [bugfix-unify-admin-matrix-oidc-identity] 2026-07-01T10:31Z dev-story → done (cycle 1): MAJOR fixed (defdelegate matrix_oidc_extra_scopes/0 added to Nebu.Matrix facade); MINOR fixed (doc cross-reference); 894/894 pass
+# [bugfix-unify-admin-matrix-oidc-identity] 2026-07-01T10:28Z code-review → 1 MAJOR (ADR-020: Nebu.Admin.Auth calls Nebu.Matrix.SsoLogin submodule directly, bypasses Nebu.Matrix facade), 1 MINOR (stale doc cross-reference) → cycle 1
+# [bugfix-unify-admin-matrix-oidc-identity] 2026-07-01T10:23Z ci-gate → ✓ redeploy+test-integration (exit 0)
+# [bugfix-unify-admin-matrix-oidc-identity] 2026-07-01T10:20Z dev-story → done (cycle 0): confirmed live via real Dex round-trips — admin_oidc_extra_scopes vs matrix_oidc_extra_scopes drift caused different ID-token claim sets for same person -> UserId.from_claims diverged; fix: admin_oidc_scope/0 unions admin+matrix extra scopes (claim-superset guarantee); 7 new tests + 1066/1066 full suite green
+# [bugfix-unify-admin-matrix-oidc-identity] 2026-07-01T10:02Z pipeline started (--bug: Admin-Login und Matrix-Login erzeugen für dieselbe Person zwei verschiedene Identitäten — admin_oidc_extra_scopes und matrix_oidc_extra_scopes sind unabhängig konfigurierbar (server_config), wodurch das Admin-ID-Token evtl. kein preferred_username claim enthält und UserId.from_claims auf sub zurückfällt, während der Matrix-Login mit anderem Scope preferred_username bekommt -> zwei User-IDs für eine Person. Ziel: ein User, überall der Matrix-Username, auch als Admin)
+# [bugfix-autojoin-first-login-race] 2026-07-01T10:01Z committed ✓ a7d92a47 (ATDD adapted+Dev 2 cycles CLEAN+Kassandra CLEAN; real POST /login never triggered auto-join — dead code found+fixed)
+# [bugfix-autojoin-first-login-race] 2026-07-01T10:01Z arc42-update → done (06-runtime.md Scenario 3p corrected: stale gRPC-era diagram + missing run_post_login_provisioning/2 entry point documented)
+# [bugfix-autojoin-first-login-race] 2026-07-01T09:59Z security-review → Kassandra CLEAN (0 CRIT/HIGH/MED/LOW, 1 INFO carry-over: pre-existing F-4 join_rule/ban gap now reachable, not introduced)
+# [bugfix-autojoin-first-login-race] 2026-07-01T09:55Z code-review → CLEAN (cycle 1); 0 MAJOR/MINOR, 1 INFO (Logger.error bump for genuine join failures noted as reasonable drive-by)
+# [bugfix-autojoin-first-login-race] 2026-07-01T09:53Z ci-gate → ✓ redeploy+test-integration cycle 1 (exit 0)
+# [bugfix-autojoin-first-login-race] 2026-07-01T09:47Z dev-story → done (cycle 1): 3 MINOR fixed (Task.start error logged, doc-comments corrected, DB-level defense-in-depth assertion added); 484/484 targeted tests pass
+# [bugfix-autojoin-first-login-race] 2026-07-01T09:44Z code-review → 0 MAJOR, 3 MINOR, 6 INFO → cycle 1 (stale doc-comments on ensure_auto_join_memberships/space referencing only validate_token/2; Task.start return value ignored in run_post_login_provisioning/2; regression test lacks DB-level defense-in-depth assertion)
+# [bugfix-autojoin-first-login-race] 2026-07-01T09:41Z ci-gate → ✓ redeploy+test-integration (exit 0)
+# [bugfix-autojoin-first-login-race] 2026-07-01T09:35Z dev-story → done (cycle 0): confirmed root cause — POST /_matrix/client/v3/login (real client login path) never called auto-join provisioning at all (dead code, only unit-tested); extracted run_post_login_provisioning/2, wired into http_public.ex + bulk_import_users; genuine join failures now Logger.error; regression test auto_join_first_login_regression_test.exs RED-confirmed via stash/pop; 484 targeted tests + 1061 unit tests green
+# [bugfix-autojoin-first-login-race] 2026-07-01T09:11Z atdd → adapted: live-repro-first (root cause unconfirmed across 3 hypotheses; existing unit tests already cover idempotent-join non-fatal path intentionally — speculative RED tests risk passing vacuously per this file's own MAJOR-1 history). Handing root-cause-confirm + RED test + fix to dev-story in one pass.
+# [bugfix-autojoin-first-login-race] 2026-07-01T09:10Z baseline-integration → ✓ clean (exit 0)
+# [bugfix-autojoin-first-login-race] 2026-07-01T09:05Z pipeline started (--bug: neuer User wird trotz aktivem is_auto_join=true nicht automatisch Mitglied — Verdacht: race im fire-and-forget Task server.ex:1650-1658 oder silent-failure bei Room.Server.join/2 server.ex:3719-3742)
+# [bugfix-dual-role-db-grants] 2026-07-01T09:10Z committed ✓ 55e270a4 (ATDD+Code CLEAN; SQL-only, security skipped; 7 migrations gefixt)
+# story bugfix-dual-role-db-grants done (pipeline: ATDD+Code CLEAN; SQL-only GRANT fix für Dual-Role-Deployment): 2026-07-01
+# [bugfix-dual-role-db-grants] 2026-07-01T09:07Z arc42-update → no arch changes (DDL-Korrektheit, dual-role deployment bereits dokumentiert)
+# [bugfix-dual-role-db-grants] 2026-07-01T09:06Z security-review → skipped (not-needed: SQL-only GRANT fix, keine neue Auth-Surface, keine neuen Privileges über 000001-Intention hinaus)
+# [bugfix-dual-role-db-grants] 2026-07-01T09:05Z code-review → CLEAN (cycle 0); 0 MAJOR/MINOR, 2 INFO (audit_log REVOKE/GRANT order + RLS coverage — beide no action)
+# [bugfix-dual-role-db-grants] 2026-07-01T08:58Z ci-gate → ✓ unit-elixir EXIT:0 (--warnings-as-errors clean; SQL-only changes, no new warnings)
+# [bugfix-dual-role-db-grants] 2026-07-01T08:52Z dev-story → done (cycle 0): GRANTs in 7 migrations; 47/47 grant tests green
+# [bugfix-dual-role-db-grants] 2026-07-01T08:45Z test-review → CLEAN (0 MAJOR; 2 MINOR fixed inline: __DIR__ path + SERIAL regex)
+# [bugfix-dual-role-db-grants] 2026-07-01T08:40Z atdd → 24 failing tests (migrations_grant_test.exs: AC1×16 tables, AC2×5 sequences, AC3/AC4 green)
+# [bugfix-dual-role-db-grants] 2026-07-01T08:35Z baseline-unit → ✓ clean (EXIT:0; deps-only output captured; prior pipeline state confirms clean baseline)
+# [bugfix-dual-role-db-grants] 2026-07-01T08:30Z pipeline started (--bug: post-squash migrations 000006/008/009/010/011/012 create tables without GRANT to nebu_app — dual-role UpCloud deployment fails with 'permission denied for table devices' on login)
 # [bug-login-blocks-bootstrap] 2026-06-29T09:25Z code-review → CLEAN (Patch-1 fixed: Phoenix.Controller.redirect → redirect; 1 defer pre-existing)
 # [bug-login-blocks-bootstrap] 2026-06-29T09:16Z ci-gate → ✓ unit-elixir 959/0 (--warnings-as-errors clean)
 # [bug-login-blocks-bootstrap] 2026-06-29T09:15Z dev-story → done (cycle 0): LoginController.index/2 redirects to /admin/bootstrap when bootstrap_completed? == false
@@ -191,16 +249,12 @@
 # [5-30] 2026-05-24T19:49Z atdd → 4 failing tests (auth_extra_scopes_test.go)
 # [5-30] 2026-05-24T19:38Z pipeline started (story pre-created)
 
-story: "bug-login-blocks-bootstrap"
-current_step: "commit"
-completed:
-  - atdd
-  - dev-story
-  - ci-gate
-  - code-review
+story: null
+current_step: null
+completed: []
 cycle_count: 0
 blocked_reason: null
-last_updated: "2026-06-29T09:58Z"
+last_updated: "2026-07-02T22:52Z"
 story: "device-key-registration"
 current_step: "commit"
 completed:

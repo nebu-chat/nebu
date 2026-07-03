@@ -1,0 +1,212 @@
+# Nebu Pipeline State — oidc-simplification epic
+# Do not edit manually during an active pipeline run.
+# last_updated: 2026-07-02
+# [scope-admin-claim-to-path] 2026-07-02T14:20Z committed ✓ (Code 2 cycles(MAJOR M1 mandatory-path fix+4 MINOR fixed)+Kassandra CLEAN(1 LOW A1 follow-up), memory self-updated, epic 8/8 done)
+# [scope-admin-claim-to-path] 2026-07-02T14:16Z arc42-update → verified sufficient (already staged 08-concepts.md fully documents path-scoped gate, M1 mandatory-path fix, fallback, migration 000016)
+# [scope-admin-claim-to-path] 2026-07-02T14:15Z security-review → Kassandra CLEAN (0 CRIT/HIGH/MED, 1 LOW pre-existing A1 role-mapping-editor path/value decoupling, fails closed, follow-up tracked); memory self-updated (any-key-scan MEDIUM marked RESOLVED)
+# [scope-admin-claim-to-path] 2026-07-02T12:03Z code-review cycle 2 → CLEAN (0 MAJOR, 0 MINOR, all cycle-1 MINORs verified fixed)
+# [scope-admin-claim-to-path] 2026-07-02T11:59Z code-review cycle 1 → 0 MAJOR, 4 MINOR fixed (dedup decoders, removed dead legacy_selected/1, added migration_admin_group_claim_path_mutable_test.exs 8 tests, cond reorder for correct rejection diagnostics + stale doc comment); full suite 1198 passed 0 new warnings; dispatched cycle-2 verification
+# [scope-admin-claim-to-path] 2026-07-02T11:55Z code-review cycle 1 → 0 MAJOR, 4 MINOR (dead legacy_selected value computation, discovered_claim_pairs/values duplication persists, migration 000016 lacks dedicated static-analysis test, do_complete_bootstrap/3 doc comment stale), 5 INFO; auto-cycling minor fixes without asking
+# [scope-admin-claim-to-path] 2026-07-02T11:49Z code-review cycle 0 → 2 MAJOR (M1: path validation skippable via legacy param, permanently pins fresh installs to vulnerable fallback; M2: docs overstate RESOLVED) + 3 MINOR + 5 INFO; fixed M1 by making path mandatory on every bootstrap completion (new unconditional cond clause rejects nil selected_path before pair-membership check), updated 9 test files whose happy-path relied on the now-rejected legacy param shape, flipped one test from expect-success to expect-rejection, fixed docs/SEC-NOTE wording (M2); full unit suite re-verified 1189 passed 0 new warnings; dispatched cycle-1 re-review
+# [scope-admin-claim-to-path] 2026-07-02T11:35Z code-review (cycle 0) → dispatched to nebu-code-reviewer agent
+# [scope-admin-claim-to-path] 2026-07-02T11:34Z ci-gate → integration harness pre-existing failure (byte-identical warning set to Step 1d baseline: Logger.warn/1 deprecation + DeltaCrdt/SweetXpath struct-update warnings abort --warnings-as-errors before any test runs, elixir:1.19-alpine fresh image has no _build cache) — NOT caused by this story; full unit suite verified separately: 1189/1189 passed on a clean elixir:1.20-alpine build, 0 new warnings introduced (only the 2 pre-existing warnings from untouched files), 102/102 targeted new+updated tests green
+# [scope-admin-claim-to-path] 2026-07-02T11:30Z atdd+dev-story → implemented directly (not delegated): migration 000016, OidcClaims.claim_at_path_matches?/3, Auth.admin_claim?/1 path-scoped+fallback, bootstrap_confirm_claim/2 path persistence+pair-validation, select_claim_html/1 JSON-encoded choice field, 25 new/updated unit tests, arc42 updated; unit suite 1189 passed (0 new warnings, 2 pre-existing warnings unrelated to this story abort --warnings-as-errors at baseline too)
+# [scope-admin-claim-to-path] 2026-07-02T11:19Z baseline-integration → ⚠ FAILING (pre-existing: deps warnings-as-errors abort before test run, e.g. Logger.warn/1 deprecated, DeltaCrdt/SweetXpath struct-update warnings — unrelated to this story, not caused by story changes)
+# [scope-admin-claim-to-path] 2026-07-02T11:12Z oracle-gate → skipped (not a Matrix feature)
+# [scope-admin-claim-to-path] 2026-07-02T11:12Z classify → matrix:false ui:false security_review:required
+# [scope-admin-claim-to-path] 2026-07-02T11:12Z pipeline started (resume from 1c, story pre-written)
+# [provision-matrix-identity-on-admin-login] 2026-07-02T11:11Z committed ✓ (ATDD 1 MAJOR+2 MINOR fixed pre-dev+Code CLEAN 2 INFO+Kassandra CLEAN)
+# [provision-matrix-identity-on-admin-login] 2026-07-02T11:09Z arc42-update → verified sufficient (already staged, no extension needed)
+# [provision-matrix-identity-on-admin-login] 2026-07-02T11:09Z security-review → Kassandra CLEAN (0 CRIT/HIGH/MED, 1 pre-existing INFO restated)
+# [provision-matrix-identity-on-admin-login] 2026-07-02T11:04Z code-review → CLEAN (cycle 0, 2 INFO only)
+# [provision-matrix-identity-on-admin-login] 2026-07-02T11:00Z ci-gate → ✓ redeploy+integration(1429 tests, 2 pre-existing known-flaky failures: AdminStaleRoomsTest+RegressionSyncLoadTest, matches prior story baselines)+unit(1173 passed, 0 failures)
+# [provision-matrix-identity-on-admin-login] 2026-07-02T10:03Z dev-story → done (cycle 0): added Nebu.Matrix.provision_identity/2 facade (validate/4 + upsert_profile/3, no auto-join per AC2), wired into normal_callback/2 + bootstrap_confirm_claim/2 (not into put_current_user/2's refresh path), arc42 + story Implementation Decision documented, status:review; pipeline coordinator additionally fixed a flaky @run_id lowercase fixture bug the dev agent flagged (UserId.from_claims always downcases, Base.url_encode64 can emit uppercase)
+# [provision-matrix-identity-on-admin-login] 2026-07-02T09:30Z dev-story (cycle 0) → in progress
+# [provision-matrix-identity-on-admin-login] 2026-07-02T09:29Z test-review → 1 MAJOR fixed (AC2 auto-join test rewired from unreachable Room.Server/Horde insert_member to reachable list_auto_join_rooms boundary), 2 MINOR fixed (AC4 split into own named test + profile-preservation COALESCE assertion added); re-run confirms 3/26 fail (exactly the AC1 RED tests), 0 collateral
+# [provision-matrix-identity-on-admin-login] 2026-07-02T09:22Z atdd → 7 tests added (3 AC1 RED, 1 AC2 vacuous-pass, 2 AC3/AC5 integration-tagged, 1 regression-guard pass); 3/237 failing as expected
+# [provision-matrix-identity-on-admin-login] 2026-07-02T09:14Z oracle-gate → spec context captured (no CS contract changes; TokenValidator.validate/4 has 2 pre-existing call sites — login-path full-provisioning flavor is what AC1 needs, not the /refresh check-only flavor; facade needs new delegate)
+# [provision-matrix-identity-on-admin-login] 2026-07-02T09:14Z classify → matrix:true ui:false security_review:required
+# [provision-matrix-identity-on-admin-login] 2026-07-02T09:12Z pipeline started (resumed at Step 1c per user instruction — story already written)
+# [matrix-refresh-revalidates-with-idp] 2026-07-02T09:40Z committed ✓ (ATDD 7 tests+Code 1 MAJOR fixed+2 MINOR fixed 1 cycle(m1 regression test added, stale RED comment+arch doc fixed)+Kassandra CLEAN)
+# [matrix-refresh-revalidates-with-idp] 2026-07-02T09:32Z arc42-update → done: 08-concepts.md AC2 two-branch correction (from cycle-1 dev fix) confirmed complete and sufficient; Kassandra's LOW/INFO findings are defense-in-depth notes, not architecturally doc-worthy, no further arc42 changes needed
+# [matrix-refresh-revalidates-with-idp] 2026-07-02T09:30Z security-review → Kassandra CLEAN (0 CRIT/HIGH, 1 LOW: delete_for_user_device/2 best-effort DELETE, not exploitable since no tokens minted on any error branch; 2 INFO); m1 transient/confirmed branch specifically scrutinized: byte-identical 401+soft_logout envelope on both branches, transient only reachable post successful IdP redeem+id_token reverify, deprovisioned users always land in confirmed hard-delete branch, transient path never reaches do_rotate/4 — no info leak, no bypass via repeated transient errors. Report: docs/stories/oidc-simplification/security-reports/matrix-refresh-revalidates-with-idp-security-review-2026-07-02.md
+# [matrix-refresh-revalidates-with-idp] 2026-07-02T09:20Z code-review RE-REVIEW → CLEAN (cycle 1): all 4 named issues verified resolved (MAJOR blank-PII fix confirmed, m1 transient-test genuinely exercises {:error,{:transient_check_failed,_}} branch + proves no hard-delete, m2 test verified, stale RED-phase comment + 08-concepts.md AC2 doc both corrected accurately); 0 new MAJOR/MINOR, 3 INFO (pre-existing cross-domain reach-through pattern, no sub-binding on refresh in either domain symmetric with mirrored pattern, admin/auth.ex exchange helpers confirmed still live for authz_code leg) — no action needed
+# [matrix-refresh-revalidates-with-idp] 2026-07-02T09:10Z ci-gate (cycle-1 fresh re-run) → ✓ redeploy+integration(1420t/3f/2skip, exact match to baseline: AdminStaleRoomsTest/MatrixSsoTest/RegressionSyncLoadTest — 0 new failures, +1 test vs prior=new m1 test)+unit(1169 passed/2 skipped/249 excluded/0 failures; --warnings-as-errors abort is the same pre-existing unrelated bootstrap_admin_session_identity_test.exs:168 warning, file confirmed untouched by this story/committed in a prior story)
+# [matrix-refresh-revalidates-with-idp] 2026-07-02T09:05Z dev-story (cycle-1 fixes) → done: added m1 transient-failure regression test (TransientlyFailingValidator via :session_manager,:validator_module seam) asserting no hard-delete on transient check failure; rewrote stale RED-phase comment block (login_refresh_test.exs ~710-725) to describe shipped GREEN behavior; corrected 08-concepts.md AC2 section (~534-541) to document the two-branch fail-closed behavior (confirmed rejection/deprovisioning → hard-delete; transient check failure → session preserved)
+# [matrix-refresh-revalidates-with-idp] 2026-07-02T07:19Z ci-gate (post-fix cycle1) → ✓ redeploy+integration(3 runs: 1419t/4f/1419t/4f/1419t/3f — the 4th failure was SyncConcurrentTest 429 under RegressionSyncLoadTest contention, independently proven flaky via isolated re-run(1t/0f) + control re-run(back to exact 3-failure baseline); all 3 consistent failures are documented pre-existing baseline: AdminStaleRoomsTest/MatrixSsoTest/RegressionSyncLoadTest)+unit(1169 passed/2 skipped/0 failures, --warnings-as-errors abort is the same pre-existing unrelated bootstrap_admin_session_identity_test.exs:168 warning confirmed identical on main)
+# [matrix-refresh-revalidates-with-idp] 2026-07-02T06:44Z user decision: (a) fix MAJOR — pass fresh_claims-derived display_name/email into check_still_active/1 instead of blank strings, or prefer a read-only check if cleanly available; add regression test for not-yet-backfilled-user (no signing_key_id) hitting /refresh; MINORs m1/m2 fixable now if cheap → cycle 1
+# [matrix-refresh-revalidates-with-idp] 2026-07-02T06:42Z code-review → 1 MAJOR (check_still_active/1 blank-PII-overwrite bug) + 2 MINOR (error-class conflation; no-oidc-rt permanent-lockout untested) + 4 INFO — BLOCKED awaiting user decision
+# [matrix-refresh-revalidates-with-idp] 2026-07-02T06:35Z ci-gate → ✓ redeploy+integration(1416t/3f/2skip, exact match to baseline: MatrixSsoTest/AdminStaleRoomsTest/RegressionSyncLoadTest — 0 new failures)+unit(1169 passed/2 skipped/245 excluded/0 failures; --warnings-as-errors abort is a PRE-EXISTING unrelated warning in bootstrap_admin_session_identity_test.exs:168 from a different already-committed story, 0 warnings in any file this story touched)
+# [matrix-refresh-revalidates-with-idp] 2026-07-01T21:49Z dev-story → done (cycle 0): new Nebu.Web.OidcTokenExchange.refresh/2 (AC5 shared module, config-parameterized not self-resolving); admin/auth.ex exchange_refresh_token/1 now thin delegate; http_public.ex do_refresh_with/2 rewritten (revalidate_with_idp/1 -> exchange_oidc_refresh_token/1 seam :matrix_oidc_refresh_override -> check_still_active/1 via TokenValidator -> do_rotate/4 reusing session_expires_at/1, fail-closed delete_for_user_device/2 + soft_logout:true on any failure); matrix_session_store.ex rotate_tokens/1 :new_oidc_refresh_token now has a real caller (AC4); sso_login.ex oidc_config_for_refresh/0 added; 08-concepts.md updated. Dev agent also added seam stubs (no assertion weakening) to 3 pre-existing describe blocks in login_refresh_test.exs + device_lifecycle_login_test.exs that called /refresh without a seam, since /refresh now mandatorily contacts the IdP. Verified: login_refresh_test.exs 21/21, device_lifecycle_login_test.exs 13/13, admin_token_refresh_test.exs+admin_keepalive_test.exs 17/17, mix test unit 1171/0f, full integration 1416t/3f (baseline-identical: AdminStaleRoomsTest/MatrixSsoTest/RegressionSyncLoadTest).
+# [matrix-refresh-revalidates-with-idp] 2026-07-01T21:10Z test-review → CLEAN (0 MAJOR, 0 MINOR, 3 INFO: AC5 correctly untested at HTTP level, soft_logout parity bonus assertion, seam name/shape confirmed faithful mirror of admin_oidc_refresh_override not hallucinated)
+# [matrix-refresh-revalidates-with-idp] 2026-07-01T21:07Z atdd → 7 new failing tests (login_refresh_test.exs, +348 lines purely additive, 0 pre-existing tests modified): AC1 seam-invocation, AC2 IdP-rejection 401+session-dead, AC2 soft_logout:true, AC2 deprovisioning 401+invalidated (via users.is_active flip, not deactivate_user which already hard-deletes), AC3 expires_in_ms from fresh id_token.exp not 8h ceiling, AC4 RT-rotation stores new encrypted value, AC6 full happy-path regression. New test seam :matrix_oidc_refresh_override (mirrors :admin_oidc_refresh_override). 21 total tests in file: 14 pre-existing green + 7 new RED (confirmed via mix test --include integration).
+# [matrix-refresh-revalidates-with-idp] 2026-07-01T21:00Z baseline-integration → ⚠ FAILING (1408t/3f/2skip, pre-existing: MatrixSsoTest AC3/AC4, AdminStaleRoomsTest AC3, RegressionSyncLoadTest AC7 — matches documented prior baseline, unrelated to this story)
+# [matrix-refresh-revalidates-with-idp] 2026-07-01T20:52Z oracle-gate → spec context captured (refresh endpoint MUST rules, 401 M_UNKNOWN_TOKEN cases, soft_logout note, rotation binding requirements)
+# [matrix-refresh-revalidates-with-idp] 2026-07-01T20:50Z classify → matrix:true ui:false sec:required
+# [matrix-refresh-revalidates-with-idp] 2026-07-01T20:49Z pipeline started (from Step 1c, story pre-existing)
+# [fix-matrix-login-missing-refresh-token] 2026-07-01T20:48Z committed ✓ (AC1 diagnosis=IdP-misconfig(a), no code bug + AC2 log-parity fix+ATDD 13 tests+Code CLEAN+Kassandra CLEAN)
+# [fix-matrix-login-missing-refresh-token] 2026-07-01T20:47Z arc42-update → done (08-concepts.md: new paragraph in Matrix Session Lifecycle section documenting the requested-but-not-granted fallback, admin-parity log wording, AC1 diagnosis outcome, and cross-reference to deferred follow-up story matrix-refresh-revalidates-with-idp)
+# [fix-matrix-login-missing-refresh-token] 2026-07-01T20:46Z security-review → Kassandra CLEAN (0 CRIT/HIGH/MED/LOW; verified: static log literal only user_id metadata, no token/id_token/PII leak, no log injection, never echoed to client, no new refresh-token-delivery condition, opaque-session guard byte-unchanged, non-goals honored)
+# [fix-matrix-login-missing-refresh-token] 2026-07-01T20:44Z code-review → CLEAN (cycle 0): 0 MAJOR/MINOR, 4 INFO (stale story-doc line refs, cosmetic count phrasing, pre-existing unrelated warnings-as-errors red flag, id_token-leak test coverage optional/deferred). Log-parity verified near-verbatim vs admin/auth.ex, no token/PII leak, AC1 diagnosis re-confirmed, non-goals honored.
+# [fix-matrix-login-missing-refresh-token] 2026-07-01T20:40Z ux-gate → skipped (no UI; http_public.ex log-string change only, no admin/ files touched)
+# [fix-matrix-login-missing-refresh-token] 2026-07-01T20:40Z ci-gate → ✓ redeploy+integration(1408t/3f/2skip, exact match to baseline 3 pre-existing failures: MatrixSsoTest AC3/AC4, AdminStaleRoomsTest AC3, RegressionSyncLoadTest AC7 — 0 new failures, +3 tests vs baseline = new AC2/AC4 tests)+unit(1169 passed/2 skipped/237 excluded, 0 failures)
+# [fix-matrix-login-missing-refresh-token] 2026-07-01T20:32Z dev-story → done (cycle 0): http_public.ex AC2 log wording fixed to admin-parity ('...ensure the IdP grants offline_access to the matrix client'), log level/metadata unchanged (user_id only, no token leak); test formatting MINOR fixed; sso_login.ex/oidc_scopes.ex/session_expires_at/admin-refresh untouched per non-goals; login_refresh_test.exs 13/13 green isolated
+# [fix-matrix-login-missing-refresh-token] 2026-07-01T20:07Z test-review → CLEAN (0 MAJOR real defect, 2 MINOR: id_token-leak assertion gap mitigated by manual verify + mix format drift; 1 intended RED confirmed not a test bug)
+# [fix-matrix-login-missing-refresh-token] 2026-07-01T20:01Z atdd → 13 tests (1 RED: AC2 log-wording test expects 'ensure the IdP grants offline_access to the matrix client' vs current 'verify...'; 2 new AC4 tests already GREEN as regression-lock; 10 pre-existing AC5 tests untouched/green). AC1 diagnosis=outcome(a): pure IdP-misconfig/diagnosability gap, no code bug — OidcScopes.resolve_scope correctly appends offline_access, extract_id_token correctly parses nil RT (spec-legal). login_refresh_test.exs modified only (no lib/ changes).
+# [fix-matrix-login-missing-refresh-token] 2026-07-01T19:48Z baseline-integration → ⚠ FAILING (1405t/3f/2skip, pre-existing: RegressionSyncLoadTest latency AC7, MatrixSsoTest AC3/AC4, AdminStaleRoomsTest AC3 — matches documented prior baseline, unrelated to this story)
+# [fix-matrix-login-missing-refresh-token] 2026-07-01T19:41Z oracle-gate → spec context captured (AC4 gap confirmed: requested-but-not-granted RT case untested; login MUST/SHOULD fields enumerated; log-parity requirement vs admin/auth.ex noted)
+# [fix-matrix-login-missing-refresh-token] 2026-07-01T19:39Z classify → matrix:false(classifier) OVERRIDDEN to matrix:true(orchestrator: touches sso_login.ex/http_public.ex login+refresh) ui:false sec:required
+# [fix-matrix-login-missing-refresh-token] 2026-07-01T19:39Z pipeline started (from Step 1c, story pre-existing)
+# [fix-bootstrap-admin-session-identity] 2026-07-01T19:38Z committed ✓ (ATDD 14 tests(8 RED)+Code MAJOR-1 fixed 1 cycle(fallback dropped)+Kassandra CLEAN)
+# [fix-bootstrap-admin-session-identity] 2026-07-01T19:35Z arc42-update → done (08-concepts.md: new section documenting bootstrap-completion session identity fix, positioned after the related Admin/Matrix identity unification note; documents the rejected actor_id/1 fallback decision and its rationale)
+# [fix-bootstrap-admin-session-identity] 2026-07-01T19:34Z security-review → Kassandra CLEAN (0 CRIT/HIGH/MED/LOW; all 6 SEC-Gate-1 checkpoints verified: matrix_user_id structural equivalence, no unverified claims, guard ordering pre-complete_bootstrap, no Jason atom-injection risk, controllers confirmed reverted with bounded self-healing residual, C1 defense + session-fixation + session_exp-flooring all preserved/improved)
+# [fix-bootstrap-admin-session-identity] 2026-07-01T19:30Z code-review RE-REVIEW → CLEAN (cycle 1): MAJOR-1 fallback fully removed (controllers byte-for-byte reverted, diff empty), AC3 test soundly rewritten via real put_current_user/2 + admin-group claim, MINOR-1 moduledoc fixed, core AC1/AC2/AC4 fix in auth.ex unchanged/correct, 1169 passed/2 pre-existing skipped/0 failures independently re-verified
+# [fix-bootstrap-admin-session-identity] 2026-07-01T19:27Z user decision: (a) drop actor_id/1 fallback entirely — resolves MAJOR-1+MINOR-2+ADR-020 concern together; rooms_controller.ex/users_controller.ex fully reverted to original; AC3 test rewritten to mint session via real put_current_user/2 (not hand-rolled buggy fixture, since real bootstrap sessions now always carry matrix_user_id and no fallback exists for stale ones); MINOR-1 stale RED-phase moduledoc fixed; 1169/0f/2skip re-verified green → cycle 1
+# [fix-bootstrap-admin-session-identity] 2026-07-01T19:21Z code-review → 1 MAJOR (actor_id/1 defense-in-depth fallback: correctness divergence + ADR-020 + scope creep, entangled) + 2 MINOR + 3 INFO — BLOCKED awaiting user decision
+# [fix-bootstrap-admin-session-identity] 2026-07-01T19:16Z ux-gate → skipped (no UI; auth.ex/rooms_controller.ex/users_controller.ex diffs are pure session/logic changes, no template/LiveView changes)
+# [fix-bootstrap-admin-session-identity] 2026-07-01T19:16Z ci-gate → ✓ redeploy+integration(2 runs: 1405t 4/3 failures, run1's extra PersonalRoomTest failure confirmed FLAKY via control re-run — not reproduced, DB-contention artifact under concurrent load; run2 exactly matches 3-failure baseline)+unit(1169 passed/2 pre-existing skipped/234 excluded, 0 regressions)
+# [fix-bootstrap-admin-session-identity] 2026-07-01T19:00Z dev-story → done (cycle 0): bootstrap_confirm_claim/2 now mints session via put_current_user/2 (real shared path, not hand-rolled map); bootstrap_callback/2 stashes bootstrap_full_claims; bootstrap_claims/1 fail-closed guard before complete_bootstrap/2 runs with graceful fallback reconstruction for legacy in-flight bootstraps; rooms_controller.ex+users_controller.ex actor_id/1 defense-in-depth for stale pre-fix sessions. 1169 passed/2 pre-existing skipped/234 excluded(integration), 0 regressions. Process note: orchestrator briefly edited auth.ex concurrently with the dev agent mid-run (agent correctly held ground-truth-from-disk and resolved cleanly, no data loss)
+# [fix-bootstrap-admin-session-identity] 2026-07-01T18:48Z test-review → CLEAN (0 MAJOR, 1 MINOR cosmetic comment nit, 2 INFO); AC3 real-pipeline verified sound (actor_id(conn) computed before admin_room_creator seam), all seams/APIs verified real (no hallucinations), crash/restart correctly N/A
+# [fix-bootstrap-admin-session-identity] 2026-07-01T18:43Z atdd → 14 tests (8 failing RED as expected, 6 passing intentional baseline/contrast/preservation checks); new bootstrap_admin_session_identity_test.exs (AC1/AC2/AC4/session_exp-pin/cache-timing) + admin_create_room_test.exs AC3 addition (real Endpoint/Router/Controller pipeline); auth_test.exs deliberately untouched (OIDC-scope-only, unrelated)
+# [fix-bootstrap-admin-session-identity] 2026-07-01T18:32Z baseline-integration → ⚠ FAILING (1392t/3f/2skip, pre-existing: RegressionSyncLoadTest latency AC7, AdminStaleRoomsTest AC3, MatrixSsoTest AC3/AC4 — unrelated to bootstrap session identity)
+# [fix-bootstrap-admin-session-identity] 2026-07-01T18:19Z oracle-gate → skipped (no Matrix feature)
+# [fix-bootstrap-admin-session-identity] 2026-07-01T18:19Z classify → matrix:false ui:false sec:required
+# [fix-bootstrap-admin-session-identity] 2026-07-01T18:18Z pipeline started (from Step 1c, story pre-existing)
+# [centralize-scope-resolution] 2026-07-01T18:17Z committed ✓ (ATDD 40 tests+2 test-review MAJOR fixed pre-dev+Code CLEAN+Kassandra CLEAN)
+# [centralize-scope-resolution] 2026-07-01T18:14Z arc42-update → done (08-concepts.md: new OidcScopes module, cache extension, superseded identity-unification note, cross-referenced by dev-story)
+# [centralize-scope-resolution] 2026-07-01T18:13Z security-review → Kassandra CLEAN (0 CRIT/HIGH/MED/LOW, 1 INFO: stale docstring in auth.ex:272, non-blocking)
+# [centralize-scope-resolution] 2026-07-01T18:09Z code-review → CLEAN (cycle 0, 0 MAJOR/CRITICAL, 3 INFO only: extra-scope whitespace-split defense-in-depth gap, stringify_keys computed twice, stale RED-phase test narration)
+# [centralize-scope-resolution] 2026-07-01T18:04Z ux-gate → skipped (no UI; admin/ diffs are pure validator-call-site swaps + auth delegation, no template/LiveView changes)
+# [centralize-scope-resolution] 2026-07-01T18:03Z ci-gate → ✓ redeploy+integration(3 runs: 1392t, 4/3/4 failures all pre-existing/flaky, verified via git-stash control run matching baseline+control failures exactly)+unit(1156 passed/0f/2 skipped)
+# [centralize-scope-resolution] 2026-07-01T18:03Z dev-story → done (cycle 0): OidcScopes module created, SsoLogin/Admin.Auth thin delegates, union_scopes/facade removed, oidc_config.ex cache extended, db.ex invalidation hook added, AC1-7 satisfied
+# [centralize-scope-resolution] 2026-07-01T16:54Z test-review MAJOR fixes applied directly (AC4 narrowed to scope-specific call site; AC2 real ETS/:pg integration test added) → re-verified: 39/40 unit RED+1 legit pass+3 excluded, 2/3 new integration RED+1 legit precondition pass, 6/6 AC7 suites green, 0 regressions → CLEAN, proceeding to dev-story
+# [centralize-scope-resolution] 2026-07-01T16:36Z test-review → 2 MAJOR (AC4 unsatisfiable grep assertion; AC2 cache test doesn't exercise ETS/:pg) + 2 MINOR + 4 INFO — BLOCKED awaiting user decision
+# [centralize-scope-resolution] 2026-07-01T16:32Z atdd → 40 failing tests (oidc_scopes_test.exs, RED confirmed: 39 fail as expected, 1 pre-existing-invariant pass, 0 regressions across 6 named AC7 suites)
+# [centralize-scope-resolution] 2026-07-01T16:24Z baseline-integration → ⚠ FAILING (1349t/10f/2skip, pre-existing, matches prior stories' documented 10-baseline)
+# [centralize-scope-resolution] 2026-07-01T16:16Z oracle-gate → skipped (no Matrix feature)
+# [centralize-scope-resolution] 2026-07-01T16:16Z classify → matrix:false ui:false sec:required
+# [centralize-scope-resolution] 2026-07-01T16:15Z pipeline started (from Step 1c, story pre-existing)
+# [admin-liveview-session-refresh] 2026-07-01T16:14Z committed ✓ (ATDD 6 tests+Code 3 cycles clean+Kassandra HIGH found&fixed(refresh_grace_exp)+re-verified CLEAN)
+# [admin-liveview-session-refresh] 2026-07-01T16:12Z arc42-update → done (08-concepts.md: added Security hardening paragraph documenting refresh_grace_exp fix for Kassandra HIGH finding)
+# [admin-liveview-session-refresh] 2026-07-01T16:11Z ci-gate (post-SEC-fix) → ✓ redeploy+integration(1349t/9f, 0 new vs baseline)+unit(1116 passed/0f, +1 SEC-HIGH regression test)
+# [admin-liveview-session-refresh] 2026-07-01T16:02Z security-review RE-REVIEW → Kassandra CLEAN — HIGH Finding #1 CLOSED (independently re-verified: tamper-proof, non-bypassable, fail-closed, timing sound, no new vuln introduced), 1 LOW advisory unchanged
+# [admin-liveview-session-refresh] 2026-07-01T15:58Z code-review MINOR-1 fixed directly (stale refreshable?/1 arity refs corrected to /2, 2 genuinely-historical refs left as /1), 17/17 target + 220/17excl green, no regressions → CLEAN, proceeding to Kassandra re-review
+# [admin-liveview-session-refresh] 2026-07-01T15:54Z code-review (post-SEC-fix) → HIGH CLOSED (verified: tamper-proof, fail-closed, sound grace-window math), 1 MINOR (stale refreshable?/1 comments, cosmetic) → cycle to fix
+# [admin-liveview-session-refresh] 2026-07-01T15:50Z dev-story (SEC fix) → added refresh_grace_exp (session_exp+180s) independent bound, refreshable?/2 requires decrypt AND grace-window, new SEC-HIGH regression test RED→GREEN, max_age cookie deliberately skipped (would conflict with AC2), 12/12+220/17excl+1116/0f green
+# [admin-liveview-session-refresh] 2026-07-01T15:43Z user decision: (a) fix HIGH finding — add independent server-side refresh_grace_exp bound, restart from Step 4
+# [admin-liveview-session-refresh] 2026-07-01T15:38Z security-review → Kassandra HIGH (1 finding: decrypt-gated grace window unbounded when heartbeat severed → revoked admin retains indefinite AuditLog/Dashboard read access) + 1 LOW advisory. BLOCKED — awaiting user decision
+# [admin-liveview-session-refresh] 2026-07-01T15:31Z code-review → CLEAN (cycle 3, 0 MAJOR/MINOR, stale RED-phase prose issue fully resolved across both test files)
+# [admin-liveview-session-refresh] 2026-07-01T15:28Z dev-story cycle 3 → fixed MINOR-1 exhaustively (both test files rewritten, grep-verified zero RED-phase matches), 16/16 + 219/17excl green
+# [admin-liveview-session-refresh] 2026-07-01T15:25Z code-review cycle 2 → MINOR-1 continuation (stale RED-phase prose incompletely fixed, missed admin_keepalive_test.exs entirely + AC2 block in admin_token_refresh_test.exs) → cycle 3 (final attempt before escalation)
+# [admin-liveview-session-refresh] 2026-07-01T15:21Z dev-story cycle 2 → fixed MINOR-3 (rewrote stale RED-phase test comments/names to describe shipped GREEN behavior), 16/16 target + 219/17excl admin suite green
+# [admin-liveview-session-refresh] 2026-07-01T15:18Z code-review cycle 1 → MINOR-1/2 resolved, 1 NEW MINOR-3 (stale RED-phase test comments contradict shipped GREEN fix) → cycle 2
+# [admin-liveview-session-refresh] 2026-07-01T15:15Z dev-story cycle 1 → fixed MINOR-1 (SEC NOTE documenting decrypt-only grace-window tradeoff in refreshable?/1) + MINOR-2 (removed stale Bootstrap-as-LiveView refs), 219 admin/1115 full suite green, 0 regressions
+# [admin-liveview-session-refresh] 2026-07-01T15:11Z code-review → 2 MINOR (decrypt-only grace window bound, stale Bootstrap comments) → cycle 1
+# [admin-liveview-session-refresh] 2026-07-01T15:07Z ux-gate → CLEAN (0 violations, 7 advisories, BOND.md-unfilled process note)
+# [admin-liveview-session-refresh] 2026-07-01T15:05Z ci-gate → ✓ redeploy+integration(1348t/9f, 0 new vs 10 baseline)+unit(1115 passed/0f); note: nebu-agent-testing/ci_gate.py fallback stale (references removed Go build-gateway layer, pre-existing script bug unrelated to story, make test-unit-elixir used as authoritative per CLAUDE.md)
+# [admin-liveview-session-refresh] 2026-07-01T14:56Z dev-story → done (cycle 0): keepalive_controller.ex+router+layouts+app.js+auth.ex(on_mount grace window), 16/16 target tests green, admin suite 219/219, full suite 1115/0f
+# [admin-liveview-session-refresh] 2026-07-01T14:46Z test-review → CLEAN (0 MAJOR, 2 MINOR maintainability, 8 INFO)
+# [admin-liveview-session-refresh] 2026-07-01T14:43Z atdd → 6 failing tests (AC1/AC2 in admin_token_refresh_test.exs, AC4 x4 in new admin_keepalive_test.exs); 10 pre-existing tests untouched/green
+# [admin-liveview-session-refresh] 2026-07-01T14:36Z baseline-integration → ⚠ FAILING (1341t/10f/2skip, pre-existing, matches prior story's documented 10-baseline)
+# [admin-liveview-session-refresh] 2026-07-01T14:28Z oracle-gate → skipped (no Matrix feature)
+# [admin-liveview-session-refresh] 2026-07-01T14:28Z classify → matrix:false(override, raw=true false-positive) ui:true(override, raw=false, admin-UI-adjacent per instruction) sec:required
+# [admin-liveview-session-refresh] 2026-07-01T14:28Z pipeline started (from Step 1c, story pre-existing)
+# [centralize-claim-resolution] 2026-07-01T14:27Z committed ✓ (ATDD 34 tests CLEAN+1 MINOR fixed 1 cycle+Kassandra CLEAN)
+# [centralize-claim-resolution] 2026-07-01T14:26Z arc42-update → done (05-building-blocks.md: new Nebu.Web.OidcClaims entry)
+# [centralize-claim-resolution] 2026-07-01T14:25Z security-review → Kassandra CLEAN (0 CRIT/HIGH/MED/LOW, 4 INFO)
+# [centralize-claim-resolution] 2026-07-01T14:21Z code-review → CLEAN (cycle 1, MINOR-1 fixed)
+# [centralize-claim-resolution] 2026-07-01T14:20Z dev-story cycle 1 → fixed MINOR-1 (comment reference updated to Nebu.Web.OidcClaims), 76/76 affected tests green
+# [centralize-claim-resolution] 2026-07-01T14:20Z code-review → 1 MINOR (stale 'below' comment reference) → cycle 1
+# [centralize-claim-resolution] 2026-07-01T14:16Z ux-gate → skipped (no UI; admin/auth.ex diff is pure logic delegation, no render/template changes)
+# [centralize-claim-resolution] 2026-07-01T14:16Z ci-gate → ✓ redeploy+integration(1341t/9f, 0 new vs 10 baseline)+unit(1108 passed)
+# [centralize-claim-resolution] 2026-07-01T14:06Z dev-story → done (cycle 0): 34/34 new tests green, admin suite unchanged/green
+# [centralize-claim-resolution] 2026-07-01T14:02Z test-review → CLEAN (0 MAJOR, 4 INFO)
+# [centralize-claim-resolution] 2026-07-01T14:00Z atdd → 34 failing tests (oidc_claims_test.exs, RED confirmed: UndefinedFunctionError)
+# [centralize-claim-resolution] 2026-07-01T13:55Z baseline-integration → ⚠ FAILING (10 pre-existing, unrelated to this story — documented)
+# [centralize-claim-resolution] 2026-07-01T13:41Z oracle-gate → skipped (no Matrix feature)
+# [centralize-claim-resolution] 2026-07-01T13:41Z classify → matrix:false ui:false sec:required
+# [centralize-claim-resolution] 2026-07-01T13:41Z pipeline started (from Step 1c, story pre-existing)
+# [epic] 2026-07-01T00:00Z architecture + stories created by Winston (bmad-agent-architect) with
+#   security consultation input from Kassandra (nebu-agent-kassandra). Decision: consolidated
+#   OIDC claims/scope logic lands in new Nebu.Web.OidcScopes / Nebu.Web.OidcClaims shared-infra
+#   modules (extends existing Nebu.Web.OidcConfig/JwksCache pattern per ADR-020/022). 3 stories
+#   created: centralize-scope-resolution, centralize-claim-resolution, scope-admin-claim-to-path.
+#   See: _bmad-output/implementation-artifacts/oidc-simplification-security-consultation-2026-07-01.md
+# [epic] 2026-07-01T00:00Z Phil live-tested post-bootstrap admin login and surfaced a further issue:
+#   bootstrap_confirm_claim/2 (auth.ex:619-636) mints the admin session via a hand-rolled map
+#   missing "matrix_user_id" (unlike put_current_user/2 used by normal_callback/2) -> actor_id/1
+#   in rooms_controller.ex/users_controller.ex falls back to raw sub -> room creator/added-by shows
+#   the raw OIDC sub instead of the canonical Matrix user_id right after bootstrap. Separately: no
+#   admin login path (bootstrap or normal) provisions a Matrix `users` row at all (only the
+#   Matrix-client login path does via TokenValidator.validate/4) -> an admin-only operator never
+#   appears in /admin/users. Confirmed via code trace, not speculative. 2 stories added:
+#   fix-bootstrap-admin-session-identity (severity: high, the acute bug) and
+#   provision-matrix-identity-on-admin-login (severity: medium, depends on the first). Epic now has
+#   5 stories total; alphabetical filename order already satisfies all depends_on edges.
+# [epic] 2026-07-01T00:00Z Phil reported (mid-run, while centralize-claim-resolution was executing):
+#   on a Keycloak-backed installation, admin sessions expire after ~5 min despite
+#   admin_oidc_refresh_mode=offline. Root cause confirmed via code trace: fetch_current_user/2
+#   (auth.ex:119-160) is an HTTP Plug only, wired into the :browser pipeline - the 3 remaining Admin
+#   LiveViews (Dashboard/AuditLog/Bootstrap) run over a persistent WebSocket with no new HTTP
+#   request, so the silent-refresh plug never fires while an operator idles in a LiveView. Already
+#   documented as a "known limitation" in 08-concepts.md; now reproduced as a real bug. Masked in
+#   dev because dev/dex/config.yaml sets idTokens: 24h (plenty of slack for occasional HTTP
+#   requests); Keycloak's default ID/access-token lifespan is ~5min, so no HTTP request happens
+#   before session_exp = min(id_token.exp, now+8h) collapses to ~now+5min. Matrix-side refresh is
+#   unaffected (client-driven /refresh, spec-conformant, separate mechanism). Story added:
+#   admin-liveview-session-refresh (severity: high, no depends_on - independent of the other 5).
+#   Epic now has 6 stories total. Recommended fix (non-binding): client-side heartbeat hook pinging
+#   a new GET /admin/keepalive HTTP endpoint while any admin LiveView is mounted, riding the
+#   existing HTTP-Plug refresh mechanism rather than building a second one for WebSocket.
+# [epic] 2026-07-01T00:00Z Phil reported a related Matrix-client-side symptom (Element logs out
+#   after ~5min too) and asked to consult the Oracle against the v1.18 token-refresh spec section.
+#   Oracle confirmed Nebu's /login+/refresh field shapes are spec-conformant, but found a real
+#   behavioral bug: session_expires_at/1 (http_public.ex:470-481) floors the LOGIN access-token
+#   lifetime to min(oidc_id_token.exp, now+8h) - Keycloak's ~5min default id_token exp collapses
+#   this to ~5min - while POST /refresh's re-mint (:547-548) uses only the 8h ceiling, no IdP-exp
+#   floor. Asymmetric: a successful refresh recovers 8h, but the FIRST token is too short-lived to
+#   reliably survive to that refresh. Story added: decouple-matrix-login-lifetime-from-idp-exp
+#   (severity: high, no depends_on). Phil then asked whether v1.18's new "OAuth 2.0 API" section
+#   supersedes the legacy /login+m.login.sso+/refresh flow this epic is patching. Oracle verdict
+#   (2nd consultation): NO - spec line 4222 "a homeserver MAY support one of those two APIs, or
+#   both" - it's optional/additive/parallel, not a replacement; m.login.sso and legacy /refresh
+#   carry no deprecation notice. Epic's repair approach confirmed as spec-valid; no rework needed.
+# [epic] 2026-07-01T00:00Z Phil pushed back on decouple-matrix-login-lifetime-from-idp-exp before
+#   any dev work started: Nebu-as-homeserver must not lose its OIDC Resource-Server posture, and
+#   explicitly asked not to make architecture changes right now - just fix the concrete bug. Element
+#   itself surfaced the real symptom: "Unable to refresh token - no refresh token or refresh
+#   function" - Element gets NO refresh_token from /login at all, full stop. Code-trace confirmed:
+#   Matrix /refresh (http_public.ex:531-573, matrix_session_store.ex rotate_tokens/1) extends the
+#   session PURELY LOCALLY - never contacts the OIDC token endpoint, never re-verifies claims, the
+#   captured oidc_refresh_token is carried over unused. Admin's refresh (admin/auth.ex:162-229) DOES
+#   contact the IdP + re-verify + re-check the admin gate - structurally different, Admin is correct,
+#   Matrix is not. This IS a real Resource-Server-posture gap on the Matrix side, but per Phil's
+#   explicit instruction it is deliberately NOT this story's scope - recorded as a deferred
+#   observation inside fix-matrix-login-missing-refresh-token.md for a future decision, not dropped.
+#   Superseded decouple-matrix-login-lifetime-from-idp-exp.md deleted (was backlog, never entered
+#   the pipeline) and replaced with the narrowly-scoped fix-matrix-login-missing-refresh-token
+#   (severity: high, no depends_on): diagnose why the IdP token response lacks refresh_token despite
+#   offline_access being requested (likely Keycloak client missing the Offline Access capability,
+#   to be confirmed not assumed), make the silent-fallback warning as diagnosable as the admin side
+#   already is, and add regression coverage for the requested-but-not-granted path. Epic remains at
+#   7 stories total (net: 1 removed, 1 added).
+# [epic] 2026-07-01T00:00Z Phil corrected the deferral: "mache das mit dem matrix refresh. deshalb
+#   habe ich das ja gmeldet." - the Matrix-refresh-doesn't-contact-the-IdP gap noted above IS what he
+#   wants fixed, not deferred. New story added: matrix-refresh-revalidates-with-idp (severity: high,
+#   depends_on: fix-matrix-login-missing-refresh-token - filename sorts after it alphabetically so
+#   pipeline order is already correct). Mirrors the Admin pattern exactly (exchange_refresh_token/1,
+#   admin/auth.ex:209-229): decrypt stored oidc_refresh_token -> POST grant_type=refresh_token to the
+#   IdP token endpoint -> verify_token the fresh id_token -> re-derive Matrix token expiry from THAT
+#   id_token's exp (restores login/refresh symmetry without decoupling from the IdP) -> fail-closed
+#   401+session-invalidate on IdP rejection or detected deprovisioning, no local-only fallback.
+#   Architecture recommendation folded in as AC5: extract the IdP token-exchange call into a shared
+#   Nebu.Web helper used by BOTH Admin and Matrix, instead of a second copied implementation - same
+#   consolidation pattern as centralize-scope-resolution/centralize-claim-resolution. Updated
+#   fix-matrix-login-missing-refresh-token.md's "deferred observation" section into a forward
+#   pointer at this story. Epic now has 8 stories total.
+story: null
+current_step: null
+last_updated: "2026-07-02T12:12Z"
+completed: []
+cycle_count: 0
+blocked_reason: null
