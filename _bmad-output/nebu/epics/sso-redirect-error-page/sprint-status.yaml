@@ -1,0 +1,12 @@
+# generated: 2026-07-03
+# Epic: sso-redirect-error-page
+# story html-error-page-for-rejected-sso-redirect-scheme done (pipeline: ATDD+Dev CLEAN, 1 code-review MINOR cycle, Kassandra CLEAN): 2026-07-03
+project: nebu
+epic: sso-redirect-error-page
+epic_status: in-progress
+
+development_status:
+  # Stories are added as they complete.
+  # Format:
+  #   <story-slug>: done | in-progress | ready-for-dev | backlog
+  html-error-page-for-rejected-sso-redirect-scheme: done

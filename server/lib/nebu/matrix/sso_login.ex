@@ -75,13 +75,159 @@ defmodule Nebu.Matrix.SsoLogin do
         error(conn, 400, "M_MISSING_PARAM", "redirectUrl is required")
 
       not redirect_url_allowed?(redirect_url) ->
-        # Do NOT echo the scheme/url back (avoid reflected-XSS / info leak).
+        # Do NOT echo the full url back (avoid reflected-XSS / info leak) — only
+        # the parsed+escaped scheme is ever rendered, and only on the HTML path.
         Logger.warning("matrix SSO: redirectUrl rejected by allowlist")
-        error(conn, 400, "M_INVALID_PARAM", "redirectUrl scheme is not permitted")
+        reject_redirect(conn, redirect_url)
 
       true ->
         do_redirect(conn, redirect_url)
     end
+  end
+
+  # story sso-redirect-error-page/html-error-page-for-rejected-sso-redirect-scheme:
+  # a rejected redirectUrl scheme is ALWAYS a 400. What changes is only the
+  # response *representation* — a real browser navigating to this endpoint (the
+  # Matrix SSO flow always opens a browser here) gets a human-readable HTML page
+  # instead of a raw JSON blob, when its Accept header clearly prefers HTML.
+  # Every other/ambiguous/missing Accept header keeps the EXACT pre-existing
+  # JSON body byte-for-byte (AC2 — the guaranteed default fallback; Oracle N2).
+  # This branch is a rejection-only concern (AC6/N1) — it never touches
+  # redirect_url_allowed?/1 or the allow path.
+  defp reject_redirect(conn, redirect_url) do
+    if prefers_html?(conn) do
+      uri = URI.parse(redirect_url)
+      scheme = uri.scheme && String.downcase(uri.scheme)
+
+      conn
+      |> put_resp_header("content-security-policy", "default-src 'none'")
+      |> put_resp_content_type("text/html")
+      |> send_resp(400, render_html_error(scheme))
+    else
+      error(conn, 400, "M_INVALID_PARAM", "redirectUrl scheme is not permitted")
+    end
+  end
+
+  # ── Content negotiation (AC1) ────────────────────────────────────────────────
+  #
+  # Conservative, JSON-biased heuristic: HTML is rendered ONLY when the Accept
+  # header clearly, unambiguously prefers it. Every other case — missing Accept,
+  # bare `*/*`, explicit `application/json`, or any tie/ambiguity — falls back to
+  # JSON, which stays the guaranteed default representation (AC2, Oracle N2).
+  #
+  # Algorithm:
+  #   1. Parse the Accept header into `{media_type, q}` pairs (default q = 1.0
+  #      when the `q` parameter is absent, per RFC 7231 §5.3.2).
+  #   2. Find the best (highest-q) HTML-ish entry — `text/html` or
+  #      `application/xhtml+xml` (NOT the `*/*` or `text/*` wildcards; those are
+  #      too ambiguous to count as an explicit HTML preference).
+  #   3. Find the best (highest-q) `application/json` entry.
+  #   4. Prefer HTML only if an HTML-ish entry exists AND (no json entry exists
+  #      OR the html q-value is strictly greater than the json q-value). A tie
+  #      is resolved in favour of JSON (conservative default).
+  #
+  # `action`/`idpId` query/path params are handled entirely upstream of this
+  # function and are never affected by content negotiation (Oracle N3).
+  defp prefers_html?(conn) do
+    accept_entries =
+      conn
+      |> get_req_header("accept")
+      |> Enum.flat_map(&parse_accept_header/1)
+
+    html_q = best_q(accept_entries, ["text/html", "application/xhtml+xml"])
+    json_q = best_q(accept_entries, ["application/json"])
+
+    case {html_q, json_q} do
+      {nil, _} -> false
+      {html_q, nil} -> html_q > 0.0
+      {html_q, json_q} -> html_q > json_q
+    end
+  end
+
+  # Highest q-value among entries whose media type is in `wanted`, or nil if none present.
+  defp best_q(entries, wanted) do
+    entries
+    |> Enum.filter(fn {type, _q} -> type in wanted end)
+    |> Enum.map(fn {_type, q} -> q end)
+    |> case do
+      [] -> nil
+      qs -> Enum.max(qs)
+    end
+  end
+
+  # Splits a (possibly comma-joined, since Plug may return one header value per
+  # line already split, or one combined "a, b, c" string) Accept header value
+  # into `{media_type, q}` pairs. Media type is lowercased; q defaults to 1.0.
+  defp parse_accept_header(header) when is_binary(header) do
+    header
+    |> String.split(",")
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.map(&parse_media_range/1)
+  end
+
+  defp parse_media_range(entry) do
+    [type | params] = entry |> String.split(";") |> Enum.map(&String.trim/1)
+
+    q =
+      params
+      |> Enum.find_value(fn param ->
+        case param |> String.split("=", parts: 2) |> Enum.map(&String.trim/1) do
+          ["q", value] ->
+            # Require the ENTIRE value to be a valid float (reject trailing
+            # garbage like "0.8abc") — this is the client's own header, so
+            # there's no cross-boundary trust issue, but a strict parse avoids
+            # silently accepting a malformed q-value as if it were valid.
+            case Float.parse(value) do
+              {q, ""} -> q
+              _ -> nil
+            end
+
+          _ ->
+            nil
+        end
+      end)
+
+    {String.downcase(type), q || 1.0}
+  end
+
+  # ── HTML error page rendering (AC3/AC4) ──────────────────────────────────────
+  #
+  # `scheme` is the ONLY user-controlled value ever rendered here — never the
+  # full redirectUrl (host/path/query). It is explicitly HTML-entity-escaped via
+  # `Plug.HTML.html_escape/1` BEFORE interpolation into the static template
+  # below. Elixir's bare string interpolation (and EEx, if it were used) does
+  # NOT auto-escape — that is a Phoenix.HTML/HEEx-only behaviour — so the
+  # escaping must be, and is, explicit here.
+  #
+  # Defense in depth: `URI.parse/1`'s scheme grammar (RFC 3986) already rejects
+  # HTML metacharacters at the parsing layer (any such input yields `scheme ==
+  # nil`, never reaching this function via the HTTP path) — layer 1. This
+  # explicit escape is layer 2, the failsafe verified independently by the
+  # `render_html_error/1` unit test with a directly-injected hostile string.
+  #
+  # Public (not `defp`) so it can be unit-tested directly, independent of the
+  # HTTP/Plug.Conn integration path.
+  @doc false
+  @spec render_html_error(String.t() | nil) :: String.t()
+  def render_html_error(scheme) do
+    escaped_scheme = Plug.HTML.html_escape(scheme || "")
+
+    """
+    <!doctype html>
+    <html lang="en">
+    <head>
+      <meta charset="utf-8">
+      <title>Login Not Supported</title>
+    </head>
+    <body>
+      <h1>Login Method Not Supported</h1>
+      <p>This app's login method (<code>#{escaped_scheme}</code>) is not yet permitted on this server.</p>
+      <p>Please contact your server administrator and ask them to add this scheme under
+      the Admin UI at <code>/admin/config</code>, in the "SSO redirect schemes" section.</p>
+    </body>
+    </html>
+    """
   end
 
   defp do_redirect(conn, redirect_url, uia_session \\ nil) do
@@ -94,7 +240,12 @@ defmodule Nebu.Matrix.SsoLogin do
 
       case SsoStore.put_state(
              state,
-             %{verifier: verifier, nonce: nonce, redirect_url: redirect_url, uia_session: uia_session},
+             %{
+               verifier: verifier,
+               nonce: nonce,
+               redirect_url: redirect_url,
+               uia_session: uia_session
+             },
              @state_ttl_seconds
            ) do
         :ok ->
@@ -495,11 +646,14 @@ defmodule Nebu.Matrix.SsoLogin do
   end
 
   # Accept both the new 3-tuple and the legacy 2-tuple (AC7 / no-RT path).
-  defp normalize_exchange({:ok, id_token, oidc_refresh_token}), do: {:ok, id_token, oidc_refresh_token}
+  defp normalize_exchange({:ok, id_token, oidc_refresh_token}),
+    do: {:ok, id_token, oidc_refresh_token}
+
   defp normalize_exchange({:ok, id_token}) when is_binary(id_token), do: {:ok, id_token, nil}
   defp normalize_exchange({:error, _} = err), do: err
 
-  defp exchange_code(token_endpoint, code, verifier, cfg, redirect_uri) when is_binary(verifier) do
+  defp exchange_code(token_endpoint, code, verifier, cfg, redirect_uri)
+       when is_binary(verifier) do
     body =
       URI.encode_query(%{
         "grant_type" => "authorization_code",
@@ -534,7 +688,8 @@ defmodule Nebu.Matrix.SsoLogin do
     end
   end
 
-  defp exchange_code(_endpoint, _code, _verifier, _cfg, _redirect_uri), do: {:error, :missing_verifier}
+  defp exchange_code(_endpoint, _code, _verifier, _cfg, _redirect_uri),
+    do: {:error, :missing_verifier}
 
   # oidc-session-refresh: also surface the OIDC `refresh_token` from the
   # token-endpoint response (present when `offline_access` is granted —

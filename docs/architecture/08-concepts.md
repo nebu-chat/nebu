@@ -124,6 +124,22 @@ hardcoded defaults `element`/`schildichat`/`im.fluffychat.auth`) are bootstrap-o
 the Admin UI (`/admin/config`, `server_config.sso_extra_redirect_schemes`) — no env var
 (story `fix-and-configure-sso-redirect-schemes`).
 
+**SSO redirect scheme rejection: content-negotiated response (story
+`sso-redirect-error-page/html-error-page-for-rejected-sso-redirect-scheme`):** when
+`SsoLogin.redirect_url_allowed?/1` rejects a client's `redirectUrl` scheme, `GET
+.../sso/redirect` and `.../sso/redirect/{idpId}` now content-negotiate the rejection
+response on the request's `Accept` header — a real browser (the Matrix SSO flow always
+opens one here) with an HTML-preferring `Accept` header gets a minimal static HTML error
+page naming only the rejected **scheme** (never the full `redirectUrl`/host/path/query),
+pointing to `/admin/config` → "SSO redirect schemes" to request support. Every other
+Accept header (missing, `application/json`, bare `*/*`, or any ambiguous/tied preference)
+still gets the exact pre-existing JSON `M_INVALID_PARAM` error, byte-for-byte — this
+remains the guaranteed default per the CS API's standard-error-response rule. The scheme
+is the only interpolated value and is explicitly escaped via `Plug.HTML.html_escape/1`;
+the HTML response carries `Content-Security-Policy: default-src 'none'`. This is a
+rejection-response-format change only — the allow/deny decision in
+`redirect_url_allowed?/1` is untouched, as are `uia_fallback/1` and the OIDC callback.
+
 **Bootstrap mode:** First OIDC login automatically receives `instance_admin`. Bootstrap mode is
 permanently disabled after the first admin setup. No default password, no insecure fallback.
 
