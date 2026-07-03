@@ -8,7 +8,17 @@
 #   _bmad-output/nebu/epics/<epic-name>/pipeline-state.yaml
 # This file is no longer used for named-epic pipeline runs.
 #
-# last_updated: 2026-07-02
+# last_updated: 2026-07-03
+# [bugfix-jwt-soft-logout] 2026-07-03T09:43Z committed ✓ 5fb55eac (ATDD+Dev CLEAN, 1 cycle MINOR fixed+Kassandra CLEAN)
+# [bugfix-jwt-soft-logout] 2026-07-03T09:43Z arc42-update → done (08-concepts.md:474 JWT-fallback soft_logout behavior documented)
+# [bugfix-jwt-soft-logout] 2026-07-03T09:41Z security-review → Kassandra CLEAN (0 CRIT/HIGH)
+# [bugfix-jwt-soft-logout] 2026-07-03T09:38Z code-review → CLEAN (cycle 1); 2 MINOR fixed (stale RED-phase docstring, stale caller-list comment)
+# [bugfix-jwt-soft-logout] 2026-07-03T09:36Z code-review → 0 MAJOR, 2 MINOR (stale RED-phase docstring; stale deny_soft_logout/3 comment) → cycle 1
+# [bugfix-jwt-soft-logout] 2026-07-03T09:31Z ci-gate → ✓ redeploy+integration(exit 0)+unit-elixir(exit 0)
+# [bugfix-jwt-soft-logout] 2026-07-03T09:23Z dev-story → done (cycle 0): deny_soft_logout/3 in call_jwt/2 :expired branch, all tests green
+# [bugfix-jwt-soft-logout] 2026-07-03T09:20Z test-review → 1 MAJOR (deactivated-branch AC2 gap) fixed, 1 MINOR + 3 INFO accepted
+# [bugfix-jwt-soft-logout] 2026-07-03T09:14Z atdd → 1 RED test updated (oidc_plug_expired_test.exs) + 1 regression test added (oidc_plug_test.exs, AC2 pin)
+# [bugfix-jwt-soft-logout] 2026-07-03T09:12Z pipeline started (--bug: call_jwt/2 expired-token branch in oidc_plug.ex uses deny/3 instead of deny_soft_logout/3, missing soft_logout:true per spec SHOULD, causes Element Web full storage wipe on natural JWT expiry)
 # [bugfix-remove-unused-confirm-default] 2026-07-02T22:52Z committed ✓ ec1a84e3 (ATDD skip-reasoned+Dev 1 MINOR fixed 1 cycle+Kassandra CLEAN; mix test --warnings-as-errors exit 0 restored, 2 own-code warnings fixed)
 # [bugfix-remove-unused-confirm-default] 2026-07-02T22:51Z arc42-update → done (06-runtime.md ln1081 stale Task.start/1 error-logging claim corrected to reflect dead-branch removal)
 # [bugfix-remove-unused-confirm-default] 2026-07-02T22:51Z security-review → Kassandra CLEAN (0 CRIT/HIGH/MEDIUM/LOW); dead-branch removal has no exploitable delta, test-oracle strictly stricter
@@ -254,7 +264,7 @@ current_step: null
 completed: []
 cycle_count: 0
 blocked_reason: null
-last_updated: "2026-07-02T22:52Z"
+last_updated: "2026-07-03T09:43Z"
 story: "device-key-registration"
 current_step: "commit"
 completed:

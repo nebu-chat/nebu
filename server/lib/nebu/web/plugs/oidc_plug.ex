@@ -11,6 +11,8 @@ defmodule Nebu.Web.Plugs.OidcPlug do
 
     * Missing header / non-Bearer scheme → `M_MISSING_TOKEN` "Missing access token"
     * Expired (`exp` in the past)        → `M_UNKNOWN_TOKEN` "Access token has expired"
+      + `soft_logout: true` (bugfix-jwt-soft-logout: the underlying session is
+      still intact, so the client can recover via refresh/re-auth)
     * Bad signature / iss / aud / kid / alg / malformed → `M_UNKNOWN_TOKEN`
 
   ## JWKS source seam
@@ -148,7 +150,12 @@ defmodule Nebu.Web.Plugs.OidcPlug do
         deny(conn, "M_MISSING_TOKEN", "Missing access token")
 
       {:error, :expired} ->
-        deny(conn, "M_UNKNOWN_TOKEN", "Access token has expired")
+        # bugfix-jwt-soft-logout: a naturally-expired JWT is a SOFT logout — the
+        # underlying Nebu session (device binding, user, device_id) is still intact
+        # server-side, so the client should be told it can recover via refresh/
+        # re-auth instead of wiping all local state (E2EE/device data). Mirrors
+        # call_opaque/1's already-correct handling of its own expiry case.
+        deny_soft_logout(conn, "M_UNKNOWN_TOKEN", "Access token has expired")
 
       {:error, :revoked} ->
         # F-1: a token denylisted by POST /logout must not be accepted again,
@@ -516,9 +523,12 @@ defmodule Nebu.Web.Plugs.OidcPlug do
     |> halt()
   end
 
-  # AC5 (spec SHOULD): an EXPIRED opaque session token returns soft_logout: true so
-  # the client knows it can recover by refreshing (vs. a hard logout that requires a
-  # fresh login). Only the opaque-session expiry path uses this.
+  # AC5 (spec SHOULD): a token rejection that still leaves the underlying Nebu
+  # session (device binding, user, device_id) intact returns soft_logout: true so
+  # the client knows it can recover by refreshing/re-authing (vs. a hard logout
+  # that requires wiping local state). Callers: opaque-session expiry,
+  # opaque-session deactivated-account re-check, and JWT-fallback expiry
+  # (call_jwt/2's :expired branch).
   defp deny_soft_logout(conn, errcode, error) do
     body = Jason.encode!(%{"errcode" => errcode, "error" => error, "soft_logout" => true})
 
