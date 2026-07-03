@@ -87,12 +87,21 @@ defmodule Nebu.Admin.BootstrapRefreshModePromotionTest do
 
   defp session_conn(method, path), do: conn(method, path) |> init_test_session(%{})
 
+  # scope-admin-claim-to-path (code-review MAJOR M1 fix): a claim path is now mandatory
+  # on bootstrap completion — bootstrap_confirm_claim/2 rejects a bare "admin_group_claim"
+  # param with no path. Builds the JSON-encoded "admin_group_claim_choice" param
+  # select_claim_html/1 now emits, matching the {path, value} pair stashed in
+  # "bootstrap_claims" by install_store/1 above (["groups", "instance_admin"]).
+  defp confirm_params(value, path) do
+    %{"admin_group_claim_choice" => Jason.encode!(%{"value" => value, "path" => path})}
+  end
+
   test "bootstrap completion promotes BOTH refresh modes into server_config (AC4)" do
     store = install_store()
 
     conn =
       session_conn(:post, "/admin/bootstrap/select-claim")
-      |> Auth.bootstrap_confirm_claim(%{"admin_group_claim" => "instance_admin"})
+      |> Auth.bootstrap_confirm_claim(confirm_params("instance_admin", "groups"))
 
     # Sanity: the confirm completed (not bounced to login).
     assert conn.status == 302
@@ -118,7 +127,7 @@ defmodule Nebu.Admin.BootstrapRefreshModePromotionTest do
 
     conn =
       session_conn(:post, "/admin/bootstrap/select-claim")
-      |> Auth.bootstrap_confirm_claim(%{"admin_group_claim" => "instance_admin"})
+      |> Auth.bootstrap_confirm_claim(confirm_params("instance_admin", "groups"))
 
     assert conn.status == 302
 

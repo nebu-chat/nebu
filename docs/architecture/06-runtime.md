@@ -1078,7 +1078,13 @@ automatically joined to all such rooms at first login, without manual invite.
    It launches a `Task.start` fire-and-forget:
    - Always: `ensure_personal_room/1` (Story personal-self-room).
    - Only when `is_new = true`: `ensure_auto_join_memberships/1` + `ensure_auto_join_space_memberships/1`.
-   - If `Task.start/1` itself fails to spawn, that is now logged (`Logger.warning`) instead of silently dropped.
+   - `Task.start/1` (unlike `Task.start_link/1`) has typespec `dynamic({:ok, pid()})` —
+     it cannot return `{:error, reason}`, so there is no failure branch to observe here
+     (confirmed by Elixir 1.20's type checker; a prior `{:error, reason} ->
+     Logger.warning(...)` clause was flagged as dead code and removed —
+     bugfix-remove-unused-confirm-default, 2026-07-03). Spawn-level resource exhaustion
+     is still possible in principle but is not surfaced as a return value to branch on;
+     it would need a system-level probe, not a `case` clause here.
 4. `ensure_auto_join_memberships/1`:
    - `messages_db_module().list_auto_join_rooms()` → `SELECT room_id FROM rooms WHERE is_auto_join = true AND status = 'active'`.
    - For each room_id: `Nebu.Room.RoomSupervisor.start_room(room_id)` (idempotent) + `Nebu.Room.Server.join(room_id, user_id)`.

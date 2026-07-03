@@ -122,6 +122,14 @@ defmodule Nebu.Admin.BootstrapOidcFlowTest do
 
   defp session_conn(method, path), do: conn(method, path) |> init_test_session(%{})
 
+  # scope-admin-claim-to-path (code-review MAJOR M1 fix): a claim path is now mandatory
+  # on bootstrap completion — bootstrap_confirm_claim/2 rejects a bare "admin_group_claim"
+  # param with no path. Builds the JSON-encoded "admin_group_claim_choice" param
+  # select_claim_html/1 now emits.
+  defp confirm_choice(value, path) do
+    %{"admin_group_claim_choice" => Jason.encode!(%{"value" => value, "path" => path})}
+  end
+
   # Pre-fills a valid login state (as login_start would have written) so the callback's
   # state/nonce checks pass; `mode` mirrors the value login_start stored.
   defp with_login_state(conn, mode) do
@@ -205,8 +213,14 @@ defmodule Nebu.Admin.BootstrapOidcFlowTest do
     assert select_conn.status == 200
     body = select_conn.resp_body || ""
     assert body =~ "instance_admin"
-    assert body =~ ~s(name="admin_group_claim")
-    assert body =~ ~s(value="instance_admin")
+    # scope-admin-claim-to-path (AC2): the radio now submits a single JSON-encoded
+    # "admin_group_claim_choice" value carrying BOTH the claim value AND its dot-path
+    # (there is no native HTML way to bind two independently-named radio groups to one
+    # click without JS) — see select_claim_html/1 and bootstrap_confirm_claim/2's
+    # resolve_selection/1 decode step.
+    assert body =~ ~s(name="admin_group_claim_choice")
+    assert body =~ Phoenix.HTML.html_escape(Jason.encode!(%{"value" => "instance_admin", "path" => "groups"}))
+                    |> Phoenix.HTML.safe_to_string()
   end
 
   test "callback mode=bootstrap stores the authenticated sub/email in the draft for confirm" do
@@ -239,7 +253,7 @@ defmodule Nebu.Admin.BootstrapOidcFlowTest do
 
     conn =
       session_conn(:post, "/admin/bootstrap/select-claim")
-      |> Auth.bootstrap_confirm_claim(%{"admin_group_claim" => "instance_admin"})
+      |> Auth.bootstrap_confirm_claim(confirm_choice("instance_admin", "groups"))
 
     assert conn.halted
     assert conn.status == 302
@@ -248,6 +262,7 @@ defmodule Nebu.Admin.BootstrapOidcFlowTest do
 
     config = Agent.get(store, & &1.config)
     assert config["admin_group_claim"] == "instance_admin"
+    assert config["admin_group_claim_path"] == "groups"
     assert config["bootstrap_completed"] == "true"
     assert config["instance_name"] == "test-nebu"
     assert config["oidc_issuer"] == @issuer
@@ -261,6 +276,92 @@ defmodule Nebu.Admin.BootstrapOidcFlowTest do
     user = get_session(conn, "current_user")
     assert user["admin"] == true
     assert user["sub"] == "kai"
+  end
+
+  # ── scope-admin-claim-to-path (AC2) — confirm persists path AND value ─────────────
+
+  test "AC2 — confirm via admin_group_claim_choice persists BOTH admin_group_claim and admin_group_claim_path" do
+    store = install_store(false)
+    Agent.update(store, &put_in(&1, [:draft, "bootstrap_sub"], "kai"))
+    Agent.update(store, &put_in(&1, [:draft, "bootstrap_email"], "kai@example.com"))
+
+    discovered =
+      Auth.extract_discovered_claims(%{
+        "sub" => "kai",
+        "realm_access" => %{"roles" => ["instance_admin"]}
+      })
+      |> Enum.map(fn {k, v} -> [k, v] end)
+
+    Agent.update(store, &put_in(&1, [:draft, "bootstrap_claims"], Jason.encode!(discovered)))
+
+    choice = Jason.encode!(%{"value" => "instance_admin", "path" => "realm_access.roles"})
+
+    conn =
+      session_conn(:post, "/admin/bootstrap/select-claim")
+      |> Auth.bootstrap_confirm_claim(%{"admin_group_claim_choice" => choice})
+
+    assert conn.halted
+    assert conn.status == 302
+    assert [loc] = get_resp_header(conn, "location")
+    assert loc == "/admin/dashboard"
+
+    config = Agent.get(store, & &1.config)
+    assert config["admin_group_claim"] == "instance_admin"
+    assert config["admin_group_claim_path"] == "realm_access.roles"
+    assert config["bootstrap_completed"] == "true"
+  end
+
+  test "AC2 (code-review MAJOR M1 fix) — a legacy admin_group_claim-only submission (no path) is REJECTED, not silently completed path-less" do
+    store = install_store(false)
+    Agent.update(store, &put_in(&1, [:draft, "bootstrap_sub"], "kai"))
+    Agent.update(store, &put_in(&1, [:draft, "bootstrap_email"], "kai@example.com"))
+    Agent.update(
+      store,
+      &put_in(&1, [:draft, "bootstrap_claims"], Jason.encode!([["groups", "instance_admin"]]))
+    )
+
+    # A path is now MANDATORY on every bootstrap completion — a bare legacy
+    # "admin_group_claim" param (no "admin_group_claim_choice") must be refused, not
+    # silently accepted with no admin_group_claim_path persisted (that was the M1 gap:
+    # it would have permanently pinned this fresh instance onto the any-key-scan
+    # fallback, exactly the risk this story exists to close).
+    conn =
+      session_conn(:post, "/admin/bootstrap/select-claim")
+      |> Auth.bootstrap_confirm_claim(%{"admin_group_claim" => "instance_admin"})
+
+    assert conn.halted
+    refute get_resp_header(conn, "location") == ["/admin/dashboard"]
+
+    config = Agent.get(store, & &1.config)
+    refute config["bootstrap_completed"] == "true"
+    refute Map.has_key?(config, "admin_group_claim_path")
+    refute Map.has_key?(config, "admin_group_claim")
+    assert get_session(conn, "current_user") == nil
+  end
+
+  test "AC2 (injection guard) — confirm REJECTS a value paired with a path it was never discovered under" do
+    store = install_store(false)
+    Agent.update(store, &put_in(&1, [:draft, "bootstrap_sub"], "kai"))
+    Agent.update(store, &put_in(&1, [:draft, "bootstrap_email"], "kai@example.com"))
+
+    # Discovered: "instance_admin" only under "groups"; "viewer" only under "name".
+    discovered = [["groups", "instance_admin"], ["name", "viewer"]]
+    Agent.update(store, &put_in(&1, [:draft, "bootstrap_claims"], Jason.encode!(discovered)))
+
+    # Attacker/operator pairs the real value "instance_admin" with the real path "name" —
+    # a combination that was never actually rendered together on the select-claim page.
+    choice = Jason.encode!(%{"value" => "instance_admin", "path" => "name"})
+
+    conn =
+      session_conn(:post, "/admin/bootstrap/select-claim")
+      |> Auth.bootstrap_confirm_claim(%{"admin_group_claim_choice" => choice})
+
+    assert conn.halted
+    refute get_resp_header(conn, "location") == ["/admin/dashboard"]
+
+    config = Agent.get(store, & &1.config)
+    refute config["bootstrap_completed"] == "true"
+    refute Map.has_key?(config, "admin_group_claim_path")
   end
 
   # ── Test 4 — confirm is inert once bootstrap complete (AC5 security) ──────────────
@@ -326,10 +427,11 @@ defmodule Nebu.Admin.BootstrapOidcFlowTest do
 
     Agent.update(store, &put_in(&1, [:draft, "bootstrap_claims"], Jason.encode!(discovered)))
 
-    # The submitted value IS a member of the verified token's discovered claims → success.
+    # The submitted {path, value} pair IS a member of the verified token's discovered
+    # claims → success.
     conn =
       session_conn(:post, "/admin/bootstrap/select-claim")
-      |> Auth.bootstrap_confirm_claim(%{"admin_group_claim" => "instance_admin"})
+      |> Auth.bootstrap_confirm_claim(confirm_choice("instance_admin", "groups"))
 
     assert conn.halted
     assert conn.status == 302
@@ -338,6 +440,7 @@ defmodule Nebu.Admin.BootstrapOidcFlowTest do
 
     config = Agent.get(store, & &1.config)
     assert config["admin_group_claim"] == "instance_admin"
+    assert config["admin_group_claim_path"] == "groups"
     assert config["bootstrap_completed"] == "true"
 
     user = get_session(conn, "current_user")

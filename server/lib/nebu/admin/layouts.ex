@@ -55,6 +55,14 @@ defmodule Nebu.Admin.Layouts do
       end
 
     ~H"""
+    <div
+      :if={is_map_key(assigns, :__changed__)}
+      id="admin-session-keepalive"
+      phx-hook="SessionKeepalive"
+      class="hidden"
+      aria-hidden="true"
+    >
+    </div>
     <div class="min-h-screen flex flex-col">
       <header class="h-12 bg-base-300 flex items-center justify-between px-4 shrink-0" role="banner">
         <span class="font-semibold text-base-content">Nebu Admin</span>

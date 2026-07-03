@@ -156,10 +156,14 @@ test_gitlab_ci_yaml_valid() {
 #
 # AC 1 / Story AT 3
 # Given: .github/workflows/ci.yml exists
-# When:  grep for anchored job identifiers: lint-go, test-unit-go,
-#        test-unit-elixir, secret-scan, verify-docs
+# When:  grep for anchored job identifiers: test-unit-elixir, secret-scan,
+#        verify-docs
 #        (anchored pattern: ^  <jobname>: — two leading spaces, colon after)
-# Then:  All five job names are present
+# Then:  All three job names are present
+#
+# go-removal-cleanup (full-elixir-stack): lint-go and test-unit-go were
+# removed from both CI configs along with the Go layer (ADR-021) — dropped
+# from this required-jobs list to match.
 # =============================================================================
 test_github_workflow_has_required_jobs() {
     if [[ ! -f "${GITHUB_WORKFLOW}" ]]; then
@@ -167,7 +171,7 @@ test_github_workflow_has_required_jobs() {
         return 1
     fi
 
-    local required_jobs=("lint-go" "test-unit-go" "test-unit-elixir" "secret-scan" "verify-docs")
+    local required_jobs=("test-unit-elixir" "secret-scan" "verify-docs")
     local ok=0
     local job
     for job in "${required_jobs[@]}"; do
@@ -185,10 +189,14 @@ test_github_workflow_has_required_jobs() {
 #
 # AC 2 / Story AT 4
 # Given: .gitlab-ci.yml exists
-# When:  grep for anchored job identifiers: lint-go, test-unit-go,
-#        test-unit-elixir, secret-scan, verify-docs
+# When:  grep for anchored job identifiers: test-unit-elixir, secret-scan,
+#        verify-docs
 #        (anchored pattern: ^<jobname>: — no leading spaces in GitLab YAML)
-# Then:  All five job names are present
+# Then:  All three job names are present
+#
+# go-removal-cleanup (full-elixir-stack): lint-go and test-unit-go were
+# removed from both CI configs along with the Go layer (ADR-021) — dropped
+# from this required-jobs list to match.
 # =============================================================================
 test_gitlab_ci_has_required_jobs() {
     if [[ ! -f "${GITLAB_CI}" ]]; then
@@ -196,7 +204,7 @@ test_gitlab_ci_has_required_jobs() {
         return 1
     fi
 
-    local required_jobs=("lint-go" "test-unit-go" "test-unit-elixir" "secret-scan" "verify-docs")
+    local required_jobs=("test-unit-elixir" "secret-scan" "verify-docs")
     local ok=0
     local job
     for job in "${required_jobs[@]}"; do

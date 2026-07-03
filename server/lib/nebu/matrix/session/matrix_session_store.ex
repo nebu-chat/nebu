@@ -139,7 +139,13 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
   already revoked (the caller maps that to 401).
 
   `params`: `:old_access_token`, `:new_access_token`, `:new_refresh_token`,
-  `:new_expires_at` (DateTime), optional `:new_oidc_refresh_token`.
+  `:new_expires_at` (DateTime), optional `:new_oidc_refresh_token` (already
+  AES-256-GCM encrypted — story `matrix-refresh-revalidates-with-idp` AC4:
+  `Nebu.Matrix.HttpPublic.do_refresh_with/2` is the first caller to actually
+  populate this when the IdP round-trip it now performs returns a
+  provider-rotated OIDC refresh token; previously this param existed but was
+  never supplied by any caller, so the encrypted OIDC RT only ever carried
+  over unchanged).
   """
   @spec rotate_tokens(map()) :: :ok | :error
   def rotate_tokens(%{

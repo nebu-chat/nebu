@@ -16,6 +16,12 @@ defmodule Nebu.Web.OidcConfig do
   - `get/0` — returns `%{issuer: binary() | nil, audience: binary() | nil}`.
   - `jwks_uri/0` — returns the `oidc_jwks_uri` from `server_config` (used by
     `JwksCache` to resolve the signing-key endpoint).
+  - `get_scopes/0` — returns `%{matrix_oidc_extra_scopes:, matrix_oidc_refresh_mode:,
+    admin_oidc_extra_scopes:, admin_oidc_refresh_mode:}` (story
+    `centralize-scope-resolution`, AC2). Consumed by `Nebu.Web.OidcScopes` instead
+    of a second, independent cache — the four scope/refresh-mode keys live in the
+    SAME ETS table and are refreshed/broadcast by the SAME `refresh/0` path as
+    issuer/audience/jwks_uri.
   - `refresh/0` (or `refresh/1` with pid) — forces a synchronous re-read from
     `server_config` and updates the ETS cache. Called by the Bootstrap Wizard after
     it promotes the draft into `server_config` (AC2, AC5). Also broadcasts to
@@ -48,6 +54,20 @@ defmodule Nebu.Web.OidcConfig do
 
   @table :nebu_http_oidc_config
   @pg_group "nebu_web_oidc_config"
+
+  # Story centralize-scope-resolution (AC2): the cached config map now also
+  # carries these 4 scope/refresh-mode keys, read/written by the SAME
+  # do_refresh/0 -> load_from_db/0 path (and the SAME :pg broadcast on refresh/0)
+  # as issuer/audience/jwks_uri — no second, independently-lived cache.
+  @empty_config %{
+    issuer: nil,
+    audience: nil,
+    jwks_uri: nil,
+    matrix_oidc_extra_scopes: nil,
+    matrix_oidc_refresh_mode: nil,
+    admin_oidc_extra_scopes: nil,
+    admin_oidc_refresh_mode: nil
+  }
 
   # ── Public API ──────────────────────────────────────────────────────────────
 
@@ -101,6 +121,46 @@ defmodule Nebu.Web.OidcConfig do
           _ -> nil
         end
     end
+  end
+
+  @doc """
+  Returns the cached OIDC scope/refresh-mode config (story
+  `centralize-scope-resolution`, AC2): `matrix_oidc_extra_scopes`,
+  `matrix_oidc_refresh_mode`, `admin_oidc_extra_scopes`, `admin_oidc_refresh_mode`.
+
+  Extra-scope values default to `""` (never a hardcoded scope literal — OIDC
+  Scopes Law); refresh-mode values default to `nil` when not yet populated (the
+  caller, `Nebu.Web.OidcScopes`, applies its own per-client enum default).
+
+  Reads through the SAME ETS table `get/0` and `jwks_uri/0` use when the owning
+  GenServer is running (AC2 — the cache is warmed/broadcast via `refresh/0`,
+  invalidated cluster-wide via `:pg` on an Admin-Config write). When the ETS
+  table does not exist yet (the GenServer is not started — e.g. gated off under
+  `mix test`, see `config/test.exs` `start_jwks_cache: false`), falls back to a
+  direct, uncached `server_config` read so scope resolution stays correct even
+  before/without a running cache process — mirroring the historical per-call SQL
+  read behaviour the pre-refactor per-domain readers had. Once the GenServer
+  starts, subsequent reads go through the ETS cache as normal.
+  """
+  @spec get_scopes() :: %{
+          matrix_oidc_extra_scopes: binary(),
+          matrix_oidc_refresh_mode: binary() | nil,
+          admin_oidc_extra_scopes: binary(),
+          admin_oidc_refresh_mode: binary() | nil
+        }
+  def get_scopes do
+    raw =
+      case :ets.whereis(@table) do
+        :undefined -> load_from_db()
+        _ -> read_from_ets()
+      end
+
+    %{
+      matrix_oidc_extra_scopes: Map.get(raw, :matrix_oidc_extra_scopes) || "",
+      matrix_oidc_refresh_mode: Map.get(raw, :matrix_oidc_refresh_mode),
+      admin_oidc_extra_scopes: Map.get(raw, :admin_oidc_extra_scopes) || "",
+      admin_oidc_refresh_mode: Map.get(raw, :admin_oidc_refresh_mode)
+    }
   end
 
   @doc """
@@ -160,18 +220,18 @@ defmodule Nebu.Web.OidcConfig do
   defp read_from_ets do
     case :ets.whereis(@table) do
       :undefined ->
-        %{issuer: nil, audience: nil, jwks_uri: nil}
+        @empty_config
 
       _ ->
         case :ets.lookup(@table, :config) do
           [{:config, config}] -> config
-          _ -> %{issuer: nil, audience: nil, jwks_uri: nil}
+          _ -> @empty_config
         end
     end
   rescue
     e ->
       Logger.warning("OidcConfig: unexpected error reading ETS table: #{inspect(e)}")
-      %{issuer: nil, audience: nil, jwks_uri: nil}
+      @empty_config
   end
 
   defp ensure_table do
@@ -187,7 +247,11 @@ defmodule Nebu.Web.OidcConfig do
 
   @sql_load_oidc_config """
   SELECT key, value FROM server_config
-  WHERE key IN ('oidc_issuer', 'oidc_audience', 'oidc_jwks_uri')
+  WHERE key IN (
+    'oidc_issuer', 'oidc_audience', 'oidc_jwks_uri',
+    'matrix_oidc_extra_scopes', 'matrix_oidc_refresh_mode',
+    'admin_oidc_extra_scopes', 'admin_oidc_refresh_mode'
+  )
   """
 
   defp load_from_db do
@@ -199,15 +263,23 @@ defmodule Nebu.Web.OidcConfig do
           %{
             issuer: nilify(map["oidc_issuer"]),
             audience: nilify(map["oidc_audience"]),
-            jwks_uri: nilify(map["oidc_jwks_uri"])
+            jwks_uri: nilify(map["oidc_jwks_uri"]),
+            # Story centralize-scope-resolution (AC2): extra-scope values default to
+            # "" (never nil→hardcoded-default — OIDC Scopes Law), refresh-mode
+            # values are passed through raw (nil when absent) so
+            # Nebu.Web.OidcScopes applies its own per-client enum default.
+            matrix_oidc_extra_scopes: map["matrix_oidc_extra_scopes"] || "",
+            matrix_oidc_refresh_mode: nilify(map["matrix_oidc_refresh_mode"]),
+            admin_oidc_extra_scopes: map["admin_oidc_extra_scopes"] || "",
+            admin_oidc_refresh_mode: nilify(map["admin_oidc_refresh_mode"])
           }
 
         {:error, reason} ->
           Logger.warning("OidcConfig: failed to load from server_config: #{inspect(reason)}")
-          %{issuer: nil, audience: nil, jwks_uri: nil}
+          @empty_config
       end
     else
-      %{issuer: nil, audience: nil, jwks_uri: nil}
+      @empty_config
     end
   end
 

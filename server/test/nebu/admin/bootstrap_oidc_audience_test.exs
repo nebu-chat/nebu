@@ -205,14 +205,21 @@ defmodule Nebu.Admin.BootstrapOidcAudienceTest do
       # can call get_session — mirrors bootstrap_refresh_mode_promotion_test.exs.
       conn =
         :post
-        |> conn("/admin/bootstrap/select-claim", "admin_group_claim=instance_admin")
+        |> conn("/admin/bootstrap/select-claim", "")
         |> put_req_header("content-type", "application/x-www-form-urlencoded")
         |> init_test_session(%{})
 
       # Directly call bootstrap_confirm_claim/2 (same pattern as BootstrapOidcFlowTest).
       # WILL FAIL until oidc_audience is added to do_complete_bootstrap/2.
       # bootstrap_confirm_claim/2 returns a halted conn (redirect), not {:ok, conn}.
-      conn = Auth.bootstrap_confirm_claim(conn, %{"admin_group_claim" => "instance_admin"})
+      # scope-admin-claim-to-path (code-review MAJOR M1 fix): a claim path is now
+      # mandatory on bootstrap completion — submit the JSON-encoded
+      # "admin_group_claim_choice" param matching the {path, value} pair stashed in
+      # "bootstrap_claims" above (["instance_admin", "instance_admin"]).
+      conn =
+        Auth.bootstrap_confirm_claim(conn, %{
+          "admin_group_claim_choice" => Jason.encode!(%{"value" => "instance_admin", "path" => "instance_admin"})
+        })
 
       # Sanity: confirm completed (redirected to dashboard, not bounced to login).
       assert conn.status == 302
@@ -253,11 +260,17 @@ defmodule Nebu.Admin.BootstrapOidcAudienceTest do
 
       conn =
         :post
-        |> conn("/admin/bootstrap/select-claim", "admin_group_claim=instance_admin")
+        |> conn("/admin/bootstrap/select-claim", "")
         |> put_req_header("content-type", "application/x-www-form-urlencoded")
         |> init_test_session(%{})
 
-      conn = Auth.bootstrap_confirm_claim(conn, %{"admin_group_claim" => "instance_admin"})
+      # scope-admin-claim-to-path (code-review MAJOR M1 fix): submit a path-carrying
+      # choice so this test genuinely exercises the audience guard (not an earlier
+      # rejection for a missing path) — matches the {path, value} pair stashed above.
+      conn =
+        Auth.bootstrap_confirm_claim(conn, %{
+          "admin_group_claim_choice" => Jason.encode!(%{"value" => "instance_admin", "path" => "instance_admin"})
+        })
 
       # Audience guard fires → NOT completed → must NOT redirect to the dashboard.
       assert conn.status == 302

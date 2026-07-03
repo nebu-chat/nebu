@@ -165,8 +165,8 @@ defmodule Nebu.Admin.BootstrapController do
     matrix_scopes = params["matrix_oidc_extra_scopes"] || ""
     admin_scopes = params["admin_oidc_extra_scopes"] || ""
 
-    with :ok <- validate_scope_string(matrix_scopes),
-         :ok <- validate_scope_string(admin_scopes) do
+    with :ok <- Nebu.Web.OidcScopes.validate_scope_string(matrix_scopes),
+         :ok <- Nebu.Web.OidcScopes.validate_scope_string(admin_scopes) do
       save_claim_mapping(params)
       redirect(conn, to: "/admin/login/start?mode=bootstrap")
     else
@@ -225,25 +225,9 @@ defmodule Nebu.Admin.BootstrapController do
     end)
   end
 
-  # Validates that each space-separated scope token contains only characters in
-  # [a-zA-Z0-9_:.-]. An empty string is valid (runtime produces 'openid' only).
-  defp validate_scope_string(scope_string) do
-    scopes = String.split(scope_string, " ", trim: true)
-
-    invalid =
-      Enum.find(scopes, fn s ->
-        not String.match?(s, ~r/^[a-zA-Z0-9_:.\-]+\z/)
-      end)
-
-    case invalid do
-      nil ->
-        :ok
-
-      bad ->
-        {:error,
-         "Scope '#{bad}' contains invalid characters. Only alphanumeric, underscore, colon, period, and dash are allowed."}
-    end
-  end
+  # Story centralize-scope-resolution (AC5): save_step3/2 above calls the ONE scope
+  # validator (Nebu.Web.OidcScopes.validate_scope_string/1) directly — no local
+  # validate_scope_string/1 wrapper/regex copy.
 
   # ── Re-render helpers ─────────────────────────────────────────────────────────
 

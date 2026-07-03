@@ -1,6 +1,9 @@
 defmodule Nebu.Admin.AdminCreateRoomTest do
   use ExUnit.Case, async: false
 
+  import Plug.Test
+  import Plug.Conn
+
   # ─── Story rm3-admin-create-archive (AC2/AC4) ────────────────────────────────
   #
   # Verifies the admin "Create room" path through the Matrix public API
@@ -19,6 +22,20 @@ defmodule Nebu.Admin.AdminCreateRoomTest do
   #   - :room_manager/:db_module + :event_dispatcher/:messages_db_module → FakeDB (no Postgres)
   #   - :event_dispatcher/:admin_db_module → FakeAdminDB (captures update_room_visibility)
   #   - :compliance/:audit_writer → FakeAuditWriter (Process.send spy)
+  #
+  # ─── AC3 of story fix-bootstrap-admin-session-identity ───────────────────────
+  #
+  # The describe block "AC3: room-creator after bootstrap ..." below drives the
+  # REAL Admin HTTP pipeline (Nebu.Admin.Endpoint → router → RoomsController.create/2
+  # → actor_id/1) instead of calling Nebu.Matrix.create_room/2 directly with a
+  # hardcoded "@admin:test.local" string, exactly because the tests ABOVE that call
+  # Matrix.create_room/2 directly bypass actor_id/1 entirely and therefore CANNOT
+  # catch the bug this story fixes (session missing matrix_user_id → actor_id/1
+  # falls back to the raw OIDC sub). Verified via code read of
+  # server/lib/nebu/admin/rooms_controller.ex:503-509 (actor_id/1) and
+  # server/test/nebu/admin/admin_http_controllers_test.exs (build_admin_conn/
+  # endpoint_call pattern, the only other test file in this repo that dispatches
+  # through the real Nebu.Admin.Endpoint for RoomsController).
 
   alias Nebu.Matrix
 
@@ -210,6 +227,127 @@ defmodule Nebu.Admin.AdminCreateRoomTest do
 
       refute_received {:event_inserted, "m.room.create", _, _}
       refute_received {:audit_log, _, "room_created", _, _, _, _, _}
+    end
+  end
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # AC3 (story fix-bootstrap-admin-session-identity) — room-creator after a
+  # bootstrap-completion login is the canonical Matrix user_id, NOT the raw OIDC
+  # sub. Driven through the REAL Admin HTTP pipeline (Endpoint → Router →
+  # RoomsController.create/2 → actor_id/1) with a session minted via the REAL
+  # Nebu.Admin.Auth.put_current_user/2 — the exact builder bootstrap_confirm_claim/2
+  # now shares (AC1) — not a hand-rolled map. Before this story's fix,
+  # bootstrap_confirm_claim/2 minted sessions with sub/email but no "matrix_user_id",
+  # which made actor_id/1 fall back to the raw sub; that shape can no longer occur
+  # from the real bootstrap-completion path (verified below), and RoomsController
+  # deliberately has no defense-in-depth fallback for a stale/malformed session
+  # missing matrix_user_id — see code-review-findings.md MAJOR-1 for why that
+  # fallback was rejected (silent mis-derivation risk when a non-default
+  # oidc_user_id_claim is configured, plus an ADR-020 concern).
+  # ════════════════════════════════════════════════════════════════════════════
+
+  describe "AC3: room-creator after bootstrap is the Matrix user_id, not the raw sub" do
+    @endpoint Nebu.Admin.Endpoint
+    @secret_key_base String.duplicate("nebu-admin-test-secret-key-base!", 2)
+
+    setup do
+      Application.put_env(:nebu_http, :admin_csrf_bypass, true)
+
+      test_pid = self()
+
+      # Capture the actor_id RoomsController.create/2 actually passed to the room
+      # creator, without needing a live Matrix room/Repo stack for this assertion.
+      Application.put_env(:nebu_http, :admin_room_creator, fn actor_id, _opts ->
+        send(test_pid, {:create_room_called, actor_id})
+        {:ok, "!captured:test.local"}
+      end)
+
+      on_exit(fn ->
+        Application.delete_env(:nebu_http, :admin_csrf_bypass)
+        Application.delete_env(:nebu_http, :admin_room_creator)
+      end)
+
+      :ok
+    end
+
+    defp endpoint_call(conn), do: @endpoint.call(conn, @endpoint.init([]))
+
+    # Mints the session via the REAL Nebu.Admin.Auth.put_current_user/2 — the exact
+    # function bootstrap_confirm_claim/2 now calls internally (story
+    # fix-bootstrap-admin-session-identity, AC1) — rather than a hand-rolled map. This
+    # is the accurate reproduction of what a freshly-completed bootstrap session
+    # contains today: put_current_user/2 always sets "matrix_user_id" via
+    # Nebu.Matrix.UserId.from_claims/2, so this fixture exercises the FIXED path, not
+    # the pre-fix bug. (The pre-fix bug — a session with sub/email but no
+    # matrix_user_id — cannot occur from bootstrap_confirm_claim/2 anymore; RoomsController
+    # deliberately has no defense-in-depth fallback for that shape, by design decision
+    # during this story's code review, to avoid silently mis-deriving matrix_user_id for
+    # a claim configuration it can't see — see code-review-findings.md MAJOR-1.)
+    defp bootstrap_session_conn(method, path, claims) do
+      %{conn(method, path) | secret_key_base: @secret_key_base}
+      |> Nebu.Admin.Endpoint.admin_session([])
+      |> fetch_session()
+      |> Nebu.Admin.Auth.put_current_user(claims)
+    end
+
+    test "operator who never logged in via Matrix creates a room → creator is the canonical Matrix user_id" do
+      claims = %{
+        "sub" => "01923abf-raw-oidc-sub-value",
+        "email" => "operator@example.com",
+        # admin_claim?/1 (auth.ex) must resolve true for this session to pass the
+        # router's admin-guard plug — "instance_admin" is the default admin_group_claim.
+        "groups" => ["instance_admin"]
+      }
+
+      conn =
+        bootstrap_session_conn(:post, "/admin/rooms", claims)
+        |> put_req_header("content-type", "application/x-www-form-urlencoded")
+        |> Map.put(:body_params, %{"name" => "Ops Room", "visibility" => "private"})
+        |> Map.put(:params, %{"name" => "Ops Room", "visibility" => "private"})
+        |> endpoint_call()
+
+      assert conn.status == 302
+      assert get_resp_header(conn, "location") == ["/admin/rooms/%21captured%3Atest.local"]
+
+      assert_receive {:create_room_called, actor_id}, 500
+
+      refute actor_id == "01923abf-raw-oidc-sub-value",
+             "regression: actor_id/1 must not fall back to the raw OIDC sub for a " <>
+               "session minted by put_current_user/2 (the builder bootstrap_confirm_claim/2 " <>
+               "now shares) — this is exactly the live bug " <>
+               "fix-bootstrap-admin-session-identity fixes. Room creator must be the " <>
+               "canonical Matrix user_id (@localpart:server), never the opaque sub."
+
+      assert Nebu.Matrix.UserId.valid?(actor_id),
+             "the room creator actor_id must be a syntactically valid Matrix user_id " <>
+               "(@localpart:server); got: #{inspect(actor_id)}"
+
+      assert actor_id == Nebu.Matrix.UserId.from_claims(claims, "localhost")
+    end
+
+    test "a session WITH matrix_user_id (post-fix shape) is used as-is — sanity/contrast case" do
+      now = System.system_time(:second)
+
+      conn =
+        %{conn(:post, "/admin/rooms") | secret_key_base: @secret_key_base}
+        |> Nebu.Admin.Endpoint.admin_session([])
+        |> fetch_session()
+        |> put_session("current_user", %{
+          "sub" => "01923abf-raw-oidc-sub-value",
+          "email" => "operator@example.com",
+          "admin" => true,
+          "matrix_user_id" => "@operator:test.local",
+          "session_exp" => now + 8 * 3600,
+          "refresh_grace_exp" => now + 8 * 3600 + 180
+        })
+        |> put_req_header("content-type", "application/x-www-form-urlencoded")
+        |> Map.put(:body_params, %{"name" => "Ops Room", "visibility" => "private"})
+        |> Map.put(:params, %{"name" => "Ops Room", "visibility" => "private"})
+        |> endpoint_call()
+
+      assert conn.status == 302
+      assert_receive {:create_room_called, actor_id}, 500
+      assert actor_id == "@operator:test.local"
     end
   end
 end

@@ -224,6 +224,41 @@
     });
   }
 
+  // admin-liveview-session-refresh (AC3): the silent OIDC refresh in
+  // Nebu.Admin.Auth.fetch_current_user/2 only runs on a genuine HTTP round-trip
+  // through the :browser pipeline — it never re-fires for an operator who stays on
+  // an open admin LiveView (Dashboard/AuditLog) with no new HTTP request, so a
+  // Keycloak-class IdP's short id_token lifetime force-logs-out the operator even
+  // with a valid stored OIDC refresh token. Rather than inventing a new
+  // WebSocket-reachable refresh mechanism, this hook periodically fires an
+  // invisible `GET /admin/keepalive` (well inside the existing 120s pre-expiry
+  // window) while any admin LiveView with this hook mounted is on screen — that
+  // request goes through the normal :browser pipeline, so fetch_current_user/2's
+  // EXISTING silent-refresh leg runs unmodified. No response payload is read; the
+  // side effect (refreshing the underlying HTTP session) is all that matters.
+  var KEEPALIVE_INTERVAL_MS = 60 * 1000;
+
+  var SessionKeepalive = {
+    mounted: function () {
+      this.timer = setInterval(sendKeepalive, KEEPALIVE_INTERVAL_MS);
+    },
+    destroyed: function () {
+      if (this.timer) clearInterval(this.timer);
+    },
+  };
+
+  function sendKeepalive() {
+    fetch("/admin/keepalive", {
+      method: "GET",
+      credentials: "same-origin",
+      cache: "no-store",
+    }).catch(function () {
+      // Best-effort heartbeat: a transient network error just means this cycle's
+      // refresh attempt is skipped — the next interval tick tries again, and the
+      // operator's normal HTTP navigation remains an independent refresh trigger.
+    });
+  }
+
   function boot() {
     wireConfirmForms();
     wireUserAutocomplete();
@@ -252,10 +287,11 @@
 
     // NOTE: the add-user typeahead is NOT a LiveView hook — it is the CSP-safe fetch
     // widget wired in `wireUserAutocomplete()` above (the admin add-member pages are
-    // dead controller renders with no LiveView socket). No hooks are needed here.
+    // dead controller renders with no LiveView socket).
     var liveSocket = new LiveSocket("/admin/live", Socket, {
       transport: ThrottledLongPoll,
       params: { _csrf_token: csrfToken },
+      hooks: { SessionKeepalive: SessionKeepalive },
     });
 
     liveSocket.connect();

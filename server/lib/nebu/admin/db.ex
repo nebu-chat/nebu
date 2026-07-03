@@ -17,6 +17,15 @@ defmodule Nebu.Admin.DB do
   decryption and masking happen in the gRPC server handler.
   """
 
+  # Story centralize-scope-resolution (AC2): the 4 server_config keys whose write
+  # must trigger a Nebu.Web.OidcConfig cache refresh (see upsert_server_config/1
+  # below) — declared here (before first use) since Elixir module attributes are
+  # order-dependent.
+  @scope_cache_keys ~w(
+    matrix_oidc_extra_scopes matrix_oidc_refresh_mode
+    admin_oidc_extra_scopes admin_oidc_refresh_mode
+  )
+
   # ─── User operations ─────────────────────────────────────────────────────────
 
   @doc """
@@ -734,6 +743,33 @@ defmodule Nebu.Admin.DB do
     # a no-op (no stale-claim risk, no needless re-read).
     if Map.has_key?(stringify_keys(changes), "oidc_user_id_claim") do
       Nebu.Matrix.invalidate_oidc_claim_cache()
+    end
+
+    # Story centralize-scope-resolution (AC2): this is also the SINGLE central
+    # write point for the 4 OIDC scope/refresh-mode keys `OidcScopes` reads
+    # through Nebu.Web.OidcConfig's shared ETS cache. When a change touches any of
+    # them, force a synchronous cache refresh (which also broadcasts the
+    # invalidation to peer nodes via `:pg`, exactly like an issuer/audience/jwks_uri
+    # change) so an Admin-Config edit is visible on the VERY NEXT read — no
+    # node-local-only staleness window. A change that touches none of them is a
+    # no-op (no needless re-read).
+    if Enum.any?(@scope_cache_keys, &Map.has_key?(stringify_keys(changes), &1)) do
+      refresh_oidc_scope_cache()
+    end
+
+    :ok
+  end
+
+  # Nebu.Web.OidcConfig is gated off under plain `mix test` (config/test.exs:
+  # start_jwks_cache: false) so the app-level supervision tree never starts it in
+  # the unit suite — GenServer.call on an unstarted named process would raise.
+  # Best-effort, non-fatal: a unit test writing these keys via a mocked
+  # Nebu.Repo/no-DB path simply has no cache to refresh (OidcScopes' seams are the
+  # unit-test path for those suites); the integration suite (real DB + real
+  # Nebu.Web.OidcConfig) exercises the actual refresh/:pg path (AC2).
+  defp refresh_oidc_scope_cache do
+    if Process.whereis(Nebu.Web.OidcConfig) do
+      Nebu.Web.OidcConfig.refresh()
     end
 
     :ok

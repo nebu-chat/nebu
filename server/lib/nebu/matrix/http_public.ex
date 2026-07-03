@@ -414,8 +414,8 @@ defmodule Nebu.Matrix.HttpPublic do
       # MINOR-3 (Go parity): the client asked for a refreshable session but we
       # could not provide one. Warn (no token values) and degrade to the JWT path.
       Logger.warning(
-        "matrix login: refresh_token requested but no OIDC refresh token available — " <>
-          "returning JWT (verify the IdP grants offline_access)",
+        "matrix login: no OIDC refresh token returned — session cannot be silently refreshed; " <>
+          "ensure the IdP grants offline_access to the matrix client",
         user_id: user_id
       )
     end
@@ -502,14 +502,39 @@ defmodule Nebu.Matrix.HttpPublic do
 
   # ── POST /_matrix/client/v3/refresh (oidc-session-refresh, Matrix CS v1.3) ────
   #
-  # Mirrors the Go gateway refresh.go PostRefresh:
+  # Mirrors the Go gateway refresh.go PostRefresh, EXTENDED by
+  # matrix-refresh-revalidates-with-idp so Matrix re-validates against the IdP
+  # exactly like the admin refresh path (admin/auth.ex refresh_admin_session/1)
+  # already does — Nebu must not lose its OIDC-resource-server posture just
+  # because a session is refreshable:
+  #
   #   * UNAUTHENTICATED (spec MUST — registered before the OidcPlug catch-all).
   #   * body {refresh_token}: empty/missing → 400 M_MISSING_PARAM; malformed JSON →
   #     400 M_NOT_JSON.
   #   * unknown / revoked / grace-expired RT → 401 M_UNKNOWN_TOKEN (AC6).
-  #   * otherwise: mint a new opaque AT+RT, rotate_tokens/1 (soft-revoke old +
-  #     60s grace, carry the encrypted OIDC RT), respond {access_token,
-  #     refresh_token, expires_in_ms}.
+  #   * otherwise (AC1): decrypt the stored OIDC refresh token and redeem it at
+  #     the IdP token endpoint (grant_type=refresh_token) BEFORE any local
+  #     rotation — via the shared Nebu.Web.OidcTokenExchange.refresh/2, behind
+  #     the :matrix_oidc_refresh_override test seam (mirrors
+  #     :admin_oidc_refresh_override).
+  #   * AC2: ANY failure (IdP rejection/network error, decrypt failure, missing
+  #     OIDC RT, or the freshly-verified user being deactivated) is FAIL-CLOSED
+  #     for THIS response — 401 M_UNKNOWN_TOKEN + soft_logout: true. No
+  #     local-only fallback. For CONFIRMED deprovisioning/IdP rejection, the
+  #     opaque session is ALSO immediately hard-invalidated
+  #     (delete_for_user_device/2) so a retry with the same RT cannot slip
+  #     through and the old opaque AT stops working right away. A merely
+  #     TRANSIENT failure re-checking is_active (e.g. a DB hiccup — tagged
+  #     `{:transient_check_failed, _}`) fails this request the same way but
+  #     does NOT hard-delete the session row, since it is not proof of
+  #     deprovisioning (code-review cycle-1 m1).
+  #   * AC3: on success, the new opaque tokens' expires_at is derived from the
+  #     SAME session_expires_at/1 function login uses, fed the FRESH claims
+  #     from the IdP round-trip (not a flat ceiling).
+  #   * AC4: a provider-rotated OIDC RT (returned by the exchange) is
+  #     re-encrypted and threaded through rotate_tokens/1's
+  #     :new_oidc_refresh_token param; no new RT → the old encrypted blob is
+  #     carried over unchanged (rotate_tokens/1's existing behavior).
   defp do_refresh(conn) do
     cond do
       conn.assigns[:json_parse_error] == true ->
@@ -536,40 +561,173 @@ defmodule Nebu.Matrix.HttpPublic do
         error(conn, 401, "M_UNKNOWN_TOKEN", "Unknown or expired refresh token")
 
       {:ok, sess} ->
-        new_at = Store.generate_opaque_token()
-        new_rt = Store.generate_opaque_token()
-        # Nebu controls the refreshed lifetime independently of the OIDC token
-        # (the encrypted OIDC RT is carried over for a possible future Keycloak
-        # round-trip). Same configurable ceiling as the login path (default 8h) so the
-        # refreshed session honors NEBU_MATRIX_SESSION_TTL_SECONDS too — otherwise a
-        # refreshed e2e session would silently revert to 8h. Trade-off documented in
-        # the story — a Keycloak-side logout does not immediately invalidate the session.
-        new_expires_at =
-          DateTime.add(DateTime.utc_now(), SessionConfig.matrix_session_ttl_seconds(), :second)
+        case revalidate_with_idp(sess) do
+          {:ok, fresh_claims, new_oidc_rt} ->
+            do_rotate(conn, sess, fresh_claims, new_oidc_rt)
 
-        case Store.rotate_tokens(%{
-               old_access_token: sess.access_token,
-               new_access_token: new_at,
-               new_refresh_token: new_rt,
-               new_expires_at: new_expires_at
-             }) do
-          :ok ->
-            Logger.info("matrix session refreshed",
+          # code-review cycle-1 MINOR (m1): a transient failure while
+          # re-checking is_active (e.g. a DB hiccup) is NOT confirmed
+          # deprovisioning — fail THIS request closed (still 401, AC2's
+          # response guarantee is unchanged) WITHOUT hard-deleting the session
+          # row, so a later refresh attempt can succeed once the transient
+          # issue clears instead of permanently killing a legitimate session
+          # over an unrelated infra blip.
+          {:error, {:transient_check_failed, reason}} ->
+            Logger.warning(
+              "matrix session refresh: transient failure re-checking active status, session left intact",
               user_id: sess.user_id,
-              device_id: sess.device_id
+              device_id: sess.device_id,
+              reason: inspect(reason)
             )
 
-            send_json(conn, 200, %{
-              "access_token" => new_at,
-              "refresh_token" => new_rt,
-              "expires_in_ms" => expires_in_ms(new_expires_at)
-            })
+            deny_soft_logout(conn, "Unknown or expired refresh token")
 
-          :error ->
-            # Race: the session was revoked between lookup and rotate.
-            error(conn, 401, "M_UNKNOWN_TOKEN", "Refresh token no longer valid")
+          {:error, reason} ->
+            Logger.warning("matrix session refresh: IdP re-validation failed, invalidating session",
+              user_id: sess.user_id,
+              device_id: sess.device_id,
+              reason: inspect(reason)
+            )
+
+            # AC2: fail-closed — hard-invalidate the opaque session for this
+            # user+device NOW (not merely refuse this one response) so neither
+            # a retried /refresh nor the still-live opaque AT can succeed
+            # afterwards. No local-only fallback.
+            :ok = Store.delete_for_user_device(sess.user_id, sess.device_id)
+            deny_soft_logout(conn, "Unknown or expired refresh token")
         end
     end
+  end
+
+  # AC1: decrypt the session's stored OIDC refresh token and redeem it at the
+  # IdP (grant_type=refresh_token) BEFORE any local opaque-token rotation.
+  # AC2: also re-checks the (fresh) user's active status via the SAME gate
+  # the login path uses (TokenValidator.validate/4 → {:error, :deactivated}),
+  # analogous to the admin refresh path's check_admin/1 re-evaluation — a
+  # deprovisioned user must lose access at the next refresh even when the IdP
+  # itself still happily honors the refresh_token grant.
+  defp revalidate_with_idp(%{oidc_refresh_token: enc_rt} = sess)
+       when is_binary(enc_rt) and enc_rt != "" do
+    with {:ok, plaintext_rt} <- Nebu.Web.SecretBox.decrypt(enc_rt),
+         {:ok, claims, new_rt} <- exchange_oidc_refresh_token(plaintext_rt),
+         :ok <- check_still_active(sess.user_id, claims) do
+      {:ok, claims, new_rt}
+    end
+  end
+
+  defp revalidate_with_idp(_sess), do: {:error, :no_oidc_refresh_token}
+
+  # code-review cycle-1 MAJOR fix: TokenValidator.validate/4 is NOT read-only —
+  # Postgres.validate/4 has a `signing_key_id: nil` branch (an existing user not
+  # yet backfilled with crypto keys / encrypted PII) that calls
+  # UserProvisioner.provision_user/4, which UNCONDITIONALLY re-encrypts and
+  # overwrites display_name_encrypted/email_encrypted with whatever is passed
+  # AND regenerates fresh signing/encryption keypairs (guarded only by
+  # `WHERE signing_key_id IS NULL`, not by whether the passed-in values are
+  # real). Passing hardcoded "" / "" (as this call used to) would silently wipe
+  # a not-yet-backfilled user's real display_name/email to blank on every
+  # /refresh. Fix: derive display_name/email from the FRESH claims returned by
+  # the IdP round-trip, using the SAME extraction the login path uses
+  # (provision_and_respond/6, http_public.ex ~329-330) — so a refresh that hits
+  # the backfill branch provisions with the user's REAL current profile data,
+  # never blanks.
+  # code-review cycle-1 MINOR (m1) fix: a non-deprovisioning error here (e.g. a
+  # transient DB failure while re-checking is_active) is NOT proof of
+  # deprovisioning — it must not trigger the SAME hard session-delete as a
+  # confirmed `:deactivated` verdict or an actual IdP rejection. Wrap any
+  # non-`:deactivated` error in `{:transient_check_failed, reason}` so
+  # `do_refresh_with/2` can tell "confirmed deprovisioning/IdP rejection"
+  # (hard-delete the session row) apart from "we simply couldn't confirm right
+  # now" (fail this one request closed with 401, but leave the session row
+  # alone so a later refresh attempt can re-check once the transient issue
+  # clears).
+  defp check_still_active(user_id, fresh_claims) do
+    display_name = fresh_claims["preferred_username"] || fresh_claims["name"] || ""
+    email = fresh_claims["email"] || ""
+
+    case Nebu.Matrix.Session.TokenValidator.validate(user_id, "user", display_name, email) do
+      {:error, :deactivated} -> {:error, :deactivated}
+      {:ok, _user} -> :ok
+      {:error, reason} -> {:error, {:transient_check_failed, reason}}
+    end
+  end
+
+  # Performs the `grant_type=refresh_token` exchange + ID-token re-verify,
+  # returning `{:ok, claims, new_rt_or_nil}` | `{:error, reason}`. A test seam
+  # (`:matrix_oidc_refresh_override`, a 1-arity fun receiving the DECRYPTED
+  # OIDC refresh token) short-circuits the HTTP+JWT-verify leg, mirroring
+  # `:admin_oidc_refresh_override` (admin/auth.ex). AC5: the real path delegates
+  # to the SAME shared `Nebu.Web.OidcTokenExchange.refresh/2` the admin path
+  # uses — no second, independent copy of the HTTP-POST+parse+verify logic.
+  defp exchange_oidc_refresh_token(refresh_token) do
+    case Application.get_env(:nebu_http, :matrix_oidc_refresh_override) do
+      fun when is_function(fun, 1) ->
+        fun.(refresh_token)
+
+      _ ->
+        with {:ok, cfg} <- Nebu.Matrix.SsoLogin.oidc_config_for_refresh() do
+          Nebu.Web.OidcTokenExchange.refresh(refresh_token, %{
+            issuer: cfg.issuer,
+            client_id: cfg.client_id,
+            client_secret: cfg.client_secret
+          })
+        end
+    end
+  end
+
+  # Successful IdP re-validation: mint + rotate the opaque token pair. AC3: the
+  # new lifetime is derived from the FRESH claims via the SAME session_expires_at/1
+  # function login uses. AC4: a provider-rotated OIDC RT is re-encrypted and
+  # threaded through; a nil RT lets rotate_tokens/1 carry the old encrypted
+  # blob over unchanged (its pre-existing behavior).
+  defp do_rotate(conn, sess, fresh_claims, new_oidc_rt) do
+    alias Nebu.Matrix.Session.MatrixSessionStore, as: Store
+
+    new_at = Store.generate_opaque_token()
+    new_rt = Store.generate_opaque_token()
+    new_expires_at = session_expires_at(fresh_claims)
+
+    rotate_params =
+      %{
+        old_access_token: sess.access_token,
+        new_access_token: new_at,
+        new_refresh_token: new_rt,
+        new_expires_at: new_expires_at
+      }
+      |> maybe_put_new_oidc_rt(new_oidc_rt)
+
+    case Store.rotate_tokens(rotate_params) do
+      :ok ->
+        Logger.info("matrix session refreshed",
+          user_id: sess.user_id,
+          device_id: sess.device_id
+        )
+
+        send_json(conn, 200, %{
+          "access_token" => new_at,
+          "refresh_token" => new_rt,
+          "expires_in_ms" => expires_in_ms(new_expires_at)
+        })
+
+      :error ->
+        # Race: the session was revoked between lookup and rotate.
+        error(conn, 401, "M_UNKNOWN_TOKEN", "Refresh token no longer valid")
+    end
+  end
+
+  defp maybe_put_new_oidc_rt(params, new_rt) when is_binary(new_rt) and new_rt != "" do
+    Map.put(params, :new_oidc_refresh_token, Nebu.Web.SecretBox.encrypt(new_rt))
+  end
+
+  defp maybe_put_new_oidc_rt(params, _no_new_rt), do: params
+
+  # AC2 (spec SHOULD parity with the existing expired-opaque-AT 401 envelope,
+  # OidcPlug.deny_soft_logout/2): every fail-closed rejection path on /refresh
+  # (IdP contact failure, deprovisioning, missing OIDC RT) responds with
+  # soft_logout: true so clients know to re-login rather than treat it as a
+  # hard auth failure.
+  defp deny_soft_logout(conn, message) do
+    send_json(conn, 401, %{"errcode" => "M_UNKNOWN_TOKEN", "error" => message, "soft_logout" => true})
   end
 
   # Matrix device IDs: a UUIDv4-shaped opaque string (matches login.go).

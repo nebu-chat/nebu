@@ -1,0 +1,6 @@
+{
+  "matrix": false,
+  "ui": true,
+  "security_review": "required",
+  "notes": "classify_story.py raw output was matrix:true (false positive - triggered by '_matrix/', 'Matrix-Spec' string matches inside the story's Non-Goals section explicitly ruling OUT Matrix /refresh involvement; no Matrix C-S API surface touched) and ui:false (classifier only reads frontmatter 'ui:' field, story has none; overridden per explicit pipeline instruction since story adds new Admin route + JS heartbeat hook, admin-UI-adjacent with accessibility/CSP considerations noted in Security Considerations). security_review:required taken directly from frontmatter."
+}

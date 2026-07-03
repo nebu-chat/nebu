@@ -1,0 +1,27 @@
+# generated: 2026-07-01
+# Epic: oidc-simplification
+# EPIC SEC GATE 2 (2026-07-02): CLEAN / PASS — 0 CRIT/HIGH/MEDIUM, 1 LOW pre-existing (A-1, out of diff scope, fails closed). Report: _bmad-output/implementation-artifacts/epic-oidc-simplification-security-review-2026-07-02.md
+# story scope-admin-claim-to-path done (pipeline: Code 2 cycles (MAJOR M1 mandatory-path fix+4 MINOR fixed)+Kassandra CLEAN (1 LOW A1 follow-up tracked)): 2026-07-02
+# story provision-matrix-identity-on-admin-login done (pipeline: ATDD 7 tests (1 MAJOR+2 MINOR fixed pre-dev)+Code CLEAN (2 INFO)+Kassandra CLEAN): 2026-07-02
+# story matrix-refresh-revalidates-with-idp done (pipeline: ATDD 7 tests+Code 1 MAJOR fixed+2 MINOR fixed(incl. m1 regression test added)+doc fixes+Kassandra CLEAN): 2026-07-02
+# story fix-matrix-login-missing-refresh-token done (pipeline: AC1 diagnosis=IdP-misconfig(a)+AC2 log-parity fix+ATDD 13 tests+Code CLEAN+Kassandra CLEAN): 2026-07-01
+# story fix-bootstrap-admin-session-identity done (pipeline: ATDD 14 tests(8 RED as expected)+Code 1 cycle(MAJOR-1 fallback dropped per user decision)+Kassandra CLEAN): 2026-07-01
+# story centralize-scope-resolution done (pipeline: ATDD 40 tests+2 test-review MAJOR fixed pre-dev+Code CLEAN+Kassandra CLEAN): 2026-07-01
+# story admin-liveview-session-refresh done (pipeline: ATDD 6 tests+Code 3 cycles (2 doc MINOR fixed inline, 1 cosmetic)+Kassandra HIGH found&fixed (refresh_grace_exp bound)+re-verified CLEAN): 2026-07-01
+# story centralize-claim-resolution done (pipeline: ATDD 34 tests + 1 MINOR fixed 1 cycle + Kassandra CLEAN): 2026-07-01
+project: nebu
+epic: oidc-simplification
+epic_status: done
+
+development_status:
+  # Stories are added as they complete.
+  # Format:
+  #   <story-slug>: done | in-progress | ready-for-dev | backlog
+  admin-liveview-session-refresh: done
+  fix-matrix-login-missing-refresh-token: done
+  matrix-refresh-revalidates-with-idp: done
+  fix-bootstrap-admin-session-identity: done
+  provision-matrix-identity-on-admin-login: done
+  centralize-scope-resolution: done
+  centralize-claim-resolution: done
+  scope-admin-claim-to-path: done

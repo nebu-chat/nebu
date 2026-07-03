@@ -58,6 +58,14 @@ server/lib/nebu/
 │   │                   /logout records the presented token; the OIDC plug consults it AFTER crypto
 │   │                   verification; keyed by JWT jti else SHA-256(raw token); entries self-expire
 │   │                   at the token exp; volatile (Postgres-backed persistence is follow-up hardening)
+│   ├── oidc_claims.ex ← Nebu.Web.OidcClaims — pure, stateless recursive OIDC-claims-map walker;
+│   │                   claim_value_matches?/2 (arbitrary-depth value search) and
+│   │                   flatten_discovered_claims/2 (claims → dot-path {key, value} pairs, e.g.
+│   │                   Keycloak-shaped realm_access.roles). Centralized here (from two independent
+│   │                   private implementations in Nebu.Admin.Auth) so the admin-group-claim gate
+│   │                   and the Bootstrap Wizard's claim-picker share one walker instead of two that
+│   │                   could drift apart. Trust-boundary rationale (no depth guard — signed,
+│   │                   verified IdP token is the boundary) travels with the code as a comment.
 │   └── plugs/        ← OidcPlug (Bearer validation: alg allowlist RS*/ES*/PS*, JWKS kid select,
 │                       Assent/JOSE verify of sig+exp+iss+aud+sub, issuer/audience from env var
 │                       OR OidcConfig cache, denylist check, idempotent TTL-cached user

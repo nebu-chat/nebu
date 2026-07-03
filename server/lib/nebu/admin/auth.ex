@@ -64,6 +64,40 @@ defmodule Nebu.Admin.Auth do
   # session via the stored OIDC refresh token (AC3). 120s per the story.
   @refresh_window 120
 
+  # SECURITY (admin-liveview-session-refresh, HIGH finding — Kassandra security review
+  # 2026-07-01): independent, non-bypassable outer bound on `refreshable?/2`.
+  #
+  # `refreshable?/1` (single-arity, now removed) used to grant the LiveView `on_mount`
+  # gate a grace window purely because the stored OIDC refresh-token blob still
+  # DECRYPTED — decryptability has no time component (SecretBox/AES-256-GCM never
+  # expires), so that check alone let a de-provisioned admin whose heartbeat is severed
+  # (JS disabled, `/admin/keepalive` blocked, backgrounded/throttled tab) keep an open
+  # LiveView socket (Dashboard, AuditLog) alive INDEFINITELY across reconnects,
+  # bypassing the only other server-side bound (`session_exp` via `session_live?/1`).
+  #
+  # `refresh_grace_exp` closes that gap: a second, independently-tracked timestamp,
+  # written alongside `session_exp` at login and re-written on every SUCCESSFUL
+  # HTTP-path refresh (`put_current_user/2`, shared by both write sites). It is a
+  # FIXED, bounded grace — `session_exp + @refresh_grace_seconds` — NOT tied to RT-blob
+  # decryptability and NOT extended merely by a socket reconnect (reconnects only ever
+  # READ this value via `refreshable?/2`, they never write it).
+  #
+  # `refreshable?/2` now requires BOTH: the RT blob decrypts AND `now <= refresh_grace_exp`.
+  # RT-blob decryptability is necessary but no longer SUFFICIENT. Once
+  # `refresh_grace_exp` passes — which only happens when the heartbeat has not
+  # successfully refreshed the session in a while — `refreshable?/2` returns false
+  # regardless of decryptability, and `on_mount` halts + redirects exactly like the
+  # pre-fix `session_live?`-only path did.
+  #
+  # Sizing: the keepalive heartbeat (AC3/AC4) fires every 60s and re-writes
+  # `refresh_grace_exp` forward on every successful refresh, so a HEALTHY heartbeat
+  # keeps the bound extending in small increments — the idle-tab UX goal (AC2) is
+  # unaffected. A grace of 180s (3 minutes) gives a healthy heartbeat ~3 missed/delayed
+  # beats of slack (well above @refresh_window=120s, proportionate to it) before the
+  # bound lapses, while still keeping the severed-heartbeat exposure window to low
+  # single-digit minutes instead of unbounded.
+  @refresh_grace_seconds 180
+
   @behaviour Plug
 
   # ── Plug: establish current_user from the signed admin session cookie ──────────
@@ -206,24 +240,24 @@ defmodule Nebu.Admin.Auth do
   # (`:admin_oidc_refresh_override`, a 1-arity fun receiving the DECRYPTED RT)
   # short-circuits the HTTP+JWT-verify leg, mirroring `:admin_oidc_token_override` for
   # the login leg.
+  #
+  # matrix-refresh-revalidates-with-idp (AC5): the HTTP-POST + response-parse +
+  # verify_token leg itself now lives in the shared `Nebu.Web.OidcTokenExchange`,
+  # reused verbatim by the Matrix refresh path — this function is now a thin
+  # wrapper (seam check + this domain's own config resolution) around it,
+  # structurally identical to how it worked before extraction.
   defp exchange_refresh_token(refresh_token) do
     case Application.get_env(:nebu_http, :admin_oidc_refresh_override) do
       fun when is_function(fun, 1) ->
         fun.(refresh_token)
 
       _ ->
-        with {:ok, cfg} <- oidc_config(nil),
-             {:ok, token_endpoint} <- discover(cfg.issuer, "token_endpoint"),
-             body =
-               URI.encode_query(%{
-                 "grant_type" => "refresh_token",
-                 "refresh_token" => refresh_token,
-                 "client_id" => cfg.client_id
-               }),
-             {:ok, resp_body} <- token_endpoint_post(token_endpoint, body, cfg),
-             {:ok, id_token, new_rt} <- extract_tokens(resp_body),
-             {:ok, claims} <- Nebu.Web.Plugs.OidcPlug.verify_token(id_token, audience: cfg.client_id) do
-          {:ok, claims, new_rt}
+        with {:ok, cfg} <- oidc_config(nil) do
+          Nebu.Web.OidcTokenExchange.refresh(refresh_token, %{
+            issuer: cfg.issuer,
+            client_id: cfg.client_id,
+            client_secret: cfg.client_secret
+          })
         end
     end
   end
@@ -234,14 +268,20 @@ defmodule Nebu.Admin.Auth do
   configured admin group claim (server_config) just like the Go backend.
 
   `"matrix_user_id"` is derived via `Nebu.Matrix.UserId.from_claims/2`, which resolves
-  differently depending on which claims are present in `claims` (bugfix-unify-admin-
-  matrix-oidc-identity: `admin_oidc_scope/0` now folds in the Matrix flow's extra
-  scopes so both flows request the same claim superset going forward). This is NOT
-  retroactive: an operator whose admin and Matrix sessions already resolved to
-  different `matrix_user_id` values under the old (pre-fix) scope drift keeps that
-  split identity — only logins that happen after this fix are unified.
+  differently depending on which claims are present in `claims`. Historical note
+  (bugfix-unify-admin-matrix-oidc-identity): `admin_oidc_scope/0` used to fold in the
+  Matrix flow's extra scopes so both flows requested the same claim superset — that
+  fold was REMOVED by story `centralize-scope-resolution` (it was the root cause of an
+  `offline_access` cross-client leak, AC3). `admin_oidc_scope/0` now resolves each
+  client's scopes independently via `Nebu.Web.OidcScopes.resolve_scope/1`; an operator
+  who configures different `matrix_oidc_extra_scopes` / `admin_oidc_extra_scopes`
+  values can once again see divergent claim sets (and therefore divergent
+  `matrix_user_id` resolution) between the two flows — this is an accepted,
+  documented trade-off (see `docs/architecture/08-concepts.md`), not a regression.
   """
   def put_current_user(conn, claims) when is_map(claims) do
+    exp = session_expiry(claims)
+
     user = %{
       "sub" => claims["sub"],
       "email" => claims["email"],
@@ -255,7 +295,14 @@ defmodule Nebu.Admin.Auth do
       # Parity with the Go gateway maxSessionDuration: cap the admin session at
       # min(idToken.exp, now+8h) so a session never outlives its ID token and is
       # always bounded even if the cookie itself is replayed. on_mount enforces it.
-      "session_exp" => session_expiry(claims)
+      "session_exp" => exp,
+      # SECURITY (admin-liveview-session-refresh HIGH fix): the independent, bounded
+      # outer bound consumed by `refreshable?/2` — see the `@refresh_grace_seconds`
+      # doc above. Written here (at login AND at every successful HTTP-path refresh,
+      # since both call sites share `put_current_user/2`) so it always tracks
+      # `session_exp + @refresh_grace_seconds` at the moment the session was last
+      # legitimately (re-)established — never extended by a mere socket reconnect.
+      "refresh_grace_exp" => exp + @refresh_grace_seconds
     }
 
     conn
@@ -265,6 +312,48 @@ defmodule Nebu.Admin.Auth do
     |> configure_session(renew: true)
     |> put_session("current_user", user)
     |> assign(:current_user, user)
+  end
+
+  # provision-matrix-identity-on-admin-login (AC1): called from BOTH
+  # normal_callback/2 and bootstrap_confirm_claim/2 — the two admin-login
+  # completion points that mint a session via put_current_user/2 for a freshly
+  # verified OIDC login (as opposed to the silent pre-expiry HTTP refresh path,
+  # `refresh_admin_session/1`, which also calls put_current_user/2 but is
+  # deliberately NOT wired here — it is not a new login, and re-provisioning on
+  # every refreshed HTTP request would be needless work for no behavioural
+  # gain since the identity was already provisioned at the original login).
+  #
+  # Provisions the SAME `users`-row the real Matrix `/login` path provisions,
+  # for the SAME matrix_user_id `put_current_user/2` derives from these claims
+  # (Nebu.Matrix.UserId.from_claims/2, single source of truth) — via the
+  # Nebu.Matrix facade only (ADR-020). AC2 (this architecture's decision, see
+  # the story's "Implementation Decision" note): deliberately does NOT trigger
+  # auto-join — Nebu.Matrix.provision_identity/2 only performs the `users`-row
+  # + profile upsert.
+  #
+  # Best-effort: swallows a provisioning failure (logged) rather than blocking
+  # the admin session mint that follows — the Phoenix admin session, not
+  # Matrix-domain provisioning, is this function's primary contract.
+  defp provision_matrix_identity(claims) when is_map(claims) do
+    matrix_user_id = Nebu.Matrix.UserId.from_claims(claims, server_name())
+    display_name = claims["preferred_username"] || claims["name"] || ""
+    email = claims["email"] || ""
+
+    case Nebu.Matrix.provision_identity(matrix_user_id,
+           display_name: display_name,
+           email: email
+         ) do
+      {:ok, _user_id} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "admin login: Matrix identity provisioning failed for #{matrix_user_id}: " <>
+            "#{inspect(reason)} — admin session will still be minted"
+        )
+
+        :ok
+    end
   end
 
   # AC1+AC2: encrypt the OIDC refresh token (AES-256-GCM via Nebu.Web.SecretBox) and
@@ -490,6 +579,8 @@ defmodule Nebu.Admin.Auth do
   defp normal_callback(conn, claims, refresh_token) do
     case check_admin(claims) do
       :ok ->
+        provision_matrix_identity(claims)
+
         conn
         |> put_current_user(claims)
         |> store_refresh_token(refresh_token)
@@ -534,6 +625,15 @@ defmodule Nebu.Admin.Auth do
         # value that actually appeared in the token they authenticated with, so the org-wide
         # admin gate can never be decoupled from that token by a forged/free-form POST body.
         put_draft("bootstrap_claims", encode_discovered_claims(claims))
+        # fix-bootstrap-admin-session-identity AC2: also stash the FULL verified claims map
+        # (not the flattened bootstrap_claims list above, which dot-paths nested objects for
+        # the claim-picker UI and is NOT usable as input to Nebu.Matrix.UserId.from_claims/2,
+        # which does direct flat-key lookups like claims["preferred_username"]). This is what
+        # lets bootstrap_confirm_claim/2 mint the session via the SAME put_current_user/2 path
+        # normal_callback/2 uses, so matrix_user_id is derived identically to a subsequent
+        # normal re-login of the same person. Draft storage is already server-side (no new
+        # attack surface — same trust boundary as bootstrap_claims above).
+        put_draft("bootstrap_full_claims", Jason.encode!(claims))
 
         conn
         |> Phoenix.Controller.redirect(to: "/admin/bootstrap/select-claim")
@@ -550,15 +650,18 @@ defmodule Nebu.Admin.Auth do
     |> Jason.encode!()
   end
 
-  # The set of claim VALUES the operator was actually shown (and is allowed to choose),
-  # reconstructed from the server-side stash written by bootstrap_callback/2. An absent or
-  # malformed stash yields the empty set, so confirm fails CLOSED (rejects everything).
-  defp discovered_claim_values(draft) do
+  # scope-admin-claim-to-path (AC2, code-review MINOR m1 fix): the set of {path, value}
+  # PAIRS the operator was actually shown, reconstructed from the server-side stash
+  # written by bootstrap_callback/2. An absent or malformed stash yields the empty set,
+  # so confirm fails CLOSED (rejects everything). The single source of truth for
+  # decoding "bootstrap_claims" -- discovered_claim_values/1 below derives from this
+  # rather than re-decoding independently, so the two can never drift on parsing rules.
+  defp discovered_claim_pairs(draft) do
     case draft["bootstrap_claims"] do
       json when is_binary(json) and json != "" ->
         case Jason.decode(json) do
           {:ok, pairs} when is_list(pairs) ->
-            for [_k, v] <- pairs, is_binary(v), into: MapSet.new(), do: v
+            for [k, v] <- pairs, is_binary(v), into: MapSet.new(), do: {k, v}
 
           _ ->
             MapSet.new()
@@ -566,6 +669,101 @@ defmodule Nebu.Admin.Auth do
 
       _ ->
         MapSet.new()
+    end
+  end
+
+  # The set of claim VALUES the operator was actually shown (and is allowed to choose),
+  # ignoring which path each value appeared under -- used by the legacy value-only
+  # membership check in bootstrap_confirm_claim/2. Derived from discovered_claim_pairs/1
+  # rather than re-decoding "bootstrap_claims" independently (code-review MINOR m1).
+  defp discovered_claim_values(draft) do
+    draft |> discovered_claim_pairs() |> Enum.map(fn {_k, v} -> v end) |> MapSet.new()
+  end
+
+  # scope-admin-claim-to-path (AC2, code-review MAJOR M1 fix): the select-claim form now
+  # submits a single JSON-encoded "admin_group_claim_choice" param carrying BOTH the
+  # chosen value and its dot-path (see select_claim_html/1). A bare legacy
+  # "admin_group_claim" param (no path) OR a malformed/undecodable
+  # "admin_group_claim_choice" both resolve to `{nil, nil}` here -- deliberately NOT a
+  # legacy value paired with a nil path, since bootstrap_confirm_claim/2's `cond` REJECTS
+  # a nil `selected_path` unconditionally (path is mandatory on every fresh bootstrap
+  # completion, closing the M1 gap where a legacy-shaped or malformed submission could
+  # otherwise silently complete bootstrap with no path and permanently pin the instance
+  # on admin_claim?/1's any-key-scan fallback) -- resolving a "selected value" in that
+  # case would be dead work, since the request is rejected before it's ever used.
+  # This function only DECODES the submission; it deliberately does not itself decide
+  # accept/reject -- that stays in bootstrap_confirm_claim/2 alongside the other
+  # discovered-claim validations, so all rejection reasons are visible in one place.
+  defp resolve_selection(params) do
+    case params["admin_group_claim_choice"] do
+      json when is_binary(json) and json != "" ->
+        case Jason.decode(json) do
+          {:ok, %{"value" => value, "path" => path}}
+          when is_binary(value) and value != "" and is_binary(path) and path != "" ->
+            {value, path}
+
+          _ ->
+            {nil, nil}
+        end
+
+      _ ->
+        {nil, nil}
+    end
+  end
+
+  # fix-bootstrap-admin-session-identity (AC2): decode the full verified claims map stashed
+  # by bootstrap_callback/2 under "bootstrap_full_claims" (Jason-encoded, NOT the flattened
+  # "bootstrap_claims" list — that one is dot-path-flattened for the claim-picker UI and is
+  # not usable as input to Nebu.Matrix.UserId.from_claims/2's flat-key lookups).
+  #
+  # A legacy in-flight bootstrap (started before this fix shipped) has no
+  # "bootstrap_full_claims" key at all — falls back to reconstructing a flat claims map
+  # from "bootstrap_claims" (the dot-path-flattened discovered-claims list) plus
+  # "bootstrap_sub"/"bootstrap_email", which is exactly what every prior bootstrap_callback/2
+  # run already stashed. Only BARE (non-dot-path) keys are restored — a nested claim (e.g.
+  # "realm_access.roles") cannot be losslessly reconstructed from its flattened form, but
+  # `Nebu.Matrix.UserId.from_claims/2` only ever does flat top-level lookups
+  # (configured claim / preferred_username / name / sub), so this is sufficient for its
+  # purposes. Repeated bare keys (multi-valued claims, e.g. "groups") are folded into a list.
+  # Fails closed (:error) only when NEITHER stash is present/decodable, so
+  # bootstrap_confirm_claim/2 never mints a session from incomplete or untrusted data.
+  defp bootstrap_claims(draft) do
+    case draft["bootstrap_full_claims"] do
+      json when is_binary(json) and json != "" ->
+        case Jason.decode(json) do
+          {:ok, %{} = claims} -> {:ok, claims}
+          _ -> reconstruct_claims_from_flattened(draft)
+        end
+
+      _ ->
+        reconstruct_claims_from_flattened(draft)
+    end
+  end
+
+  defp reconstruct_claims_from_flattened(draft) do
+    case draft["bootstrap_claims"] do
+      json when is_binary(json) and json != "" ->
+        case Jason.decode(json) do
+          {:ok, pairs} when is_list(pairs) ->
+            claims =
+              for [k, v] <- pairs, is_binary(k), not String.contains?(k, "."), is_binary(v), reduce: %{} do
+                acc ->
+                  Map.update(acc, k, v, fn
+                    existing when is_list(existing) -> existing ++ [v]
+                    existing -> [existing, v]
+                  end)
+              end
+              |> Map.put_new_lazy("sub", fn -> draft["bootstrap_sub"] end)
+              |> Map.put_new_lazy("email", fn -> draft["bootstrap_email"] end)
+
+            {:ok, claims}
+
+          _ ->
+            :error
+        end
+
+      _ ->
+        :error
     end
   end
 
@@ -584,8 +782,7 @@ defmodule Nebu.Admin.Auth do
   absent from the draft (no prior bootstrap-mode callback).
   """
   def bootstrap_confirm_claim(conn, params) do
-    selected = params["admin_group_claim"] || @default_admin_group_claim
-    selected = if selected == "", do: @default_admin_group_claim, else: selected
+    {selected, selected_path} = resolve_selection(params)
     draft = load_draft()
 
     cond do
@@ -598,6 +795,32 @@ defmodule Nebu.Admin.Auth do
 
       not is_binary(draft["bootstrap_sub"]) or draft["bootstrap_sub"] == "" ->
         Logger.warning("bootstrap claim selection refused: no authenticated bootstrap identity")
+
+        conn
+        |> Phoenix.Controller.redirect(to: "/admin/login?error=auth_failed")
+        |> halt()
+
+      # scope-admin-claim-to-path (AC2/AC3, code-review MAJOR M1 fix): a path is now
+      # MANDATORY on every bootstrap completion, not merely accepted-when-present. AC3.2's
+      # any-key-scan fallback exists ONLY for deployments that completed bootstrap BEFORE
+      # this story shipped (their server_config genuinely has no admin_group_claim_path
+      # row and never will, short of a manual re-run) — it must NOT be reachable via a
+      # FRESH bootstrap simply by POSTing the pre-story param shape. Bootstrap completes
+      # exactly once (guarded by bootstrap_completed?/0 above), so once this check is in
+      # place there is no legitimate way for a new instance to end up path-less: every
+      # first-time completion is forced through the path-carrying form field. The shipped
+      # select_claim_html/1 template only ever emits "admin_group_claim_choice" going
+      # forward, so a well-behaved client submission always has selected_path set; a
+      # bare/legacy "admin_group_claim" param (old cached page, forged/replayed request,
+      # browser devtools) is refused here rather than silently succeeding path-less.
+      #
+      # Checked BEFORE the discovered-value/pair checks below: resolve_selection/1 always
+      # returns `{nil, nil}` together (never a non-nil value paired with a nil path), so
+      # this is the correct, most-specific diagnostic for every legacy/malformed
+      # submission — checking value-membership first would instead misreport them all as
+      # "claim value not in verified token", masking the real (missing-path) reason.
+      is_nil(selected_path) ->
+        Logger.warning("bootstrap claim selection refused: no claim path submitted (path is mandatory on bootstrap completion)")
 
         conn
         |> Phoenix.Controller.redirect(to: "/admin/login?error=auth_failed")
@@ -616,22 +839,61 @@ defmodule Nebu.Admin.Auth do
         |> Phoenix.Controller.redirect(to: "/admin/login?error=auth_failed")
         |> halt()
 
+      # SEC (unchanged from before M1 fix): the submitted {path, value} pair MUST be one
+      # of the discovered PAIRS, not just an independently-valid path and an
+      # independently-valid value from two different discovered entries. Without this, an
+      # attacker who can drive this POST mid-bootstrap could pair a real discovered value
+      # with an unrelated real discovered path, decoupling the persisted path from the
+      # value it actually appeared under.
+      not MapSet.member?(discovered_claim_pairs(draft), {selected_path, selected}) ->
+        Logger.warning("bootstrap claim selection refused: claim path/value pair not in verified token")
+
+        conn
+        |> Phoenix.Controller.redirect(to: "/admin/login?error=auth_failed")
+        |> halt()
+
+      # fix-bootstrap-admin-session-identity (AC2 edge case): checked BEFORE
+      # complete_bootstrap/2 runs — a legacy in-flight bootstrap (started before this fix
+      # shipped) has no "bootstrap_full_claims" stash. Reject up front so bootstrap_completed
+      # is never set to "true" and no session is minted from incomplete/untrusted data; the
+      # operator re-runs the (cheap, idempotent) bootstrap callback to get a fresh draft.
+      match?(:error, bootstrap_claims(draft)) ->
+        Logger.warning(
+          "bootstrap claim selection refused: bootstrap_full_claims missing/invalid in draft"
+        )
+
+        conn
+        |> Phoenix.Controller.redirect(to: "/admin/login?error=auth_failed")
+        |> halt()
+
       true ->
-        case complete_bootstrap(draft, selected) do
+        {:ok, claims} = bootstrap_claims(draft)
+
+        case complete_bootstrap(draft, selected, selected_path) do
           :ok ->
-            # Mint the admin session for the just-authenticated operator. The chosen claim
-            # is now in server_config, so put_current_user resolves admin == true.
-            user = %{
-              "sub" => draft["bootstrap_sub"],
-              "email" => draft["bootstrap_email"],
-              "admin" => true,
-              "session_exp" => System.system_time(:second) + SessionConfig.admin_session_ttl_seconds()
-            }
+            # fix-bootstrap-admin-session-identity (AC1/AC2): mint the session via the SAME
+            # builder normal_callback/2 uses — put_current_user/2 — instead of a second,
+            # separate map construction. That is what previously left "matrix_user_id" out of
+            # the bootstrap-completion session entirely (RoomsController/UsersController's
+            # actor_id/1 then fell back to the raw OIDC sub for any admin-initiated write in
+            # this session). put_current_user/2 needs the FULL verified claims map (not just
+            # sub/email) to derive matrix_user_id identically to how a subsequent normal
+            # re-login of the same person would — bootstrap_callback/2 now stashes that map
+            # under "bootstrap_full_claims" for exactly this purpose.
+            #
+            # No RT is captured on the bootstrap-completion leg (bootstrap-mode never runs the
+            # refresh-token exchange normal_callback/2's OIDC round-trip does), so
+            # put_current_user/2 sets "refresh_grace_exp" from session_exp as usual but
+            # refreshable?/2 will still correctly return false regardless — no store_refresh_
+            # token/2 call follows, same as the old hand-rolled path.
+            #
+            # provision-matrix-identity-on-admin-login (AC1): bootstrap completion is a
+            # login too — provision the SAME matrix_user_id's `users`-row here, exactly
+            # as normal_callback/2 does.
+            provision_matrix_identity(claims)
 
             conn
-            |> configure_session(renew: true)
-            |> put_session("current_user", user)
-            |> assign(:current_user, user)
+            |> put_current_user(claims)
             |> Phoenix.Controller.redirect(to: "/admin/dashboard")
             |> halt()
 
@@ -918,114 +1180,28 @@ defmodule Nebu.Admin.Auth do
     {draft["oidc_client_id"], draft_secret}
   end
 
-  # The admin authorization scope. `offline_access` is NO LONGER force-added (story
-  # oidc-refresh-mode-config, AC3): it is requested iff the server_config key
-  # `admin_oidc_refresh_mode` resolves to "offline". DEFAULT is "online" (no forced
-  # offline_access → no special IdP approval needed; on Keycloak a session-bound RT
-  # still enables silent refresh). `openid` stays MANDATORY in every mode.
+  # The admin authorization scope. Story centralize-scope-resolution: scope
+  # resolution (extra-scopes read, refresh-mode read, "openid" base, OIDC Scopes
+  # Law default) is now centralized in Nebu.Web.OidcScopes — the SINGLE source of
+  # OIDC scope resolution for both Matrix and Admin. This is a thin delegate
+  # (AC4); admin/auth.ex no longer runs its own server_config SQL reads for
+  # scopes, defines no local scope-validation regex, and no longer reaches into
+  # the Matrix domain (directly or via any facade) to fold that flow's extra
+  # scopes into the admin request — each client resolves its OWN extra scopes /
+  # refresh mode only (AC3: this also fixes the `offline_access` cross-client
+  # leak the old cross-client scope fold could cause). The pre-existing
+  # :admin_oidc_extra_scopes_reader / :admin_oidc_refresh_mode_reader test seams
+  # are honoured by OidcScopes itself, unchanged in name/shape, so existing tests
+  # keep passing.
   #
-  # OIDC Scopes Law (bugfix-remove-default-scopes): extra scopes default to EMPTY.
-  # Do NOT add a fallback default — "openid" only when server_config has no value.
-  # All additional scopes come exclusively from server_config (ADR-022).
-  #
-  # bugfix-unify-admin-matrix-oidc-identity: the admin scope ALSO always includes
-  # whatever extra scopes the Matrix flow requests, fetched via the Public-API facade
-  # `Nebu.Matrix.matrix_oidc_extra_scopes/0` (ADR-020 — never call `Nebu.Matrix.SsoLogin`
-  # directly from here). Root cause of the "one person, two identities" bug: an operator
-  # could set `matrix_oidc_extra_scopes` and `admin_oidc_extra_scopes` to DIFFERENT values
-  # (e.g. Matrix gets "profile" so preferred_username/name resolve, admin gets only
-  # "groups"). The SAME real person then gets ID tokens with DIFFERENT claim sets from the
-  # two login flows, so Nebu.Matrix.UserId.from_claims/2 (which is claim-priority-driven —
-  # configured claim → preferred_username → name → sub) derives TWO DIFFERENT Matrix
-  # user_ids for one person: the admin session falls back further down the priority chain
-  # (or all the way to the opaque `sub`) than the Matrix client session that actually
-  # carries the richer scope. Folding the Matrix extra scopes into the admin request
-  # (union, not replace — the admin UI field is kept so an operator can additionally
-  # request admin-gate-only scopes like a groups claim) guarantees the admin ID token is
-  # always a claim-superset of the Matrix ID token, so from_claims/2 resolves identically
-  # for both flows. Note: this does NOT retroactively fix identities that already split
-  # under the old drift (a previously-created split user row keeps its own row); only NEW
-  # logins after this fix are unified going forward — see the limitation note on
-  # `put_current_user/2`.
-  #
-  # Test seam: a 0-arity fun under :admin_oidc_extra_scopes_reader injects extra
-  # scopes; default reads server_config. A 0-arity fun under
-  # :admin_oidc_refresh_mode_reader injects the mode; default reads server_config.
-  # Nebu.Matrix.SsoLogin.matrix_extra_scopes/0 (reached via the facade above) honours
-  # its OWN independent test seam (:matrix_oidc_extra_scopes_reader), so admin-flow
-  # tests that don't care about Matrix scopes are unaffected (it defaults to "" when
-  # unset / Repo not running).
-
-  defp admin_oidc_scope do
-    extra = union_scopes(admin_extra_scopes(), Nebu.Matrix.matrix_oidc_extra_scopes())
-    prefix = if admin_refresh_mode() == "offline", do: ["openid", "offline_access"], else: ["openid"]
-
-    (prefix ++ String.split(extra, " ", trim: true))
-    |> Enum.reject(&(&1 == ""))
-    |> Enum.uniq()
-    |> Enum.join(" ")
-  end
-
-  # Space-separated union of two scope strings, order-preserving (admin's own scopes
-  # first, then any Matrix-only scopes not already present) so the resulting scope
-  # string is deterministic and stable across calls with the same inputs.
-  defp union_scopes(a, b) do
-    a_list = String.split(a, " ", trim: true)
-    b_list = String.split(b, " ", trim: true)
-    Enum.join(a_list ++ (b_list -- a_list), " ")
-  end
-
-  defp admin_extra_scopes do
-    reader =
-      Application.get_env(
-        :nebu_http,
-        :admin_oidc_extra_scopes_reader,
-        &default_admin_extra_scopes/0
-      )
-
-    case reader.() do
-      s when is_binary(s) and s != "" -> s
-      _ -> ""
-    end
-  end
-
-  @sql_admin_extra_scopes "SELECT value FROM server_config WHERE key = 'admin_oidc_extra_scopes' LIMIT 1"
-
-  defp default_admin_extra_scopes do
-    if running?(Nebu.Repo) do
-      case Ecto.Adapters.SQL.query(Nebu.Repo, @sql_admin_extra_scopes, []) do
-        {:ok, %{rows: [[value]]}} when is_binary(value) -> value
-        _ -> ""
-      end
-    else
-      ""
-    end
-  end
-
-  @sql_admin_refresh_mode "SELECT value FROM server_config WHERE key = 'admin_oidc_refresh_mode' LIMIT 1"
-
-  # Resolves the admin refresh mode to the validated enum "offline" | "online".
-  # Any value other than "offline" (incl. absent / junk) collapses to the "online"
-  # default — so a stray server_config value can never inject an arbitrary scope.
-  defp admin_refresh_mode do
-    reader = Application.get_env(:nebu_http, :admin_oidc_refresh_mode_reader, &default_admin_refresh_mode/0)
-
-    case reader.() do
-      "offline" -> "offline"
-      _ -> "online"
-    end
-  end
-
-  defp default_admin_refresh_mode do
-    if running?(Nebu.Repo) do
-      case Ecto.Adapters.SQL.query(Nebu.Repo, @sql_admin_refresh_mode, []) do
-        {:ok, %{rows: [[value]]}} when is_binary(value) and value != "" -> value
-        _ -> "online"
-      end
-    else
-      "online"
-    end
-  end
+  # Note: this intentionally reverses the pre-story
+  # bugfix-unify-admin-matrix-oidc-identity fold (Matrix extra scopes were folded
+  # into the admin scope so both ID tokens carried the same claim superset). That
+  # fold was the root cause of the AC3 `offline_access` leak (Kassandra LOW) and is
+  # removed per this story's Implementation Map; identity/claim unification across
+  # independently-scoped flows is tracked separately (see story Non-Goals: "Kein
+  # Claim-Mapping").
+  defp admin_oidc_scope, do: Nebu.Web.OidcScopes.resolve_scope(:admin)
 
   # The redirect_uri MUST be a fixed, server-controlled value registered with the IdP —
   # it is NOT derived from request headers (Host/X-Forwarded-*), which an attacker could
@@ -1076,62 +1252,67 @@ defmodule Nebu.Admin.Auth do
   defp describe(reason) when is_atom(reason), do: Atom.to_string(reason)
   defp describe(reason), do: inspect(reason)
 
-  # SEC NOTE (Kassandra MEDIUM, bugfix-unify-admin-matrix-oidc-identity, 2026-07-01;
-  # scope updated bugfix-nested-oidc-claim-support, 2026-07-01):
-  # `admin_oidc_scope/0` now folds the Matrix flow's extra scopes (e.g. `profile`) into
-  # the admin OIDC request, so claims like `name`/`preferred_username` can appear in the
-  # admin session's claims map where they never did before. Since `admin_claim?/1` scans
-  # ALL claim values regardless of key — and, per `claim_value_matches?/2` below, now
-  # recurses into every value at EVERY nesting depth, not just flat top-level ones — a
-  # non-admin who can self-set such a claim at the IdP (common on some connectors) could
-  # in theory set it (or a NESTED sub-value, e.g. under `resource_access.<client>.*` or
-  # a nested profile/address claim) to the admin marker value and be misclassified as
-  # admin. Accepted as a known, non-blocking risk (Kassandra: 0 CRITICAL/HIGH) rather
-  # than patched with a claim-key denylist here: the bootstrap wizard
-  # (`extract_discovered_claims/1` / `bootstrap_confirm_claim/2`) stores only the
-  # SELECTED CLAIM VALUE, not its source key, so a hardcoded denylist could silently
-  # break a legitimately-configured admin_group_claim without warning (see code-review
-  # cycle 2 MAJOR M2). The real fix — track the claim KEY (and its full path) alongside
-  # the value, scope the check to only that key, and centralize OIDC scope/claim
-  # resolution so admin and Matrix never diverge in the first place — is tracked as a
-  # follow-up architecture item, not squeezed into this bug fix.
+  # SEC NOTE (RESOLVED by story scope-admin-claim-to-path, 2026-07-02 — was an accepted
+  # MEDIUM risk from bugfix-unify-admin-matrix-oidc-identity + bugfix-nested-oidc-claim-
+  # support, both 2026-07-01):
+  # `admin_oidc_scope/0` folds the Matrix flow's extra scopes (e.g. `profile`) into the
+  # admin OIDC request, so claims like `name`/`preferred_username` can appear in the
+  # admin session's claims map where they never did before. The OLD `admin_claim?/1`
+  # scanned ALL claim values regardless of key/path — a non-admin who could self-set such
+  # a claim at the IdP (common on some connectors) could set it (or a NESTED sub-value,
+  # e.g. under `resource_access.<client>.*` or a nested profile/address claim) to the
+  # admin marker value and be misclassified as admin.
+  #
+  # FIX: the Bootstrap Wizard now persists the admin-group claim's dot-PATH
+  # (`admin_group_claim_path`, e.g. `"realm_access.roles"` or a flat `"groups"`)
+  # alongside its VALUE (`admin_group_claim`). When a path is configured, the gate
+  # resolves ONLY that path via `Nebu.Web.OidcClaims.claim_at_path_matches?/3` — a hit
+  # anywhere else in the claims tree no longer counts. This is NOT a claim-key denylist
+  # (which code-review cycle 2 MAJOR M2, bugfix-unify-admin-matrix-oidc-identity,
+  # rejected as unsafe): it is an allowlist of exactly the ONE path the operator
+  # themselves selected during bootstrap, so a legitimately-configured admin_group_claim
+  # can never be silently broken by it.
+  #
+  # FALLBACK (AC3.2): a deployment bootstrapped BEFORE this story shipped has no
+  # `admin_group_claim_path` in `server_config` — falling back to the old any-key scan
+  # for those deployments is not a regression (it is exactly today's behavior, unchanged)
+  # and avoids locking out an existing admin whose config predates path tracking. This
+  # fallback is UNREACHABLE for any bootstrap completed AFTER this story shipped:
+  # `bootstrap_confirm_claim/2` now REJECTS a bootstrap-completion POST that omits a
+  # verified claim path (code-review MAJOR M1 fix, 2026-07-02) instead of silently
+  # persisting a path-less config — bootstrap runs exactly once, so a fresh instance can
+  # never end up on this branch. AC3.3: the fallback branch logs at INFO (no PII) so
+  # operators of a genuinely pre-story deployment can see that a re-bootstrap / claim
+  # re-selection would harden the gate.
   @doc """
-  True when the configured admin group claim is present anywhere in the OIDC claims.
-  Parity with `auth.MatchesAdminGroupClaim` (Go): checks string and string-list claims.
+  True when the configured admin group claim is present in the OIDC claims.
 
-  Claim values are searched recursively through arbitrary nesting depth, so IdP-shaped
-  claims such as Keycloak's `realm_access.roles` (map of list) or
-  `resource_access.<client>.roles` (map of map of list) are matched the same way as a
-  flat Dex-style `"groups" => [...]` claim — the marker only needs to appear as (or
-  inside) SOME value in the claims tree, at any depth.
+  When `admin_group_claim_path` is configured (bootstrapped by this story or later), the
+  check is PATH-scoped: `target` must appear at that exact dot-path, not anywhere else in
+  the claims tree (closes the any-key-value-scan risk, see SEC NOTE above).
+
+  When no path is configured (pre-existing deployment bootstrapped before this story),
+  falls back to the legacy any-key recursive scan across the whole claims tree — parity
+  with `auth.MatchesAdminGroupClaim` (Go) and unchanged pre-story behavior.
   """
   def admin_claim?(claims) when is_map(claims) do
     target = admin_group_claim()
-    claim_value_matches?(claims, target)
+
+    case admin_group_claim_path() do
+      path when is_binary(path) and path != "" ->
+        Nebu.Web.OidcClaims.claim_at_path_matches?(claims, path, target)
+
+      _ ->
+        Logger.info(
+          "admin gate: admin_group_claim_path not configured — falling back to any-key " <>
+            "claim-value scan; re-run the bootstrap claim selection to harden this check"
+        )
+
+        Nebu.Web.OidcClaims.claim_value_matches?(claims, target)
+    end
   end
 
   def admin_claim?(_), do: false
-
-  # Recursively walks a claims value (map, list, or scalar) looking for `target` as a
-  # string value, or as a member of a list of strings, at any nesting depth.
-  #
-  # Non-tail-recursive with no explicit depth guard: acceptable because (a) `target`
-  # (from `admin_group_claim/0`) is always a binary — DB-guarded or the literal
-  # default — never attacker-controlled, and (b) the recursion depth is bounded in
-  # practice by the JSON structure of a trusted, signature-verified IdP token, not by
-  # adversarial input in any sense that matters here — the IdP is already the trust
-  # anchor for the whole authentication flow.
-  defp claim_value_matches?(target, target) when is_binary(target), do: true
-
-  defp claim_value_matches?(map, target) when is_map(map) do
-    Enum.any?(map, fn {_k, v} -> claim_value_matches?(v, target) end)
-  end
-
-  defp claim_value_matches?(list, target) when is_list(list) do
-    target in list or Enum.any?(list, &claim_value_matches?(&1, target))
-  end
-
-  defp claim_value_matches?(_, _), do: false
 
   # A session with no recorded expiry (legacy/pre-go-removal session) is treated as
   # live for backward-compat; a recorded expiry is enforced.
@@ -1146,30 +1327,48 @@ defmodule Nebu.Admin.Auth do
   LiveView `on_mount` hook. `{Nebu.Admin.Auth, :require_admin}` halts a mount when
   the session has no admin operator, redirecting to `/admin/login`. An authenticated
   admin proceeds with `current_user` assigned to the socket.
+
+  ## admin-liveview-session-refresh (AC1/AC2)
+
+  `on_mount` runs on every LiveView mount/reconnect but is NOT itself the place that
+  performs the actual OIDC token-endpoint refresh: it has no HTTP response to attach
+  a refreshed `Set-Cookie` to (a LiveView socket handshake predates any writable
+  response), so calling the token-endpoint exchange here would refresh the IdP-side
+  token without ever being able to persist the rotated refresh token back into the
+  signed session cookie — the next real HTTP round-trip would silently discard it.
+  That HTTP round-trip (the client-side keepalive heartbeat hitting `GET
+  /admin/keepalive`, AC3/AC4) is what actually drives `fetch_current_user/2`'s
+  existing refresh leg and persists the result.
+
+  What `on_mount` DOES do differently now: when the stored `session_exp` has already
+  elapsed but the session is still `refreshable?/2` — a DECRYPTABLE (decryptable is
+  NOT the same as still-valid/unrevoked at the IdP) OIDC refresh token is present
+  AND the independent `refresh_grace_exp` bound has not yet passed — it treats the
+  operator as still-refreshable rather than immediately logged-out — the mount
+  proceeds (`{:cont, socket}`) instead of halting, so an operator who has been idling
+  on an open LiveView tab is not force-logged-out purely because `id_token.exp`
+  elapsed while no HTTP request happened to run in between. This relies on the
+  keepalive heartbeat (AC3/AC4) to keep actually refreshing the underlying HTTP
+  session (and advancing `refresh_grace_exp`) before/around this point; `on_mount`
+  itself never talks to the token endpoint and never rotates/persists the refresh
+  token or writes `refresh_grace_exp`. See the SECURITY note on `refreshable?/2` for
+  the exact bound this enforces (admin-liveview-session-refresh HIGH fix,
+  2026-07-01): decryptability alone is no longer sufficient — a severed heartbeat
+  causes `refresh_grace_exp` to lapse within `@refresh_grace_seconds` of the last
+  successful refresh, at which point `refreshable?/2` returns false and this branch
+  falls through to the halt+redirect below, same as the pre-fix `session_live?`-only
+  path.
   """
   def on_mount(:require_admin, _params, session, socket) do
     completed = bootstrap_completed?()
 
     case session["current_user"] do
       %{"admin" => true} = user ->
-        if session_live?(user) do
-          socket =
-            Phoenix.Component.assign(socket,
-              current_user: user,
-              bootstrap_completed: completed
-            )
-
-          # Bootstrap gate (Go parity): an instance that has not finished the bootstrap
-          # wizard funnels EVERY LiveView into /admin/bootstrap until setup is done.
-          # The wizard itself is now a plain HTTP controller (BootstrapController) and
-          # is no longer a LiveView — so all LiveViews here require a completed bootstrap.
-          if not completed do
-            {:halt, redirect(socket, to: "/admin/bootstrap")}
-          else
-            {:cont, socket}
-          end
+        if session_live?(user) or refreshable?(session, user) do
+          mount_admin(socket, user, completed)
         else
-          # Session past its capped expiry → treat as logged out (re-auth required).
+          # Session past its capped expiry, no usable refresh token → treat as
+          # logged out (re-auth required).
           {:halt, redirect(socket, to: "/admin/login")}
         end
 
@@ -1186,6 +1385,89 @@ defmodule Nebu.Admin.Auth do
         else
           {:halt, redirect(socket, to: "/admin/bootstrap")}
         end
+    end
+  end
+
+  defp mount_admin(socket, user, completed) do
+    socket =
+      Phoenix.Component.assign(socket,
+        current_user: user,
+        bootstrap_completed: completed
+      )
+
+    # Bootstrap gate (Go parity): an instance that has not finished the bootstrap
+    # wizard funnels EVERY LiveView into /admin/bootstrap until setup is done.
+    # The wizard itself is now a plain HTTP controller (BootstrapController) and
+    # is no longer a LiveView — so all LiveViews here require a completed bootstrap.
+    if not completed do
+      {:halt, redirect(socket, to: "/admin/bootstrap")}
+    else
+      {:cont, socket}
+    end
+  end
+
+  # AC1/AC2: true when the session carries a stored OIDC refresh token that at least
+  # decrypts cleanly (i.e. was legitimately written by this server, not corrupt/
+  # forged) AND the independent `refresh_grace_exp` bound has not yet passed.
+  # Deliberately does NOT call the token endpoint here — see the on_mount doc: this
+  # LiveView lifecycle path has no HTTP response to persist a rotated refresh token
+  # into, so the actual refresh stays exclusively on the HTTP path
+  # (`fetch_current_user/2`, triggered by the keepalive heartbeat AC3/AC4). This only
+  # grants the mount a grace window on the assumption that the keepalive heartbeat is
+  # (or was recently) doing the real refresh work on the underlying HTTP session.
+  #
+  # SECURITY (admin-liveview-session-refresh HIGH fix, Kassandra security review
+  # 2026-07-01 — supersedes the code-review cycle 1 MINOR-1 SEC NOTE below):
+  # decryptability is NECESSARY but NO LONGER SUFFICIENT. Both conditions are
+  # required:
+  #
+  #   1. `SecretBox.decrypt(enc_rt)` succeeds (was legitimately written by this
+  #      server, not corrupt/forged) — as before.
+  #   2. `now <= refresh_grace_exp` — a FIXED, bounded timestamp written into the
+  #      session at login and on every successful HTTP-path refresh (see
+  #      `put_current_user/2` and `@refresh_grace_seconds`). This is the
+  #      INDEPENDENT, non-bypassable outer bound: it is NOT tied to RT-blob
+  #      decryptability (which never expires — SecretBox/AES-256-GCM has no time
+  #      component) and it is NOT extended just because the LiveView socket
+  #      reconnects (a reconnect only ever READS `refresh_grace_exp`, on_mount never
+  #      writes it).
+  #
+  # Previously (pre-fix) condition 1 ALONE was treated as sufficient, which meant a
+  # revoked-but-still-logged-in admin whose heartbeat was severed (JS disabled,
+  # `/admin/keepalive` blocked, throttled/backgrounded tab) could keep an open
+  # LiveView socket (Dashboard/AuditLog) alive INDEFINITELY across reconnects — the
+  # RT blob decrypts forever, so `refreshable?/1` never flipped to false, bypassing
+  # the only other server-side bound (`session_exp` via `session_live?/1`). Requiring
+  # `now <= refresh_grace_exp` closes that gap: once the heartbeat stops successfully
+  # refreshing the session, `refresh_grace_exp` stops advancing and lapses within
+  # `@refresh_grace_seconds` of the last successful refresh — `refreshable?/2` then
+  # returns false regardless of whether the RT blob still decrypts, and `on_mount`
+  # halts + redirects exactly like the pre-fix `session_live?`-only path did.
+  #
+  # A HEALTHY heartbeat (the intended, documented use case — AC2) keeps
+  # `refresh_grace_exp` extending forward in small increments on every successful
+  # refresh, so an idle-but-open LiveView tab still survives past `id_token.exp`
+  # indefinitely as designed; only a SEVERED heartbeat lets the bound lapse.
+  #
+  # Real IdP-side validity is (still) enforced by the separate keepalive-heartbeat-
+  # driven HTTP path: `app.js` `SessionKeepalive` polls `GET /admin/keepalive` every
+  # 60s → `fetch_current_user/2` → `maybe_refresh_session/2` →
+  # `refresh_admin_session/1`, which performs the actual `grant_type=refresh_token`
+  # exchange against the IdP and DOES log the operator out on failure (expired/
+  # revoked RT, admin-gate lost, etc.). `refresh_grace_exp` does not replace that
+  # check — it bounds how long `on_mount` may proceed WITHOUT it having run recently.
+  defp refreshable?(session, user) do
+    now = System.system_time(:second)
+
+    grace_exp = user["refresh_grace_exp"]
+    within_grace = is_integer(grace_exp) and now <= grace_exp
+
+    case session[@oidc_rt_session_key] do
+      enc_rt when is_binary(enc_rt) and enc_rt != "" ->
+        within_grace and match?({:ok, _}, SecretBox.decrypt(enc_rt))
+
+      _ ->
+        false
     end
   end
 
@@ -1266,6 +1548,17 @@ defmodule Nebu.Admin.Auth do
       @default_admin_group_claim
     end
   end
+
+  # Story scope-admin-claim-to-path (AC3): the dot-path (e.g. "realm_access.roles", or a
+  # flat "groups") the operator selected during bootstrap, persisted alongside the
+  # existing admin_group_claim VALUE. `nil` means either an absent config (fresh instance
+  # that hasn't completed bootstrap) or a pre-existing deployment bootstrapped before
+  # this story shipped -- both are handled by admin_claim?/1's fallback branch (AC3.2).
+  #
+  # Reuses the SAME :admin_oidc_config_reader test seam admin_config_value/1 (OIDC
+  # issuer/client lookups) already honours, rather than inventing a second seam name --
+  # one seam covers every server_config key tests need to inject.
+  defp admin_group_claim_path, do: admin_config_value("admin_group_claim_path")
 
   defp running?(name), do: Process.whereis(name) != nil
 
@@ -1357,7 +1650,7 @@ defmodule Nebu.Admin.Auth do
   # config (e.g. bootstrap_completed = "true" but no admin_group_claim, which would brick
   # the gate). The seam/no-Repo path (unit tests) has no transaction boundary and runs the
   # same sequential upserts.
-  defp complete_bootstrap(draft, admin_group_claim) do
+  defp complete_bootstrap(draft, admin_group_claim, admin_group_claim_path) do
     result =
       if not seam_installed?() and running?(Nebu.Repo) do
         # Ecto.Repo.transaction/1 (NOT Ecto.Adapters.SQL.transaction/2, which does not
@@ -1365,7 +1658,7 @@ defmodule Nebu.Admin.Auth do
         # half-promoted config. The inline Ecto.Adapters.SQL.query calls inside
         # do_complete_bootstrap run on the transaction's checked-out connection.
         case Nebu.Repo.transaction(fn ->
-               case do_complete_bootstrap(draft, admin_group_claim) do
+               case do_complete_bootstrap(draft, admin_group_claim, admin_group_claim_path) do
                  {:error, reason} ->
                    # Roll back the transaction and surface the error to the caller.
                    Nebu.Repo.rollback(reason)
@@ -1378,7 +1671,7 @@ defmodule Nebu.Admin.Auth do
           {:error, reason} -> {:error, reason}
         end
       else
-        do_complete_bootstrap(draft, admin_group_claim)
+        do_complete_bootstrap(draft, admin_group_claim, admin_group_claim_path)
       end
 
     # Only trigger cache refresh when the bootstrap actually completed successfully.
@@ -1423,7 +1716,7 @@ defmodule Nebu.Admin.Auth do
     is_function(Application.get_env(:nebu_http, :admin_bootstrap_store), 2)
   end
 
-  defp do_complete_bootstrap(draft, admin_group_claim) do
+  defp do_complete_bootstrap(draft, admin_group_claim, admin_group_claim_path) do
     # MINOR-1 (cycle-2): guard against completing bootstrap without an OIDC audience.
     # A missing audience means OidcPlug fails closed permanently (all Bearer tokens
     # rejected with 401 M_UNKNOWN_TOKEN). Fail here rather than silently creating a
@@ -1465,19 +1758,19 @@ defmodule Nebu.Admin.Auth do
       end)
 
       # Story configurable-oidc-scopes (AC6): promote the operator's chosen OIDC extra scopes.
-      # SECURITY: validate each scope token against the character whitelist
-      # [a-zA-Z0-9_:.-] before writing. An invalid draft value is silently skipped
-      # (not promoted) so injection via a tampered draft cannot reach server_config.
+      # SECURITY: validate via the ONE scope validator (story centralize-scope-resolution,
+      # AC1/AC5 — Nebu.Web.OidcScopes.validate_scope_string/1) before writing. An invalid
+      # draft value is silently skipped (not promoted) so injection via a tampered draft
+      # cannot reach server_config.
       Enum.each(~w(matrix_oidc_extra_scopes admin_oidc_extra_scopes), fn key ->
         case draft[key] do
           v when is_binary(v) and v != "" ->
-            # Validate each scope token.
-            scopes = String.split(v, " ", trim: true)
-            all_valid = Enum.all?(scopes, &String.match?(&1, ~r/^[a-zA-Z0-9_:.\-]+\z/))
-            if all_valid do
-              put_config(key, v)
-            else
-              Logger.warning("configurable-oidc-scopes: skipping #{key} promotion — invalid scope token in draft value: #{inspect(v)}")
+            case Nebu.Web.OidcScopes.validate_scope_string(v) do
+              :ok ->
+                put_config(key, v)
+
+              {:error, _msg} ->
+                Logger.warning("configurable-oidc-scopes: skipping #{key} promotion — invalid scope token in draft value: #{inspect(v)}")
             end
 
           _ ->
@@ -1486,6 +1779,18 @@ defmodule Nebu.Admin.Auth do
       end)
 
       put_config("admin_group_claim", admin_group_claim)
+
+      # scope-admin-claim-to-path (AC2/AC3): persist the claim's dot-PATH alongside its
+      # value. `bootstrap_confirm_claim/2` (code-review MAJOR M1 fix) now REJECTS the
+      # request before this function is ever called when no path was submitted, so
+      # `admin_group_claim_path` is guaranteed non-nil/non-empty on every call reached
+      # from that guarded path. This guard is defensive belt-and-suspenders for any other
+      # (e.g. future or test-only) caller of do_complete_bootstrap/3 that might not go
+      # through that gate — it must never silently persist an empty-string path.
+      if is_binary(admin_group_claim_path) and admin_group_claim_path != "" do
+        put_config("admin_group_claim_path", admin_group_claim_path)
+      end
+
       put_config("bootstrap_completed", "true")
       clear_draft()
       :ok
@@ -1512,28 +1817,9 @@ defmodule Nebu.Admin.Auth do
   """
   def extract_discovered_claims(claims) when is_map(claims) do
     claims
-    |> flatten_discovered_claims(nil)
+    |> Nebu.Web.OidcClaims.flatten_discovered_claims(nil)
     |> Enum.uniq()
   end
-
-  defp flatten_discovered_claims(map, prefix) when is_map(map) do
-    Enum.flat_map(map, fn {k, v} ->
-      flatten_discovered_claims(v, dot_path(prefix, k))
-    end)
-  end
-
-  defp flatten_discovered_claims(list, prefix) when is_list(list) do
-    Enum.flat_map(list, fn item -> flatten_discovered_claims(item, prefix) end)
-  end
-
-  defp flatten_discovered_claims(s, prefix) when is_binary(s) and s != "" do
-    [{prefix, s}]
-  end
-
-  defp flatten_discovered_claims(_, _), do: []
-
-  defp dot_path(nil, key), do: key
-  defp dot_path(prefix, key), do: "#{prefix}.#{key}"
 
   # HTML-escape a value (the token is attacker-influenceable — escape every interpolation).
   defp esc(s), do: s |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()
@@ -1546,10 +1832,21 @@ defmodule Nebu.Admin.Auth do
       |> Enum.map_join("\n", fn {{key, value}, idx} ->
         id = "claim-#{idx}"
 
+        # scope-admin-claim-to-path (AC2): each radio submits BOTH the claim value
+        # (existing "admin_group_claim" param, unchanged) and its dot-path key (new
+        # "admin_group_claim_path" param) via a single JSON-encoded value, decoded by
+        # the form-submit handler below into two POST params. Plain HTML has no way
+        # to bind two independently-named radio groups to one click without JS, so
+        # encoding both pieces of data into the ONE value the browser submits is the
+        # standard no-JS-required technique. `key` is `nil` for a top-level bare claim
+        # with no discoverable dot-path (extract_discovered_claims/1 never produces a
+        # nil key today, but the encoding tolerates it defensively).
+        encoded = Jason.encode!(%{"value" => value, "path" => key})
+
         """
         <li>
           <label for="#{esc(id)}" class="cursor-pointer flex items-center gap-2">
-            <input type="radio" id="#{esc(id)}" name="admin_group_claim" value="#{esc(value)}" class="radio" />
+            <input type="radio" id="#{esc(id)}" name="admin_group_claim_choice" value="#{esc(encoded)}" class="radio" />
             <span><code>#{esc(key)}</code>: #{esc(value)}</span>
           </label>
         </li>
