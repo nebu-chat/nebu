@@ -1,0 +1,23 @@
+# Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents.
+# Do not edit manually during an active pipeline run.
+# last_updated: 2026-07-03
+# [fix-and-configure-sso-redirect-schemes] 2026-07-03T14:31Z committed ✓ (ATDD+1 code-review cycle+Kassandra CLEAN, commit 3e6ff830)
+# [fix-and-configure-sso-redirect-schemes] 2026-07-03T14:30Z arc42-update → done (08-concepts.md, 05-building-blocks.md updated for OidcConfig cache extension + env var removal)
+# [fix-and-configure-sso-redirect-schemes] 2026-07-03T14:29Z security-review → Kassandra CLEAN (0 CRITICAL/HIGH/MEDIUM/LOW/INFO)
+# [fix-and-configure-sso-redirect-schemes] 2026-07-03T14:18Z code-review → 1 MAJOR (missing AC13 Godog/BDD feature) + 1 MINOR (trim mismatch, non-security) → fixed: added e2e/features/admin/sso_schemes.feature + step-defs, fixed persist normalization + regression test; 1232 unit tests pass, 0 failures
+# [fix-and-configure-sso-redirect-schemes] 2026-07-03T14:02Z ci-gate → unit ✓ (1231 passed/2 skipped/0 failed); integration infra pre-existing fail (byte-identical to baseline, ephemeral-container app-list issue, unrelated to story)
+# [fix-and-configure-sso-redirect-schemes] 2026-07-03T13:52Z ux-gate → CLEAN (no blocking issues; flash-message addition is net a11y improvement)
+# [fix-and-configure-sso-redirect-schemes] 2026-07-03T13:44Z invariant-check → CLEAN (6 changed files, --auto scope; full-repo scan shows only pre-existing unrelated debt)
+# [fix-and-configure-sso-redirect-schemes] 2026-07-03T13:43Z dev-story → done (cycle 0); 39/39 new tests pass, 1231 passed/2 skipped full suite, zero regressions
+# [fix-and-configure-sso-redirect-schemes] 2026-07-03T13:32Z test-review → 3 MAJOR found+fixed (2 false-RED tests, 1 broken Plug API call); now CLEAN, all 20 new tests genuinely RED
+# [fix-and-configure-sso-redirect-schemes] 2026-07-03T13:21Z atdd → 27 failing tests written (sso_login_test.exs +16, config_controller_test.exs +11 new)
+# [fix-and-configure-sso-redirect-schemes] 2026-07-03T13:10Z baseline-integration → PRE-EXISTING FAIL (elixir:1.19-alpine ephemeral container: :event_dispatcher/:nebu_http/:signature/:compliance apps unavailable at compile time — env/container config issue, not story-related; zero code changes at baseline). Continuing per pipeline rule.
+# [fix-and-configure-sso-redirect-schemes] 2026-07-03T13:03Z oracle-gate → M_INVALID_PARAM confirmed spec-compliant; no M_INVALID_REDIRECT_URL exists
+# [fix-and-configure-sso-redirect-schemes] 2026-07-03T13:00Z create-story → fix-and-configure-sso-redirect-schemes.md (matrix=true, ui=true, security_review=required)
+# [configurable-sso-redirect-schemes-fix-and-admin-config] 2026-07-03T12:50Z pipeline started
+story: null
+current_step: null
+completed: []
+cycle_count: 0
+blocked_reason: null
+last_updated: "2026-07-03T14:31Z"

@@ -7,6 +7,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- **SSO Redirect Schemes — bootstrap-only config**: `NEBU_SSO_REDIRECT_SCHEMES` environment variable has been removed. All SSO redirect scheme configuration is now bootstrap-only: configure additional trusted schemes via the Admin UI at `/admin/config` after bootstrap. The hardcoded default now correctly lists `element`, `schildichat`, and `im.fluffychat.auth` (previously included inaccurate scheme names `io.element.fluffychat` and bare `fluffychat`, which do not match any real Matrix client's registered URI scheme).
+
+---
+
 ## [0.2.1] – 2026-05-20
 
 ### Fixed

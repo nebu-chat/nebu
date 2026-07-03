@@ -17,13 +17,17 @@ defmodule Nebu.Admin.DB do
   decryption and masking happen in the gRPC server handler.
   """
 
-  # Story centralize-scope-resolution (AC2): the 4 server_config keys whose write
+  # Story centralize-scope-resolution (AC2): the server_config keys whose write
   # must trigger a Nebu.Web.OidcConfig cache refresh (see upsert_server_config/1
   # below) — declared here (before first use) since Elixir module attributes are
-  # order-dependent.
+  # order-dependent. Story fix-and-configure-sso-redirect-schemes (AC6) extends
+  # this SAME list with `sso_extra_redirect_schemes` — it lives in the SAME
+  # OidcConfig ETS table/GenServer, so the existing conditional refresh below picks
+  # it up automatically without a second cache-invalidation code path.
   @scope_cache_keys ~w(
     matrix_oidc_extra_scopes matrix_oidc_refresh_mode
     admin_oidc_extra_scopes admin_oidc_refresh_mode
+    sso_extra_redirect_schemes
   )
 
   # ─── User operations ─────────────────────────────────────────────────────────

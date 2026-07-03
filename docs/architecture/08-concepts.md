@@ -71,16 +71,22 @@ Components in `Nebu.Web` (the shared HTTP plumbing):
   by the forwarded sub-routers and CORSPlug's halted preflight. All Nebu responses are
   `application/json` Matrix envelopes, so this prevents any MIME-sniffing edge case on a misbehaving
   client.
-- **`Nebu.Web.OidcConfig`** — a GenServer + ETS cache for OIDC issuer, audience, and JWKS URI.
-  **ADR-022: OIDC is configured EXCLUSIVELY via the Bootstrap Wizard** (`server_config`) — there is no
-  environment-variable OIDC config path. `OidcPlug`, `JwksCache`, `SsoLogin`, and `Admin.Auth` resolve
-  issuer/audience/JWKS-URI **solely** through this cache (and the bootstrap draft during the wizard flow).
-  Caching in ETS `:nebu_http_oidc_config` avoids per-request DB lookups on the hot OIDC path. The cache is
-  refreshed by the Bootstrap Wizard after configuration is written to `server_config`, and cluster-aware
-  invalidation via `:pg` ensures all nodes stay synchronized (ADR-020, M-3). When `server_config` has no
-  OIDC config (pre-bootstrap), the cache returns `nil` and every consumer **fails closed** (F-4 — all
-  Bearer tokens rejected with 401; admin → `/bootstrap`). A test-only `:oidc_config_source` seam injects
-  values without a live DB.
+- **`Nebu.Web.OidcConfig`** — a GenServer + ETS cache for OIDC issuer, audience, JWKS URI, and (since
+  story `fix-and-configure-sso-redirect-schemes`) the Admin-UI-managed `sso_extra_redirect_schemes`
+  string (additional trusted `redirectUrl` deep-link schemes for `SsoLogin.redirect_url_allowed?/1`,
+  beyond the hardcoded defaults). **ADR-022: OIDC is configured EXCLUSIVELY via the Bootstrap Wizard**
+  (`server_config`) — there is no environment-variable OIDC config path. `OidcPlug`, `JwksCache`,
+  `SsoLogin`, and `Admin.Auth` resolve issuer/audience/JWKS-URI/SSO-schemes **solely** through this
+  cache (and the bootstrap draft during the wizard flow). Caching in ETS `:nebu_http_oidc_config` avoids
+  per-request DB lookups on the hot OIDC and SSO-redirect paths. The cache is refreshed both by the
+  Bootstrap Wizard and by `Nebu.Admin.DB.upsert_server_config/1` (for post-bootstrap Admin UI edits,
+  e.g. `/admin/config`) after configuration is written to `server_config`, and cluster-aware invalidation
+  via `:pg` ensures all nodes stay synchronized (ADR-020, M-3). When `server_config` has no OIDC config
+  (pre-bootstrap), the cache returns `nil` and every consumer **fails closed** (F-4 — all Bearer tokens
+  rejected with 401; admin → `/bootstrap`); the SSO-schemes field independently defaults to `[]`
+  (only the hardcoded scheme allowlist governs redirectUrl validation) rather than failing closed, since
+  it is an additive allowlist extension, not an auth-critical value. A test-only `:oidc_config_source`
+  seam injects values without a live DB.
 - **`Nebu.Web.JwksCache`** — a GenServer that fetches the OIDC provider JWKS on start and refreshes
   it on a TTL (`NEBU_OIDC_JWKS_TTL`, default 300s — a cache-tuning knob, not OIDC config). The JWKS URI
   is resolved (ADR-022) from `server_config` via `OidcConfig.jwks_uri/0`; when only the issuer is
@@ -111,9 +117,12 @@ audience, JWKS URI) at form submission to prevent completing into a broken state
 Relevant configuration (server service): all OIDC config (issuer, audience, JWKS URI, the single
 client id/secret, claim mappings) is set via the **Bootstrap Wizard** (`server_config`), never env.
 Remaining env knobs: `NEBU_OIDC_JWKS_TTL` (JwksCache refresh interval), `NEBU_OIDC_DISPLAY_NAME`
-(advertised IdP name for `POST /login` `m.login.sso`), `NEBU_SSO_REDIRECT_SCHEMES`,
-`NEBU_RATE_LIMIT_DISABLED`, and `NEBU_SERVER_NAME` (used to build the `@<sub>:<server_name>` Matrix
-user ID and to derive the admin `/admin/callback` redirect_uri).
+(advertised IdP name for `POST /login` `m.login.sso`), `NEBU_RATE_LIMIT_DISABLED`, and
+`NEBU_SERVER_NAME` (used to build the `@<sub>:<server_name>` Matrix user ID and to derive the admin
+`/admin/callback` redirect_uri). Additional trusted SSO client redirect schemes (beyond the
+hardcoded defaults `element`/`schildichat`/`im.fluffychat.auth`) are bootstrap-only, configured via
+the Admin UI (`/admin/config`, `server_config.sso_extra_redirect_schemes`) — no env var
+(story `fix-and-configure-sso-redirect-schemes`).
 
 **Bootstrap mode:** First OIDC login automatically receives `instance_admin`. Bootstrap mode is
 permanently disabled after the first admin setup. No default password, no insecure fallback.

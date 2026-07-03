@@ -43,12 +43,14 @@ server/lib/nebu/
 │   │                   Phoenix Admin endpoint; before_send sets X-Content-Type-Options: nosniff on
 │   │                   EVERY response
 │   ├── oidc_config.ex ← Nebu.Web.OidcConfig — GenServer + ETS cache for OIDC issuer, audience,
-│   │                   and JWKS URI (resolved from server_config DB when env vars are absent).
-│   │                   Addresses bootstrap-wizard deployments where NEBU_OIDC_* are not set at
-│   │                   boot. Per-request DB lookups on the hot OIDC path are unacceptable, so
-│   │                   values are cached in :nebu_http_oidc_config ETS table. Cluster-aware via
-│   │                   :pg broadcast on refresh (ADR-020). Used by OidcPlug (for issuer/audience)
-│   │                   and JwksCache (for JWKS URI when NEBU_OIDC_JWKS_URI env var is absent).
+│   │                   JWKS URI, and (since fix-and-configure-sso-redirect-schemes) the Admin-UI
+│   │                   -managed sso_extra_redirect_schemes string, all resolved from server_config.
+│   │                   Per-request DB lookups on hot paths (OIDC + SSO redirectUrl validation) are
+│   │                   unacceptable, so values are cached in :nebu_http_oidc_config ETS table.
+│   │                   Cluster-aware via :pg broadcast on refresh (ADR-020), triggered by both the
+│   │                   Bootstrap Wizard and Nebu.Admin.DB.upsert_server_config/1 (Admin UI edits).
+│   │                   Used by OidcPlug (issuer/audience), JwksCache (JWKS URI), and SsoLogin
+│   │                   (extra redirect schemes for the redirectUrl allowlist).
 │   ├── jwks_cache.ex ← Nebu.Web.JwksCache — GenServer fetching OIDC provider JWKS on start + TTL
 │   │                   refresh (NEBU_OIDC_JWKS_TTL, default 300s). JWKS URI resolved from
 │   │                   NEBU_OIDC_JWKS_URI env var OR OidcConfig cache (fallback for bootstrap
