@@ -1,0 +1,23 @@
+# Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents.
+# Do not edit manually during an active pipeline run.
+# last_updated: 2026-07-03
+# [sso-redirect-error-page-html-response] 2026-07-03T17:48Z committed ✓ (ATDD+Dev CLEAN, 1 code-review MINOR cycle, Kassandra CLEAN)
+# [sso-redirect-error-page-html-response] 2026-07-03T17:47Z arc42-update → done (08-concepts.md delta)
+# [sso-redirect-error-page-html-response] 2026-07-03T17:45Z security-review → Kassandra CLEAN (0 CRITICAL/HIGH/MEDIUM/LOW, 1 INFO)
+# [sso-redirect-error-page-html-response] 2026-07-03T17:34Z code-review → M1-M3 fixed cycle 1, CLEAN
+# [sso-redirect-error-page-html-response] 2026-07-03T17:33Z code-review → 3 MINOR (M1-M3) → cycle 1
+# [sso-redirect-error-page-html-response] 2026-07-03T17:21Z ux-gate → CLEAN (0 blocking, 1 optional lang=en applied)
+# [sso-redirect-error-page-html-response] 2026-07-03T17:14Z ci-gate → ✓ redeploy+integration(clean, 2 pre-existing)+unit(1248 pass)
+# [sso-redirect-error-page-html-response] 2026-07-03T17:13Z ci-gate → integration 2 pre-existing failures only (clean-DB verified; dirty-DB run had 3 extra list_users pollution failures, unrelated, DB-volume artifact not story-caused)
+# [sso-redirect-error-page-html-response] 2026-07-03T17:01Z dev-story → done (cycle 0), 41/41 targeted tests pass
+# [sso-redirect-error-page-html-response] 2026-07-03T16:49Z test-review → PASS (0 MAJOR, 4 MINOR)
+# [sso-redirect-error-page-html-response] 2026-07-03T16:39Z atdd → 7 failing tests (RED confirmed), 5 passing (unaffected paths)
+# [sso-redirect-error-page-html-response] 2026-07-03T16:18Z oracle-gate → CLEAR (3 non-blocking notes)
+# [sso-redirect-error-page-html-response] 2026-07-03T16:15Z create-story → html-error-page-for-rejected-sso-redirect-scheme.md
+# [sso-redirect-error-page-html-response] 2026-07-03T16:03Z pipeline started
+story: null
+current_step: null
+completed: []
+cycle_count: 0
+blocked_reason: null
+last_updated: "2026-07-03T17:48Z"
