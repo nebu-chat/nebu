@@ -97,7 +97,15 @@ server/lib/nebu/
 │   │                   raw OIDC-JWT sessions, keyed by SHA-256(token), per-node 60s TTL ETS cache,
 │   │                   PostgreSQL source of truth — Story s2-device-lifecycle-at-login);
 │   │                   Sweeper (hourly best-effort eviction of expired jwt_device_bindings +
-│   │                   uia_sessions rows — Story s3, supervised under Nebu.Repo's children)
+│   │                   uia_sessions rows — Story s3, supervised under Nebu.Repo's children);
+│   │                   RefreshWorker (periodic per-row proactive redemption of matrix_sessions'
+│   │                   stored upstream OIDC refresh token shortly before expires_at, so legacy
+│   │                   Element Web SSO-token-login clients that never call POST /refresh stay
+│   │                   logged in — interval/lookahead configurable via
+│   │                   NEBU_MATRIX_REFRESH_WORKER_INTERVAL_MS /
+│   │                   NEBU_MATRIX_REFRESH_WORKER_LOOKAHEAD_SECONDS, defaults 5min/1h — Story
+│   │                   server-paced-session-refresh/background-session-refresh-worker,
+│   │                   supervised alongside Sweeper under Nebu.Repo's children)
 │   ├── presence/     ← Presence status (online/offline/unavailable)
 │   ├── signature/    ← Ed25519 signing (:crypto eddsa), Nebu.EventId.generate/1 (SHA-256 content
 │   │                   hash), RFC 8785 canonical JSON

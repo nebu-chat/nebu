@@ -582,6 +582,50 @@ with their own resolved config (issuer/client_id/client_secret) — same pattern
 keeps its OWN test seam (`:admin_oidc_refresh_override` / `:matrix_oidc_refresh_override`) since
 audience/client-config context can differ between the two flows.
 
+**Server-paced background refresh worker (`Nebu.Matrix.Session.RefreshWorker`, story
+`server-paced-session-refresh/background-session-refresh-worker`):**
+
+The client-driven `/refresh` flow above only extends a session when the client actually calls it.
+Element Web's legacy SSO redirect + token-login path never does — it never sends `refresh_token: true`
+at login and never calls `/refresh` — so an opaque session issued that way was previously fire-and-forget:
+it simply expired at its initial `expires_at` bound with no further extension.
+
+`RefreshWorker` is a plain `GenServer` (ADR-018/ADR-021 — inline SQL, no Repository/Service layer,
+`Process.send_after` scheduling loop, same template as `Nebu.Matrix.Session.Sweeper`), registered in the
+supervision tree alongside `Sweeper` under `Nebu.Repo`'s children (`server/lib/nebu/application.ex`), so
+neither starts without a DB. Each cycle:
+
+1. **Selects candidates** — `matrix_sessions` rows with `revoked_at IS NULL` and `expires_at` within a
+   configurable lookahead window of `NOW()` (`NEBU_MATRIX_REFRESH_WORKER_LOOKAHEAD_SECONDS`, default 1h).
+   Since `rotate_tokens/1` always soft-revokes the old row in the same transaction as inserting the new
+   one, at most one non-revoked row exists per device at a time — a plain `revoked_at IS NULL` filter
+   already excludes every grace-period sibling, so a stale rotated-away row is never touched.
+2. **Re-checks per row (TOCTOU-safe)** immediately before calling the IdP — re-selects by `access_token`
+   and skips silently (no-op, no resurrection) if the row was deleted or revoked since step 1 (e.g. by
+   `delete_one_device` or a racing client-driven refresh).
+3. **Redeems via the SAME reused logic** as the client-driven path — `HttpPublic.revalidate_with_idp/1`
+   and `MatrixSessionStore.rotate_tokens/1` — no second, parallel IdP-exchange implementation.
+4. **On success**, the new `expires_at` is computed by the SAME `session_expires_at/1` cap login/`/refresh`
+   already use (`min(fresh_oidc_exp, now + ceiling)`) — never unbounded, never a separately-invented rule.
+5. **On failure**, only a CONFIRMED upstream rejection/deprovisioning signal (e.g. `:deactivated`, an
+   explicit IdP rejection of that refresh token, decrypt failure) hard-deletes the session row — scoped to
+   the EXACT row just acted on (`MatrixSessionStore.delete_by_access_token/1`, guarded
+   `WHERE access_token = $1 AND revoked_at IS NULL`), **not** the wider `delete_for_user_device/2`. This
+   narrower scope matters specifically for this worker: under clustering (ADR-020), multiple nodes may race
+   to redeem the same rotating upstream refresh token, and a losing node's failure must not be able to
+   reach across and delete the winning node's freshly-rotated replacement row. A merely TRANSIENT error
+   (DB hiccup, IdP unreachable/discovery failure, IdP 5xx/429) is NOT treated as rejection — the row is left
+   intact and simply expires via the bounded TTL if the transient condition persists, avoiding a brief IdP
+   outage or rolling restart turning into a mass, self-inflicted hard-delete of every near-expiry session
+   in that cycle.
+
+**Orthogonal to the per-request liveness check:** the existing ≤60s deactivation/revocation check in
+`OidcPlug.call_opaque/1` (via `provision/2`) is completely unmodified — the worker's interval does not
+replace it, lengthen it, or otherwise interact with it. Delete-on-deactivation remains the fast path;
+the worker's bounded rolling TTL remains the fail-safe ceiling if a delete is ever missed. No new ADR:
+this is additive hardening of the existing legacy-login session-refresh path, not a new architectural
+decision.
+
 **Grace period semantics (Spec MUST):**
 
 The 60-second grace window lets a client that failed to persist the `/refresh` response retry with the

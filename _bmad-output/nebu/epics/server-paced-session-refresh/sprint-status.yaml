@@ -1,0 +1,12 @@
+# generated: 2026-07-03
+# Epic: server-paced-session-refresh
+# story background-session-refresh-worker done (pipeline: ATDD+Dev CLEAN, code-review 3 cycles (1 MAJOR + 3 MINOR resolved), Kassandra 3 rounds (HIGH cluster-race + 2 MEDIUM resolved, 1 LOW accepted) -> APPROVED): 2026-07-03
+project: nebu
+epic: server-paced-session-refresh
+epic_status: done
+
+development_status:
+  # Stories are added as they complete.
+  # Format:
+  #   <story-slug>: done | in-progress | ready-for-dev | backlog
+  background-session-refresh-worker: done

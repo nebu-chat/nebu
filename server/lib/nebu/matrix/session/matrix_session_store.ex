@@ -346,6 +346,56 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
   end
 
   @doc """
+  Deletes a SINGLE session row by its exact `access_token`, but ONLY while it
+  is still the active (non-revoked) row — `WHERE access_token = $1 AND
+  revoked_at IS NULL`.
+
+  security-review fix (server-paced-session-refresh / background-session-refresh-worker,
+  HIGH finding #1): `Nebu.Matrix.Session.RefreshWorker.redeem/1`'s fail-closed
+  path on a CONFIRMED upstream rejection must delete ONLY the exact row it
+  re-selected and acted on — never the wider `(user_id, device_id)` pair via
+  `delete_for_user_device/2`. In the supported clustered deployment, every
+  node runs its own instance of the worker against the same shared table; two
+  nodes can race to redeem the same (rotating) upstream refresh token. The
+  winner rotates to a healthy NEW row and soft-revokes the old one
+  (`rotate_tokens/1`, guarded `UPDATE ... WHERE access_token=$1 AND
+  revoked_at IS NULL`); the loser's redemption then fails (the RT was already
+  consumed) and must NOT delete the winner's brand-new row. Scoping this
+  delete by the loser's OWN (now stale) `access_token` AND `revoked_at IS
+  NULL` gives it the same true per-row atomicity `rotate_tokens/1` already
+  has: if another node already superseded this row (soft-revoked or deleted
+  it), this delete matches 0 rows and cannot touch a sibling/replacement row.
+
+  Deliberately NOT a replacement for `delete_for_user_device/2` — that
+  function's wide `(user_id, device_id)` scope is correct and intentional for
+  explicit, single-actor, user-initiated device removal (`delete_one_device`
+  in `protected.ex`) and the client-driven `/refresh` fail-closed path
+  (`do_refresh_with/2`), where there is no sibling winner racing the delete.
+  This function exists ONLY for callers (like the background worker) that
+  fan out across multiple nodes/rows and must not risk deleting a row they
+  did not themselves select.
+
+  Best-effort like the other delete helpers: never raises.
+  """
+  @spec delete_by_access_token(String.t()) :: :ok
+  def delete_by_access_token(access_token) when is_binary(access_token) do
+    case safe_query(
+           "DELETE FROM matrix_sessions WHERE access_token = $1 AND revoked_at IS NULL",
+           [access_token]
+         ) do
+      {:ok, _} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("matrix_sessions delete_by_access_token failed",
+          reason: inspect(reason)
+        )
+
+        :ok
+    end
+  end
+
+  @doc """
   Deletes sessions whose `expires_at` is more than 7 days in the past. Returns the
   number of rows deleted. Not wired to a periodic sweeper yet (no supervised
   session sweeper exists) — call it from one when added.
