@@ -530,7 +530,7 @@ release-server-image:
 #   3. Add a scheduled pipeline: Settings → CI/CD → Schedules → weekly on main
 #
 # Renovate reads renovate.json from the repo root and opens MRs for updates.
-renovate:
+.renovate:
   stage: .pre
   image: renovate/renovate:latest
   variables:
@@ -561,6 +561,7 @@ create-release-tag:
   interruptible: false
   variables:
     GIT_STRATEGY: none
+    DEVGUARD_EXCLUDE_PATHS: "**/_bmad/**, **/_bmad_output/**, **/skills/**, **/node_modules/**, **/docs/**, **/test/**, **/deploy/**"
   before_script:
     - apk add --no-cache curl
   script:
@@ -581,3 +582,5 @@ include:
       devguard_token: "$DEVGUARD_TOKEN"
       devguard_api_url: "$DEVGUARD_API_URL"
       devguard_web_ui: "https://devguard.opencode.de"
+    rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
