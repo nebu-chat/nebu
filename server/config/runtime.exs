@@ -154,7 +154,15 @@ if config_env() in [:prod, :dev] do
   config :nebu, Nebu.Repo,
     url: db_url,
     pool_size: 10,
-    ssl: ssl_opts
+    ssl: ssl_opts,
+    # enhanced-logging/matrix-payload-debug-logging: disable Ecto's own query
+    # logger (which prints bound SQL parameter values verbatim at :debug,
+    # including credentials) — see config/config.exs for the full rationale.
+    # Set here (merged into the existing NEBU_DB_URL-gated config call) rather
+    # than unconditionally in config.exs, so `Nebu.Application.repo_children/0`'s
+    # `Application.get_env(:nebu, Nebu.Repo)` presence check still correctly
+    # returns nil when no DB is configured (plain unit runs).
+    log: false
 end
 
 # ── admin-ui-migration: Phoenix LiveView Admin UI endpoint (runtime secret) ───
@@ -218,7 +226,11 @@ end
 # NEBU_DB_URL) still start zero DB children, exactly as before.
 if config_env() == :test do
   if db_url = System.get_env("NEBU_DB_URL") do
-    config :nebu, Nebu.Repo, url: db_url, pool_size: 10
+    # log: false — see the prod/dev block above and config/config.exs for the
+    # full rationale (Ecto's default query logger leaks bound credential
+    # params at :debug; kept co-located with the real DB config so the
+    # NEBU_DB_URL-presence invariant in Nebu.Application.repo_children/0 holds).
+    config :nebu, Nebu.Repo, url: db_url, pool_size: 10, log: false
 
     server_name = System.get_env("NEBU_SERVER_NAME", "test.local")
     config :event_dispatcher, server_name: server_name

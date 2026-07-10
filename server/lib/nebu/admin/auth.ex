@@ -1104,11 +1104,22 @@ defmodule Nebu.Admin.Auth do
   # issuer + client are read from the bootstrap_draft (Go parity: loadOIDCConfigFromDraft),
   # decrypting the at-rest secret. In normal mode they come from server_config.
   # Fails CLOSED when issuer or client_id is absent.
+  #
+  # bugfix-bootstrap-scope-ignored: the extra-scopes value is read from the DRAFT's own
+  # "admin_oidc_extra_scopes" field (persisted by bootstrap_controller.ex from Step 3's
+  # "Admin client scopes" form field), NOT from admin_oidc_scope/0 — that delegates to
+  # Nebu.Web.OidcScopes.resolve_scope(:admin), which reads server_config's
+  # admin_oidc_extra_scopes key. That key is only ever written at final bootstrap
+  # completion (do_complete_bootstrap), so mid-bootstrap it is always absent and the
+  # operator's Step 3 input was silently ignored. Composition (base "openid" + extras +
+  # "offline_access" iff refresh mode is "offline") is reused as-is via
+  # resolve_scope_with_extra/2 — only the SOURCE of the extras value differs from
+  # normal-mode's admin_oidc_scope/0 below; refresh-mode resolution is unchanged.
   defp oidc_config("bootstrap") do
     draft = load_draft()
     issuer = draft["oidc_issuer"]
     {client_id, client_secret} = bootstrap_operator_client(draft)
-    scope = admin_oidc_scope()
+    scope = Nebu.Web.OidcScopes.resolve_scope_with_extra(:admin, draft["admin_oidc_extra_scopes"])
     # oidc-bootstrap-only-e2e-regressions (AC1): surface the draft's explicit JWKS URI so
     # exchange_and_verify can fetch the operator-token signing keys from the DRAFT (the
     # global JwksCache is empty mid-bootstrap). May be nil — then keys are discovered from

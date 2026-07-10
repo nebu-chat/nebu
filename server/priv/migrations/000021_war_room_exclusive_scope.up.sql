@@ -1,0 +1,18 @@
+-- enhanced-logging/war-room-dedicated-page (AC9/AC10, Dev Notes Option A —
+-- "recommended"): the "exclusive scope" convenience syntax ("capture
+-- everything EXCEPT these endpoints", primarily motivated by
+-- `/_matrix/client/v3/sync` dominating any endpoint-scoped capture).
+--
+-- Kept as a SEPARATE, nullable JSONB column from `scope` (which stays a
+-- plain string: NULL/"all"/a specific route_template, unchanged from
+-- 000019) rather than refactoring `scope` into a JSONB map — minimal
+-- change, backward-compatible with every pre-existing
+-- `Nebu.Web.LogStore.WarRoom`/`Nebu.Admin.WarRoomManager` code path that
+-- reads `scope` as a string.
+--
+-- NULL or an empty JSON array is a pure no-op (100% backward compatible —
+-- see `war_room_exclusive_scope_test.exs`). A non-empty JSON array of
+-- route_template strings means: an entry whose route_template is a member
+-- of this list is NEVER tagged/counted, regardless of what `scope`/`filter`
+-- would otherwise have matched.
+ALTER TABLE war_room_sessions ADD COLUMN IF NOT EXISTS exclusive_scope JSONB;

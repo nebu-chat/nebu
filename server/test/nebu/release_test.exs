@@ -37,7 +37,26 @@ defmodule Nebu.ReleaseTest do
       # (000014/000015 renumbered on rebase onto configurable-oidc-scopes.)
       # 000016 — scope-admin-claim-to-path: extends config_update_mutable RLS policy
       # to allow runtime UPDATE of admin_group_claim_path (path-scoped admin gate).
-      assert versions == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+      # 000017 — enhanced-logging/operational-log-store: creates operational_logs
+      # (persistent, admin-configurable diagnostic log store) and extends
+      # config_update_mutable RLS policy with the 5 new log-policy keys.
+      # 000018 — enhanced-logging/admin-logs-retention-settings: extends
+      # config_update_mutable RLS policy with the new log_retention_info_max_count key.
+      # 000019 — enhanced-logging/war-room-mode: creates war_room_sessions,
+      # adds the operational_logs.war_room_id FK constraint (the column
+      # itself was already added by 000017), and the "exactly one active
+      # session" partial unique index.
+      # 000020 — enhanced-logging/trace-map-node-controls: creates
+      # admin_temporary_captures (the DB-backed capture timer — "state is a
+      # row, expiry is a comparison against now()") and extends
+      # config_update_mutable RLS policy with the log_min_level_<route> /
+      # log_retention_days_<route> dynamic per-endpoint key families.
+      # 000021 — enhanced-logging/war-room-dedicated-page: adds the
+      # `war_room_sessions.exclusive_scope` nullable JSONB column (Dev Notes
+      # Option A — the "capture everything EXCEPT these endpoints"
+      # convenience, AC9/AC10).
+      assert versions ==
+               [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]
 
       # Only *.up.sql files are returned — *.down.sql are excluded.
       assert Enum.all?(result, fn {_v, path} -> String.ends_with?(path, ".up.sql") end)

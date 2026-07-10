@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-07-03T18:40:00Z",
-  "generator": "bmad-maintain-arc42 skill (delta update \u2014 SSO redirect scheme rejection content-negotiated HTML error page, story sso-redirect-error-page/html-error-page-for-rejected-sso-redirect-scheme)",
+  "generated_at": "2026-07-10T06:40:29Z",
+  "generator": "bmad-maintain-arc42 skill (delta update \u2014 war-room-dedicated-page story, enhanced-logging epic; new Nebu.Admin.LogsLive.WarRoom and Nebu.Admin.WarRoomIndicator modules, TraceMapBubble :readonly mode, exclusive_scope JSONB column for war_room_sessions)",
   "source_artifacts": [
     "_bmad-output/planning-artifacts/architecture.md",
     "_bmad-output/planning-artifacts/prd.md",
@@ -8,7 +8,10 @@
     "_bmad-output/implementation-artifacts/sprint-status.yaml",
     "CLAUDE.md",
     "README.md",
-    "gateway/cmd/gateway/main.go"
+    "gateway/cmd/gateway/main.go",
+    "docs/stories/enhanced-logging/admin-logs-retention-settings.md",
+    "docs/stories/enhanced-logging/war-room-mode.md",
+    "docs/stories/enhanced-logging/trace-map-leitstand.md"
   ],
   "files": {
     "docs/architecture/README.md": {
@@ -37,8 +40,8 @@
     },
     "docs/architecture/05-building-blocks.md": {
       "editable": false,
-      "generated_at": "2026-07-03T14:37:58Z",
-      "source": "docs/stories/server-paced-session-refresh/background-session-refresh-worker.md",
+      "generated_at": "2026-07-08T10:15:30Z",
+      "source": "docs/stories/enhanced-logging/war-room-dedicated-page.md",
       "arc42_section": "05 Building Block View"
     },
     "docs/architecture/06-runtime.md": {
@@ -55,8 +58,8 @@
     },
     "docs/architecture/08-concepts.md": {
       "editable": false,
-      "generated_at": "2026-07-03T18:40:00Z",
-      "source": "docs/stories/sso-redirect-error-page/html-error-page-for-rejected-sso-redirect-scheme.md",
+      "generated_at": "2026-07-08T10:15:30Z",
+      "source": "docs/stories/enhanced-logging/war-room-dedicated-page.md",
       "arc42_section": "08 Cross-cutting Concepts"
     },
     "docs/architecture/09-decisions.md": {
@@ -67,19 +70,19 @@
     },
     "docs/architecture/10-quality.md": {
       "editable": false,
-      "generated_at": "2026-05-08T13:00:00Z",
+      "generated_at": "2026-07-10T06:39:30Z",
       "source": "_bmad-output/planning-artifacts/prd.md",
       "arc42_section": "10 Quality Requirements"
     },
     "docs/architecture/11-risks.md": {
       "editable": false,
-      "generated_at": "2026-05-11T00:00:00Z",
+      "generated_at": "2026-07-10T06:40:29Z",
       "source": "_bmad-output/implementation-artifacts/sprint-status.yaml",
       "arc42_section": "11 Risks and Technical Debt"
     },
     "docs/architecture/12-glossary.md": {
       "editable": false,
-      "generated_at": "2026-05-08T10:00:00Z",
+      "generated_at": "2026-07-10T06:39:30Z",
       "source": "CLAUDE.md",
       "arc42_section": "12 Glossary"
     },

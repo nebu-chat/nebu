@@ -32,6 +32,16 @@ defmodule Nebu.Application do
     Nebu.Web.Plugs.RateLimit.init_table()
     Nebu.Matrix.AccountDataStore.init_table()
 
+    # enhanced-logging/matrix-payload-debug-logging (CI-gate cycle-2, global fix):
+    # `Nebu.Repo` runs with `log: false` (server/config/config.exs) — Ecto's own
+    # query logger prints bound SQL parameter values (which include credentials
+    # such as opaque tokens) verbatim at :debug level, so it is disabled globally.
+    # This attaches the sanitized replacement (source + duration only, never bound
+    # params) to Ecto's `[:nebu, :repo, :query]` telemetry event, which Ecto still
+    # emits unconditionally. Attaching is harmless when no Repo is configured (no
+    # DB in pure unit runs) — the event simply never fires.
+    Nebu.Repo.QueryTelemetry.attach()
+
     # ── :pg scope for room/presence process-group broadcast (ADR-002/005). ──
     case :pg.start_link() do
       {:ok, _pid} -> :ok
@@ -48,8 +58,35 @@ defmodule Nebu.Application do
       :persistent_term.put(:nebu_signing_key, {pub_key, priv_key})
     end
 
+    # enhanced-logging/operational-log-store (AC2): attaches the central
+    # :logger handler that intercepts every Logger.* call app-wide. Safe to
+    # call before the supervisor tree starts — the handler's own broadcast
+    # (Nebu.PubSub, started as a child below) and persistence (Writer, also
+    # below) paths each guard against their target process not being up yet.
+    #
+    # Gated behind :attach_log_store_handler (default true; test env sets it
+    # false, mirroring start_jwks_cache/start_admin_endpoint/start_finch) so
+    # `log_store_test.exs`'s own "registers exactly one new handler"
+    # idempotency-count test (which must observe a handler_ids delta of
+    # exactly +1 from ITS OWN call) is not pre-empted by a boot-time attach
+    # that already happened before any test runs — the handler still gets
+    # attached explicitly wherever a test/AC needs it (attach_handler/0 is
+    # idempotent either way), and in prod/dev it is attached unconditionally
+    # at boot per AC2.
+    if Application.get_env(:nebu_http, :attach_log_store_handler, true) do
+      :ok = Nebu.Web.LogStore.attach_handler()
+    end
+
     children =
-      repo_children() ++
+      # Nebu.PubSub: the central :logger handler (attached above) broadcasts
+      # EVERY Logger.* call here, regardless of whether DB persistence is
+      # enabled (and regardless of whether Nebu.Repo is configured at all —
+      # plain unit runs have no DB but still exercise attach_handler/0's
+      # broadcast-only path, AC2/AC10). Started unconditionally (unlike
+      # Nebu.Admin.PubSub, which is gated behind start_admin_endpoint) so it
+      # is available in every environment, including a DB-less unit run.
+      [Supervisor.child_spec({Phoenix.PubSub, name: Nebu.PubSub}, id: Nebu.PubSub)] ++
+        repo_children() ++
         libcluster_children() ++
         [
           # Crash-prone stateful Matrix processes (Presence, Session, Horde rooms),
@@ -95,9 +132,37 @@ defmodule Nebu.Application do
   # server-paced-session-refresh: RefreshWorker (proactive background renewal of
   # opaque matrix_sessions rows nearing their bound expires_at) is started the
   # same way — it has nothing to refresh without a DB either.
+  # enhanced-logging/operational-log-store: Nebu.Web.LogStore.Writer (batches
+  # operational_logs INSERTs) is started the same way — it has nothing to
+  # flush to without a DB either. Supervised with the Supervisor default
+  # (:permanent) restart strategy, same as every other child here, so a
+  # crashed Writer is restarted under the same registered name (AC6).
+  # Nebu.Web.LogStore.PolicyCache (refreshes the should_persist?/1 cache from
+  # server_config) is started alongside it — nothing to cache without a DB
+  # either.
+  # enhanced-logging/war-room-mode (design-decisions.md #4):
+  # Nebu.Web.LogStore.WarRoom (caches the single active war room session +
+  # owns the increment/timeout atomicity boundary) is started the same way,
+  # right alongside Writer/PolicyCache — nothing to cache without a DB
+  # either, and the same :permanent supervisor-restart contract applies (a
+  # crashed WarRoom is restarted under the same registered name; its own
+  # init/1 reloads the active session from the DB, immediately ending it if
+  # it is already past its max_duration_s deadline — AC5 across a restart).
+  # enhanced-logging/trace-map-node-controls: Nebu.Web.LogStore.CaptureCache
+  # (caches which off-list endpoints have an active temporary capture, for
+  # should_persist?/2's hot path) is started the same way — nothing to
+  # cache without a DB either.
   defp repo_children do
     if Application.get_env(:nebu, Nebu.Repo),
-      do: [Nebu.Repo, Nebu.Matrix.Session.Sweeper, Nebu.Matrix.Session.RefreshWorker],
+      do: [
+        Nebu.Repo,
+        Nebu.Matrix.Session.Sweeper,
+        Nebu.Matrix.Session.RefreshWorker,
+        Nebu.Web.LogStore.Writer,
+        Nebu.Web.LogStore.PolicyCache,
+        Nebu.Web.LogStore.WarRoom,
+        Nebu.Web.LogStore.CaptureCache
+      ],
       else: []
   end
 
@@ -141,7 +206,15 @@ defmodule Nebu.Application do
   # pure-unit children-count assertions are unaffected.
   defp admin_children do
     if Application.get_env(:nebu_http, :start_admin_endpoint, true) do
-      [{Phoenix.PubSub, name: Nebu.Admin.PubSub}, Nebu.Admin.Endpoint]
+      # enhanced-logging/operational-log-store: gave this child an explicit
+      # :id (default would be Phoenix.PubSub.Supervisor for every
+      # {Phoenix.PubSub, ...} child, colliding with the always-started
+      # Nebu.PubSub child above — Supervisor.start_link/2 rejects duplicate
+      # child ids).
+      [
+        Supervisor.child_spec({Phoenix.PubSub, name: Nebu.Admin.PubSub}, id: Nebu.Admin.PubSub),
+        Nebu.Admin.Endpoint
+      ]
     else
       []
     end

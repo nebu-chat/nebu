@@ -4,11 +4,26 @@ defmodule Nebu.Admin.DashboardLive do
 
   Landing page after login: system status (core health), instance info, and headline
   counts (users, rooms). Read-only; inline SQL per ADR-018.
+
+  ## War Room sidebar dot / topbar pill (enhanced-logging/war-room-dedicated-page, amendment 4)
+
+  Threads `:war_room_active`/`:war_room_started_at`/`:war_room_started_by`
+  through to `Nebu.Admin.Layouts.live/1` via the shared
+  `Nebu.Admin.WarRoomIndicator` helper, polled every 2s — this is one of
+  the small, fully-enumerable set of remaining admin LiveViews (the rest
+  were converted to plain HTTP controllers by admin-http-refactor), so
+  "visible from anywhere in the admin UI" only requires this same wiring on
+  `Nebu.Admin.AuditLogLive`/`Nebu.Admin.LogsLive`/
+  `Nebu.Admin.LogsLive.TraceMap`/`Nebu.Admin.LogsLive.WarRoom` too.
   """
   use Phoenix.LiveView, layout: {Nebu.Admin.Layouts, :live}
 
+  alias Nebu.Admin.WarRoomIndicator
+
   @impl Phoenix.LiveView
   def mount(_params, _session, socket) do
+    if connected?(socket) and Process.whereis(Nebu.Repo), do: WarRoomIndicator.schedule()
+
     {:ok,
      socket
      |> assign(:active_nav, "dashboard")
@@ -16,8 +31,17 @@ defmodule Nebu.Admin.DashboardLive do
      |> assign(:health, health())
      |> assign(:user_count, count("SELECT count(*) FROM users"))
      |> assign(:room_count, count("SELECT count(*) FROM rooms"))
-     |> assign(:server_config, server_config())}
+     |> assign(:server_config, server_config())
+     |> WarRoomIndicator.assign_status(WarRoomIndicator.status())}
   end
+
+  @impl Phoenix.LiveView
+  def handle_info(:refresh_war_room_status, socket) do
+    if Process.whereis(Nebu.Repo), do: WarRoomIndicator.schedule()
+    {:noreply, WarRoomIndicator.assign_status(socket, WarRoomIndicator.status())}
+  end
+
+  def handle_info(_other, socket), do: {:noreply, socket}
 
   @impl Phoenix.LiveView
   def render(assigns) do

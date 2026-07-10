@@ -1,0 +1,1055 @@
+<meta charset="utf-8">
+<title>Nebu Trace Map — Leitstand Design Dummy</title>
+<!--
+  Design dummy for the enhanced-logging Trace Map redesign ("Leitstand" radial map)
+  + Logs sidebar submenu (Live Stream / Trace Map / War Room).
+  Single-theme dark by deliberate choice: this IS the nebu "Obsidian" admin theme
+  (server/assets/tailwind.config.js) — the dummy must look like the real Admin UI.
+  All traffic is SIMULATED in-page; demo controls are clearly badged.
+-->
+<style>
+  :root {
+    --bg:        #0d1117;
+    --surface:   #111827;
+    --panel:     #1f2937;
+    --line:      #374151;
+    --text:      #f9fafb;
+    --text-2:    #9ca3af;
+    --text-3:    #4b5563;
+    --primary:   #f97316;
+    --primary-h: #ea580c;
+    --ok:        #22c55e;
+    --warn:      #f59e0b;
+    --err:       #ef4444;
+    --ok-bg:     #052e16;
+    --warn-bg:   #431407;
+    --err-bg:    #450a0a;
+    --sans: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--surface); color: var(--text);
+    font-family: var(--sans); font-size: 15px; line-height: 1.5;
+    overflow: hidden;
+  }
+  button { font-family: var(--sans); }
+
+  /* ── Shell ─────────────────────────────────────────────── */
+  .shell { display: flex; flex-direction: column; height: 100vh; }
+  .topbar {
+    height: 48px; background: var(--line); flex-shrink: 0;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 16px; gap: 12px;
+  }
+  .topbar .brand { font-weight: 600; }
+  .topbar-pills { display: flex; gap: 8px; align-items: center; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12px; letter-spacing: .06em; text-transform: uppercase;
+    padding: 3px 10px; border-radius: 999px; border: 1px solid var(--text-3);
+    color: var(--text-2); background: var(--surface);
+  }
+  .pill--warroom { border-color: var(--err); color: #fca5a5; display: none; }
+  .pill--warroom.on { display: inline-flex; }
+  .recdot {
+    width: 8px; height: 8px; border-radius: 50%; background: var(--err);
+    animation: recblink 1.2s ease-in-out infinite;
+  }
+  @keyframes recblink { 0%,100% { opacity: 1 } 50% { opacity: .25 } }
+
+  .body { display: flex; flex: 1; min-height: 0; }
+
+  /* ── Sidebar ───────────────────────────────────────────── */
+  .sidebar {
+    width: 240px; background: var(--panel); border-right: 1px solid var(--line);
+    display: flex; flex-direction: column; flex-shrink: 0;
+  }
+  .sidebar ul { list-style: none; margin: 0; padding: 8px; display: flex; flex-direction: column; gap: 2px; flex: 1; }
+  .sidebar ul ul { padding: 0 0 0 0; margin: 0; }
+  .nav-item, .nav-group-header {
+    display: flex; align-items: center; gap: 8px; width: 100%;
+    padding: 9px 12px; border-radius: 6px; font-size: 14px; font-weight: 500;
+    color: var(--text); text-decoration: none; background: none; border: none;
+    cursor: pointer; text-align: left;
+  }
+  .nav-item:hover, .nav-group-header:hover { background: var(--line); }
+  .nav-item:focus-visible, .nav-group-header:focus-visible, .btn:focus-visible {
+    outline: 2px solid var(--primary); outline-offset: 2px;
+  }
+  .nav-item[aria-current="page"] { background: var(--primary); color: #1c1917; font-weight: 600; }
+  .nav-sub .nav-item { padding-left: 34px; font-weight: 400; font-size: 13.5px; }
+  .nav-group-header .chev { font-size: 10px; color: var(--text-2); width: 12px; transition: transform .15s; }
+  .nav-group-header[aria-expanded="true"] .chev { transform: rotate(90deg); }
+  .nav-sub[hidden] { display: none; }
+  .navdot {
+    width: 8px; height: 8px; border-radius: 50%; background: var(--err);
+    margin-left: auto; animation: recblink 1.2s ease-in-out infinite; display: none;
+  }
+  .navdot.on { display: block; }
+  .sidebar .foot { padding: 8px; border-top: 1px solid var(--line); }
+
+  /* ── Views ─────────────────────────────────────────────── */
+  .view { display: none; flex: 1; min-width: 0; min-height: 0; }
+  .view.active { display: flex; }
+
+  /* ── Trace map view layout ─────────────────────────────── */
+  .tm { flex-direction: column; }
+  .tm-toolbar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--surface);
+  }
+  .tm-toolbar h1 { font-size: 16px; font-weight: 600; margin: 0 8px 0 0; letter-spacing: -0.01em; }
+  .badge-demo {
+    font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--warn); border: 1px dashed var(--warn); border-radius: 4px;
+    padding: 2px 8px;
+  }
+  .btn {
+    background: var(--panel); color: var(--text); border: 1px solid var(--line);
+    border-radius: 6px; padding: 5px 12px; font-size: 13px; cursor: pointer;
+  }
+  .btn:hover { background: var(--line); }
+  .btn--warn  { border-color: var(--warn); color: var(--warn); }
+  .btn--err   { border-color: var(--err);  color: #fca5a5; }
+  .btn--primary { background: var(--primary); border-color: var(--primary); color: #1c1917; font-weight: 600; }
+  .btn--primary:hover { background: var(--primary-h); }
+  .rate { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); }
+  .rate input { accent-color: var(--primary); width: 90px; }
+
+  .tm-main { display: flex; flex: 1; min-height: 0; }
+  .tm-left { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .tm-map { flex: 1; min-height: 0; background: var(--bg); position: relative; }
+  .tm-map svg { width: 100%; height: 100%; display: block; }
+
+  /* ── Map nodes ─────────────────────────────────────────── */
+  .edge { stroke: var(--line); stroke-width: 1; opacity: .55; }
+  .node { cursor: pointer; }
+  .node:focus { outline: none; }
+  .node .core { transition: stroke .25s, fill .25s, fill-opacity .25s, stroke-opacity .25s; }
+
+  .node--ok .core   { fill: var(--panel); fill-opacity: .35; stroke: var(--ok);   stroke-opacity: .55; stroke-width: 1.5; }
+  .node--warn .core { fill: var(--warn-bg); fill-opacity: .9; stroke: var(--warn); stroke-width: 2.5;
+                      filter: drop-shadow(0 0 6px rgba(245,158,11,.45)); }
+  .node--err .core  { fill: var(--err-bg);  fill-opacity: .95; stroke: var(--err); stroke-width: 3;
+                      filter: drop-shadow(0 0 10px rgba(239,68,68,.6));
+                      animation: errpulse 1.4s ease-in-out infinite; }
+  @keyframes errpulse {
+    0%,100% { stroke-opacity: 1;  filter: drop-shadow(0 0 10px rgba(239,68,68,.6)); }
+    50%     { stroke-opacity: .5; filter: drop-shadow(0 0 3px  rgba(239,68,68,.25)); }
+  }
+
+  .node--ok .nlabel   { fill: var(--text-2); opacity: .75; }
+  .node--warn .nlabel, .node--err .nlabel { fill: var(--text); opacity: 1; }
+  .nlabel  { font-family: var(--sans); font-size: 12px; text-anchor: middle; pointer-events: none; }
+  .ncount  { font-family: var(--mono); font-size: 11.5px; text-anchor: middle; fill: var(--text-2); pointer-events: none; }
+  .node--warn .ncount, .node--err .ncount { fill: var(--text); }
+  .nname-in { font-family: var(--sans); font-size: 13px; font-weight: 600; text-anchor: middle; fill: var(--text); pointer-events: none; }
+
+  /* Long-polling endpoints: logging off by default (gray, dashed), temporarily
+     enable-able by click. While temporarily capturing, the status stroke stays dashed. */
+  .node--off .core {
+    fill: var(--panel); fill-opacity: .15; stroke: var(--text-3); stroke-opacity: .8;
+    stroke-width: 1.5; stroke-dasharray: 4 4; filter: none; animation: none;
+  }
+  .node--off .nlabel, .node--off .ncount { fill: var(--text-3); opacity: 1; }
+  .node--temp .core { stroke-dasharray: 6 3; }
+  .ntimer { font-family: var(--mono); font-size: 9.5px; text-anchor: middle; fill: var(--text-2); pointer-events: none; display: none; }
+  .node--temp .ntimer { display: block; }
+
+  .selring { fill: none; stroke: var(--primary); stroke-width: 2.5; display: none; }
+  .node[aria-pressed="true"] .selring { display: block; }
+  .node:focus-visible .core { stroke: var(--primary); stroke-width: 3; stroke-opacity: 1; }
+
+  .sbadge { pointer-events: none; display: none; }
+  .node--warn .sbadge--warn, .node--err .sbadge--err { display: block; }
+  .sbadge circle { stroke: var(--bg); stroke-width: 1.5; }
+  .sbadge--warn circle { fill: var(--warn); }
+  .sbadge--err  circle { fill: var(--err); }
+  .sbadge text { font-family: var(--mono); font-size: 9.5px; font-weight: 700; fill: #1c1917; text-anchor: middle; }
+  /* black on red per theme error-content token (5.58:1) — white failed WCAG 1.4.3 (3.76:1), UX-gate V2 */
+  .sbadge--err text { fill: #000; }
+
+  .ping { fill: none; stroke-width: 2; animation: ping .7s ease-out forwards; pointer-events: none;
+          transform-box: fill-box; transform-origin: center; }
+  @keyframes ping { from { opacity: .55; } to { opacity: 0; transform: scale(1.55); } }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ping { display: none; }
+    .node--err .core { animation: none; }
+    .recdot, .navdot { animation: none; }
+  }
+
+  .map-hint {
+    position: absolute; left: 14px; bottom: 10px; font-size: 12px; color: var(--text-3);
+  }
+
+  /* ── Tooltip ───────────────────────────────────────────── */
+  .tooltip {
+    position: absolute; z-index: 20; pointer-events: none; display: none;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px 12px; font-size: 12.5px; min-width: 200px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.5);
+  }
+  .tooltip .t-name { font-weight: 600; font-size: 13px; }
+  .tooltip .t-route { font-family: var(--mono); font-size: 11.5px; color: var(--text-2); margin-bottom: 6px; }
+  .tooltip .t-row { display: flex; justify-content: space-between; gap: 16px; color: var(--text-2); }
+  .tooltip .t-row b { color: var(--text); font-family: var(--mono); font-weight: 500; }
+  .tooltip .t-cta { margin-top: 6px; color: var(--primary); font-size: 11.5px; }
+
+  /* ── Stream panel ──────────────────────────────────────── */
+  /* Drag handle between map and stream: resize the log table (pointer or arrow keys) */
+  .resizer {
+    height: 8px; flex-shrink: 0; cursor: row-resize; background: var(--surface);
+    border-top: 1px solid var(--line); display: flex; align-items: center;
+    justify-content: center; touch-action: none;
+  }
+  .resizer::before {
+    content: ""; width: 44px; height: 3px; border-radius: 2px; background: var(--line);
+  }
+  .resizer:hover::before, .resizer:focus-visible::before { background: var(--primary); }
+  .resizer:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+
+  .stream {
+    height: 218px; flex-shrink: 0; border-top: 1px solid var(--line);
+    display: flex; flex-direction: column; background: var(--surface);
+  }
+  .stream-head {
+    display: flex; align-items: center; gap: 8px; padding: 7px 14px;
+    border-bottom: 1px solid var(--line); flex-wrap: wrap; min-height: 40px;
+  }
+  .stream-head .cap { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-2); margin-right: 4px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 12px;
+    font-family: var(--mono); background: var(--panel); border: 1px solid var(--primary);
+    color: var(--text); border-radius: 999px; padding: 2px 10px; cursor: pointer;
+  }
+  .chip .x { color: var(--primary); font-weight: 700; }
+  .chip:hover { background: var(--line); }
+  .chip--clear { border-color: var(--line); color: var(--text-2); }
+  .lvl-filters { display: inline-flex; gap: 4px; margin-right: 8px; }
+  .lvlbtn {
+    font-family: var(--mono); font-size: 11px; font-weight: 700; padding: 2px 9px;
+    border-radius: 999px; border: 1px solid var(--line); background: transparent;
+    color: var(--text-3); cursor: pointer;
+  }
+  .lvlbtn:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+  .lvlbtn-DEBUG[aria-pressed="true"] { color: var(--text-2); border-color: var(--text-2); }
+  .lvlbtn-INFO[aria-pressed="true"]  { color: var(--text);   border-color: var(--text-2); }
+  .lvlbtn-WARN[aria-pressed="true"]  { color: var(--warn);   border-color: var(--warn); background: var(--warn-bg); }
+  .lvlbtn-ERROR[aria-pressed="true"] { color: #fca5a5;       border-color: var(--err);  background: var(--err-bg); }
+  .stream-body { flex: 1; overflow-y: auto; padding: 6px 14px; font-family: var(--mono); font-size: 12.5px; }
+  .logline { display: flex; gap: 10px; padding: 1.5px 0; white-space: nowrap; }
+  .logline .ts { color: var(--text-3); }
+  .lvl { width: 52px; flex-shrink: 0; font-weight: 700; }
+  .lvl-DEBUG { color: var(--text-3); } .lvl-INFO { color: var(--text-2); }
+  .lvl-WARN { color: var(--warn); } .lvl-ERROR { color: var(--err); }
+  .logline .rt { color: var(--text); } .logline .msg { color: var(--text-2); }
+
+  /* ── Inspector column ──────────────────────────────────── */
+  .inspector {
+    width: 320px; flex-shrink: 0; border-left: 1px solid var(--line);
+    background: var(--surface); overflow-y: auto; padding: 14px; display: flex;
+    flex-direction: column; gap: 14px;
+  }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+  .card h2 { margin: 0 0 10px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-2); font-weight: 600; }
+  .insp-name { font-weight: 600; font-size: 15px; }
+  .insp-route { font-family: var(--mono); font-size: 12px; color: var(--text-2); word-break: break-all; margin-bottom: 10px; }
+  .statuspill {
+    display: inline-flex; align-items: center; gap: 6px; border-radius: 999px;
+    font-size: 12px; font-weight: 600; padding: 2px 10px; margin-bottom: 10px;
+  }
+  .statuspill--ok   { background: var(--ok-bg);   color: var(--ok); }
+  .statuspill--warn { background: var(--warn-bg); color: var(--warn); }
+  .statuspill--err  { background: var(--err-bg);  color: #fca5a5; }
+  .statuspill--off  { background: var(--line);    color: var(--text-2); }
+  .kv { display: flex; justify-content: space-between; font-size: 13px; color: var(--text-2); padding: 3px 0; }
+  .kv b { font-family: var(--mono); font-weight: 500; color: var(--text); }
+  .insp-empty { color: var(--text-3); font-size: 13px; }
+  .legend-row { display: flex; align-items: center; gap: 10px; padding: 5px 0; font-size: 13px; color: var(--text-2); }
+  .legend-dot { width: 18px; height: 18px; border-radius: 50%; flex-shrink: 0; }
+  .legend-dot--ok   { background: rgba(31,41,55,.35); border: 1.5px solid rgba(34,197,94,.55); }
+  .legend-dot--warn { background: var(--warn-bg); border: 2.5px solid var(--warn); }
+  .legend-dot--err  { background: var(--err-bg);  border: 3px solid var(--err); }
+  .legend-dot--sel  { border: 2.5px solid var(--primary); background: transparent; }
+  .legend-dot--off  { border: 1.5px dashed var(--text-3); background: transparent; }
+  .legend-dot--temp { border: 2px dashed var(--ok); background: rgba(31,41,55,.35); }
+  .mini-events { font-family: var(--mono); font-size: 11.5px; color: var(--text-2); }
+  .mini-events div { padding: 1px 0; }
+
+  /* Per-node logging controls in the inspector */
+  .ctl-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 4px 0; font-size: 13px; color: var(--text-2); }
+  .ctl-row select {
+    background: var(--surface); border: 1px solid var(--line); color: var(--text);
+    border-radius: 6px; padding: 4px 8px; font-family: var(--mono); font-size: 12px;
+  }
+  .ctl-row select:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+  .ctl-note { font-size: 11.5px; color: var(--text-3); margin-top: 6px; }
+  .ctl-capture { margin-top: 10px; display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12.5px; color: var(--text-2); }
+  .ctl-capture b { font-family: var(--mono); font-weight: 500; color: var(--text); }
+
+  /* War-room banner across the trace map view */
+  .wr-banner {
+    display: flex; align-items: center; gap: 10px; padding: 8px 16px;
+    background: var(--err-bg); border-bottom: 1px solid var(--err);
+    color: #fca5a5; font-size: 13.5px;
+  }
+  .wr-banner b { font-family: var(--mono); font-weight: 500; color: var(--text); }
+  .wr-banner .btn { margin-left: auto; border-color: var(--err); color: #fca5a5; }
+  .wr-banner[hidden] { display: none; }
+
+  /* ── War room / placeholder views ──────────────────────── */
+  .simplepage { flex-direction: column; padding: 28px; overflow-y: auto; gap: 16px; }
+  .simplepage h1 { font-size: 24px; font-weight: 600; letter-spacing: -0.02em; margin: 0; }
+  .simplepage p.lead { color: var(--text-2); max-width: 62ch; margin: 0; }
+  .wr-card { max-width: 560px; }
+  .wr-status { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; font-size: 14px; }
+  .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+  .field label { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-2); }
+  .field input {
+    background: var(--surface); border: 1px solid var(--line); color: var(--text);
+    border-radius: 6px; padding: 7px 10px; font-family: var(--mono); font-size: 13px; width: 180px;
+  }
+  .field input:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+  .placeholder { color: var(--text-3); font-size: 14px; }
+
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+</style>
+
+<div class="shell">
+  <header class="topbar" role="banner">
+    <span class="brand">Nebu Admin</span>
+    <div class="topbar-pills">
+      <span class="pill pill--warroom" id="wr-pill"><span class="recdot"></span>War Room recording · <span id="wr-pill-time">00:00</span></span>
+      <span class="pill">Design Dummy</span>
+    </div>
+  </header>
+
+  <div class="body">
+    <nav class="sidebar" aria-label="Admin navigation">
+      <ul role="list">
+        <li><a class="nav-item" href="#" data-view="placeholder">Dashboard</a></li>
+        <li><a class="nav-item" href="#" data-view="placeholder">Compliance</a></li>
+        <li>
+          <button class="nav-group-header" aria-expanded="true" aria-controls="sub-logs" id="grp-logs">
+            <span class="chev" aria-hidden="true">▶</span>Logs
+          </button>
+          <ul class="nav-sub" id="sub-logs" role="list">
+            <li><a class="nav-item" href="#" data-view="livestream">Live Stream</a></li>
+            <li><a class="nav-item" href="#" data-view="tracemap" aria-current="page">Trace Map</a></li>
+            <li><a class="nav-item" href="#" data-view="warroom">War Room<span class="navdot" id="wr-navdot" aria-hidden="true"></span></a></li>
+          </ul>
+        </li>
+        <li><a class="nav-item" href="#" data-view="placeholder">Users</a></li>
+        <li><a class="nav-item" href="#" data-view="placeholder">Rooms</a></li>
+        <li><a class="nav-item" href="#" data-view="placeholder">Spaces</a></li>
+        <li>
+          <button class="nav-group-header" aria-expanded="false" aria-controls="sub-config" id="grp-config">
+            <span class="chev" aria-hidden="true">▶</span>Configuration
+          </button>
+          <ul class="nav-sub" id="sub-config" role="list" hidden>
+            <li><a class="nav-item" href="#" data-view="placeholder">General</a></li>
+            <li><a class="nav-item" href="#" data-view="placeholder">Role Mapping</a></li>
+            <li><a class="nav-item" href="#" data-view="placeholder">Claim Mapping</a></li>
+          </ul>
+        </li>
+      </ul>
+      <div class="foot"><a class="nav-item" href="#" onclick="return false">Logout</a></div>
+    </nav>
+
+    <!-- ── Trace Map view ─────────────────────────────────── -->
+    <main class="view tm active" id="view-tracemap" role="main" aria-label="Trace Map">
+      <div class="tm-toolbar">
+        <h1>Trace Map</h1>
+        <span class="badge-demo">Demo · simulated traffic</span>
+        <span style="flex:1"></span>
+        <span class="rate">Traffic <input type="range" id="rate" min="0.3" max="3" step="0.1" value="1" aria-label="Simulated traffic rate"></span>
+        <button class="btn" id="btn-pause">Pause</button>
+        <button class="btn btn--warn" id="btn-warn">Inject WARN</button>
+        <button class="btn btn--err" id="btn-err">Inject ERROR</button>
+        <button class="btn btn--err" id="btn-scenario">Scenario: media outage (30&thinsp;s)</button>
+        <button class="btn" id="btn-reset">Heal all</button>
+      </div>
+
+      <div class="wr-banner" id="wr-banner" hidden>
+        <span class="recdot" aria-hidden="true"></span>
+        <span>War Room session active — capturing <b>@alice:nebu.example</b> · <span id="wr-banner-time">00:00</span></span>
+        <button class="btn" id="wr-banner-open">Open War Room</button>
+      </div>
+
+      <div class="tm-main">
+        <div class="tm-left">
+          <div class="tm-map" id="map-wrap">
+            <svg id="map" viewBox="-560 -400 1120 800" preserveAspectRatio="xMidYMid meet" role="group" aria-label="Service health map"></svg>
+            <div class="tooltip" id="tooltip"></div>
+            <div class="map-hint">Click a node to filter the stream · gray long-polling nodes activate on click · click <b>nebu</b> to clear · Tab + Enter works too</div>
+          </div>
+
+          <div class="resizer" id="stream-resizer" role="separator" aria-orientation="horizontal"
+               aria-label="Resize log stream (drag, or arrow up/down; double-click resets)" tabindex="0"></div>
+
+          <section class="stream" id="stream-panel" aria-label="Live log stream">
+            <div class="stream-head">
+              <span class="cap">Live stream</span>
+              <span class="lvl-filters" role="group" aria-label="Level filter">
+                <button class="lvlbtn lvlbtn-DEBUG" data-level="DEBUG" aria-pressed="true">DEBUG</button>
+                <button class="lvlbtn lvlbtn-INFO"  data-level="INFO"  aria-pressed="true">INFO</button>
+                <button class="lvlbtn lvlbtn-WARN"  data-level="WARN"  aria-pressed="true">WARN</button>
+                <button class="lvlbtn lvlbtn-ERROR" data-level="ERROR" aria-pressed="true">ERROR</button>
+              </span>
+              <span id="chips" style="display:contents"></span>
+            </div>
+            <div class="stream-body" id="stream" tabindex="0"></div>
+          </section>
+        </div>
+
+        <aside class="inspector" aria-label="Node inspector">
+          <div class="card" id="insp">
+            <h2>Node inspector</h2>
+            <div class="insp-empty">Hover or select a node to see its live health details.</div>
+          </div>
+          <div class="card">
+            <h2>Legend</h2>
+            <div class="legend-row"><span class="legend-dot legend-dot--ok"></span>Healthy — recedes into the background</div>
+            <div class="legend-row"><span class="legend-dot legend-dot--warn"></span><span>▲ Warnings in the last 60&thinsp;s</span></div>
+            <div class="legend-row"><span class="legend-dot legend-dot--err"></span><span>✕ Errors in the last 60&thinsp;s — pulses</span></div>
+            <div class="legend-row"><span class="legend-dot legend-dot--sel"></span>Selected as stream filter</div>
+            <div class="legend-row"><span class="legend-dot legend-dot--off"></span>Long-polling endpoint — logging off by default; click to capture for 5&thinsp;min</div>
+            <div class="legend-row"><span class="legend-dot legend-dot--temp"></span>Dashed = temporary capture, falls back to off automatically</div>
+            <div class="legend-row" style="color:var(--text-3); font-size:12px;">Domains inherit the worst status of their satellites; nebu inherits the worst domain. Nodes heal automatically once the 60&thinsp;s window passes.</div>
+          </div>
+        </aside>
+      </div>
+    </main>
+
+    <!-- ── Live Stream view (mock) ────────────────────────── -->
+    <main class="view simplepage" id="view-livestream" role="main" aria-label="Live Stream">
+      <h1>Live Stream</h1>
+      <p class="lead">The existing full log stream with level filters lives here — unchanged by this redesign. The Trace Map becomes its own sibling page focused purely on at-a-glance health.</p>
+      <p class="placeholder">(Not part of this design dummy.)</p>
+    </main>
+
+    <!-- ── War Room view (mock) ───────────────────────────── -->
+    <main class="view simplepage" id="view-warroom" role="main" aria-label="War Room">
+      <h1>War Room</h1>
+      <p class="lead">Targeted debug capture for a single user or device. As its own page under Logs, a running session is visible from anywhere: the sidebar shows a recording dot, the topbar a recording pill.</p>
+      <div class="card wr-card">
+        <h2>Session</h2>
+        <div class="wr-status" id="wr-status"><span class="legend-dot legend-dot--ok"></span>No active session</div>
+        <div class="field"><label for="wr-user">User ID</label><input id="wr-user" value="@alice:nebu.example"></div>
+        <div class="field"><label for="wr-entries">Max entries</label><input id="wr-entries" value="100" inputmode="numeric"></div>
+        <div class="field"><label for="wr-duration">Max duration (s)</label><input id="wr-duration" value="300" inputmode="numeric"></div>
+        <button class="btn btn--primary" id="wr-toggle">Start capture</button>
+        <div class="kv" style="margin-top:12px"><span>Captured entries</span><b id="wr-count">–</b></div>
+      </div>
+    </main>
+
+    <!-- ── Placeholder view ───────────────────────────────── -->
+    <main class="view simplepage" id="view-placeholder" role="main" aria-label="Placeholder">
+      <h1 id="ph-title">Dashboard</h1>
+      <p class="placeholder">(Not part of this design dummy.)</p>
+    </main>
+  </div>
+</div>
+
+<div class="sr-only" role="status" aria-live="polite" id="announcer"></div>
+
+<script>
+(() => {
+  'use strict';
+
+  /* ── Model ──────────────────────────────────────────────── */
+  const MODEL = [
+    { key: 'matrix-client', label: 'Matrix Client', route: '/_matrix/client', angle: -48, children: [
+      { key: 'sync',     label: 'sync',     route: '/_matrix/client/v3/sync',                 w: 30, off: true },
+      { key: 'send',     label: 'send',     route: '/_matrix/client/v3/rooms/{id}/send',      w: 12 },
+      { key: 'messages', label: 'messages', route: '/_matrix/client/v3/rooms/{id}/messages',  w: 10 },
+      { key: 'login',    label: 'login',    route: '/_matrix/client/v3/login',                w: 4  },
+      { key: 'profile',  label: 'profile',  route: '/_matrix/client/v3/profile/{userId}',     w: 3  },
+      { key: 'keys',     label: 'keys',     route: '/_matrix/client/v3/keys/query',           w: 5  },
+    ]},
+    { key: 'matrix-media', label: 'Matrix Media', route: '/_matrix/media', angle: 48, children: [
+      { key: 'upload',    label: 'upload',    route: '/_matrix/media/v3/upload',              w: 6  },
+      { key: 'download',  label: 'download',  route: '/_matrix/media/v3/download/{mediaId}',  w: 10 },
+      { key: 'thumbnail', label: 'thumbnail', route: '/_matrix/media/v3/thumbnail/{mediaId}', w: 8  },
+    ]},
+    { key: 'admin', label: 'Admin', route: '/admin', angle: 132, children: [
+      { key: 'adm-users',      label: 'users',      route: '/admin/users',      w: 3 },
+      { key: 'adm-rooms',      label: 'rooms',      route: '/admin/rooms',      w: 3 },
+      { key: 'adm-logs',       label: 'logs',       route: '/admin/logs',       w: 6 },
+      { key: 'adm-config',     label: 'config',     route: '/admin/config',     w: 1 },
+      { key: 'adm-compliance', label: 'compliance', route: '/admin/compliance', w: 1 },
+      { key: 'keepalive',      label: 'keepalive',  route: '/admin/keepalive',  w: 6, off: true },
+    ]},
+    { key: 'health', label: 'Health', route: '/health', angle: -132, children: [
+      { key: 'healthz', label: 'health', route: '/health', w: 5, off: true },
+    ]},
+  ];
+
+  const R1 = 195, R2 = 128, R_CENTER = 52, R_DOMAIN = 38, R_SAT = 24;
+  const WINDOW_MS = 60000;
+  const CAPTURE_MS = 60000; // demo-shortened; the real feature proposes 5 min
+  const LV = { DEBUG: 0, INFO: 1, WARN: 2, ERROR: 3 };
+  const rad = d => d * Math.PI / 180;
+
+  // Flat node registry: key -> {key,label,route,r,x,y,parent,children[],events[],off,captureUntil,minLevel}
+  const nodes = new Map();
+  nodes.set('nebu', { key: 'nebu', label: 'nebu', route: 'all traffic', r: R_CENTER, x: 0, y: 0, parent: null, children: [], events: [], off: false, captureUntil: 0, minLevel: 'DEBUG' });
+
+  for (const dom of MODEL) {
+    const dx = Math.cos(rad(dom.angle)) * R1, dy = Math.sin(rad(dom.angle)) * R1;
+    const d = { key: dom.key, label: dom.label, route: dom.route, r: R_DOMAIN, x: dx, y: dy, parent: 'nebu', children: [], events: [], off: false, captureUntil: 0, minLevel: 'DEBUG' };
+    nodes.set(dom.key, d);
+    nodes.get('nebu').children.push(dom.key);
+    const n = dom.children.length;
+    const spread = Math.min(130, n * 26);
+    dom.children.forEach((c, i) => {
+      const a = n === 1 ? dom.angle : dom.angle - spread / 2 + (spread / (n - 1)) * i;
+      const s = { key: c.key, label: c.label, route: c.route, w: c.w, r: R_SAT,
+                  x: dx + Math.cos(rad(a)) * R2, y: dy + Math.sin(rad(a)) * R2,
+                  parent: dom.key, children: [], events: [],
+                  off: !!c.off, captureUntil: 0, minLevel: 'DEBUG' };
+      nodes.set(c.key, s);
+      d.children.push(c.key);
+    });
+  }
+  const satellites = [...nodes.values()].filter(n => n.children.length === 0);
+  const totalWeight = satellites.reduce((s, n) => s + n.w, 0);
+
+  /* ── SVG construction ───────────────────────────────────── */
+  const svg = document.getElementById('map');
+  const NS = 'http://www.w3.org/2000/svg';
+  const el = (tag, attrs = {}) => {
+    const e = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+    return e;
+  };
+
+  const gEdges = el('g'), gPings = el('g'), gNodes = el('g');
+  svg.append(gEdges, gPings, gNodes);
+
+  function edge(a, b) {
+    const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy);
+    const ux = dx / len, uy = dy / len;
+    gEdges.append(el('line', {
+      class: 'edge',
+      x1: a.x + ux * (a.r + 4), y1: a.y + uy * (a.r + 4),
+      x2: b.x - ux * (b.r + 4), y2: b.y - uy * (b.r + 4),
+    }));
+  }
+  for (const n of nodes.values()) if (n.parent) edge(nodes.get(n.parent), n);
+
+  const nodeEls = new Map();
+  for (const n of nodes.values()) {
+    const isCenter = n.key === 'nebu', isDomain = !isCenter && n.children.length > 0;
+    const g = el('g', {
+      class: 'node node--ok', transform: `translate(${n.x} ${n.y})`,
+      tabindex: 0, role: 'button', 'aria-pressed': 'false', 'data-key': n.key,
+    });
+    g.append(el('circle', { class: 'selring', r: n.r + 7 }));
+    g.append(el('circle', { class: 'core', r: n.r }));
+
+    if (isCenter) {
+      const t1 = el('text', { class: 'nname-in', y: -2 }); t1.textContent = 'nebu';
+      const t2 = el('text', { class: 'ncount', y: 16 }); t2.textContent = '0/min';
+      g.append(t1, t2);
+    } else if (isDomain) {
+      const t1 = el('text', { class: 'nname-in', y: -1, style: 'font-size:12.5px' }); t1.textContent = n.label;
+      const t2 = el('text', { class: 'ncount', y: 14 }); t2.textContent = '0';
+      g.append(t1, t2);
+    } else {
+      const t2 = el('text', { class: 'ncount', y: n.off ? 0 : 4 }); t2.textContent = '0';
+      const t1 = el('text', { class: 'nlabel', y: n.r + 15 }); t1.textContent = n.label;
+      g.append(t2, t1);
+      if (n.off) {
+        const tt = el('text', { class: 'ntimer', y: 13 }); tt.textContent = '';
+        g.append(tt);
+      }
+    }
+    for (const [kind, icon] of [['warn', '▲'], ['err', '✕']]) {
+      const b = el('g', { class: `sbadge sbadge--${kind}`, transform: `translate(${n.r * 0.72} ${-n.r * 0.72})` });
+      b.append(el('circle', { r: 9 }));
+      const t = el('text', { y: 3.5 }); t.textContent = icon;
+      b.append(t);
+      g.append(b);
+    }
+    gNodes.append(g);
+    nodeEls.set(n.key, g);
+  }
+
+  /* ── Simulation ─────────────────────────────────────────── */
+  const logMsgs = {
+    DEBUG: ['request accepted', 'session token verified', 'db pool checkout 0.4ms'],
+    INFO:  ['200 in 12ms', '200 in 34ms', '200 in 8ms', '201 in 41ms'],
+    WARN:  ['slow query 480ms', 'retry 1/3 after timeout', 'rate limit near threshold', '429 too many requests'],
+    ERROR: ['500 internal server error', 'db connection refused', 'upstream timeout after 5s', 'S3 object store unreachable'],
+  };
+  const state = {
+    paused: false, rate: 1, selected: new Set(), scenarioUntil: 0,
+    levels: new Set(['DEBUG', 'INFO', 'WARN', 'ERROR']),
+    logs: [], lastAnnounce: 0, statusCache: new Map(),
+    wrActive: false, wrStart: 0, wrCount: 0,
+  };
+
+  function pickSatellite() {
+    let x = Math.random() * totalWeight;
+    for (const s of satellites) { x -= s.w; if (x <= 0) return s; }
+    return satellites[satellites.length - 1];
+  }
+
+  const satOff = n => n.off && Date.now() >= n.captureUntil;
+  const fmt = s => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+
+  function enableCapture(n) {
+    n.captureUntil = Date.now() + CAPTURE_MS;
+    document.getElementById('announcer').textContent = `Capture enabled on ${n.route} for 5 minutes`;
+    renderTick();
+  }
+
+  function recordEvent(sat, level, now) {
+    if (satOff(sat)) return;                    // logging disabled: no data at all
+    if (LV[level] < LV[sat.minLevel]) return;   // below the endpoint's min level: not logged
+    const ev = { t: now, level };
+    sat.events.push(ev);
+    nodes.get(sat.parent).events.push(ev);
+    nodes.get('nebu').events.push(ev);
+    ping(sat, level);
+    if (level === 'WARN' || level === 'ERROR') ping(nodes.get(sat.parent), level);
+    pushLog(sat, level, now);
+    if (state.wrActive) { state.wrCount++; }
+  }
+
+  function simTick() {
+    if (state.paused) return;
+    const now = Date.now();
+    const scenario = now < state.scenarioUntil;
+    const n = Math.random() < 0.35 * state.rate ? 2 : (Math.random() < 0.85 * state.rate ? 1 : 0);
+    for (let i = 0; i < n; i++) {
+      const sat = pickSatellite();
+      let level = Math.random() < 0.62 ? 'INFO' : 'DEBUG';
+      if (Math.random() < 0.004) level = 'WARN';
+      if (scenario && (sat.key === 'download' || sat.key === 'thumbnail') && Math.random() < 0.75) level = 'ERROR';
+      recordEvent(sat, level, now);
+    }
+  }
+
+  function inject(level) {
+    const sat = pickSatellite();
+    recordEvent(sat, level, Date.now());
+  }
+
+  /* ── Status + rendering ─────────────────────────────────── */
+  function counts(node, now) {
+    node.events = node.events.filter(e => now - e.t < WINDOW_MS);
+    let warn = 0, err = 0;
+    for (const e of node.events) { if (e.level === 'WARN') warn++; else if (e.level === 'ERROR') err++; }
+    return { total: node.events.length, warn, err };
+  }
+  const statusOf = c => c.err > 0 ? 'err' : c.warn > 0 ? 'warn' : 'ok';
+
+  function renderTick() {
+    const now = Date.now();
+    for (const n of nodes.values()) {
+      const c = counts(n, now);
+      const st = statusOf(c);
+      const g = nodeEls.get(n.key);
+      const isSat = n.children.length === 0;
+      const off = isSat && satOff(n);
+      const temp = n.off && !satOff(n);
+      g.setAttribute('class', off ? 'node node--off' : `node node--${st}${temp ? ' node--temp' : ''}`);
+      if (n.off) {
+        const tt = g.querySelector('.ntimer');
+        if (tt) tt.textContent = temp ? fmt(Math.ceil((n.captureUntil - now) / 1000)) : '';
+      }
+      if (off) {
+        g.querySelector('.ncount').textContent = 'off';
+        g.setAttribute('aria-label', `${n.route} — logging disabled (long-polling endpoint), press Enter to capture for 5 minutes`);
+        state.statusCache.set(n.key, 'off');
+        continue;
+      }
+      const prev = state.statusCache.get(n.key);
+      if (st === 'err' && prev !== 'err' && n.children.length === 0 && now - state.lastAnnounce > 4000) {
+        state.lastAnnounce = now;
+        document.getElementById('announcer').textContent = `Error on ${n.route}`;
+      }
+      state.statusCache.set(n.key, st);
+
+      const countEl = g.querySelector('.ncount');
+      if (n.key === 'nebu') countEl.textContent = `${c.total}/min`;
+      else countEl.textContent = String(c.total);
+
+      for (const [kind, val] of [['warn', c.warn], ['err', c.err]]) {
+        const t = g.querySelector(`.sbadge--${kind} text`);
+        if (val > 0 && ((kind === 'err' && st === 'err') || (kind === 'warn' && st === 'warn'))) t.textContent = val > 9 ? '9+' : String(val);
+        else t.textContent = kind === 'warn' ? '▲' : '✕';
+      }
+      g.setAttribute('aria-label',
+        `${n.key === 'nebu' ? 'nebu (all traffic)' : n.route} — status ${st === 'ok' ? 'healthy' : st === 'warn' ? 'warning' : 'ERROR'}, ` +
+        `${c.total} requests, ${c.warn} warnings, ${c.err} errors in the last 60 seconds`);
+    }
+    renderInspector();
+    document.getElementById('wr-banner').hidden = !state.wrActive;
+    if (state.wrActive) renderWarRoom();
+  }
+
+  function ping(node, level) {
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    if (gPings.childElementCount > 24) return;
+    const color = level === 'ERROR' ? 'var(--err)' : level === 'WARN' ? 'var(--warn)' : 'var(--ok)';
+    const wrap = el('g', { transform: `translate(${node.x} ${node.y})` });
+    const inner = el('circle', { class: 'ping', r: node.r, stroke: color });
+    wrap.append(inner);
+    gPings.append(wrap);
+    setTimeout(() => wrap.remove(), 750);
+  }
+
+  /* ── Log stream ─────────────────────────────────────────── */
+  const streamEl = document.getElementById('stream');
+  function pushLog(sat, level, now) {
+    const d = new Date(now);
+    const ts = d.toTimeString().slice(0, 8) + '.' + String(d.getMilliseconds()).padStart(3, '0');
+    const msg = logMsgs[level][Math.floor(Math.random() * logMsgs[level].length)];
+    state.logs.push({ ts, level, sat, msg });
+    if (state.logs.length > 400) state.logs.shift();
+
+    if (!logVisible(sat, level)) return;
+    const line = document.createElement('div');
+    line.className = 'logline';
+    line.innerHTML = `<span class="ts">${ts}</span><span class="lvl lvl-${level}">${level}</span>` +
+      `<span class="rt">${escapeHtml(sat.route)}</span><span class="msg">${escapeHtml(msg)}</span>`;
+    streamEl.append(line);
+    while (streamEl.childElementCount > 250) streamEl.firstElementChild.remove();
+    if (!streamEl.matches(':hover')) streamEl.scrollTop = streamEl.scrollHeight;
+  }
+  function escapeHtml(s) { return s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+  function logVisible(sat, level) {
+    if (!state.levels.has(level)) return false;
+    if (state.selected.size === 0) return true;
+    return state.selected.has(sat.key) || state.selected.has(sat.parent);
+  }
+  function rebuildStream() {
+    streamEl.innerHTML = '';
+    for (const l of state.logs.slice(-250)) {
+      if (!logVisible(l.sat, l.level)) continue;
+      const line = document.createElement('div');
+      line.className = 'logline';
+      line.innerHTML = `<span class="ts">${l.ts}</span><span class="lvl lvl-${l.level}">${l.level}</span>` +
+        `<span class="rt">${escapeHtml(l.sat.route)}</span><span class="msg">${escapeHtml(l.msg)}</span>`;
+      streamEl.append(line);
+    }
+    streamEl.scrollTop = streamEl.scrollHeight;
+  }
+
+  /* ── Selection / filter chips ───────────────────────────── */
+  const chipsEl = document.getElementById('chips');
+  function toggleSelect(key) {
+    if (key === 'nebu') { state.selected.clear(); }
+    else if (state.selected.has(key)) state.selected.delete(key);
+    else state.selected.add(key);
+    for (const [k, g] of nodeEls) g.setAttribute('aria-pressed', String(state.selected.has(k)));
+    renderChips();
+    rebuildStream();
+  }
+  function renderChips() {
+    chipsEl.querySelectorAll('.chip').forEach(c => c.remove());
+    for (const key of state.selected) {
+      const n = nodes.get(key);
+      const b = document.createElement('button');
+      b.className = 'chip';
+      b.innerHTML = `${escapeHtml(n.route)} <span class="x" aria-hidden="true">×</span>`;
+      b.setAttribute('aria-label', `Remove filter ${n.route}`);
+      b.onclick = () => toggleSelect(key);
+      chipsEl.append(b);
+    }
+    if (state.selected.size > 0) {
+      const clear = document.createElement('button');
+      clear.className = 'chip chip--clear';
+      clear.textContent = 'Clear all';
+      clear.onclick = () => toggleSelect('nebu');
+      chipsEl.append(clear);
+    }
+  }
+
+  /* ── Tooltip + inspector ────────────────────────────────── */
+  const tooltip = document.getElementById('tooltip');
+  const mapWrap = document.getElementById('map-wrap');
+  let inspectKey = null;
+
+  function showTooltip(key, evt) {
+    const n = nodes.get(key);
+    if (n.children.length === 0 && satOff(n)) {
+      tooltip.innerHTML =
+        `<div class="t-name">${escapeHtml(n.label)}</div>` +
+        `<div class="t-route">${escapeHtml(n.route)}</div>` +
+        `<div class="t-row"><span>Status</span><b>logging off</b></div>` +
+        `<div class="t-row"><span>Reason</span><b>long-polling</b></div>` +
+        `<div class="t-cta">Click to capture for 5 min</div>`;
+      tooltip.style.display = 'block';
+      positionTooltip(evt);
+      return;
+    }
+    const c = counts(n, Date.now());
+    const st = statusOf(c);
+    tooltip.innerHTML =
+      `<div class="t-name">${escapeHtml(n.label)}</div>` +
+      `<div class="t-route">${escapeHtml(n.route)}</div>` +
+      `<div class="t-row"><span>Status</span><b>${st === 'ok' ? 'healthy' : st === 'warn' ? 'warning ▲' : 'ERROR ✕'}</b></div>` +
+      `<div class="t-row"><span>Requests / 60 s</span><b>${c.total}</b></div>` +
+      `<div class="t-row"><span>Warnings</span><b>${c.warn}</b></div>` +
+      `<div class="t-row"><span>Errors</span><b>${c.err}</b></div>` +
+      `<div class="t-cta">${key === 'nebu' ? 'Click to clear all filters' : 'Click to toggle stream filter'}</div>`;
+    tooltip.style.display = 'block';
+    positionTooltip(evt);
+  }
+  function positionTooltip(evt) {
+    const r = mapWrap.getBoundingClientRect();
+    let x = evt.clientX - r.left + 16, y = evt.clientY - r.top + 12;
+    if (x + 230 > r.width) x -= 250;
+    if (y + 150 > r.height) y -= 160;
+    tooltip.style.left = x + 'px'; tooltip.style.top = y + 'px';
+  }
+
+  // The inspector doubles as the per-node logging control panel. It is BUILT once
+  // per inspected node (so the level/retention selects keep focus and value) and
+  // only its live stats are UPDATED on every tick.
+  let inspectorBuiltFor = null;
+
+  function descendantSatellites(n) {
+    if (n.children.length === 0) return [n];
+    return n.children.flatMap(k => descendantSatellites(nodes.get(k)));
+  }
+
+  function renderInspector() {
+    if (!inspectKey) return;
+    if (inspectorBuiltFor !== inspectKey) buildInspector();
+    updateInspectorStats();
+  }
+
+  function buildInspector() {
+    const n = nodes.get(inspectKey);
+    inspectorBuiltFor = inspectKey;
+    const isSat = n.children.length === 0;
+    const box = document.getElementById('insp');
+    const levelOpts = ['DEBUG', 'INFO', 'WARN', 'ERROR']
+      .map(l => `<option${l === n.minLevel ? ' selected' : ''}>${l}</option>`).join('');
+    box.innerHTML =
+      `<h2>Node inspector</h2>` +
+      `<div class="insp-name">${escapeHtml(n.label)}</div>` +
+      `<div class="insp-route">${escapeHtml(n.route)}</div>` +
+      `<div id="insp-pill"></div>` +
+      `<div class="kv"><span>Requests / 60 s</span><b id="insp-total">–</b></div>` +
+      `<div class="kv"><span>Warnings / 60 s</span><b id="insp-warn">–</b></div>` +
+      `<div class="kv"><span>Errors / 60 s</span><b id="insp-err">–</b></div>` +
+      `<h2 style="margin-top:12px">Logging</h2>` +
+      `<div class="ctl-row"><label for="ctl-level">Min level</label><select id="ctl-level">${levelOpts}</select></div>` +
+      `<div class="ctl-row"><label for="ctl-retention">Retention</label><select id="ctl-retention">` +
+      `<option>1 h</option><option selected>24 h</option><option>7 d</option><option>30 d</option></select></div>` +
+      (isSat && n.off
+        ? `<div class="ctl-capture"><span id="cap-state">Logging off (long-polling)</span>` +
+          `<button class="btn" id="cap-btn">Enable for 5 min</button></div>` +
+          `<div class="ctl-note">Long-polling endpoints stay off by default and fall back automatically.</div>`
+        : '') +
+      (!isSat
+        ? `<div class="ctl-note">Applies to all endpoints ${n.key === 'nebu' ? 'on the map' : 'in this domain'}.</div>`
+        : '') +
+      `<h2 style="margin-top:12px">Recent events</h2><div class="mini-events" id="insp-events"></div>`;
+
+    box.querySelector('#ctl-level').onchange = e => {
+      const lv = e.target.value;
+      n.minLevel = lv;
+      for (const s of descendantSatellites(n)) s.minLevel = lv;
+      document.getElementById('announcer').textContent = `Min level ${lv} set on ${n.route}`;
+    };
+    const capBtn = box.querySelector('#cap-btn');
+    if (capBtn) capBtn.onclick = () => {
+      if (satOff(n)) enableCapture(n);
+      else { n.captureUntil = 0; renderTick(); }
+      updateInspectorStats();
+    };
+  }
+
+  function updateInspectorStats() {
+    const n = nodes.get(inspectKey);
+    const c = counts(n, Date.now());
+    const st = statusOf(c);
+    const isSat = n.children.length === 0;
+    const off = isSat && satOff(n);
+    document.getElementById('insp-pill').innerHTML = off
+      ? `<div class="statuspill statuspill--off">◌ logging off</div>`
+      : `<div class="statuspill statuspill--${st}">${st === 'ok' ? '● healthy' : st === 'warn' ? '▲ warning' : '✕ error'}</div>`;
+    document.getElementById('insp-total').textContent = off ? '–' : String(c.total);
+    document.getElementById('insp-warn').textContent = off ? '–' : String(c.warn);
+    document.getElementById('insp-err').textContent = off ? '–' : String(c.err);
+    document.getElementById('insp-events').innerHTML = off ? '<div>—</div>' :
+      (n.events.slice(-5).reverse().map(e => {
+        const d = new Date(e.t);
+        return `<div>${d.toTimeString().slice(0, 8)} · ${e.level}</div>`;
+      }).join('') || '<div>—</div>');
+    const capState = document.getElementById('cap-state');
+    const capBtn = document.getElementById('cap-btn');
+    if (capState && capBtn) {
+      if (off) { capState.textContent = 'Logging off (long-polling)'; capBtn.textContent = 'Enable for 5 min'; }
+      else {
+        capState.innerHTML = `Capture active · <b>${fmt(Math.ceil((n.captureUntil - Date.now()) / 1000))}</b>`;
+        capBtn.textContent = 'Disable now';
+      }
+    }
+  }
+
+  // Activating a node: normally toggles the stream filter; on a disabled
+  // long-polling node it enables the temporary capture instead. Either way the
+  // node becomes the inspected node (the inspector is the control panel).
+  function activate(key) {
+    const n = nodes.get(key);
+    if (n.children.length === 0 && satOff(n)) enableCapture(n);
+    else toggleSelect(key);
+    inspectKey = key;
+    renderInspector();
+  }
+
+  gNodes.addEventListener('pointermove', e => {
+    const g = e.target.closest('.node');
+    if (g) showTooltip(g.dataset.key, e);
+  });
+  gNodes.addEventListener('pointerleave', () => { tooltip.style.display = 'none'; });
+  gNodes.addEventListener('click', e => {
+    const g = e.target.closest('.node');
+    if (g) { tooltip.style.display = 'none'; activate(g.dataset.key); }
+  });
+  gNodes.addEventListener('keydown', e => {
+    const g = e.target.closest('.node');
+    if (g && (e.key === 'Enter' || e.key === ' ')) {
+      e.preventDefault();
+      activate(g.dataset.key);
+    }
+  });
+  gNodes.addEventListener('focusin', e => {
+    const g = e.target.closest('.node');
+    if (g) { inspectKey = g.dataset.key; renderInspector(); }
+  });
+
+  /* ── Toolbar controls ───────────────────────────────────── */
+  document.getElementById('btn-pause').onclick = e => {
+    state.paused = !state.paused;
+    e.target.textContent = state.paused ? 'Resume' : 'Pause';
+  };
+  document.getElementById('rate').oninput = e => { state.rate = parseFloat(e.target.value); };
+  document.getElementById('btn-warn').onclick = () => inject('WARN');
+  document.getElementById('btn-err').onclick = () => inject('ERROR');
+  document.getElementById('btn-scenario').onclick = () => { state.scenarioUntil = Date.now() + 30000; };
+  document.getElementById('btn-reset').onclick = () => {
+    state.scenarioUntil = 0;
+    for (const n of nodes.values()) n.events = n.events.filter(e => e.level !== 'WARN' && e.level !== 'ERROR');
+    renderTick();
+  };
+
+  /* ── Stream level filter ────────────────────────────────── */
+  // Leitstand shortcut: clicking a level while ALL are active shows ONLY that
+  // level; clicking the sole active level goes back to all. Otherwise: toggle.
+  const ALL_LEVELS = ['DEBUG', 'INFO', 'WARN', 'ERROR'];
+  document.querySelectorAll('.lvlbtn').forEach(b => {
+    b.addEventListener('click', () => {
+      const lv = b.dataset.level;
+      if (state.levels.size === ALL_LEVELS.length) state.levels = new Set([lv]);
+      else if (state.levels.has(lv) && state.levels.size === 1) state.levels = new Set(ALL_LEVELS);
+      else if (state.levels.has(lv)) state.levels.delete(lv);
+      else state.levels.add(lv);
+      document.querySelectorAll('.lvlbtn').forEach(x =>
+        x.setAttribute('aria-pressed', String(state.levels.has(x.dataset.level))));
+      rebuildStream();
+    });
+  });
+
+  /* ── Stream panel resizer ───────────────────────────────── */
+  const resizer = document.getElementById('stream-resizer');
+  const streamPanel = document.getElementById('stream-panel');
+  const DEFAULT_STREAM_H = 218;
+  function setStreamHeight(h) {
+    const max = document.querySelector('.tm-left').offsetHeight - 140;
+    streamPanel.style.height = Math.max(64, Math.min(max, h)) + 'px';
+  }
+  let dragStart = null;
+  resizer.addEventListener('pointerdown', e => {
+    dragStart = { y: e.clientY, h: streamPanel.offsetHeight };
+    resizer.setPointerCapture(e.pointerId);
+  });
+  resizer.addEventListener('pointermove', e => {
+    if (dragStart) setStreamHeight(dragStart.h + (dragStart.y - e.clientY));
+  });
+  resizer.addEventListener('pointerup', () => { dragStart = null; });
+  resizer.addEventListener('dblclick', () => setStreamHeight(DEFAULT_STREAM_H));
+  resizer.addEventListener('keydown', e => {
+    if (e.key === 'ArrowUp')   { e.preventDefault(); setStreamHeight(streamPanel.offsetHeight + 32); }
+    if (e.key === 'ArrowDown') { e.preventDefault(); setStreamHeight(streamPanel.offsetHeight - 32); }
+    if (e.key === 'Home')      { e.preventDefault(); setStreamHeight(9999); }
+    if (e.key === 'End')       { e.preventDefault(); setStreamHeight(64); }
+  });
+
+  /* ── Sidebar: view switching + disclosure groups ────────── */
+  document.querySelectorAll('.nav-group-header').forEach(h => {
+    h.addEventListener('click', () => {
+      const expanded = h.getAttribute('aria-expanded') === 'true';
+      h.setAttribute('aria-expanded', String(!expanded));
+      document.getElementById(h.getAttribute('aria-controls')).hidden = expanded;
+    });
+  });
+  document.querySelectorAll('.nav-item[data-view]').forEach(a => {
+    a.addEventListener('click', e => {
+      e.preventDefault();
+      document.querySelectorAll('.nav-item[data-view]').forEach(x => x.removeAttribute('aria-current'));
+      a.setAttribute('aria-current', 'page');
+      const view = a.dataset.view;
+      document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+      document.getElementById('view-' + view).classList.add('active');
+      if (view === 'placeholder') document.getElementById('ph-title').textContent = a.textContent.trim();
+    });
+  });
+
+  /* ── War room mock ──────────────────────────────────────── */
+  const wrToggle = document.getElementById('wr-toggle');
+  document.getElementById('wr-banner-open').onclick = () => {
+    document.querySelector('a[data-view="warroom"]').click();
+  };
+  wrToggle.onclick = () => {
+    state.wrActive = !state.wrActive;
+    if (state.wrActive) { state.wrStart = Date.now(); state.wrCount = 0; }
+    document.getElementById('wr-pill').classList.toggle('on', state.wrActive);
+    document.getElementById('wr-navdot').classList.toggle('on', state.wrActive);
+    document.getElementById('wr-banner').hidden = !state.wrActive;
+    wrToggle.textContent = state.wrActive ? 'Stop capture' : 'Start capture';
+    wrToggle.classList.toggle('btn--err', state.wrActive);
+    wrToggle.classList.toggle('btn--primary', !state.wrActive);
+    renderWarRoom();
+  };
+  function renderWarRoom() {
+    const stEl = document.getElementById('wr-status');
+    if (state.wrActive) {
+      const s = Math.floor((Date.now() - state.wrStart) / 1000);
+      const mm = String(Math.floor(s / 60)).padStart(2, '0'), ss = String(s % 60).padStart(2, '0');
+      stEl.innerHTML = `<span class="recdot"></span> Recording <b style="font-family:var(--mono)">@alice:nebu.example</b> · ${mm}:${ss}`;
+      document.getElementById('wr-pill-time').textContent = `${mm}:${ss}`;
+      document.getElementById('wr-banner-time').textContent = `${mm}:${ss}`;
+      document.getElementById('wr-count').textContent = String(state.wrCount);
+    } else {
+      stEl.innerHTML = `<span class="legend-dot legend-dot--ok"></span>No active session`;
+      document.getElementById('wr-count').textContent = '–';
+    }
+  }
+
+  /* ── Boot ───────────────────────────────────────────────── */
+  // Seed a little history so the map isn't empty on load.
+  for (let i = 0; i < 40; i++) {
+    const sat = pickSatellite();
+    const level = Math.random() < 0.01 ? 'WARN' : (Math.random() < 0.6 ? 'INFO' : 'DEBUG');
+    recordEvent(sat, level, Date.now() - Math.random() * 30000);
+  }
+  state.logs.sort((a, b) => a.ts < b.ts ? -1 : 1);
+  rebuildStream();
+  renderTick();
+  setInterval(simTick, 320);
+  setInterval(renderTick, 1000);
+})();
+</script>

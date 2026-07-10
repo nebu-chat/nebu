@@ -82,8 +82,12 @@ test.describe('Bootstrap — Full Happy Path (OIDC E2E)', () => {
     await expect(page.getByRole('heading', { name: /Step 3/ })).toBeVisible();
 
     // ── Step 3: Claim Mapping → Connect with OIDC ─────────────────────────────
-    // Default claim values are pre-filled; just click "Connect with OIDC"
+    // Default claim values are pre-filled, but "Admin client scopes" defaults to
+    // empty (OIDC Scopes Law — only `openid` is ever requested unless configured).
+    // kai@example.com's instance_admin membership is a `groups` claim in Dex, so
+    // that scope must be requested or the claim-selection page has nothing to show.
     await expect(page.getByRole('heading', { name: 'Step 3: Claim Mapping' })).toBeVisible();
+    await page.getByLabel(/admin client scopes/i).fill('profile email groups');
     await page.getByRole('button', { name: 'Connect with OIDC' }).click();
 
     // ── Dex Authorization Page ────────────────────────────────────────────────
@@ -97,8 +101,11 @@ test.describe('Bootstrap — Full Happy Path (OIDC E2E)', () => {
     // ── Claim Selection Page ──────────────────────────────────────────────────
     // OIDC callback → /admin/bootstrap/select-claim (shows discovered group claims)
     await expect(page).toHaveURL(/\/admin\/bootstrap\/select-claim/, { timeout: 15_000 });
-    await expect(page.locator('input[type="radio"][value="instance_admin"]')).toBeVisible();
-    await page.locator('input[type="radio"][value="instance_admin"]').check();
+    // auth.ex's select_claim_html/1 JSON-encodes the radio value as
+    // {"value": "instance_admin", "path": "..."} — substring match finds it
+    // regardless of which claim path it came from.
+    await expect(page.locator('input[type="radio"][value*="instance_admin"]')).toBeVisible();
+    await page.locator('input[type="radio"][value*="instance_admin"]').check();
     await page.getByRole('button', { name: 'Confirm' }).click();
 
     // ── Step 4: User Import ───────────────────────────────────────────────────
@@ -137,6 +144,7 @@ test.describe('Bootstrap — Full Happy Path (OIDC E2E)', () => {
       await page.getByRole('button', { name: 'Next' }).click();
       await expect(page.getByRole('heading', { name: /Step 3/ })).toBeVisible();
 
+      await page.getByLabel(/admin client scopes/i).fill('profile email groups');
       await page.getByRole('button', { name: 'Connect with OIDC' }).click();
       // Wait for redirect away from bootstrap (to Dex or error page)
       await page.waitForURL(/dex.*\/auth|admin\/login/, { timeout: 15_000 });
@@ -159,7 +167,7 @@ test.describe('Bootstrap — Full Happy Path (OIDC E2E)', () => {
 
     // Claim selection → dashboard
     await expect(page).toHaveURL(/\/admin\/bootstrap\/select-claim/, { timeout: 15_000 });
-    await page.locator('input[type="radio"][value="instance_admin"]').check();
+    await page.locator('input[type="radio"][value*="instance_admin"]').check();
     await page.getByRole('button', { name: 'Confirm' }).click();
 
     // Must NOT land on an error page — should reach Step 4

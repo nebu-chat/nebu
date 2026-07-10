@@ -44,6 +44,10 @@ defmodule Nebu.Matrix.Session.Sweeper do
 
     _ = safe_query("DELETE FROM jwt_device_bindings WHERE exp IS NOT NULL AND exp < $1", [now])
     _ = Nebu.Matrix.Uia.cleanup_expired()
+    # enhanced-logging/operational-log-store (AC8): per-level TTL + DEBUG
+    # max-count pruning of operational_logs, same hourly cadence as the
+    # sweeps above.
+    _ = Nebu.Web.LogStore.Retention.prune_operational_logs()
     :ok
   end
 

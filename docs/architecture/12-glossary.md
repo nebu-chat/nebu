@@ -51,6 +51,10 @@
 | **GDPR / DSGVO** | General Data Protection Regulation (EU) / Datenschutz-Grundverordnung (German) |
 | **arc42** | A lean architecture documentation framework - see https://arc42.org |
 | **BMAD** | Build More Architect Dreams - the agent-driven development method used for Nebu development |
+| **Trace Map Leitstand** | The radial SVG "control room" visualization at `/admin/logs/trace-map` — nebu at center, domain circles (Matrix/Admin/Media/Health) on a compass layout around it, satellite endpoint nodes fanned around each domain, health-status color coding (epic `enhanced-logging`) |
+| **War Room Mode** | A bounded, tagged, self-terminating diagnostic logging session (max entries / max duration), distinct from the persistent global DEBUG-collection toggle |
+| **Temporary Capture** | A fine-grained, one-click, fixed 5-minute per-endpoint DEBUG/INFO logging override, for endpoints normally off by default (e.g. `/sync`) |
+| **OIDC Scopes Law** | The base OIDC scope is always `openid`; extra scopes (`profile`/`email`/`groups`/etc.) are requested ONLY when an operator explicitly configures them — never a hardcoded default (`bugfix-remove-default-scopes`, centralized in `Nebu.Web.OidcScopes`) |
 
 ## Roles
 

@@ -6,10 +6,10 @@
 
 | Risk | Probability | Impact | Mitigation |
 |---|---|---|---|
-| Elixir/OTP insufficient for middleware elimination thesis | Medium | High | Silver-tier loadtest validates before release; Redis optionally addable |
+| ~~Elixir/OTP insufficient for middleware elimination thesis~~ | — | — | **Resolved 2026-06-22**: `full-elixir-stack`/`grpc-removal` removed the Go Gateway and gRPC boundary entirely (ADR-019/020/021) — the thesis validated in production, not just loadtest. Silver-tier loadtest remains a pre-release gate for the resulting single-node Elixir server. |
 | OIDC-only excludes too many potential users | Low | Medium | Deliberate scope decision for target audience with existing IdP |
-| CRDT consistency edge cases in Horde during netsplit | Low | High | Single-node MVP; cluster tested in Phase 2 before enabling libcluster |
-| Cryptographic deletion not legally recognized | Low | High | Legal review pre-MVP; fallback: physical pseudonymization |
+| CRDT consistency edge cases in Horde during netsplit | Low | High | Single-node deployment today; cluster tested in Phase 2 before enabling libcluster |
+| Cryptographic deletion not legally recognized | Low | High | Legal review pre-release; fallback: physical pseudonymization |
 
 ### Open Architecture Decisions
 
@@ -25,6 +25,9 @@
 | Compliance session revoke CSRF (fixed) | Resolved | Story 7-16b, Kassandra HIGH-1 |
 | Moderation caller_id from request body (fixed) | Resolved | Story 7-32, SEC Gate 2 HIGH |
 | Safari re-login lands on #/welcome (Dex cached id_token + Safari 302 cache) | Resolved | Story 11-7 |
+| Admin route source classification could leak email into operational logs (fixed pre-ship) | Resolved | Story `war-room-mode`, security-review-driven fix |
+| Bootstrap-mode OIDC scope ignored the operator's Step 3 config — providers needing a non-`openid` scope to expose the admin claim could never complete bootstrap | Resolved | `bugfix-bootstrap-scope-ignored`, 2026-07-09 |
+| Admin-logs source-classification: 1 MEDIUM accepted non-blocking after a fix attempt was reverted for an architecture conflict | Accepted risk | Story `admin-logs-monitoring-view`, Kassandra review |
 
 ## Technical Debt
 

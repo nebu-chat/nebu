@@ -253,7 +253,13 @@ defmodule Nebu.Admin.ConfigController do
     conn
     |> assign(:config, load_config())
     |> assign(:page_title, "Configuration")
-    |> assign(:active_nav, "config")
+    # admin-sidebar-nesting coordination contract (UX gate V1): the parent
+    # "config" key belongs to a pure disclosure <button> that never emits
+    # aria-current="page" — the page must highlight the "General" CHILD so the
+    # current page stays programmatically determinable (WCAG 1.3.1). The
+    # parent gets its secondary accent from the child match in
+    # Nebu.Admin.Layouts.nav_item/1.
+    |> assign(:active_nav, "config-general")
     |> assign(:bootstrap_completed, Nebu.Admin.Auth.bootstrap_completed?())
     |> put_layout(html: {Nebu.Admin.Layouts, :live})
     |> render(:index)

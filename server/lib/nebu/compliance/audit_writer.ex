@@ -25,6 +25,10 @@ defmodule Nebu.Compliance.AuditWriter do
   # user_deactivated, user_reactivated, update_user_role added for Epic 9 (Story 9.1 HIGH-1 fix).
   # member_added, member_removed added for admin-initiated room membership (room-management rm4).
   # room_visibility_changed added for admin room-visibility toggle (room-management rm1).
+  # enable_temporary_capture, disable_temporary_capture added for the Trace Map's
+  # off-by-default long-polling endpoints (enhanced-logging/trace-map-node-controls,
+  # AC12 Option B — ANSWERED design question 2): enabling collection on a
+  # previously-off endpoint is an admin-initiated logging-policy change.
   @known_actions ~w(
     admin_login
     admin_login_failed
@@ -58,6 +62,8 @@ defmodule Nebu.Compliance.AuditWriter do
     room_upgraded
     gdpr_deletion
     users_bulk_imported
+    enable_temporary_capture
+    disable_temporary_capture
   )
 
   # Configurable repo for test injection. Production uses Nebu.Repo.

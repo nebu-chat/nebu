@@ -2,6 +2,17 @@ import Config
 
 config :logger, level: :warning
 config :nebu_http, port: 4001
+
+# enhanced-logging/matrix-payload-debug-logging (CI-gate cycle-2): disable
+# Nebu.Repo.QueryTelemetry's own Logger.debug/1 call in :test — the handler
+# still attaches and runs (unconditionally, everywhere), it just skips
+# logging. See the module's @moduledoc "Disabled in :test" section for why:
+# ExUnit.CaptureLog.capture_log/1 intercepts the GLOBAL logger, so a query
+# fired by any concurrently-running async test can otherwise inject an
+# unrelated log line into another test's captured output while it is
+# mid-capture at :debug (this broke request_logger_test.exs's AC1 JSON-line
+# extraction). No test asserts on this module's own output.
+config :nebu, Nebu.Repo.QueryTelemetry, enabled: false
 # oidc-middleware-migration: the JwksCache GenServer is NOT started from the
 # Application in test — jwks_cache_test.exs starts its own supervised instances
 # under the same registered name. Prod/dev start it (default true).
@@ -10,6 +21,15 @@ config :nebu_http, start_jwks_cache: false
 # the real Finch pool is not needed in test (and starting it under the Application
 # would add an unused supervised process to the children-count assertions).
 config :nebu_http, start_finch: false
+
+# enhanced-logging/operational-log-store: the central :logger handler is NOT
+# attached automatically at boot in :test — every test that needs it
+# attached calls Nebu.Web.LogStore.attach_handler/0 itself (idempotent). This
+# keeps log_store_test.exs's "registers exactly one new handler" idempotency
+# test meaningful: it needs to observe a handler_ids delta of exactly +1 from
+# its OWN call, which a boot-time attach (already done before any test runs)
+# would otherwise pre-empt. Prod/dev attach it unconditionally at boot (AC2).
+config :nebu_http, attach_log_store_handler: false
 config :signature, pii_encryption_key: :crypto.strong_rand_bytes(32)
 
 # admin-ui-migration: the Phoenix LiveView Admin UI endpoint. The endpoint runs with

@@ -109,8 +109,16 @@ async function runBootstrapWizard(page: Page): Promise<void> {
   // Story 11-10 added Step 3; "Connect with OIDC" is now on Step 3, not Step 2.
   await page.getByRole('button', { name: /^next$/i }).click();
 
-  // Step 3: Claim Mapping — accept pre-filled defaults and proceed to OIDC.
+  // Step 3: Claim Mapping — accept pre-filled defaults, but the "Admin client
+  // scopes" field defaults to empty (OIDC Scopes Law: only `openid` is ever
+  // requested unless explicitly configured — no hardcoded extras). Dex's local
+  // password connector only returns the `groups` claim when the `groups` scope
+  // is actually requested, and `kai@example.com`'s `instance_admin` membership
+  // (dev/dex/config.yaml) IS a `groups` claim — without requesting that scope,
+  // the claim-selection page below has nothing to render, and "Confirm Admin
+  // Claim" always submits with no claim path selected.
   await page.waitForURL(/\/admin\/bootstrap/, { timeout: 10_000 });
+  await page.getByLabel(/admin client scopes/i).fill('profile email groups');
   // "Connect with OIDC" POST → redirect to /admin/login/start?mode=bootstrap → Dex
   await page.getByRole('button', { name: /connect with oidc/i }).click();
 
@@ -159,9 +167,14 @@ async function runBootstrapWizard(page: Page): Promise<void> {
   }
 
   // Step 3: select admin group claim (rendered at /admin/callback)
+  // The radio's `value` attribute is NOT the literal claim value — auth.ex's
+  // select_claim_html/1 JSON-encodes it as {"value": "instance_admin", "path": "..."}
+  // (a single-value encoding trick to submit two params from one no-JS radio group).
+  // A substring match on the encoded attribute finds the right option regardless
+  // of which claim path it came from.
   // The radio button is styled with a <label> that intercepts pointer events.
   // Click the label instead of the hidden input, or use force:true as fallback.
-  const instanceAdminRadio = page.locator('input[type="radio"][value="instance_admin"]');
+  const instanceAdminRadio = page.locator('input[type="radio"][value*="instance_admin"]');
   if (await instanceAdminRadio.isVisible({ timeout: 5_000 }).catch(() => false)) {
     // Try clicking the associated label first (avoids intercept issue)
     const radioId = await instanceAdminRadio.getAttribute('id').catch(() => null);

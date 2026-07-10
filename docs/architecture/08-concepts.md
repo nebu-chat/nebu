@@ -265,6 +265,21 @@ client, set in the Bootstrap Wizard (Step 3, before refresh-mode) and changeable
   `:{matrix,admin}_oidc_refresh_mode_reader` pattern for test isolation; both pairs of seams now live
   on `Nebu.Web.OidcScopes` (unchanged name/shape) rather than being duplicated per domain module.
 
+**Bootstrap-mode scope carve-out (bugfix-bootstrap-scope-ignored, 2026-07-09):** the table above
+(`admin_oidc_extra_scopes` → `server_config`) only applies to the admin client's **post-bootstrap**
+login. During the wizard itself, `server_config.admin_oidc_extra_scopes` does not exist yet — it is
+only written by `do_complete_bootstrap` at the very end — so `Nebu.Admin.Auth.oidc_config("bootstrap")`
+cannot use `admin_oidc_scope/0` (it would always see an empty value and request `openid` only,
+ignoring whatever the operator just typed into Step 3's "Admin client scopes" field). It instead calls
+`Nebu.Web.OidcScopes.resolve_scope_with_extra(:admin, draft["admin_oidc_extra_scopes"])`, reading the
+value straight from the in-progress `bootstrap_draft`. `resolve_scope_with_extra/2` composes the
+scope identically to `resolve_scope/1` (same `openid` + extras + refresh-mode-gated `offline_access`
+rule) but takes the extras value as an argument instead of reading a fixed seam — and, since that
+argument is no longer forced through a validated trust boundary, it re-validates it itself
+(`validate_scope_string/1`, fail-closed to `openid`-only on an invalid string) rather than trusting
+every call site. Bootstrap-mode's refresh-mode side is unaffected by this fix and still reads
+`server_config`/the reader (a known, deliberately out-of-scope, same-class gap for a future story).
+
 **Admin/Matrix identity unification (bugfix-unify-admin-matrix-oidc-identity, 2026-07-01) — SUPERSEDED
 by story `centralize-scope-resolution` (same date):**
 Because `matrix_oidc_extra_scopes` and `admin_oidc_extra_scopes` are independently configurable,
@@ -713,6 +728,135 @@ audit entry (including an `"error"` metadata field with the exception message) b
 original exception. A nested `try/rescue` around the audit write itself ensures an outage in the
 audit writer never masks the original error. This guarantees that any partially-applied operation
 leaves a forensic record even when the in-process call ultimately returns an error to the client.
+
+## Operational Logging
+
+**Separation from audit logs:** `Nebu.Web.LogStore` manages a **mutable, pruneable operational log store** (`operational_logs` table) that is EXPLICITLY SEPARATE from `Nebu.Compliance.AuditLog` (the immutable, tamper-evident audit trail). Audit logs have a compliance contract (legal hold, tamper evidence); operational logs are transient diagnostics for operator troubleshooting — merging them would force audit logs to inherit a TTL deletion policy (bad for compliance) or operational logs to inherit expensive immutability (unnecessary complexity under churn).
+
+**Central logger handler:** instead of scattered `Logger.*` calls deciding independently whether to persist, a single Erlang `:logger` handler (attached at boot via `Nebu.Web.LogStore.attach_handler/0`) intercepts **every** `Logger.*` call app-wide and is the sole decision point:
+1. **Always:** broadcasts via `Phoenix.PubSub.broadcast/3` to topic `"operational_logs"` (feeds live-view subscriptions, independent of persistence)
+2. **Conditionally:** queues entries via `GenServer.cast/2` to `Nebu.Web.LogStore.Writer` for batched insertion, scoped by `server_config` policy
+
+The handler runs **synchronously** in the calling process (standard `:logger` behaviour) but performs NO blocking DB I/O — instead, it delegates to a buffering GenServer (non-blocking `cast`) so that `Logger` calls on hot paths (e.g. inside `Nebu.Repo.QueryTelemetry`'s telemetry callback, where a live DB read would deadlock the connection pool) remain fast.
+
+**Levels and persistence:** 
+- `WARN` and `ERROR`: always persisted (no toggle). Since story `admin-logs-retention-settings`, these two levels also get a hardcoded, **non-admin-configurable** 90-day safety-net TTL (no `server_config` key, no UI control — AC6 explicitly forbids one) so this tier is no longer unbounded, closing a gap flagged during the `operational-log-store` review.
+  - **ERROR-always-persists exception (story `trace-map-node-controls`):** Entry level is checked before endpoint-tier policy — ERROR entries persist to `operational_logs` **unconditionally**, regardless of whether the endpoint is in the long-polling "off-by-default" list. This ensures a silently-off zone never hides failures: if an off-list endpoint encounters an error, the error is logged and propagates to the Trace Map (node renders with error status), making the silent zone visibly alarming to operators.
+- `INFO` and `DEBUG`: persisted only if enabled via `server_config` keys (`log_collect_info`, `log_collect_debug`); off-list endpoints (long-polling: sync, keepalive, health) suppress DEBUG/INFO collection by default
+- Retention per level: TTL (`log_retention_*_days`) + max-count cap, purged hourly via `Nebu.Matrix.Session.Sweeper`'s existing sweep cycle. The max-count cap was DEBUG-only at first; story `admin-logs-retention-settings` added the symmetric `log_retention_info_max_count` key so INFO now has the same two-dimensional (days + count) retention control as DEBUG.
+
+**Request ID and route template propagation:** `Nebu.Web.Plugs.RequestLogger` calls `Logger.metadata(request_id: request_id, route_template: route_template)` early in the pipeline so all downstream `Logger.*` calls automatically carry them. `route_template` is normalized via position-based pattern matching (room/user/event ID segments → placeholders, e.g. `/rooms/:room_id/send/:event_type/:txn_id`) rather than fragile regex matching, enabling endpoint-level log aggregation.
+
+**Policy cache:** `Nebu.Web.LogStore.PolicyCache` caches the `server_config` log-policy keys (6, since `admin-logs-retention-settings` added `log_retention_info_max_count`) in `persistent_term` to avoid a `Nebu.Repo` connection-pool re-entrancy bug (the handler runs synchronously inside `Nebu.Repo.QueryTelemetry`'s own telemetry callback, so a synchronous DB read there would deadlock the pool). The cache is refreshed on-write and on a periodic timer.
+
+**Schema:**
+```sql
+CREATE TABLE war_room_sessions (
+  id               UUID PRIMARY KEY,
+  started_by       TEXT NOT NULL,               -- admin user ID
+  reason           TEXT,
+  scope            TEXT,                        -- "all" | route_template (e.g. "/_matrix/client/v3/sync")
+  exclusive_scope  JSONB,                       -- nullable list of endpoints to exclude: ["/_matrix/client/v3/sync", "/health", ...]
+  filter           JSONB,                       -- optional {user_id, device_id} AND-matched against entry metadata
+  max_entries      INTEGER NOT NULL,            -- 10..10,000 (enforced at API boundary, ADR-018)
+  max_duration_s   INTEGER NOT NULL,            -- 10..3600 (enforced at API boundary)
+  entries_collected INTEGER DEFAULT 0,
+  started_at       TIMESTAMPTZ NOT NULL,
+  ended_at         TIMESTAMPTZ,                 -- NULL while active; set on exhaustion or duration timeout
+  ended_reason     TEXT                         -- "budget_exhausted" | "duration_exceeded" | "manual_stop"
+);
+
+CREATE TABLE operational_logs (
+  id             BIGSERIAL PRIMARY KEY,
+  inserted_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  level          TEXT NOT NULL,        -- "debug" | "info" | "warning" | "error"
+  source         TEXT NOT NULL,        -- "http" | "ecto" | module name
+  route_template TEXT,                 -- normalized, e.g. "/rooms/:room_id/send/:event_type/:txn_id"
+  request_id     TEXT,
+  message        TEXT NOT NULL,
+  metadata       JSONB,                -- domain-specific data (already redacted upstream)
+  war_room_id    UUID                  -- nullable, extension seam for war-room-mode story; FK→war_room_sessions(id)
+);
+```
+
+**exclusive_scope in war_room_sessions (Story `war-room-dedicated-page`):**
+When an operator pre-scopes a session with "exclusive mode" (AC9), the `exclusive_scope` column holds a non-empty list of route_template strings to EXCLUDE from capture. When `Nebu.Web.LogStore.WarRoom.check/1` evaluates an entry for tagging, it checks:
+1. Does the entry's `route_template` match the session's `scope` (as before, inclusive scope)?
+2. Is the `route_template` in `exclusive_scope` (AC10)? If yes, SKIP (do not tag).
+3. Does the `filter` (if present) match `metadata["user_id"]`/`["device_id"]` AND-wise?
+
+If all three conditions pass, the entry is tagged with `war_room_id` and persisted. This avoids the common "I only wanted /sync excluded" scenario by allowing an operator to say "capture everything except these noisy endpoints" rather than laboriously enumerating what they *do* want. Pre-populated defaults from `Nebu.Admin.LogsLive.TraceMap.long_polling_endpoints/0` (the canonical endpoint list) are offered as checkbox options in the War Room form; an operator may also type a custom route if needed (validated server-side — untrusted client input, ADR-018 defense-in-depth).
+
+**Admin UI monitoring consumption layer (`Nebu.Admin.LogsLive`, story `admin-logs-monitoring-view`):**
+
+The operational log store's live broadcast is consumed by the Admin UI at `/admin/logs` (`Nebu.Admin.LogsLive` LiveView), which groups operational logs by `request_id` and presents one row per request, enabling operators to diagnose production issues without leaving the admin dashboard. The view subscribes to the `"operational_logs"` PubSub topic and applies log filters with two dimensions: **Level** (flat bubble list) and **Source** (flat bubble list). The filter state is a real, persistent LiveView socket assign, `@active_filters` — a map of `dimension => [values]` supporting same-dimension multi-select (e.g. `level=error` OR `level=warning`). Each bubble's `phx-click` triggers both instant client-side visual feedback via `Phoenix.LiveView.JS.dispatch` (zero perceived lag for interactivity) AND a `JS.push("toggle_filter"/"remove_filter", ...)` that updates the server-side assign via new event handlers in `LogsLive`. Filter state is also reflected in the page URL as comma-joined query params (e.g. `?level=error,warning`) via client-side `history.pushState`, making the filtered view reloadable and shareable. Browser back/forward triggers a new `handle_event("sync_filters", ...)` push to keep the server assign in sync with URL-driven navigation. A shared `reject_off_tier/3` helper guards all three write paths (mount-time URL seeding, `toggle_filter`, `sync_filters`) against activating a dimension value not currently collected per the retention policy. This fixes a latent bug in the prior pure-client-side design: unrelated re-renders silently reset filters since the server never tracked click state. The view streams requests sorted by severity then recency. A detail panel shows the full chronological thread for a request_id. The Endpoint dimension (hierarchical tree filtering) was retired in story `trace-map-leitstand` and is now a dedicated, full-page LiveView at `/admin/logs/trace-map`. Additionally, this story fixes two logging-pipeline gaps: (1) `Nebu.Web.Plugs.RequestLogger` now places `method`/`status`/`duration_ms` into structured `Logger.metadata/1` so these fields reach the operational log store as metadata (not just inspect'd message text), and (2) `Nebu.Web.LogStore.Handler.source_from_meta/1` now derives the calling module from Logger's `:mfa` metadata tuple rather than a nonexistent bare `:module` key, so "http"/"ecto" source classification works correctly in production log ingestion.
+
+**Admin UI collection-policy configuration layer (`Nebu.Admin.LogsController`, story `admin-logs-retention-settings`):**
+
+Where `Nebu.Admin.LogsLive` (above) is a read-only view of the collection policy, `GET /admin/logs/config` / `POST /admin/logs/config/retention` (`Nebu.Admin.LogsController` + `Nebu.Admin.LogsConfigHTML`) let an operator actually *change* it — reached via a "Sammlung konfigurieren →" link on the monitoring page, deliberately nested under `/admin/logs` rather than the generic `/admin/config` page (config UI lives next to where it's used, not in a catch-all). It is a deliberate, literal plain Phoenix Controller, **not** a LiveView, following `Nebu.Admin.ConfigController`'s exact GET/POST/flash/redirect pattern. WARN and ERROR render as non-interactive, always-on bubbles (no UI control exists for them, matching their hardcoded safety-net TTL above); INFO and DEBUG render as clickable toggle buttons that, when turned on, reveal inline retention fields (days, max entries) — DEBUG additionally shows a fixed warning about payload volume and high-frequency capture, referencing a not-yet-built "War Room mode" by name as a forward-compatible placeholder. Because there is no LiveView socket on this page, all of the toggle/reveal/pre-fill/warning interactivity (AC7/AC8/AC11) is implemented client-side in a new `wireLogsConfigToggles()` function in `server/priv/static/assets/app.js`, using the same delegated-listener, CSP-safe pattern (`script-src 'self'`, no inline handlers) as the page's other JS-driven admin widgets; the actual persistence round-trip is a real native form POST, validated and normalized server-side (blank or `"0"` always means "no limit" for that dimension, unconditionally — the 7-day/1000-entry defaults from AC8 are a client-side pre-fill convenience only, never a server-side fallback). Cross-tab consistency between this settings page and the monitoring view's bubble state (AC17) is implemented as Option A for this story: no PubSub, the monitoring page reflects a changed policy only on its next manual reload.
+
+**War Room Mode — bounded, self-terminating diagnostic sessions (story `war-room-mode`, final story of the enhanced-logging epic):**
+
+The DEBUG collection toggle above (`log_collect_debug`) is a *persistent, global* switch — safe only if an operator remembers to turn it off, and unsafe on a high-frequency endpoint like `/sync` (calls continuously, every connected client, every few seconds — an unbounded DEBUG-on window can fill the DB in seconds). War Room Mode is a **distinct, orthogonal mechanism**: a bounded, tagged, self-terminating diagnostic *session*, not a policy toggle. Exactly one may be active at a time (`war_room_sessions` table; `started_by`/`reason`/`scope`/`filter` JSONB/`max_entries`/`max_duration_s`/`ended_at`/`ended_reason`/`entries_collected`).
+
+*Enforcement lives upstream of persistence, not inside the Writer's batch flush.* The obvious-looking design — "tag entries with `war_room_id` inside `Writer.flush_buffer/1`, right before the INSERT" — does not work, for two reasons: (1) `Writer` only ever sees entries `Handler.log/2` already decided to persist per the *ambient* policy, but AC4 requires war-room-matched entries to persist **regardless** of that policy (e.g. a DEBUG entry even when `log_collect_debug=false`); (2) `Writer`'s batching (every 5s or 100 entries) is far too coarse for single-entry budget granularity — a burst of matching entries inside one flush window would blow straight through `max_entries` before the batch is even inserted. Instead, `Nebu.Web.LogStore.WarRoom` (a new GenServer, sibling to `PolicyCache`) intercepts **inside `Handler.log/2`, before the `should_persist?` gate**: it holds the one cached active session, fast-paths to a no-op when none is active (a `persistent_term` flag, mirroring `PolicyCache`'s own "never block the hot path" design), and on a match performs one atomic `UPDATE ... entries_collected = entries_collected + 1[, ended_at = now(), ended_reason = 'budget_exhausted']`, serialized through the single GenServer — genuinely single-entry-granular, no read-then-write race, no batch-window overshoot.
+
+*Two independent termination paths, both scoped to exactly one active session by construction* (AC2's "exactly one active" is enforced both app-level, in `Nebu.Admin.WarRoomManager`, and at the DB level via a partial unique index `war_room_sessions_single_active_idx ON ((1)) WHERE ended_at IS NULL` — the app check gives a friendly conflict message, the index is the real backstop against a race, and a `unique_violation` maps to the same `{:error, :conflict, ...}` tuple either way): (1) **budget exhaustion** — the atomic increment above; (2) **duration timeout** — a single `Process.send_after` scheduled on session load, checked against the *current* cached session id (so a stale timer message from a since-ended session is a no-op), re-scheduled with the *remaining* time on every load — including at app boot (`do_load_active/1`), which immediately ends an already-past-deadline session rather than silently leaving it active forever across a restart. This closes the exact "forgot to turn it off" failure mode that motivated bounding the feature in the first place.
+
+*Scope/filter matching* (AC3/AC9): `scope` is `"all"`/`nil` (match everything) or an exact `route_template` string (e.g. `/_matrix/client/v3/sync` — verified the only sync route this codebase serves, no `r0`/`v1` alias exists, so exact-string matching is complete here); `filter` is an optional `{user_id, device_id}` JSONB map, AND-matched against the log entry's `metadata["user_id"]`/`["device_id"]`. Those two metadata fields did not exist anywhere in the logging pipeline before this story — `Nebu.Web.Plugs.RequestLogger` now also propagates them via `Logger.metadata/1`, extracted through a new `extract_user_id/1` helper that reduces `conn.assigns.current_user` to a bare identifier string regardless of route (Matrix routes: already a string; `/admin/*` routes, served by the SAME `RequestLogger` plug: `Nebu.Admin.Auth`'s `current_user` is a MAP containing an admin's email — `extract_user_id/1` exists specifically to never let that map, or its email, reach `Logger.metadata/1`; this was a security-review-driven fix after code-review caught the naive version leaking admin emails into `operational_logs` on admin routes).
+
+*UI integration is a LiveView, not a new HTTP controller.* The story's own Dev Notes assumed a separate `war_room_controller.ex` with JSON-shaped endpoints (`POST /admin/war-room/start` → 409/session-id) — written before `admin-logs-monitoring-view` had shipped. In reality `/admin/logs` is `Nebu.Admin.LogsLive`, a LiveView, and the admin app's `:browser` pipeline is HTML-only with no JSON-API convention anywhere under `/admin`. The War Room panel (`Nebu.Admin.LogsLive.WarRoomPanel`) is therefore a component of that same LiveView: `handle_event("start_war_room"/"stop_war_room", ...)` calls straight into `Nebu.Admin.WarRoomManager` (the Admin-domain public API + inline SQL, ADR-018 — `start_session/1`, `stop_session/1`, `status/0`; no `Plug.Conn` awareness, directly unit-testable), gated by the same `on_mount :require_admin` as every other event in that LiveView. `WarRoomManager.start_session/1` also enforces `max_entries`/`max_duration_s` numeric bounds directly at this API boundary — added after a Kassandra security-review MEDIUM finding that the LiveView form's own client-side bounds check was the *only* place those bounds were enforced, insufficient defense-in-depth for a feature whose entire purpose is bounding runaway collection. A 2-second self-tick (independent of log traffic) refreshes the live "N/max entries · time remaining" status bar; the panel's outer wrapper carries `aria-live="polite"` (mirroring the retention-settings page's own established "stable wrapper, dynamic child" pattern) so screen-reader users get feedback on every start/stop/auto-terminate transition. `Nebu.Admin.LogsLive.mount/3` additionally accepts an optional `war_room_id` query param, seeding the initial log load from `Nebu.Web.LogStore.get_logs(%{war_room_id: id})` (its `@allowed_filter_keys` was extended to accept it — the SQL already selected the column, added by `operational-log-store`'s migration as a forward-looking seam) instead of the default unfiltered 200-row cap, giving a bookmarkable "show me everything tagged with this session" URL without reimplementing the stream component.
+
+*Redaction is untouched — no new leak path.* `WarRoom.check/1` and the tagging it performs read/write only `route_template`, `metadata["user_id"/"device_id"]`, and `war_room_id` — it never touches `entry.message` or any payload content. The two-category redaction (`PayloadRedactor`, credentials + chat message content) still runs entirely upstream, inside `RequestLogger`'s `Logger.debug(fn -> ... end)` closure, before an entry ever reaches `Handler.log/2`; elevating collection via a war room changes *whether* an already-redacted entry gets persisted, never *what* is in it.
+
+## War Room Indicator — Cross-Page Recording Status Visibility (Story `war-room-dedicated-page`)
+
+**Problem:** When an operator starts a War Room session, the UI signals (recording indicator, countdown) were visible only on the page where the session was started (`/admin/logs` when embedded, later the dedicated `/admin/logs/war-room` page). An operator navigating away would lose real-time awareness that a recording session was active, and could inadvertently perform unmonitored diagnostic work or trigger a full page reload thinking the session had ended.
+
+**Solution:** `Nebu.Admin.WarRoomIndicator` is a shared, stateless assign helper that every admin LiveView (DashboardLive, AuditLogLive, LogsLive, LogsLive.TraceMap, LogsLive.WarRoom) calls in its `mount/3` to poll `Nebu.Admin.WarRoomManager.status/0` every 2 seconds. Each page receives a live `@war_room_active` assign (boolean or session metadata), updated by a self-tick independent of user interaction. `Nebu.Admin.Layouts.live/1` consumes this assign to render:
+
+- **Sidebar recording dot:** a pulsing red dot on the "War Room" nav item (children item under "Logs" group, populated by the admin-sidebar-nesting story) when `@war_room_active` is truthy.
+- **Topbar recording pill:** a fixed-width pill showing `"War Room recording · mm:ss"` in the header, with the user who initiated the session and elapsed time, updated every second on the client via a lightweight JS hook (no server tick needed — the expiry state is already in `@war_room_active`'s `{started_at, max_duration_s}` tuple or similar).
+
+This pattern is CSP-safe (no inline JS; the hook is registered in `app.js` like the nav-section toggle) and survives LiveView morphdom patches (the dot/pill are part of the shared Layouts chrome, not re-rendered on each view mount). An operator viewing any admin page sees a single source of truth for "is a recording active right now" without needing to navigate back to the War Room page — closing the situational-awareness gap the Trace Map Leitstand UX gate identified as a required closure for the feature to be production-safe.
+
+## Temporary Capture — Time-Limited Per-Endpoint Diagnostic Collection (Story `trace-map-node-controls`)
+
+**Rationale:** Long-polling endpoints (sync, keepalive, health) are rendered off-by-default in the Trace Map to keep the signal-to-noise ratio high — DEBUG/INFO collection is suppressed unless an operator explicitly enables temporary capture. This complements War Room Mode: where War Room is a global, bounded session with optional scope/filter, Temporary Capture is a **fine-grained, one-click per-endpoint toggle** for a fixed 5-minute window.
+
+**Architecture:**
+
+- **Storage:** `admin_temporary_captures` table (`endpoint TEXT PRIMARY KEY`, `enabled_at TIMESTAMP`, `expires_at TIMESTAMPTZ`, `started_by TEXT`) — a shared DB row is the single source of truth for timer state (cluster-safe, survives node restarts, deterministic server-time-based expiry).
+
+- **Module:** `Nebu.Admin.TemporaryCaptureManager` (public API: `enable/2`, `disable/2`, `active?/1`, `cleanup_expired/0`; inline SQL, ADR-018). The 5-minute duration is configurable via `Application.get_env(:nebu, :temporary_capture_duration_s, 300)` for testing.
+
+- **Cache:** `Nebu.Web.LogStore.CaptureCache` (persistent_term-backed, mirroring `PolicyCache` pattern). 2s polling refresh + on-demand invalidation (PubSub broadcast on capture enable/disable). Holds a map of `{endpoint → {enabled_at, expires_at}}` so should_persist?/2's enforcement avoids a per-request DB query on the hot path.
+
+- **Enforcement in LogStore:** `Handler.log/2` invokes `should_persist?/2` *after* checking for ERROR (which always persists) and *after* the war-room check. `should_persist?/2` now consults `CaptureCache`: if a capture is active and not expired for the endpoint, persist the entry (DEBUG/INFO level) regardless of the global policy. Expired captures are cleaned up lazily on cache refresh.
+
+- **UI:** The Trace Map inspector panel gains "Enable capture" button for off-list endpoints. On click, `Nebu.Admin.LogsLive.TraceMap.handle_event("enable_capture", ...)` → `TemporaryCaptureManager.enable/2` → PubSub broadcast → `CaptureCache` refresh. A countdown display (mm:ss, client-side computed from `expires_at`) updates every second; on expiry, the node reverts to off state. "Disable now" button calls `handle_event("disable_capture", ...)` → `disable/2` for early termination.
+
+- **Audit trail:** Capture enable/disable are recorded as admin actions in `compliance_audit_log` (following the retention-settings pattern): `action: "enable_temporary_capture" / "disable_temporary_capture"`, `resource_type: "endpoint"`, `resource_id: endpoint_name`, `admin_user: current_user`, `timestamp: now()`.
+
+- **Cascade for domain/nebu nodes:** Inspector selects allow per-endpoint level/retention changes and also cascade those changes to all satellite endpoints under a domain or nebu (batch `upsert_server_config` calls). Temporary capture is per-endpoint only; cascade does not apply to capture enable/disable (clicking an off node enables capture for that node alone, not its entire domain).
+
+No new ADR: this is an operational feature layered atop the existing policy cache and handler pattern, not a new architectural decision.
+
+## Trace Map Zoom/Pan — Client-Owned Viewport State (Story `trace-map-zoom-pan`)
+
+**Interaction model:** the Trace Map Leitstand SVG supports Google-Maps-style navigation via four redundant input paths, each covering both zoom and pan:
+- **Wheel** — cursor-centered zoom (the point under the cursor stays fixed), computed via `getScreenCTM().inverse()` against a real SVG point rather than raw pixel deltas, so it stays correct under the `viewBox`'s `preserveAspectRatio="xMidYMid meet"` letterboxing.
+- **Drag** — click-and-drag pans the background; a `pointerdown` originating on a node (`[data-testid="trace-map-node"]`) sets a null guard for the whole gesture so a click (or even a large intentional drag) started on a node never pans and never blocks the node's own click handler.
+- **Keyboard** — arrow keys pan (32px/press), `+`/`=`/PageUp and `-`/`_`/PageDown zoom, scoped to `event.target === mapSvg` so it never shadows the page's other keyboard interactions (node activation, the stream resizer). Keyboard/button zoom deliberately holds pan fixed (no re-centering) — only wheel zoom is cursor-centered by design.
+- **Buttons** — a `trace-map-zoom-controls` group (zoom in/out/reset) and a `trace-map-pan-controls` group (up/down/left/right), both plain `<button type="button">` wired via `addEventListener` in the `TraceMapLeitstand` hook (`server/priv/static/assets/app.js`) — no `phx-click`, no inline handlers (CSP `script-src 'self'`). The pan buttons call the exact same `panByStep/2` the keyboard path uses, not a parallel implementation, so the two stay behaviorally identical by construction.
+
+Zoom is bounded `1.0`–`4.0` (step `0.1`); pan is clamped so the viewport can never scroll past the map's edges at any zoom level. State does not persist across reload (by design) and lives only in the LiveView hook's JS-side instance state.
+
+**Client-owned state survives LiveView patches:** this is the second feature in this epic to need this pattern, after the stream-resizer's height. Any client-set attribute the server never renders (the SVG's `viewBox`, here) is silently stripped by morphdom on the next patch, because the DOM node's identity is preserved but its non-server-tracked attributes are not. The hook's `updated()` callback reasserts the current `zoom`/`panX`/`panY` into the `viewBox` on every patch — the same fix shape as the resizer's `streamHeight` reassertion — rather than the server tracking viewport state as a socket assign (which would require a round-trip per zoom/pan input and defeat the point of client-side responsiveness).
+
+**Accessibility:** the SVG root is `tabindex="0"` with an extended `aria-label` describing the keyboard controls, and carries an explicit `:focus-visible` CSS rule (`server/assets/css/app.css`) matching the existing node-ring/resizer focus-ring convention — a newly-focusable element needs its own explicit rule rather than relying on the browser's UA-default outline. Both zoom and pan have a dedicated on-screen button group specifically so a user who cannot perform a pointer drag, or whose assistive technology may not reliably enter "focus mode" for a bare `role="group"` container, still has a fully discoverable, keyboard-operable path to every viewport operation.
+
+No new ADR: this is a client-side interaction enhancement to an existing visualization, not a new architectural component.
 
 ## GDPR Article 17 Right to Erasure - Deletion Orchestration (Story 14.4)
 
@@ -1213,7 +1357,55 @@ deferred to a separate story to keep diffs minimal and reviewable.
 
 **Elixir:** `Logger` with keyword metadata, structured key-value pairs.
 
-PII (email, display name) must never appear in log output. Debug level never enabled in production.
+PII (email, display name, message content, credentials) must never appear in log output.
+
+### Request/Response Payload Logging with Two-Category Redaction (Story matrix-payload-debug-logging, epic enhanced-logging)
+
+When DEBUG logging is enabled (via `Logger.configure(level: :debug)` at runtime), the request logger captures and logs HTTP request/response bodies with mandatory two-category redaction (Story AC4–AC7):
+
+**Category 1: Credentials and Secrets**
+- Top-level fields: `password`, `new_password`, `access_token`, `refresh_token`, `client_secret`, `id_access_token`, `token` (OIDC token grant)
+- HTTP headers: `Authorization` (entire header value)
+- Nested recursively at any depth in the JSON tree
+- Deprecated query-string pattern: `?access_token=<secret>` in URLs
+
+All are replaced with the literal string `"***REDACTED***"`.
+
+**Category 2: Chat Message Content**
+- Any user-generated message text or metadata at any depth in the JSON tree — not just under a top-level `content` wrapper
+- Includes Matrix event content fields: `body`, `formatted_body`, `topic`, `name`, `displayname`, `filename`, `reason` (k/b/redaction free text)
+- Includes metadata inside `m.relates_to` (reaction emoji/key text), but NOT structural metadata fields like `rel_type`, `event_id`, `algorithm`, `sender_key`, `device_id`, `session_id`
+- For write-path requests (Matrix `PUT .../send/{eventType}/{txnId}` and `PUT .../state/{eventType}[/{stateKey}]`), the event content is the raw top-level request body with no `content` wrapper — this is treated as user-generated content by default
+
+All are replaced with `"***MESSAGE_CONTENT***"`.
+
+**Implementation (Nebu.Web.Plugs.RequestLogger + Nebu.Web.Plugs.RequestLogger.PayloadRedactor):**
+
+`Nebu.Web.Plugs.RequestLogger.call/2` logs every HTTP request at INFO level with method, path, status, duration_ms, and request_id. When DEBUG logging is enabled (checked via `Logger.level()`), a secondary `Logger.debug` call issues a JSON-structured log line with:
+- All INFO-level fields
+- `request_body` — the decoded JSON request map, redacted
+- `response_body` — the decoded JSON response map, redacted
+- `auth_header` — the redacted Authorization header value (if present)
+- `query_string` — the redacted query string (if the request carried deprecated `?access_token=` patterns)
+
+The redaction is performed by `Nebu.Web.Plugs.RequestLogger.PayloadRedactor.redact_payload/1` (pure, stateless, tested in isolation). The redactor walks the decoded JSON tree recursively, matches keys case-insensitively for credentials and at any depth for message-content fields (whether the field is under a `content` wrapper or at the root of a write-path body), and returns the redacted map. Redaction is idempotent.
+
+**Failure handling:** If response-body JSON decoding fails (binary media, non-JSON Content-Type, or malformed JSON), the redacted response_body field is `nil` and the response is not logged verbatim.
+
+**No toggle in this story:** The redaction layer itself is always enabled (it's a simple pass-through if DEBUG is off); no feature flag is required. Operators enable/disable DEBUG-level logging for the whole application via `Logger.configure(level: :debug)` at runtime without restarting the server.
+
+### Query Logging Without Bound Parameters (Story matrix-payload-debug-logging, cycle 2 — Nebu.Repo.QueryTelemetry)
+
+Ecto's default query logger outputs `:debug`-level log lines including the raw SQL text and bound parameter values. When an operator enables DEBUG logging to diagnose application issues, every database query leaks any credentials bound as SQL parameters (e.g., `SELECT * FROM matrix_sessions WHERE access_token = $1` prints the actual token value in `$1`).
+
+**Solution:** Ecto's query logging is disabled globally (`config :nebu, Nebu.Repo, log: false` in `server/config/runtime.exs`, applied only when `NEBU_DB_URL` is set). Instead, Nebu hooks the underlying `:telemetry` event (which Ecto emits unconditionally regardless of the `log: false` setting) via `Nebu.Repo.QueryTelemetry`:
+
+- `QueryTelemetry.attach/0` is called once from `Nebu.Application.start/2`, registering a handler on the `[:nebu, :repo, :query]` telemetry event.
+- The handler logs a **sanitized summary at `:debug` level** — only `source` (the table name, when schema metadata is available; `"unknown"` for ADR-018 inline-SQL queries — itself safe information) and `duration_ms` (query execution time).
+- Raw SQL text (`query` field) and bound parameter values (`params` field) are **never** logged.
+- Success/failure is classified as `result=ok|error|unknown`, never surfacing the raw exception message.
+
+This restores equivalent query-level debug visibility ("a query ran, how long it took") for **every query in the codebase** (present and future) without leaking any bound credentials. The handler is **disabled in `:test` environments** (via `config :nebu, Nebu.Repo.QueryTelemetry, enabled: false` in `server/config/test.exs`) to avoid cross-test log interleaving with `ExUnit.CaptureLog`.
 
 ## API Response Formats
 
