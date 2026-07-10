@@ -48,6 +48,10 @@ module.exports = {
         "status-ok-bg":    "#052e16",
         "status-warn-bg":  "#431407",
         "status-error-bg": "#450a0a",
+        // trace-map-leitstand UX gate V5: text-on-status-error-bg pairing
+        // (the dummy's own choice) — #fca5a5 on #450a0a = 8.51:1 WCAG AA;
+        // the plain error token (#ef4444) only reaches 4.29:1 there.
+        "status-error-text": "#fca5a5",
         "base-400":        "#0d1117",
       },
       fontFamily: {

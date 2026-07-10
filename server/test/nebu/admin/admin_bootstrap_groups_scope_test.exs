@@ -2,6 +2,12 @@ defmodule Nebu.Admin.AdminBootstrapGroupsScopeTest do
   @moduledoc """
   RED-phase ATDD test for bug `bugfix-oidc-bootstrap-only-e2e-regressions`, AC3.
 
+  Also covers bug `bugfix-bootstrap-scope-ignored` (see the last `describe` block):
+  `oidc_config("bootstrap")` must read extra scopes from the in-progress
+  `bootstrap_draft`, not from `admin_oidc_scope/0`/`server_config` — that key
+  doesn't exist yet mid-bootstrap, so the operator's Step 3 "Admin client scopes"
+  field was being silently ignored on every bootstrap-mode OIDC redirect.
+
   ## Background (root cause)
 
   ADR-022 set the admin/bootstrap base scope to a fixed `"openid profile email"`
@@ -98,17 +104,24 @@ defmodule Nebu.Admin.AdminBootstrapGroupsScopeTest do
   end
 
   # In-memory draft store backing the bootstrap-mode oidc_config("bootstrap") read.
-  # bootstrap NOT completed so the bootstrap-login leg is live.
-  defp install_bootstrap_store do
+  # bootstrap NOT completed so the bootstrap-login leg is live. `extra_draft_fields`
+  # merges in additional draft keys (e.g. "admin_oidc_extra_scopes") on top of the
+  # base draft below, for tests that need the operator to have filled in Step 3's
+  # scope field before "Connect with OIDC" is clicked.
+  defp install_bootstrap_store(extra_draft_fields \\ %{}) do
     encrypted = Nebu.Admin.BootstrapLive.encrypt_secret(@client_secret)
 
-    draft = %{
-      "instance_name" => "test-nebu",
-      "oidc_issuer" => @issuer,
-      "oidc_client_id" => @client_id,
-      "oidc_client_secret" => encrypted,
-      "oidc_audience" => @client_id
-    }
+    draft =
+      Map.merge(
+        %{
+          "instance_name" => "test-nebu",
+          "oidc_issuer" => @issuer,
+          "oidc_client_id" => @client_id,
+          "oidc_client_secret" => encrypted,
+          "oidc_audience" => @client_id
+        },
+        extra_draft_fields
+      )
 
     store = start_supervised!({Agent, fn -> %{draft: draft, config: %{}} end})
 
@@ -176,6 +189,71 @@ defmodule Nebu.Admin.AdminBootstrapGroupsScopeTest do
 
       refute "profile" in scopes
       refute "email" in scopes
+    end
+  end
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # bugfix-bootstrap-scope-ignored — bootstrap-mode scope must read the DRAFT's
+  # own admin_oidc_extra_scopes, not server_config (which doesn't have that key
+  # until do_complete_bootstrap runs — after the operator has already had to pick
+  # a claim). FIXED: oidc_config("bootstrap") now calls
+  # OidcScopes.resolve_scope_with_extra(:admin, draft["admin_oidc_extra_scopes"])
+  # instead of admin_oidc_scope/0, which read the SAME :admin_oidc_extra_scopes_reader
+  # / server_config source as normal-mode login, completely ignoring what the
+  # operator typed into Step 3's "Admin client scopes" field (persisted into the
+  # draft, not server_config, at
+  # this point). So the operator-configured scope is silently dropped and the IdP
+  # is only ever asked for "openid" during bootstrap, no matter what.
+  # ════════════════════════════════════════════════════════════════════════════
+
+  describe "bugfix-bootstrap-scope-ignored — bootstrap-mode honors the draft's own scope field" do
+    test "operator-configured draft scope IS requested during the bootstrap OIDC redirect" do
+      install_bootstrap_store(%{"admin_oidc_extra_scopes" => "groups"})
+
+      scopes = scope_params(%{"mode" => "bootstrap"})
+
+      assert "openid" in scopes
+
+      assert "groups" in scopes,
+             "draft-configured admin_oidc_extra_scopes must be honored during bootstrap " <>
+               "(Step 3's 'Admin client scopes' field would otherwise have no effect); " <>
+               "got: #{inspect(scopes)}"
+    end
+
+    test "draft with no extra-scopes value still resolves to openid alone (Law default preserved)" do
+      install_bootstrap_store()
+
+      scopes = scope_params(%{"mode" => "bootstrap"})
+
+      assert scopes == ["openid"]
+    end
+
+    test "bootstrap scope comes EXCLUSIVELY from the draft, never unioned with server_config" do
+      # A fix that unions the draft's scope with whatever admin_oidc_extra_scopes_reader
+      # (server_config) also returns would pass the two tests above but still be wrong —
+      # per AC3 (Nebu.Web.OidcScopes' own no-cross-client-leak rule), the bootstrap login
+      # is not "yet another server_config-configured client", it's the ONE flow that reads
+      # the draft instead, because server_config doesn't have this key yet. Pin that the
+      # draft's "groups" appears and the reader's unrelated "profile" does NOT.
+      Application.put_env(:nebu_http, :admin_oidc_extra_scopes_reader, fn -> "profile" end)
+      install_bootstrap_store(%{"admin_oidc_extra_scopes" => "groups"})
+
+      scopes = scope_params(%{"mode" => "bootstrap"})
+
+      assert scopes == ["openid", "groups"],
+             "bootstrap scope must come exclusively from the draft; got: #{inspect(scopes)}"
+    end
+
+    test "an invalid draft scope string fails closed to openid-only (Kassandra LOW hardening)" do
+      # resolve_scope_with_extra/2 is caller-supplied, not seam/server_config-validated,
+      # so it must not trust its input blindly — a malformed value (however it got into
+      # the draft) must never reach the outbound IdP request; it fails closed instead.
+      install_bootstrap_store(%{"admin_oidc_extra_scopes" => "groups&evil=1"})
+
+      scopes = scope_params(%{"mode" => "bootstrap"})
+
+      assert scopes == ["openid"],
+             "an invalid scope string must fail closed to openid-only; got: #{inspect(scopes)}"
     end
   end
 end

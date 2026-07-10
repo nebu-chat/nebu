@@ -8,7 +8,7 @@ Quality
 │   ├── NFR-P1: Message latency ≤500ms under Silver load (500 concurrent/m5.large)
 │   ├── NFR-P2: /sync response ≤1s under normal load
 │   ├── NFR-P3: Silver-tier (>500 concurrent), Gold (>1000), Platinum (>5000) without Redis/NATS
-│   └── NFR-P4: Gateway cold-start ≤5s
+│   └── NFR-P4: Server cold-start ≤5s (single BEAM node; ADR-019/021 — no separate Gateway process)
 ├── Security
 │   ├── NFR-S1: All external connections TLS 1.2+ (1.3 preferred)
 │   ├── NFR-S2: Sensitive PII encrypted at rest (X25519 key)
@@ -17,17 +17,19 @@ Quality
 │   ├── NFR-S5: Ed25519 key deletion is irreversible (GDPR compliance)
 │   └── NFR-S6: Bootstrap mode disables permanently after first admin setup
 ├── Scalability
-│   ├── NFR-SC1: Go Gateway horizontally scalable without session affinity
+│   ├── NFR-SC1: (Historical, superseded by NFR-SC2 — the stateless Go Gateway this
+│   │            requirement targeted was removed, ADR-021/full-elixir-stack)
 │   ├── NFR-SC2: Elixir/OTP Server supports cluster operation (Phase 2: libcluster)
 │   └── NFR-SC3: No external middleware layer required (PostgreSQL only)
 ├── Reliability
 │   ├── NFR-R1: OTP process isolation (Room crash → only that room affected)
-│   ├── NFR-R2: No data loss on Gateway restart (PostgreSQL is source of truth)
-│   └── NFR-R3: Rolling updates without full downtime (stateless Gateway)
+│   ├── NFR-R2: No data loss on server restart (PostgreSQL is source of truth)
+│   └── NFR-R3: Rolling updates without full downtime
 ├── Operability
 │   ├── NFR-O1: Full deployment via docker compose up in ≤10 minutes
 │   ├── NFR-O2: Health/readiness endpoints respond ≤200ms under load
-│   ├── NFR-O3: Admin UI fully embedded in Gateway binary (no external deps)
+│   ├── NFR-O3: Admin UI fully embedded in the Nebu server (no external deps; ADR-020/021 —
+│   │           no separate Go-template admin binary)
 │   └── NFR-O4: All Admin UI states reproducible via URL
 ├── Compliance
 │   ├── NFR-C1: GDPR Right-to-be-forgotten via cryptographic key deletion
@@ -55,9 +57,7 @@ Quality
 | Scenario | Stimulus | Response | Measure |
 |---|---|---|---|
 | Silver-tier load | 500 concurrent users (60% sync, 20% send, 10% presence/typing, 5% room ops) | ≤500ms message latency | Loadtest on 2x AWS m5.large |
-| Gateway restart | SIGTERM | HTTP traffic resumes | ≤5s cold start |
-| Server restart | docker restart server | Events resume delivery, no cold-sync | Recovery via ETS + PostgreSQL checkpoint |
-| gRPC stream lost | Network partition | message_buffer absorbs writes; drain on reconnect | 0 message loss |
+| Server restart | SIGTERM / docker restart server | HTTP traffic resumes, events resume delivery, no cold-sync | ≤5s cold start; recovery via ETS + PostgreSQL checkpoint |
 | Full-text search | POST /search with keyword query across user's rooms | GIN index hit, no seq-scan | ≤500ms at Silver load; scope enforced via room membership filter |
 
 ## Security Scenarios

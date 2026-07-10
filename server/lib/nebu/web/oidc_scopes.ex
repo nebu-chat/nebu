@@ -16,6 +16,10 @@ defmodule Nebu.Web.OidcScopes do
       deduplicated, space-separated scope string: `"openid"` + operator-configured
       extra scopes + `"offline_access"` iff that client's OWN refresh mode is
       `"offline"`.
+    * `resolve_scope_with_extra/2` — same composition, but the extra-scopes
+      value is supplied by the caller instead of read from the reader seam /
+      `server_config`. Used by bootstrap-mode admin login, whose extras live in
+      the in-progress `bootstrap_draft` (see `bugfix-bootstrap-scope-ignored`).
     * `validate_scope_string/1` — the ONE scope-token validator
       (`~r/^[a-zA-Z0-9_:.\\-]+\\z/` per token, split on `" "`), replacing the two
       previously-duplicated copies in `bootstrap_controller.ex` and `admin/auth.ex`.
@@ -73,10 +77,48 @@ defmodule Nebu.Web.OidcScopes do
   """
   @spec resolve_scope(:matrix | :admin) :: String.t()
   def resolve_scope(client) when client in [:matrix, :admin] do
-    extra = extra_scopes(client)
-    mode = refresh_mode(client)
+    compose_scope(extra_scopes(client), refresh_mode(client))
+  end
 
-    base = ["openid"] ++ String.split(extra, " ", trim: true)
+  @doc """
+  Same scope composition as `resolve_scope/1` (`"openid"` + extras +
+  `"offline_access"` iff `client`'s refresh mode is `"offline"`), but the
+  caller supplies the extra-scopes value directly instead of it being read
+  from the `:{client}_oidc_extra_scopes_reader` seam / `server_config`.
+
+  This exists for `bugfix-bootstrap-scope-ignored`: bootstrap-mode admin login
+  (`Nebu.Admin.Auth.oidc_config("bootstrap")`) must resolve its extra scopes
+  from the in-progress `bootstrap_draft` — `server_config`'s
+  `admin_oidc_extra_scopes` key does not exist yet mid-bootstrap (it is only
+  written at final bootstrap completion), so the normal seam/`server_config`
+  path is unusable there. `client`'s refresh mode is still resolved via its
+  normal reader (that side of scope resolution is unaffected by this bug).
+
+  An absent/empty/blank `extra` resolves to `"openid"` alone (plus
+  `"offline_access"` per the refresh-mode rule above) — the OIDC Scopes Law
+  default applies exactly as it does in `resolve_scope/1`.
+
+  SEC (Kassandra, bugfix-bootstrap-scope-ignored review): unlike `resolve_scope/1`,
+  `extra` here is caller-supplied rather than read through a fixed seam/`server_config`
+  boundary, so this function validates it itself (`validate_scope_string/1`, fail-closed
+  to `""` on an invalid string) rather than trusting every call site to have validated
+  it beforehand. Today's only caller already validates at write time
+  (`bootstrap_controller.ex`'s `save_step3/2`) — this is defense-in-depth for future
+  callers, not a fix for a currently-reachable bug.
+  """
+  @spec resolve_scope_with_extra(:matrix | :admin, String.t() | nil) :: String.t()
+  def resolve_scope_with_extra(client, extra) when client in [:matrix, :admin] do
+    safe_extra =
+      case validate_scope_string(normalize_extra(extra)) do
+        :ok -> extra
+        {:error, _reason} -> ""
+      end
+
+    compose_scope(safe_extra, refresh_mode(client))
+  end
+
+  defp compose_scope(extra, mode) do
+    base = ["openid"] ++ String.split(normalize_extra(extra), " ", trim: true)
     base = if mode == "offline", do: base ++ ["offline_access"], else: base
 
     base

@@ -1,0 +1,31 @@
+# generated: 2026-07-06
+# Epic: enhanced-logging
+# story trace-map-zoom-pan done (pipeline: ATDD 4 red+18 e2e scenarios, dev-story 3 cycles (impl+2 E2E-scenario fixes, then UX-gate 2 blocking fixed [focus-visible CSS+4 pan buttons], then code-review cycle 2 [0 MAJOR both passes; cycle-0/1's 4 MINORs were a corrupted-artifact misdiagnosis, self-corrected]), ci-gate PASS x2 (2005/19=baseline unrelated families, 0 regressions), UX-gate CLEAN cycle 1, code-review CLEAN cycle 2, security_review not-needed, arc42 updated. 1581/1581 unit, 34/34 Zoom|Pan + 37/37 Trace Map E2E): 2026-07-09
+# story war-room-dedicated-page done (pipeline: ATDD 9 MINOR pre-dev; CI 3 dev cycles (live bugs + isolation fix); UX 1V+4A fixed; CR 1 MINOR fixed; Kassandra CLEAN): 2026-07-08
+# story trace-map-node-controls done (pipeline: ATDD 1 MAJOR pre-dev; CI 5 live bugs found+fixed; UX 3V fixed; CR 0 MAJOR; Kassandra 1 MEDIUM fixed): 2026-07-08
+# story trace-map-leitstand done (pipeline: ATDD 2 MAJOR pre-dev; CI E2E cycle; UX 5V fixed; CR 1 MAJOR fixed; Kassandra CLEAN): 2026-07-07
+# story admin-sidebar-nesting done (pipeline: ATDD 2 MAJOR test-fixes pre-dev; UX V1 fixed; 3 MINOR fixed 1 cycle; e2e harness setup-crash fixed): 2026-07-07
+# story trace-map-hierarchy done (pipeline: ATDD 11 ExUnit+8 Playwright(blocked by pre-existing e2e-admin tooling bug, verified manually live instead), test-review 0 MAJOR/2 MINOR docs folded in, dev-story 3 cycles [cycle0 impl, cycle1 UX-gate BLOCKING fixed (hidden/flex CSS cascade), cycle2 code-review 3 MINOR fixed (dead animation removed+AC5 descoped, contradictory aria-label fixed, realistic click-flow test added)], ci-gate PASS x3 (final independent verify 1763/4=known baseline flakes), UX-gate re-verified clean, code-review CLEAN, security_review not-needed, arc42 updated): 2026-07-06
+# story trace-map-filter-reset-bugfix done (pipeline: bugfix (pipeline: ATDD 4 ExUnit+7 Playwright, test-review 2 MAJOR fixed pre-dev, dev-story 4 cycles [root cause: @active_filters never real, hardcoded false; code-review found 3 MAJOR further gaps: multi-select-per-dimension not modeled, popstate sync_filters crashed sibling LiveViews, AC2 e2e test inert wrong-transport; all fixed+reverified], ci-gate PASS x4 (final independent coordinator re-verify: 1750/3=known baseline flakes, 0 regressions), UX-gate CLEAN (3 advisories accepted), code-review cycle-3 reverify CLEAN, security_review not-needed, arc42 updated): 2026-07-06): 2026-07-06
+# story war-room-mode done (pipeline: ATDD 36 tests+5 Playwright scenarios+1 MAJOR test-review fix, dev-story cycle 0 green (1729/1729 fresh-volume integration, 2 real bugs+3 test bugs fixed), ci-gate PASS x1 (baseline exactly), code-review cycle 1 (1 MAJOR PII-leak fixed+reverified, 2 MINOR fixed), UX-gate 1 blocking fixed (aria-live), Kassandra MEDIUM/LOW-only (1 MEDIUM fixed directly — API-boundary bounds enforcement, 2 LOW accepted), arc42 updated. Final independent verify: 1737/11=exactly established epic baseline, 0 regressions.): 2026-07-06
+# story admin-logs-retention-settings done (pipeline: ATDD 27 tests (+e2e Playwright feature)+2 MAJOR/3 MINOR test-review fixed, dev-story cycle 0, ci-gate PASS (1691/11=10 baseline+1 same-class flake, verified isolated), code-review 1 MAJOR fixed+reverified CLEAN, UX-gate 1 blocking fixed (aria-live), Kassandra CLEAN, arc42 updated): 2026-07-06
+# story admin-logs-monitoring-view done (pipeline: ATDD 14 tests+5 MAJOR test-review fixed, dev-story 7 cycles (test-isolation, 5 a11y violations, live-DB nil-request_id crash, cross-story source-classification bug), ci-gate PASS x5 (final: 1661/10=baseline), UX-gate 2 rounds CLEAN, code-review 3 MAJOR fixed+reverified CLEAN, Kassandra CLEAN (1 MEDIUM accepted non-blocking after fix attempt reverted for architecture-conflict), arc42 updated): 2026-07-05
+# story operational-log-store done (pipeline: ATDD 42 tests+2 MAJOR test-review fixed+1 code-review cycle (2 MAJOR fixed)+Kassandra MEDIUM-only (approved, GDPR/erasure gap flagged for admin-logs-retention-settings)): 2026-07-05
+# story noise-endpoint-bucketing created with full design decision (AC5 Option A: collapse/expand only, filtering requires expansion), cross-story coordination points, and 14 acceptance tests. Ready for dev-agent handoff.
+project: nebu
+epic: enhanced-logging
+epic_status: in-progress
+
+development_status:
+  # Stories are added as they complete.
+  # Format:
+  #   <story-slug>: done | in-progress | ready-for-dev | backlog
+  matrix-payload-debug-logging: done
+  operational-log-store: done
+  admin-logs-monitoring-view: done
+  admin-logs-retention-settings: done
+  war-room-mode: done
+  trace-map-filter-reset-bugfix: done
+  noise-endpoint-bucketing: ready-for-dev
+  war-room-dedicated-page: backlog
+  admin-sidebar-nesting: ready-for-dev

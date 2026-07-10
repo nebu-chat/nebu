@@ -32,6 +32,9 @@ server/lib/nebu/
 │                       DynamicSupervisor/Registry, Session/Presence managers, eager request-time
 │                       ETS tables: token denylist + rate-limit buckets)
 ├── repo.ex           ← Nebu.Repo (Ecto connection pool ONLY — no schemas, no Repository layer, ADR-018)
+│   └── query_telemetry.ex ← QueryTelemetry (telemetry handler attached at boot; logs sanitized
+│                   query summary at DEBUG — source + duration_ms only, never raw SQL or bound
+│                   parameters; replaces Ecto's default query logger which leaks credentials)
 ├── release.ex        ← Nebu.Release.migrate/0 — applies raw-SQL migrations before the app boots (ADR-018)
 ├── node_registration.ex ← Nebu.NodeRegistration — PSK-based cluster node registration (ADR-008)
 ├── health/           ← Nebu.Health.* — /health (incl. cluster_nodes) and /info endpoints
@@ -73,7 +76,75 @@ server/lib/nebu/
 │                       OR OidcConfig cache, denylist check, idempotent TTL-cached user
 │                       provisioning), RateLimit (per-IP token bucket: /login 30/min burst 10,
 │                       /sync 600/min burst 100; NEBU_RATE_LIMIT_DISABLED no-op), RequestId,
-│                       RequestLogger, CORS, JSON body, security headers
+│                       RequestLogger (logs all requests at INFO + optionally at DEBUG with
+│                       request/response bodies, redacted via PayloadRedactor to strip
+│                       credentials and message content; propagates request_id + route_template
+│                       via Logger.metadata/1 so downstream Logger.* calls inherit them; since
+│                       war-room-mode, also propagates user_id/device_id — via extract_user_id/1,
+│                       which reduces conn.assigns.current_user to a bare identifier string
+│                       regardless of route shape [Matrix routes: plain string; /admin/* routes:
+│                       Nebu.Admin.Auth's current_user map → matrix_user_id/sub only, NEVER email
+│                       or the raw map] — a security-review-driven fix after code-review found the
+│                       raw-assign version leaked admin emails into operational_logs metadata on
+│                       admin routes, since this same plug also serves /admin/*),
+│                       CORS, JSON body, security headers
+│   │
+│   ├── request_logger/ ← PayloadRedactor (pure, recursive two-category redaction: credentials
+│   │                   like password/access_token/Authorization → ***REDACTED***; message
+│   │                   content like event body/topic/name → ***MESSAGE_CONTENT***)
+│   ├── log_store/      ← LogStore (operational log store — persistent, mutable, admin-configurable
+│   │                   diagnostic log capture; separate from compliance audit logs, ADR-018 inline SQL):
+│   │   ├── handler.ex  — central Erlang :logger handler (attached at boot, non-blocking) that
+│   │                     broadcasts ALL Logger.* calls via Phoenix.PubSub to "operational_logs" topic
+│   │                     (feeds live views), conditionally persists via GenServer.cast to Writer.
+│   │                     Since war-room-mode: calls WarRoom.check/1 BEFORE the should_persist? gate —
+│   │                     if a matching war room session tags the entry, it persists via Writer
+│   │                     REGARDLESS of the ambient WARN/ERROR-only policy (the override lives here,
+│   │                     not in Writer's batch-flush path — see 08-concepts.md)
+│   │   ├── writer.ex   — batching GenServer (flushes every 5s or ≥100 entries) that serializes
+│   │                     INSERTs to operational_logs table; per-row fallback on batch-INSERT failure;
+│   │                     supervised :permanent child of Nebu.Application. Since war-room-mode,
+│   │                     @columns/row_values also carry the entry's war_room_id (tagged upstream by
+│   │                     Handler/WarRoom, not derived here — this module never decides tagging itself)
+│   │   ├── war_room.ex — Nebu.Web.LogStore.WarRoom (new, war-room-mode): GenServer holding the single
+│   │   │                 cached active session (or none — a persistent_term boolean fast-paths the
+│   │   │                 common "no war room active" case so Handler.log/2's hot path never blocks on
+│   │   │                 this when inactive). check/1 synchronously scope/filter-matches one log entry
+│   │   │                 against the cached session and, on match, atomically increments
+│   │   │                 entries_collected via a single `UPDATE ... SET entries_collected = +1[, ended_at
+│   │   │                 = now(), ended_reason = 'budget_exhausted']` — serialized through this one
+│   │   │                 process, so there is no read-then-write race and single-entry-granularity
+│   │   │                 budget enforcement holds exactly (never overshoots max_entries). Schedules its
+│   │   │                 own duration-timeout message on session load; boot-time load
+│   │   │                 (do_load_active/1) immediately ends an already-past-deadline session (a
+│   │   │                 restarted node cannot "forget" to end an expired session); supervisor
+│   │   │                 crash-restart re-loads the same state from war_room_sessions. Deliberately NOT
+│   │   │                 folded into Writer's batching (Writer flushes every 5s/100 entries — too
+│   │   │                 coarse for AC4's single-entry budget/override semantics)
+│   │   ├── retention.ex — TTL + max-count pruning (INFO/DEBUG per server_config policy, INFO now
+│   │                     symmetric with DEBUG's max-count cap since admin-logs-retention-settings;
+│   │                     WARN/ERROR always persist, no admin-configurable cap, but gained a
+│   │                     hardcoded, non-configurable 90-day safety-net TTL in that same story —
+│   │                     closing a previously-flagged unbounded-growth gap), wired into
+│   │                     Nebu.Matrix.Session.Sweeper's hourly sweep cycle
+│   │   ├── route_normalizer.ex — position-based Matrix path-segment normalization (room/user/event
+│   │                     IDs → placeholders, e.g. "/rooms/:room_id/send/:event_type/:txn_id") before
+│   │                     persisting route_template, replacing fragile regex ID-shape detection
+│   │   ├── policy_cache.ex — persistent_term-backed cache of server_config log-policy keys
+│   │                     (log_collect_info/debug, log_retention_*_days/debug_max_count, and — since
+│   │                     admin-logs-retention-settings — log_retention_info_max_count, 6 keys total),
+│   │                     refreshed periodically + on config write, added to avoid Nebu.Repo
+│   │                     connection-pool re-entrancy (handler runs sync inside QueryTelemetry's
+│   │                     telemetry callback)
+│   │   └── capture_cache.ex — persistent_term-backed cache of admin_temporary_captures table (new,
+│   │                     trace-map-node-controls): holds a map of {endpoint → {enabled_at, expires_at}}
+│   │                     for fast lookup in should_persist?/2's temporary-capture enforcement. 2s polling
+│   │                     interval + on-demand refresh on capture enable/disable events (PubSub broadcast).
+│   │                     Cluster-aware via :pg invalidation, mirroring PolicyCache pattern
+│   ├── log_store.ex    ← Nebu.Web.LogStore — public API: attach_handler/0 (registration),
+│   │                   get_policy/0, get_logs/1 (minimal read layer for tests + Admin UI; since
+│   │                   war-room-mode, get_logs/1's @allowed_filter_keys also accepts war_room_id,
+│   │                   with UUID-binary/string normalization for Postgrex's native uuid type)
 │
 ├── matrix/           ← Nebu.Matrix.* — Matrix C-S API surface + all stateful chat logic
 │   ├── http/         ← Nebu.Matrix.Http* — Matrix endpoint handlers: login, logout, sync (long-poll,
@@ -138,8 +209,49 @@ server/lib/nebu/
 │   │                   forwards the /admin subtree by calling it, so admin pages ride the same Bandit
 │   │                   port (4000) as Matrix/media
 │   ├── router.ex     ← Phoenix.Router; :admin pipeline with require_admin plug; CRUD pages use
-│   │                   get/post/delete routes; LiveViews (Dashboard, AuditLog) use live_session :admin;
-│   │                   /admin/login + /admin/login/start + /admin/bootstrap are public (no admin gate)
+│   │                   get/post/delete routes; LiveViews (Dashboard, AuditLog, Logs) use live_session :admin;
+│   │                   /admin/login + /admin/login/start + /admin/bootstrap are public (no admin gate);
+│   │                   GET /logs/config + POST /logs/config/retention (LogsController, plain HTTP —
+│   │                   deliberately NOT under live_session :admin, story admin-logs-retention-settings);
+│   │                   stub routes live /logs/trace-map + live /logs/war-room (stories trace-map-leitstand /
+│   │                   war-room-dedicated-page implement these pages; for now they render LogsLive)
+│   ├── layouts.ex     ← Nebu.Admin.Layouts — Phoenix.Component helpers for the shared admin UI shell.
+│   │                   root/1 renders the HTML document wrapper (Tailwind + DaisyUI stylesheet, Phoenix
+│   │                   LiveView client). live/1 renders the shared admin chrome: header + left sidebar nav +
+│   │                   main content area. The sidebar uses a dual-mode nav_item/1 component (story
+│   │                   admin-sidebar-nesting, enhanced-logging epic). live/1 also wires in WarRoomIndicator
+│   │                   to poll war room status every 2s, driving a pulsing red recording dot on the "War Room"
+│   │                   sidebar item and a topbar recording pill ("War Room recording · mm:ss") visible while
+│   │                   a session is active (story war-room-dedicated-page, trace-map-leitstand design closure).
+│   │                     • LEAF mode (`children == []`, default) — a plain nav item with zero behavior change
+│   │                       for existing call sites; renders as `<li><.link>` with active highlighting via
+│   │                       @active_nav key match. When key == "logs-war-room" and @war_room_active, the
+│   │                       nav item renders with a pulsing red dot and the <li> gains a distinct background.
+│   │                     • PARENT mode (`children != []`) — an accessible disclosure group: <button aria-expanded
+│   │                       aria-controls> toggle (with chevron icon that rotates on expand) followed by an
+│   │                       indented nested <ul id="nav-{key}-children"> of child items. The parent is a pure
+│   │                       disclosure control (no navigation); client-side delegated click listener
+│   │                       (wireNavSectionToggles in app.js) flips aria-expanded + hidden attribute + chevron
+│   │                       rotation on click (CSP-safe, survives LiveView morphdom patches).
+│   │                   Current nesting: "Logs" parent (children: Live Stream/logs-monitoring → /admin/logs,
+│   │                   Trace Map/logs-trace-map → /admin/logs/trace-map, War Room/logs-war-room →
+│   │                   /admin/logs/war-room, Log Retention/logs-config → /admin/logs/config);
+│   │                   "Configuration" parent (children: Role Mapping/role-mapping, Claim Mapping/
+│   │                   claim-mapping, General/config-general → /admin/config). Pre-existing flat
+│   │                   top-level "Role Mapping" and "Claim Mapping" items removed (AC6). Label
+│   │                   "Configuration" under Logs renamed to "Log Retention" in story trace-map-leitstand
+│   │                   (navkey logs-config unchanged).
+│   │                   Active-nav mechanism extended to parents: when a child's key matches @active_nav,
+│   │                   the child gets primary highlight (bg-primary text-primary-content + aria-current="page")
+│   │                   and the parent gets secondary highlight (bg-base-300, never bg-primary), keeping the
+│   │                   hierarchy visible. Leaf items (Dashboard, Users, Rooms, Spaces, Compliance, Bootstrap,
+│   │                   Logout) render as before with full primary highlight on key match.
+│   │                   Accessibility: parents are <button> elements (not links) with aria-expanded (true/false,
+│   │                   toggled by client) + aria-controls pointing to child <ul>'s id. All nav items retain
+│   │                   data-navkey for E2E selector compatibility (AC11). Children always in DOM; collapse adds
+│   │                   hidden attribute only (no display-none class — ensures UA's [hidden] rule applies,
+│   │                   closing a cascade bug where flex utility beats conditional display). Tab navigation works
+│   │                   naturally (parents are focusable buttons, children focusable when parent expanded).
 │   ├── auth.ex       ← admin OIDC Authorization-Code + PKCE login (login_start/callback/logout) +
 │   │                   require_admin plug (for HTTP controllers) + bootstrap_gate plug (for bootstrap
 │   │                   controller; open while bootstrap incomplete, locked post-setup) +
@@ -163,6 +275,138 @@ server/lib/nebu/
 │   ├── compliance_controller.ex    ← Compliance settings HTTP controller
 │   ├── dashboard_live.ex        ← Dashboard LiveView (real-time metrics; remains as LiveView)
 │   ├── audit_log_live.ex        ← Audit log LiveView (live-streaming audit events; remains as LiveView)
+│   ├── logs_live.ex             ← Operational Logs Monitoring LiveView (live request-stream grouped by
+│   │                   request_id, subscribes to Nebu.Web.LogStore's "operational_logs" PubSub topic,
+│   │                   level/source bubble filtering; real server-tracked @active_filters socket assign
+│   │                   supporting same-dimension multi-select, with instant client-side visual feedback
+│   │                   via Phoenix.LiveView.JS.dispatch for latency, plus JS.push for server-side state
+│   │                   sync; URL query params (?level=error,warning) for reloadable/shareable filtered
+│   │                   views; popstate handler sync_filters to keep server assign in sync with
+│   │                   back/forward navigation; story trace-map-filter-reset-bugfix fixed latent
+│   │                   filter-reset bug where unrelated re-renders silently wiped click state since
+│   │                   server never tracked it before; 200-row eviction cap for memory bounding; detail
+│   │                   panel slide-in for chronological log threads; header now links to /admin/logs/config
+│   │                   via "Sammlung konfigurieren →" (story admin-logs-retention-settings). The
+│   │                   endpoint-filtering Trace Map was retired in story trace-map-leitstand and now
+│   │                   lives on a dedicated page at /admin/logs/trace-map. Since war-room-mode:
+│   │                   handle_event("start_war_room"/"stop_war_room", ...) — real server round-trips
+│   │                   (unlike the prior filter design), gated by the same on_mount :require_admin as
+│   │                   the rest of the LiveView, calling into Nebu.Admin.WarRoomManager; a 2s self-tick
+│   │                   (Process.send_after) refreshes the live budget/time-remaining display independent
+│   │                   of log traffic; mount/3 now reads an optional war_room_id query param and, if
+│   │                   present, seeds initial_entries/0 from Nebu.Web.LogStore.get_logs(%{war_room_id: id})
+│   │                   instead of the default unfiltered 200-row load — a bookmarkable "view this
+│   │                   session's logs" URL (AC12)
+│   │   ├── trace_map_bubble.ex  ← Reusable Phoenix.Component with :filter mode (level/source, toggleable
+│   │   │                   bubbles, aria-pressed semantics), :configure mode (visual styling only —
+│   │   │                   color/shape — reused by LogsController's plain-HTML template, story
+│   │   │                   admin-logs-retention-settings), and :readonly mode (non-interactive preview,
+│   │   │                   new, war-room-dedicated-page — bubbles render with live counts but are
+│   │   │                   disabled/unclickable, used by WarRoom's pre-session live-activity scoping form).
+│   │   │                   Endpoint-filtering Trace Map was retired from /admin/logs in story
+│   │   │                   trace-map-leitstand.
+│   │   ├── trace_map_tree.ex     ← Nebu.Admin.LogsLive.TraceMapTree (story trace-map-hierarchy):
+│   │   │                   hierarchical domain→endpoint disclosure-tree wrapper component, grouping
+│   │   │                   observed endpoints by top-level namespace/domain (e.g. /admin, /_matrix/client,
+│   │   │                   /_matrix/media, /health) into collapsible group headers with native <button
+│   │   │                   aria-expanded> disclosure controls. Kept for reuse via
+│   │   │                   domain_for_endpoint/1 and group_endpoints_by_domain/1 helpers (canonical
+│   │   │                   domain-classification logic used by trace-map-leitstand), though the
+│   │   │                   endpoint_tree/1 component render is now unused on /admin/logs. Flagged for
+│   │   │                   cleanup in a follow-up story.
+│   │   ├── detail_panel.ex      ← Stateless slide-in detail-panel component; renders chronological
+│   │   │                   thread of log entries for a request_id with full metadata
+│   │   ├── war_room_panel.ex    ← Nebu.Admin.LogsLive.WarRoomPanel (RETIRED, war-room-mode): previously the visually
+│   │   │                   distinct "🚨 Start War Room" / "🚨 War Room Active" embedded panel on /admin/logs
+│   │   │                   (inactive: start form; active: live status bar). NO LONGER RENDERED on Live Stream page.
+│   │   │                   Replaced by the dedicated Nebu.Admin.LogsLive.WarRoom page (story
+│   │   │                   war-room-dedicated-page).
+│   │   └── war_room.ex          ← Nebu.Admin.LogsLive.WarRoom (new, war-room-dedicated-page): the dedicated
+│   │                       LiveView for /admin/logs/war-room, with two actions (:index list view
+│   │                       and :show detail view, mirroring LogsLive.TraceMap's shape). Index displays
+│   │                       active/historical war_room_sessions, a pre-session scoping form with live
+│   │                       TraceMapBubble preview (level/source, :readonly mode), and exclusive-scope
+│   │                       checkbox list. Show displays session metadata panel + filtered operational_logs
+│   │                       (war_room_id match), copy-to-markdown export, and back link to list. Breadcrumb
+│   │                       and routing via /admin/logs/war-room/:room_id (both routes in router.ex)
+│   ├── trace_map_geometry.ex    ← Nebu.Admin.TraceMapGeometry (new, trace-map-leitstand): pure Elixir
+│   │                   module computing radial SVG positions for the Trace Map Leitstand control-room
+│   │                   page (ADR-018/021). Canonical helper: 4-domain fixed angles (−48/48/132/−132)
+│   │                   with even-distribution fallback; satellite fan min(130°, n·26°) relative to
+│   │                   their domain; polar_to_cartesian/2 conversion; trim_edge/2 for line padding;
+│   │                   layout/1 for node-radius and ring-distance computations (nebu r=52 at origin,
+│   │                   domains R1=195 r=38, satellites R2=128 r=24).
+│   ├── logs_live/        ← Submodules for the trace-map-leitstand, trace-map-node-controls, and war-room-mode stories:
+│   │   ├── trace_map_status.ex   ← Nebu.Admin.LogsLive.TraceMapStatus (new, trace-map-leitstand): pure
+│   │   │                   module for AC3's 60-second sliding-window status calculation (worst-child
+│   │   │                   propagation, auto-heal on window slide). Pure functions of (state, now_ms);
+│   │   │                   record/3 self-prunes aged events for bounded per-node memory. No cleanup
+│   │                   timer — aging happens naturally as the window advances with each new entry.
+│   │   └── trace_map.ex         ← Nebu.Admin.LogsLive.TraceMap (new, trace-map-leitstand; extended,
+│   │                   trace-map-node-controls): dedicated LiveView module at /admin/logs/trace-map,
+│   │                   separate from LogsLive because it exports handle_params/3 (AC5's URL-driven
+│   │                   filter state via push_patch), which would break live_isolated/3 tests of the
+│   │                   shared monitoring page. Selection state: @selected seeded from bracket-array
+│   │                   ?endpoint[]=… params in handle_params/3; every node click round-trips
+│   │                   toggle_node/clear_filters → push_patch → handle_params/3. Status events
+│   │                   recorded per-node at ingest; parents' rendered status uses TraceMapStatus.worst/1.
+│   │                   A 1s server tick advances @now_ms for auto-heal visibility without traffic. War-room
+│   │                   status polled every 2s (banner appears/disappears dynamically while the page is open),
+│   │                   guarded behind Process.whereis(Nebu.Repo) like all DB reads (mount stays DB-free
+│   │                   for unit tests). (trace-map-node-controls extends with: inspector logging control
+│   │                   panel — min-level/retention selects, persistent-term CaptureCache for 2s-poll DB
+│   │                   mirroring, enable/disable handlers for temporary capture — 5-minute server-side
+│   │                   timers from admin_temporary_captures table, countdown display via JS hook, cascade
+│   │                   config updates to domain/nebu nodes' descendant endpoints, aria-live announcements for
+│   │                   capture events).
+│   ├── war_room_manager.ex      ← Nebu.Admin.WarRoomManager (new, war-room-mode): the Admin-domain
+│   │                   public API + inline-SQL (ADR-018) module for war room session lifecycle —
+│   │                   start_session/1, stop_session/1, status/0. Deliberately NOT a Plug.Conn-aware
+│   │                   HTTP controller (the story's own Dev Notes assumed a separate
+│   │                   war_room_controller.ex + JSON endpoints; /admin/logs is a LiveView, not a plain
+│   │                   Controller, and the admin app's :browser pipeline is html-only, so this is
+│   │                   called directly from LogsLive's handle_event clauses instead — see
+│   │                   08-concepts.md). Enforces "exactly one active session" via an app-level check
+│   │                   PLUS a DB partial unique index backstop (war_room_sessions_single_active_idx ON
+│   │                   ((1)) WHERE ended_at IS NULL) — a unique_violation on a race maps to the same
+│   │                   {:error, :conflict, message} tuple as the app-level check. Also enforces
+│   │                   max_entries (10..10_000) / max_duration_s (10..3_600) bounds DIRECTLY at this
+│   │                   API boundary (added after a Kassandra security-review MEDIUM finding: the
+│   │                   LiveView form's own bounds check alone was insufficient defense-in-depth for a
+│   │                   feature whose entire purpose is bounding runaway log collection)
+│   ├── war_room_indicator.ex    ← Nebu.Admin.WarRoomIndicator (new, war-room-dedicated-page): a
+│   │                   shared assign helper module (no render output) that polls WarRoomManager.status/0
+│   │                   every 2s to provide a live @war_room_active assign for 5 admin LiveViews
+│   │                   (DashboardLive, AuditLogLive, LogsLive, LogsLive.TraceMap, LogsLive.WarRoom).
+│   │                   Used by Layouts.live/1 to drive a pulsing red recording dot on the "War Room"
+│   │                   sidebar nav item and a topbar recording pill ("War Room recording · mm:ss")
+│   │                   visible from anywhere in the admin UI while a session is active (story
+│   │                   trace-map-leitstand design approval, closure of the cross-page visibility gap)
+│   ├── temporary_capture_manager.ex ← Nebu.Admin.TemporaryCaptureManager (new, trace-map-node-controls):
+│   │                   the Admin-domain public API + inline-SQL (ADR-018) module for temporary logging
+│   │                   capture on long-polling endpoints (endpoints off by default). DB-backed 5-minute
+│   │                   timer via admin_temporary_captures table (endpoint PK, expires_at TIMESTAMPTZ,
+│   │                   enabled_at TIMESTAMP, started_by TEXT). enable/2 inserts/updates a row;
+│   │                   disable/2 deletes it; active?/1 checks expiry; cleanup_expired/0 removes past-expiry
+│   │                   rows (NOT auto-scheduled — manual hygiene helper to avoid deadlock risk if wired into
+│   │                   CaptureCache's own refresh). Cluster-safe: state is a shared DB row, expiry is a
+│   │                   server-time comparison against NOW()
+│   ├── logs_controller.ex       ← Nebu.Admin.LogsController — Logging Settings page (story
+│   │                   admin-logs-retention-settings): GET /logs/config (renders form), POST
+│   │                   /logs/config/retention (validates + persists). Deliberately a plain Phoenix
+│   │                   Controller, NOT a LiveView — follows ConfigController's exact pattern
+│   │                   (plug-based :require_admin, injectable writer seam via
+│   │                   Application.get_env(:nebu_http, :admin_logs_retention_writer)). WARN/ERROR
+│   │                   render as non-interactive divs (always-on, no UI control per AC6); INFO/DEBUG
+│   │                   render as interactive buttons with server-conditional inline retention fields
+│   │                   and (DEBUG only) an excessive-logging warning. Blank/"0" retention fields are
+│   │                   unconditionally normalized to "no limit" server-side; the 7-day/1000-entry
+│   │                   "sensible defaults" (AC8) are applied entirely client-side, never server-side.
+│   ├── logs_config_html.ex      ← Nebu.Admin.LogsConfigHTML — view module for LogsController, named
+│   │                   explicitly (not the Phoenix-derived LogsHTML) to avoid ambiguity with the
+│   │                   sibling Nebu.Admin.LogsLive monitoring module
+│   │   └── templates/logs_config/index.html.heex — form + bubbles + inline retention fields + DEBUG
+│   │                   warning template; CSRF token via Plug.CSRFProtection.get_csrf_token/0
 │   ├── bootstrap_controller.ex  ← Bootstrap Wizard plain HTTP controller (fix-bootstrap-wizard-liveview-bugs):
 │   │                   replaces BootstrapLive for routing; accessible unauthenticated when bootstrap
 │   │                   incomplete (bootstrap_gate plug); step 2 auto-discovers JWKS URI from

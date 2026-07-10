@@ -50,6 +50,7 @@ defmodule Nebu.Admin.Router do
   The following LiveViews REMAIN (real-time requirement):
     - DashboardLive  — future PubSub/metric push
     - AuditLogLive   — compliance live scroll
+    - LogsLive       — operational log Trace Map + live request-stream (enhanced-logging/admin-logs-monitoring-view)
 
   The following LiveView has been CONVERTED to a plain HTTP controller (fix-bootstrap-wizard-liveview-bugs):
     - BootstrapLive   → BootstrapController (GET /bootstrap, POST /bootstrap/step/1-3)
@@ -189,6 +190,10 @@ defmodule Nebu.Admin.Router do
     post "/config/scopes", ConfigController, :save_scopes
     post "/config/sso-schemes", ConfigController, :save_sso_schemes
 
+    # Logs configuration (enhanced-logging/admin-logs-retention-settings)
+    get "/logs/config", LogsController, :index
+    post "/logs/config/retention", LogsController, :save_retention
+
     # Claim mapping
     get "/config/claim-mapping", ClaimMappingController, :index
     post "/config/claim-mapping", ClaimMappingController, :update
@@ -211,6 +216,25 @@ defmodule Nebu.Admin.Router do
     live_session :admin, on_mount: {Nebu.Admin.Auth, :require_admin} do
       live "/dashboard", DashboardLive, :index
       live "/audit-log", AuditLogLive, :index
+      # enhanced-logging/admin-logs-monitoring-view: live request-stream,
+      # subscribed to the operational-log-store's PubSub topic. The embedded
+      # Trace Map's Endpoint dimension was retired from this page by
+      # enhanced-logging/trace-map-leitstand (AC13) in favor of the dedicated
+      # radial-map page below.
+      live "/logs", LogsLive, :index
+      # enhanced-logging/trace-map-leitstand (AC1): the dedicated Trace Map
+      # "Leitstand" page — a SEPARATE LiveView module (it defines
+      # handle_params/3 for URL-driven filter state, which the shared
+      # LogsLive must never export; see LogsLive.TraceMap's moduledoc).
+      live "/logs/trace-map", LogsLive.TraceMap, :index
+      # enhanced-logging/war-room-dedicated-page (amendment 1): repoints the
+      # former stub (which rendered the Live Stream page, mislabeled) to the
+      # real dedicated War Room page — a SEPARATE LiveView module (mirrors
+      # LogsLive.TraceMap's own "one module, two router actions" shape),
+      # room_id arriving as a static path segment for :show (no
+      # handle_params/3 needed — see that module's moduledoc).
+      live "/logs/war-room", LogsLive.WarRoom, :index
+      live "/logs/war-room/:room_id", LogsLive.WarRoom, :show
     end
   end
 end

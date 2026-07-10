@@ -30,6 +30,14 @@ defmodule Nebu.Admin.DB do
     sso_extra_redirect_schemes
   )
 
+  # enhanced-logging/operational-log-store (AC3/AC7): the 5 log-policy keys
+  # whose write must force an immediate Nebu.Web.LogStore.PolicyCache
+  # refresh — see upsert_server_config/1 below.
+  @log_policy_cache_keys ~w(
+    log_collect_info log_retention_info_days log_retention_info_max_count
+    log_collect_debug log_retention_debug_days log_retention_debug_max_count
+  )
+
   # ─── User operations ─────────────────────────────────────────────────────────
 
   @doc """
@@ -759,6 +767,17 @@ defmodule Nebu.Admin.DB do
     # no-op (no needless re-read).
     if Enum.any?(@scope_cache_keys, &Map.has_key?(stringify_keys(changes), &1)) do
       refresh_oidc_scope_cache()
+    end
+
+    # enhanced-logging/operational-log-store (AC7): the 5 log-policy keys are
+    # read on Nebu.Web.LogStore.Handler's hot path via a persistent_term
+    # cache (Nebu.Web.LogStore.PolicyCache), NEVER via a live DB read there
+    # (re-entering Nebu.Repo's connection pool from a Logger.* call risks a
+    # connection-pool deadlock — see PolicyCache's moduledoc). Force a
+    # synchronous cache refresh here so a policy flip takes effect on the
+    # VERY NEXT Logger.* call, mirroring the OIDC scope-cache pattern above.
+    if Enum.any?(@log_policy_cache_keys, &Map.has_key?(stringify_keys(changes), &1)) do
+      Nebu.Web.LogStore.refresh_policy_cache()
     end
 
     :ok

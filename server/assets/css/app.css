@@ -37,3 +37,415 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Trace Map "Leitstand" (enhanced-logging/trace-map-leitstand)
+ *
+ * Visual states per the design spec §2 / trace-map-leitstand-dummy.html,
+ * using the Obsidian theme's own color values (tailwind.config.js).
+ * Status colors are reserved for health; primary orange is selection/focus
+ * ONLY. All animations are pure CSS and disabled under
+ * prefers-reduced-motion (AC10 — blocking accessibility requirement).
+ * ──────────────────────────────────────────────────────────────────────── */
+
+.tm-edge {
+  stroke: #374151; /* --line / base-300 */
+  stroke-width: 1;
+  opacity: 0.55;
+}
+
+.tm-node {
+  cursor: pointer;
+}
+
+.tm-node-core {
+  transition: stroke 0.25s, fill 0.25s, fill-opacity 0.25s, stroke-opacity 0.25s;
+}
+
+/* ok: healthy recedes — dim fill, soft green stroke, dimmed label */
+.tm-node--ok .tm-node-core {
+  fill: #1f2937; /* base-200 */
+  fill-opacity: 0.35;
+  stroke: #22c55e; /* success */
+  stroke-opacity: 0.55;
+  stroke-width: 1.5;
+}
+
+/* warn: amber stroke + soft glow + ▲ badge (badge markup is server-side) */
+.tm-node--warn .tm-node-core {
+  fill: #431407; /* status-warn-bg */
+  fill-opacity: 0.9;
+  stroke: #f59e0b; /* warning */
+  stroke-width: 2.5;
+  filter: drop-shadow(0 0 6px rgba(245, 158, 11, 0.45));
+}
+
+/* error: red stroke + glow + pulse (pulse disabled under reduced motion) */
+.tm-node--error .tm-node-core {
+  fill: #450a0a; /* status-error-bg */
+  fill-opacity: 0.95;
+  stroke: #ef4444; /* error */
+  stroke-width: 3;
+  filter: drop-shadow(0 0 10px rgba(239, 68, 68, 0.6));
+  animation: tm-errpulse 1.4s ease-in-out infinite;
+}
+
+@keyframes tm-errpulse {
+  0%,
+  100% {
+    stroke-opacity: 1;
+    filter: drop-shadow(0 0 10px rgba(239, 68, 68, 0.6));
+  }
+  50% {
+    stroke-opacity: 0.5;
+    filter: drop-shadow(0 0 3px rgba(239, 68, 68, 0.25));
+  }
+}
+
+/* Node labels/counters (mono counters per spec §2) */
+.tm-nname {
+  font-family: Inter, system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  text-anchor: middle;
+  fill: #f9fafb;
+  pointer-events: none;
+}
+
+.tm-nlabel {
+  font-family: Inter, system-ui, sans-serif;
+  font-size: 12px;
+  text-anchor: middle;
+  fill: #9ca3af;
+  pointer-events: none;
+}
+
+.tm-ncount {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11.5px;
+  text-anchor: middle;
+  fill: #9ca3af;
+  pointer-events: none;
+}
+
+/* ok recedes: dimmed label (status is never color-alone — AC4) */
+.tm-node--ok .tm-nlabel {
+  opacity: 0.75;
+}
+
+.tm-node--warn .tm-nlabel,
+.tm-node--error .tm-nlabel,
+.tm-node--warn .tm-ncount,
+.tm-node--error .tm-ncount {
+  fill: #f9fafb;
+  opacity: 1;
+}
+
+/* enhanced-logging/trace-map-node-controls (AC4/AC5/AC6/AC8): long-polling
+ * endpoints — off by default (gray, dashed, "off" text), one click enables
+ * a dashed temporary capture. The errors-always-persist amendment (an
+ * off-tier node with a windowed error) stays on the normal
+ * `.tm-node--error` red/pulse rule EXCEPT it must keep the dashed stroke
+ * and drop the pulse — selected via the `[data-node-off="true"]` co-marker
+ * (never a duplicated status string) so "off" and "erroring" compose.
+ *
+ * UX gate (2026-07-08, V1/V2/A1 fix): #6b7280 was mislabeled "text-disabled"
+ * in an earlier comment and was ALSO the wrong token regardless of the
+ * label (#6b7280 is the theme's info token; the real text-disabled is
+ * #4b5563). Neither applies here: an off node is OPERABLE (clickable to
+ * enable a 5-minute capture — AC5), so the "inactive control" contrast
+ * exemption used elsewhere in this file (see level_pill_class/1's own UX
+ * gate V3 note) does NOT apply — same lesson as the previous story's
+ * V1/V3. Uses text-secondary (#9ca3af) at full opacity for both the
+ * stroke and the label/count text: 7.45:1 on the base-400 map background,
+ * clearing both the 4.5:1 (text) and 3:1 (non-text/graphical) WCAG AA
+ * thresholds. */
+.tm-node--off .tm-node-core {
+  fill: #1f2937; /* base-200 */
+  fill-opacity: 0.15;
+  stroke: #9ca3af; /* text-secondary — operable control, not a disabled one */
+  stroke-opacity: 1;
+  stroke-width: 1.5;
+  stroke-dasharray: 4 4;
+  filter: none;
+  animation: none;
+}
+
+.tm-node--off .tm-nlabel,
+.tm-node--off .tm-ncount {
+  fill: #9ca3af; /* text-secondary — see UX gate note above */
+  opacity: 1;
+}
+
+.tm-node--temp .tm-node-core {
+  stroke-dasharray: 6 3;
+}
+
+.tm-node--temp .tm-countdown {
+  fill: #9ca3af;
+}
+
+/* AC4 amendment (2026-07-07): "off silences noise, never failures" — an
+ * off-tier node with a windowed error stays dashed (never the solid
+ * pulse), communicating that it is STILL off-tier even while erroring. */
+.tm-node--error[data-node-off="true"] .tm-node-core {
+  stroke-dasharray: 4 4;
+  animation: none;
+}
+
+/* Selection ring — primary orange ONLY, never used for health (AC4) */
+.tm-selring {
+  fill: none;
+  stroke: #f97316; /* primary */
+  stroke-width: 2.5;
+  display: none;
+}
+
+.tm-node[data-node-selected="true"] .tm-selring {
+  display: block;
+}
+
+/* AC10: visible focus ring on every node (never removed) */
+[data-testid="trace-map-node"]:focus-visible {
+  outline: 2px solid #f97316;
+  outline-offset: 2px;
+}
+
+/* enhanced-logging/trace-map-zoom-pan (AC5 / UX gate finding 1): the map
+   surface itself is focusable (tabindex="0", see trace_map.ex) so it needs
+   its own explicit visible-focus rule — same color/style as the node ring
+   and the resizer below, rather than relying on the browser's UA-default
+   outline. `outline-offset: -2px` (inset) matches `.tm-resizer:focus-visible`
+   since the SVG, like the resizer, fills its own container edge-to-edge. */
+[data-testid="trace-map-svg"]:focus-visible {
+  outline: 2px solid #f97316;
+  outline-offset: -2px;
+}
+
+/* Status badges (▲/✕ + count) — status is never conveyed by color alone */
+.tm-badge {
+  pointer-events: none;
+}
+
+.tm-badge circle {
+  stroke: #0d1117; /* base-400 map background */
+  stroke-width: 1.5;
+}
+
+.tm-badge--warn circle {
+  fill: #f59e0b;
+}
+
+.tm-badge--error circle {
+  fill: #ef4444;
+}
+
+.tm-badge text {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 9.5px; /* UX gate A7: match the dummy's badge size */
+  font-weight: 700;
+  fill: #1c1917;
+  text-anchor: middle;
+}
+
+/* UX gate V2: white on #ef4444 is only 3.76:1 — the theme's own
+ * error-content token (#000000, 5.58:1 on the error red) is used instead
+ * (the dummy's white-on-red badge text has the same flaw; AC10's 4.5:1
+ * hard gate overrides the dummy here). */
+.tm-badge--error text {
+  fill: #000000;
+}
+
+/* Decorative event pings (created by the TraceMapLeitstand hook on status
+ * transitions; the animation itself is pure CSS — AC11) */
+.tm-ping {
+  fill: none;
+  stroke-width: 2;
+  animation: tm-ping 0.7s ease-out forwards;
+  pointer-events: none;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.tm-ping--warn {
+  stroke: #f59e0b;
+}
+
+.tm-ping--error {
+  stroke: #ef4444;
+}
+
+@keyframes tm-ping {
+  from {
+    opacity: 0.55;
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.55);
+  }
+}
+
+/* War-room banner recording dot (AC6) */
+.tm-recdot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ef4444;
+  flex-shrink: 0;
+  animation: tm-recblink 1.2s ease-in-out infinite;
+}
+
+@keyframes tm-recblink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+/* Tooltip (AC7 — positioned by the hook, content from data-tooltip-*) */
+.tm-tooltip {
+  position: absolute;
+  z-index: 20;
+  pointer-events: none;
+  background: #1f2937;
+  border: 1px solid #374151;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12.5px;
+  min-width: 200px;
+  max-width: 260px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.tm-tooltip[hidden] {
+  display: none;
+}
+
+.tm-tooltip-name {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.tm-tooltip-route {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11.5px;
+  color: #9ca3af;
+  margin-bottom: 6px;
+  word-break: break-all;
+}
+
+.tm-tooltip-status,
+.tm-tooltip-counts {
+  color: #9ca3af;
+}
+
+.tm-tooltip-cta {
+  margin-top: 6px;
+  color: #f97316;
+  font-size: 11.5px;
+}
+
+/* Resizer (AC9) — visible affordance bar; orange on hover/focus */
+.tm-resizer {
+  height: 8px;
+  cursor: row-resize;
+  background: #111827;
+  border-top: 1px solid #374151;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: none;
+}
+
+.tm-resizer::before {
+  content: "";
+  width: 44px;
+  height: 3px;
+  border-radius: 2px;
+  background: #374151;
+}
+
+.tm-resizer:hover::before,
+.tm-resizer:focus-visible::before {
+  background: #f97316;
+}
+
+.tm-resizer:focus-visible {
+  outline: 2px solid #f97316;
+  outline-offset: -2px;
+}
+
+/* Stream panel default height (dblclick on the resizer resets to this) */
+.tm-stream {
+  height: 218px;
+}
+
+/* Legend dots (AC8 — one per visual state, mirrors the node styling) */
+.tm-legend-dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-block;
+}
+
+.tm-legend-dot--ok {
+  background: rgba(31, 41, 55, 0.35);
+  border: 1.5px solid rgba(34, 197, 94, 0.55);
+}
+
+.tm-legend-dot--warn {
+  background: #431407;
+  border: 2.5px solid #f59e0b;
+}
+
+.tm-legend-dot--error {
+  background: #450a0a;
+  border: 3px solid #ef4444;
+}
+
+.tm-legend-dot--selected {
+  background: transparent;
+  border: 2.5px solid #f97316;
+}
+
+.tm-legend-dot--off {
+  background: transparent;
+  border: 1.5px dashed #4b5563;
+}
+
+.tm-legend-dot--temp {
+  background: rgba(31, 41, 55, 0.35);
+  border: 2px dashed #22c55e;
+}
+
+/* AC10 (blocking): reduced motion disables ALL decorative animation —
+ * error pulse, event pings, and the recording dot's blink. */
+@media (prefers-reduced-motion: reduce) {
+  .tm-node--error .tm-node-core {
+    animation: none;
+  }
+
+  .tm-ping {
+    display: none;
+  }
+
+  .tm-recdot {
+    animation: none;
+  }
+}
+
+/* War-room banner (AC6): owns its display so the boolean `hidden` attribute
+ * actually hides it — a bare Tailwind `.flex` utility would beat the UA's
+ * `[hidden] { display: none }` rule in the cascade (the known
+ * flex-beats-hidden trap; reconfirmed against the live stack, dev cycle 1). */
+.tm-wr-banner {
+  display: flex;
+}
+
+.tm-wr-banner[hidden] {
+  display: none;
+}

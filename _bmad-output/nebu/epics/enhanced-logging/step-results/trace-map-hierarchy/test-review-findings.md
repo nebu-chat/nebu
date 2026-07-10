@@ -1,0 +1,7 @@
+# Test Review — trace-map-hierarchy (RED phase)
+
+0 MAJOR. All AC1-AC9 covered, no hard waits/brittle selectors, @pending-feature convention correctly used, AC3 scope respected (no domain-header-click-also-filters), AC8 additive-only, edge cases real.
+
+2 MINOR (address during dev-story, not blocking):
+1. trace_map_tree_test.exs's moduledoc documents endpoint_tree/1's attrs (endpoints, counts, active_filters, on_click) but AT1's 2nd test also passes an undocumented `expanded_domains` attr for explicit override, while AT2 relies purely on active_filters-derived expansion. Precedence/merge rule between explicit expanded_domains and filter-derived expansion is unspecified. Dev agent: pick ONE clear rule (recommend: expanded_domains, if provided, is the authoritative initial state; active_filters-derived expansion only applies when expanded_domains is not passed / on subsequent active_filters changes) and document it in the component's moduledoc.
+2. AC9 allows EITHER an aria-live announcement OR natural screen-reader encounter of the aria-expanded change; the test suite implicitly commits to "natural encounter" (no aria-live test exists) but this choice isn't documented anywhere. Dev agent: add a one-line Dev Notes/moduledoc comment confirming this is the deliberate choice (native aria-expanded button is the ARIA APG disclosure pattern, no extra live-region needed) so a future reviewer doesn't flag its absence as a gap.

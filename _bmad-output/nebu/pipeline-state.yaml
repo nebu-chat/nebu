@@ -8,7 +8,16 @@
 #   _bmad-output/nebu/epics/<epic-name>/pipeline-state.yaml
 # This file is no longer used for named-epic pipeline runs.
 #
-# last_updated: 2026-07-03
+# last_updated: 2026-07-09
+# [bugfix-bootstrap-scope-ignored] 2026-07-09T17:10Z committed ✓ f245ea18 (ATDD+Dev 1 cycle MAJOR-changeset-scope resolved via commit pathspec+2 MINOR fixed+Kassandra CLEAN 2 LOW fixed proactively)
+# [bugfix-bootstrap-scope-ignored] 2026-07-09T17:08Z arc42-update → done (08-concepts.md OIDC Scopes Law section extended with bootstrap-mode carve-out note)
+# [bugfix-bootstrap-scope-ignored] 2026-07-09T17:07Z security-review → Kassandra CLEAN (0 CRIT/HIGH/MEDIUM), 2 LOW (resolve_scope_with_extra/2 trusted caller-supplied extra without re-validation) fixed proactively: fail-closed validate_scope_string/1 inside the function + regression test; 1580p/0f full suite
+# [bugfix-bootstrap-scope-ignored] 2026-07-09T17:01Z code-review → CLEAN (cycle 0); 1 MAJOR (staged changeset contaminated by unrelated in-flight trace-map-zoom-pan story — will scope-commit via pathspec, not unstage) noted for commit step; 1 MINOR fixed (stale RED NOW comment), 1 MINOR accepted (write-time-validation trust boundary, single writer, low likelihood); composition-equivalence/normal-mode-untouched/no-dead-code all verified CLEAN
+# [bugfix-bootstrap-scope-ignored] 2026-07-09T16:55Z ci-gate → ✓ redeploy+integration (2004 tests, 19 failures — all pre-existing/unrelated: trace-map-zoom-pan WIP + 1 flaky rate-limit timing test, none touch OIDC/scopes)+unit (1579p/0f)
+# [bugfix-bootstrap-scope-ignored] 2026-07-09T16:48Z dev-story → done (cycle 0): oidc_config("bootstrap") now resolves scope via new OidcScopes.resolve_scope_with_extra/2 from draft["admin_oidc_extra_scopes"] instead of admin_oidc_scope()/server_config; normal-mode path untouched; 5/5 target tests + full suite 1579p/0f
+# [bugfix-bootstrap-scope-ignored] 2026-07-09T16:45Z test-review → CLEAN (0 MAJOR, 2 MINOR: added source-isolation test to close the union-vs-exclusive-read gap, moduledoc updated); 5 tests total, 2 RED confirmed
+# [bugfix-bootstrap-scope-ignored] 2026-07-09T16:40Z atdd → 1 RED test added (admin_bootstrap_groups_scope_test.exs: draft-configured admin_oidc_extra_scopes must be honored during bootstrap; got openid-only) + 1 regression-guard test (empty draft scope still resolves to openid alone)
+# [bugfix-bootstrap-scope-ignored] 2026-07-09T16:37Z pipeline started (--bug: oidc_config("bootstrap") in auth.ex always requests scope=openid regardless of the operator's Step-3 'Admin client scopes' field, because it resolves scope via admin_oidc_scope()/server_config instead of the in-progress bootstrap_draft; an IdP claim reachable only via an extra scope like groups can never be selected during bootstrap, wizard permanently refuses with 'no claim path submitted')
 # [bugfix-jwt-soft-logout] 2026-07-03T09:43Z committed ✓ 5fb55eac (ATDD+Dev CLEAN, 1 cycle MINOR fixed+Kassandra CLEAN)
 # [bugfix-jwt-soft-logout] 2026-07-03T09:43Z arc42-update → done (08-concepts.md:474 JWT-fallback soft_logout behavior documented)
 # [bugfix-jwt-soft-logout] 2026-07-03T09:41Z security-review → Kassandra CLEAN (0 CRIT/HIGH)
@@ -264,7 +273,7 @@ current_step: null
 completed: []
 cycle_count: 0
 blocked_reason: null
-last_updated: "2026-07-03T09:43Z"
+last_updated: "2026-07-09T17:10Z"
 story: "device-key-registration"
 current_step: "commit"
 completed:

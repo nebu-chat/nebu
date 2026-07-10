@@ -5,8 +5,16 @@ defmodule Nebu.Admin.AuditLogLive do
   Read-only list of the most recent audit_log events (actor, action, target, outcome,
   time). Inline SQL per ADR-018; the audit_log table is the append-only compliance trail
   written by Nebu.Compliance.AuditWriter.
+
+  ## War Room sidebar dot / topbar pill (enhanced-logging/war-room-dedicated-page, amendment 4)
+
+  See `Nebu.Admin.DashboardLive`'s own moduledoc note — same
+  `Nebu.Admin.WarRoomIndicator` wiring, part of the small, fully-enumerable
+  set of remaining admin LiveViews.
   """
   use Phoenix.LiveView, layout: {Nebu.Admin.Layouts, :live}
+
+  alias Nebu.Admin.WarRoomIndicator
 
   @sql """
   SELECT event_time, actor_user_id, action, target_type, target_id, outcome
@@ -17,12 +25,23 @@ defmodule Nebu.Admin.AuditLogLive do
 
   @impl Phoenix.LiveView
   def mount(_params, _session, socket) do
+    if connected?(socket) and Process.whereis(Nebu.Repo), do: WarRoomIndicator.schedule()
+
     {:ok,
      socket
      |> assign(:active_nav, "compliance")
      |> assign(:page_title, "Audit Log")
-     |> assign(:events, load_events())}
+     |> assign(:events, load_events())
+     |> WarRoomIndicator.assign_status(WarRoomIndicator.status())}
   end
+
+  @impl Phoenix.LiveView
+  def handle_info(:refresh_war_room_status, socket) do
+    if Process.whereis(Nebu.Repo), do: WarRoomIndicator.schedule()
+    {:noreply, WarRoomIndicator.assign_status(socket, WarRoomIndicator.status())}
+  end
+
+  def handle_info(_other, socket), do: {:noreply, socket}
 
   @impl Phoenix.LiveView
   def render(assigns) do

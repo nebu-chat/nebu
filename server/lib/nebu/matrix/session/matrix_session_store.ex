@@ -450,6 +450,18 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
     }
   end
 
+  # NOTE (enhanced-logging/matrix-payload-debug-logging, CI-gate cycle-2 bug 2):
+  # this module binds opaque access/refresh tokens (credentials) as SQL
+  # parameters in every query. Ecto's default query logger would emit those
+  # bound params verbatim at :debug level. Rather than disabling logging on a
+  # per-call-site basis here, the fix is global: `config :nebu, Nebu.Repo,
+  # log: false` (server/config/config.exs) disables Ecto's own Logger call for
+  # ALL queries everywhere, and `Nebu.Repo.QueryTelemetry`
+  # (server/lib/nebu/repo/query_telemetry.ex) attaches to the
+  # `[:nebu, :repo, :query]` telemetry event to log a SANITIZED summary
+  # (source + duration_ms only, never bound parameters) at :debug. See that
+  # module for details. This keeps every query in the codebase — not just
+  # this module's — safe at :debug level, now and for any future query.
   defp query(sql, params), do: Ecto.Adapters.SQL.query(Nebu.Repo, sql, params)
 
   # Read-path query that never raises: a failed lookup (DB down / not started, or a

@@ -8,7 +8,8 @@
 #   _bmad-output/nebu/epics/<epic-name>/sprint-status.yaml
 # ═══════════════════════════════════════════════════════════════════════════════
 # generated: 2026-03-20
-# last_updated: 2026-07-03
+# last_updated: 2026-07-09
+# story bugfix-bootstrap-scope-ignored done (pipeline: ATDD+Dev CLEAN, 1 cycle 1 MAJOR (changeset scope, resolved via commit pathspec)+2 MINOR fixed+Kassandra CLEAN (2 LOW fixed proactively)): 2026-07-09
 # story bugfix-jwt-soft-logout done (pipeline: ATDD+Dev CLEAN, 1 cycle MINOR fixed+Kassandra CLEAN): 2026-07-03
 # story bugfix-remove-unused-confirm-default done (pipeline: ATDD skip-with-reasoning (build-time property, no synthetic test)+Dev 0 MAJOR/1 MINOR fixed 1 cycle+Kassandra CLEAN; mix test --warnings-as-errors 2 own-code warnings fixed, exit 0 restored): 2026-07-03
 # story bugfix-nested-oidc-claim-support done (pipeline: Dev 1 MAJOR+2 MINOR fixed 1 cycle+Kassandra CLEAN (widening risk reassessed, unchanged verdict)): 2026-07-01
