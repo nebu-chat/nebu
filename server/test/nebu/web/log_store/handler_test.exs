@@ -535,8 +535,16 @@ defmodule Nebu.Web.LogStore.HandlerTest do
 
       on_exit(fn ->
         if Process.whereis(Nebu.Repo) do
+          # 10e follow-on fix: `Nebu.Admin.WarRoomManager.row_to_session/1` now
+          # returns `id` as the canonical hex-dash STRING (matching its own
+          # long-standing @spec), not the raw 16-byte BINARY Postgrex hands
+          # back for a `uuid` column — every raw-SQL `$1` bind of a
+          # WarRoomManager-sourced session id in this pre-existing file needs
+          # the same `Ecto.UUID.dump!/1` normalization already established at
+          # `Nebu.Admin.LogsLive.WarRoom.load_session/1` and now also in
+          # `Nebu.Admin.WarRoomManager.stop_session/1` itself.
           Ecto.Adapters.SQL.query(Nebu.Repo, "DELETE FROM war_room_sessions WHERE id = $1", [
-            session.id
+            Ecto.UUID.dump!(session.id)
           ])
 
           Ecto.Adapters.SQL.query(
@@ -578,7 +586,11 @@ defmodule Nebu.Web.LogStore.HandlerTest do
 
       war_room_ids = Enum.map(result.rows, fn [_level, wr_id] -> wr_id end)
 
-      assert session.id in war_room_ids,
+      # `war_room_ids` above are read straight off a raw-SQL SELECT, so they
+      # stay in Postgrex's raw-binary uuid form; `session.id` is the
+      # canonical string WarRoomManager now returns (10e follow-on fix) —
+      # dump it to binary for a like-for-like comparison.
+      assert Ecto.UUID.dump!(session.id) in war_room_ids,
              "expected at least one persisted DEBUG row for this request to be tagged with " <>
                "the active war room session's id, got: #{inspect(war_room_ids)}"
 
@@ -586,7 +598,7 @@ defmodule Nebu.Web.LogStore.HandlerTest do
         Ecto.Adapters.SQL.query!(
           Nebu.Repo,
           "SELECT entries_collected FROM war_room_sessions WHERE id = $1",
-          [session.id]
+          [Ecto.UUID.dump!(session.id)]
         )
 
       assert [[collected]] = updated.rows
@@ -618,8 +630,11 @@ defmodule Nebu.Web.LogStore.HandlerTest do
 
       on_exit(fn ->
         if Process.whereis(Nebu.Repo) do
+          # 10e follow-on fix: see the first test's on_exit comment above —
+          # session.id is now a canonical string, dump it back to binary for
+          # this raw-SQL uuid-column bind.
           Ecto.Adapters.SQL.query(Nebu.Repo, "DELETE FROM war_room_sessions WHERE id = $1", [
-            session.id
+            Ecto.UUID.dump!(session.id)
           ])
 
           Ecto.Adapters.SQL.query(
@@ -684,7 +699,7 @@ defmodule Nebu.Web.LogStore.HandlerTest do
         Ecto.Adapters.SQL.query!(
           Nebu.Repo,
           "SELECT entries_collected FROM war_room_sessions WHERE id = $1",
-          [session.id]
+          [Ecto.UUID.dump!(session.id)]
         )
 
       assert [[0]] = count_result.rows,
@@ -715,8 +730,9 @@ defmodule Nebu.Web.LogStore.HandlerTest do
 
       on_exit(fn ->
         if Process.whereis(Nebu.Repo) do
+          # 10e follow-on fix: see the first test's on_exit comment above.
           Ecto.Adapters.SQL.query(Nebu.Repo, "DELETE FROM war_room_sessions WHERE id = $1", [
-            session.id
+            Ecto.UUID.dump!(session.id)
           ])
 
           Ecto.Adapters.SQL.query(

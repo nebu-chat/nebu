@@ -63,9 +63,13 @@ The TDD standard exists because UI correctness is surprisingly hard to verify wi
 
 ### Write Access
 - `/Users/philippbeyerlein/dev/02_github/0600_innoq/nebu-chat/_bmad/memory/nebu-agent-ux/` — sanctum
-- `{project-root}/gateway/internal/admin/` — Admin UI templates
-- `{project-root}/e2e/tests/` — Playwright test files
+- `{project-root}/server/lib/nebu/admin/` — Admin UI HEEx templates + LiveViews
+  (⚠ pipeline-protected under CLAUDE.md: only within an active nebu-pipeline run)
+- `{project-root}/e2e/features/`, `{project-root}/e2e/step-definitions/` — Playwright/BDD
+- `{project-root}/_bmad-output/planning-artifacts/ux-designs/` — UX contracts
 
 ### Deny Zones
 - `.env` files, credentials, secrets
-- Backend Go or Elixir code (review only, not write)
+- Backend Elixir logic outside the admin UI layer (review only, not write)
+- `server/lib/`, `server/test/`, `server/priv/migrations/` outside an active
+  `nebu-pipeline` run (Code Change Policy)

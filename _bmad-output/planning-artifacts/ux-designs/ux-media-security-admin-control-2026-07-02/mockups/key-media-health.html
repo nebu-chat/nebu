@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>Nebu Admin — Scan-Gesundheit (Key Screen Mock)</title>
+<style>
+/*
+  Governs: DESIGN.md → Layout & Spacing (stat grid), Elevation & Depth
+           (top-border StatusCard, left-border AlertItem — greenfield),
+           Components → scan-health-stat, scan-alert-item.
+  EXPERIENCE.md → IA (/admin/media/health dedicated route, D6 — bookmarkable,
+           shareable per-problem links), Component Patterns (scan-health-stat/
+           scan-alert-item — live, unresolved pinned, auto-clear),
+           State Patterns B (Degraded pipeline; Empty "Alles ruhig"),
+           Accessibility post-review hardening H6 (status never color-only —
+           every alert/card carries a severity WORD + icon, not just color).
+  Two states in one file per key-screens.md: degraded/critical (top, the
+  load-bearing incident state operators bookmark this route for) and the
+  calm baseline (bottom, alternate state).
+  Offline, inline CSS, no JS, no network. Icons: inline SVG, never emoji.
+*/
+:root{
+  --primary:#f97316; --primary-hover:#ea580c; --primary-content:#1c1917; --primary-subtle:#431407;
+  --base-100:#111827; --base-200:#1f2937; --base-300:#374151; --base-content:#f9fafb;
+  --text-secondary:#9ca3af; --success:#22c55e; --warning:#f59e0b; --status-warn-bg:#451a03;
+  --error:#ef4444; --neutral:#6b7280;
+  --media-processing:#f59e0b; --media-released:#14b8a6; --media-infected:#ef4444;
+  --media-blocked:#fb7185; --media-terminal:#6b7280; --badge-dark-text:#1c1917;
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{background:var(--base-100); color:var(--base-content); font-family:Inter,"Segoe UI",system-ui,-apple-system,sans-serif; font-size:15px; line-height:1.5;}
+.mono{font-family:"JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+.sr-only{position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap;}
+
+.topbar{position:fixed; top:0; left:0; right:0; height:48px; background:var(--base-300); display:flex; align-items:center; padding:0 16px; gap:12px; z-index:10;}
+.topbar .brand{font-weight:700;}
+.topbar .spacer{flex:1;}
+.topbar .user{display:flex; align-items:center; gap:8px; font-size:.85rem; color:var(--text-secondary);}
+.avatar{width:28px; height:28px; border-radius:50%; background:var(--primary-subtle); color:var(--primary); display:flex; align-items:center; justify-content:center; font-size:.75rem; font-weight:700;}
+
+.sidebar{width:240px; background:var(--base-200); position:fixed; top:48px; bottom:0; left:0; padding:20px 0; overflow-y:auto;}
+.sidebar .group-label{font-size:11px; letter-spacing:.06em; color:var(--text-secondary); text-transform:uppercase; padding:0 20px; margin:20px 0 8px;}
+.sidebar .group-label:first-child{margin-top:0;}
+.sidebar a.navitem{display:flex; align-items:center; gap:10px; padding:8px 20px; color:var(--base-content); text-decoration:none; font-size:14px; position:relative;}
+.sidebar a.navitem.active{background:var(--base-300); font-weight:600;}
+.sidebar a.navitem.active::before{content:""; position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--primary);}
+/* Nested nav parent/child (feature/enhanced-logging → admin-sidebar-nesting,
+   merged into main). Real markup: Nebu.Admin.Layouts.nav_item/1 with
+   :children — a <button aria-expanded aria-controls> disclosure toggle +
+   chevron, followed by an indented <ul> of child <.link>s. Real toggle
+   behavior is wired CSP-safely by wireNavSectionToggles() in app.js; this
+   static mock always renders expanded (the real default). */
+.navitem-parent{display:flex; align-items:center; gap:8px; width:100%; padding:8px 20px; background:none; border:none; color:var(--base-content); font:inherit; font-size:14px; text-align:left; cursor:pointer; position:relative;}
+.navitem-parent:focus-visible{outline:2px solid var(--primary); outline-offset:-2px;}
+.navitem-parent.child-active{background:var(--base-300); font-weight:600;}
+.navitem-parent.self-active{background:var(--primary); color:var(--primary-content); font-weight:600;}
+.navitem-parent:not(.child-active):not(.self-active):hover{background:var(--base-300);}
+.nav-chevron{width:14px; height:14px; flex:none; transform:rotate(90deg); transition:transform .15s;}
+.navitem-parent .badge-count{margin-left:auto;}
+.nav-children{list-style:none; margin:2px 0 4px; padding:0; display:flex; flex-direction:column; gap:2px;}
+.nav-child-link{display:flex; align-items:center; gap:8px; padding:6px 20px 6px 46px; font-size:13px; color:var(--base-content); text-decoration:none; position:relative;}
+.nav-child-link.active{background:var(--primary); color:var(--primary-content); font-weight:600;}
+.nav-child-link:not(.active):hover{background:var(--base-300);}
+.nav-dot{display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--media-infected); margin-left:2px;}
+.alert-actions{margin-top:8px;}
+.btn-live-diag{display:inline-flex; align-items:center; gap:6px; padding:6px 12px; border-radius:6px; border:1px solid var(--media-infected); background:transparent; color:#fca5a5; font-size:.78rem; font-weight:700; cursor:pointer;}
+.btn-live-diag:hover{background:rgba(239,68,68,.12);}
+.btn-live-diag:focus-visible{outline:2px solid var(--primary); outline-offset:2px;}
+.navitem .badge-count{margin-left:auto; background:var(--warning); color:var(--badge-dark-text); font-size:11px; font-weight:700; padding:1px 6px; border-radius:10px; min-width:18px; text-align:center;}
+
+main{margin-left:240px; margin-top:48px; padding:24px; max-width:1200px;}
+h1.page-title{font-size:1.5rem; font-weight:600; margin:0 0 4px;}
+.breadcrumb{font-size:.8rem; color:var(--text-secondary); margin:0 0 20px;}
+.breadcrumb a{color:var(--text-secondary);}
+
+.stat-grid{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:16px; margin-bottom:24px;}
+.stat-card{background:var(--base-200); border:1px solid var(--base-300); border-top:3px solid var(--success); border-radius:8px; padding:20px;}
+.stat-card.warn{border-top-color:var(--warning);}
+.stat-card.down{border-top-color:var(--media-infected);}
+.stat-card .num{font-size:2.25rem; font-weight:700; line-height:1.1;}
+.stat-card .label{font-size:.78rem; color:var(--text-secondary); margin-top:4px;}
+.stat-card .word{display:inline-flex; align-items:center; gap:5px; font-size:.78rem; font-weight:700; margin-top:8px;}
+.stat-card .word svg{width:13px; height:13px;}
+.stat-card.down .word{color:#fca5a5;}
+.stat-card.warn .word{color:var(--warning);}
+.stat-card:not(.warn):not(.down) .word{color:var(--success);}
+
+.banner{display:flex; gap:10px; align-items:flex-start; background:var(--status-warn-bg); border:1px solid var(--media-infected); border-radius:8px; padding:14px 16px; margin-bottom:20px; font-size:.85rem;}
+.banner svg{width:18px; height:18px; flex:none; color:#fca5a5; margin-top:1px;}
+
+h2.section-title{font-size:1.05rem; font-weight:600; margin:0 0 12px;}
+
+.alert-item{display:flex; gap:12px; align-items:flex-start; padding:14px 16px; border-radius:8px; background:var(--base-200); border-left:3px solid var(--warning); margin-bottom:10px;}
+.alert-item.critical{border-left-color:var(--media-infected);}
+.alert-item svg{width:16px; height:16px; flex:none; margin-top:2px;}
+.alert-item.critical svg{color:#fca5a5;}
+.alert-item.warning-item svg{color:var(--warning);}
+.alert-item .a-title{font-weight:700; font-size:.85rem;}
+.alert-item .a-title .sev{text-transform:uppercase; font-size:.68rem; letter-spacing:.04em; margin-right:6px; padding:1px 6px; border-radius:4px;}
+.alert-item.critical .sev{background:var(--media-infected); color:#fff;}
+.alert-item.warning-item .sev{background:var(--warning); color:var(--badge-dark-text);}
+.alert-item .a-detail{font-size:.8rem; color:var(--text-secondary); margin-top:2px;}
+
+.calm-block{display:flex; align-items:center; gap:12px; background:var(--base-200); border:1px solid var(--base-300); border-radius:8px; padding:24px; color:var(--success); font-weight:600;}
+.calm-block svg{width:22px; height:22px;}
+
+.alt-state{margin-top:48px; padding-top:24px; border-top:1px dashed var(--base-300);}
+.alt-state h2.section-title{color:var(--text-secondary); text-transform:uppercase; letter-spacing:.03em; font-size:1rem;}
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="ic-warn" viewBox="0 0 16 16"><path d="M8 2.2L14.6 13.3H1.4L8 2.2z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><line x1="8" y1="6.4" x2="8" y2="9.8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11.4" r="0.9" fill="currentColor"/></symbol>
+  <symbol id="ic-check" viewBox="0 0 16 16"><path d="M3 8.5l3.3 3.3L13 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="ic-x" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+  <symbol id="ic-record" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="currentColor"/></symbol>
+</svg>
+
+<header class="topbar">
+  <span class="brand">Nebu Admin</span>
+  <span class="spacer"></span>
+  <span class="user"><span class="avatar">KM</span> Kai M. · instance_admin</span>
+</header>
+
+<nav class="sidebar" aria-label="Hauptnavigation">
+  <div class="group-label">Verwaltung</div>
+  <a class="navitem" href="#">👤 <span>Benutzer</span></a>
+  <a class="navitem" href="#">💬 <span>Räume</span></a>
+  <div class="nav-parent-item">
+    <button type="button" class="navitem-parent child-active" aria-expanded="true" aria-controls="nav-media-children" data-navkey="media">
+      <svg class="nav-chevron" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z"/></svg>
+      🖼 <span>Medien</span>
+      <span class="badge-count warn" aria-label="2 offene Meldungen">2</span>
+    </button>
+    <ul id="nav-media-children" class="nav-children">
+      <li><a class="nav-child-link" href="#">Übersicht</a></li>
+      <li><a class="nav-child-link active" href="#" aria-current="page">Health<span class="nav-dot" aria-hidden="true"></span><span class="sr-only">(kritische Meldung offen)</span></a></li>
+      <li><a class="nav-child-link" href="#">Settings</a></li>
+      <li><a class="nav-child-link" href="#">Approvals</a></li>
+    </ul>
+  </div>
+  <div class="group-label">Compliance</div>
+  <a class="navitem" href="#">📋 <span>Audit Log</span></a>
+</nav>
+
+<main>
+  <p class="breadcrumb"><a href="#">Medien</a> / Scan-Gesundheit</p>
+  <h1 class="page-title">Scan-Gesundheit</h1>
+
+  <div class="banner" role="alert">
+    <svg aria-hidden="true"><use href="#ic-warn"/></svg>
+    <span><strong>Virenscanner nicht erreichbar seit 08:47.</strong> Kill-Switch aktiv im Modus <code class="mono">fail_closed</code> — neue Uploads liefern derzeit HTTP 503. Einstellung unter <a href="#" style="color:inherit;">Medien-Einstellungen</a> einsehbar.</span>
+  </div>
+
+  <div class="stat-grid" aria-label="Kennzahlen Scan-Pipeline">
+    <div class="stat-card down">
+      <div class="num">0/Std</div>
+      <div class="label">Durchsatz</div>
+      <div class="word"><svg aria-hidden="true"><use href="#ic-x"/></svg>Nicht erreichbar</div>
+    </div>
+    <div class="stat-card warn">
+      <div class="num">47</div>
+      <div class="label">Warteschlange (Backlog)</div>
+      <div class="word"><svg aria-hidden="true"><use href="#ic-warn"/></svg>Beeinträchtigt</div>
+    </div>
+    <div class="stat-card">
+      <div class="num">0.4 %</div>
+      <div class="label">Fehlerrate (7 Tage)</div>
+      <div class="word"><svg aria-hidden="true"><use href="#ic-check"/></svg>Gesund</div>
+    </div>
+    <div class="stat-card down">
+      <div class="num">08:47</div>
+      <div class="label">ClamAV — down seit</div>
+      <div class="word"><svg aria-hidden="true"><use href="#ic-x"/></svg>Nicht erreichbar</div>
+    </div>
+  </div>
+
+  <h2 class="section-title">Offene Meldungen</h2>
+  <div class="alert-item critical" role="alert">
+    <svg aria-hidden="true"><use href="#ic-warn"/></svg>
+    <div>
+      <div class="a-title"><span class="sev">Kritisch</span>Virenscanner nicht erreichbar</div>
+      <div class="a-detail">ClamAV-Daemon antwortet seit 08:47 nicht mehr · 47 Dateien in Warteschlange · Kill-Switch: fail_closed (Uploads blockiert)</div>
+      <div class="alert-actions"><button class="btn-live-diag" type="button"><svg width="10" height="10" aria-hidden="true"><use href="#ic-record"/></svg>Live-Diagnose starten</button></div>
+    </div>
+  </div>
+  <div class="alert-item warning-item" role="status">
+    <svg aria-hidden="true"><use href="#ic-warn"/></svg>
+    <div>
+      <div class="a-title"><span class="sev">Warnung</span>Backlog wächst</div>
+      <div class="a-detail">47 Dateien warten auf Prüfung, +12 seit der letzten Stunde</div>
+    </div>
+  </div>
+
+  <section class="alt-state" aria-label="Alternativer Zustand: keine Meldungen">
+    <h2 class="section-title">Alternativer Zustand — Alles ruhig (kein offenes Ereignis)</h2>
+    <div class="calm-block" role="status">
+      <svg aria-hidden="true"><use href="#ic-check"/></svg>
+      <span>Alles ruhig — Virenscanner erreichbar, keine offenen Meldungen.</span>
+    </div>
+  </section>
+</main>
+</body>
+</html>

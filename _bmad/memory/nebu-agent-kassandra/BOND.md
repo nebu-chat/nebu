@@ -26,8 +26,17 @@ older memory attributes to "Go middleware" now map to `Nebu.Web` plugs or the pe
 
 ## Sensitive Surfaces
 - Auth handlers / token comparison, admin endpoints, migration files, the in-process command layer.
-- **PLANNED — Media Gateway Management UI** (Phil, 2026-06-25; build after the app stabilises post `admin-http-refactor`). A new admin UI to view/inspect/clean up media uploads, pulling content **from the downstream object store** (MinIO/Stackit). This is a high-scrutiny surface before a single line is written:
+- **Media Gateway Management UI — epic drafted 2026-07-01** (`tmp/media-epic.md`, "Media Security & Admin Control": ClamAV quarantine/scan/release state machine + admin media UI). Pre-implementation design consultation done same day — see [[MEMORY]] "media-security-clamav (WHOLE-EPIC DESIGN consultation)" row for the full watch-list (3 design-HIGH incl. the admin-preview concern below, still unaddressed in the current draft). Original 2026-06-25 flag preserved below — still the high-scrutiny checklist for Story 5/6 when they land:
   - **Attacker-controlled content in the admin same-origin context.** Uploaded files (arbitrary `Content-Type`, filenames, EXIF, SVG) rendered/previewed in the admin UI = stored-XSS + content-injection. Serve previews from a separate sandboxed origin (or `Content-Disposition: attachment` + `X-Content-Type-Options: nosniff` + a tight per-response CSP); never render uploaded HTML/SVG inline in the admin origin. (See Epic 12 patterns in [[MEMORY]]: "Inline Content-Type echoed back with inline disposition", "Unauthenticated media endpoint + unbounded resource".)
+    **Partially CLOSED (Story 5a, 2026-07-18):** the `/admin/media` table renders `filename` (Story 2b's
+    client-supplied `?filename=`) via plain HEEx auto-escaping only, no preview/thumbnail (AC6 excludes
+    it) — regression-tested against a `<script>` payload. The FILE-CONTENT-preview/cross-origin-asset/
+    SRI half of this item is still fully open — re-check in full whenever a future story (6b detail-view
+    or later) adds an actual preview/thumbnail surface.
+    **Re-checked per this note's own trigger (Story 6b, 2026-07-19):** confirmed 6b ships NO
+    preview/thumbnail/file-content-rendering surface (pure metadata + transition-history + storage
+    aggregates) — nothing here for this item to apply to. Still OPEN, unchanged, for whichever future
+    story (6c/6d or later) actually adds a preview.
   - **Cross-origin assets ⇒ SRI + CSP origins.** Once admin UI assets/content come from the object store, the same-origin assumption that makes SRI unnecessary breaks — revisit SRI and pin `script-src`/`img-src`/`connect-src` origins. (See SRI watch-flag row in [[MEMORY]].)
   - **Authz on every media-management endpoint**, not just the trigger — listing/preview/delete each leak or mutate; admin-gate the whole router chain (Epic 14 pattern: "Long-running op progress endpoint needs auth gate").
   - **Destructive cleanup ops** (delete/purge uploads) need audit_log emit + the action name in `AuditWriter.@known_actions`, and ideally a four-eyes / confirmation guard. (Epic 14 patterns: "Bulk operation with no audit_log entry".)

@@ -119,6 +119,29 @@ defmodule Nebu.Matrix do
   end
 
   @doc """
+  Returns `true` if `user_id` is a known Matrix user with `is_active = true`,
+  `false` if the user is deactivated OR unknown (fail-closed — an absent
+  `users` row grants nothing).
+
+  Read-only — unlike `provision_identity/2` this never inserts/upserts a row,
+  it only reports the SAME account-deactivation signal
+  (`{:error, :deactivated}`) that `provision_identity/2` and the `/login` path
+  (`Nebu.Matrix.Session.TokenValidator`) already use. Added for
+  `Nebu.Media.Permission.can_upload?/1` (media-security-admin-control/
+  2a-post-media-create, AC4) — ADR-020: this is the only sanctioned way
+  `Nebu.Media` may read Matrix account state.
+  """
+  @spec active?(String.t()) :: boolean()
+  def active?(user_id) when is_binary(user_id) do
+    case Ecto.Adapters.SQL.query(Nebu.Repo, "SELECT is_active FROM users WHERE user_id = $1", [
+           user_id
+         ]) do
+      {:ok, %{rows: [[true]]}} -> true
+      _ -> false
+    end
+  end
+
+  @doc """
   Creates a Matrix Space (a room with `creation_content.type = "m.space"`), with
   `creator_id` as the creator (power level 100). `name` may be `nil`/`""`.
 

@@ -27,11 +27,13 @@ defmodule Nebu.Web.MediaTestSupport do
                                      | {:error, term}` for preview_url.
                                      Production: Finch. SSRF guard runs BEFORE this.
 
-  The `media_files` row shape mirrors the migration columns:
+  The `media_files` row shape mirrors the migration columns (see `media_row/1`
+  below for defaults):
     media_id, server_name, content_type, file_size, aes_key_hex, nonce_hex,
-    uploader_user_id, uploaded_at, deleted, plus a Nebu-specific `room_id`
-    used for the room-membership access check (the dev wires whichever column
-    actually scopes media to a room — tests assert behavior, not the column).
+    uploader_user_id, uploaded_at, deleted, state, storage_key, archived_at,
+    compressed, plus a Nebu-specific `room_id` used for the room-membership
+    access check (the dev wires whichever column actually scopes media to a
+    room — tests assert behavior, not the column).
   """
 
   @server_name "test.local"
@@ -147,7 +149,26 @@ defmodule Nebu.Web.MediaTestSupport do
       uploaded_at: Keyword.get(opts, :uploaded_at, 0),
       deleted: Keyword.get(opts, :deleted, false),
       room_id: Keyword.get(opts, :room_id, "!room:test.local"),
-      storage_key: Keyword.get(opts, :storage_key, Keyword.fetch!(opts, :media_id))
+      storage_key: Keyword.get(opts, :storage_key, Keyword.fetch!(opts, :media_id)),
+      # media-security-admin-control/download-gate: the media_files lifecycle
+      # state (see Nebu.Media.StateMachine.state()). Defaults to :released so
+      # every pre-existing test that doesn't care about lifecycle state keeps
+      # passing unmodified (implicit-serve behavior, unchanged).
+      state: Keyword.get(opts, :state, :released),
+      # media-security-admin-control/8c-media-archive-worker (AC11): drives
+      # Nebu.Media's fetch_and_decrypt/3 bucket switch — nil (default) means
+      # "not archived, read the primary bucket", matching every pre-existing
+      # test unmodified. Set to a DateTime/timestamp to exercise the
+      # archive-bucket read path.
+      archived_at: Keyword.get(opts, :archived_at, nil),
+      # fix-media-download-gzip-decompression: mirrors the real
+      # `media_files.compressed` column (migration 000022, ADR-029
+      # store-smaller-of-two) — `Nebu.Media.Storage.compress/1` decides
+      # whether the bytes handed to `:media_storage_get_fun` are the gzipped
+      # or the original form. Defaults to `false` so every pre-existing test
+      # that never mentions compression keeps its current (uncompressed)
+      # meaning unmodified.
+      compressed: Keyword.get(opts, :compressed, false)
     }
   end
 end

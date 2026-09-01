@@ -8,7 +8,30 @@
 #   _bmad-output/nebu/epics/<epic-name>/pipeline-state.yaml
 # This file is no longer used for named-epic pipeline runs.
 #
-# last_updated: 2026-07-09
+# last_updated: 2026-08-27
+# [fix-media-download-gzip-decompression] 2026-08-27T19:11Z committed ✓ 89aa61b4 (ATDD 6 tests+test-review CLEAN+Dev fix+ci-gate 325/325+code-review 1 MAJOR fixed+8 MINOR fixed 1 cycle+Kassandra CLEAN 3 LOW/4 INFO+arc42 updated)
+# [fix-media-download-gzip-decompression] 2026-08-27T19:10Z arc42-update → done (ADR-029 read-path invariant added, 05-building-blocks.md decrypt/decompress pipeline updated)
+# [fix-media-download-gzip-decompression] 2026-08-27T19:07Z security-review → Kassandra CLEAN (0 CRIT/HIGH, 3 LOW, 4 INFO — no decompression bomb, no masking, no new surface, ClamAV-vs-served claim verified)
+# [fix-media-download-gzip-decompression] 2026-08-27T18:56Z code-review → CLEAN (cycle 1): 2 doc/comment MINORs fixed directly (to_map/1 test overclaim, stale async-route moduledoc), 1 tooling-hygiene MINOR deferred as pre-existing unrelated follow-up (pipeline-state.yaml duplicate blocks). Verified: 325/325 tests pass.
+# [fix-media-download-gzip-decompression] 2026-08-27T18:44Z dev-story cycle 1 → done: 8 MINORs fixed + 3 pre-existing test files fixed (put_sync verb, media_db_module fake). Verified: 325/325 server/test/nebu/media/ pass (incl. integration), mix compile --warnings-as-errors clean (176 files).
+# [fix-media-download-gzip-decompression] 2026-08-27T18:30Z code-review → 1 MAJOR (7 pre-existing unrelated unit failures, user chose: fix in this pipeline) + 8 MINOR → cycle 1
+# [fix-media-download-gzip-decompression] 2026-08-26T19:58Z ci-gate → ✓ redeploy+integration(2628/40 pre-existing unrelated, vs 47 at baseline)+unit(2000/7 pre-existing unrelated) — 0 regressions, all 6 new gzip tests pass
+# [fix-media-download-gzip-decompression] 2026-08-26T19:46Z dev-story → done (cycle 0): db.ex SELECT+to_map fix, media.ex maybe_gunzip/2 in fetch_and_decrypt/3, mirrors existing MediaScanWorker.maybe_gunzip/2 precedent
+# [fix-media-download-gzip-decompression] 2026-08-26T19:37Z test-review → CLEAN (0 MAJOR, 2 MINOR noted)
+# [fix-media-download-gzip-decompression] 2026-08-26T19:31Z atdd → 6 tests (5 RED covering AC1/AC2/AC4, 1 documented non-regression guard for AC3 passes today) — server/test/nebu/media/media_download_gzip_decompression_test.exs
+# [fix-media-download-gzip-decompression] 2026-08-26T19:12Z baseline-integration → ⚠ FAILING (pre-existing): 2622 tests, 47 failures, 3 skipped
+# [fix-media-download-gzip-decompression] 2026-08-26T19:04Z baseline-integration → pre-req fix: server/test/nebu/media/media_upload_test.exs:229 called undefined put_upload/2 (stale PUT->POST rename), fixed to post_upload/2 to unblock compilation (unrelated pre-existing bug)
+# [fix-media-download-gzip-decompression] 2026-08-26T19:01Z pipeline started (bug fix)
+# [admin-media-nav-grouping] 2026-07-30T19:07Z committed ✓ 56819369 (ATDD 20 tests+test-review CLEAN 4 MINOR noted+dev CLEAN+ci-gate clean+ux-gate CLEAN+code-review 2 MINOR fixed 1 cycle+security not-needed+arc42 updated)
+# [admin-media-nav-grouping] 2026-07-30T19:06Z arc42-update → done (05-building-blocks.md, 4 stale-nav references fixed)
+# [admin-media-nav-grouping] 2026-07-30T19:04Z code-review → CLEAN (cycle 1); security-review → skipped (not-needed, pure nav-label change)
+# [admin-media-nav-grouping] 2026-07-30T18:59Z code-review → 2 MINOR (AC3 badge content unasserted, stale moduledoc) → cycle 1
+# [admin-media-nav-grouping] 2026-07-30T18:54Z ux-gate → CLEAN (1 advisory: no direct e2e for Media toggle, component-level only, deemed acceptable — structurally identical to tested Logs/Config pattern)
+# [admin-media-nav-grouping] 2026-07-30T18:51Z ci-gate → ✓ redeploy+integration(2605/30 pre-existing unrelated)+unit(1979/0)
+# [admin-media-nav-grouping] 2026-07-30T18:41Z dev-story → done (cycle 0)
+# [admin-media-nav-grouping] 2026-07-30T18:33Z test-review → CLEAN (0 MAJOR, 4 MINOR noted for code-review)
+# [admin-media-nav-grouping] 2026-07-30T18:27Z atdd → 20 tests (17 RED, 3 correctly passing/non-regression)
+# [admin-media-nav-grouping] 2026-07-30T18:19Z pipeline started (bug-fix flow)
 # [bugfix-bootstrap-scope-ignored] 2026-07-09T17:10Z committed ✓ f245ea18 (ATDD+Dev 1 cycle MAJOR-changeset-scope resolved via commit pathspec+2 MINOR fixed+Kassandra CLEAN 2 LOW fixed proactively)
 # [bugfix-bootstrap-scope-ignored] 2026-07-09T17:08Z arc42-update → done (08-concepts.md OIDC Scopes Law section extended with bootstrap-mode carve-out note)
 # [bugfix-bootstrap-scope-ignored] 2026-07-09T17:07Z security-review → Kassandra CLEAN (0 CRIT/HIGH/MEDIUM), 2 LOW (resolve_scope_with_extra/2 trusted caller-supplied extra without re-validation) fixed proactively: fail-closed validate_scope_string/1 inside the function + regression test; 1580p/0f full suite
@@ -273,7 +296,7 @@ current_step: null
 completed: []
 cycle_count: 0
 blocked_reason: null
-last_updated: "2026-07-09T17:10Z"
+last_updated: "2026-08-27T19:11Z"
 story: "device-key-registration"
 current_step: "commit"
 completed:

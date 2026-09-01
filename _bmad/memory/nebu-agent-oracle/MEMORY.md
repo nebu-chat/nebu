@@ -16,7 +16,8 @@ Media Gateway (Epic 12) — missing (post-epic open follow-ups):
 - `GET /_matrix/client/v1/media/download/{serverName}/{mediaId}/{fileName}` — MEDIUM
 - `GET /_matrix/media/v3/config` — MEDIUM (deprecated but old clients call it)
 - `GET /_matrix/media/v3/download/{serverName}/{mediaId}/{fileName}` — MEDIUM
-- `POST /_matrix/media/v1/create` + `PUT /_matrix/media/v3/upload/{serverName}/{mediaId}` — LOW (async upload)
+- `POST /_matrix/media/v1/create` + `PUT /_matrix/media/v3/upload/{serverName}/{mediaId}` — now in-scope
+  for the `media-security-admin-control` epic proposal (2026-07-01), see dated note below
 - `GET /_matrix/client/v1/media/preview_url` — LOW
 
 Threading (Epic 9):
@@ -124,6 +125,30 @@ DEPLOY: needs `make redeploy` so migration 000010 applies; then verify Element r
 signing bootstrap actually completes (the real acceptance is Element no longer showing
 "Schlüssel können nicht eingerichtet werden").
 
+### Async Media Upload — corrections to draft epic (2026-07-01)
+Reviewed `tmp/media-epic.md` (Epic: Media Security & Admin Control, Story 2) — the async-upload
+part was old/wrong on several points vs. v1.18. No MSC any more: `POST /_matrix/media/v1/create`
++ `PUT /_matrix/media/v3/upload/{serverName}/{mediaId}` were merged into core spec at v1.7, no
+MSC2246 reference or unstable-flag remains. Key fidelity corrections applied to the epic doc:
+- `POST .../create` takes **no request params at all** — no client-supplied `expires_at`. Server
+  sets `unused_expires_at` unilaterally (spec-recommended default 24h) and **must** return it
+  alongside `content_uri` in the 200 body (draft only had `content_uri`).
+- Server SHOULD cap concurrent *pending* uploads per user → `429 M_LIMIT_EXCEEDED` +
+  `retry_after_ms` if exceeded. Not in the original draft.
+- `PUT .../upload/{serverName}/{mediaId}` needs an **ownership check**: 403 `M_FORBIDDEN` if the
+  caller isn't the same user who called `/create` — spec names this explicitly as a 403 cause.
+  Draft only checked state (`:reserved`), not identity.
+- Must return `409 M_CANNOT_OVERWRITE_MEDIA` (not a generic 400) when PUT targets a media ID that
+  already has content — applies even to an idempotent retry of an already-successful upload; spec
+  has no idempotency exception here. Missed entirely in the draft.
+- `404 M_NOT_FOUND` for unknown/expired media ID must be a **live check in the PUT handler**, not
+  only enforced by the cleanup cron (race window between cron runs).
+- `Content-Type` header on PUT is optional since v1.12 (defaults to `application/octet-stream`);
+  `filename` query param should be persisted like the sync upload path for `Content-Disposition`.
+- `413` (body over max upload size) must be enforced at PUT time before writing to disk —
+  orthogonal to `Nebu.Media.ClamAV`'s `max_file_size_bytes` (that only gates whether scanning
+  happens, not whether the upload is accepted).
+
 ### OPEN spec-fidelity follow-up — collision errcode 400 vs 403 (2026-06-28)
 In `cross-signing-readback` AC6 I (Oracle) specified the device↔cross-signing ID-namespace
 collision to return **400 M_INVALID_PARAM**. The dev gate flagged: §device_signing/upload defines
@@ -132,6 +157,29 @@ ID-already-in-use rejection. The spec gives NO explicit errcode for the device-v
 MUST-guard specifically, so 400 is defensible but 403 M_FORBIDDEN is more spec-aligned. Story
 honored my 400 choice; logged here as a small fidelity follow-up for the team to confirm or
 switch. NOT a security/functional bug.
+
+### Media Lifecycle / per-room policy / redaction (ADR-030 consult, 2026-07-02)
+Winston consulted me for ADR-030 (Media Lifecycle Rules & Two-Eyes Delete). Three rulings:
+- **Redaction vs. 404:** Content Repository has NO "media withdrawal" concept — a download **404 is
+  spec-neutral** (allowed, not mandated). `m.room.redaction` is the ONLY spec tool to remove the
+  reference itself; room v11 redaction strips the **entire** `content` of `m.room.message` (url/info/
+  thumbnail_url/body — not in the allow-list). Irreversible, PL-gated. So: legal-hold = 404
+  (reversible restriction); redaction only as an operator-initiated, PL-gated add-on, never
+  auto-coupled to a hold that two-eyes might later release.
+- **mxc lives in 6 content fields** (for any events.content join): `content.url`,
+  `content.info.thumbnail_url` (m.room.message image/file/audio/video, m.sticker, m.room.avatar);
+  `content.avatar_url` (m.room.member); and for ENCRYPTED msgs `content.file.url` +
+  `content.info.thumbnail_file.url` (EncryptedFile replaces url/thumbnail_url). No media↔room
+  ownership in spec; one mxc → many rooms.
+- **⚠️ Per-room media policy is COMPLIANCE-MODE-ONLY.** In E2EE rooms `content` is Megolm ciphertext,
+  so the server can't see `content.file.url` → the room→media join is impossible. Encrypted rooms
+  MUST fall back to global policy. Spec consequence (ties ADR-011/023).
+- **Spaces (§Spaces):** `m.space.child` (in space-room, trust anchor) vs `m.space.parent` (in child,
+  a CLAIM — ignore unless matching child OR sender has PL for m.space.child in the parent). Multiple
+  parents allowed (`canonical` tiebreak = lowest room id lexicographically); nesting allowed, loops
+  disallowed-but-possible (guard), link is DYNAMIC (demotion/leave can invalidate). Resolve at cron
+  eval time, not per-download.
+Full detail: sessions/2026-07-02.md.
 
 ## Known Spec Decisions
 _Deliberate implementation choices — accepted deviations, spec ambiguity resolutions. Not re-flagged as findings._
@@ -143,6 +191,28 @@ All `PUT /state/{eventType}` responses return `{"event_id":""}` — Core generat
 
 ### Media — Authenticated Endpoints Freeze (v1.11/v1.12)
 Per §Media Repository v1.18: since v1.11, `/_matrix/media/v3/` download/thumbnail/config are deprecated. Since v1.12, servers SHOULD "freeze" them — newly uploaded media only accessible via authenticated `/_matrix/client/v1/media/` endpoints. Element Web (current) will prefer the authenticated form. Without those endpoints, images uploaded after a hypothetical freeze will not display.
+
+### Media — 451 for M_NOT_YET_UPLOADED/M_NOT_FOUND is a Nebu overlay, not spec (2026-07-13)
+`media-security-admin-control` epic gates download/thumbnail on `media_files.state`: pending states
+→ 451 `M_NOT_YET_UPLOADED`, `:admin_blocked` → 451 `M_NOT_FOUND` (body identical to genuine 404).
+Spec fact-check: CS API v1.18 pairs `M_NOT_YET_UPLOADED` with **HTTP 504** (both v1 auth and
+deprecated v3 download endpoints), never 451 — `451` does not appear anywhere in the spec's media
+section. `M_NOT_FOUND` is a "common error code" with NO status mandated at all (spec explicitly
+says clients should trust errcode over HTTP status). Precedent for "look like 404" already exists:
+deprecated v3 download MAY return 404 M_NOT_FOUND for real-but-frozen media (v1.11). Conclusion:
+451 is spec-safe (errcode-first client behavior) but a deliberate Nebu deviation from the documented
+504 pairing — do NOT "fix" it back to 504 later without re-checking this decision. Not re-flagged
+as a compliance finding. Full detail: sessions/2026-07-13-media-lifecycle-gate-spec-check.md.
+
+### Media — wait/stall query param is `timeout_ms`, not `timeout` (2026-07-14)
+On all four download-endpoint variants (`/_matrix/client/v1/media/download/{serverName}/{mediaId}`
++ `/{fileName}`, and the deprecated `/_matrix/media/v3/download/...` equivalents) the spec's
+query param name is `timeout_ms` (integer, milliseconds; added v1.7; spec default 20000ms when
+absent; content repo SHOULD cap it, MAY respond early). Story `2d-download-stall-mechanism`
+drafted it as `?timeout=N` — flagged CRITICAL in that story's Oracle Gate: a real client (which
+sends `timeout_ms` per spec) would never trigger the stall path if the handler only recognizes
+`timeout`. Story 1c's own oracle-context.md already had `timeout_ms` right; 2d regressed the
+name. Full detail: sessions/2026-07-14.md.
 
 ### Media — SHOULD Headers Missing from download + thumbnail handlers
 `media/internal/download/handler.go` and `media/internal/thumbnail/handler.go` set `X-Content-Type-Options: nosniff` but are missing:

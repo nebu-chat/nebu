@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>Nebu Admin — Freigaben (Key Screen Mock)</title>
+<style>
+/*
+  Governs: DESIGN.md → Layout & Spacing (/admin/media/approvals, gap filled
+           2026-07-11: full-width, single table, no filter bar) · Components
+           → two-eyes-approval (queue + Approve/Reject actions, self-request-
+           disabled row) · the Approve-dialog decision (neutral header,
+           danger-colored confirm button — not the escalated red override-
+           dialog treatment, since this isn't a malware alarm).
+  EXPERIENCE.md → IA (/admin/media/approvals, dedicated route, D8) ·
+           Component Patterns (two-eyes-approval: cannot approve own request,
+           mandatory rationale, enabled-confirm+inline-error per H4/H5) ·
+           State Patterns B (empty queue = calm, not degraded) · Flow 5
+           steps 3-4 (Dr. Petra reviews and approves Kai's Art.-17-lapsed
+           hard-delete request).
+  Two states in one file per key-screens.md: the queue at rest (canonical —
+  one approvable row, one self-request-disabled row) and the Approve dialog
+  open (alternate state, Flow 5 step 4's climax).
+  Offline, inline CSS, no JS, no network. Icons: inline SVG, never emoji.
+*/
+:root{
+  --primary:#f97316; --primary-hover:#ea580c; --primary-content:#1c1917; --primary-subtle:#431407;
+  --base-100:#111827; --base-200:#1f2937; --base-300:#374151; --base-content:#f9fafb;
+  --text-secondary:#9ca3af; --success:#22c55e; --warning:#f59e0b; --status-warn-bg:#451a03;
+  --error:#ef4444; --neutral:#6b7280;
+  --media-processing:#f59e0b; --media-released:#14b8a6; --media-infected:#ef4444;
+  --media-blocked:#fb7185; --media-terminal:#6b7280; --badge-dark-text:#1c1917;
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{background:var(--base-100); color:var(--base-content); font-family:Inter,"Segoe UI",system-ui,-apple-system,sans-serif; font-size:15px; line-height:1.5;}
+.mono,code,.mxid{font-family:"JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+.sr-only{position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap;}
+
+.topbar{position:fixed; top:0; left:0; right:0; height:48px; background:var(--base-300); display:flex; align-items:center; padding:0 16px; gap:12px; z-index:10;}
+.topbar .brand{font-weight:700;}
+.topbar .spacer{flex:1;}
+.topbar .user{display:flex; align-items:center; gap:8px; font-size:.85rem; color:var(--text-secondary);}
+.avatar{width:28px; height:28px; border-radius:50%; background:var(--primary-subtle); color:var(--primary); display:flex; align-items:center; justify-content:center; font-size:.75rem; font-weight:700;}
+
+.sidebar{width:240px; background:var(--base-200); position:fixed; top:48px; bottom:0; left:0; padding:20px 0; overflow-y:auto;}
+.sidebar .group-label{font-size:11px; letter-spacing:.06em; color:var(--text-secondary); text-transform:uppercase; padding:0 20px; margin:20px 0 8px;}
+.sidebar .group-label:first-child{margin-top:0;}
+.sidebar a.navitem{display:flex; align-items:center; gap:10px; padding:8px 20px; color:var(--base-content); text-decoration:none; font-size:14px; position:relative;}
+.sidebar a.navitem.active{background:var(--base-300); font-weight:600;}
+.sidebar a.navitem.active::before{content:""; position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--primary);}
+/* Nested nav parent/child (feature/enhanced-logging → admin-sidebar-nesting,
+   merged into main). Real markup: Nebu.Admin.Layouts.nav_item/1 with
+   :children — a <button aria-expanded aria-controls> disclosure toggle +
+   chevron, followed by an indented <ul> of child <.link>s. Real toggle
+   behavior is wired CSP-safely by wireNavSectionToggles() in app.js; this
+   static mock always renders expanded (the real default). */
+.navitem-parent{display:flex; align-items:center; gap:8px; width:100%; padding:8px 20px; background:none; border:none; color:var(--base-content); font:inherit; font-size:14px; text-align:left; cursor:pointer; position:relative;}
+.navitem-parent:focus-visible{outline:2px solid var(--primary); outline-offset:-2px;}
+.navitem-parent.child-active{background:var(--base-300); font-weight:600;}
+.navitem-parent:not(.child-active):hover{background:var(--base-300);}
+.nav-chevron{width:14px; height:14px; flex:none; transform:rotate(90deg); transition:transform .15s;}
+.navitem-parent .badge-count{margin-left:auto;}
+.nav-children{list-style:none; margin:2px 0 4px; padding:0; display:flex; flex-direction:column; gap:2px;}
+.nav-child-link{display:flex; align-items:center; gap:8px; padding:6px 20px 6px 46px; font-size:13px; color:var(--base-content); text-decoration:none; position:relative;}
+.nav-child-link.active{background:var(--primary); color:var(--primary-content); font-weight:600;}
+.nav-child-link:not(.active):hover{background:var(--base-300);}
+
+main{margin-left:240px; margin-top:48px; padding:24px; max-width:1200px;}
+h1.page-title{font-size:1.5rem; font-weight:600; margin:0 0 4px;}
+.breadcrumb{font-size:.8rem; color:var(--text-secondary); margin:0 0 8px;}
+.breadcrumb a{color:var(--text-secondary);}
+.page-hint{font-size:.85rem; color:var(--text-secondary); margin:0 0 20px;}
+
+.badge{display:inline-flex; align-items:center; gap:5px; padding:3px 10px; border-radius:10px; font-size:.78rem; font-weight:700; color:var(--badge-dark-text); line-height:1.4;}
+.badge svg{width:12px; height:12px; flex:none;}
+.badge--terminal{background:var(--media-terminal);}
+
+.table-wrap{overflow-x:auto; border:1px solid var(--base-300); border-radius:8px;}
+table{width:100%; border-collapse:collapse; font-size:.85rem;}
+table tbody tr:nth-child(even){background:rgba(255,255,255,.02);}
+th{text-align:left; padding:10px 14px; background:var(--base-300); font-weight:600; font-size:.72rem; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); white-space:nowrap;}
+td{padding:10px 14px; border-top:1px solid var(--base-300); vertical-align:middle;}
+tr.row-self{background:rgba(255,255,255,.015);}
+
+.btn{display:inline-flex; align-items:center; gap:5px; padding:6px 12px; border-radius:6px; border:1px solid var(--base-300); background:var(--base-300); color:var(--base-content); font-size:.78rem; font-weight:600; cursor:pointer;}
+.btn:hover{filter:brightness(1.12);}
+.btn:focus-visible{outline:2px solid var(--primary); outline-offset:2px;}
+.btn-approve{background:var(--primary); border-color:var(--primary); color:var(--primary-content);}
+.btn-reject{background:transparent; border-color:var(--base-300); color:var(--base-content);}
+.actions-cell{display:flex; gap:6px;}
+.self-note{display:flex; align-items:center; gap:6px; font-size:.78rem; color:var(--text-secondary); font-style:italic;}
+.self-note svg{width:13px; height:13px; flex:none;}
+
+.alt-state{margin-top:40px; padding-top:24px; border-top:1px dashed var(--base-300);}
+.alt-state h2.section-title{font-size:1.05rem; color:var(--text-secondary); font-weight:600; margin:0 0 16px; text-transform:uppercase; letter-spacing:.03em;}
+.alt-frame{position:relative; background:var(--base-100); border:1px solid var(--base-300); border-radius:8px; padding:50px 24px; display:flex; justify-content:center;}
+.scrim-note{position:absolute; inset:0; background:rgba(0,0,0,.55); border-radius:8px;}
+.dialog{position:relative; z-index:1; background:var(--base-200); border:1px solid var(--base-300); border-radius:8px; width:460px; padding:24px;}
+/* Neutral header (DESIGN.md, two-eyes-approval): NOT the escalated red
+   override-dialog treatment — approving a compliance-vetted hard-delete
+   isn't a malware alarm. Only the confirm button keeps the danger color. */
+.dialog-head{display:flex; align-items:center; gap:8px; font-weight:700; font-size:1.05rem; margin-bottom:4px; color:var(--base-content);}
+.dialog-sub{font-size:.8rem; color:var(--text-secondary); margin:0 0 16px;}
+.dialog-info{background:var(--base-100); border:1px solid var(--base-300); border-radius:6px; padding:12px 14px; font-size:.83rem; margin-bottom:16px; color:var(--text-secondary);}
+.dialog .form-control{margin-bottom:16px;}
+.dialog label{display:block; font-size:.8rem; font-weight:600; margin-bottom:6px;}
+.dialog label .req{color:var(--warning); margin-left:2px;}
+.dialog textarea{width:100%; background:var(--base-100); border:1px solid var(--base-300); border-radius:6px; color:var(--base-content); padding:10px; font-size:.85rem; font-family:inherit; resize:vertical;}
+.dialog textarea:focus-visible{outline:2px solid var(--primary); outline-offset:2px;}
+.dialog-actions{display:flex; justify-content:flex-end; gap:8px;}
+.btn-cancel{background:transparent;}
+.btn-danger-confirm{background:var(--media-infected); border-color:var(--media-infected); color:#fff;}
+.reqlegend{font-size:.72rem; color:var(--text-secondary); margin-top:-4px; margin-bottom:16px;}
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="ic-info" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.3" fill="none" stroke="currentColor" stroke-width="1.3"/><line x1="8" y1="7" x2="8" y2="11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="4.6" r="0.9" fill="currentColor"/></symbol>
+  <symbol id="ic-lock" viewBox="0 0 16 16"><rect x="3.5" y="7" width="9" height="6.2" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M5.3 7V5.2a2.7 2.7 0 015.4 0V7" fill="none" stroke="currentColor" stroke-width="1.3"/></symbol>
+</svg>
+
+<header class="topbar">
+  <span class="brand">Nebu Admin</span>
+  <span class="spacer"></span>
+  <span class="user"><span class="avatar">DP</span> Dr. Petra L. · compliance_officer</span>
+</header>
+
+<nav class="sidebar" aria-label="Hauptnavigation">
+  <div class="group-label">Verwaltung</div>
+  <a class="navitem" href="#">👤 <span>Benutzer</span></a>
+  <a class="navitem" href="#">💬 <span>Räume</span></a>
+  <div class="nav-parent-item">
+    <button type="button" class="navitem-parent child-active" aria-expanded="true" aria-controls="nav-media-children" data-navkey="media">
+      <svg class="nav-chevron" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z"/></svg>
+      🖼 <span>Medien</span>
+    </button>
+    <ul id="nav-media-children" class="nav-children">
+      <li><a class="nav-child-link" href="#">Übersicht</a></li>
+      <li><a class="nav-child-link" href="#">Health</a></li>
+      <li><a class="nav-child-link" href="#">Settings</a></li>
+      <li><a class="nav-child-link active" href="#" aria-current="page">Approvals</a></li>
+    </ul>
+  </div>
+  <div class="group-label">Compliance</div>
+  <a class="navitem" href="#">📋 <span>Audit Log</span></a>
+</nav>
+
+<main>
+  <p class="breadcrumb"><a href="#">Medien</a> / Freigaben</p>
+  <h1 class="page-title">Freigaben</h1>
+  <p class="page-hint">Löschanfragen, die eine zweite Freigabe benötigen.</p>
+
+  <div class="table-wrap">
+    <table>
+      <caption class="sr-only">Ausstehende Zwei-Augen-Löschanfragen</caption>
+      <thead>
+        <tr>
+          <th scope="col">Status</th>
+          <th scope="col">Ziel-Datei</th>
+          <th scope="col">Angefragt von</th>
+          <th scope="col">Grund</th>
+          <th scope="col">Angefragt am</th>
+          <th scope="col">Aktionen</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr data-role="approval-row" data-request-id="req_44a1" data-self-request="false">
+          <td data-label="Status"><span class="badge badge--terminal">Gelöscht</span></td>
+          <td data-label="Ziel-Datei">Vertrag_Dienstleister_2016.pdf</td>
+          <td data-label="Angefragt von" class="mxid">@intern:muni.de</td>
+          <td data-label="Grund">Aufbewahrungspflicht abgelaufen (HGB §257) — Löschanspruch Art. 17 vollstrecken</td>
+          <td data-label="Angefragt am">vor 2 Tagen, 14:02</td>
+          <td data-label="Aktionen">
+            <div class="actions-cell">
+              <button class="btn btn-approve" type="button">Freigeben</button>
+              <button class="btn btn-reject" type="button">Ablehnen</button>
+            </div>
+          </td>
+        </tr>
+        <tr class="row-self" data-role="approval-row" data-request-id="req_44b7" data-self-request="true">
+          <td data-label="Status"><span class="badge badge--terminal">Gelöscht</span></td>
+          <td data-label="Ziel-Datei">Testdaten_Migration_Altsystem.zip</td>
+          <td data-label="Angefragt von" class="mxid">@petra.lang:muni.de</td>
+          <td data-label="Grund">Migrationsartefakt, keine Aufbewahrungspflicht</td>
+          <td data-label="Angefragt am">Gestern, 09:15</td>
+          <td data-label="Aktionen">
+            <span class="self-note"><svg aria-hidden="true"><use href="#ic-lock"/></svg>Eigene Anfrage — Freigabe durch zweite Person</span>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <section class="alt-state" aria-label="Alternativer Zustand: Approve-Dialog offen">
+    <h2 class="section-title">Alternativzustand — Approve-Dialog offen (Flow 5, Schritt 4, Dr. Petra)</h2>
+    <div class="alt-frame">
+      <div class="scrim-note" aria-hidden="true"></div>
+      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="ap-head">
+        <div class="dialog-head" id="ap-head"><svg width="18" height="18" aria-hidden="true"><use href="#ic-info"/></svg>Löschung endgültig freigeben</div>
+        <p class="dialog-sub">Vertrag_Dienstleister_2016.pdf · med_7a12c9 · angefragt von @intern:muni.de</p>
+        <div class="dialog-info">Nach Bestätigung löscht der MediaLifecycleWorker die Bytes endgültig. Der Nachweis-Datensatz (Hash, Zeitstempel) bleibt erhalten.</div>
+        <div class="form-control">
+          <label for="ap-reason">Freigabe-Begründung<span class="req">*</span></label>
+          <textarea id="ap-reason" rows="3" aria-required="true">Aufbewahrungsfrist nach HGB §257 ist abgelaufen (10 Jahre, geprüft 2026-07-09). Löschanspruch Art. 17 vollstreckt.</textarea>
+        </div>
+        <p class="reqlegend">* = Pflichtfeld</p>
+        <div class="dialog-actions">
+          <button class="btn btn-cancel" type="button">Abbrechen</button>
+          <button class="btn btn-danger-confirm" type="button">Freigabe endgültig bestätigen</button>
+        </div>
+      </div>
+    </div>
+    <p class="page-hint" style="margin-top:10px;">Bestätigen bleibt aktiviert (nie hinter einem deaktivierten Button versteckt) — bei leerem Feld erscheint stattdessen ein Inline-Fehler beim Absenden (H4/H5).</p>
+  </section>
+</main>
+</body>
+</html>

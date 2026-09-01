@@ -329,9 +329,24 @@ defmodule Nebu.Admin.WarRoomManagerTest do
       assert session.max_entries == 50
       assert session.max_duration_s == 120
       assert session.entries_collected == 0
-      refute is_nil(session.id)
+      # 10e fix follow-up: `session.id` is now guaranteed a canonical,
+      # non-nil UUID string by `WarRoomManager.row_to_session/1`'s own
+      # `Ecto.UUID.load!/1` (it raises rather than returning nil on a
+      # malformed value), so `refute is_nil(session.id)` can never
+      # meaningfully fail — replaced with a positive shape assertion that
+      # WOULD catch a real regression (e.g. `id` reverting to the raw
+      # 16-byte Postgrex binary).
+      assert {:ok, _} = Ecto.UUID.cast(session.id)
       refute is_nil(session.started_at)
       assert is_nil(session.ended_at)
+
+      # `session.id` is the canonical hex-dash STRING (row_to_session/1's
+      # `Ecto.UUID.load!/1`) — dumped back to the raw 16-byte binary
+      # Postgrex's `uuid` extension requires for a bound query parameter
+      # (mirrors `Nebu.Admin.LogsLive.WarRoom.load_session/1`'s own
+      # `uuid_dump/1` precedent, and `WarRoomManager.stop_session/1`'s own
+      # fix for the identical concern).
+      binary_id = Ecto.UUID.dump!(session.id)
 
       row =
         Ecto.Adapters.SQL.query!(
@@ -340,7 +355,7 @@ defmodule Nebu.Admin.WarRoomManagerTest do
           SELECT started_by, reason, max_entries, max_duration_s, entries_collected, ended_at
           FROM war_room_sessions WHERE id = $1
           """,
-          [session.id]
+          [binary_id]
         )
 
       assert [[db_started_by, "sync investigation", 50, 120, 0, nil]] = row.rows
@@ -363,11 +378,14 @@ defmodule Nebu.Admin.WarRoomManagerTest do
       assert session.scope == "/_matrix/client/v3/sync"
       assert session.filter == %{"user_id" => "@alice:localhost"}
 
+      # session.id is the canonical STRING form — dump back to the raw
+      # binary Postgrex's `uuid` extension requires for a bound `$1` (see
+      # the round-trip test above for the full rationale).
       row =
         Ecto.Adapters.SQL.query!(
           Nebu.Repo,
           "SELECT scope, filter FROM war_room_sessions WHERE id = $1",
-          [session.id]
+          [Ecto.UUID.dump!(session.id)]
         )
 
       # JSONB columns are decoded back into native Elixir terms by
@@ -390,6 +408,42 @@ defmodule Nebu.Admin.WarRoomManagerTest do
 
       assert is_nil(session.scope)
       assert is_nil(session.filter)
+    end
+  end
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # media-security-admin-control/10e-trace-map-war-room-integration (AC7):
+  # start_session/1 accepts a LIST-shaped scope (in addition to the existing
+  # nil/string forms asserted above) and round-trips it as the SAME list on
+  # the returned session — the exact shape AC8's "Live-Diagnose starten"
+  # jump-off point needs (`scope: ["/media/clamav", "/media/scan_worker",
+  # "/admin/media"]`).
+  #
+  # ## Why this MUST FAIL right now
+  #
+  # `insert_session/1` passes `Map.get(params, :scope)` straight to Postgrex
+  # as a bind parameter against the plain TEXT `scope` column (migration
+  # 000019) — Postgrex has no implicit encoding from an Elixir list to TEXT,
+  # so passing a list today raises (an ArgumentError/Postgrex.Error) rather
+  # than returning `{:ok, session}`. Dev-story is expected to
+  # `Jason.encode!/1` a list-shaped scope on write and `Jason.decode!/1` it
+  # back on read (see Technical Requirements) so this round-trips cleanly.
+  # ══════════════════════════════════════════════════════════════════════════
+
+  describe "10e AC7: start_session/1 accepts and round-trips a list-shaped scope" do
+    test "scope: [...] round-trips as the same list on the returned session" do
+      end_all_active!()
+
+      {:ok, session} =
+        Nebu.Admin.WarRoomManager.start_session(%{
+          started_by: new_started_by(),
+          reason: "media domain diagnosis",
+          max_entries: 100,
+          max_duration_s: 300,
+          scope: ["/media/clamav", "/media/scan_worker", "/admin/media"]
+        })
+
+      assert session.scope == ["/media/clamav", "/media/scan_worker", "/admin/media"]
     end
   end
 
@@ -529,11 +583,14 @@ defmodule Nebu.Admin.WarRoomManagerTest do
 
       assert :ok = Nebu.Admin.WarRoomManager.stop_session(session.id)
 
+      # session.id is the canonical STRING form — dump back to the raw
+      # binary Postgrex's `uuid` extension requires for a bound `$1` (see
+      # the AC3 round-trip test above for the full rationale).
       row =
         Ecto.Adapters.SQL.query!(
           Nebu.Repo,
           "SELECT ended_at, ended_reason FROM war_room_sessions WHERE id = $1",
-          [session.id]
+          [Ecto.UUID.dump!(session.id)]
         )
 
       assert [[ended_at, "manual_stop"]] = row.rows

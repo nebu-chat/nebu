@@ -58,6 +58,17 @@ defmodule Nebu.Application do
       :persistent_term.put(:nebu_signing_key, {pub_key, priv_key})
     end
 
+    # media-security-admin-control/2d-download-stall-mechanism (fix-cycle 1,
+    # MINOR-1): eager-init the single shared, signed :atomics download-stall
+    # concurrency counter once, here at boot, so DownloadStall.counter_ref/0 is
+    # a pure, race-free `:persistent_term.get/1`. Mirrors the :nebu_signing_key
+    # guard directly above: the nil-check runs exactly once, sequentially, at
+    # boot — never concurrently — so it carries none of the double-init race the
+    # old lazy check-then-put in counter_ref/0 had (two concurrent first-ever
+    # callers could each create a DIFFERENT atomics ref, last-write-wins, and
+    # the loser then decremented an orphaned counter forever).
+    Nebu.Media.DownloadStall.init_counter()
+
     # enhanced-logging/operational-log-store (AC2): attaches the central
     # :logger handler that intercepts every Logger.* call app-wide. Safe to
     # call before the supervisor tree starts — the handler's own broadcast
@@ -103,6 +114,40 @@ defmodule Nebu.Application do
           # invalidation; the cached value lives in persistent_term for an O(1)
           # hot-path read. Supervised so a crash repopulates lazily on next get/0.
           Nebu.Matrix.OidcClaimCache,
+          # media-security-admin-control/9a-media-config-table-module (ADR-027):
+          # ETS-backed cache for the media_config table, structured like
+          # Nebu.Web.OidcConfig but as Nebu.Media's own dedicated instance.
+          # Started unconditionally (like OidcClaimCache above, not gated
+          # behind a :start_xxx test flag) — AC5 (cluster-wide invalidation
+          # without a restart) and the crash/restart acceptance test both
+          # require this to be a genuinely supervised, always-running
+          # process. Wrapped in its own dedicated Supervisor (generous
+          # restart intensity) rather than added bare here — see
+          # Nebu.Media.Config.Supervisor's moduledoc for why.
+          Nebu.Media.Config.Supervisor,
+          # media-security-admin-control/11a-storage-config-schema-secrets:
+          # ETS-backed cache for the media_storage_config singleton table —
+          # its OWN dedicated instance (own ETS table, own :pg group), never
+          # sharing Nebu.Media.Config's above (see the story's Summary for
+          # why). Started unconditionally, immediately alongside
+          # Nebu.Media.Config.Supervisor, for the identical reason: AC7
+          # (cluster-wide invalidation without a restart) and its own
+          # crash/restart acceptance test both require this to be a
+          # genuinely supervised, always-running process. Wrapped in its own
+          # dedicated Supervisor (generous restart intensity) rather than
+          # added bare here — see Nebu.Media.StorageConfig.Supervisor's
+          # moduledoc for why.
+          Nebu.Media.StorageConfig.Supervisor,
+          # media-security-admin-control/7-admin-notifications: subscribes to
+          # Story 5b's "media:admin" broadcast and enqueues an optional outbound
+          # webhook Oban job on :infected/:scan_failed (AC1). Started
+          # unconditionally, right after Nebu.PubSub above (its init/1
+          # subscribes to Nebu.PubSub, which must already be running) — a
+          # bare GenServer (not wrapped in its own dedicated Supervisor like
+          # the two Media config caches above) since it holds no ETS
+          # table/cache to repopulate on crash, just a PubSub subscription
+          # the :one_for_one default restart re-establishes.
+          Nebu.Media.AlertNotifier,
           # Nebu.Compliance (cross-cutting) — child supervisor reads :compliance, :workers
           Nebu.Compliance.Supervisor
         ] ++
@@ -152,10 +197,18 @@ defmodule Nebu.Application do
   # (caches which off-list endpoints have an active temporary capture, for
   # should_persist?/2's hot path) is started the same way — nothing to
   # cache without a DB either.
+  # media-security-admin-control/2e-reserved-upload-cleanup-cron (ADR-025): Oban
+  # is started right after Nebu.Repo — it needs a DB connection (its own
+  # oban_jobs/oban_peers tables, migration 000026), so it is gated behind the
+  # exact same `Application.get_env(:nebu, Nebu.Repo)` check as every other
+  # DB-dependent child here rather than unconditionally in the top-level list.
+  # A pure-unit test run (no NEBU_DB_URL, no Nebu.Repo config) therefore starts
+  # zero Oban children too, consistent with the rest of this function.
   defp repo_children do
     if Application.get_env(:nebu, Nebu.Repo),
       do: [
         Nebu.Repo,
+        {Oban, Application.fetch_env!(:nebu, Oban)},
         Nebu.Matrix.Session.Sweeper,
         Nebu.Matrix.Session.RefreshWorker,
         Nebu.Web.LogStore.Writer,
@@ -192,13 +245,27 @@ defmodule Nebu.Application do
     end
   end
 
-  # Finch pool for media preview_url fetching. Disabled in test (fake fetch boundary).
+  # Finch pool for media preview_url fetching (disabled in test — fake fetch boundary)
+  # plus the ClamAV scanner client supervisor (media-security-admin-control/
+  # 3-clamav-genserver). Disabled in test — clamav_test.exs starts its own
+  # supervised Nebu.Media.ClamAV instance per test against a fake clamd, and a
+  # pure-unit run has no real clamd container to connect to.
   defp media_children do
-    if Application.get_env(:nebu_http, :start_finch, true) do
-      [{Finch, name: Nebu.Media.Finch}]
-    else
-      []
-    end
+    finch_children =
+      if Application.get_env(:nebu_http, :start_finch, true) do
+        [{Finch, name: Nebu.Media.Finch}]
+      else
+        []
+      end
+
+    clamav_children =
+      if Application.get_env(:nebu_http, :start_clamav_client, true) do
+        [Nebu.Media.Supervisor]
+      else
+        []
+      end
+
+    finch_children ++ clamav_children
   end
 
   # Phoenix LiveView Admin UI. Local PubSub (LiveView socket) + AdminEndpoint (server:

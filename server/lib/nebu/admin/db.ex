@@ -855,6 +855,43 @@ defmodule Nebu.Admin.DB do
     {:ok, rows}
   end
 
+  # ─── media-security-admin-control/11b: storage-target orphan-risk check ────
+
+  @doc """
+  Returns the count of `media_files` rows with a non-null `storage_key`
+  (ADR-018 exception, mirroring the precedent already established for
+  `Nebu.Admin.MediaLive`, Story 5a — the only namespace allowed to read
+  `media_files` directly for admin-facing concerns). Used by
+  `Nebu.Admin.MediaSettingsController.save_storage/2` (story
+  `11b-storage-ui-test-connection`, AC4/AC6) to decide whether changing the
+  storage target's `endpoint`/`bucket` would orphan already-stored files.
+
+  Test seam: `Application.get_env(:nebu_http, :media_files_storage_key_count_fun)`
+  (0-arity fun returning a non-negative integer). Falls back to a real
+  `SELECT COUNT(*) FROM media_files WHERE storage_key IS NOT NULL` when unset.
+  """
+  @spec count_media_with_storage_key() :: non_neg_integer()
+  def count_media_with_storage_key do
+    case Application.get_env(:nebu_http, :media_files_storage_key_count_fun) do
+      fun when is_function(fun, 0) -> fun.()
+      _ -> real_count_media_with_storage_key()
+    end
+  end
+
+  defp real_count_media_with_storage_key do
+    result =
+      Ecto.Adapters.SQL.query!(
+        Nebu.Repo,
+        "SELECT COUNT(*) FROM media_files WHERE storage_key IS NOT NULL",
+        []
+      )
+
+    case result.rows do
+      [[count]] -> count
+      _ -> 0
+    end
+  end
+
   # ─── Private helpers ──────────────────────────────────────────────────────────
 
   defp row_to_user_map([user_id, display_name_encrypted, display_name_nonce, email_encrypted, email_nonce, email_ephemeral_pub, is_active, system_role, created_at]) do

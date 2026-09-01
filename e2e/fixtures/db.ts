@@ -376,6 +376,84 @@ export function insertWarRoomSession(opts: {
   return id;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// media-security-admin-control/5a-admin-media-table — media_files row seeds for
+// the admin media overview page. Same approved direct-SQL mechanism as above
+// (NO test-only HTTP routes, ever): a real "infected" row requires a genuine
+// ClamAV EICAR scan round-trip (async, Oban-queued) which is far too slow/
+// nondeterministic for a page-render/filter/pagination E2E check — this
+// deterministically seeds the ALREADY-SCANNED end state the page renders.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Seed one media_files row directly (schema: server/priv/migrations/
+ * 000001_init.up.sql + 000022_media_state_machine_foundation.up.sql +
+ * 000025_media_files_filename.up.sql). `mediaId` must be unique per call —
+ * callers generate it (e.g. `e2e-media-${Date.now()}`) so it can be located
+ * in the DOM afterwards.
+ */
+export function insertMediaFile(opts: {
+  mediaId: string;
+  state?:
+    | 'reserved'
+    | 'quarantined'
+    | 'scanning'
+    | 'released'
+    | 'infected'
+    | 'admin_blocked'
+    | 'deleted'
+    | 'hard_deleted'
+    | 'scan_failed';
+  contentType?: string;
+  fileSize?: number;
+  uploaderUserId?: string;
+  filename?: string;
+  uploadedMsAgo?: number;
+  clamavSignature?: string;
+  scannedAt?: string;
+}): void {
+  const state = opts.state ?? 'released';
+  const contentType = opts.contentType ?? 'application/octet-stream';
+  const fileSize = opts.fileSize ?? 1024;
+  const uploaderUserId = opts.uploaderUserId ?? '@e2e-media-operator:test.local';
+  const uploadedAgo = opts.uploadedMsAgo ?? 0;
+  const filenameExpr = opts.filename ? sqlLiteral(opts.filename) : 'NULL';
+
+  const scanMetadataExpr =
+    opts.clamavSignature || opts.scannedAt
+      ? `'${JSON.stringify({
+          clamav_signature: opts.clamavSignature,
+          scanned_at: opts.scannedAt ?? new Date().toISOString(),
+        }).replace(/'/g, "''")}'::jsonb`
+      : 'NULL';
+
+  runSql(
+    'INSERT INTO media_files ' +
+      '(media_id, server_name, content_type, file_size, aes_key_hex, nonce_hex, ' +
+      'uploader_user_id, uploaded_at, deleted, state, filename, scan_metadata) VALUES (' +
+      [
+        sqlLiteral(opts.mediaId),
+        sqlLiteral('e2e.test.local'),
+        sqlLiteral(contentType),
+        String(fileSize),
+        sqlLiteral('e2eaeskeyhex'),
+        sqlLiteral('e2enoncehex'),
+        sqlLiteral(uploaderUserId),
+        `((extract(epoch from now()) * 1000)::bigint - ${Math.floor(uploadedAgo)})`,
+        'false',
+        sqlLiteral(state),
+        filenameExpr,
+        scanMetadataExpr,
+      ].join(', ') +
+      ') ON CONFLICT (media_id) DO UPDATE SET state = EXCLUDED.state',
+  );
+}
+
+/** Scenario cleanup: remove every media_files row this fixture seeded (prefix-scoped). */
+export function clearMediaFiles(mediaIdPrefix: string): void {
+  runSql(`DELETE FROM media_files WHERE media_id LIKE '${mediaIdPrefix}%'`);
+}
+
 /** Insert one operational_logs row already tagged with a war_room_id (AC5 detail-view seeding). */
 export function insertOperationalLogForWarRoom(
   warRoomId: string,

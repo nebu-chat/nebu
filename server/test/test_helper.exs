@@ -1,5 +1,13 @@
 ExUnit.start()
 
+# media-security-admin-control/2d-download-stall-mechanism (fix-cycle 1,
+# MINOR-1): eager-init the download-stall :atomics counter here too, so a unit
+# run that exercises Nebu.Media.DownloadStall reaches counter_ref/0's pure
+# `:persistent_term.get/1` with the key already present, regardless of whether
+# Nebu.Application.start/2 ran first. Runs exactly once, sequentially, at suite
+# boot (no concurrent racers) and is idempotent with the boot-time init.
+Nebu.Media.DownloadStall.init_counter()
+
 # Exclude :integration-tagged tests from unit runs (mix test without NEBU_DB_URL).
 # Integration tests require a live PostgreSQL instance and are only run via
 # make test-integration (which sets NEBU_DB_URL and starts Nebu.Repo).
@@ -16,6 +24,18 @@ Code.require_file("nebu/web/oidc_test_support.exs", __DIR__)
 Code.require_file("nebu/media/media_test_support.exs", __DIR__)
 Code.require_file("nebu/media/media_fakes.exs", __DIR__)
 
+# media-security-admin-control/1b-state-machine-module: grep-based invariant
+# checker (AC6) — defense-in-depth only, NOT a substitute for Story 1a's DB
+# trigger/RLS (ADR-031). Loaded once so state_machine_invariant_test.exs can
+# use it against both the real server/lib tree and in-memory fixture strings.
+Code.require_file("nebu/media/media_mutation_invariant_support.exs", __DIR__)
+
 # admin-room-creator-provisioning: shared no-op UserStore for the create_room/2
 # creator-provisioning seam, so DB-mocked unit tests need no live Repo.
 Code.require_file("nebu/matrix/event_dispatcher/create_room_test_support.exs", __DIR__)
+
+# media-security-admin-control/3-clamav-genserver: real :gen_tcp fake clamd
+# listener for clamav_test.exs (there's no function boundary to Mox-stub for
+# a raw binary TCP protocol — the fake IS a socket). Loaded once so the
+# helper module is available at compile time.
+Code.require_file("nebu/media/clamav_fake_server.exs", __DIR__)

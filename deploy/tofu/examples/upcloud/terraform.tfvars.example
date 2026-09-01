@@ -176,3 +176,5 @@ dns_mode = "external"
 # dex_memory_limit     = "128m"
 # element_cpu_limit    = "0.25"   # Element Web (enable_element_web = true only)
 # element_memory_limit = "128m"
+# clamav_cpu_limit     = "0.50"   # Malware scanner, ADR-024 (enable_media_gateway = true only)
+# clamav_memory_limit  = "1.5g"   # clamd keeps the full signature DB resident in memory

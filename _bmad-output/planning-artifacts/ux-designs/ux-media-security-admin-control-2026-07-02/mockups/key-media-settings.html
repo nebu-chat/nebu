@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>Nebu Admin — Medien-Einstellungen (Key Screen Mock)</title>
+<style>
+/*
+  Governs: DESIGN.md → Layout & Spacing (max-w-2xl single column, stacked
+           sections, space-8), Components → settings-section,
+           storage-config-section, lifecycle-ladder-editor.
+           Do's/Don'ts (no multi-column forms, mask secrets, explicit Save).
+  EXPERIENCE.md → Component Patterns (settings-section explicit-save +
+           inline validation, lifecycle-ladder-editor 13b, storage
+           test-before-commit), Accessibility Floor (labels, aria-invalid/
+           aria-errormessage, required legend, show/hide toggle aria-pressed),
+           Key Flow 3 (Dr. Petra tightens retention — escalated warning) and
+           Key Flow 4 (repointing object storage — test connection + bucket
+           change warning).
+  Primary state: Retention escalated-warning banner mid-edit (canonical, most
+  load-bearing interaction). Alternate section below: Object Storage with a
+  successful connection test + the existing-media warning (Flow 4, Climax).
+  Offline, inline CSS, no JS, no network. Icons: inline SVG, never emoji.
+*/
+:root{
+  --primary:#f97316; --primary-hover:#ea580c; --primary-content:#1c1917; --primary-subtle:#431407;
+  --base-100:#111827; --base-200:#1f2937; --base-300:#374151; --base-content:#f9fafb;
+  --text-secondary:#9ca3af; --success:#22c55e; --warning:#f59e0b; --status-warn-bg:#451a03;
+  --error:#ef4444; --neutral:#6b7280;
+  --media-processing:#f59e0b; --media-released:#14b8a6; --media-infected:#ef4444;
+  --media-blocked:#fb7185; --media-terminal:#6b7280; --badge-dark-text:#1c1917;
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{background:var(--base-100); color:var(--base-content); font-family:Inter,"Segoe UI",system-ui,-apple-system,sans-serif; font-size:15px; line-height:1.5;}
+.mono{font-family:"JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+.sr-only{position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap;}
+
+.topbar{position:fixed; top:0; left:0; right:0; height:48px; background:var(--base-300); display:flex; align-items:center; padding:0 16px; gap:12px; z-index:10;}
+.topbar .brand{font-weight:700;}
+.topbar .spacer{flex:1;}
+.topbar .user{display:flex; align-items:center; gap:8px; font-size:.85rem; color:var(--text-secondary);}
+.avatar{width:28px; height:28px; border-radius:50%; background:var(--primary-subtle); color:var(--primary); display:flex; align-items:center; justify-content:center; font-size:.75rem; font-weight:700;}
+
+.sidebar{width:240px; background:var(--base-200); position:fixed; top:48px; bottom:0; left:0; padding:20px 0; overflow-y:auto;}
+.sidebar .group-label{font-size:11px; letter-spacing:.06em; color:var(--text-secondary); text-transform:uppercase; padding:0 20px; margin:20px 0 8px;}
+.sidebar .group-label:first-child{margin-top:0;}
+.sidebar a.navitem{display:flex; align-items:center; gap:10px; padding:8px 20px; color:var(--base-content); text-decoration:none; font-size:14px; position:relative;}
+.sidebar a.navitem.active{background:var(--base-300); font-weight:600;}
+.sidebar a.navitem.active::before{content:""; position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--primary);}
+/* Nested nav parent/child (feature/enhanced-logging → admin-sidebar-nesting,
+   merged into main). Real markup: Nebu.Admin.Layouts.nav_item/1 with
+   :children — a <button aria-expanded aria-controls> disclosure toggle +
+   chevron, followed by an indented <ul> of child <.link>s. Real toggle
+   behavior is wired CSP-safely by wireNavSectionToggles() in app.js; this
+   static mock always renders expanded (the real default). */
+.navitem-parent{display:flex; align-items:center; gap:8px; width:100%; padding:8px 20px; background:none; border:none; color:var(--base-content); font:inherit; font-size:14px; text-align:left; cursor:pointer; position:relative;}
+.navitem-parent:focus-visible{outline:2px solid var(--primary); outline-offset:-2px;}
+.navitem-parent.child-active{background:var(--base-300); font-weight:600;}
+.navitem-parent.self-active{background:var(--primary); color:var(--primary-content); font-weight:600;}
+.navitem-parent:not(.child-active):not(.self-active):hover{background:var(--base-300);}
+.nav-chevron{width:14px; height:14px; flex:none; transform:rotate(90deg); transition:transform .15s;}
+.nav-children{list-style:none; margin:2px 0 4px; padding:0; display:flex; flex-direction:column; gap:2px;}
+.nav-child-link{display:flex; align-items:center; gap:8px; padding:6px 20px 6px 46px; font-size:13px; color:var(--base-content); text-decoration:none; position:relative;}
+.nav-child-link.active{background:var(--primary); color:var(--primary-content); font-weight:600;}
+.nav-child-link:not(.active):hover{background:var(--base-300);}
+
+main{margin-left:240px; margin-top:48px; padding:24px; max-width:960px;}
+h1.page-title{font-size:1.5rem; font-weight:600; margin:0 0 4px;}
+.breadcrumb{font-size:.8rem; color:var(--text-secondary); margin:0 0 24px;}
+.breadcrumb a{color:var(--text-secondary);}
+
+.settings-col{max-width:640px; display:flex; flex-direction:column; gap:32px;}
+.settings-section{background:var(--base-200); border:1px solid var(--base-300); border-radius:8px; padding:24px;}
+.settings-section h2{font-size:1.05rem; font-weight:600; margin:0 0 4px;}
+.settings-section .section-hint{font-size:.78rem; color:var(--text-secondary); margin:0 0 20px;}
+
+.form-control{display:flex; flex-direction:column; gap:6px; margin-bottom:20px;}
+.form-control:last-child{margin-bottom:0;}
+label{font-size:.85rem; font-weight:600;}
+label .req{color:var(--warning); margin-left:2px;}
+input[type=text],input[type=number],input[type=password]{
+  background:var(--base-100); border:1px solid var(--base-300); border-radius:6px; color:var(--base-content);
+  padding:8px 12px; font-size:.85rem;
+}
+input:focus-visible, button:focus-visible, a:focus-visible{outline:2px solid var(--primary); outline-offset:2px;}
+.hint{font-size:.75rem; color:var(--text-secondary);}
+.reqlegend{font-size:.72rem; color:var(--text-secondary); margin-top:-8px;}
+
+.escalated-banner{display:flex; gap:10px; align-items:flex-start; background:var(--status-warn-bg); border:1px solid var(--warning); border-left:3px solid var(--warning); border-radius:6px; padding:12px 14px; margin:4px 0 20px; font-size:.83rem;}
+.escalated-banner svg{width:16px; height:16px; flex:none; color:var(--warning); margin-top:2px;}
+
+.section-footer{display:flex; justify-content:flex-end; gap:8px; margin-top:20px; padding-top:16px; border-top:1px solid var(--base-300);}
+.btn{display:inline-flex; align-items:center; gap:5px; padding:8px 16px; border-radius:6px; border:1px solid var(--base-300); background:var(--base-300); color:var(--base-content); font-size:.82rem; font-weight:600; cursor:pointer;}
+.btn-primary{background:var(--primary); border-color:var(--primary); color:var(--primary-content);}
+.btn-primary:disabled{opacity:.55; cursor:not-allowed;}
+
+/* lifecycle ladder */
+.ladder{display:flex; flex-direction:column; gap:10px; margin-bottom:16px;}
+.rung{display:flex; align-items:center; gap:12px; background:var(--base-100); border:1px solid var(--base-300); border-radius:8px; padding:12px 14px;}
+.rung .handle{background:transparent; border:1px solid var(--base-300); border-radius:6px; width:28px; height:28px; display:flex; align-items:center; justify-content:center; color:var(--text-secondary); cursor:pointer; flex:none;}
+.rung .rung-body{flex:1; display:flex; align-items:center; gap:10px; flex-wrap:wrap;}
+.badge{display:inline-flex; align-items:center; gap:5px; padding:3px 10px; border-radius:10px; font-size:.76rem; font-weight:700; color:var(--badge-dark-text);}
+.badge--released{background:var(--media-released);}
+.badge--terminal{background:var(--media-terminal);}
+.rung .arrow{color:var(--text-secondary);}
+.rung input[type=number]{width:80px;}
+.rung.high-blast{border-color:var(--warning);}
+
+/* storage section */
+.pw-field{position:relative;}
+.pw-toggle{position:absolute; right:6px; top:6px; background:transparent; border:none; color:var(--text-secondary); font-size:.72rem; font-weight:600; cursor:pointer; padding:4px 8px;}
+.test-row{display:flex; align-items:center; gap:10px; margin-top:4px;}
+.result-pill{display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:10px; font-size:.78rem; font-weight:700;}
+.result-pill.ok{background:var(--media-released); color:var(--badge-dark-text);}
+.result-pill svg{width:12px; height:12px;}
+
+.alt-state{margin-top:8px;}
+.alt-state h2.tag{font-size:.9rem; color:var(--text-secondary); text-transform:uppercase; letter-spacing:.03em; margin:0 0 12px;}
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="ic-warn" viewBox="0 0 16 16"><path d="M8 2.2L14.6 13.3H1.4L8 2.2z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><line x1="8" y1="6.4" x2="8" y2="9.8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11.4" r="0.9" fill="currentColor"/></symbol>
+  <symbol id="ic-check" viewBox="0 0 16 16"><path d="M3 8.5l3.3 3.3L13 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="ic-grip" viewBox="0 0 16 16"><circle cx="5" cy="4" r="1" fill="currentColor"/><circle cx="11" cy="4" r="1" fill="currentColor"/><circle cx="5" cy="8" r="1" fill="currentColor"/><circle cx="11" cy="8" r="1" fill="currentColor"/><circle cx="5" cy="12" r="1" fill="currentColor"/><circle cx="11" cy="12" r="1" fill="currentColor"/></symbol>
+</svg>
+
+<header class="topbar">
+  <span class="brand">Nebu Admin</span>
+  <span class="spacer"></span>
+  <span class="user"><span class="avatar">DP</span> Dr. Petra L. · compliance_officer</span>
+</header>
+
+<nav class="sidebar" aria-label="Hauptnavigation">
+  <div class="group-label">Verwaltung</div>
+  <a class="navitem" href="#">👤 <span>Benutzer</span></a>
+  <a class="navitem" href="#">💬 <span>Räume</span></a>
+  <div class="nav-parent-item">
+    <button type="button" class="navitem-parent child-active" aria-expanded="true" aria-controls="nav-media-children" data-navkey="media">
+      <svg class="nav-chevron" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z"/></svg>
+      🖼 <span>Medien</span>
+    </button>
+    <ul id="nav-media-children" class="nav-children">
+      <li><a class="nav-child-link" href="#">Übersicht</a></li>
+      <li><a class="nav-child-link" href="#">Health</a></li>
+      <li><a class="nav-child-link active" href="#" aria-current="page">Settings</a></li>
+      <li><a class="nav-child-link" href="#">Approvals</a></li>
+    </ul>
+  </div>
+  <div class="group-label">Compliance</div>
+  <a class="navitem" href="#">📋 <span>Audit Log</span></a>
+</nav>
+
+<main>
+  <p class="breadcrumb"><a href="#">Medien</a> / Einstellungen</p>
+  <h1 class="page-title">Medien-Einstellungen</h1>
+
+  <div class="settings-col">
+
+    <section class="settings-section" aria-labelledby="s-retention">
+      <h2 id="s-retention">Aufbewahrung</h2>
+      <p class="section-hint">Automatisches Löschen freigegebener Dateien nach Ablauf einer Frist.</p>
+
+      <div class="form-control">
+        <label for="ret-days">Freigegebene Dateien löschen nach (Tage)</label>
+        <input type="number" id="ret-days" value="90" min="1">
+        <span class="hint">Vorbelegt aus Umgebungsvariable beim ersten Laden · zuvor: aus</span>
+      </div>
+
+      <div class="escalated-banner" role="alert">
+        <svg aria-hidden="true"><use href="#ic-warn"/></svg>
+        <span><strong>Betrifft alle freigegebenen Dateien älter als 90 Tage.</strong> Diese Änderung löst eine automatische Massenlöschung nie beanstandeter Dateien aus. Bitte bestätigen Sie bewusst.</span>
+      </div>
+
+      <div class="section-footer">
+        <button class="btn btn-primary" type="button">Speichern &amp; bestätigen</button>
+      </div>
+    </section>
+
+    <section class="settings-section" aria-labelledby="s-ladder">
+      <h2 id="s-ladder">Lifecycle-Regeln</h2>
+      <p class="section-hint">Geordnete Leiter der Zustandsübergänge — jede Stufe mit eigener Frist.</p>
+
+      <div class="ladder">
+        <div class="rung">
+          <button class="handle" type="button" aria-label="Stufe verschieben"><svg aria-hidden="true"><use href="#ic-grip"/></svg></button>
+          <div class="rung-body">
+            <span class="badge badge--released">Freigegeben</span>
+            <span class="arrow">→</span>
+            <span>nach</span>
+            <input type="number" value="90" min="1" aria-label="Frist in Tagen für Freigegeben → Gelöscht">
+            <span>Tagen → Gelöscht</span>
+          </div>
+        </div>
+        <div class="rung">
+          <button class="handle" type="button" aria-label="Stufe verschieben"><svg aria-hidden="true"><use href="#ic-grip"/></svg></button>
+          <div class="rung-body">
+            <span class="badge badge--terminal">Gelöscht</span>
+            <span class="arrow">→</span>
+            <span>nach</span>
+            <input type="number" value="365" min="1" aria-label="Frist in Tagen für Gelöscht → Hard-Delete">
+            <span>Tagen → Hard-Delete</span>
+          </div>
+        </div>
+        <div class="rung high-blast">
+          <button class="handle" type="button" aria-label="Stufe verschieben"><svg aria-hidden="true"><use href="#ic-grip"/></svg></button>
+          <div class="rung-body">
+            <span class="badge" style="background:var(--media-processing);">Verwaist (orphaned)</span>
+            <span class="arrow">→</span>
+            <span>nach</span>
+            <input type="number" value="7" min="1" aria-label="Frist in Tagen für verwaiste Objekte">
+            <span>Tagen → Hard-Delete</span>
+          </div>
+        </div>
+      </div>
+      <p class="hint">Legal-Hold-Dateien sind von jeder Stufe ausgenommen, bis die Sperre über Zwei-Augen freigegeben wird.</p>
+
+      <div class="section-footer">
+        <button class="btn btn-primary" type="button">Speichern</button>
+      </div>
+    </section>
+
+    <section class="settings-section" aria-labelledby="s-storage">
+      <h2 id="s-storage">Objektspeicher</h2>
+      <p class="section-hint">S3-kompatibler Speicher (on-prem MinIO) für Medien-Binärdaten.</p>
+
+      <div class="form-control">
+        <label for="s3-endpoint">Endpoint</label>
+        <input type="text" id="s3-endpoint" value="https://minio-cluster02.internal.muni.de">
+      </div>
+      <div class="form-control">
+        <label for="s3-bucket">Bucket</label>
+        <input type="text" id="s3-bucket" value="nebu-media-prod-eu2">
+      </div>
+      <div class="form-control">
+        <label for="s3-key">Access Key</label>
+        <div class="pw-field">
+          <input type="password" id="s3-key" value="AKIAEXAMPLE1234">
+          <button class="pw-toggle" type="button" aria-pressed="false">Anzeigen</button>
+        </div>
+      </div>
+      <div class="form-control">
+        <label for="s3-secret">Secret Key</label>
+        <div class="pw-field">
+          <input type="password" id="s3-secret" value="••••••••••••••••">
+          <button class="pw-toggle" type="button" aria-pressed="false">Anzeigen</button>
+        </div>
+      </div>
+
+      <div class="test-row">
+        <button class="btn" type="button">Verbindung testen</button>
+        <span class="result-pill ok"><svg aria-hidden="true"><use href="#ic-check"/></svg>Erreichbar</span>
+      </div>
+
+      <div class="escalated-banner" role="alert" style="margin-top:16px;">
+        <svg aria-hidden="true"><use href="#ic-warn"/></svg>
+        <span><strong>312 bestehende Dateien liegen im alten Bucket und wären nicht mehr erreichbar.</strong> Bitte Daten zuerst kopieren, bevor Sie speichern.</span>
+      </div>
+
+      <div class="section-footer">
+        <button class="btn btn-primary" type="button">Speichern</button>
+      </div>
+    </section>
+
+  </div>
+
+  <p class="reqlegend" style="margin-top:24px;">Jede gespeicherte Änderung schreibt einen Audit-Log-Eintrag (media_config_updated / media_storage_config_updated). Geheime Werte werden nie im Klartext protokolliert.</p>
+</main>
+</body>
+</html>

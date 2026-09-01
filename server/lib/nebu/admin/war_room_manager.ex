@@ -110,26 +110,47 @@ defmodule Nebu.Admin.WarRoomManager do
   """
   @spec stop_session(String.t()) :: :ok | {:error, :not_found | :already_ended}
   def stop_session(id) do
-    result =
-      Ecto.Adapters.SQL.query!(
-        Nebu.Repo,
-        "UPDATE war_room_sessions SET ended_at = now(), ended_reason = 'manual_stop' " <>
-          "WHERE id = $1 AND ended_at IS NULL",
-        [id]
-      )
+    # 10e (Trace-Map/War-Room integration) fix, follow-on to the
+    # row_to_session/1 change above: `id` arrives as the canonical
+    # hex-dash STRING (this function's own long-standing @spec, and now
+    # what row_to_session/1 actually returns) — Postgrex's raw `uuid`
+    # extension requires the 16-byte BINARY form for a bound `$1`
+    # parameter against a `uuid` column (confirmed against the live
+    # stack: a plain string `$1` raises `DBConnection.EncodeError`).
+    # Mirrors `Nebu.Admin.LogsLive.WarRoom.load_session/1`'s own
+    # `Ecto.UUID.cast/1` + `Ecto.UUID.dump!/1` precedent for the
+    # identical concern. A malformed, non-UUID-shaped `id` cannot match
+    # any real row, so it is treated the same as "not found" rather than
+    # crashing.
+    case uuid_dump(Ecto.UUID.cast(id)) do
+      {:ok, binary_id} ->
+        result =
+          Ecto.Adapters.SQL.query!(
+            Nebu.Repo,
+            "UPDATE war_room_sessions SET ended_at = now(), ended_reason = 'manual_stop' " <>
+              "WHERE id = $1 AND ended_at IS NULL",
+            [binary_id]
+          )
 
-    case result.num_rows do
-      1 ->
-        notify_war_room_reload()
-        :ok
+        case result.num_rows do
+          1 ->
+            notify_war_room_reload()
+            :ok
 
-      0 ->
-        case fetch_by_id(id) do
-          nil -> {:error, :not_found}
-          _existing -> {:error, :already_ended}
+          0 ->
+            case fetch_by_id(binary_id) do
+              nil -> {:error, :not_found}
+              _existing -> {:error, :already_ended}
+            end
         end
+
+      :error ->
+        {:error, :not_found}
     end
   end
+
+  defp uuid_dump({:ok, canonical}), do: {:ok, Ecto.UUID.dump!(canonical)}
+  defp uuid_dump(:error), do: :error
 
   @doc """
   Returns `{:ok, session}` for the currently active session, or `:none`
@@ -182,6 +203,28 @@ defmodule Nebu.Admin.WarRoomManager do
     {:error, :invalid_params, "exclusive_scope must be a list, got #{inspect(other)}"}
   end
 
+  # media-security-admin-control/10e-trace-map-war-room-integration (AC7):
+  # symmetrical defense-in-depth shape validation for a list-shaped `scope`
+  # (Nebu.Web.LogStore.WarRoom's own new list-form scope_matches?/2 clause),
+  # mirroring validate_exclusive_scope/1's own pattern exactly. `nil` and a
+  # plain string are the existing, unchanged scope forms (AC3/AC8) and need
+  # no new validation here.
+  defp validate_scope(nil), do: :ok
+  defp validate_scope(scope) when is_binary(scope), do: :ok
+
+  defp validate_scope(list) when is_list(list) do
+    if Enum.all?(list, &valid_route_shape?/1) do
+      :ok
+    else
+      {:error, :invalid_params,
+       "scope must be a list of non-empty route paths starting with \"/\" (got #{inspect(list)})"}
+    end
+  end
+
+  defp validate_scope(other) do
+    {:error, :invalid_params, "scope must be nil, a string, or a list, got #{inspect(other)}"}
+  end
+
   defp valid_route_shape?(value) when is_binary(value), do: String.starts_with?(value, "/")
   defp valid_route_shape?(_value), do: false
 
@@ -211,7 +254,8 @@ defmodule Nebu.Admin.WarRoomManager do
              min_duration,
              max_duration_bound
            ),
-         :ok <- validate_exclusive_scope(Map.get(params, :exclusive_scope)) do
+         :ok <- validate_exclusive_scope(Map.get(params, :exclusive_scope)),
+         :ok <- validate_scope(Map.get(params, :scope)) do
       :ok
     end
   end
@@ -242,7 +286,7 @@ defmodule Nebu.Admin.WarRoomManager do
         [
           Map.fetch!(params, :started_by),
           Map.fetch!(params, :reason),
-          Map.get(params, :scope),
+          encode_scope(Map.get(params, :scope)),
           Map.get(params, :filter),
           Map.get(params, :exclusive_scope),
           Map.fetch!(params, :max_entries),
@@ -272,6 +316,25 @@ defmodule Nebu.Admin.WarRoomManager do
 
   defp unique_violation?(%Postgrex.Error{postgres: %{code: :unique_violation}}), do: true
   defp unique_violation?(_), do: false
+
+  # media-security-admin-control/10e-trace-map-war-room-integration (AC7):
+  # `scope` is a plain TEXT column (migration 000019 — not jsonb), so a
+  # list-shaped scope is JSON-encoded here on write and decoded back in
+  # row_to_session/1 below, rather than changing the column type. `nil`/a
+  # plain string (the existing "all"/exact-route-template forms) pass
+  # through unchanged.
+  defp encode_scope(nil), do: nil
+  defp encode_scope(scope) when is_binary(scope), do: scope
+  defp encode_scope(scope) when is_list(scope), do: Jason.encode!(scope)
+
+  defp decode_scope(nil), do: nil
+
+  defp decode_scope(scope) when is_binary(scope) do
+    case Jason.decode(scope) do
+      {:ok, list} when is_list(list) -> list
+      _ -> scope
+    end
+  end
 
   # ── idempotent-restart comparison (AC2) ─────────────────────────────────
 
@@ -346,10 +409,31 @@ defmodule Nebu.Admin.WarRoomManager do
          entries_collected
        ]) do
     %{
-      id: id,
+      # 10e (Trace-Map/War-Room integration): `id` is a native Postgres `uuid`
+      # column — a raw `Ecto.Adapters.SQL.query!/3` (this module's own inline
+      # SQL, ADR-018) returns it as a 16-byte BINARY, not the canonical
+      # hex-dash STRING. Converted here to mirror the sibling module
+      # `Nebu.Admin.LogsLive.WarRoom`'s own `row_to_session/1` (its own
+      # separate copy, same precedent) — callers of `start_session/1`/
+      # `status/0` (e.g. `MediaHealthLive`'s `push_navigate(socket, to:
+      # "/admin/logs?war_room_id=#{session.id}")`) interpolate `id` directly
+      # into a URL, which requires the STRING form.
+      #
+      # code-review cycle 2 (MINOR-1/MINOR-3): kept as-is rather than
+      # reverted — see this story's Dev Agent Record for the full ripple this
+      # caused (`stop_session/1`'s own `uuid_dump/1` round-trip below,
+      # `war_room_manager_test.exs`, and the unrelated `enhanced-logging`
+      # epic's `handler_test.exs`) and why reverting was judged not worth the
+      # re-verification cost for a pure diff-size reduction. THREE independent
+      # `row_to_session/1` functions exist in this codebase and do NOT all
+      # agree on `id`'s shape: this one and `Nebu.Admin.LogsLive.WarRoom`'s
+      # both return the STRING form (same reason); `Nebu.Web.LogStore.
+      # WarRoom.row_to_session/1` deliberately stays BINARY (hot-path match
+      # cache only, never rendered into a URL).
+      id: Ecto.UUID.load!(id),
       started_by: started_by,
       reason: reason,
-      scope: scope,
+      scope: decode_scope(scope),
       filter: filter,
       exclusive_scope: exclusive_scope,
       max_entries: max_entries,

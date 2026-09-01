@@ -97,6 +97,19 @@ defmodule Nebu.Web.Router do
   # before the catch-all "/_matrix" forward, since Plug.Router matches top-down.
   forward "/_matrix/media", to: Nebu.Web.Router.Media
 
+  # Authenticated Matrix Client-Server v1 media endpoints
+  # (bugfix-fix-matrix-client-v1-media-routes) — Element Web (spec v1.11+
+  # aware) calls these instead of the deprecated `/_matrix/media/v3/*` ones
+  # above. Forwarded to a DEDICATED router (Nebu.Web.Router.ClientV1Media)
+  # rather than reusing Nebu.Web.Router.Media (code-review cycle 1: reusing
+  # the same router made /v3/upload, /v3/preview_url, etc. cross-reachable
+  # under this prefix, and made un-versioned /download, /thumbnail aliases
+  # reachable under /_matrix/media — both unintended widenings of the URL
+  # surface). ClientV1Media runs its own OidcPlug and has only the
+  # download/thumbnail clauses this story is scoped to. Must be matched
+  # before the catch-all "/_matrix" forward below.
+  forward "/_matrix/client/v1/media", to: Nebu.Web.Router.ClientV1Media
+
   # ── Matrix client discovery — UNAUTHENTICATED, required by every client BEFORE
   #    login (Element/FluffyChat fetch these first; a 401 here means no login UI).
   #    Restored from the Go gateway (matrix-api-migration dropped them). Matched

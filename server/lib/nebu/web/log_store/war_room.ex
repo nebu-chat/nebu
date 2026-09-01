@@ -255,6 +255,12 @@ defmodule Nebu.Web.LogStore.WarRoom do
   # Oracle gate confirms this codebase has exactly one /sync route, so exact
   # matching against "/_matrix/client/v3/sync" is complete).
   defp scope_matches?(scope, route) when is_binary(scope), do: scope == route
+  # media-security-admin-control/10e-trace-map-war-room-integration (AC7):
+  # a list of route templates, OR-matched — the minimal, additive extension
+  # needed to scope a session to "the media domain"
+  # (["/media/clamav", "/media/scan_worker", "/admin/media"]). Every
+  # existing nil/"all"/single-string clause above is unchanged.
+  defp scope_matches?(scope, route) when is_list(scope), do: route in scope
   defp scope_matches?(_scope, _route), do: false
 
   # filter = NULL/empty -> always match (no additional filtering).
@@ -298,6 +304,17 @@ defmodule Nebu.Web.LogStore.WarRoom do
     end
   end
 
+  # code-review cycle 2 (media-security-admin-control/10e, MINOR-3): THREE
+  # independent `row_to_session/1` functions exist in this codebase and do
+  # NOT all agree on `id`'s shape — do not assume they are interchangeable.
+  # This one deliberately keeps `id` as the raw 16-byte BINARY Postgrex
+  # returns (never converted to the canonical hex-dash STRING): this copy
+  # feeds only this module's own hot-path in-memory match cache, is never
+  # rendered into a URL/markup, and converting it would cost every `check/1`
+  # call something for no benefit. `Nebu.Admin.WarRoomManager.
+  # row_to_session/1` and `Nebu.Admin.LogsLive.WarRoom.row_to_session/1` both
+  # convert to the STRING form instead, because both DO render `id` into a
+  # URL (`push_navigate`/`href`).
   defp row_to_session([
          id,
          started_by,
@@ -314,7 +331,7 @@ defmodule Nebu.Web.LogStore.WarRoom do
       id: id,
       started_by: started_by,
       reason: reason,
-      scope: scope,
+      scope: decode_scope(scope),
       filter: filter,
       exclusive_scope: exclusive_scope,
       max_entries: max_entries,
@@ -322,6 +339,22 @@ defmodule Nebu.Web.LogStore.WarRoom do
       started_at: started_at,
       entries_collected: entries_collected
     }
+  end
+
+  # media-security-admin-control/10e-trace-map-war-room-integration (AC7):
+  # `scope` is a plain TEXT column (migration 000019, confirmed by reading
+  # it — not jsonb), so a list-shaped scope is JSON-encoded on write
+  # (`Nebu.Admin.WarRoomManager.insert_session/1`) and must be decoded back
+  # here. Every pre-existing scalar form (`nil`, `"all"`, an exact
+  # route_template string) is not valid JSON, so `Jason.decode/1` fails for
+  # them and the raw string is kept unchanged — 100% backward compatible.
+  defp decode_scope(nil), do: nil
+
+  defp decode_scope(scope) when is_binary(scope) do
+    case Jason.decode(scope) do
+      {:ok, list} when is_list(list) -> list
+      _ -> scope
+    end
   end
 
   # Single, atomic UPDATE ... RETURNING — increments the counter AND

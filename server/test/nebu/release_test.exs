@@ -55,8 +55,130 @@ defmodule Nebu.ReleaseTest do
       # `war_room_sessions.exclusive_scope` nullable JSONB column (Dev Notes
       # Option A — the "capture everything EXCEPT these endpoints"
       # convenience, AC9/AC10).
+      # 000022 — media-security-admin-control/1a-media-files-migration
+      # (ADR-031): media_state / media_transition_actor_type ENUMs, 8 new
+      # media_files columns + backfill, the append-only media_state_transitions
+      # table with its BEFORE UPDATE OR DELETE immutability trigger
+      # (SQLSTATE 23001) and secondary RLS/REVOKE layer.
+      # 000023 — media-security-admin-control/9a-media-config-table-module
+      # (ADR-027): creates the dedicated media_config key/value table (RLS +
+      # 3 policies mirroring server_config's shape) that backs
+      # Nebu.Media.Config's get/0 / upsert/2 (media policy settings — upload/
+      # scan size limits, retention windows, webhook URL, MIME denylist).
+      # 000024 — media-security-admin-control/11a-storage-config-schema-secrets:
+      # creates the singleton media_storage_config table (RLS + 3 policies)
+      # that backs Nebu.Media.StorageConfig's get/0 / get_for_connection/0 /
+      # upsert/1 (S3/MinIO storage target config — endpoint/bucket/region/
+      # use_ssl/access_key/secret_key/s3_key_prefix_template/archive_bucket).
+      # 000025 — media-security-admin-control/2b-put-media-upload
+      # (coordinator-approved guardrail exception, 2026-07-14): adds the
+      # single nullable media_files.filename column so the async-upload PUT
+      # handler can persist ?filename=... for later Content-Disposition
+      # derivation. ALTER TABLE only — no new table, so no new GRANT is
+      # required (media_files is already covered by 000001's blanket GRANT).
+      # 000026 — media-security-admin-control/2e-reserved-upload-cleanup-cron
+      # (ADR-025): bootstraps Oban (2e lands before 4b in actual build order, so
+      # it absorbs the one-time schema setup 4b's own story had originally
+      # planned to do). Hand-translates Oban 2.23's official Postgres schema
+      # (oban_job_state enum, oban_jobs, oban_peers — the default table-based
+      # leadership peer module Oban.Plugins.Cron needs) into this project's
+      # raw-SQL convention; deliberately omits the pg_notify trigger/function
+      # the official schema creates in V01/V08 and then itself DROPS in V12 —
+      # not present as of schema version 14 (confirmed via direct inspection of
+      # the fetched dependency's own migration source, not assumed).
+      # 000027 — media-security-admin-control/2e-reserved-upload-cleanup-cron
+      # (code-review CRITICAL fix, 2026-07-14): drops the NOT NULL constraint
+      # on media_files.uploader_user_id. The cleanup cron's hard_deleted
+      # transition NULLs this column per the epic's DB-Record-Invariante;
+      # without this migration that UPDATE raises a Postgres not_null_violation
+      # against a real database. ALTER TABLE only — no new GRANT required.
+      # 000028 — media-security-admin-control/4a-scan-failed-enum-migration:
+      # `ALTER TYPE media_state ADD VALUE 'scan_failed'` — the 9th media_state
+      # value, deferred from Story 1a's foundation migration (000022) into its
+      # own transaction per Postgres's restriction on combining ADD VALUE with
+      # other DDL/DML against the same type. The story's own Technical
+      # Requirements section names this file 000023 (the next free number when
+      # the story was written); by the time it actually landed, 000023-000027
+      # had already been claimed by the five migrations documented above, so
+      # this migration is numbered 000028 instead — a pure filename/number
+      # correction, no change to the SQL content or intent.
+      # 000029 — media-security-admin-control/6a-routine-state-actions (design/
+      # architecture gap, caller-approved option A): media_state_transitions.
+      # actor_id was UUID (000022) on the mistaken assumption that admin
+      # identity would be UUID-shaped; this app has no UUID-shaped user/admin
+      # identity anywhere (users.user_id and audit_log.actor_user_id are both
+      # TEXT, Matrix-ID-shaped) — 6a is the first real caller of the
+      # {:admin, admin_id} actor, and it surfaced the mismatch. ALTER COLUMN
+      # TYPE only — no new table, no new GRANT required. Verified zero-risk:
+      # every existing row's actor_id was NULL before this migration ran.
+      # 000030 — media-security-admin-control/6c-infected-override: adds
+      # users.media_admin_override (BOOLEAN NOT NULL DEFAULT false), the
+      # distinct grant (orthogonal to system_role) gating the
+      # :infected -> :released false-positive override action. ALTER TABLE
+      # only — no new table, no new GRANT required (users is already covered
+      # by 000001's blanket GRANT on ALL TABLES).
+      # 000031 — media-security-admin-control/8b-orphan-detection-gdpr
+      # (AC6 / "Offene Entscheidung #3"): adds a jsonb_path_ops GIN index on
+      # events.content, empirically verified via EXPLAIN ANALYZE to be
+      # required for Nebu.Workers.MediaOrphanDetectionWorker's anti-join
+      # detection query to avoid a full sequential scan of events per run.
+      # Index-only — no new table, no new GRANT required (events is already
+      # covered by 000001's blanket GRANT on ALL TABLES). Plain CREATE INDEX,
+      # not CONCURRENTLY (see the migration file's own comment for why).
+      # 000032 — media-security-admin-control/10a-scan-stats-rollup: adds the
+      # media_scan_stats hourly rollup table (BIGSERIAL PK, UNIQUE index on
+      # window_start) that Nebu.Workers.MediaScanStatsRollupWorker upserts
+      # into and Nebu.Admin.MediaHealthLive reads from. New table — full
+      # GRANT SELECT/INSERT/UPDATE/DELETE + sequence USAGE/SELECT to nebu_app
+      # (this table is a derived, re-computable rollup, not an append-only
+      # ledger like media_state_transitions — no trigger/RLS needed).
+      # 000033 — media-security-admin-control/10c-media-alerts-triggers: adds
+      # the media_alerts table (BIGINT IDENTITY PK, media_alert_severity
+      # ENUM, TEXT+CHECK alert_type list, partial unique index enforcing at
+      # most one OPEN alert per alert_type) that
+      # Nebu.Workers.MediaAlertsCheckerWorker opens/auto-resolves and
+      # Nebu.Media.Alerts.list_open/0 reads from. New table — narrower GRANT
+      # SELECT/INSERT/UPDATE (deliberately no DELETE — alerts are opened/
+      # updated in place, never removed by app code) + sequence USAGE/SELECT
+      # to nebu_app. Also extends media_config_update_mutable (ADR-027,
+      # Story 9a) with this story's own 4 alert-threshold keys.
       assert versions ==
-               [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]
+               [
+                 1,
+                 2,
+                 3,
+                 4,
+                 5,
+                 6,
+                 7,
+                 8,
+                 9,
+                 10,
+                 11,
+                 12,
+                 13,
+                 14,
+                 15,
+                 16,
+                 17,
+                 18,
+                 19,
+                 20,
+                 21,
+                 22,
+                 23,
+                 24,
+                 25,
+                 26,
+                 27,
+                 28,
+                 29,
+                 30,
+                 31,
+                 32,
+                 33,
+                 34
+               ]
 
       # Only *.up.sql files are returned — *.down.sql are excluded.
       assert Enum.all?(result, fn {_v, path} -> String.ends_with?(path, ".up.sql") end)

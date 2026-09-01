@@ -90,6 +90,7 @@ defmodule Nebu.Admin.LogsLive.WarRoom do
 
   alias Nebu.Admin.LogsLive.TraceMap
   alias Nebu.Admin.LogsLive.TraceMapBubble
+  alias Nebu.Admin.MediaAttentionBadge
   alias Nebu.Admin.WarRoomIndicator
   alias Nebu.Admin.WarRoomManager
   alias Phoenix.LiveView.JS
@@ -106,12 +107,15 @@ defmodule Nebu.Admin.LogsLive.WarRoom do
   @impl Phoenix.LiveView
   def mount(params, session, socket) do
     Phoenix.PubSub.subscribe(Nebu.PubSub, @topic)
+    MediaAttentionBadge.subscribe()
 
     socket =
       socket
       |> assign(:active_nav, "logs-war-room")
       |> assign(:page_title, "War Room")
       |> assign(:current_admin_id, admin_id_from_session(session))
+      # media-security-admin-control/5b-live-updates-nav-badges.
+      |> assign(:media_attention_count, MediaAttentionBadge.initial_count())
       |> WarRoomIndicator.assign_status(WarRoomIndicator.status())
 
     socket =
@@ -192,6 +196,11 @@ defmodule Nebu.Admin.LogsLive.WarRoom do
 
     {:noreply,
      WarRoomIndicator.assign_status(socket, WarRoomIndicator.status())}
+  end
+
+  # media-security-admin-control/5b-live-updates-nav-badges.
+  def handle_info({:media_state_transition, _media_id, old_state, new_state}, socket) do
+    {:noreply, MediaAttentionBadge.apply_transition(socket, old_state, new_state)}
   end
 
   def handle_info(_other, socket), do: {:noreply, socket}
@@ -459,6 +468,17 @@ defmodule Nebu.Admin.LogsLive.WarRoom do
       # `Nebu.Web.LogStore.get_logs/1`'s own moduledoc comment on this exact
       # Postgrex behavior) — converted here since `id` is rendered directly
       # into `data-room-id`/`href`/markdown text throughout this module.
+      #
+      # code-review cycle 2 (media-security-admin-control/10e, MINOR-3): this
+      # is one of THREE independent `row_to_session/1` functions in the
+      # codebase, and they do NOT all agree on `id`'s shape — do not assume
+      # they are interchangeable. `Nebu.Admin.WarRoomManager.row_to_session/1`
+      # (enhanced-logging/war-room-mode + 10e) also converts to this same
+      # canonical STRING form (for the identical "rendered into a URL"
+      # reason). `Nebu.Web.LogStore.WarRoom.row_to_session/1` deliberately
+      # stays BINARY — that copy feeds only the hot-path in-memory match
+      # cache, is never rendered into a URL/markup, and converting it would
+      # cost every `check/1` call something for no benefit.
       id: Ecto.UUID.load!(id),
       started_by: started_by,
       reason: reason,

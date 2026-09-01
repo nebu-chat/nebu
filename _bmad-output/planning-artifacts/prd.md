@@ -602,6 +602,28 @@ MVP gilt als abgeschlossen wenn:
 - FR51: Developer/Operator kann alle Admin-Funktionen programmatisch über eine REST-API nutzen
 - FR52: System stellt OpenAPI-Spezifikation der Admin API bereit
 
+### Media Security & Scanning
+
+> Ergänzt 2026-07-02 (Epic *Media Security & Admin Control*). Der ursprüngliche
+> PRD führte „Media Server (S3-kompatibel)" nur als Growth-Zeile; die folgenden
+> FRs machen den Medien-Sicherheits-Scope explizit. UX-Contract:
+> `_bmad-output/planning-artifacts/ux-designs/ux-media-security-admin-control-2026-07-02/`.
+
+- FR53: System nimmt Media-Uploads über den asynchronen Matrix-Flow entgegen (`POST /_matrix/media/v1/create` + `PUT /_matrix/media/v3/upload/…`); Expiry und Pending-Upload-Limits sind reine Server-Policy.
+- FR54: Jede hochgeladene Datei durchläuft eine State Machine (`reserved → quarantined → scanning → {released | infected | scan_failed}`); Media gilt bis zum sauberen Scan als quarantäniert und wird nicht ausgeliefert.
+- FR55: System scannt hochgeladene Bytes auf Malware (ClamAV) vor der Freigabe; oberhalb einer konfigurierbaren Maximalgröße wird ungescannt freigegeben (dokumentiert im `scan_metadata`).
+- FR56: Download-Handler liefert Bytes ausschließlich im State `released` (200); alle anderen States fallen in die jeweilige Deny-Antwort (451 bzw. 404), wobei `admin_blocked` bewusst als 404 erscheint (Anonymität der Blockierung).
+- FR57: Instance Admin kann alle Medien einer Instanz in einer Übersicht auflisten, filtern (State, MIME-Prefix, Uploader, Zeitraum) und paginieren; State-Änderungen aktualisieren die Ansicht in Echtzeit.
+- FR58: Instance Admin kann pro Datei State-Aktionen ausführen — Block/Unblock (idempotent), Löschen (Soft-Delete, bestätigungspflichtig), manuelles Rescan; alle Aktionen werden auditiert.
+- FR59: System weist eine separate Rolle `media_admin_override` zu; nur diese darf als Malware erkannte Dateien (`infected → released`) mit zwingender, auditierter Begründung freigeben.
+- FR60: System benachrichtigt Admins über kritische Medien-Ereignisse (`infected`, `scan_failed`) in der Admin-UI (Attention-Badges) und optional per Webhook.
+- FR61: Instance Admin kann Medien-Policy-Werte (Upload-/Scan-Größenlimits, Pending-Limits, Retention-Fristen, Webhook-URL, MIME-Denylist) zur Laufzeit über `/admin/media/settings` ändern — ohne Redeploy, jede Änderung auditiert. Muster wie `/admin/config` (ADR-022).
+- FR62: Instance Admin kann Scan-Gesundheit (Durchsatz, Ø-Scan-Dauer, Backlog-Tiefe, Fehlerrate, ClamAV-Status, Signaturalter) in einem eigenen Dashboard einsehen; Alerts (ClamAV-Ausfall, Backlog-/Fehlerraten-Schwellen) werden geführt und lösen sich automatisch auf.
+- FR63: Instance Admin kann einen Kill-Switch zwischen `fail_open` (Default) und `fail_closed` schalten; im `fail_closed`-Modus werden Uploads bei ClamAV-Ausfall mit 503 abgewiesen.
+- FR64: Instance Admin kann das Objektspeicher-Ziel (Endpoint, Bucket, Region, Credentials, Key-Schema, Archiv-Bucket) über die Admin-UI konfigurieren; Credentials werden feldverschlüsselt gespeichert und nie im Klartext bzw. Audit-Log ausgegeben. „Test Connection" vor dem Speichern; Warnung bei Endpoint-/Bucket-Wechsel mit bestehenden Dateien.
+- FR65: System wendet Retention an (Soft-Delete → Hard-Delete per Cron; konfigurierbare Fristen); beim Hard-Delete werden Bytes gelöscht, der `media_files`-Record bleibt (mit `file_hash` + Zeitstempeln, `storage_key`/`uploader_id` genullt) als Compliance-Nachweis.
+- FR66: Malware-Funde, Scan-Fehler und alle Admin-Medien-Aktionen (inkl. Override) werden zusätzlich in das globale, append-only Audit-Log geschrieben und sind über `AuditLogLive` auffindbar.
+
 ## Non-Functional Requirements
 
 ### Performance
@@ -643,7 +665,8 @@ MVP gilt als abgeschlossen wenn:
 
 - **NFR-C1:** Right to be Forgotten implementiert durch kryptografische Schlüssellöschung — DSGVO-konform ohne Bruch der Audit-Log-Integrität
 - **NFR-C2:** Audit-Log-Aufbewahrungsdauer konfigurierbar (Default: 7 Jahre, anpassbar an nationale Aufbewahrungsfristen)
-- **NFR-C3:** Alle Daten liegen ausschließlich in der konfigurierten PostgreSQL-Instanz — kein Cloud-Service, kein externer Dienst erforderlich (On-Premise-fähig)
+- **NFR-C3:** Alle **Laufzeitdaten** (Events, Rooms, User, Audit-Log, operative PII) liegen ausschließlich in der konfigurierten PostgreSQL-Instanz — kein Cloud-Service, kein externer Dienst erforderlich (On-Premise-fähig). **Ausgenommen sind Media-Binärdaten** (statische Dateiablage), die per Design nicht in PostgreSQL, sondern im Objektspeicher liegen (siehe NFR-C4) — dies bleibt On-Premise-fähig.
+- **NFR-C4:** Media-Binärdaten werden in einem S3-kompatiblen Objektspeicher als **statische Dateiablage** abgelegt (**Entscheidung 2026-07-02:** state of the art; via selbst-gehostetes **MinIO** ohne Cloud-Abhängigkeit realisierbar und damit On-Premise-konform). Binärdateien in PostgreSQL zu speichern ist bewusst **nicht** vorgesehen. Objektspeicher-Credentials werden feldverschlüsselt persistiert und nie im Klartext ausgegeben. Die Trennung — PostgreSQL für Laufzeitdaten, Objektspeicher für statische Files — ist die verbindliche Persistenz-Architektur; ein ADR hält sie fest.
 
 ### Matrix-Protokoll-Konformität
 

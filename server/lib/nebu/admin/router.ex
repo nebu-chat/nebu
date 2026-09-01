@@ -194,6 +194,15 @@ defmodule Nebu.Admin.Router do
     get "/logs/config", LogsController, :index
     post "/logs/config/retention", LogsController, :save_retention
 
+    # Media policy settings (media-security-admin-control/9b-media-settings-ui)
+    get "/media/settings", MediaSettingsController, :index
+    post "/media/settings", MediaSettingsController, :save
+    # Storage-target config + Test Connection (media-security-admin-control/
+    # 11b-storage-ui-test-connection) — extends the SAME page/controller
+    # above with a second, independent form section; no new route/nav item.
+    post "/media/settings/storage", MediaSettingsController, :save_storage
+    post "/media/settings/storage/test-connection", MediaSettingsController, :test_connection
+
     # Claim mapping
     get "/config/claim-mapping", ClaimMappingController, :index
     post "/config/claim-mapping", ClaimMappingController, :update
@@ -235,6 +244,22 @@ defmodule Nebu.Admin.Router do
       # handle_params/3 needed — see that module's moduledoc).
       live "/logs/war-room", LogsLive.WarRoom, :index
       live "/logs/war-room/:room_id", LogsLive.WarRoom, :show
+      # media-security-admin-control/5a-admin-media-table: read-only, filterable,
+      # keyset-paginated media_files overview. URL-driven filter/pagination state
+      # (handle_params/3 + push_patch/2), same contract as LogsLive.TraceMap.
+      live "/media", MediaLive, :index
+      # media-security-admin-control/10a-scan-stats-rollup: Scan Health & Alerts
+      # Dashboard — reads only the media_scan_stats rollup table, never a live
+      # query over media_state_transitions' full history. MUST be declared
+      # BEFORE "/media/:media_id" below (Phoenix routes match top-down; a
+      # "health" segment would otherwise be dispatched as :media_id), same
+      # NOTE as the "/rooms/new" vs "/rooms/:room_id" ordering above.
+      live "/media/health", MediaHealthLive, :index
+      # media-security-admin-control/6b-file-detail-storage-summary: read-only
+      # per-file detail view reached from a row in the table above. `media_id`
+      # is a static path segment (no handle_params/3 needed), same contract as
+      # LogsLive.WarRoom's :show action.
+      live "/media/:media_id", MediaLive.Detail, :show
     end
   end
 end

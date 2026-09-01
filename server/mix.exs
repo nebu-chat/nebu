@@ -16,7 +16,9 @@ defmodule Nebu.MixProject do
         &String.ends_with?(&1, "media_test_support.exs"),
         &String.ends_with?(&1, "media_fakes.exs"),
         &String.ends_with?(&1, "create_room_test_support.exs"),
-        &String.ends_with?(&1, "oidc_test_support.exs")
+        &String.ends_with?(&1, "oidc_test_support.exs"),
+        &String.ends_with?(&1, "media_mutation_invariant_support.exs"),
+        &String.ends_with?(&1, "clamav_fake_server.exs")
       ],
       deps: deps(),
       releases: [
@@ -42,6 +44,12 @@ defmodule Nebu.MixProject do
       # ── Database (nebu_db) ──
       {:ecto_sql, "~> 3.12"},
       {:postgrex, "~> 0.19"},
+      # ── Background jobs (ADR-025) ──
+      # media-security-admin-control/2e-reserved-upload-cleanup-cron bootstraps Oban
+      # first (build-order swap ahead of 4b, which originally specified this). Raw-SQL
+      # migration 000026_oban_jobs adds the schema (Nebu.Release is not Ecto-Migration-
+      # based — see its moduledoc — so Oban.Migration.up/1 is NOT used).
+      {:oban, "~> 2.18"},
       # ── Clustering (room_manager / event_dispatcher) ──
       {:horde, "~> 0.9"},
       {:libcluster, "~> 3.3"},

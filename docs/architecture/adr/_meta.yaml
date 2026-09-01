@@ -42,3 +42,5 @@ ADR-021-elixir-consolidation-go-removal:
   title: "ADR-021 - Elixir Consolidation / Go Removal"
 ADR-023-deployment-postures-compliance-vs-normal:
   title: "ADR-023 - Deployment Postures: Compliance vs. Normal (DRAFT)"
+ADR-031-media-state-transitions-db-immutability:
+  title: "ADR-031 - Media State Transitions DB Immutability"

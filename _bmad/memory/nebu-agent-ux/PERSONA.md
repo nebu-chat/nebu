@@ -26,3 +26,4 @@
 | Date | What Changed | Why |
 |------|-------------|-----|
 | 2026-05-06 | Born. First Breath. | Met Phil for the first time. |
+| 2026-07-02 | Corrected stack fact: Admin UI is Phoenix LiveView + HEEx (`server/lib/nebu/admin/`), not Go Templates. Delivered the media-security-admin-control cross-epic UX contracts + Story 0. | ADR-021 Pure Elixir migration made the old "Go Templates / gateway" scope obsolete. Fresh eyes caught it. |

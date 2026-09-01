@@ -62,6 +62,16 @@ resource "upcloud_loadbalancer_backend" "nebu" {
     health_check_interval        = 10
     health_check_fall            = 3
     health_check_rise            = 3
+    # Matrix /sync is a long-poll capped by the app at 25s (see parse_timeout/1
+    # in server/lib/nebu/web/router/protected.ex) specifically to leave headroom
+    # against upstream proxy timeouts. UpCloud's LB default backend timeouts are
+    # shorter than that, so without this override the LB cuts the connection and
+    # returns a proxy-level 504 (no CORS headers) before Nebu's response lands —
+    # browsers then misreport it as a CORS failure instead of a gateway timeout.
+    # (The matching client-side timeout lives on the frontend below —
+    # timeout_client is not a valid upcloud_loadbalancer_backend attribute.)
+    timeout_server = 40
+    timeout_tunnel = 40
   }
 }
 
@@ -92,6 +102,13 @@ resource "upcloud_loadbalancer_frontend" "https" {
 
   networks {
     name = "public"
+  }
+
+  # Matches the backend's timeout_server/timeout_tunnel override above — the
+  # client-facing leg of the same long-poll /sync connection needs the same
+  # headroom, and timeout_client only exists on the frontend resource.
+  properties {
+    timeout_client = 40
   }
 }
 

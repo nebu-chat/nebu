@@ -1,0 +1,41 @@
+-- media-security-admin-control/8b-orphan-detection-gdpr (AC6 / "Offene
+-- Entscheidung #3"): empirically verified via EXPLAIN ANALYZE against a
+-- representative events table (20,000 seeded rows) that
+-- Nebu.Workers.MediaOrphanDetectionWorker's anti-join query performs a full
+-- Seq Scan of `events` per orphan-candidate `media_files` row without this
+-- index (Execution Time ~1000ms even at this modest scale, confirmed
+-- unchanged even with `enable_seqscan = off` forced -- proving no usable
+-- index plan exists at all without this migration). See this story's Dev
+-- Agent Record for the full before/after EXPLAIN ANALYZE output.
+--
+-- A `jsonb_path_ops` GIN index on the whole `content` column accelerates
+-- jsonb containment (`@>`) lookups, INCLUDING nested containment
+-- (`content @> '{"info": {"thumbnail_url": "..."}}'`). This is why the
+-- worker's query checks the `content.info.thumbnail_url` case via nested
+-- containment against `content` directly, rather than
+-- `content -> 'info' @> jsonb_build_object('thumbnail_url', ...)` --
+-- empirically verified that the `->` extraction form defeats this index
+-- (Postgres cannot push a GIN index lookup through an extraction operator on
+-- the indexed column), while the nested-containment form uses a
+-- `Bitmap Index Scan` against this exact index.
+--
+-- Deliberately NOT `CREATE INDEX CONCURRENTLY`, despite this story's
+-- Technical Requirements originally suggesting it: `Nebu.Release.migrate/0`
+-- (`server/lib/nebu/release.ex`, `apply_migration/3`) wraps EVERY migration
+-- file's SQL in a single `Postgrex.transaction/2` unconditionally, and
+-- PostgreSQL forbids `CREATE INDEX CONCURRENTLY` inside a transaction block
+-- ("cannot run inside a transaction block") -- giving it its own file (as
+-- originally suggested) does not avoid this, since the transaction wrapping
+-- happens at the release-runner level, not per-file, and there is no
+-- per-migration opt-out. A plain (transactional, briefly locking) CREATE
+-- INDEX is therefore the only mechanism this project's migration runner
+-- supports today; every other migration in this codebase already accepts
+-- the same transactional-DDL lock characteristics, so this is consistent
+-- with existing practice, not a new risk class.
+--
+-- No new table is created here, so no new GRANT is needed (`events` already
+-- has its DML grant to nebu_app from migration 000001's blanket
+-- `GRANT ... ON ALL TABLES`) -- MigrationsGrantTest's AC1 table-creation
+-- scope does not apply; its AC4 down-migration list is still extended for
+-- this migration number for consistency with the established convention.
+CREATE INDEX events_content_gin_idx ON events USING GIN (content jsonb_path_ops);

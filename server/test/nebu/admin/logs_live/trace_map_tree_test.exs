@@ -622,6 +622,43 @@ defmodule Nebu.Admin.LogsLive.TraceMapTreeTest do
     end
   end
 
+  # ══════════════════════════════════════════════════════════════════════════
+  # media-security-admin-control/10e-trace-map-war-room-integration (AC4):
+  # pure-function regression pinning that "/media/clamav" and
+  # "/media/scan_worker" group under a NEW "/media" domain via the EXISTING,
+  # UNMODIFIED domain_for_endpoint/1 heuristic — no TraceMapTree code change
+  # is needed OR permitted for this story (Dev Agent Guardrails: "Do not
+  # modify Nebu.Admin.LogsLive.TraceMapTree.domain_for_endpoint/1 or
+  # group_endpoints_by_domain/1").
+  #
+  # Unlike every other 10e test added across this epic slice, this one is
+  # expected to PASS already, today, unmodified — it exists to PIN that fact
+  # down as a regression guard (proving the choice of slash-separated route
+  # names in Story 10e's AC1-AC3 groups "for free"), not to drive new
+  # implementation work.
+  # ══════════════════════════════════════════════════════════════════════════
+
+  describe "10e AC4: /media/clamav and /media/scan_worker group under a new \"/media\" domain, unmodified heuristic" do
+    test "domain_for_endpoint/1 groups both media routes under \"/media\"" do
+      assert TraceMapTree.domain_for_endpoint("/media/clamav") == "/media"
+      assert TraceMapTree.domain_for_endpoint("/media/scan_worker") == "/media"
+    end
+
+    test "group_endpoints_by_domain/1 produces two groups: \"/media\" (2 leaves) and \"/admin\" (1 leaf)" do
+      groups =
+        TraceMapTree.group_endpoints_by_domain([
+          "/media/clamav",
+          "/media/scan_worker",
+          "/admin/users"
+        ])
+
+      assert groups == [
+               {"/media", ["/media/clamav", "/media/scan_worker"]},
+               {"/admin", ["/admin/users"]}
+             ]
+    end
+  end
+
   # ── shared depth-first-order helper ─────────────────────────────────────────
 
   defp collect_buttons_in_order(nodes) when is_list(nodes) do
