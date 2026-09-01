@@ -73,6 +73,20 @@ defmodule Nebu.Admin.Layouts do
     %{navigate: "/admin/config", key: "config-general", label: "General"}
   ]
 
+  # bugfix/admin-media-nav-grouping: the three media admin pages (table,
+  # settings, health), previously three flat top-level `<.nav_item>` leaves,
+  # now nest under one "Media" parent — mirroring `@logs_nav_children`/
+  # `@config_nav_children` exactly. The "Media Explorer" child keeps the full
+  # "Media" prefix (product direction: "Explorer" alone doesn't read as
+  # media-related once nested); the other two drop it, same as
+  # `logs_nav_children`'s/`config_nav_children`'s entries not repeating their
+  # own parent's name.
+  @media_nav_children [
+    %{navigate: "/admin/media", key: "media-explorer", label: "Media Explorer"},
+    %{navigate: "/admin/media/settings", key: "media-settings", label: "Settings"},
+    %{navigate: "/admin/media/health", key: "media-health", label: "Health"}
+  ]
+
   # The shared admin shell: topbar + sidebar + content. Nav items mirror the Go admin.
   # Works for both LiveView sockets (assign_new/3 with change tracking) and dead
   # controller renders (plain map — use Map.put_new/3 for compatibility).
@@ -94,6 +108,11 @@ defmodule Nebu.Admin.Layouts do
         |> assign_new(:war_room_active, fn -> false end)
         |> assign_new(:war_room_started_at, fn -> nil end)
         |> assign_new(:war_room_started_by, fn -> nil end)
+        # media-security-admin-control/5b-live-updates-nav-badges: `nil`
+        # default mirrors `war_room_active`'s own precedent exactly — any
+        # OTHER LiveView call site that does not set this (and every
+        # controller-rendered dead page) gets `nil`, i.e. no badge at all.
+        |> assign_new(:media_attention_count, fn -> nil end)
       else
         assigns
         |> Map.put_new(:active_nav, nil)
@@ -101,15 +120,21 @@ defmodule Nebu.Admin.Layouts do
         |> Map.put_new(:war_room_active, false)
         |> Map.put_new(:war_room_started_at, nil)
         |> Map.put_new(:war_room_started_by, nil)
+        |> Map.put_new(:media_attention_count, nil)
       end
 
     logs_children = war_room_dot_children(logs_nav_children(), assigns.war_room_active)
+    media_children = media_badge_children(media_nav_children(), assigns.media_attention_count)
 
     assigns =
       if is_map_key(assigns, :__changed__) do
-        assign(assigns, :logs_children, logs_children)
+        assigns
+        |> assign(:logs_children, logs_children)
+        |> assign(:media_children, media_children)
       else
-        Map.put(assigns, :logs_children, logs_children)
+        assigns
+        |> Map.put(:logs_children, logs_children)
+        |> Map.put(:media_children, media_children)
       end
 
     ~H"""
@@ -169,6 +194,16 @@ defmodule Nebu.Admin.Layouts do
             <.nav_item :if={@bootstrap_completed} navigate="/admin/users" key="users" active={@active_nav}>Users</.nav_item>
             <.nav_item :if={@bootstrap_completed} navigate="/admin/rooms" key="rooms" active={@active_nav}>Rooms</.nav_item>
             <.nav_item :if={@bootstrap_completed} navigate="/admin/spaces" key="spaces" active={@active_nav}>Spaces</.nav_item>
+            <%!-- bugfix/admin-media-nav-grouping: the media table, settings, and
+                  health pages nest under this single "Media" parent (mirrors the
+                  Logs/Configuration parents above) instead of three flat top-level
+                  leaves. The `nav-media-attention-badge` span (role="status",
+                  aria-hidden count + sr-only sentence — media-security-admin-control/
+                  5b-live-updates-nav-badges, UX gate 2026-07-18) now attaches to the
+                  "Media Explorer" child specifically via `media_badge_children/2`,
+                  not to this parent label — see that function and `nav_item/1`'s
+                  children-rendering clause below. --%>
+            <.nav_item :if={@bootstrap_completed} key="media" active={@active_nav} children={@media_children}>Media</.nav_item>
             <.nav_item :if={@bootstrap_completed} key="config" active={@active_nav} children={config_nav_children()}>Configuration</.nav_item>
           </ul>
           <div :if={@bootstrap_completed} class="p-2 border-t border-base-300">
@@ -192,6 +227,27 @@ defmodule Nebu.Admin.Layouts do
 
   defp logs_nav_children, do: @logs_nav_children
   defp config_nav_children, do: @config_nav_children
+  defp media_nav_children, do: @media_nav_children
+
+  # bugfix/admin-media-nav-grouping (AC3): additively marks the "media-explorer"
+  # child with the badge fields `nav_item/1`'s children-rendering clause reads —
+  # every OTHER child (Settings, Health, and every Logs/Configuration child)
+  # renders unaffected, mirroring `war_room_dot_children/2`'s own precedent of
+  # attaching an optional per-child extra via `Map.put/3` rather than changing
+  # the children-rendering clause's default behavior.
+  defp media_badge_children(children, media_attention_count) do
+    Enum.map(children, fn child ->
+      if child.key == "media-explorer" do
+        Map.merge(child, %{
+          badge_testid: "nav-media-attention-badge",
+          badge_count: media_attention_count,
+          badge_sr_suffix: " Datei(en) benötigen Aufmerksamkeit"
+        })
+      else
+        child
+      end
+    end)
+  end
 
   # enhanced-logging/war-room-dedicated-page (amendment 4): additively marks
   # the "logs-war-room" child with `:dot` when a session is active — every
@@ -356,6 +412,26 @@ defmodule Nebu.Admin.Layouts do
                   equivalent. --%>
             <span :if={Map.get(child, :dot, false)} data-testid="nav-war-room-dot-label" class="sr-only">
               (recording)
+            </span>
+            <%!-- bugfix/admin-media-nav-grouping (AC3): generic per-child badge
+                  slot — only renders when a child carries a positive-integer
+                  `:badge_count` (today, only the "media-explorer" child, via
+                  `media_badge_children/2`); every other child's `Map.get/2`
+                  calls return `nil`, so this is a no-op for Logs/Configuration's
+                  existing (badge-less) children. Content/attributes preserved
+                  EXACTLY from the former flat "Medien" leaf's badge span
+                  (media-security-admin-control/5b-live-updates-nav-badges, UX
+                  gate 2026-07-18): `role="status"` for the live-updating count,
+                  an aria-hidden visible number, and an sr-only sentence so the
+                  accessible name is a full sentence, not a bare number. --%>
+            <span
+              :if={is_integer(Map.get(child, :badge_count)) and Map.get(child, :badge_count) > 0}
+              data-testid={Map.get(child, :badge_testid)}
+              role="status"
+              class="badge badge-sm badge-error ml-1"
+            >
+              <span aria-hidden="true">{child.badge_count}</span>
+              <span class="sr-only">{child.badge_count}{Map.get(child, :badge_sr_suffix)}</span>
             </span>
           </.link>
         </li>

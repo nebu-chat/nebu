@@ -22,6 +22,13 @@ config :nebu_http, start_jwks_cache: false
 # would add an unused supervised process to the children-count assertions).
 config :nebu_http, start_finch: false
 
+# media-security-admin-control/3-clamav-genserver: the real Nebu.Media.ClamAV
+# GenServer is NOT started from the Application in test — clamav_test.exs
+# starts its own start_supervised!/1 instance per test against a real fake
+# clamd (:gen_tcp.listen/2 fake server), and a pure-unit run has no real clamd
+# container to connect to. Prod/dev start it (default true).
+config :nebu_http, start_clamav_client: false
+
 # enhanced-logging/operational-log-store: the central :logger handler is NOT
 # attached automatically at boot in :test — every test that needs it
 # attached calls Nebu.Web.LogStore.attach_handler/0 itself (idempotent). This

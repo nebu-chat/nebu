@@ -76,6 +76,7 @@ defmodule Nebu.Admin.LogsLive.TraceMap do
 
   alias Nebu.Admin.LogsLive.TraceMapStatus
   alias Nebu.Admin.LogsLive.TraceMapTree
+  alias Nebu.Admin.MediaAttentionBadge
   alias Nebu.Admin.TemporaryCaptureManager
   alias Nebu.Admin.TraceMapGeometry
   alias Nebu.Admin.WarRoomIndicator
@@ -170,6 +171,7 @@ defmodule Nebu.Admin.LogsLive.TraceMap do
   @impl Phoenix.LiveView
   def mount(_params, session, socket) do
     Phoenix.PubSub.subscribe(Nebu.PubSub, @topic)
+    MediaAttentionBadge.subscribe()
     war_room_status = initial_war_room_status()
 
     socket =
@@ -202,6 +204,8 @@ defmodule Nebu.Admin.LogsLive.TraceMap do
       |> assign(:captures, load_active_captures())
       |> assign(:current_admin_id, admin_id_from_session(session))
       |> assign(:cascade_flash, "")
+      # media-security-admin-control/5b-live-updates-nav-badges.
+      |> assign(:media_attention_count, MediaAttentionBadge.initial_count())
 
     socket =
       Enum.reduce(initial_entries(), socket, fn entry, acc ->
@@ -622,6 +626,11 @@ defmodule Nebu.Admin.LogsLive.TraceMap do
   # tagged tuple) — same match as `Nebu.Admin.LogsLive.handle_info/2`.
   def handle_info(%{level: _, source: _, request_id: _} = entry, socket) do
     {:noreply, ingest_entry(socket, entry, announce: true)}
+  end
+
+  # media-security-admin-control/5b-live-updates-nav-badges.
+  def handle_info({:media_state_transition, _media_id, old_state, new_state}, socket) do
+    {:noreply, MediaAttentionBadge.apply_transition(socket, old_state, new_state)}
   end
 
   def handle_info(_other, socket), do: {:noreply, socket}

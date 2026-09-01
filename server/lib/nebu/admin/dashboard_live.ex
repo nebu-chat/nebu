@@ -15,14 +15,24 @@ defmodule Nebu.Admin.DashboardLive do
   "visible from anywhere in the admin UI" only requires this same wiring on
   `Nebu.Admin.AuditLogLive`/`Nebu.Admin.LogsLive`/
   `Nebu.Admin.LogsLive.TraceMap`/`Nebu.Admin.LogsLive.WarRoom` too.
+
+  ## Media attention nav badge (media-security-admin-control/5b-live-updates-nav-badges)
+
+  Same shared-helper shape as the War Room indicator above, via
+  `Nebu.Admin.MediaAttentionBadge` — this module is one of the "small, fully-enumerable set
+  of remaining admin LiveViews" 5b's own story text names as needing the identical wiring
+  (that story's original draft undercounted this set at 3; corrected to the actual 5
+  pre-existing LiveViews plus 5a's new `MediaLive` = 6, see that story's Summary correction).
   """
   use Phoenix.LiveView, layout: {Nebu.Admin.Layouts, :live}
 
+  alias Nebu.Admin.MediaAttentionBadge
   alias Nebu.Admin.WarRoomIndicator
 
   @impl Phoenix.LiveView
   def mount(_params, _session, socket) do
     if connected?(socket) and Process.whereis(Nebu.Repo), do: WarRoomIndicator.schedule()
+    MediaAttentionBadge.subscribe()
 
     {:ok,
      socket
@@ -32,6 +42,7 @@ defmodule Nebu.Admin.DashboardLive do
      |> assign(:user_count, count("SELECT count(*) FROM users"))
      |> assign(:room_count, count("SELECT count(*) FROM rooms"))
      |> assign(:server_config, server_config())
+     |> assign(:media_attention_count, MediaAttentionBadge.initial_count())
      |> WarRoomIndicator.assign_status(WarRoomIndicator.status())}
   end
 
@@ -39,6 +50,10 @@ defmodule Nebu.Admin.DashboardLive do
   def handle_info(:refresh_war_room_status, socket) do
     if Process.whereis(Nebu.Repo), do: WarRoomIndicator.schedule()
     {:noreply, WarRoomIndicator.assign_status(socket, WarRoomIndicator.status())}
+  end
+
+  def handle_info({:media_state_transition, _media_id, old_state, new_state}, socket) do
+    {:noreply, MediaAttentionBadge.apply_transition(socket, old_state, new_state)}
   end
 
   def handle_info(_other, socket), do: {:noreply, socket}

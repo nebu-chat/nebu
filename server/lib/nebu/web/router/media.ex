@@ -3,6 +3,15 @@ defmodule Nebu.Web.Router.Media do
   Matrix content-repository routes (deprecated `/_matrix/media/v3/*`),
   forwarded here from `Nebu.Web.Router` under the `/_matrix/media` prefix.
 
+  The authenticated Matrix Client-Server `v1` media endpoints
+  (`/_matrix/client/v1/media/download`, `/_matrix/client/v1/media/thumbnail`)
+  are served by the SEPARATE `Nebu.Web.Router.ClientV1Media` router, not this
+  one (bugfix-fix-matrix-client-v1-media-routes, code-review cycle 1: sharing
+  this router made `/v3/upload`, `/v3/preview_url`, etc. cross-reachable via
+  the `v1` prefix, and made un-versioned `/download`/`/thumbnail` aliases
+  reachable via THIS router's `/_matrix/media` prefix — both unintended). See
+  `Nebu.Web.Router.ClientV1Media`'s moduledoc for the full rationale.
+
   `Nebu.Web.Plugs.OidcPlug` runs in this router's pipeline, so EVERY media route
   is authenticated (test-review MIN-2: media routes MUST sit behind OidcPlug;
   upload requires auth per AC1, download/thumbnail/preview_url all assert the
@@ -52,9 +61,26 @@ defmodule Nebu.Web.Router.Media do
   plug :match
   plug :dispatch
 
-  put "/v3/upload" do
+  post "/v3/upload" do
     conn = Nebu.Web.Plugs.RateLimit.call(conn, @upload_rate_limit)
     if conn.halted, do: conn, else: Media.upload(conn)
+  end
+
+  # media-security-admin-control/2b-put-media-upload: async-upload companion
+  # (Matrix v1.7+, core-stable). Reuses the same @upload_rate_limit tier as
+  # the synchronous route above — exactly as expensive per request.
+  put "/v3/upload/:server_name/:media_id" do
+    conn = Nebu.Web.Plugs.RateLimit.call(conn, @upload_rate_limit)
+    if conn.halted, do: conn, else: Media.upload_async(conn, server_name, media_id)
+  end
+
+  # media-security-admin-control/2a-post-media-create: reservation half of
+  # Matrix's async upload flow (core-stable since v1.7, no MSC/unstable-
+  # capability gate). No new rate-limit tier here — AC3's 429 is a per-user
+  # pending-reservation-count business check inside Media.create/1, not the
+  # per-IP token bucket used by upload/preview_url above.
+  post "/v1/create" do
+    Media.create(conn)
   end
 
   get "/v3/download/:server_name/:media_id/:file_name" do

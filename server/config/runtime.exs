@@ -105,6 +105,16 @@ if config_env() in [:prod, :dev] do
 
   config :nebu_http, media_bucket: System.get_env("NEBU_MINIO_BUCKET", "nebu-media")
 
+  # media-security-admin-control/8c-media-archive-worker (AC1, Dependencies —
+  # Story 11b): the archive-bucket name Nebu.Media.Storage.archive_bucket/0
+  # reads. Story 11b (Object Storage Target Config) has not landed a
+  # DB-backed source for this on this branch yet — same MinIO/S3 connection
+  # (host/scheme/port/keys/region below) as the primary bucket, just a
+  # different bucket name, per this story's own guardrails (a placeholder
+  # until 11b lands a genuinely separate, admin-configurable target).
+  config :nebu_http,
+    media_archive_bucket: System.get_env("NEBU_MINIO_ARCHIVE_BUCKET", "nebu-media-archive")
+
   config :ex_aws,
     access_key_id: minio_access_key,
     secret_access_key: minio_secret_key,
@@ -116,6 +126,23 @@ if config_env() in [:prod, :dev] do
     port: port,
     # MinIO requires path-style addressing (bucket in the path, not the host).
     region: System.get_env("NEBU_S3_REGION", "us-east-1")
+end
+
+# ─── media-security-admin-control/3-clamav-genserver: ClamAV scanner client ──
+# Nebu.Media.ClamAV connects to a clamd daemon over TCP (INSTREAM protocol).
+# NEBU_CLAMAV_HOST/NEBU_CLAMAV_PORT let operators point at a real clamd;
+# defaults match the dev-stack's Docker Compose service name ("clamav" on the
+# default network, port 3310) — the same "env var defaults to the compose
+# service name" pattern used for NEBU_MINIO_ENDPOINT above. Only wired in
+# prod/dev — unit tests configure Nebu.Media.ClamAV directly (per-test, via
+# Application.put_env) against a fake clamd and never touch this block
+# (config/test.exs also disables the Application-supervised instance,
+# start_clamav_client: false).
+if config_env() in [:prod, :dev] do
+  clamav_host = System.get_env("NEBU_CLAMAV_HOST", "clamav")
+  clamav_port = String.to_integer(System.get_env("NEBU_CLAMAV_PORT", "3310"))
+
+  config :nebu, Nebu.Media.ClamAV, address: {:tcp, clamav_host, clamav_port}
 end
 
 # Placeholder — NEBU_* env vars added as each story requires them

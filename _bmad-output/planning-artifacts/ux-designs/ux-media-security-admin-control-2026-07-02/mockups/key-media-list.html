@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>Nebu Admin — Medien (Key Screen Mock)</title>
+<style>
+/*
+  Governs: DESIGN.md → Colors, Typography, Layout & Spacing, Components
+           (media-state-badge, media-table, nav-attention-badge)
+  EXPERIENCE.md → Information Architecture (/admin/media hub),
+           Component Patterns (media-table, row actions, media-state-badge),
+           State Patterns B (Empty/Loading/Live/Permission),
+           Accessibility Floor + Post-review hardening (H1-H3, C1-C2),
+           Key Flow 1 (Kai triages an infected upload) — steps 1-2 shown at rest.
+  This is a 1:1 visual reference, offline, inline CSS, no JS, no network.
+  Icons are hand-drawn inline SVG (never emoji — D7/M1 colorblind rule).
+*/
+:root{
+  --primary:#f97316; --primary-hover:#ea580c; --primary-content:#1c1917; --primary-subtle:#431407;
+  --base-100:#111827; --base-200:#1f2937; --base-300:#374151; --base-content:#f9fafb;
+  --text-secondary:#9ca3af; --success:#22c55e; --warning:#f59e0b; --status-warn-bg:#451a03;
+  --error:#ef4444; --neutral:#6b7280;
+  --media-processing:#f59e0b; --media-released:#14b8a6; --media-infected:#ef4444;
+  --media-blocked:#fb7185; --media-terminal:#6b7280; --badge-dark-text:#1c1917;
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{background:var(--base-100); color:var(--base-content); font-family:Inter,"Segoe UI",system-ui,-apple-system,sans-serif; font-size:15px; line-height:1.5;}
+.mono,code,.hash,.mxid{font-family:"JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+.sr-only{position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap;}
+
+.topbar{position:fixed; top:0; left:0; right:0; height:48px; background:var(--base-300); display:flex; align-items:center; padding:0 16px; gap:12px; z-index:10;}
+.topbar .brand{font-weight:700; letter-spacing:.02em;}
+.topbar .spacer{flex:1;}
+.topbar .user{display:flex; align-items:center; gap:8px; font-size:.85rem; color:var(--text-secondary);}
+.avatar{width:28px; height:28px; border-radius:50%; background:var(--primary-subtle); color:var(--primary); display:flex; align-items:center; justify-content:center; font-size:.75rem; font-weight:700;}
+
+.sidebar{width:240px; background:var(--base-200); position:fixed; top:48px; bottom:0; left:0; padding:20px 0; overflow-y:auto;}
+.sidebar .group-label{font-size:11px; letter-spacing:.06em; color:var(--text-secondary); text-transform:uppercase; padding:0 20px; margin:20px 0 8px;}
+.sidebar .group-label:first-child{margin-top:0;}
+.sidebar a.navitem{display:flex; align-items:center; gap:10px; padding:8px 20px; color:var(--base-content); text-decoration:none; font-size:14px; position:relative;}
+.sidebar a.navitem.active{background:var(--base-300); font-weight:600;}
+.sidebar a.navitem.active::before{content:""; position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--primary);}
+/* Nested nav parent/child (feature/enhanced-logging → admin-sidebar-nesting,
+   merged into main). Real markup: Nebu.Admin.Layouts.nav_item/1 with
+   :children — a <button aria-expanded aria-controls> disclosure toggle +
+   chevron, followed by an indented <ul> of child <.link>s. Real toggle
+   behavior is wired CSP-safely by wireNavSectionToggles() in app.js; this
+   static mock always renders expanded (the real default). */
+.navitem-parent{display:flex; align-items:center; gap:8px; width:100%; padding:8px 20px; background:none; border:none; color:var(--base-content); font:inherit; font-size:14px; text-align:left; cursor:pointer; position:relative;}
+.navitem-parent:focus-visible{outline:2px solid var(--primary); outline-offset:-2px;}
+.navitem-parent.child-active{background:var(--base-300); font-weight:600;}
+.navitem-parent.self-active{background:var(--primary); color:var(--primary-content); font-weight:600;}
+.navitem-parent:not(.child-active):not(.self-active):hover{background:var(--base-300);}
+.nav-chevron{width:14px; height:14px; flex:none; transform:rotate(90deg); transition:transform .15s;}
+.navitem-parent .badge-count{margin-left:auto;}
+.nav-children{list-style:none; margin:2px 0 4px; padding:0; display:flex; flex-direction:column; gap:2px;}
+.nav-child-link{display:flex; align-items:center; gap:8px; padding:6px 20px 6px 46px; font-size:13px; color:var(--base-content); text-decoration:none; position:relative;}
+.nav-child-link.active{background:var(--primary); color:var(--primary-content); font-weight:600;}
+.nav-child-link:not(.active):hover{background:var(--base-300);}
+.navitem .badge-count{margin-left:auto; background:var(--media-infected); color:#fff; font-size:11px; font-weight:700; padding:1px 6px; border-radius:10px; min-width:18px; text-align:center;}
+.navitem .badge-count.warn{background:var(--warning); color:var(--badge-dark-text);}
+
+main{margin-left:240px; margin-top:48px; padding:24px; max-width:1400px;}
+h1.page-title{font-size:1.5rem; font-weight:600; margin:0 0 16px;}
+.caption{font-size:.8rem; color:var(--text-secondary);}
+
+.filterbar{display:flex; flex-wrap:wrap; gap:16px; align-items:flex-end; margin-bottom:16px; padding:16px; background:var(--base-200); border:1px solid var(--base-300); border-radius:8px;}
+.filter-group{display:flex; flex-direction:column; gap:6px;}
+.filter-group label{font-size:.75rem; font-weight:600; color:var(--text-secondary); text-transform:uppercase; letter-spacing:.03em;}
+.pillgroup{display:flex; gap:6px; flex-wrap:wrap;}
+.pill{padding:5px 12px; border-radius:10px; border:1px solid var(--base-300); background:transparent; color:var(--base-content); font-size:.8rem; cursor:pointer;}
+.pill.selected{background:var(--media-infected); border-color:var(--media-infected); color:#fff; font-weight:600;}
+.pill:focus-visible{outline:2px solid var(--primary); outline-offset:2px;}
+input[type=text],input[type=date]{background:var(--base-100); border:1px solid var(--base-300); border-radius:6px; color:var(--base-content); padding:7px 10px; font-size:.85rem;}
+input:focus-visible{outline:2px solid var(--primary); outline-offset:2px;}
+
+.result-count{margin:0 0 10px; font-size:.85rem; color:var(--text-secondary);}
+
+.table-wrap{overflow-x:auto; border:1px solid var(--base-300); border-radius:8px;}
+table{width:100%; border-collapse:collapse; font-size:.85rem;}
+table tbody tr:nth-child(even){background:rgba(255,255,255,.02);}
+th{text-align:left; padding:10px 14px; background:var(--base-300); font-weight:600; font-size:.72rem; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); white-space:nowrap;}
+td{padding:10px 14px; border-top:1px solid var(--base-300); vertical-align:middle; white-space:nowrap;}
+tr.row-highlight{background:rgba(239,68,68,.06);}
+tr.row-highlight:hover, tr:hover{background:rgba(255,255,255,.03);}
+
+.badge{display:inline-flex; align-items:center; gap:5px; padding:3px 10px; border-radius:10px; font-size:.78rem; font-weight:700; color:var(--badge-dark-text); line-height:1.4;}
+.badge svg{width:12px; height:12px; flex:none;}
+.badge--processing{background:var(--media-processing);}
+.badge--released{background:var(--media-released);}
+.badge--infected{background:#f56565;} /* base token #ef4444 fails at 4.40:1 as dark-text pill per DESIGN.md D7 measured table; lightened one step, icon still carries the semantic */
+.badge--blocked{background:var(--media-blocked);}
+.badge--terminal{background:var(--media-terminal);}
+
+.btn{display:inline-flex; align-items:center; gap:5px; padding:6px 12px; border-radius:6px; border:1px solid var(--base-300); background:var(--base-300); color:var(--base-content); font-size:.78rem; font-weight:600; cursor:pointer; text-decoration:none;}
+.btn:hover{filter:brightness(1.12);}
+.btn:focus-visible{outline:2px solid var(--primary); outline-offset:2px;}
+.btn-danger{background:transparent; border-color:var(--media-infected); color:#fca5a5;}
+.btn-danger:hover{background:rgba(239,68,68,.12);}
+.actions-cell{display:flex; gap:6px;}
+
+.loadmore-wrap{display:flex; justify-content:center; margin-top:16px;}
+.btn-loadmore{background:var(--base-200); border:1px solid var(--base-300); padding:8px 20px;}
+
+@media (max-width:768px){
+  .sidebar{display:none;}
+  main{margin-left:0;}
+  .table-wrap{border:none;}
+  table thead{display:none;}
+  table, table tbody, table tr, table td{display:block; width:100%;}
+  table tr{background:var(--base-200); border:1px solid var(--base-300); border-radius:8px; margin-bottom:10px; padding:10px 14px;}
+  table td{border-top:none; padding:4px 0; white-space:normal;}
+  table td::before{content:attr(data-label); display:block; font-size:.68rem; color:var(--text-secondary); text-transform:uppercase; letter-spacing:.03em;}
+}
+@media (prefers-reduced-motion:reduce){ *{animation:none !important; transition:none !important;} }
+</style>
+</head>
+<body>
+
+<!-- inline SVG icon defs — no icon font, no network -->
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="ic-hourglass" viewBox="0 0 16 16"><path d="M4 2h8M4 14h8M4 2c0 4 4 3.2 4 6s-4 2-4 6M12 2c0 4-4 3.2-4 6s4 2 4 6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></symbol>
+  <symbol id="ic-check" viewBox="0 0 16 16"><path d="M3 8.5l3.3 3.3L13 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="ic-warn" viewBox="0 0 16 16"><path d="M8 2.2L14.6 13.3H1.4L8 2.2z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><line x1="8" y1="6.4" x2="8" y2="9.8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11.4" r="0.9" fill="currentColor"/></symbol>
+  <symbol id="ic-block" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.4"/><line x1="4" y1="12" x2="12" y2="4" stroke="currentColor" stroke-width="1.4"/></symbol>
+  <symbol id="ic-trash" viewBox="0 0 16 16"><path d="M3.5 4.5h9M6 4.5V2.7h4v1.8M5.2 4.5l.7 9h4.2l.7-9" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+</svg>
+
+<header class="topbar">
+  <span class="brand">Nebu Admin</span>
+  <span class="spacer"></span>
+  <span class="user"><span class="avatar">KM</span> Kai M. · instance_admin</span>
+</header>
+
+<nav class="sidebar" aria-label="Hauptnavigation">
+  <div class="group-label">Verwaltung</div>
+  <a class="navitem" href="#">👤 <span>Benutzer</span></a>
+  <a class="navitem" href="#">💬 <span>Räume</span></a>
+  <div class="nav-parent-item">
+    <button type="button" class="navitem-parent child-active" aria-expanded="true" aria-controls="nav-media-children" data-navkey="media">
+      <svg class="nav-chevron" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z"/></svg>
+      🖼 <span>Medien</span>
+      <span class="badge-count" aria-label="1 infizierte Datei">1</span>
+    </button>
+    <ul id="nav-media-children" class="nav-children">
+      <li><a class="nav-child-link active" href="#" aria-current="page">Übersicht</a></li>
+      <li><a class="nav-child-link" href="#">Health</a></li>
+      <li><a class="nav-child-link" href="#">Settings</a></li>
+      <li><a class="nav-child-link" href="#">Approvals</a></li>
+    </ul>
+  </div>
+  <div class="group-label">Compliance</div>
+  <a class="navitem" href="#">📋 <span>Audit Log</span></a>
+</nav>
+
+<main>
+  <h1 class="page-title">Medien</h1>
+
+  <form class="filterbar" aria-label="Medien filtern">
+    <div class="filter-group">
+      <label id="lbl-state">Status</label>
+      <div class="pillgroup" role="group" aria-labelledby="lbl-state">
+        <button type="button" class="pill">Alle</button>
+        <button type="button" class="pill">Wird geprüft</button>
+        <button type="button" class="pill">Freigegeben</button>
+        <button type="button" class="pill selected" aria-pressed="true">Infiziert</button>
+        <button type="button" class="pill">Gesperrt</button>
+        <button type="button" class="pill">Gelöscht</button>
+        <button type="button" class="pill">Legal Hold</button>
+      </div>
+    </div>
+    <div class="filter-group">
+      <label for="f-mime">MIME-Typ</label>
+      <input type="text" id="f-mime" placeholder="z. B. application/pdf" value="">
+    </div>
+    <div class="filter-group">
+      <label for="f-uploader">Uploader</label>
+      <input type="text" id="f-uploader" placeholder="@nutzer:domain" value="">
+    </div>
+    <div class="filter-group">
+      <label for="f-from">Hochgeladen ab</label>
+      <input type="date" id="f-from" value="2026-06-01">
+    </div>
+  </form>
+
+  <p class="result-count" aria-live="polite">1 Medien gefunden</p>
+
+  <div class="table-wrap">
+    <table>
+      <caption class="sr-only">Medienübersicht, gefiltert nach Status: Infiziert</caption>
+      <thead>
+        <tr>
+          <th scope="col">Status</th>
+          <th scope="col">Dateiname</th>
+          <th scope="col">Uploader</th>
+          <th scope="col">MIME</th>
+          <th scope="col">Größe</th>
+          <th scope="col">Hochgeladen</th>
+          <th scope="col">Geprüft</th>
+          <th scope="col">ClamAV-Signatur</th>
+          <th scope="col">Aktionen</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="row-highlight" data-role="media-row" data-media-id="med_8f21c" data-state="infected">
+          <td data-label="Status"><span class="badge badge--infected"><svg aria-hidden="true"><use href="#ic-warn"/></svg>Infiziert</span></td>
+          <td data-label="Dateiname">Jahresbericht_Gemeinde_2026.docx</td>
+          <td data-label="Uploader" class="mxid">@intern:muni.de</td>
+          <td data-label="MIME" class="mono">application/vnd.…wordprocessingml</td>
+          <td data-label="Größe">2.4 MB</td>
+          <td data-label="Hochgeladen">09:12</td>
+          <td data-label="Geprüft">09:13</td>
+          <td data-label="ClamAV-Signatur" class="mono">Doc.Downloader.Emotet-9981</td>
+          <td data-label="Aktionen"><div class="actions-cell"><a class="btn" href="#">Ansehen</a><button class="btn btn-danger" type="button"><svg width="12" height="12" aria-hidden="true"><use href="#ic-trash"/></svg>Löschen</button></div></td>
+        </tr>
+        <tr data-role="media-row" data-media-id="med_1a70e" data-state="released">
+          <td data-label="Status"><span class="badge badge--released"><svg aria-hidden="true"><use href="#ic-check"/></svg>Freigegeben</span></td>
+          <td data-label="Dateiname">Ratsprotokoll_2026-06.pdf</td>
+          <td data-label="Uploader" class="mxid">@sabine.roth:muni.de</td>
+          <td data-label="MIME" class="mono">application/pdf</td>
+          <td data-label="Größe">640 KB</td>
+          <td data-label="Hochgeladen">Gestern, 16:02</td>
+          <td data-label="Geprüft">Gestern, 16:02</td>
+          <td data-label="ClamAV-Signatur" class="mono">—</td>
+          <td data-label="Aktionen"><div class="actions-cell"><a class="btn" href="#">Ansehen</a></div></td>
+        </tr>
+        <tr data-role="media-row" data-media-id="med_c390b" data-state="processing">
+          <td data-label="Status"><span class="badge badge--processing"><svg aria-hidden="true"><use href="#ic-hourglass"/></svg>Wird geprüft</span></td>
+          <td data-label="Dateiname">Bauantrag_2026-114.pdf</td>
+          <td data-label="Uploader" class="mxid">@jonas.weber:muni.de</td>
+          <td data-label="MIME" class="mono">application/pdf</td>
+          <td data-label="Größe">1.1 MB</td>
+          <td data-label="Hochgeladen">09:41</td>
+          <td data-label="Geprüft">Ergebnis in Kürze</td>
+          <td data-label="ClamAV-Signatur" class="mono">—</td>
+          <td data-label="Aktionen"><div class="actions-cell"><a class="btn" href="#">Ansehen</a></div></td>
+        </tr>
+        <tr data-role="media-row" data-media-id="med_047fe" data-state="admin_blocked">
+          <td data-label="Status"><span class="badge badge--blocked"><svg aria-hidden="true"><use href="#ic-block"/></svg>Gesperrt</span></td>
+          <td data-label="Dateiname">Testupload_intern.exe</td>
+          <td data-label="Uploader" class="mxid">@azubi.kruse:muni.de</td>
+          <td data-label="MIME" class="mono">application/x-msdownload</td>
+          <td data-label="Größe">88 KB</td>
+          <td data-label="Hochgeladen">Mo., 11:20</td>
+          <td data-label="Geprüft">Mo., 11:21</td>
+          <td data-label="ClamAV-Signatur" class="mono">—</td>
+          <td data-label="Aktionen"><div class="actions-cell"><a class="btn" href="#">Ansehen</a></div></td>
+        </tr>
+        <tr data-role="media-row" data-media-id="med_9de21" data-state="deleted">
+          <td data-label="Status"><span class="badge badge--terminal"><svg aria-hidden="true"><use href="#ic-trash"/></svg>Gelöscht</span></td>
+          <td data-label="Dateiname">Altarchiv_2019.zip</td>
+          <td data-label="Uploader" class="mxid">@sabine.roth:muni.de</td>
+          <td data-label="MIME" class="mono">application/zip</td>
+          <td data-label="Größe">— (Bytes entfernt)</td>
+          <td data-label="Hochgeladen">2019-08-02</td>
+          <td data-label="Geprüft">2019-08-02</td>
+          <td data-label="ClamAV-Signatur" class="mono">—</td>
+          <td data-label="Aktionen"><div class="actions-cell"><a class="btn" href="#">Ansehen</a></div></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="loadmore-wrap">
+    <button class="btn btn-loadmore" type="button">Weitere laden</button>
+  </div>
+  <p class="caption" style="text-align:center; margin-top:8px;">5 von 214 Medien geladen</p>
+</main>
+</body>
+</html>

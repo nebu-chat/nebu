@@ -1,0 +1,20 @@
+# Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents.
+# Do not edit manually during an active pipeline run.
+# last_updated: 2026-07-30
+# [bugfix-fix-matrix-media-upload-post-verb] 2026-07-30T19:57Z committed ✓ (ATDD+1 cycle code-review CLEAN, sec-review optional-skipped, unit 1585/1585, integration pre-existing-flake-only)
+# [bugfix-fix-matrix-media-upload-post-verb] 2026-07-30T19:57Z arc42-update → no arch changes (verb-only fix to already-documented endpoint)
+# [bugfix-fix-matrix-media-upload-post-verb] 2026-07-30T19:56Z security-review → skipped (optional; verb-only change, no new attack surface, confirmed by 2 code-review passes)
+# [bugfix-fix-matrix-media-upload-post-verb] 2026-07-30T19:56Z code-review cycle 1 → CLEAN (0 MAJOR, 0 MINOR)
+# [bugfix-fix-matrix-media-upload-post-verb] 2026-07-30T19:55Z dev-story cycle 1 → MINOR/INFO fixed, 10/10 tests green
+# [bugfix-fix-matrix-media-upload-post-verb] 2026-07-30T19:52Z code-review → 1 MINOR + 3 INFO, no MAJOR → cycle 1
+# [bugfix-fix-matrix-media-upload-post-verb] 2026-07-30T19:50Z ci-gate → unit 1585/1585 clean; integration 1986/2010 (24 pre-existing failures, none in Nebu.Media/router; confirmed non-deterministic via isolated rerun, unrelated to this diff)
+# [bugfix-fix-matrix-media-upload-post-verb] 2026-07-30T19:42Z dev-story → done (cycle 0), unit suite 1585 passed 0 failures
+# [bugfix-fix-matrix-media-upload-post-verb] 2026-07-30T19:38Z test-review → 1 MAJOR (media_upload_test.exs uses PUT, will regress) — folded into story scope, proceeding to dev-story
+# [bugfix-fix-matrix-media-upload-post-verb] 2026-07-30T19:34Z atdd → 4 failing tests (media_upload_verb_test.exs), corrected story AC3 (async route never existed)
+# [bugfix-fix-matrix-media-upload-post-verb] 2026-07-30T19:29Z pipeline started (--bug: /_matrix/media/v3/upload wired as PUT instead of POST, media.ex:55)
+story: null
+current_step: null
+completed: []
+cycle_count: 0
+blocked_reason: null
+last_updated: "2026-07-30T19:57Z"

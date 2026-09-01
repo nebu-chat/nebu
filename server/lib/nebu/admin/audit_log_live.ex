@@ -11,9 +11,15 @@ defmodule Nebu.Admin.AuditLogLive do
   See `Nebu.Admin.DashboardLive`'s own moduledoc note — same
   `Nebu.Admin.WarRoomIndicator` wiring, part of the small, fully-enumerable
   set of remaining admin LiveViews.
+
+  ## Media attention nav badge (media-security-admin-control/5b-live-updates-nav-badges)
+
+  See `Nebu.Admin.DashboardLive`'s own moduledoc note — same
+  `Nebu.Admin.MediaAttentionBadge` wiring.
   """
   use Phoenix.LiveView, layout: {Nebu.Admin.Layouts, :live}
 
+  alias Nebu.Admin.MediaAttentionBadge
   alias Nebu.Admin.WarRoomIndicator
 
   @sql """
@@ -26,12 +32,14 @@ defmodule Nebu.Admin.AuditLogLive do
   @impl Phoenix.LiveView
   def mount(_params, _session, socket) do
     if connected?(socket) and Process.whereis(Nebu.Repo), do: WarRoomIndicator.schedule()
+    MediaAttentionBadge.subscribe()
 
     {:ok,
      socket
      |> assign(:active_nav, "compliance")
      |> assign(:page_title, "Audit Log")
      |> assign(:events, load_events())
+     |> assign(:media_attention_count, MediaAttentionBadge.initial_count())
      |> WarRoomIndicator.assign_status(WarRoomIndicator.status())}
   end
 
@@ -39,6 +47,10 @@ defmodule Nebu.Admin.AuditLogLive do
   def handle_info(:refresh_war_room_status, socket) do
     if Process.whereis(Nebu.Repo), do: WarRoomIndicator.schedule()
     {:noreply, WarRoomIndicator.assign_status(socket, WarRoomIndicator.status())}
+  end
+
+  def handle_info({:media_state_transition, _media_id, old_state, new_state}, socket) do
+    {:noreply, MediaAttentionBadge.apply_transition(socket, old_state, new_state)}
   end
 
   def handle_info(_other, socket), do: {:noreply, socket}

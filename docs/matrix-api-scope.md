@@ -10,6 +10,7 @@ Client-Server API specification.
 - 🔶 Stub - returns a hardcoded or minimal valid response; no persistent storage
 - ❌ Intentionally excluded - will not be implemented (by design)
 - ⏳ Planned - requires ADR decision before implementation
+- 🔲 Not implemented - no route registered; known gap, tracked as a potential follow-up
 
 ---
 
@@ -176,7 +177,7 @@ Client-Server API specification.
 | GET | `/_matrix/client/v3/account/3pid` | 🔶 | Returns empty list (3PIDs not supported) |
 | GET | `/_matrix/client/v3/thirdparty/protocols` | 🔶 | Returns {} |
 | GET | `/_matrix/client/v3/voip/turnServer` | 🔶 | Returns 404 (TURN not configured) |
-| GET | `/_matrix/media/v3/config` | ✅ | Returns `{"m.upload.size": N}` - unauthenticated, deprecated (Story 12.16) |
+| GET | `/_matrix/media/v3/config` | 🔲 | No route registered in `Nebu.Web.Router.Media` (or anywhere) - stale ✅ carried over from the Go gateway inventory; corrected by bugfix-fix-matrix-client-v1-media-routes, which found and fixed the `download`/`thumbnail` gaps but explicitly left `config` unrouted (out of scope, no reported symptom) |
 
 ## Media Repository
 
@@ -191,16 +192,23 @@ application), behind the same Bandit listener as the Matrix API.
 | GET | `/_matrix/media/v3/download/{serverName}/{mediaId}` | ✅ | Decrypt + stream; CSP + CORP headers (Story 12.16) |
 | GET | `/_matrix/media/v3/download/{serverName}/{mediaId}/{fileName}` | ✅ | Same + `Content-Disposition: filename="{fileName}"` |
 | GET | `/_matrix/media/v3/thumbnail/{serverName}/{mediaId}` | ✅ | On-demand thumbnail; AES decrypt + resize; CSP + CORP headers (Story 12.16) |
-| GET | `/_matrix/media/v3/config` | ✅ | `{"m.upload.size": N}` - unauthenticated, deprecated (Story 12.16) |
+| GET | `/_matrix/media/v3/config` | 🔲 | No route registered - see Third-Party and Other table above; stale ✅ corrected by bugfix-fix-matrix-client-v1-media-routes |
 
 **Authenticated endpoints (v1.11+, Matrix CS API spec):**
 
+Served by the DEDICATED `Nebu.Web.Router.ClientV1Media` router (forwarded from
+`/_matrix/client/v1/media` in `router.ex`, matched before the generic `/_matrix` catch-all) - a
+separate Plug.Router module from `Nebu.Web.Router.Media` above, not a shared one (code-review
+cycle 1 of bugfix-fix-matrix-client-v1-media-routes found that sharing would have made `/v3/upload`,
+`/v3/preview_url`, etc. cross-reachable under this prefix). Reuses the same `Nebu.Media.download/2,3`
+/ `thumbnail/3` handlers as the v3 routes - no handler changes, routing-only fix.
+
 | Method | Endpoint | Auth | Status | Notes |
 |---|---|---|---|---|
-| GET | `/_matrix/client/v1/media/config` | Bearer | ✅ | `{"m.upload.size": N}` - 401 M_MISSING_TOKEN if no token (Story 12.16) |
-| GET | `/_matrix/client/v1/media/download/{serverName}/{mediaId}` | Bearer | ✅ | Auth-gated download; same handler as v3 (Story 12.16) |
-| GET | `/_matrix/client/v1/media/download/{serverName}/{mediaId}/{fileName}` | Bearer | ✅ | Auth-gated download with filename in `Content-Disposition` (Story 12.16) |
-| GET | `/_matrix/client/v1/media/thumbnail/{serverName}/{mediaId}` | Bearer | ✅ | Auth-gated thumbnail (Story 12.16) |
+| GET | `/_matrix/client/v1/media/config` | Bearer | 🔲 | No route registered - Story 12.16 (Go gateway) implemented this, but the Go→Elixir media-gateway-migration never ported it and the ✅ mark was stale; `client/v1/media` was completely unrouted (404) until bugfix-fix-matrix-client-v1-media-routes, which explicitly scoped `config` OUT (no reported symptom - only `download`/`thumbnail` were broken for Element) |
+| GET | `/_matrix/client/v1/media/download/{serverName}/{mediaId}` | Bearer | ✅ | Fixed by bugfix-fix-matrix-client-v1-media-routes (2026-07-31) - previously unrouted → 404 for all Element attachment views, despite the stale Story 12.16 ✅ mark; now served by `Nebu.Web.Router.ClientV1Media`, same handler as v3 |
+| GET | `/_matrix/client/v1/media/download/{serverName}/{mediaId}/{fileName}` | Bearer | ✅ | Fixed by bugfix-fix-matrix-client-v1-media-routes (2026-07-31); auth-gated download with filename in `Content-Disposition` |
+| GET | `/_matrix/client/v1/media/thumbnail/{serverName}/{mediaId}` | Bearer | ✅ | Fixed by bugfix-fix-matrix-client-v1-media-routes (2026-07-31) - previously unrouted → 404 for all Element image thumbnails, despite the stale Story 12.16 ✅ mark; now served by `Nebu.Web.Router.ClientV1Media` |
 
 **Auth error codes for all `/_matrix/client/v1/media/*` endpoints:**
 

@@ -1,0 +1,311 @@
+<h1 class="text-heading font-semibold mb-4">Media Settings</h1>
+<p class="text-text-secondary mb-4">
+  Media policy values (upload/scan size limits, pending-upload limit, stall timeout, retention
+  windows, and the admin-notification webhook URL). Changes take effect cluster-wide without a
+  redeploy.
+</p>
+
+<p :if={Phoenix.Flash.get(@flash, :info)} class="alert alert-success mb-4" role="status">
+  {Phoenix.Flash.get(@flash, :info)}
+</p>
+<p :if={Phoenix.Flash.get(@flash, :warning)} class="alert alert-warning mb-4" role="alert">
+  ⚠️ {Phoenix.Flash.get(@flash, :warning)}
+</p>
+<p :if={Phoenix.Flash.get(@flash, :error)} class="alert alert-error mb-4" role="alert">
+  {Phoenix.Flash.get(@flash, :error)}
+</p>
+
+<form
+  id="media-settings-form"
+  data-testid="media-settings-form"
+  method="post"
+  action="/admin/media/settings"
+  class="mb-6"
+>
+  <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+
+  <h2 class="text-heading font-semibold mb-2">Upload &amp; scan limits</h2>
+
+  <div class="flex flex-wrap gap-4 mb-4">
+    <label for="max_upload_size_bytes" class="form-control">
+      <span class="label-text">Max upload size (bytes)</span>
+      <input
+        type="number"
+        id="max_upload_size_bytes"
+        name="max_upload_size_bytes"
+        value={@state["max_upload_size_bytes"]}
+        min="1"
+        class="input input-bordered input-sm"
+      />
+      <span class="label-text-alt mt-1 text-base-content/70">
+        Requests larger than this are rejected with 413 (Story 2b).
+      </span>
+    </label>
+
+    <label for="max_file_size_bytes" class="form-control">
+      <span class="label-text">Max file size for AV scanning (bytes)</span>
+      <input
+        type="number"
+        id="max_file_size_bytes"
+        name="max_file_size_bytes"
+        value={@state["max_file_size_bytes"]}
+        min="1"
+        class="input input-bordered input-sm"
+      />
+      <span class="label-text-alt mt-1 text-base-content/70">
+        Files above this size are never scanned by ClamAV (Story 3).
+      </span>
+    </label>
+  </div>
+
+  <h2 class="text-heading font-semibold mb-2">Pending uploads</h2>
+
+  <div class="flex flex-wrap gap-4 mb-4">
+    <label for="max_pending_per_user" class="form-control">
+      <span class="label-text">Max pending uploads per user</span>
+      <input
+        type="number"
+        id="max_pending_per_user"
+        name="max_pending_per_user"
+        value={@state["max_pending_per_user"]}
+        min="1"
+        class="input input-bordered input-sm"
+      />
+      <span class="label-text-alt mt-1 text-base-content/70">
+        A user exceeding this limit receives 429 (default 20).
+      </span>
+    </label>
+
+    <label for="max_stall_ms" class="form-control">
+      <span class="label-text">Max stall timeout (ms)</span>
+      <input
+        type="number"
+        id="max_stall_ms"
+        name="max_stall_ms"
+        value={@state["max_stall_ms"]}
+        min="1"
+        class="input input-bordered input-sm"
+      />
+      <span class="label-text-alt mt-1 text-base-content/70">
+        An upload that stalls longer than this is abandoned (default 20000).
+      </span>
+    </label>
+  </div>
+
+  <h2 class="text-heading font-semibold mb-2">Retention windows</h2>
+
+  <div class="flex flex-wrap gap-4 mb-4">
+    <label for="deleted_days" class="form-control">
+      <span class="label-text">Deleted media retention (days)</span>
+      <input
+        type="number"
+        id="deleted_days"
+        name="deleted_days"
+        value={@state["deleted_days"]}
+        min="0"
+        class="input input-bordered input-sm"
+      />
+    </label>
+
+    <label for="infected_days" class="form-control">
+      <span class="label-text">Infected media retention (days)</span>
+      <input
+        type="number"
+        id="infected_days"
+        name="infected_days"
+        value={@state["infected_days"]}
+        min="0"
+        class="input input-bordered input-sm"
+      />
+    </label>
+
+    <label for="orphaned_hours" class="form-control">
+      <span class="label-text">Orphaned upload retention (hours)</span>
+      <input
+        type="number"
+        id="orphaned_hours"
+        name="orphaned_hours"
+        value={@state["orphaned_hours"]}
+        min="0"
+        class="input input-bordered input-sm"
+      />
+    </label>
+
+    <label for="released_delete_after_days" class="form-control">
+      <span class="label-text">Auto-delete released media after (days)</span>
+      <input
+        type="number"
+        id="released_delete_after_days"
+        name="released_delete_after_days"
+        value={@state["released_delete_after_days"]}
+        min="0"
+        placeholder="Leave blank to never auto-delete"
+        class="input input-bordered input-sm"
+      />
+      <span class="label-text-alt mt-1 text-base-content/70">
+        Leave blank to disable automatic deletion of released media (Story 8d).
+      </span>
+    </label>
+  </div>
+
+  <h2 class="text-heading font-semibold mb-2">Notifications</h2>
+
+  <div class="flex flex-wrap gap-4 mb-4">
+    <label for="webhook_url" class="form-control w-full max-w-md">
+      <span class="label-text">Admin notification webhook URL</span>
+      <input
+        type="text"
+        id="webhook_url"
+        name="webhook_url"
+        value={@state["webhook_url"]}
+        placeholder="https://example.org/media-hook"
+        class="input input-bordered"
+      />
+      <span class="label-text-alt mt-1 text-base-content/70">
+        Must be HTTPS; private, loopback, and link-local addresses are blocked. Leave blank to
+        disable (Story 7).
+      </span>
+    </label>
+  </div>
+
+  <button type="submit" class="btn btn-primary">Save</button>
+</form>
+
+<h2 class="text-heading font-semibold mb-4">Storage Target</h2>
+<p class="text-text-secondary mb-4">
+  The S3/MinIO endpoint, bucket, and credentials Nebu stores media objects in. Changing the
+  endpoint or bucket while files already exist under the current target makes those files
+  unreachable — use "Test Connection" to verify new credentials before saving.
+</p>
+
+<p
+  :if={@test_connection_result}
+  role={if elem(@test_connection_result, 0) == :ok, do: "status", else: "alert"}
+  class={[
+    "alert mb-4",
+    if(elem(@test_connection_result, 0) == :ok, do: "alert-success", else: "alert-error")
+  ]}
+>
+  {elem(@test_connection_result, 1)}
+</p>
+
+<form
+  id="media-storage-form"
+  data-testid="media-storage-form"
+  method="post"
+  action="/admin/media/settings/storage"
+  class="mb-6"
+>
+  <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+
+  <div :if={@orphan_warning} class="alert alert-error mb-4">
+    <p class="mb-2" role="alert">
+      ⚠️ Changing the endpoint or bucket does not migrate existing objects. {@orphan_warning}
+      existing file(s) currently stored under the active target will become unreachable
+      (download requests will 404) once this change is saved, because their storage keys will
+      no longer resolve against the new endpoint/bucket.
+    </p>
+    <label for="confirm_orphan_risk" class="flex items-center gap-2">
+      <input type="checkbox" id="confirm_orphan_risk" name="confirm_orphan_risk" value="true" />
+      <span>
+        I understand {@orphan_warning} existing file(s) will become unreachable and want to
+        proceed
+      </span>
+    </label>
+  </div>
+
+  <div class="flex flex-wrap gap-4 mb-4">
+    <label for="endpoint" class="form-control">
+      <span class="label-text">Endpoint (host:port)</span>
+      <input
+        type="text"
+        id="endpoint"
+        name="endpoint"
+        value={@storage_config.endpoint}
+        placeholder="minio:9000"
+        class="input input-bordered"
+      />
+      <span class="label-text-alt mt-1 text-base-content/70">
+        A bare hostname[:port] — no http:// or https:// prefix.
+      </span>
+    </label>
+
+    <label for="bucket" class="form-control">
+      <span class="label-text">Bucket</span>
+      <input
+        type="text"
+        id="bucket"
+        name="bucket"
+        value={@storage_config.bucket}
+        class="input input-bordered"
+      />
+    </label>
+
+    <label for="region" class="form-control">
+      <span class="label-text">Region</span>
+      <input
+        type="text"
+        id="region"
+        name="region"
+        value={@storage_config.region}
+        class="input input-bordered"
+      />
+    </label>
+
+    <label for="use_ssl" class="flex items-center gap-2 form-control">
+      <input type="checkbox" id="use_ssl" name="use_ssl" value="true" checked={@storage_config.use_ssl} />
+      <span class="label-text">Use SSL (HTTPS)</span>
+    </label>
+  </div>
+
+  <div class="flex flex-wrap gap-4 mb-4">
+    <label for="s3_key_prefix_template" class="form-control">
+      <span class="label-text">Object key prefix template</span>
+      <input
+        type="text"
+        id="s3_key_prefix_template"
+        name="s3_key_prefix_template"
+        value={@storage_config.s3_key_prefix_template}
+        class="input input-bordered"
+      />
+    </label>
+
+    <label for="archive_bucket" class="form-control">
+      <span class="label-text">Archive bucket (optional)</span>
+      <input
+        type="text"
+        id="archive_bucket"
+        name="archive_bucket"
+        value={@storage_config.archive_bucket}
+        class="input input-bordered"
+      />
+    </label>
+  </div>
+
+  <h2 class="text-heading font-semibold mb-2">Credentials</h2>
+
+  <div class="flex flex-wrap gap-4 mb-4">
+    <label for="access_key" class="form-control">
+      <span class="label-text">Access key</span>
+      <input type="password" id="access_key" name="access_key" class="input input-bordered" />
+      <span class="label-text-alt mt-1 text-base-content/70">
+        {if @access_key_configured, do: "Currently configured.", else: "Not currently configured."}
+        Leave blank to keep the current value.
+      </span>
+    </label>
+
+    <label for="secret_key" class="form-control">
+      <span class="label-text">Secret key</span>
+      <input type="password" id="secret_key" name="secret_key" class="input input-bordered" />
+      <span class="label-text-alt mt-1 text-base-content/70">
+        {if @secret_key_configured, do: "Currently configured.", else: "Not currently configured."}
+        Leave blank to keep the current value.
+      </span>
+    </label>
+  </div>
+
+  <button type="submit" class="btn btn-primary">Save</button>
+  <button type="submit" formaction="/admin/media/settings/storage/test-connection" class="btn">
+    Test Connection
+  </button>
+</form>

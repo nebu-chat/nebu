@@ -1,0 +1,23 @@
+-- Adds the 9th media_state value, deferred from Story 1a's foundation migration
+-- (000022_media_state_machine_foundation.up.sql) specifically so this ADD VALUE
+-- runs in its own transaction, isolated from any other DDL/DML against the
+-- media_state type or media_files table.
+--
+-- NOTE ON MIGRATION NUMBER: this story's own Technical Requirements section
+-- names this file "000023_media_scan_failed_state.*.sql", written when Story
+-- 1a's foundation migration (000022) was the newest migration on this branch.
+-- By the time this story actually ran, 000023-000027 had already been taken
+-- by other stories that landed first (000023_media_config,
+-- 000024_media_storage_config, 000025_media_files_filename, 000026_oban_jobs,
+-- 000027_media_files_uploader_user_id_nullable) — so this migration is
+-- numbered 000028, the next free slot, instead. The SQL content and intent
+-- are otherwise unchanged from the story's Technical Requirements.
+--
+-- OPERATIONAL CONSTRAINT: PostgreSQL does not allow a newly-added enum value to
+-- be used (in an INSERT/UPDATE/CAST) within the SAME transaction that adds it.
+-- This migration file contains ONLY this one statement for that reason — do not
+-- append any statement that references 'scan_failed' to this file, even one
+-- that looks harmless (e.g. a backfill, a CHECK constraint, a comment cast).
+-- Any such follow-up belongs in a later migration that runs after this one has
+-- committed.
+ALTER TYPE media_state ADD VALUE 'scan_failed';

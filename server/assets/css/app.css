@@ -285,6 +285,43 @@
   }
 }
 
+/* ─────────────────────────────────────────────────────────────────────────
+ * Media-state badges (media-security-admin-control/5a-admin-media-table)
+ *
+ * DESIGN.md D2/C1: filled pills with DARK text #1c1917 (never DaisyUI's light
+ * default — that's the 2.1-2.6:1 contrast failure the design review caught).
+ * One class per lifecycle group (processing/released/infected/blocked/terminal);
+ * color is never the only signal — every badge also carries a leading
+ * aria-hidden icon + the (always-distinct-per-state) visible text label, so a
+ * colorblind operator still gets the semantic from wording, not hue alone.
+ * ──────────────────────────────────────────────────────────────────────── */
+@layer components {
+  .media-badge--processing {
+    background-color: #f59e0b; /* media-processing amber */
+    color: #1c1917;
+  }
+
+  .media-badge--released {
+    background-color: #14b8a6; /* media-released teal */
+    color: #1c1917;
+  }
+
+  .media-badge--infected {
+    background-color: #ef4444; /* media-infected red */
+    color: #1c1917;
+  }
+
+  .media-badge--blocked {
+    background-color: #fb7185; /* media-blocked coral */
+    color: #1c1917;
+  }
+
+  .media-badge--terminal {
+    background-color: #6b7280; /* media-terminal gray */
+    color: #1c1917;
+  }
+}
+
 /* War-room banner recording dot (AC6) */
 .tm-recdot {
   width: 8px;

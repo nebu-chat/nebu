@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Validation Report — Media Security &amp; Admin Control</title>
+<style>
+  :root{--bg:#111827;--surface:#1f2937;--raised:#374151;--text:#f9fafb;--sub:#9ca3af;
+    --crit:#ef4444;--high:#f59e0b;--med:#14b8a6;--low:#6b7280;--ok:#22c55e;--pri:#f97316}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:16px/1.6 Inter,system-ui,sans-serif;padding:2rem}
+  main{max-width:960px;margin:0 auto}
+  h1{font-size:1.75rem;margin:0 0 .25rem}
+  h2{font-size:1.25rem;margin:2rem 0 .75rem;border-bottom:1px solid var(--raised);padding-bottom:.35rem}
+  .meta{color:var(--sub);font-size:.9rem;margin-bottom:1.5rem}
+  .meta code{background:var(--surface);padding:.1rem .35rem;border-radius:6px}
+  .verdict{background:var(--surface);border-left:3px solid var(--pri);border-radius:8px;padding:1rem 1.25rem;margin:1rem 0}
+  .cards{display:flex;flex-wrap:wrap;gap:.75rem;margin:1rem 0}
+  .card{background:var(--surface);border:1px solid var(--raised);border-radius:8px;padding:.75rem 1rem;flex:1 1 180px}
+  .card b{font-size:1.5rem;display:block}
+  table{width:100%;border-collapse:collapse;margin:.5rem 0;font-size:.92rem}
+  th,td{text-align:left;padding:.45rem .6rem;border-bottom:1px solid var(--raised);vertical-align:top}
+  th{color:var(--sub);font-weight:600}
+  .pill{display:inline-block;border-radius:10px;padding:.05rem .5rem;font-size:.75rem;font-weight:700;color:#1c1917}
+  .p-crit{background:var(--crit)}.p-high{background:var(--high)}.p-med{background:var(--med)}.p-low{background:var(--low);color:#f9fafb}
+  .p-ok{background:var(--ok)}
+  .f{background:var(--surface);border-radius:8px;padding:.75rem 1rem;margin:.6rem 0;border-left:3px solid var(--raised)}
+  .f.c{border-left-color:var(--crit)}.f.h{border-left-color:var(--high)}
+  .f .fix{color:var(--ok);font-size:.9rem}
+  .f .src{color:var(--sub);font-size:.8rem}
+  .done{color:var(--ok);font-weight:700}
+  code{font-family:"JetBrains Mono",ui-monospace,monospace}
+  .scroll{overflow-x:auto}
+</style>
+</head>
+<body>
+<main>
+  <h1>Validation Report — Media Security &amp; Admin Control</h1>
+  <p class="meta">
+    DESIGN.md <code>./DESIGN.md</code> · EXPERIENCE.md <code>./EXPERIENCE.md</code><br>
+    Run 2026-07-02 · Reviewer Gate, 3 parallel lenses:
+    rubric-walker · accessibility (WCAG 2.1 AA) · implementation-consistency
+  </p>
+
+  <div class="cards">
+    <div class="card"><span class="pill p-crit">Critical</span><b>3</b>all resolved</div>
+    <div class="card"><span class="pill p-high">High</span><b>7</b>all resolved</div>
+    <div class="card"><span class="pill p-med">Medium</span><b>~14</b>resolved / noted</div>
+    <div class="card"><span class="pill p-low">Low</span><b>~11</b>noted in-spec</div>
+  </div>
+
+  <div class="verdict">
+    <strong>Overall.</strong> Disciplined, well-shaped spine pair with an unusually strong
+    behavioral Accessibility Floor. The gate surfaced two dominant issues: an accessibility
+    <em>conditional fail</em> (wrong color math on filled badges + a false "tokens verified"
+    claim) and a verified coverage gap (the epic grew the same day — Review 5 added
+    <strong>Story 13</strong> with three new Admin-UI surfaces). Implementation lens:
+    <strong>buildable, GO with corrections</strong>. <span class="done">All critical/high
+    findings and the Story 13 gap were resolved (D7); spines remain
+    <code>status: final</code>.</span> Post-review sign-off (D8) closed the residuals:
+    <code>/admin/media/approvals</code> is a dedicated route, the <code>status-warn-bg</code>
+    edit is cleared for the pipeline/security review, and the persistence tension is
+    resolved — PostgreSQL for runtime data, S3/MinIO (on-prem) for static files
+    (PRD NFR-C3/C4 updated). No open decisions remain.
+  </div>
+
+  <h2>Measured contrast (accessibility lens, on <code>base-200 #1f2937</code>)</h2>
+  <div class="scroll"><table>
+    <tr><th>Token</th><th>As text</th><th>Filled + light text</th><th>Filled + dark text</th></tr>
+    <tr><td>media-processing amber <code>#f59e0b</code></td><td>6.87:1 ✅</td><td>2.11:1 ❌</td><td>7.35:1 ✅</td></tr>
+    <tr><td>media-released teal <code>#14b8a6</code></td><td>5.90:1 ✅</td><td>2.42:1 ❌</td><td>7.03:1 ✅</td></tr>
+    <tr><td>media-blocked coral <code>#fb7185</code></td><td>5.45:1 ✅</td><td>2.62:1 ❌</td><td>6.50:1 ✅</td></tr>
+    <tr><td>media-infected red <code>#ef4444</code></td><td>3.87:1 ❌</td><td>3.72:1 ❌</td><td>4.40:1 ❌</td></tr>
+    <tr><td>media-terminal gray <code>#6b7280</code></td><td>3.04:1 ❌</td><td>—</td><td>—</td></tr>
+  </table></div>
+  <p class="meta">Resolution: filled pills with dark text <code>#1c1917</code>; red/gray forbidden
+    as text; infected badge lightens red or leans on the ⚠ glyph; build-time contrast assertion.</p>
+
+  <h2>Category verdicts (rubric-walker)</h2>
+  <div class="scroll"><table>
+    <tr><th>Category</th><th>Verdict</th></tr>
+    <tr><td>Flow coverage</td><td>adequate → strengthened (Story 13 flow added)</td></tr>
+    <tr><td>Token completeness</td><td>strong</td></tr>
+    <tr><td>Component coverage</td><td>adequate → strengthened (4 Story-13 components)</td></tr>
+    <tr><td>State coverage</td><td>strong</td></tr>
+    <tr><td>Visual reference coverage</td><td>strong (spine-only by design)</td></tr>
+    <tr><td>Bloat &amp; overspecification</td><td>strong</td></tr>
+    <tr><td>Inheritance discipline</td><td>adequate → corrected (greenfield vs inherited)</td></tr>
+    <tr><td>Shape fit</td><td>strong</td></tr>
+  </table></div>
+
+  <h2>Critical &amp; High findings (all resolved)</h2>
+
+  <div class="f c"><span class="pill p-crit">C1</span> <b>Badge text color unspecified → filled pills fail 1.4.3.</b>
+    <div class="fix">Fix: filled pills, dark text <code>#1c1917</code> in <code>media-badge--*</code>; build-time contrast test.</div>
+    <div class="src">accessibility · DESIGN §Colors / §media-state-badge</div></div>
+
+  <div class="f c"><span class="pill p-crit">C2</span> <b>"Inherited tokens verified ≥4.5:1" false — red 3.87:1, gray 3.04:1.</b>
+    <div class="fix">Fix: false claim removed; contrast table added; red/gray forbidden as text.</div>
+    <div class="src">accessibility · DESIGN §Colors</div></div>
+
+  <div class="f c"><span class="pill p-crit">C3</span> <b>Master-detail relationship color-only — 1.3.1/4.1.2.</b>
+    <div class="fix">Fix: <code>aria-current</code> on master items; <code>aria-labelledby</code> detail region; focus/announce on select.</div>
+    <div class="src">accessibility · DESIGN §media-detail-panel, EXPERIENCE §Post-review hardening</div></div>
+
+  <div class="f h"><span class="pill p-high">H·rubric</span> <b>Story 13 (13b/13d/13e) uncovered; settings IA drifted.</b>
+    <div class="fix">Fix: IA + role model (compliance_officer approving) + Legal-Hold/Art.-17 overlays + Flow 5 + 4 components; epic Story 0 DoR extended.</div>
+    <div class="src">rubric — verified against epic (Review 5 real)</div></div>
+
+  <div class="f h"><span class="pill p-high">H1</span> <b>PubSub row re-render drops focus.</b><div class="fix">Fix: <code>phx-update="stream"</code> stable ids, in-place update, E2E focus assertion.</div></div>
+  <div class="f h"><span class="pill p-high">H2</span> <b>Live filter results not announced.</b><div class="fix">Fix: hidden <code>aria-live="polite"</code> result-count.</div></div>
+  <div class="f h"><span class="pill p-high">H3</span> <b>"Weitere laden" focus/announce unmanaged.</b><div class="fix">Fix: focus first new row + count announcement.</div></div>
+  <div class="f h"><span class="pill p-high">H4</span> <b>Disabled confirm hides mandatory-reason requirement.</b><div class="fix">Fix: button enabled; inline field error on empty submit (override/erasure/two-eyes).</div></div>
+  <div class="f h"><span class="pill p-high">H5</span> <b>Dialog focus-in rule underspecified.</b><div class="fix">Fix: one rule for all four dialogs; kill-switch gets full trap/restore/Escape.</div></div>
+  <div class="f h"><span class="pill p-high">H6</span> <b>Alerts/health/test-pill status by color alone.</b><div class="fix">Fix: severity/status word + icon mandated.</div></div>
+
+  <h2>Implementation lens — GO with corrections</h2>
+  <div class="scroll"><table>
+    <tr><th>Finding</th><th>Resolution</th></tr>
+    <tr><td>M1 · teal/coral + <code>media-badge--*</code> are net-new</td><td>Stated greenfield: add hues to <code>tailwind.config.js</code> + new <code>@layer components</code></td></tr>
+    <tr><td>M2 · master-detail/StatusCard/AlertItem not in code</td><td>Relabeled greenfield-following-spec (real build scope)</td></tr>
+    <tr><td>M3 · "mirror /admin/config" + env prefill misread</td><td>Split visual-mirror vs new-LiveView; env-prefill scoped as migration path, reconciled w/ ADR-022</td></tr>
+    <tr><td>m1 · <code>status-warn-bg</code> value collision</td><td>Named correctly; change <code>#431407→#451a03</code> flagged for pipeline/security review</td></tr>
+    <tr><td>m2 · "no shadow scale" false</td><td>Corrected; border-only is a deliberate rule</td></tr>
+    <tr><td>m3 · <code>data-state</code> vs <code>data-status</code></td><td>Documented (additive, non-breaking)</td></tr>
+    <tr><td>m4 · pipeline-protected not noted</td><td>Added: ships via <code>/nebu-pipeline ui:true</code></td></tr>
+  </table></div>
+  <p class="meta">Confirmed correct (do not regress): CSP-safe LiveView modals, LiveView+PubSub capability,
+    greenfield modal/toast/pagination, zebra+scope table fix, layout-shell match, workers:1 serial E2E fit.</p>
+
+  <h2>Reviewer files</h2>
+  <ul>
+    <li><code>review-rubric.md</code> — 0 crit · 1 high · 6 med · 8 low</li>
+    <li><code>review-accessibility.md</code> — 3 crit · 6 high · 7 med · 3 low (conditional fail → resolved)</li>
+    <li><code>review-implementation.md</code> — 0 crit · 3 major · 4 minor · 6 confirmed-correct (GO)</li>
+  </ul>
+</main>
+</body>
+</html>

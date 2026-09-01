@@ -88,6 +88,7 @@ defmodule Nebu.Admin.LogsLive do
 
   alias Nebu.Admin.LogsLive.DetailPanel
   alias Nebu.Admin.LogsLive.TraceMapBubble
+  alias Nebu.Admin.MediaAttentionBadge
   alias Nebu.Admin.WarRoomIndicator
   alias Phoenix.LiveView.JS
 
@@ -141,6 +142,7 @@ defmodule Nebu.Admin.LogsLive do
   @impl Phoenix.LiveView
   def mount(params, session, socket) do
     Phoenix.PubSub.subscribe(Nebu.PubSub, @topic)
+    MediaAttentionBadge.subscribe()
 
     {:ok, policy} = Nebu.Web.LogStore.get_policy()
 
@@ -213,6 +215,8 @@ defmodule Nebu.Admin.LogsLive do
       # atom for `live_isolated/3` (safely defaulting to "no active filters"
       # below), with NO dependency on `handle_params/3` at all.
       |> assign(:active_filters, active_filters_from_params(params, policy))
+      # media-security-admin-control/5b-live-updates-nav-badges.
+      |> assign(:media_attention_count, MediaAttentionBadge.initial_count())
       |> stream(:rows, [], dom_id: &row_dom_id/1)
 
     socket =
@@ -363,6 +367,11 @@ defmodule Nebu.Admin.LogsLive do
     if Process.whereis(Nebu.Repo), do: WarRoomIndicator.schedule()
 
     {:noreply, WarRoomIndicator.assign_status(socket, status)}
+  end
+
+  # media-security-admin-control/5b-live-updates-nav-badges.
+  def handle_info({:media_state_transition, _media_id, old_state, new_state}, socket) do
+    {:noreply, MediaAttentionBadge.apply_transition(socket, old_state, new_state)}
   end
 
   def handle_info(_other, socket), do: {:noreply, socket}

@@ -1,0 +1,19 @@
+# Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents.
+# Do not edit manually during an active pipeline run.
+# last_updated: 2026-07-31
+# [bugfix-fix-matrix-client-v1-media-routes] 2026-07-31T07:58Z committed ✓ (ATDD+1 code-review cycle CLEAN, Kassandra CLEAN, unit 1594/1594, integration pre-existing-flake-only)
+# [bugfix-fix-matrix-client-v1-media-routes] 2026-07-31T07:54Z security-review → Kassandra CLEAN (0/0/0/0, cross-exposure closure independently re-verified)
+# [bugfix-fix-matrix-client-v1-media-routes] 2026-07-31T07:51Z code-review cycle 1 → CLEAN (0 MAJOR, 0 MINOR); unit re-verified 1594/1594 on split-router state
+# [bugfix-fix-matrix-client-v1-media-routes] 2026-07-31T07:47Z dev-story cycle 1 → split ClientV1Media router, cross-exposure closed, 13/13+40/40+1594/1594 green
+# [bugfix-fix-matrix-client-v1-media-routes] 2026-07-31T07:42Z code-review → 2 MINOR (shared-router cross-exposure; unrelated loadbalancer.tf unstaged, not this story's) → cycle 1
+# [bugfix-fix-matrix-client-v1-media-routes] 2026-07-31T07:38Z ci-gate → unit 1594/1594 clean; integration 1986/2019 (33 pre-existing flaky failures, none in Nebu.Media/router — same category as prior bugfix's confirmed flakiness)
+# [bugfix-fix-matrix-client-v1-media-routes] 2026-07-31T07:31Z dev-story → done (cycle 0), new file 13/13, media/ 40/40, full unit suite 1594/1594
+# [bugfix-fix-matrix-client-v1-media-routes] 2026-07-31T07:26Z test-review → CLEAN (0 MAJOR, 1 MINOR architectural note, all 7 ACs covered)
+# [bugfix-fix-matrix-client-v1-media-routes] 2026-07-31T07:20Z atdd → 5 failing (AC1/2/3/7x2), 8 already-passing (AC4/5/6, confirms scope), media_client_v1_routes_test.exs
+# [bugfix-fix-matrix-client-v1-media-routes] 2026-07-31T07:16Z pipeline started (--bug: GET /_matrix/client/v1/media/{download,thumbnail} 404 — never ported from Go gateway)
+story: null
+current_step: null
+completed: []
+cycle_count: 0
+blocked_reason: null
+last_updated: "2026-07-31T07:58Z"

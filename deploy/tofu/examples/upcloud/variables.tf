@@ -101,6 +101,18 @@ variable "element_memory_limit" {
   default     = "128m"
 }
 
+variable "clamav_cpu_limit" {
+  description = "CPU limit for the ClamAV malware-scanner container (ADR-024). Only relevant when enable_media_gateway = true."
+  type        = string
+  default     = "0.50"
+}
+
+variable "clamav_memory_limit" {
+  description = "Memory limit for the ClamAV malware-scanner container. clamd keeps the full virus signature database resident in memory (typically 1-1.5 GB) — set generously to avoid OOM kills during freshclam updates. Only relevant when enable_media_gateway = true."
+  type        = string
+  default     = "1.5g"
+}
+
 # ── Media object storage ──────────────────────────────────────────────────────
 
 variable "enable_media_gateway" {

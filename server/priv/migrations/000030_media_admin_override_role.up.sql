@@ -1,0 +1,22 @@
+-- media-security-admin-control/6c-infected-override
+--
+-- Adds the media_admin_override grant column to the existing `users` table.
+-- Deliberately orthogonal to users.system_role ('user' | 'instance_admin' |
+-- 'compliance_officer', 000001_init.up.sql) — not a fourth enum value. The
+-- epic is explicit that this grant is "nicht Teil der normalen Admin-Rolle":
+-- a user needs BOTH system_role = 'instance_admin' (to pass the existing
+-- on_mount(:require_admin) gate and reach /admin/media at all) AND
+-- media_admin_override = true (to see/use the :infected -> :released
+-- override action). Granting/revoking this flag via an admin UI is
+-- explicitly out of scope for this story (direct DB access only, for now).
+--
+-- No GRANT statement needed here (verified against
+-- test/nebu/matrix/migrations_grant_test.exs's own AC1/AC3): this migration
+-- only ALTERs the existing `users` table (CREATE TABLE users happened in
+-- 000001_init.up.sql) — it does not CREATE TABLE. 000001's blanket
+-- `GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO
+-- nebu_app` already covers `users`, and a table-level GRANT automatically
+-- extends to any column added later via ALTER TABLE ... ADD COLUMN — no
+-- per-column GRANT exists in PostgreSQL. Same reasoning 000029's own header
+-- comment documents for its ALTER COLUMN on media_state_transitions.
+ALTER TABLE users ADD COLUMN media_admin_override BOOLEAN NOT NULL DEFAULT false;

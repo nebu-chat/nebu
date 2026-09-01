@@ -29,6 +29,76 @@ defmodule Nebu.Compliance.AuditWriter do
   # off-by-default long-polling endpoints (enhanced-logging/trace-map-node-controls,
   # AC12 Option B — ANSWERED design question 2): enabling collection on a
   # previously-off endpoint is an admin-initiated logging-policy change.
+  # media_config_updated added for media-security-admin-control/
+  # 9a-media-config-table-module (AC6) — every successful Nebu.Media.Config.upsert/2
+  # writes one of these.
+  # media_storage_config_updated added for media-security-admin-control/
+  # 11a-storage-config-schema-secrets (AC9) — every successful
+  # Nebu.Media.StorageConfig.upsert/1 writes one of these.
+  # media_infected_detected, media_scan_failed added for media-security-admin-control/
+  # 4c-infected-scanfailed-audit-bridge (AC1/AC3) — Nebu.Workers.MediaScanWorker
+  # bridges its :infected / :scan_failed media_state_transitions writes into the
+  # global audit_log via these two actions.
+  # media_blocked, media_unblocked, media_deleted, media_rescanned added for
+  # media-security-admin-control/6a-routine-state-actions (AC6/AC7) —
+  # Nebu.Media.admin_block/3, admin_unblock/2, admin_delete/2, admin_rescan/2
+  # bridge their admin-driven media_state_transitions writes (and, for Rescan,
+  # its Oban enqueue) into the global audit_log via these four actions.
+  # media_infected_override added for media-security-admin-control/
+  # 6c-infected-override (AC5) — Nebu.Media.admin_override_infected/3 bridges
+  # the distinct-role-gated :infected -> :released false-positive override
+  # into the global audit_log via this action. Skipping this entry does not
+  # raise/500 (the state transition still commits) — it only makes the
+  # subsequent AuditWriter.log/6 call silently return
+  # {:error, :audit_unknown_action}, logged at Logger.error only. Same
+  # footgun 4c and 6a both independently flag; see this story's own dedicated
+  # allowlist regression test.
+  # media_hard_deleted added for media-security-admin-control/
+  # 8a-media-cleanup-worker (AC9/AC10) — Nebu.Workers.MediaCleanupWorker
+  # bridges its retention-cron :deleted/:infected -> :hard_deleted transitions
+  # into the global audit_log via this action, once the S3 object delete and
+  # storage_key/uploader_user_id null both succeed. Same documented footgun
+  # as above — dropping this entry would silently vanish the hard-delete
+  # event from the compliance record with no caller-visible failure.
+  # media_orphan_detection_run added for media-security-admin-control/
+  # 8b-orphan-detection-gdpr (AC2) — Nebu.Workers.MediaOrphanDetectionWorker's
+  # hourly DETECTION-ONLY cron writes exactly ONE of these per run (never one
+  # per candidate), reporting orphaned :quarantined media_files rows for
+  # human review. This action name is deliberately housekeeping-flavoured,
+  # NOT a compliance/erasure action — it does not imply or satisfy DSGVO
+  # Art. 17 (see the worker's own moduledoc); do not repurpose the existing
+  # gdpr_deletion action for this, and do not repurpose this action name for
+  # any future erasure-request flow.
+  # media_archived added for media-security-admin-control/
+  # 8c-media-archive-worker (AC9) — Nebu.Workers.MediaArchiveWorker's daily
+  # cron writes exactly ONE of these per row it successfully copies to the
+  # archive bucket AND durably commits archived_at for (never for a losing
+  # concurrent/repeated attempt). This is NOT a media_state_transitions
+  # insert and NOT a lifecycle-state change (ADR-029: "No new state for
+  # archival") — the state column never changes, only archived_at does; only
+  # the global compliance audit log records the event. Same documented
+  # footgun as every other entry above — dropping this would silently vanish
+  # the archive event from the compliance record with no caller-visible
+  # failure.
+  # media_released_auto_deleted added for media-security-admin-control/
+  # 8d-released-auto-delete (AC4) — Nebu.Workers.MediaReleasedAutoDeleteWorker's
+  # daily, OPTIONAL (nil-by-default) data-minimization cron writes exactly ONE
+  # of these per :released -> :deleted transition it drives via
+  # Nebu.Media.StateMachine.transition/4. Same documented footgun as every
+  # other entry above — dropping this would silently vanish the auto-delete
+  # event from the compliance record while the state transition itself still
+  # succeeds.
+  # media_unscanned_release added for media-security-admin-control/
+  # 10d-scan-kill-switch (AC7, non-negotiable) — Nebu.Workers.MediaScanWorker
+  # writes exactly ONE of these every time the admin-configured
+  # scan_kill_switch fires "fail_open" AND ClamAV's health-check reports the
+  # scanner unavailable AND a :quarantined -> :scanning -> :released
+  # transition actually happens without ever calling scan_binary/1. This is
+  # the single most security-sensitive event this story exists to make
+  # visible (an unscanned file became downloadable) — same documented
+  # footgun as every other entry above — dropping this would silently vanish
+  # the unscanned-release event from the compliance record while the file
+  # itself is still released.
   @known_actions ~w(
     admin_login
     admin_login_failed
@@ -64,6 +134,20 @@ defmodule Nebu.Compliance.AuditWriter do
     users_bulk_imported
     enable_temporary_capture
     disable_temporary_capture
+    media_config_updated
+    media_storage_config_updated
+    media_infected_detected
+    media_scan_failed
+    media_blocked
+    media_unblocked
+    media_deleted
+    media_rescanned
+    media_infected_override
+    media_hard_deleted
+    media_orphan_detection_run
+    media_archived
+    media_released_auto_deleted
+    media_unscanned_release
   )
 
   # Configurable repo for test injection. Production uses Nebu.Repo.

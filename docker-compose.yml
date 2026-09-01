@@ -109,6 +109,12 @@ services:
       NEBU_MINIO_SECRET_KEY_FILE: "/run/secrets/minio_app_secret_key"
       NEBU_MINIO_BUCKET: "nebu-media"
       NEBU_MINIO_USE_SSL: "false"
+      # media-security-admin-control/3-clamav-genserver: ClamAV scanner client.
+      # Nebu.Media.ClamAV tolerates clamd being unreachable at boot (AC7) — no
+      # depends_on/healthy-gate is required here, clamd may come up after the
+      # server (freshclam's first signature download can take a while).
+      NEBU_CLAMAV_HOST: "clamav"
+      NEBU_CLAMAV_PORT: "3310"
     ports:
       # go-removal-cleanup: the server now serves the public Matrix endpoint (host 8008)
       # and the admin UI (host 8080) — both formerly published by the Go gateway —
@@ -188,7 +194,27 @@ services:
     # - Bumped to 2026 release tag (security fix: Finding #6)
     # - Credentials passed via MC_HOST_minio env var and shell variables to keep secrets
     #   off argv (/proc/<pid>/cmdline) — defeats Docker Secrets goal if passed as mc args.
-    # - mc admin user add uses --stdin form to avoid echoing credentials in argv.
+    #
+    # 2026-07-30 correction: the `--stdin` form referenced above for `mc admin user add`
+    # does not exist on this (or the current `latest`) mc release — verified via
+    # `mc admin user add --help`, which only documents the positional
+    # `TARGET ACCESSKEY SECRETKEY` form. The previous script silently swallowed the
+    # resulting usage error via `|| true`, so the app IAM user was NEVER created —
+    # every real S3 write from the server failed with an auth error (surfaced as
+    # `{:error, {:put_failed, _}}` -> 500 "Failed to store media file"). Reverted to
+    # the only syntax this tool actually supports; the secret values are therefore
+    # briefly visible in this container's own argv for its few-second one-shot
+    # lifetime (not persisted, not sent over the network in cleartext — MC_HOST_minio
+    # still keeps the *root* credentials off argv). If a future mc release adds a real
+    # stdin/file-based form for `admin user add`, switch back.
+    #
+    # Second bug found the same day: the policy-to-user attachment line called
+    # `mc admin user policy attach ... --user X`, which doesn't exist either (`mc
+    # admin user policy` is a read-only "export policy as JSON" command, and `--user`
+    # isn't one of its flags) — its fallback, `mc admin policy set`, is itself a fully
+    # removed/rejected command on this release, so BOTH attempts failed and the app
+    # user never actually held the nebu-app-policy grants. The real command is the
+    # top-level `mc admin policy attach TARGET POLICY --user USER`.
     image: minio/mc:RELEASE.2025-08-13T08-35-41Z
     depends_on:
       minio:
@@ -206,9 +232,9 @@ services:
       mc mb --ignore-existing minio/nebu-media
       APP_KEY=$$(cat /run/secrets/minio_app_access_key)
       APP_SECRET=$$(cat /run/secrets/minio_app_secret_key)
-      printf "%s\n%s\n" "$$APP_KEY" "$$APP_SECRET" | mc admin user add minio --stdin || true
+      mc admin user add minio "$$APP_KEY" "$$APP_SECRET" || echo "createbuckets: user add failed or already exists (non-fatal)"
       mc admin policy create minio nebu-app-policy /policy/nebu-app-policy.json 2>/dev/null || mc admin policy add minio nebu-app-policy /policy/nebu-app-policy.json || true
-      mc admin user policy attach minio nebu-app-policy --user "$$APP_KEY" 2>/dev/null || mc admin policy set minio nebu-app-policy user="$$APP_KEY" || true
+      mc admin policy attach minio nebu-app-policy --user "$$APP_KEY" || echo "createbuckets: policy attach failed or already attached (non-fatal)"
       exit 0
       '
 
@@ -218,7 +244,40 @@ services:
   # bucket + nebu-app IAM credentials now wired into the `server:` service above.
   # The minio + createbuckets services are intentionally retained.
 
+  # media-security-admin-control/3-clamav-genserver — malware scanner daemon
+  # (ADR-024: self-hosted ClamAV, no file content/hash leaves the deployment).
+  # The official clamav/clamav image runs both clamd and freshclam (signature
+  # updates) in one container by default — no separate sidecar needed for this
+  # story's scope. Nebu.Media.ClamAV connects via NEBU_CLAMAV_HOST/PORT
+  # (default "clamav"/3310, matching this service name on the default network).
+  clamav:
+    image: clamav/clamav:stable
+    # No arm64 manifest is published for this image ("no matching manifest
+    # for linux/arm64/v8"); pin amd64 explicitly so Docker Desktop's
+    # Rosetta/QEMU emulation runs it on Apple Silicon dev hosts (same
+    # emulated-pull pattern already implied by the dex service's platform
+    # mismatch warning above), instead of a hard pull failure.
+    platform: linux/amd64
+    restart: unless-stopped
+    # Kassandra security review (F-4, 2026-07-13): clamd has no
+    # authentication and its control protocol includes verbs like SHUTDOWN
+    # (a DoS on the scanner) — unlike postgres/minio, this is not a service
+    # meant to be reachable from the host. `server` reaches it over the
+    # compose network by service name (NEBU_CLAMAV_HOST=clamav), so no host
+    # port publish is needed; deliberately no `ports:` mapping here.
+    volumes:
+      - clamav_data:/var/lib/clamav
+    healthcheck:
+      # Bundled in the clamav/clamav image specifically for container healthchecks.
+      test: ["CMD", "clamdcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      # freshclam's first signature database download can take a few minutes.
+      start_period: 180s
+
 volumes:
   postgres_data:
   dex_data:
   minio_data:
+  clamav_data:

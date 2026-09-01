@@ -891,6 +891,138 @@
     },
   };
 
+  // media-security-admin-control/5a-admin-media-table (AC10, blocking a11y
+  // requirement): after a "Weitere laden" append, focus must move to the
+  // first newly-appended row rather than silently dropping (the aria-live
+  // announcer text is pushed from the server unconditionally either way —
+  // see Nebu.Admin.MediaLive's result_announcement/2 — this hook only
+  // handles the focus-move half, which needs real DOM access). The row
+  // <tr> itself gets a temporary tabindex="-1" so it is programmatically
+  // focusable without becoming part of the normal Tab order.
+  var MediaLoadMoreFocus = {
+    mounted: function () {
+      this.handleEvent("focus_media_row", function (payload) {
+        var row = document.getElementById(payload.id);
+        if (!row) return; // no-op if the row hasn't been patched into the DOM yet
+        row.setAttribute("tabindex", "-1");
+        row.focus();
+      });
+    },
+  };
+
+  // media-security-admin-control/6a-routine-state-actions (AC10): the Delete
+  // confirm modal's real Tab-trap. Unlike Nebu.Admin.LogsLive.DetailPanel's own
+  // side panel (which explicitly documents NOT implementing a full focus trap,
+  // only focus-in + focus-return), this story's AC10 requires focus to stay
+  // INSIDE the dialog while it's open. Escape is handled server-side via
+  // `phx-window-keydown="cancel_delete_confirm" phx-key="Escape"` on the modal
+  // element itself (no JS needed for that half) — this hook only does what
+  // needs real DOM access: focus the Cancel button on mount (never the
+  // destructive Confirm button, the story's own hard requirement — belt and
+  // suspenders alongside the `autofocus` HTML attribute already on that
+  // button, which is not 100% reliable for a LiveView-patched-in node across
+  // every browser), wrap Tab/Shift+Tab between the dialog's own focusable
+  // elements, and return focus to the row's Delete trigger button (looked up
+  // via `data-trigger-id`) once the modal is removed from the DOM.
+  var MediaDeleteConfirmModal = {
+    mounted: function () {
+      var cancelBtn = this.el.querySelector("#media-delete-confirm-cancel");
+      if (cancelBtn) cancelBtn.focus();
+
+      var el = this.el;
+
+      this._trapHandler = function (e) {
+        if (e.key !== "Tab") return;
+
+        var focusable = el.querySelectorAll(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusable.length === 0) return;
+
+        var first = focusable[0];
+        var last = focusable[focusable.length - 1];
+
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      };
+
+      document.addEventListener("keydown", this._trapHandler, true);
+    },
+    destroyed: function () {
+      document.removeEventListener("keydown", this._trapHandler, true);
+
+      var triggerId = this.el.getAttribute("data-trigger-id");
+      var trigger = triggerId ? document.getElementById(triggerId) : null;
+      if (trigger) trigger.focus();
+    },
+  };
+
+  // media-security-admin-control/6c-infected-override (AC7): the Override
+  // confirm modal's real Tab-trap, mirroring MediaDeleteConfirmModal above
+  // exactly (same focus-trap/focus-return contract, escalated-warning
+  // variant) — Escape is handled server-side via
+  // `phx-window-keydown="cancel_override_confirm" phx-key="Escape"` on the
+  // modal element itself. This hook only does what needs real DOM access:
+  // focus the Cancel button on mount (never the destructive Confirm button),
+  // wrap Tab/Shift+Tab between the dialog's own focusable elements, and
+  // return focus to the row's Override trigger button (via `data-trigger-id`)
+  // once the modal is removed from the DOM.
+  //
+  // NOTE (self-caught during review): this modal's submit button carries a
+  // `disabled={String.trim(@override_reason) == ""}` binding (the confirm-
+  // disabled-until-non-empty affordance) — unlike MediaDeleteConfirmModal's
+  // buttons, which are never disabled. A `:disabled` element is excluded
+  // from the browser's native Tab order, so if `focusable` here included it
+  // as the trap's "last" element, `document.activeElement` could never
+  // actually equal it, the wrap-around branch below would never fire, and
+  // Tab from Cancel would escape the modal entirely whenever the reason
+  // field is empty (the modal's own default just-opened state) — a real
+  // focus-trap leak, not merely a hypothetical one. `:not(:disabled)`
+  // excludes it so the trap always wraps between the elements that can
+  // actually receive focus.
+  var MediaOverrideConfirmModal = {
+    mounted: function () {
+      var cancelBtn = this.el.querySelector("#media-override-confirm-cancel");
+      if (cancelBtn) cancelBtn.focus();
+
+      var el = this.el;
+
+      this._trapHandler = function (e) {
+        if (e.key !== "Tab") return;
+
+        var focusable = el.querySelectorAll(
+          'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusable.length === 0) return;
+
+        var first = focusable[0];
+        var last = focusable[focusable.length - 1];
+
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      };
+
+      document.addEventListener("keydown", this._trapHandler, true);
+    },
+    destroyed: function () {
+      document.removeEventListener("keydown", this._trapHandler, true);
+
+      var triggerId = this.el.getAttribute("data-trigger-id");
+      var trigger = triggerId ? document.getElementById(triggerId) : null;
+      if (trigger) trigger.focus();
+    },
+  };
+
   function sendKeepalive() {
     fetch("/admin/keepalive", {
       method: "GET",
@@ -1904,6 +2036,9 @@
         SessionKeepalive: SessionKeepalive,
         TraceMapLeitstand: TraceMapLeitstand,
         WarRoomPill: WarRoomPill,
+        MediaLoadMoreFocus: MediaLoadMoreFocus,
+        MediaDeleteConfirmModal: MediaDeleteConfirmModal,
+        MediaOverrideConfirmModal: MediaOverrideConfirmModal,
       },
     });
 

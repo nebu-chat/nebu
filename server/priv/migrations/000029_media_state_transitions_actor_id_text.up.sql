@@ -1,0 +1,28 @@
+-- media-security-admin-control/6a-routine-state-actions (design/architecture gap,
+-- caller-approved option A, 2026-07-19): media_state_transitions.actor_id was created
+-- (000022_media_state_machine_foundation) as UUID, on the assumption that admin
+-- identity would be UUID-shaped. That assumption was never real: this app has no
+-- UUID-shaped user/admin identity anywhere in its actual data model — users.user_id
+-- is TEXT (a Matrix user id, e.g. "@kai:test.local"), and audit_log.actor_user_id is
+-- also TEXT for the exact same identity shape. Story 1b's own tests only ever
+-- exercised the {:admin, admin_id} actor with a synthetic Ecto.UUID.generate() value;
+-- this story is the FIRST real caller (Nebu.Media.admin_block/3, admin_unblock/2,
+-- admin_delete/2), and it surfaced the mismatch: Nebu.Admin.Auth's admin session
+-- identity (current_user["matrix_user_id"], always present for every admin session,
+-- see lib/nebu/admin/auth.ex put_current_user/2) is a Matrix-ID string, never a UUID
+-- — Ecto.UUID.dump!/1 would raise ArgumentError on every real admin action against
+-- this column.
+--
+-- Data-safety (verified before writing this migration, not assumed): every existing
+-- media_state_transitions row has actor_id = NULL (all writers to date — create/1,
+-- create_quarantined/1, MediaScanWorker — use the {:system, nil} actor; {:admin, _}
+-- had no real caller before this story). `SELECT count(*) FILTER (WHERE actor_id IS
+-- NOT NULL)` against the live dev database returned 0 of 42 rows. This is a
+-- zero-risk type change, not a lossy backfill.
+--
+-- No new GRANT required: media_state_transitions is already covered by migration
+-- 000001's blanket GRANT ... ON ALL TABLES IN SCHEMA public TO nebu_app (created by
+-- 000022, which ran after 000001). This migration only ALTERs an existing table's
+-- column type, it does not CREATE TABLE.
+ALTER TABLE media_state_transitions
+    ALTER COLUMN actor_id TYPE TEXT USING actor_id::text;

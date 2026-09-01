@@ -52,7 +52,7 @@ No Go layer, no gRPC, no Redis, no NATS, no Kafka.
 
 ## Functional Requirements Overview
 
-52 functional requirements across 8 categories:
+66 functional requirements across 9 categories:
 - **Identity & Authentication (FR1–6):** OIDC-only SSO, bootstrap mode, role assignment
 - **Messaging & Rooms (FR7–16):** create, join, send, sync, profile, presence, typing, receipts
 - **Room Configuration (FR17–24):** visibility, membership, moderation, power levels
@@ -61,5 +61,6 @@ No Go layer, no gRPC, no Redis, no NATS, no Kafka.
 - **User & Room Administration (FR36–40):** list, create, deactivate, manage via Admin API
 - **Notifications (FR41–42):** push rules, pushers (Apple/Google push: Phase 2)
 - **Server Operations & Observability (FR43–52):** Docker Compose, health/ready/metrics, Admin UI
+- **Media Security & Scanning (FR53–66):** state machine (reserved→quarantined→scanning→released), ClamAV malware scanning, admin override with audit trail, retention policy, S3 storage with credentials encryption
 
-_Source: `_bmad-output/planning-artifacts/prd.md`, §Goals, §User-Personas, §Functional Requirements_
+_Source: `_bmad-output/planning-artifacts/prd.md`, §Goals, §User-Personas, §Functional Requirements, §Media Security & Admin Control_

@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>Nebu Admin — Medien-Detail (Key Screen Mock)</title>
+<style>
+/*
+  Governs: DESIGN.md → Layout & Spacing (master-detail 3-column, D6),
+           Elevation & Depth, Components → media-detail-panel, confirm-dialog,
+           override-dialog.
+  EXPERIENCE.md → IA (/admin/media/:id), Component Patterns (row actions,
+           confirm-dialog/override-dialog), State Patterns A (lifecycle +
+           download gate), Accessibility Floor + post-review hardening
+           (C3 master-detail exposure, H4/H5 dialog focus rule),
+           Key Flow 1 (Kai triages an infected upload) — canonical state,
+           Key Flow 2 (the false-positive override) — alternate state below.
+  Two states in one file per key-screens.md: canonical detail (top) and the
+  override-dialog-open alternate state (bottom section), since the dialog is
+  a load-bearing overlay on this same surface.
+  Offline, inline CSS, no JS, no network. Icons: inline SVG, never emoji.
+*/
+:root{
+  --primary:#f97316; --primary-hover:#ea580c; --primary-content:#1c1917; --primary-subtle:#431407;
+  --base-100:#111827; --base-200:#1f2937; --base-300:#374151; --base-content:#f9fafb;
+  --text-secondary:#9ca3af; --success:#22c55e; --warning:#f59e0b; --status-warn-bg:#451a03;
+  --error:#ef4444; --neutral:#6b7280;
+  --media-processing:#f59e0b; --media-released:#14b8a6; --media-infected:#ef4444;
+  --media-blocked:#fb7185; --media-terminal:#6b7280; --badge-dark-text:#1c1917;
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{background:var(--base-100); color:var(--base-content); font-family:Inter,"Segoe UI",system-ui,-apple-system,sans-serif; font-size:15px; line-height:1.5;}
+.mono,code,.hash,.mxid{font-family:"JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+.sr-only{position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap;}
+
+.topbar{position:fixed; top:0; left:0; right:0; height:48px; background:var(--base-300); display:flex; align-items:center; padding:0 16px; gap:12px; z-index:10;}
+.topbar .brand{font-weight:700;}
+.topbar .spacer{flex:1;}
+.topbar .user{display:flex; align-items:center; gap:8px; font-size:.85rem; color:var(--text-secondary);}
+.avatar{width:28px; height:28px; border-radius:50%; background:var(--primary-subtle); color:var(--primary); display:flex; align-items:center; justify-content:center; font-size:.75rem; font-weight:700;}
+
+.sidebar{width:240px; background:var(--base-200); position:fixed; top:48px; bottom:0; left:0; padding:20px 0; overflow-y:auto;}
+.sidebar .group-label{font-size:11px; letter-spacing:.06em; color:var(--text-secondary); text-transform:uppercase; padding:0 20px; margin:20px 0 8px;}
+.sidebar .group-label:first-child{margin-top:0;}
+.sidebar a.navitem{display:flex; align-items:center; gap:10px; padding:8px 20px; color:var(--base-content); text-decoration:none; font-size:14px; position:relative;}
+.sidebar a.navitem.active{background:var(--base-300); font-weight:600;}
+.sidebar a.navitem.active::before{content:""; position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--primary);}
+/* Nested nav parent/child (feature/enhanced-logging → admin-sidebar-nesting,
+   merged into main). Real markup: Nebu.Admin.Layouts.nav_item/1 with
+   :children — a <button aria-expanded aria-controls> disclosure toggle +
+   chevron, followed by an indented <ul> of child <.link>s. Real toggle
+   behavior is wired CSP-safely by wireNavSectionToggles() in app.js; this
+   static mock always renders expanded (the real default). */
+.navitem-parent{display:flex; align-items:center; gap:8px; width:100%; padding:8px 20px; background:none; border:none; color:var(--base-content); font:inherit; font-size:14px; text-align:left; cursor:pointer; position:relative;}
+.navitem-parent:focus-visible{outline:2px solid var(--primary); outline-offset:-2px;}
+.navitem-parent.child-active{background:var(--base-300); font-weight:600;}
+.navitem-parent.self-active{background:var(--primary); color:var(--primary-content); font-weight:600;}
+.navitem-parent:not(.child-active):not(.self-active):hover{background:var(--base-300);}
+.nav-chevron{width:14px; height:14px; flex:none; transform:rotate(90deg); transition:transform .15s;}
+.navitem-parent .badge-count{margin-left:auto;}
+.nav-children{list-style:none; margin:2px 0 4px; padding:0; display:flex; flex-direction:column; gap:2px;}
+.nav-child-link{display:flex; align-items:center; gap:8px; padding:6px 20px 6px 46px; font-size:13px; color:var(--base-content); text-decoration:none; position:relative;}
+.nav-child-link.active{background:var(--primary); color:var(--primary-content); font-weight:600;}
+.nav-child-link:not(.active):hover{background:var(--base-300);}
+.navitem .badge-count{margin-left:auto; background:var(--media-infected); color:#fff; font-size:11px; font-weight:700; padding:1px 6px; border-radius:10px; min-width:18px; text-align:center;}
+
+main{margin-left:240px; margin-top:48px; padding:24px; max-width:1400px;}
+h1.page-title{font-size:1.5rem; font-weight:600; margin:0 0 4px;}
+.breadcrumb{font-size:.8rem; color:var(--text-secondary); margin:0 0 16px;}
+.breadcrumb a{color:var(--text-secondary);}
+
+.badge{display:inline-flex; align-items:center; gap:5px; padding:3px 10px; border-radius:10px; font-size:.78rem; font-weight:700; color:var(--badge-dark-text); line-height:1.4;}
+.badge svg{width:12px; height:12px; flex:none;}
+.badge--processing{background:var(--media-processing);}
+.badge--released{background:var(--media-released);}
+.badge--infected{background:#f56565;}
+.badge--blocked{background:var(--media-blocked);}
+.badge--terminal{background:var(--media-terminal);}
+
+.master-detail{display:grid; grid-template-columns:280px 1fr; gap:20px; align-items:start;}
+.master-list{background:var(--base-200); border:1px solid var(--base-300); border-radius:8px; overflow:hidden;}
+.master-list .mlitem{display:block; width:100%; text-align:left; padding:12px 16px; background:none; border:none; border-bottom:1px solid var(--base-300); color:var(--base-content); cursor:pointer; position:relative; font-size:.82rem;}
+.master-list .mlitem:last-child{border-bottom:none;}
+.master-list .mlitem[aria-current="page"]{background:var(--base-300); font-weight:600;}
+.master-list .mlitem[aria-current="page"]::before{content:""; position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--primary); }
+.master-list .mlitem .fn{display:block; margin-top:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+
+.detail-card{background:var(--base-200); border:1px solid var(--base-300); border-radius:8px; padding:24px;}
+.detail-card h2{font-size:1.5rem; font-weight:600; margin:0 0 4px; word-break:break-all;}
+.gate-note{font-size:.8rem; color:var(--text-secondary); margin:0 0 20px;}
+.gate-note.gate-404{color:#fca5a5;}
+
+.meta-grid{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px 24px; margin-bottom:20px;}
+.meta-grid dt{font-size:.7rem; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); margin-bottom:2px;}
+.meta-grid dd{margin:0; font-size:.85rem; word-break:break-all;}
+
+.storage-line{font-size:.8rem; color:var(--text-secondary); padding:10px 0; border-top:1px solid var(--base-300); border-bottom:1px solid var(--base-300); margin-bottom:20px;}
+
+.actions-row{display:flex; gap:8px; margin-bottom:24px;}
+.btn{display:inline-flex; align-items:center; gap:5px; padding:7px 14px; border-radius:6px; border:1px solid var(--base-300); background:var(--base-300); color:var(--base-content); font-size:.82rem; font-weight:600; cursor:pointer;}
+.btn:focus-visible{outline:2px solid var(--primary); outline-offset:2px;}
+.btn-danger{background:transparent; border-color:var(--media-infected); color:#fca5a5;}
+.btn-danger:hover{background:rgba(239,68,68,.12);}
+
+h3.timeline-title{font-size:1rem; font-weight:600; margin:0 0 10px;}
+.timeline{list-style:none; margin:0; padding:0; border-left:2px solid var(--base-300); margin-left:6px;}
+.timeline li{position:relative; padding:0 0 16px 20px;}
+.timeline li::before{content:""; position:absolute; left:-6.5px; top:3px; width:10px; height:10px; border-radius:50%; background:var(--neutral); border:2px solid var(--base-200);}
+.timeline li.step-infected::before{background:var(--media-infected);}
+.timeline .t-transition{font-weight:600; font-size:.85rem;}
+.timeline .t-meta{font-size:.75rem; color:var(--text-secondary);}
+
+.alt-state{margin-top:48px; padding-top:24px; border-top:1px dashed var(--base-300);}
+.alt-state h2.section-title{font-size:1.1rem; color:var(--text-secondary); font-weight:600; margin:0 0 16px; text-transform:uppercase; letter-spacing:.03em;}
+.alt-frame{position:relative; background:var(--base-100); border:1px solid var(--base-300); border-radius:8px; padding:60px 24px; display:flex; justify-content:center;}
+.scrim-note{position:absolute; inset:0; background:rgba(0,0,0,.55); border-radius:8px;}
+.dialog{position:relative; z-index:1; background:var(--base-200); border:1px solid var(--base-300); border-radius:8px; width:460px; padding:24px;}
+.dialog-head{display:flex; align-items:center; gap:8px; font-weight:700; font-size:1.05rem; margin-bottom:4px; color:var(--media-infected);}
+.dialog-sub{font-size:.8rem; color:var(--text-secondary); margin:0 0 16px;}
+.dialog-warning{background:var(--status-warn-bg); border:1px solid var(--media-infected); border-radius:6px; padding:12px 14px; font-size:.85rem; margin-bottom:16px;}
+.dialog .form-control{margin-bottom:16px;}
+.dialog label{display:block; font-size:.8rem; font-weight:600; margin-bottom:6px;}
+.dialog label .req{color:var(--warning); margin-left:2px;}
+.dialog textarea{width:100%; background:var(--base-100); border:1px solid var(--base-300); border-radius:6px; color:var(--base-content); padding:10px; font-size:.85rem; font-family:inherit; resize:vertical;}
+.dialog textarea:focus-visible{outline:2px solid var(--primary); outline-offset:2px;}
+.dialog-actions{display:flex; justify-content:flex-end; gap:8px;}
+.btn-primary{background:var(--primary); border-color:var(--primary); color:var(--primary-content);}
+.btn-cancel{background:transparent;}
+.reqlegend{font-size:.72rem; color:var(--text-secondary); margin-top:-4px; margin-bottom:16px;}
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="ic-warn" viewBox="0 0 16 16"><path d="M8 2.2L14.6 13.3H1.4L8 2.2z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><line x1="8" y1="6.4" x2="8" y2="9.8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11.4" r="0.9" fill="currentColor"/></symbol>
+  <symbol id="ic-check" viewBox="0 0 16 16"><path d="M3 8.5l3.3 3.3L13 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="ic-hourglass" viewBox="0 0 16 16"><path d="M4 2h8M4 14h8M4 2c0 4 4 3.2 4 6s-4 2-4 6M12 2c0 4-4 3.2-4 6s4 2 4 6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></symbol>
+  <symbol id="ic-block" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.4"/><line x1="4" y1="12" x2="12" y2="4" stroke="currentColor" stroke-width="1.4"/></symbol>
+  <symbol id="ic-trash" viewBox="0 0 16 16"><path d="M3.5 4.5h9M6 4.5V2.7h4v1.8M5.2 4.5l.7 9h4.2l.7-9" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+</svg>
+
+<header class="topbar">
+  <span class="brand">Nebu Admin</span>
+  <span class="spacer"></span>
+  <span class="user"><span class="avatar">KM</span> Kai M. · instance_admin</span>
+</header>
+
+<nav class="sidebar" aria-label="Hauptnavigation">
+  <div class="group-label">Verwaltung</div>
+  <a class="navitem" href="#">👤 <span>Benutzer</span></a>
+  <a class="navitem" href="#">💬 <span>Räume</span></a>
+  <!-- [MOCK ASSUMPTION] /admin/media/:id has no dedicated child of its own —
+       treated as still "inside" Übersicht (child stays active while browsing
+       a detail), the same way a detail route commonly reuses its list's nav
+       key. Confirm with dev before relying on this for `active_nav` wiring. -->
+  <div class="nav-parent-item">
+    <button type="button" class="navitem-parent child-active" aria-expanded="true" aria-controls="nav-media-children" data-navkey="media">
+      <svg class="nav-chevron" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z"/></svg>
+      🖼 <span>Medien</span>
+      <span class="badge-count" aria-label="1 infizierte Datei">1</span>
+    </button>
+    <ul id="nav-media-children" class="nav-children">
+      <li><a class="nav-child-link active" href="#" aria-current="page">Übersicht</a></li>
+      <li><a class="nav-child-link" href="#">Health</a></li>
+      <li><a class="nav-child-link" href="#">Settings</a></li>
+      <li><a class="nav-child-link" href="#">Approvals</a></li>
+    </ul>
+  </div>
+  <div class="group-label">Compliance</div>
+  <a class="navitem" href="#">📋 <span>Audit Log</span></a>
+</nav>
+
+<main>
+  <p class="breadcrumb"><a href="#">Medien</a> / Jahresbericht_Gemeinde_2026.docx</p>
+  <h1 class="page-title sr-only">Medien-Detail</h1>
+
+  <section class="master-detail" aria-label="Medien-Detailansicht">
+    <nav class="master-list" aria-label="Gefilterte Medienliste">
+      <a class="mlitem" href="#">
+        <span class="badge badge--processing"><svg aria-hidden="true"><use href="#ic-hourglass"/></svg>Wird geprüft</span>
+        <span class="fn">Bauantrag_2026-114.pdf</span>
+      </a>
+      <a class="mlitem" href="#" aria-current="page">
+        <span class="badge badge--infected"><svg aria-hidden="true"><use href="#ic-warn"/></svg>Infiziert</span>
+        <span class="fn">Jahresbericht_Gemeinde_2026.docx</span>
+      </a>
+      <a class="mlitem" href="#">
+        <span class="badge badge--released"><svg aria-hidden="true"><use href="#ic-check"/></svg>Freigegeben</span>
+        <span class="fn">Ratsprotokoll_2026-06.pdf</span>
+      </a>
+      <a class="mlitem" href="#">
+        <span class="badge badge--blocked"><svg aria-hidden="true"><use href="#ic-block"/></svg>Gesperrt</span>
+        <span class="fn">Testupload_intern.exe</span>
+      </a>
+      <a class="mlitem" href="#">
+        <span class="badge badge--terminal"><svg aria-hidden="true"><use href="#ic-trash"/></svg>Gelöscht</span>
+        <span class="fn">Altarchiv_2019.zip</span>
+      </a>
+    </nav>
+
+    <div class="detail-card" role="region" aria-labelledby="detail-heading">
+      <span class="badge badge--infected" style="margin-bottom:10px;"><svg aria-hidden="true"><use href="#ic-warn"/></svg>Infiziert</span>
+      <h2 id="detail-heading">Jahresbericht_Gemeinde_2026.docx</h2>
+      <p class="gate-note gate-404">Nicht herunterladbar — Anfragen an diese Datei liefern HTTP 404.</p>
+
+      <dl class="meta-grid">
+        <div><dt>Medien-ID</dt><dd class="mono">med_8f21c4a0</dd></div>
+        <div><dt>SHA-256</dt><dd class="mono">a3f9…c1e0d4b27a58</dd></div>
+        <div><dt>Uploader</dt><dd class="mxid">@intern:muni.de</dd></div>
+        <div><dt>MIME-Typ</dt><dd class="mono">application/vnd.openxmlformats…wordprocessingml.document</dd></div>
+        <div><dt>Größe</dt><dd>2.4 MB</dd></div>
+        <div><dt>ClamAV-Signatur</dt><dd class="mono">Doc.Downloader.Emotet-9981</dd></div>
+      </dl>
+
+      <p class="storage-line">Aktiv im Objektspeicher: 2.4 MB · Pending Hard-Delete: 0 B</p>
+
+      <div class="actions-row">
+        <button class="btn btn-danger" type="button"><svg width="13" height="13" aria-hidden="true"><use href="#ic-trash"/></svg>Löschen</button>
+      </div>
+
+      <h3 class="timeline-title">Audit-Trail</h3>
+      <ol class="timeline">
+        <li><span class="t-transition">reserved</span> <span class="t-meta">· system · 09:12:03</span></li>
+        <li><span class="t-transition">reserved → quarantined</span> <span class="t-meta">· system · 09:12:04</span></li>
+        <li><span class="t-transition">quarantined → scanning</span> <span class="t-meta">· system · 09:12:05</span></li>
+        <li class="step-infected"><span class="t-transition">scanning → infected</span> <span class="t-meta">· system · 09:13:11 · Signatur Doc.Downloader.Emotet-9981</span></li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="alt-state" aria-label="Alternativer Zustand: Override-Dialog offen">
+    <h2 class="section-title">Alternativer Zustand — Override-Dialog offen (Flow 2, Rolle media_admin_override)</h2>
+    <div class="alt-frame">
+      <div class="scrim-note" aria-hidden="true"></div>
+      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="ov-head">
+        <div class="dialog-head" id="ov-head"><svg width="18" height="18" aria-hidden="true"><use href="#ic-warn"/></svg>Freigabe bestätigen (Override)</div>
+        <p class="dialog-sub">CI_Build_signed_v4.2.1.zip · med_5b02f7</p>
+        <div class="dialog-warning">„Diese Datei wurde als Malware erkannt. Freigabe erfolgt auf eigene Verantwortung."</div>
+        <div class="form-control">
+          <label for="ov-reason">Begründung<span class="req">*</span></label>
+          <textarea id="ov-reason" rows="3" aria-required="true">False positive — signierter CI-Build, Hash gegen Pipeline verifiziert.</textarea>
+        </div>
+        <p class="reqlegend">* = Pflichtfeld</p>
+        <div class="dialog-actions">
+          <button class="btn btn-cancel" type="button">Abbrechen</button>
+          <button class="btn btn-primary" type="button">Freigeben bestätigen</button>
+        </div>
+      </div>
+    </div>
+    <p class="caption" style="font-size:.78rem; color:var(--text-secondary); margin-top:10px;">
+      Bestätigen bleibt aktiviert (nie hinter einem deaktivierten Button versteckt) — bei leerem Feld erscheint stattdessen ein Inline-Fehler beim Absenden (H4/H5).
+    </p>
+  </section>
+</main>
+</body>
+</html>

@@ -1,0 +1,161 @@
+# generated: 2026-07-01
+# last_updated: 2026-07-21
+# [epic-loop] 2026-07-21 EPIC COMPLETE — all 34 stories done, epic-end SEC Gate 2 (Kassandra,
+#   opus, fresh context, diff 4d89152c..e8dc71e3) CLEAN (0 CRITICAL/0 HIGH). 5 MEDIUM/5 LOW
+#   advisory findings — M-2/M-3 (storage-config SSRF) fixed post-gate (commits dc0b199f,
+#   7349e972); M-1/M-4/M-5 + all LOW items left as documented follow-up debt per user decision.
+#   Report: _bmad-output/implementation-artifacts/epic-media-security-admin-control-security-review-2026-07-20.md
+#   Known NOT-built follow-up debt (scope decision made before implementation, not a gap):
+#   Story 0 (UX Foundation), Story 6d (Bulk Cohort Actions), Story 13a-13f (Media Lifecycle
+#   Policy + Two-Eyes-Delete + DSGVO Art.17 Restriction-of-Processing).
+# story 10e-trace-map-war-room-integration done (pipeline: ATDD 17 tests+Oracle N/A+dev(2 cycles: CI-gate UUID fix+2 MAJOR code-review fixes)+ci-gate clean(2582/28 pre-existing unrelated,unit 1956/0)+code-review cycle2 CLEAN+Kassandra CLEAN(2 LOW advisory)+arc42 updated): 2026-07-20
+# story 10d-scan-kill-switch done (pipeline: ATDD 10 tests+2 self-fixed gaps(storage-skip assertion+AC8 infected coverage)+dev-story(health-check branch, Config 15th key, migration 000034, audit allowlist)+ci-gate clean(2564/30 pre-existing flaky, unit 1948/0)+code-review 1 MINOR self-fixed(catch-all fail-closed hardening)+Kassandra CLEAN(1 LOW self-fixed pre-review)+arc42 updated): 2026-07-20
+# story 10c-media-alerts-triggers done (pipeline: ATDD 20 tests(9 checker-worker+5 alerts_test+4 grants-DDL+2 LiveView AT10)+test-review 1 MAJOR fixed 1 cycle(F2 real-DB RLS-retune test, mirrors 9a's F1)+dev-story(migration 000033, MediaAlertsCheckerWorker, Nebu.Media.Alerts, config.ex 4 keys, dev-found media_id TEXT-not-UUID fix)+ci-gate clean(2554 tests/32 pre-existing flaky unrelated, unit 1939/0)+ux-gate 2 BLOCKING self-fixed(color-only severity+badge-misused-as-alert, reused media_live.ex alert/role precedent)+code-review 1 MINOR self-fixed(stale doc comment)+Kassandra APPROVED CLEAN(0 CRIT/HIGH/MED/LOW, 2 INFO)+arc42 updated): 2026-07-20
+# story 10b-clamav-status-freshclam-age done (pipeline: ATDD 15 tests+1 test-review MAJOR fixed(AT6 rendered-copy)+dev-story(clamav.ex changed_at+signature_info/0+asctime parser, ClamAVStatusIndicator, MediaHealthLive wired)+ci-gate clean(2528 tests,31 pre-existing/flaky verified)+ux-gate 1 BLOCKING fixed(role=status)+code-review 1 cycle(2 MINOR fixed, 1 accepted)+security-review skipped(optional, user declined)+arc42 updated): 2026-07-20
+# story 10a-scan-stats-rollup done (pipeline: ATDD 10 tests+dev(fixed story's own WHERE-before-window-function SQL bug, migration 000032+grants)+ci-gate clean(4 runs, pre-existing flaky unrelated failures only)+code-review CLEAN+self-security-review 0 CRIT/HIGH+arc42 updated): 2026-07-20
+# story 8d-released-auto-delete done (pipeline: ATDD+test-review 2 MAJOR fixed 1 cycle+dev-story+code-review 2 MINOR fixed 1 cycle+Kassandra CLEAN+arc42 updated): 2026-07-20
+# story 8c-media-archive-worker done (pipeline: ATDD 16 tests+dev-story(candidates_for_archive/1+commit_archived/1 on Nebu.Media.DB, ADR-032 copy-then-commit ordering via Enum.reduce_while, storage_key-hardcode+uploaded_at-BIGINT self-corrections)+ci-gate clean(unit 1906/0, integration 2487/27 pre-existing baseline/0 media)+code-review CLEAN(self, 1 cycle)+Kassandra APPROVED 0 CRIT/HIGH/MED/LOW 2 INFO(found+dev-fixed 1 CaseClauseError gap live during review)+arc42 updated): 2026-07-19
+# story 8b-orphan-detection-gdpr done (pipeline: ATDD 9 tests+dev-story(query correction verified via EXPLAIN ANALYZE)+CI clean+Kassandra APPROVED 1 INFO+arc42 updated): 2026-07-19
+# story 8a-media-cleanup-worker done (pipeline: ATDD 15 tests+test-review CLEAN+dev CLEAN+CI clean(0 media)+code-review 1 MINOR fixed 1 cycle+Kassandra 1 MEDIUM(F-1: dead :deleted retention path, cross-story gap w/ 6a)+2nd bug(Postgrex encode crash) found+fixed cycle 2, ledger-derived fix + real-DB regression test+arc42 updated): 2026-07-19
+# story 7-admin-notifications done (pipeline: ATDD+dev CLEAN, wired to 9a/9b's media_config webhook_url (not static app-env, per story's own contingency); Kassandra found+fixed 1 HIGH (missing send-time SSRF re-check, 9a forward-carry) -> CLEAN post-fix): 2026-07-19
+# story 6c-infected-override done (pipeline: ATDD 19 tests+Dev(check_infected/1 fix)+Code(2 self-fixes: disabled-btn wiring, focus-trap leak)+CI 2431/33(0 media, OOM-flaky env)+Kassandra APPROVED 0 CRIT/HIGH/MED/LOW 2 INFO): 2026-07-19
+# story 6b-file-detail-storage-summary done (pipeline: ATDD+Dev CLEAN(self-review found+fixed AC7 clamav_signature key drift+SUM/bigint cast, both independently re-verified by Kassandra)+CI clean 2412/34(0 media)+Kassandra APPROVED 0 CRIT/HIGH/MED/LOW 2 INFO+arc42 updated): 2026-07-19
+# story 6a-routine-state-actions done (pipeline: ATDD+Dev CLEAN 1 cycle(defensive catch-all)+Kassandra 1 CRITICAL fixed(:admin_blocked anonymity dormant-1c-finding gone live, ADR-026 re-corrected)+design-gap fix(actor_id UUID->TEXT migration 000029)): 2026-07-19
+# story 5b-live-updates-nav-badges done (pipeline: ATDD+Dev CLEAN, design gap corrected (6 LiveViews not 4), CI clean, UX 2 self-fixed, Kassandra APPROVED 1 INFO): 2026-07-18
+# story 5a-admin-media-table done (pipeline: ATDD 23 tests+CI clean+UX self-review clean(2 a11y fixes same-pass)+Code-review 3 MINOR self-fixed+Kassandra APPROVED 2 INFO+arc42 updated): 2026-07-18
+# story 4c-infected-scanfailed-audit-bridge done (pipeline: ATDD 14 tests(2 allowlist+9 worker-bridge+3 real-DB)+dev(AuditWriter.@known_actions+2 actions, worker infect/2+scan_error/4 audit calls, lookup_for_scan+3 cols)+self-code-review CLEAN (allowlist regression verified live: reverted->RED->restored->GREEN)+ci-gate redeploy+integration 2335/37(0 story-related, all pre-existing baseline noise)+unit 1856/0+Kassandra APPROVED 0 CRIT/HIGH/MED/2 LOW advisory+arc42 05/10/ADR-028 updated): 2026-07-14
+# story 4b-media-scan-worker done (pipeline: ATDD+Dev(1 cycle: decode16!/case-catch-all fixes)+CI clean+Kassandra APPROVED (2 LOW fwd-looking)+arc42 updated): 2026-07-14
+# story 4a-scan-failed-enum-migration done (pipeline: ATDD 26 tests(12 static-SQL+2 real-DB enum+10 state_machine+1 download-gate AC5+1 grants-list)+Dev CLEAN(migration renumbered 000023->000028, 5 sibling stories claimed 000023-27 first)+Code-review CLEAN(1 pre-existing test regression found+fixed pre-CI-gate)+CI-gate 2311/31(0 media, all pre-existing flaky admin/SSO/logging categories)+unit 1837/0+Kassandra APPROVED CLEAN(pattern #83 re-verified against live enum)+arc42 updated): 2026-07-14
+# story 2e-reserved-upload-cleanup-cron done (pipeline: ATDD 6+1 tests(2 MAJOR fixed pre-dev: AC4 real-edge coverage+AC5 narrow-error pin)+Oban bootstrap(mix.exs/migration 000026/app.ex/config.exs, first ADR-025 landing ahead of 4b); dev-story: worker+state_machine reserved->hard_deleted edge+cron entry; code-review 1 CRITICAL fixed(uploader_user_id NOT NULL violation, migration 000027+real-DB test)+1 MAJOR fixed(SQL-side TTL predicate)+2 MINOR; Kassandra APPROVED 0 CRIT/HIGH 2 LOW; integration 2286/32(0 media)+unit 1825 clean; arc42 delta+ADR-025 updated): 2026-07-14
+# story 2d-download-stall-mechanism done (pipeline: ?timeout_ms stall consumer, Oracle param-name catch+ATDD MAJOR fixed, 2 code-review cycles (3 MINOR fixed), Kassandra CLEAN 0 CRIT/HIGH 1 MED tracked): 2026-07-14
+# story 2c-sync-upload-shared-pipeline done (pipeline: ATDD+1 test-review MAJOR(accepted, resolved structurally)+dev CLEAN, code-review 2 MINOR fixed 1 cycle+Kassandra CLEAN (0 CRIT/HIGH, closed pre-existing unscanned-sync-upload gap)): 2026-07-14
+# story 2b-put-media-upload done (pipeline: ATDD 22 tests+1 test-review AC7-isolation added+Code-review 2 MAJOR fixed 1 cycle (silent-swallow 500-gate + @blocked_upload_types parity)+Kassandra CLEAN 1 LOW/3 INFO (TOCTOU self-vs-self accepted)): 2026-07-14
+# story 2a-post-media-create done (pipeline: ATDD 2 MAJOR fixed 1 cycle+Code-review CLEAN+Kassandra APPROVED (2 LOW/3 INFO advisory)): 2026-07-14
+# story 2a-post-media-create → review (dev-story: StateMachine.create/1 genesis fn +
+#   Nebu.Media.create/1 handler + Nebu.Media.Permission + Nebu.Matrix.active?/1 +
+#   DB.count_pending_reservations/1 + router post "/v1/create"; 10/10 media_create_test.exs +
+#   18/18 state_machine_test.exs (incl. 3 new genesis tests, integration-tagged against a live
+#   Postgres) green; full unit 1769 passed/4 skipped/452 excluded/0 failed, compile
+#   --warnings-as-errors clean; handing to code-review): 2026-07-14
+# story 11c-s3-key-prefix-template done (pipeline: ATDD 13 tests (scope-adapted AT8/9 per 9c pattern, 2b not landed)+Code-review 1 MAJOR fixed 1 cycle (path-escape validator rejected story's own hierarchical templates, reworked to per-segment check)+Kassandra CLEAN 2 LOW forward-carried to 2b): 2026-07-14
+# story 11c-s3-key-prefix-template → review (dev-story: validate_template/1 +
+#   compute_key/2 added to Nebu.Media.StorageConfig, wired into upsert/1;
+#   key_prefix_template_test.exs 12/12 + storage_config_test.exs 11c-AT7 green
+#   (26/26 combined); full unit 1757 passed/4 skipped/0 failed with
+#   --warnings-as-errors. Story 2b (store_and_quarantine seam) not landed yet,
+#   so server/lib/nebu/media.ex was intentionally not touched — same
+#   standalone-unwired-unit pattern as 9c; wiring instruction documented in
+#   the story's Dev Agent Record): 2026-07-14
+# story 11b-storage-ui-test-connection done (pipeline: ATDD 26 tests+Dev 2 cycles (UX 2 fixed+Code-review 2 MINOR fixed)+Kassandra CLEAN 1 MEDIUM forward-carry (SSRF IP-range, accepted)): 2026-07-14
+# story 11a-storage-config-schema-secrets done (pipeline: ATDD 13 tests (1 MAJOR pre-dev gap fixed: crash/restart test+Supervisor)+Code-review 0 MAJOR/2 MINOR fixed 1 cycle (plaintext-in-ETS+decrypt-failure handling)+Kassandra CLEAN (1 MEDIUM+3 LOW forward-carry, unwired module)): 2026-07-13
+# story 11a-storage-config-schema-secrets → review (dev-story: migration 000024 +
+#   GRANT to nebu_app + Nebu.Media.StorageConfig/Supervisor + Nebu.Application wiring +
+#   AuditWriter.@known_actions; storage_config_test.exs 13/13 + migrations_grant_test.exs
+#   green; fixed one order-dependent test-isolation flake (boot-started supervisor vs.
+#   stale ETS cache) in storage_config_test.exs's setup; full unit 1718 passed/0 failed
+#   with --warnings-as-errors): 2026-07-13
+# story 9c-mime-denylist-enforcement done (pipeline: ATDD 19 tests+1 MAJOR pre-dev test-review gap fixed+Code-review 0 MAJOR/2 MINOR fixed 1 cycle+Kassandra CLEAN 1 MEDIUM fixed same-cycle): 2026-07-13
+# story 9b-media-settings-ui done (pipeline: ATDD 16 tests+1 MAJOR pre-dev test-review gap fixed+Code-review 3 MINOR fixed 1 cycle+Kassandra APPROVED 1 LOW accepted): 2026-07-13
+# story 9b-media-settings-ui → review (dev-story: MediaSettingsController/HTML/template +
+#   router/layouts wired, 16/16 new ATDD tests green, full unit 1688 passed/4 skipped/0 failed,
+#   compile clean; nav pragmatically top-level per Correction 2 — no "Medien" parent exists yet)
+# story 9a-media-config-table-module done (pipeline: ATDD 19 tests+3 MAJOR test-review gaps fixed pre-dev+Code-review 1 MAJOR/4 MINOR fixed 1 cycle+Kassandra HIGH fixed re-verified CLEAN): 2026-07-13
+# story 3-clamav-genserver done (pipeline: ATDD 10 tests (3 MAJOR gaps fixed pre-dev)+Code-review 3 MINOR fixed 1 cycle+Kassandra APPROVED 1 MEDIUM fixed same-day+2 LOW/3 INFO carried to epic-end/Story-4b): 2026-07-13
+# story 12-gzip-compression-at-rest done (pipeline: ATDD 7 tests CLEAN (2 skipped, blocked on Story 4b)+code-review 2 MINOR fixed 1 cycle, security not-needed): 2026-07-13
+# story 12-gzip-compression-at-rest → review (dev-story: Storage.compress/1 added, 7/7 new tests green, unit 1636 passed/4 skipped/0 failed, compile clean)
+# story 1c-download-gate-enforcement done (pipeline: MAJOR fixed 3 cycles (to_existing_atom fail-closed rescue, DDL-free unit test rewrite)+Kassandra APPROVED 1 MEDIUM dormant advisory): 2026-07-13
+# story 1b-state-machine-module done (pipeline: ATDD 3 MAJOR fixed 1 cycle+Code-review 2 MINOR fixed 1 cycle+Kassandra CLEAN): 2026-07-13
+# story 1a-media-files-migration done (pipeline: ATDD+Dev CLEAN, 1 code-review cycle (2 MINOR fixed inline), Kassandra CLEAN): 2026-07-12
+# [epic-loop] 2026-07-12T00:00Z all 34 story files created (docs/stories/media-security-admin-control/),
+#   all statuses backlog -> ready-for-dev. Story files were authored out of build order in parallel
+#   batches and cross-checked against already-written sibling stories for naming/contract
+#   consistency (module names, PubSub topics, audit action atoms). Build order for the dev
+#   pipeline is unchanged (see order below).
+# Epic: media-security-admin-control
+# project: nebu
+# tracking_system: file-system
+# story_location: docs/stories/media-security-admin-control
+#
+# Source epic: _bmad-output/planning-artifacts/media-security-admin-control-epic.md
+# Sizing (Winston, 2026-07-01): 12 fachliche Stories → 33 S-große Arbeitspakete.
+#   Stories 3, 7, 12 blieben S (unverändert); 1/2/4/5/6/8/9/10/11 wurden gesplittet.
+#
+# NOTE (2026-07-10): dieses Tracking-File ist gegenüber dem Source-Epic bereits vor Review 9
+# veraltet (fehlt: Story 0 UX-Foundation, 6d Bulk Cohort Actions, 13a-13f Lifecycle/Two-Eyes) —
+# gleiche Klasse von Drift wie Murats test-design-progress.md-Fund in Review 8. Nur 10e (Review 9)
+# wurde hier nachgezogen; ein vollständiger Re-Sync ist ein separater Aufwand, kein Teil dieser
+# Änderung.
+#
+# STATUS DEFINITIONS:
+#   Epic:  backlog -> in-progress -> done
+#   Story: backlog -> ready-for-dev -> in-progress -> review -> done
+#   Retro: optional <-> done
+# Story wird 'ready-for-dev', sobald docs/stories/media-security-admin-control/<slug>.md existiert.
+#
+# Reihenfolge unten = empfohlene Build-Reihenfolge (Abhängigkeiten aufgelöst).
+
+project: nebu
+epic: media-security-admin-control
+epic_status: done
+
+development_status:
+  # --- Foundation (Story 1) ---
+  1a-media-files-migration: done                    # media_files-Spalten + media_state_transitions
+  1b-state-machine-module: done                    # Nebu.Media.StateMachine + Invarianten-Check
+  1c-download-gate-enforcement: done                # State -> HTTP (200/404/451)
+
+  # --- Storage-Basis ---
+  12-gzip-compression-at-rest: done                # :zlib.gzip vor AES-256-GCM, store-smaller-of-two
+
+  # --- Scanner ---
+  3-clamav-genserver: done                         # TCP INSTREAM, Health-Check, Auto-Reconnect
+
+  # --- Policy-Config (Story 9) ---
+  9a-media-config-table-module: done               # media_config + Nebu.Media.Config Public-API
+  9b-media-settings-ui: done                       # /admin/media/settings Policy-Werte + Validierung
+  9c-mime-denylist-enforcement: done               # Upload-Handler-Denylist zusätzlich zum Scan
+
+  # --- Storage-Ziel-Config (Story 11) ---
+  11a-storage-config-schema-secrets: done          # Felder + Secret-Feld-Verschlüsselung + Env-Fallback
+  11b-storage-ui-test-connection: done              # Test Connection + Endpoint-Change-Warnung
+  11c-s3-key-prefix-template: done                 # Upload-Zeit-Key-Berechnung, in storage_key persistiert
+
+  # --- Async Upload (Story 2) ---
+  2a-post-media-create: done                       # POST /_matrix/media/v1/create (:reserved, 429/403)
+  2b-put-media-upload: done                        # PUT upload + 403/404/409/413 + Storage-Pipeline
+  2c-sync-upload-shared-pipeline: done              # synchroner Upload durch dieselbe Pipeline
+  2d-download-stall-mechanism: done                 # ?timeout_ms=N PubSub-Stall im Download-Handler
+  2e-reserved-upload-cleanup-cron: done             # Oban-Cron: abgelaufene :reserved-Records
+
+  # --- Scan Worker (Story 4) ---
+  4a-scan-failed-enum-migration: done              # ALTER TYPE ADD VALUE 'scan_failed'
+  4b-media-scan-worker: done                       # MediaScanWorker Flow + Retry/Lifeline/Discard
+  4c-infected-scanfailed-audit-bridge: done        # audit_log-Bridge + @known_actions
+
+  # --- Admin Overview (Story 5) ---
+  5a-admin-media-table: done                       # /admin/media LiveView + Filter + Cursor-Pagination
+  5b-live-updates-nav-badges: done                 # PubSub-Row-Updates + Attention-Nav-Badges
+
+  # --- Admin Actions (Story 6) ---
+  6a-routine-state-actions: done                    # Block/Unblock/Delete/Rescan + Audit
+  6b-file-detail-storage-summary: done             # Detail-View + Audit-Trail + Storage-Summe
+  6c-infected-override: done                       # :infected->:released, Rolle + Pflicht-Reason
+
+  # --- Notifications (Story 7) ---
+  7-admin-notifications: done                       # PubSub-Events + optionaler Webhook (Oban)
+
+  # --- Retention & Cleanup (Story 8) ---
+  8a-media-cleanup-worker: done                    # Hard-Delete-Cron (:deleted/:infected)
+  8b-orphan-detection-gdpr: done                   # Orphan-Detection (detection/reporting only, NOT DSGVO Art.17 - see story)
+  8c-media-archive-worker: done                    # Archiv-Tier (S3-Copy, archived_at)
+  8d-released-auto-delete: done                    # released_delete_after_days (Default nil)
+
+  # --- Scan Health & Alerts (Story 10) ---
+  10a-scan-stats-rollup: done                      # media_scan_stats + Metriken-Sektion
+  10b-clamav-status-freshclam-age: done            # ClamAV up/down + Signatur-Alter
+  10c-media-alerts-triggers: done                  # media_alerts + Trigger + Auto-Resolve
+  10d-scan-kill-switch: done                       # fail-open / fail-closed (default fail_closed)
+  10e-trace-map-war-room-integration: done          # Scan-Pipeline in Trace-Map-Domain + War-Room-Sprung (Review 9)
+
+  # --- Epic Retrospective ---
+  media-security-admin-control-retrospective: optional

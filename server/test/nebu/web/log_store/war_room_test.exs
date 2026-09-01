@@ -271,6 +271,49 @@ defmodule Nebu.Web.LogStore.WarRoomTest do
   end
 
   # ══════════════════════════════════════════════════════════════════════════
+  # media-security-admin-control/10e-trace-map-war-room-integration (AC7):
+  # scope_matches?/2 (private, exercised only via the public check/1 API
+  # above) is extended, ADDITIVELY, to accept a LIST of route templates,
+  # OR-matched — alongside the existing nil/"all"/single-string forms
+  # re-asserted, UNCHANGED, in the "scope matching" describe block directly
+  # above this one.
+  #
+  # The `scope` column is plain TEXT (war_room_sessions migration 000019,
+  # confirmed by reading it directly — NOT jsonb), so a list-shaped scope
+  # round-trips through it JSON-encoded: dev-story is expected to
+  # `Jason.encode!/1` on write and `Jason.decode!/1` on read at THIS module's
+  # own `row_to_session/1` (it owns its own separate load-path SQL — see this
+  # module's moduledoc, "this module owns its own inline SQL"), mirroring
+  # whatever `Nebu.Admin.WarRoomManager`'s own `insert_session/1`/
+  # `row_to_session/1` do (covered separately in war_room_manager_test.exs).
+  #
+  # ## Why this MUST FAIL right now
+  #
+  # `scope_matches?/2` has no list-shaped clause today — a scope value that
+  # arrives as a JSON-encoded string still hits
+  # `scope_matches?(scope, route) when is_binary(scope), do: scope == route`,
+  # which can never equal a bare route_template string. Every assertion below
+  # fails today.
+  # ══════════════════════════════════════════════════════════════════════════
+
+  describe "10e AC7: scope as a list of route templates (OR-matched)" do
+    test "scope as a list matches every listed route_template but not an unlisted one", %{
+      war_room: wr
+    } do
+      id = insert_session(scope: Jason.encode!(["/media/clamav", "/media/scan_worker"]))
+      load!(wr)
+
+      assert Nebu.Web.LogStore.WarRoom.check(log_entry(route_template: "/media/clamav")) == id
+
+      assert Nebu.Web.LogStore.WarRoom.check(log_entry(route_template: "/media/scan_worker")) ==
+               id
+
+      refute Nebu.Web.LogStore.WarRoom.check(log_entry(route_template: "/admin/media")),
+             "a route_template NOT in the scope list must not match"
+    end
+  end
+
+  # ══════════════════════════════════════════════════════════════════════════
   # Filter matching — AC9's AND semantics across user_id + device_id
   # ══════════════════════════════════════════════════════════════════════════
 

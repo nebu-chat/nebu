@@ -1,0 +1,20 @@
+-- PostgreSQL has no `ALTER TYPE ... DROP VALUE` — an enum value, once committed,
+-- cannot be removed by a simple reverse statement. This down migration is
+-- deliberately a no-op; it exists only so the migration runner's up/down
+-- pairing convention holds (see 000022's sibling files for the same
+-- numbering/pairing rule this follows).
+--
+-- If a full rollback of 'scan_failed' is ever genuinely required (e.g. rolling
+-- back this entire story pre-release, before any row has used the value), the
+-- manual, out-of-band procedure is:
+--   1. Verify no media_files row has state = 'scan_failed'
+--      (SELECT count(*) FROM media_files WHERE state = 'scan_failed';  -- must be 0).
+--   2. CREATE TYPE media_state_old AS ENUM (the original 8 values from
+--      000022, in their original order).
+--   3. ALTER TABLE media_files ALTER COLUMN state TYPE media_state_old
+--      USING state::text::media_state_old;
+--   4. DROP TYPE media_state; ALTER TYPE media_state_old RENAME TO media_state;
+-- This procedure is NOT automated by this migration on purpose: it requires the
+-- step-2 zero-rows precondition to hold, which only a human/ops decision can
+-- verify safely at rollback time — an automated down-migration that silently
+-- ran this against a database with live scan_failed rows would destroy data.

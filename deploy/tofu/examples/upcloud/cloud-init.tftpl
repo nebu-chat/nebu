@@ -425,6 +425,32 @@ write_files:
                 cpus: '${dex_cpu_limit}'
                 memory: ${dex_memory_limit}
 %{ endif ~}
+%{ if enable_media_gateway ~}
+        # ADR-024: self-hosted ClamAV, no file content/hash leaves the deployment.
+        # Kassandra security review (F-4, 2026-07-13): clamd has no authentication
+        # and its control protocol includes verbs like SHUTDOWN — deliberately no
+        # `ports:` mapping here, reachable only from `server` over the private
+        # compose network by service name (matches Nebu.Media.ClamAV's
+        # NEBU_CLAMAV_HOST/PORT defaults, "clamav"/3310 — no env override needed).
+        clamav:
+          image: clamav/clamav:stable
+          restart: unless-stopped
+          volumes:
+            - clamav_data:/var/lib/clamav
+          healthcheck:
+            # Bundled in the clamav/clamav image specifically for container healthchecks.
+            test: ["CMD", "clamdcheck.sh"]
+            interval: 30s
+            timeout: 10s
+            retries: 5
+            # freshclam's first signature database download can take a few minutes.
+            start_period: 180s
+          deploy:
+            resources:
+              limits:
+                cpus: '${clamav_cpu_limit}'
+                memory: ${clamav_memory_limit}
+%{ endif ~}
         server:
           image: $${NEBU_IMAGE_REGISTRY}/nebu-server:$${NEBU_VERSION}
           restart: unless-stopped
@@ -541,6 +567,11 @@ write_files:
               limits:
                 cpus: '0.25'
                 memory: 64m
+%{ endif ~}
+%{ if enable_media_gateway ~}
+
+      volumes:
+        clamav_data:
 %{ endif ~}
 
   # ── /etc/systemd/system/nebu.service ───────────────────────────────────────

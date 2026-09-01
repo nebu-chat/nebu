@@ -53,6 +53,14 @@ module.exports = {
         // the plain error token (#ef4444) only reaches 4.29:1 there.
         "status-error-text": "#fca5a5",
         "base-400":        "#0d1117",
+        // media-security-admin-control/5a-admin-media-table (DESIGN.md D2/D6/D7):
+        // net-new media-state badge vocabulary, distinct from the ops traffic-light
+        // tokens above (so "a file is available" never reads as generic ops "OK").
+        "media-processing": "#f59e0b",
+        "media-released":   "#14b8a6",
+        "media-infected":   "#ef4444",
+        "media-blocked":    "#fb7185",
+        "media-terminal":   "#6b7280",
       },
       fontFamily: {
         sans: ["Inter", "system-ui", "sans-serif"],
