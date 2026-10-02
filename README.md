@@ -161,13 +161,17 @@ make dev       # starts server (Elixir), postgres, dex (OIDC) via docker compose
 
 > **MinIO credentials:** `make setup` generates `.secrets/minio_root_user` and `.secrets/minio_root_password` automatically. These are example credentials for local development only. **Replace before first production start.** The `.secrets/` directory is gitignored and never committed.
 
-**One-time setup:** add `dex` to `/etc/hosts` so the OIDC redirect resolves in your browser:
+Dex (the dev OIDC provider) is reachable at `dex.localtest.me:5556` — a public DNS
+name that resolves to `127.0.0.1` (the [`*.localtest.me`](http://readme.localtest.me/)
+convention), so no `/etc/hosts` edit is needed. **Most common failure on a home
+network:** DNS-rebind protection in consumer routers (e.g. AVM Fritz!Box — on by
+default in Germany/EU) blocks public hostnames from resolving to loopback/private
+IPs. Check with `dig +short dex.localtest.me` — it should print `127.0.0.1`; if it
+prints nothing, that's the cause. This only affects your HOST machine/browser —
+containers are unaffected (they resolve `dex.localtest.me` via the Docker Compose
+network alias, not public DNS). Fix: `sudo sh -c 'echo "127.0.0.1 dex.localtest.me" >> /etc/hosts'`.
 
-```bash
-sudo sh -c 'echo "127.0.0.1 dex" >> /etc/hosts'
-```
-
-Open http://localhost:8008/admin and complete the Bootstrap Wizard (OIDC issuer: `http://dex:5556/dex`, client id: `nebu-admin`, client secret: `nebu-admin-secret`). Log in with one of the dev users:
+Open http://localhost:8008/admin and complete the Bootstrap Wizard (OIDC issuer: `http://dex.localtest.me:5556/dex`, client id: `nebu-gateway`, client secret: `nebu-dev-secret`). Log in with one of the dev users:
 
 | Email                      | Password   | Role                 |
 |----------------------------|------------|----------------------|

@@ -37,6 +37,9 @@
 | **MinIO** | S3-compatible object storage server used as the local-dev media backend (Epic 12). Apache 2.0 licensed. |
 | **nebu-media** | The MinIO bucket (created by the `createbuckets` init container) where all media uploads are stored |
 | **Storer** | Go interface (`Put / Get / Delete`) in `media/internal/storage` that abstracts file-system and S3 backends. `LocalStorer` implements it for the local filesystem; `MinIOStorer` for MinIO. Both handlers depend on `Storer` via injection (Story 12.2). |
+| **ClamAV** | Self-hosted, open-source malware scanner daemon (`clamd`). `Nebu.Media.ClamAV` (a GenServer) speaks its INSTREAM protocol over `:gen_tcp`; chosen (ADR-024) over commercial/cloud alternatives because no file content or hash ever leaves the deployment — a DSGVO hard requirement (epic `media-security-admin-control`) |
+| **Media State Machine** | The `media_files.media_state` lifecycle every upload passes through: `quarantined → scanning → released` \| `infected` \| `scan_failed`. No file is served to a Matrix client before reaching `released` (epic `media-security-admin-control`, ADR-031) |
+| **Scan Kill-Switch** | Admin-configurable `fail_open` / `fail_closed` policy for what happens to in-flight uploads when ClamAV is unreachable. Nebu defaults to `fail_closed` — uploads queue/retry rather than being released unscanned (Story `10d-scan-kill-switch`) |
 | **oapi-codegen** | (Historical, removed ADR-021) A Go code generator that produced types and a `ServerInterface` from an OpenAPI 3.1 YAML spec. Removed with the Go gateway. |
 | **PSK** | Pre-Shared Key - used for node registration security in the MVP (Docker Compose secrets) |
 | **mTLS** | Mutual TLS - ephemeral certificate-based authentication planned for Phase 2 node registration |
@@ -66,4 +69,4 @@
 | **Operator** | The organization or individual who deploys and runs a Nebu instance |
 | **Hoster** | An IT service provider who runs Nebu as a managed service for customers |
 
-_Source: `CLAUDE.md`, §Tech Stack, §Matrix API Scope; `_bmad-output/planning-artifacts/architecture.md`, §Naming Conventions; `_bmad-output/planning-artifacts/prd.md`, §User Journeys; Story 9-28 (Thread, Bundled Aggregations, m.relates_to)_
+_Source: `CLAUDE.md`, §Tech Stack, §Matrix API Scope; `_bmad-output/planning-artifacts/architecture.md`, §Naming Conventions; `_bmad-output/planning-artifacts/prd.md`, §User Journeys; Story 9-28 (Thread, Bundled Aggregations, m.relates_to); epic `media-security-admin-control`, Stories 3 (ClamAV GenServer) and 10d (Scan Kill-Switch)_

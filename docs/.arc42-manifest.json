@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-09-01T07:13:16Z",
-  "generator": "bmad-maintain-arc42 skill (freshness re-verification \u2014 CI test-unit branch GitLab pipeline red on validate-iac + verify-docs; verify-docs failed the 60-day manifest-freshness gate for 16 files sourced from _bmad-output/planning-artifacts/architecture.md, epics.md, and CLAUDE.md. Verified via git log that architecture.md and epics.md have had zero commits since 2026-06-23 (predates all 16 files' prior generated_at) \u2014 no content drift, sections 02/03/04/06/07/12-glossary-adjacent ADR-001..009 and roadmap.md remain accurate as generated. CLAUDE.md changed 2026-06-30 18:05 UTC (condensed to the current German Projekt/Code-Change-Policy/Modulstruktur/Key-ADRs form) \u2014 diffed against 09-decisions.md's existing ADR-018..022 coverage and confirmed no information loss, the file's detail already exceeds the condensed CLAUDE.md table. No section content changed; only generated_at timestamps refreshed to record this verification pass. Previous delta: bugfix-fix-matrix-client-v1-media-routes; new Nebu.Web.Router.ClientV1Media module + /_matrix/client/v1/media forward in router.ex serving authenticated download/thumbnail; matrix-api-scope.md v1/v3 media config rows corrected from stale Story 12.16 done to not-implemented.)",
+  "generated_at": "2026-10-02T06:35:40Z",
+  "generator": "bmad-maintain-arc42 skill (freshness delta: README, 05-building-blocks, 10-quality, ADR-031, matrix-api-scope exceeded the 60-day check_manifest_freshness threshold. README/10-quality/ADR-031 content verified current, timestamp refreshed. 05-building-blocks + matrix-api-scope updated for bugfix-oidc-public-endpoint-urls: OidcMetadata.ensure_msc2965_fields/2, no origin rewriting, OidcConfig issuer reachability contract)",
   "source_artifacts": [
     "_bmad-output/planning-artifacts/architecture.md",
     "_bmad-output/planning-artifacts/prd.md",
@@ -66,7 +66,7 @@
   "files": {
     "docs/architecture/README.md": {
       "editable": false,
-      "generated_at": "2026-07-12T00:00:00Z",
+      "generated_at": "2026-10-02T06:35:40Z",
       "source": "_bmad-output/planning-artifacts/prd.md",
       "arc42_section": "01 Introduction and Goals"
     },
@@ -90,8 +90,8 @@
     },
     "docs/architecture/05-building-blocks.md": {
       "editable": false,
-      "generated_at": "2026-07-31T00:00:00Z",
-      "source": "docs/stories/bugfix/fix-matrix-client-v1-media-download-thumbnail-routes/fix-matrix-client-v1-media-download-thumbnail-routes.md (prior delta: docs/stories/media-security-admin-control/1b-state-machine-module.md + 1c-download-gate-enforcement.md + 2a-post-media-create.md + 2c-sync-upload-shared-pipeline.md + 2d-download-stall-mechanism.md + 2e-reserved-upload-cleanup-cron.md + 3-clamav-genserver.md + 4a-scan-failed-enum-migration.md + 9a-media-config-table-module.md + 12-gzip-compression-at-rest.md + 11a-storage-config-schema-secrets.md + 11b-storage-ui-test-connection.md + 11c-s3-key-prefix-template.md + 4b-media-scan-worker.md + 4c-infected-scanfailed-audit-bridge.md + 5a-admin-media-table.md + 5b-live-updates-nav-badges.md + 6a-routine-state-actions.md + 6b-file-detail-storage-summary.md + 6c-infected-override.md + 8a-media-cleanup-worker.md + 8b-orphan-detection-gdpr.md + 8c-media-archive-worker.md + 8d-released-auto-delete.md + 10a-scan-stats-rollup.md + 10b-clamav-status-freshclam-age.md + 10c-media-alerts-triggers.md + 10d-scan-kill-switch.md + 10e-trace-map-war-room-integration.md \u2014 full media-security-admin-control epic building-block history, see git log for docs/architecture/05-building-blocks.md)",
+      "generated_at": "2026-10-02T06:35:40Z",
+      "source": "docs/stories/bugfix/fix-matrix-client-v1-media-download-thumbnail-routes/fix-matrix-client-v1-media-download-thumbnail-routes.md (prior delta: docs/stories/media-security-admin-control/1b-state-machine-module.md + 1c-download-gate-enforcement.md + 2a-post-media-create.md + 2c-sync-upload-shared-pipeline.md + 2d-download-stall-mechanism.md + 2e-reserved-upload-cleanup-cron.md + 3-clamav-genserver.md + 4a-scan-failed-enum-migration.md + 9a-media-config-table-module.md + 12-gzip-compression-at-rest.md + 11a-storage-config-schema-secrets.md + 11b-storage-ui-test-connection.md + 11c-s3-key-prefix-template.md + 4b-media-scan-worker.md + 4c-infected-scanfailed-audit-bridge.md + 5a-admin-media-table.md + 5b-live-updates-nav-badges.md + 6a-routine-state-actions.md + 6b-file-detail-storage-summary.md + 6c-infected-override.md + 8a-media-cleanup-worker.md + 8b-orphan-detection-gdpr.md + 8c-media-archive-worker.md + 8d-released-auto-delete.md + 10a-scan-stats-rollup.md + 10b-clamav-status-freshclam-age.md + 10c-media-alerts-triggers.md + 10d-scan-kill-switch.md + 10e-trace-map-war-room-integration.md — full media-security-admin-control epic building-block history, see git log for docs/architecture/05-building-blocks.md)",
       "arc42_section": "05 Building Block View"
     },
     "docs/architecture/06-runtime.md": {
@@ -108,7 +108,7 @@
     },
     "docs/architecture/08-concepts.md": {
       "editable": false,
-      "generated_at": "2026-07-08T10:15:30Z",
+      "generated_at": "2026-09-02T14:56:47Z",
       "source": "docs/stories/enhanced-logging/war-room-dedicated-page.md",
       "arc42_section": "08 Cross-cutting Concepts"
     },
@@ -120,20 +120,20 @@
     },
     "docs/architecture/10-quality.md": {
       "editable": false,
-      "generated_at": "2026-07-20T20:30:00Z",
+      "generated_at": "2026-10-02T06:35:40Z",
       "source": "_bmad-output/planning-artifacts/prd.md + docs/stories/media-security-admin-control/1c-download-gate-enforcement.md + 2a-post-media-create.md (async-upload reservation, actor-ledger-narrowing, pending-count soft limit) + 2c-sync-upload-shared-pipeline.md (closed sync-upload-quarantine gap, shared-pipeline extraction, test-proven state invariant) + 2d-download-stall-mechanism.md (event-driven ?timeout_ms stall NFR, concurrency ceiling, Kassandra M-1 no-per-IP-rate-limit finding tracked non-blocking) + 2e-reserved-upload-cleanup-cron.md (stale reservation cleanup cron, data-hygiene scenario, Kassandra F-1/F-2 security findings) + 3-clamav-genserver.md + 4a-scan-failed-enum-migration.md (media_state 9th value 'scan_failed', download-gate catch-all verified against a real committed ENUM value, Kassandra CLEAN) + 9a-media-config-table-module.md (security scenarios, migration GRANT pattern) + 11a-storage-config-schema-secrets.md (SecretBox reuse, unwired-module forward-SSRF/transport-downgrade finding) + 11b-storage-ui-test-connection.md (endpoint scheme validation guard implementation) + 11c-s3-key-prefix-template.md (path-escaping validation, per-segment analysis Cycle 1 fix) + 4b-media-scan-worker.md (Oban.insert/1 first HTTP-adjacent trigger, decompression-bomb trace, Kassandra APPROVED) + 4c-infected-scanfailed-audit-bridge.md (AuditWriter compliance bridge, ADR-028, Kassandra APPROVED) + 5a-admin-media-table.md (first admin render of attacker-controlled filename, own watch-list item partially closed, Kassandra APPROVED) + 5b-live-updates-nav-badges.md (first real broadcaster onto a media: PubSub topic, media:admin topic + MediaAttentionBadge, Kassandra APPROVED) + 6a-routine-state-actions.md (first admin-facing media WRITE path, ADR-026 :admin_blocked anonymity CRITICAL fix, Kassandra APPROVED post-fix) + 6b-file-detail-storage-summary.md (read-only file detail view + storage summary, scan_metadata clamav_signature key fix, SUM(bigint)->Decimal cast fix, Kassandra APPROVED, both BOND.md/1b-I-1 watch-flags re-checked still open) + 6c-infected-override.md (distinct media_admin_override grant beyond generic admin, check_infected/1 ATDD-caught fix, confirm-disabled/focus-trap self-caught fixes, Kassandra APPROVED) + 8a-media-cleanup-worker.md (retention hard-delete cron security scenario: F-1/MEDIUM dead-:deleted-retention-path cross-story timestamp gap found+fixed, orthogonal Postgrex parameter-encoding crash found+fixed same cycle, Kassandra + code-review both clean post-fix) + 8b-orphan-detection-gdpr.md (orphan-detection-cron-becomes-auto-delete security scenario: structural StateMachine-reference-free detection-only guarantee, live-Postgres 3-field anti-join re-verification, actor_user_id required-field fix, GIN-index-lock INFO, Kassandra APPROVED verdict) + 8c-media-archive-worker.md (archive-tier bucket-to-bucket copy race/idempotency security scenario: archived_at IS NULL guard verified sufficient without SELECT FOR UPDATE, download-path bucket-switch no-leak/no-bypass analysis, storage_key-hardcode and uploaded_at-BIGINT-vs-interval self-corrected bugs independently re-verified, CaseClauseError gap found+fixed during the review itself, Kassandra APPROVED verdict) + 8d-released-auto-delete.md (operational data-minimization window security scenario: largest-blast-radius optional cron on correctly disabled-by-default semantics, never a security feature, optional soft-delete via StateMachine of :released files past configurable age, released_delete_after_days default nil=strict-no-op, fourth/final retention lever, per-row rescue isolation, multiple independent schema/boundary validations, integration test pattern byte-identical to 8a, Kassandra APPROVED 0 CRIT/HIGH/MED 2 LOW advisory-only) + 10a-scan-stats-rollup.md (scan-health-rollup security scenario: new derived-aggregate table deliberately without append-only/RLS controls since it holds no PII, legitimate exception to the epic's Missing-RLS-on-new-tables recurring pattern, self-performed adversarial review 0 CRITICAL/HIGH) + 10b-clamav-status-freshclam-age.md (operability NFR-O2 poll-tick interval, staleness threshold operability NFR, architecture decision: poll-based vs PubSub broadcast, verified zVERSION\\0 format + clamd peer-close behavior, code-review CLEAN, security-review skipped optional-tier story) + 10c-media-alerts-triggers.md (scan-pipeline-degradation-silent operability scenario: four health-condition thresholds + per-minute periodic checker + auto-resolve-only + dashboard render, Kassandra CLEAN 0 CRIT/HIGH/MED/LOW, idempotency verified real-Postgres concurrent, zero new audit actions per Dev Agent Guardrails) + 10d-scan-kill-switch.md (availability-vs-safety kill-switch scenario: admin-configurable fail-open/fail-closed policy when ClamAV unreachable, default fail_closed defended at 3 layers, media_unscanned_release non-negotiable audit requirement verified linear no-silent-skip, Kassandra CLEAN 0 CRIT/HIGH/MED, 1 LOW self-fixed pre-review, chain-risk note vs. Story 3's already-remediated clamd network exposure) + 10e-trace-map-war-room-integration.md (media scan-pipeline incident investigation observability scenario: scan-pipeline events (ClamAV health, MediaScanWorker job, admin overrides) integrated into Trace-Map/War-Room operational visibility, WarRoom.scope_matches?/2 extended to LIST-form domain-scoped sessions, MediaHealthLive Live-Diagnose action starts bounded War Room session, redirects to /admin/logs?war_room_id=..., Kassandra CLEAN 0 CRIT/HIGH/MED, 2 LOW non-blocking)",
       "arc42_section": "10 Quality Requirements"
     },
     "docs/architecture/11-risks.md": {
       "editable": false,
-      "generated_at": "2026-07-10T06:40:29Z",
+      "generated_at": "2026-09-08T09:42:56Z",
       "source": "_bmad-output/implementation-artifacts/sprint-status.yaml",
       "arc42_section": "11 Risks and Technical Debt"
     },
     "docs/architecture/12-glossary.md": {
       "editable": false,
-      "generated_at": "2026-07-10T06:39:30Z",
-      "source": "CLAUDE.md",
+      "generated_at": "2026-09-08T09:42:56Z",
+      "source": "CLAUDE.md, _bmad-output/planning-artifacts/architecture.md",
       "arc42_section": "12 Glossary"
     },
     "docs/architecture/adr/ADR-001-elixir-otp.md": {
@@ -204,7 +204,7 @@
     },
     "docs/architecture/adr/ADR-031-media-state-transitions-db-immutability.md": {
       "editable": false,
-      "generated_at": "2026-07-12T00:00:00Z",
+      "generated_at": "2026-10-02T06:35:40Z",
       "source": "media-security-admin-control epic, Story 1a (migration 000022)",
       "arc42_section": "ADR-031"
     },
@@ -216,7 +216,7 @@
     },
     "docs/matrix-api-scope.md": {
       "editable": false,
-      "generated_at": "2026-07-31T00:00:00Z",
+      "generated_at": "2026-10-02T06:35:40Z",
       "source": "server/lib/nebu/web/router.ex, server/lib/nebu/web/router/client_v1_media.ex (docs/stories/bugfix/fix-matrix-client-v1-media-download-thumbnail-routes/fix-matrix-client-v1-media-download-thumbnail-routes.md)",
       "arc42_section": "Matrix API Scope"
     },

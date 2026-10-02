@@ -90,6 +90,8 @@ resource "upcloud_server" "nebu" {
     pg_password         = upcloud_managed_database_user.nebu_app.password
     pg_migrate_user     = upcloud_managed_database_user.nebu_migrate.username
     pg_migrate_password = upcloud_managed_database_user.nebu_migrate.password
+    pg_admin_user       = upcloud_managed_database_postgresql.nebu.service_username
+    pg_admin_password   = upcloud_managed_database_postgresql.nebu.service_password
     # TLS — "dynamic" uses the same VM-side nginx setup as "alb"; only the cert
     # management differs (UpCloud LB handles it vs. manual PEM upload).
     tls_mode       = var.tls_mode == "dynamic" ? "alb" : var.tls_mode

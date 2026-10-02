@@ -11,6 +11,29 @@ defmodule Nebu.Web.OidcConfig do
   values through this cache. A per-request DB call on the hot token-validation path
   is unacceptable, so this module caches the values in a named ETS table.
 
+  ## Operational contract: `issuer` must be reachable from BOTH sides (bugfix-oidc-public-endpoint-urls)
+
+  `:issuer` is the IdP's identity — used BOTH for Nebu's own outbound calls
+  (discovery fetch, token exchange, JWKS fetch, all via this same URL) AND, via
+  the fetched discovery document's `authorization_endpoint`, as the target of the
+  browser-facing SSO redirect (`Nebu.Matrix.SsoLogin`, `Nebu.Admin.Auth`). This is
+  the same single-URL contract every OIDC library/framework expects — Nebu does
+  NOT maintain a separate "internal" vs. "public" issuer, and does NOT rewrite any
+  fetched discovery document's endpoint URLs (an earlier cycle of this bugfix
+  tried that; code review rejected it as fragile — see
+  `Nebu.Matrix.OidcMetadata` moduledoc for why).
+  Operators deploying against a real IdP (Keycloak, Dex, ...) MUST therefore
+  ensure the URL configured here resolves and connects both from the Nebu
+  server's own network AND from end users' browsers. For a real deployment this
+  is standard OIDC practice — a public DNS name, or split-horizon DNS in an
+  enterprise network, resolving to the IdP from both vantage points. For local
+  Docker Compose dev, see `dev/dex/config.yaml` + the `dex` service's network
+  alias in `docker-compose.yml`: Dex is configured with a public-DNS-resolvable
+  issuer hostname (`dex.localtest.me`, via the `*.localtest.me` wildcard-to-
+  127.0.0.1 convention) that ALSO resolves to the same container from inside the
+  compose network via that alias — no `/etc/hosts` edit needed, no origin
+  rewriting anywhere in this codebase.
+
   ## Interface
 
   - `get/0` — returns `%{issuer: binary() | nil, audience: binary() | nil}`.

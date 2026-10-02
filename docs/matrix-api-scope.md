@@ -23,7 +23,7 @@ Client-Server API specification.
 | GET | `/_matrix/client/v3/capabilities` | 🔶 | Returns change_password: false, room_versions: {6: stable} |
 | GET | `/_matrix/client/unstable/org.matrix.msc2965/auth_issuer` | ✅ | Returns OIDC issuer from `server_config` (Bootstrap Wizard) - MSC2965 OIDC discovery (Story 13-7) |
 | GET | `/_matrix/client/v1/auth_issuer` | ✅ | Stable v1 path - same handler as unstable (Story 13-7) |
-| GET | `/_matrix/client/unstable/org.matrix.msc2965/auth_metadata` | ✅ | Proxies OIDC discovery document from the issuer in `server_config`; 5-min TTL cache; 503 M_UNAVAILABLE on provider failure (Story 13-7) |
+| GET | `/_matrix/client/unstable/org.matrix.msc2965/auth_metadata` | ✅ | Proxies OIDC discovery document from the issuer in `server_config`; 5-min TTL cache; 503 M_UNAVAILABLE on provider failure (Story 13-7). Served verbatim (no origin rewriting) except `Nebu.Matrix.OidcMetadata.ensure_msc2965_fields/2` fills in `registration_endpoint`, `response_modes_supported`, `revocation_endpoint` when the IdP omits them (bugfix-oidc-public-endpoint-urls) |
 | GET | `/_matrix/client/v1/auth_metadata` | ✅ | Stable v1 path - same handler as unstable (Story 13-7) |
 
 ## Authentication

@@ -1,4 +1,16 @@
-issuer: http://dex:5556/dex
+# bugfix-oidc-public-endpoint-urls: Dex's OWN issuer is configured as a
+# publicly-resolvable hostname (the well-known *.localtest.me wildcard DNS
+# service, which resolves any subdomain to 127.0.0.1 — no /etc/hosts edit
+# needed) rather than the Docker-Compose-internal service name `dex`. Dex bakes
+# this SAME hostname into every URL in its own discovery document
+# (authorization_endpoint, token_endpoint, jwks_uri, issuer, ...), so browsers
+# and Matrix clients receive endpoint URLs they can actually reach — no
+# response rewriting needed anywhere in Nebu. See docker-compose.yml: the `dex`
+# service is given a network alias so `dex.localtest.me` ALSO resolves to this
+# same container from inside the compose network, letting Nebu's own
+# server-to-server calls (discovery fetch, token exchange, JWKS fetch) reach
+# Dex by this exact hostname too.
+issuer: http://dex.localtest.me:5556/dex
 
 storage:
   type: sqlite3
@@ -33,6 +45,12 @@ staticClients:
       - "http://localhost:8008/_matrix/client/v3/login/sso/redirect/oidc"
       - "http://localhost:7070/auth.html"
       - "http://localhost:8008/admin/callback"
+      # nebu-app (FluffyChat fork) dev instance, served on :7071 to avoid
+      # clashing with the :7070 Element sidecar. Nebu's own SSO redirect
+      # endpoint builds this client's redirect_uri from the request's Host
+      # header, so it must exactly match whatever origin nebu-app is served
+      # from during local testing.
+      - "http://localhost:7071/_matrix/client/v3/login/sso/redirect/oidc"
 
 staticPasswords:
   - email: "kai@example.com"

@@ -51,7 +51,7 @@ test.describe('Bootstrap — Connect with OIDC click (regression repro)', () => 
     await expect(page.getByRole('heading', { name: /Step 2/ })).toBeVisible();
 
     // ── Step 2: OIDC Configuration + Connect with OIDC ─────────────────────
-    await page.getByRole('textbox', { name: 'OIDC Issuer URL' }).fill('http://dex:5556/dex');
+    await page.getByRole('textbox', { name: 'OIDC Issuer URL' }).fill('http://dex.localtest.me:5556/dex');
     await page.getByRole('textbox', { name: 'OIDC Client ID' }).fill('nebu-gateway');
     await page.getByRole('textbox', { name: 'OIDC Client Secret' }).fill('nebu-dev-secret');
     await page.getByRole('button', { name: 'Connect with OIDC' }).click();
@@ -73,7 +73,7 @@ test.describe('Bootstrap — Connect with OIDC click (regression repro)', () => 
     // load OIDC config) and must NOT receive any 429.
     await page.waitForURL(/\/admin\//, { timeout: 15_000 });
     expect(page.url(), 'callback must not redirect to login with error').not.toMatch(/login\?error=/);
-    expect(page.url(), 'must not still be on Dex').not.toMatch(/dex:5556/);
+    expect(page.url(), 'must not still be on Dex').not.toMatch(/dex\.localtest\.me:5556/);
 
     // ── Claim selection: pick instance_admin and submit ────────────────────
     // Picks the first claim that contains "instance_admin" (kai's group).

@@ -22,9 +22,12 @@
  */
 
 const MATRIX_BASE = process.env.NEBU_MATRIX_BASE ?? 'http://localhost:8008';
-// Dex's OIDC discovery document. In local dev Dex is reached via the `dex` host
-// alias (see `127.0.0.1 dex` in /etc/hosts); the issuer path is `/dex`.
-const DEX_ISSUER = process.env.NEBU_OIDC_ISSUER ?? 'http://dex:5556/dex';
+// Dex's OIDC discovery document. bugfix-oidc-public-endpoint-urls: Dex's own
+// issuer (dev/dex/config.yaml) is the public hostname `dex.localtest.me`, which
+// resolves to 127.0.0.1 via public DNS (the *.localtest.me convention) — no
+// /etc/hosts edit needed on a host with normal internet DNS access. The issuer
+// path is `/dex`.
+const DEX_ISSUER = process.env.NEBU_OIDC_ISSUER ?? 'http://dex.localtest.me:5556/dex';
 
 // How long a single probe may take before it counts as "unreachable".
 // Kept short on purpose — the whole point is to fail FAST, not to wait out the
@@ -97,9 +100,10 @@ export async function assertDexReachable() {
   }
 
   // Probe 2: Dex discovery document — the authoritative reachability check.
-  // Note: from the host this requires `127.0.0.1 dex` in /etc/hosts (the issuer
-  // host is `dex`). If that mapping is missing the DNS lookup fails here with a
-  // clear message rather than a browser timeout.
+  // Note: dex.localtest.me resolves to 127.0.0.1 via public DNS on a host with
+  // normal internet access — no /etc/hosts edit needed. If DNS itself is
+  // unavailable in this environment (e.g. an air-gapped sandbox), fall back to
+  // `127.0.0.1 dex.localtest.me` in /etc/hosts (see error message below).
   try {
     const res = await probe(discoveryUrl);
     if (res.status >= 500 || res.status === 404) {
@@ -112,8 +116,10 @@ export async function assertDexReachable() {
     if (e instanceof DexUnreachableError) throw e;
     throw new DexUnreachableError(
       `[preflight] Dex discovery unreachable at ${discoveryUrl}: ${e.message}\n` +
-      `  Either Dex is down, or \`127.0.0.1 dex\` is missing from /etc/hosts.\n` +
-      `  Fix:  docker compose up -d dex   AND   'echo "127.0.0.1 dex" | sudo tee -a /etc/hosts'\n` +
+      `  Either Dex is down, or this environment has no DNS/internet access to resolve\n` +
+      `  the *.localtest.me wildcard (it should resolve to 127.0.0.1 with no config).\n` +
+      `  Fix:  docker compose up -d dex   OR, if DNS is unavailable here:\n` +
+      `  'echo "127.0.0.1 dex.localtest.me" | sudo tee -a /etc/hosts'\n` +
       `  Aborting fast instead of waiting out a 30s browser navigation timeout.`
     );
   }
