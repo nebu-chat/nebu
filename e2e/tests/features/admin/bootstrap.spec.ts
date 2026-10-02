@@ -36,7 +36,7 @@ function restoreBootstrappedState(): void {
         ` ('bootstrap_active', 'true', ${now}),` +
         ` ('bootstrap_completed', 'true', ${now}),` +
         ` ('instance_name', 'nebuchadnezzar', ${now}),` +
-        ` ('oidc_issuer', 'http://dex:5556/dex', ${now}),` +
+        ` ('oidc_issuer', 'http://dex.localtest.me:5556/dex', ${now}),` +
         ` ('oidc_client_id', 'nebu-gateway', ${now}),` +
         ` ('oidc_client_secret', 'nebu-dev-secret', ${now}),` +
         ` ('oidc_user_id_claim', 'email', ${now}),` +
@@ -190,7 +190,7 @@ test.describe('Bootstrap — Step 2: OIDC Configuration', () => {
   });
 
   test('shows HTTP warning for http:// issuer on Next', async ({ page }) => {
-    await page.getByRole('textbox', { name: 'OIDC Issuer URL' }).fill('http://dex:5556/dex');
+    await page.getByRole('textbox', { name: 'OIDC Issuer URL' }).fill('http://dex.localtest.me:5556/dex');
     await page.getByRole('textbox', { name: 'OIDC Client ID' }).fill('nebu-gateway');
     await page.getByRole('textbox', { name: 'OIDC Client Secret' }).fill('secret');
     await page.getByRole('button', { name: 'Next' }).click();
@@ -204,7 +204,7 @@ test.describe('Bootstrap — Step 2: OIDC Configuration', () => {
   });
 
   test('preserves OIDC values when navigating back and forward', async ({ page }) => {
-    await page.getByRole('textbox', { name: 'OIDC Issuer URL' }).fill('http://dex:5556/dex');
+    await page.getByRole('textbox', { name: 'OIDC Issuer URL' }).fill('http://dex.localtest.me:5556/dex');
     await page.getByRole('textbox', { name: 'OIDC Client ID' }).fill('nebu-gateway');
     await page.getByRole('textbox', { name: 'OIDC Client Secret' }).fill('nebu-dev-secret');
     // Back to step 1 — issuer/clientID should be carried via hidden fields
@@ -214,7 +214,7 @@ test.describe('Bootstrap — Step 2: OIDC Configuration', () => {
     await page.getByRole('button', { name: 'Next' }).click();
     await expect(page.getByRole('heading', { name: 'Step 2: OIDC Configuration' })).toBeVisible();
     // Issuer and client ID preserved; secret is intentionally NOT re-populated (security)
-    await expect(page.getByRole('textbox', { name: 'OIDC Issuer URL' })).toHaveValue('http://dex:5556/dex');
+    await expect(page.getByRole('textbox', { name: 'OIDC Issuer URL' })).toHaveValue('http://dex.localtest.me:5556/dex');
     await expect(page.getByRole('textbox', { name: 'OIDC Client ID' })).toHaveValue('nebu-gateway');
   });
 });
@@ -229,7 +229,7 @@ test.describe('Bootstrap — Step 3: Claim Mapping', () => {
     await page.getByRole('textbox', { name: 'Instance Name' }).fill('nebu-dev');
     await page.getByRole('button', { name: 'Next' }).click();
     await expect(page.getByRole('heading', { name: 'Step 2' })).toBeVisible();
-    await page.getByRole('textbox', { name: 'OIDC Issuer URL' }).fill('http://dex:5556/dex');
+    await page.getByRole('textbox', { name: 'OIDC Issuer URL' }).fill('http://dex.localtest.me:5556/dex');
     await page.getByRole('textbox', { name: 'OIDC Client ID' }).fill('nebu-gateway');
     await page.getByRole('textbox', { name: 'OIDC Client Secret' }).fill('nebu-dev-secret');
     await page.getByRole('button', { name: 'Next' }).click();
@@ -250,7 +250,7 @@ test.describe('Bootstrap — Step 3: Claim Mapping', () => {
   test('Back button returns to step 2 with preserved OIDC values', async ({ page }) => {
     await page.getByRole('button', { name: 'Back' }).click();
     await expect(page.getByRole('heading', { name: 'Step 2' })).toBeVisible();
-    await expect(page.getByRole('textbox', { name: 'OIDC Issuer URL' })).toHaveValue('http://dex:5556/dex');
+    await expect(page.getByRole('textbox', { name: 'OIDC Issuer URL' })).toHaveValue('http://dex.localtest.me:5556/dex');
   });
 });
 

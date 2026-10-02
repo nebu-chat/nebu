@@ -1,0 +1,30 @@
+# Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents.
+# Do not edit manually during an active pipeline run.
+# last_updated: 2026-09-02
+# [bugfix-oidc-public-endpoint-urls] 2026-09-02T14:58Z committed ✓ (3726b453: 2 architecture cycles, 9+4 MAJOR fixed, Kassandra CLEAN, M-1 fixed inline)
+# [bugfix-oidc-public-endpoint-urls] 2026-09-02T14:57Z arc42-update → done (docs/architecture/08-concepts.md, honest-issuer principle documented)
+# [bugfix-oidc-public-endpoint-urls] 2026-09-02T14:55Z security-review → Kassandra CLEAN (0 CRITICAL/HIGH, 3 MEDIUM, 2 LOW); M-1 fixed inline (synthesis now anchors on configured issuer, not upstream-supplied), unit suite 2018 passed/0 failed
+# [bugfix-oidc-public-endpoint-urls] 2026-09-02T14:39Z code-review cycle 3 → 4 MAJOR fixes verified correct+complete; fixed 1 residual MINOR (stale nebu-admin client creds + wrong port 8080 in README/getting-started docs)
+# [bugfix-oidc-public-endpoint-urls] 2026-09-02T14:30Z ci-gate (cycle 1) → ✓ 29/2643 failures, all pre-existing flakiness (verified non-OIDC root causes for the 2 new-looking ones), 0 OIDC-related failures
+# [bugfix-oidc-public-endpoint-urls] 2026-09-02T14:24Z dev-story cycle 1 → 4 MAJOR + 4 MINOR fixed (full-path synthesis base, stale CI env var, stale --add-host, CHANGELOG upgrade note); unit suite 2015 passed/0 failed
+# [bugfix-oidc-public-endpoint-urls] 2026-09-02T14:16Z code-review (redesign) → architecture confirmed correct, 4 MAJOR (path-stripping, stale CI env var, stale --add-host, no upgrade note) + 8 MINOR → cycle 1
+# [bugfix-oidc-public-endpoint-urls] 2026-09-02T14:05Z ci-gate (redesign) → ✓ 23/2641 failures, all pre-existing flaky (verified against true baseline), 0 new/OIDC-related failures
+# [bugfix-oidc-public-endpoint-urls] 2026-09-02T14:00Z redesign implemented (dex.localtest.me + MSC2965 field synthesis only, no rewrite/no new config); unit suite 2013 passed/0 failed
+# [bugfix-oidc-public-endpoint-urls] 2026-09-02T13:39Z user decision: pivot to reconfigure-IdP-issuer architecture, restarting from ATDD with shrunk scope
+# [bugfix-oidc-public-endpoint-urls] 2026-09-01T10:11Z code-review → 9 MAJOR + 17 MINOR + 8 INFO, escalated to user (architectural question)
+# [bugfix-oidc-public-endpoint-urls] 2026-09-01T09:55Z ci-gate → ✓ 23/2666 failures, all pre-existing flaky tests (same modules as 38-failure baseline), 0 OIDC-related regressions; unit suite 2038 passed/0 failed
+# [bugfix-oidc-public-endpoint-urls] 2026-09-01T09:15Z dev-story cycle 1 → RLS migration fixed to 000020 base + AC5 tests use unreachable-DNS literal instead of dex:5556; unit suite 2038 passed/0 failed
+# [bugfix-oidc-public-endpoint-urls] 2026-09-01T09:00Z ci-gate → FAILED: 87 vs 38 baseline failures (migration 000035 regressed config_update_mutable RLS policy to stale pre-000020 allowlist) → cycle 1
+# [bugfix-oidc-public-endpoint-urls] 2026-09-01T08:50Z dev-story → done (cycle 0), full unit suite 2027 passed/0 failed
+# [bugfix-oidc-public-endpoint-urls] 2026-09-01T08:30Z test-review gaps closed → 17 failing tests total, RED confirmed
+# [bugfix-oidc-public-endpoint-urls] 2026-09-01T08:26Z test-review → 2 MAJOR (additive, fixed in-place) + 2 MINOR + 6 INFO
+# [bugfix-oidc-public-endpoint-urls] 2026-09-01T08:19Z atdd → 13 failing tests (4 files, oidc_public_base_url seam assumed)
+# [bugfix-oidc-public-endpoint-urls] 2026-09-01T08:03Z baseline-integration → ⚠ FAILING (pre-existing: 2632 tests, 38 failures, 3 skipped)
+# [bugfix-oidc-public-endpoint-urls] 2026-09-01T07:58Z oracle-gate → spec context captured (MSC2965/RFC8414 required fields confirmed)
+# [bugfix-oidc-public-endpoint-urls] 2026-09-01T07:54Z pipeline started (--bug: MSC2965 auth_metadata leaks internal dex:5556 URLs to browser + missing required fields, no public base URL config exists)
+story: null
+current_step: null
+completed: []
+cycle_count: 0
+blocked_reason: null
+last_updated: "2026-09-02T14:58Z"

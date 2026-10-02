@@ -88,6 +88,9 @@ server/lib/nebu/
 │   │                   Bootstrap Wizard and Nebu.Admin.DB.upsert_server_config/1 (Admin UI edits).
 │   │                   Used by OidcPlug (issuer/audience), JwksCache (JWKS URI), and SsoLogin
 │   │                   (extra redirect schemes for the redirectUrl allowlist).
+│   │                   Operational contract: the configured issuer must resolve from both the Nebu
+│   │                   network and end-user browsers — Nebu never rewrites discovery-document URLs
+│   │                   (bugfix-oidc-public-endpoint-urls; dev: Dex issuer dex.localtest.me + compose alias).
 │   ├── jwks_cache.ex ← Nebu.Web.JwksCache — GenServer fetching OIDC provider JWKS on start + TTL
 │   │                   refresh (NEBU_OIDC_JWKS_TTL, default 300s). JWKS URI resolved from
 │   │                   NEBU_OIDC_JWKS_URI env var OR OidcConfig cache (fallback for bootstrap

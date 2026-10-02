@@ -213,7 +213,7 @@ test.describe.serial('@smoke Full-Stack Acceptance: Nebu Happy Path', () => {
 
     // Step 2: OIDC Configuration → fill fields → Next (NOT "Connect with OIDC" — that is Step 3)
     await page.getByRole('textbox', { name: 'OIDC Issuer URL' })
-      .fill('http://dex:5556/dex');
+      .fill('http://dex.localtest.me:5556/dex');
     await page.getByRole('textbox', { name: 'OIDC Client ID' })
       .fill('nebu-gateway');
     await page.getByRole('textbox', { name: 'OIDC Client Secret' })

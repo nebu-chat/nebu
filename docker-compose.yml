@@ -80,8 +80,11 @@ services:
       # `nebu-dev-secret`, all redirect URIs registered in dev/dex/config.yaml) serves
       # both Matrix Bearer validation and admin operator login. On a fresh DB the server
       # boots fail-closed (all Bearer tokens 401, admin → /bootstrap); run the wizard
-      # once (issuer http://dex:5556/dex, client nebu-gateway / nebu-dev-secret, audience
-      # nebu-gateway, JWKS http://dex:5556/dex/keys) to configure it.
+      # once (issuer http://dex.localtest.me:5556/dex, client nebu-gateway / nebu-dev-secret,
+      # audience nebu-gateway, JWKS http://dex.localtest.me:5556/dex/keys) to configure it.
+      # bugfix-oidc-public-endpoint-urls: dex.localtest.me is Dex's OWN public issuer
+      # hostname (dev/dex/config.yaml) — see the `dex` service below for how it also
+      # resolves from inside this compose network.
       #
       # NEBU_OIDC_JWKS_TTL is the JwksCache refresh interval (a cache-tuning knob, NOT
       # OIDC issuer/audience/client config) and may stay.
@@ -138,6 +141,18 @@ services:
       - dex_data:/var/dex
     ports:
       - "5556:5556"
+    # bugfix-oidc-public-endpoint-urls: Dex's own `issuer` (dev/dex/config.yaml) is
+    # now the public hostname `dex.localtest.me` (resolves to 127.0.0.1 via public
+    # DNS — the *.localtest.me convention — reachable from a browser/Matrix client
+    # with NO /etc/hosts edit). This alias makes that SAME hostname ALSO resolve to
+    # THIS container from inside the compose network, so Nebu's own server-to-server
+    # calls (discovery fetch, token exchange, JWKS fetch) reach Dex the exact same
+    # way a browser does — no separate internal/public split, no URL rewriting. The
+    # plain `dex` service name still resolves too (Compose does not remove it).
+    networks:
+      default:
+        aliases:
+          - dex.localtest.me
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://localhost:5556/dex/.well-known/openid-configuration || exit 1"]
       interval: 5s

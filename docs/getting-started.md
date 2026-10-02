@@ -58,22 +58,41 @@ docker compose logs -f server
 
 ---
 
-## 3. /etc/hosts Setup (One-Time)
+## 3. Dex hostname (no setup needed)
 
-Dex (the development OIDC provider) must be reachable as `dex` in your browser for the OIDC
-redirect to work correctly:
+Dex (the development OIDC provider) is configured with the public hostname
+`dex.localtest.me`, which resolves to `127.0.0.1` via the well-known
+[`*.localtest.me`](http://readme.localtest.me/) wildcard DNS convention — no
+`/etc/hosts` edit is required on a machine with normal internet DNS access.
+
+**Most common failure on a home network:** DNS-rebind protection in consumer
+routers (e.g. AVM Fritz!Box, on by default in Germany/EU) blocks public hostnames
+from resolving to loopback/private IPs. Check with:
 
 ```bash
-sudo sh -c 'echo "127.0.0.1 dex" >> /etc/hosts'
+dig +short dex.localtest.me
 ```
 
-You only need to do this once.
+It should print `127.0.0.1`. If it prints nothing, DNS-rebind protection (or an
+air-gapped/VPN network) is the cause — see the fallback below. Note the asymmetry:
+this only affects your HOST machine/browser. The containers themselves are
+unaffected, since they resolve `dex.localtest.me` via the Docker Compose network
+alias (`docker-compose.yml`), not public DNS — so `docker compose logs` looking
+healthy while your browser fails to resolve the hostname is expected, not a sign
+of a broken stack.
+
+If DNS resolution fails for any reason (DNS-rebind protection, air-gapped network,
+VPN blocking external wildcard domains), add this fallback instead:
+
+```bash
+sudo sh -c 'echo "127.0.0.1 dex.localtest.me" >> /etc/hosts'
+```
 
 ---
 
 ## 4. Bootstrap Wizard
 
-Open http://localhost:8080/admin in your browser.
+Open http://localhost:8008/admin in your browser.
 
 If this is a fresh installation (empty database), you will be redirected to the Bootstrap Wizard.
 Complete the following steps:
@@ -87,9 +106,9 @@ Enter the development Dex configuration:
 
 | Field | Value |
 |---|---|
-| OIDC Issuer | `http://dex:5556/dex` |
-| Client ID | `nebu-admin` |
-| Client Secret | `nebu-admin-secret` |
+| OIDC Issuer | `http://dex.localtest.me:5556/dex` |
+| Client ID | `nebu-gateway` |
+| Client Secret | `nebu-dev-secret` |
 | Role Claim Name | `nebu_role` |
 
 **Step 3 - First Login:**
@@ -153,13 +172,29 @@ docker compose logs -f server | grep "Nebu.Application started"
 
 ---
 
-### "dex: connection refused" during OIDC login
+### "dex.localtest.me: connection refused" or DNS lookup failure during OIDC login
 
-**Cause:** Missing `/etc/hosts` entry for `dex`.
+**Cause:** No DNS/internet access to resolve the `*.localtest.me` wildcard (it
+should resolve to `127.0.0.1` with zero configuration on a normal internet
+connection). The most common cause on a home network is **DNS-rebind protection**
+in consumer routers (e.g. AVM Fritz!Box — on by default in Germany/EU), which
+deliberately blocks public hostnames from resolving to loopback/private IPs to
+prevent DNS-rebinding attacks. Less commonly: a fully air-gapped environment, or a
+corporate VPN/DNS resolver that blocks external wildcard domains.
 
-**Fix:**
+**Diagnose:**
 ```bash
-sudo sh -c 'echo "127.0.0.1 dex" >> /etc/hosts'
+dig +short dex.localtest.me
+```
+Should print `127.0.0.1`. If it prints nothing, DNS resolution (not the Nebu stack)
+is the problem — note this only affects your HOST machine/browser; the containers
+resolve `dex.localtest.me` fine via the Docker Compose network alias and are
+unaffected, so a healthy `docker compose ps`/`logs` output does not rule this out.
+
+**Fix (fallback only — try disabling VPN first, or disabling your router's
+DNS-rebind protection for `*.localtest.me` if it supports an allowlist):**
+```bash
+sudo sh -c 'echo "127.0.0.1 dex.localtest.me" >> /etc/hosts'
 ```
 Then retry. If you are in a corporate VPN, the VPN may intercept DNS - disable VPN for local dev.
 

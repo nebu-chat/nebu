@@ -18,7 +18,10 @@ import { DEX_TEST_PASSWORD } from '../../fixtures/users';
 import { doBootstrapAdmin } from '../../fixtures/admin-bootstrap';
 
 const ADMIN_BASE_URL = process.env.NEBU_ADMIN_URL ?? 'http://localhost:8008';
-const DEX_ISSUER_URL = process.env.DEX_ISSUER_URL ?? 'http://dex:5556/dex';
+// bugfix-oidc-public-endpoint-urls: mirrors fixtures/admin-bootstrap.ts's
+// DEX_ISSUER_URL — Dex's own issuer is now the public `dex.localtest.me`
+// hostname, not the Docker-Compose-internal `dex` service name.
+const DEX_ISSUER_URL = process.env.DEX_ISSUER_URL ?? 'http://dex.localtest.me:5556/dex';
 
 Given('the Nebu admin UI is accessible at the admin URL', async ({ page }: { page: Page }) => {
   const resp = await page.request.get(`${ADMIN_BASE_URL}/admin/`).catch(() => null);

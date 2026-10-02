@@ -189,6 +189,42 @@ defmodule Nebu.Web.MatrixRouterTest do
       assert Map.has_key?(body, "authorization_endpoint")
     end
 
+    # bugfix-oidc-public-endpoint-urls (architecture v2 — honest-issuer, no rewrite):
+    # Dex's discovery document genuinely omits these 3 MSC2965/RFC 8414 MUST-fields;
+    # the Matrix Dart SDK parses them non-nullable and crashes login before any
+    # method is shown. auth_metadata must still synthesize them — this AC is
+    # unchanged from the rejected cycle 1, just re-verified without any
+    # public-base-URL config dependency (the :oidc_metadata_override fixture above
+    # deliberately does NOT set them, mirroring Dex's real response shape).
+    test "GET auth_metadata → 200 synthesizes registration_endpoint, response_modes_supported, revocation_endpoint when Dex omits them" do
+      conn = call(:get, "/_matrix/client/v1/auth_metadata")
+      assert conn.status == 200
+      body = json(conn)
+
+      assert is_binary(body["registration_endpoint"])
+      assert body["response_modes_supported"] == ["query", "fragment"]
+      assert is_binary(body["revocation_endpoint"])
+    end
+
+    # Regression test for the REJECTED cycle-1 architecture (response rewriting):
+    # the fix is now "make Dex's own issuer honest" (dev/dex/config.yaml +
+    # docker-compose.yml network alias), NOT "rewrite the fetched document's
+    # origin". auth_metadata must pass every field the upstream document DOES
+    # provide through byte-for-byte — including this fixture's deliberately
+    # internal-Docker-Compose-looking issuer (@issuer resolves to a fake host in
+    # this unit test; a real Dex response would already carry the honest public
+    # origin by construction, so there is nothing left here to rewrite).
+    test "GET auth_metadata → 200 passes authorization_endpoint/token_endpoint/jwks_uri/issuer through VERBATIM (no origin rewriting)" do
+      conn = call(:get, "/_matrix/client/v1/auth_metadata")
+      assert conn.status == 200
+      body = json(conn)
+
+      assert body["issuer"] == @issuer
+      assert body["authorization_endpoint"] == @issuer <> "/auth"
+      assert body["token_endpoint"] == @issuer <> "/token"
+      assert body["jwks_uri"] == @issuer <> "/jwks"
+    end
+
     test "GET auth_metadata fails CLOSED with 503 M_UNAVAILABLE when the provider is unreachable (MINOR-4)" do
       # Drop the override and point at an unreachable issuer so the live fetch
       # fails. The handler must NOT synthesise wrong endpoint URLs — it returns

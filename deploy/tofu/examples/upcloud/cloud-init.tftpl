@@ -11,6 +11,7 @@ packages:
   - curl
   - gnupg
   - lsb-release
+  - postgresql-client
 %{ if tls_mode == "acme" ~}
   - nginx
   - certbot
@@ -24,6 +25,41 @@ write_files:
     owner: root:root
     permissions: "0600"
     content: "${internal_secret}"
+
+  # ── One-shot DB grants (UpCloud Managed PostgreSQL) ───────────────────────
+  # UpCloud creates nebu_app / nebu_migrate without any privileges on the
+  # nebu database or the public schema. Run once as the managed-DB admin user.
+  - path: /opt/nebu/.secrets/pg_admin_password
+    owner: root:root
+    permissions: "0600"
+    content: "${pg_admin_password}"
+
+  - path: /opt/nebu/db-grants.sh
+    owner: root:root
+    permissions: "0700"
+    content: |
+      #!/bin/bash
+      # Idempotent; guarded by /opt/nebu/.db-grants-done so it runs only once.
+      set -eu
+      MARKER=/opt/nebu/.db-grants-done
+      [ -f "$MARKER" ] && exit 0
+      export PGPASSWORD="$(cat /opt/nebu/.secrets/pg_admin_password)"
+      export PGSSLMODE=require
+      for i in $(seq 1 36); do
+        if psql -h ${pg_host} -p ${pg_port} -U ${pg_admin_user} -d nebu -v ON_ERROR_STOP=1 -c 'SELECT 1' >/dev/null 2>&1; then
+          psql -h ${pg_host} -p ${pg_port} -U ${pg_admin_user} -d nebu -v ON_ERROR_STOP=1 <<'SQL'
+      GRANT ALL PRIVILEGES ON DATABASE nebu TO ${pg_user}, ${pg_migrate_user};
+      GRANT ALL ON SCHEMA public TO ${pg_user}, ${pg_migrate_user};
+      SQL
+          touch "$MARKER"
+          echo "[nebu-bootstrap] DB grants applied"
+          exit 0
+        fi
+        echo "[nebu-bootstrap] DB not ready for grants (attempt $i/36), waiting 10s..."
+        sleep 10
+      done
+      echo "[nebu-bootstrap] ERROR: could not apply DB grants" >&2
+      exit 1
 
 %{ if enable_media_gateway ~}
   - path: /opt/nebu/.secrets/s3_access_key
@@ -675,6 +711,9 @@ runcmd:
     fi
 
 %{ endif ~}
+  # ── One-shot DB grants (admin user) — must precede nebu.service ────────────
+  - /opt/nebu/db-grants.sh
+
   # ── Enable + start nebu.service ─────────────────────────────────────────────
   - systemctl daemon-reload
   - systemctl enable nebu.service

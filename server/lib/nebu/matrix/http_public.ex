@@ -166,6 +166,15 @@ defmodule Nebu.Matrix.HttpPublic do
   # is unreachable or returns 5xx). We do NOT synthesise a fallback metadata
   # document: the previous Keycloak-shaped paths are WRONG for Dex (the project's
   # dev IdP), and serving incorrect endpoint URLs is worse than failing closed.
+  #
+  # bugfix-oidc-public-endpoint-urls (architecture v2): on a SUCCESSFUL fetch, the
+  # only post-processing applied is Nebu.Matrix.OidcMetadata.ensure_msc2965_fields/2
+  # — filling in the 3 MSC2965 fields Dex omits, using the CONFIGURED issuer (not
+  # the fetched document's own issuer field) as the synthesis base (M-1, Kassandra
+  # security review 2026-09-02). There is NO origin rewriting: the
+  # fetched document is otherwise served byte-for-byte. The internal-vs-public
+  # hostname problem is fixed at the source (Dex's own `issuer` config +
+  # docker-compose.yml network alias), not by rewriting this response.
   defp auth_metadata(conn) do
     # oidc-bootstrap-only-config (ADR-022): issuer from server_config (OidcConfig cache).
     case Nebu.Web.OidcConfig.get().issuer do
@@ -177,7 +186,7 @@ defmodule Nebu.Matrix.HttpPublic do
           {:ok, body} ->
             conn
             |> put_resp_content_type("application/json")
-            |> send_resp(200, body)
+            |> send_resp(200, Nebu.Matrix.OidcMetadata.ensure_msc2965_fields(body, issuer))
 
           {:error, _} ->
             error(conn, 503, "M_UNAVAILABLE", "OIDC provider is currently unavailable")

@@ -56,7 +56,7 @@ test.describe('Bootstrap — Full Happy Path (OIDC E2E)', () => {
   test('completes wizard steps 1–4 and first-admin OIDC login', async ({ page, request }) => {
     // Skip if dex is not resolvable — requires "127.0.0.1 dex" in /etc/hosts
     const dexDiscovery = await request
-      .get('http://dex:5556/dex/.well-known/openid-configuration')
+      .get('http://dex.localtest.me:5556/dex/.well-known/openid-configuration')
       .catch(() => null);
     test.skip(
       !dexDiscovery?.ok(),
@@ -75,7 +75,7 @@ test.describe('Bootstrap — Full Happy Path (OIDC E2E)', () => {
     await expect(page.getByRole('heading', { name: /Step 2/ })).toBeVisible();
 
     // ── Step 2: OIDC Configuration ────────────────────────────────────────────
-    await page.getByRole('textbox', { name: 'OIDC Issuer URL' }).fill('http://dex:5556/dex');
+    await page.getByRole('textbox', { name: 'OIDC Issuer URL' }).fill('http://dex.localtest.me:5556/dex');
     await page.getByRole('textbox', { name: 'OIDC Client ID' }).fill('nebu-gateway');
     await page.getByRole('textbox', { name: 'OIDC Client Secret' }).fill('nebu-dev-secret');
     await page.getByRole('button', { name: 'Next' }).click();
@@ -125,7 +125,7 @@ test.describe('Bootstrap — Full Happy Path (OIDC E2E)', () => {
     // Now uses ON CONFLICT DO UPDATE — retries must succeed.
 
     const dexDiscovery = await request
-      .get('http://dex:5556/dex/.well-known/openid-configuration')
+      .get('http://dex.localtest.me:5556/dex/.well-known/openid-configuration')
       .catch(() => null);
     test.skip(
       !dexDiscovery?.ok(),
@@ -138,7 +138,7 @@ test.describe('Bootstrap — Full Happy Path (OIDC E2E)', () => {
       await page.getByRole('button', { name: 'Next' }).click();
       await expect(page.getByRole('heading', { name: /Step 2/ })).toBeVisible();
 
-      await page.getByRole('textbox', { name: 'OIDC Issuer URL' }).fill('http://dex:5556/dex');
+      await page.getByRole('textbox', { name: 'OIDC Issuer URL' }).fill('http://dex.localtest.me:5556/dex');
       await page.getByRole('textbox', { name: 'OIDC Client ID' }).fill('nebu-gateway');
       await page.getByRole('textbox', { name: 'OIDC Client Secret' }).fill('nebu-dev-secret');
       await page.getByRole('button', { name: 'Next' }).click();

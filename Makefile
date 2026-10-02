@@ -225,7 +225,10 @@ test-load-silber:
 		grafana/k6:0.50.0 run /scripts/k6_chat.js
 
 ## test-e2e: Run all Playwright E2E tests (BDD + legacy) against a running stack.
-## Requires: 127.0.0.1 dex in /etc/hosts for OIDC redirect flows
+## Requires: Dex reachable at dex.localtest.me:5556 for OIDC redirect flows — resolves to
+##   127.0.0.1 via public DNS (*.localtest.me), no /etc/hosts edit needed on a normal
+##   internet connection. If DNS-rebind protection on your router (e.g. Fritz!Box) blocks
+##   public hostnames resolving to loopback, add `127.0.0.1 dex.localtest.me` to /etc/hosts.
 ## Story 9-26 AC5: runs bddgen first, then all projects including element-web + admin-ui.
 ## Reset DB to bootstrap state first:
 ##   docker compose exec postgres psql -U nebu -d nebu -c \
@@ -244,9 +247,11 @@ build-element-e2e:
 
 ## test-e2e-element: Run Element Web Browser-First BDD tests (story 9-26, Phase 2).
 ## Story 9-26 AC5: canonical target name (also aliased as test-e2e-element-bdd).
-## Requires: FULL stack running via `make dev` (NOT just `make redeploy`) + `127.0.0.1 dex`
-##   in /etc/hosts. `make redeploy` only rebuilds/restarts the server container and does NOT
-##   start Dex — browser OIDC then fails (econnrefused dex:5556, empty JWKS). The Playwright
+## Requires: FULL stack running via `make dev` (NOT just `make redeploy`). Dex is reachable
+##   at dex.localtest.me:5556 via public DNS — no /etc/hosts edit needed on a normal internet
+##   connection (see README.md for the DNS-rebind-protection fallback if it fails to resolve).
+##   `make redeploy` only rebuilds/restarts the server container and does NOT start Dex —
+##   browser OIDC then fails (econnrefused dex.localtest.me:5556, empty JWKS). The Playwright
 ##   global-setup runs a Dex preflight (Story e2e-browser-ci-and-dex-reliability, AC1) and
 ##   aborts fast with "Dex unreachable" if Dex is down, instead of a silent 30s timeout.
 test-e2e-element:
@@ -273,11 +278,11 @@ test-e2e-element:
 ## Runs on a docker-tagged (amd64) runner via DinD. See .gitlab-ci.yml e2e-element-web.
 test-e2e-element-ci: setup
 	NEBU_RATE_LIMIT_DISABLED=true docker compose --profile e2e up -d --wait && \
-	docker run --rm --network=host --add-host=dex:127.0.0.1 -v $(PWD):/workspace -w /workspace/e2e \
+	docker run --rm --network=host --add-host=dex.localtest.me:127.0.0.1 -v $(PWD):/workspace -w /workspace/e2e \
 		-e NEBU_BASE_URL=http://localhost:8008 \
 		-e NEBU_MATRIX_BASE=http://localhost:8008 \
 		-e NEBU_ELEMENT_URL=http://localhost:7070 \
-		-e NEBU_OIDC_ISSUER=http://dex:5556/dex \
+		-e NEBU_OIDC_ISSUER=http://dex.localtest.me:5556/dex \
 		mcr.microsoft.com/playwright:v1.44.0-jammy \
 		sh -c "npm install --silent && npm run preflight && npx bddgen && npx playwright test --project=element-web --reporter=list"; \
 	EXIT=$$?; \
@@ -309,8 +314,9 @@ test-e2e-admin:
 ##   2. sets admin_oidc_refresh_mode=offline (Dex issues a refresh token only with
 ##      offline_access — required for the admin silent refresh),
 ##   3. runs ONLY @short-ttl scenarios (NEBU_E2E_TAGS) across element-web + admin-ui.
-## Requires: stack up (`make dev`) + a server image with the refresh code (`make redeploy`)
-## + `127.0.0.1 dex` in /etc/hosts. Tune the TTL via NEBU_E2E_TTL (default 30s).
+## Requires: stack up (`make dev`) + a server image with the refresh code (`make redeploy`).
+## Dex is reachable at dex.localtest.me:5556 via public DNS — no /etc/hosts edit needed on a
+## normal internet connection. Tune the TTL via NEBU_E2E_TTL (default 30s).
 NEBU_E2E_TTL ?= 30
 test-e2e-refresh:
 	NEBU_MATRIX_SESSION_TTL_SECONDS=$(NEBU_E2E_TTL) \
@@ -335,7 +341,8 @@ build-fluffychat-e2e:
 	docker build -t nebu-fluffychat-e2e:dev -f docker/Dockerfile.fluffychat-e2e .
 
 ## test-e2e-fluffychat: Run Playwright E2E tests against FluffyChat Web (real Matrix client)
-## Requires: 127.0.0.1 dex in /etc/hosts (for SSO redirect via Dex)
+## Requires: Dex reachable at dex.localtest.me:5556 (for SSO redirect via Dex) — resolves to
+##   127.0.0.1 via public DNS, no /etc/hosts edit needed on a normal internet connection.
 ## Starts full stack + fluffychat sidecar via --profile e2e.
 ## Does NOT run docker compose down after tests — leaves stack for debugging.
 test-e2e-fluffychat:

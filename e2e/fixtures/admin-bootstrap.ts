@@ -21,7 +21,13 @@ import type { Page } from '@playwright/test';
 import { DEX_TEST_PASSWORD } from './users';
 
 const ADMIN_BASE_URL = process.env.NEBU_ADMIN_URL ?? 'http://localhost:8008';
-const DEX_ISSUER_URL = process.env.DEX_ISSUER_URL ?? 'http://dex:5556/dex';
+// bugfix-oidc-public-endpoint-urls: Dex's own issuer (dev/dex/config.yaml) is now
+// the public hostname `dex.localtest.me` (resolves to 127.0.0.1 via public DNS —
+// no /etc/hosts edit needed — and also resolves from inside the compose network
+// via the `dex` service's network alias in docker-compose.yml). Filling the
+// wizard with the OLD internal-only `dex:5556` value here would mismatch Dex's
+// actual (now-public) issuer and break every OIDC-driven e2e test.
+const DEX_ISSUER_URL = process.env.DEX_ISSUER_URL ?? 'http://dex.localtest.me:5556/dex';
 
 /**
  * Complete the admin bootstrap wizard if it has not yet been completed.
