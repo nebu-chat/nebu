@@ -70,10 +70,10 @@ defmodule Nebu.MixProject do
       {:assent, "~> 0.3"},
       {:jose, "~> 1.11"},
       # ── Media / object storage (nebu_http) ──
-      {:ex_aws, "~> 2.5"},
+      {:ex_aws, "~> 2.7"},
       {:ex_aws_s3, "~> 2.5"},
       {:sweet_xml, "~> 0.7"},
-      {:hackney, "~> 1.20"},
+      {:hackney, "~> 4.0"},
       {:finch, "~> 0.18"},
       {:floki, "~> 0.36"}
     ]
