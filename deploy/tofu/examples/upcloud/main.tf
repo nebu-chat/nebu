@@ -55,6 +55,13 @@ resource "upcloud_managed_object_storage" "nebu_media" {
   name              = "nebu-${var.environment}-media"
   region            = var.object_storage_region
   configured_status = "started"
+  network {
+    family = "IPv4"
+    name   = "nebu-network"
+    type   = "private"
+    uuid   = upcloud_network.nebu.id
+  }
+
 }
 
 resource "upcloud_managed_object_storage_bucket" "nebu_media" {
