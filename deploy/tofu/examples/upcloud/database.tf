@@ -12,9 +12,10 @@ resource "upcloud_managed_database_postgresql" "nebu" {
   title = "Nebu PostgreSQL (${var.environment})"
 
   properties {
-    version       = "16"
+    version       = "18"
     public_access = false
   }
+  #  additional_disk_space_gib = 20
 
   network {
     family = "IPv4"

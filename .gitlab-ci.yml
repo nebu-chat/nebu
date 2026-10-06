@@ -454,6 +454,11 @@ validate-iac:
           - deploy/tofu/examples/k8s/.terraform.lock.hcl
       paths:
         - deploy/tofu/examples/k8s/.terraform/
+    - key:
+        files:
+          - deploy/tofu/examples/upcloud/.terraform.lock.hcl
+      paths:
+        - deploy/tofu/examples/upcloud/.terraform/
   script:
     - echo "==> OpenTofu version"
     - tofu version
@@ -465,6 +470,8 @@ validate-iac:
     - (cd deploy/tofu/examples/stackit && tofu init -backend=false && tofu validate)
     - echo "==> Validating deploy/tofu/examples/k8s"
     - (cd deploy/tofu/examples/k8s && tofu init -backend=false && tofu validate)
+    - echo "==> Validating deploy/tofu/examples/upcloud"
+    - (cd deploy/tofu/examples/upcloud && tofu init -backend=false && tofu validate)
     - echo "==> IaC validation passed."
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'

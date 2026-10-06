@@ -617,16 +617,35 @@ write_files:
 %{ endif ~}
 runcmd:
   # ── Docker CE install ───────────────────────────────────────────────────────
+  # Retries guard against transient DNS/egress failures in the first seconds of
+  # boot — a failed GPG fetch or `apt-get update` here does not abort runcmd, so
+  # apt-get install would otherwise proceed against an unindexed repo and fail
+  # with "docker-ce has no installation candidate".
   - install -m 0755 -d /etc/apt/keyrings
-  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  - |
+    for i in $(seq 1 10); do
+      curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc \
+        && [ -s /etc/apt/keyrings/docker.asc ] && break
+      echo "[nebu-bootstrap] docker gpg key fetch attempt $i failed, retrying in 10s..."
+      sleep 10
+    done
   - chmod a+r /etc/apt/keyrings/docker.asc
   - |
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
       https://download.docker.com/linux/ubuntu \
       $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
       > /etc/apt/sources.list.d/docker.list
-  - apt-get update -y
-  - apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  - |
+    for i in $(seq 1 10); do
+      apt-get update -y \
+        && apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin \
+        && break
+      echo "[nebu-bootstrap] docker-ce install attempt $i failed, retrying in 15s..."
+      sleep 15
+    done
+  - |
+    dpkg -s docker-ce >/dev/null 2>&1 \
+      || echo "[nebu-bootstrap] WARNING: docker-ce failed to install after retries — nebu.service will not start." >&2
 
   # ── STACKIT Server Agent ────────────────────────────────────────────────────
   - curl -fsSL http://169.254.169.254/stackit/v1/server-agent/amd64/deb -o /tmp/stackit-server-agent.deb

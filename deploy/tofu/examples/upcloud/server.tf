@@ -48,7 +48,7 @@ resource "upcloud_server" "nebu" {
   metadata = true
   template {
     storage = var.vm_template
-    size    = 64
+    size    = var.vm_size
   }
 
   # Public interface — SSH access and internet egress.
@@ -90,8 +90,13 @@ resource "upcloud_server" "nebu" {
     pg_password         = upcloud_managed_database_user.nebu_app.password
     pg_migrate_user     = upcloud_managed_database_user.nebu_migrate.username
     pg_migrate_password = upcloud_managed_database_user.nebu_migrate.password
-    pg_admin_user       = upcloud_managed_database_postgresql.nebu.service_username
-    pg_admin_password   = upcloud_managed_database_postgresql.nebu.service_password
+    # Service admin (superuser) — used once at boot to hand schema ownership to
+    # nebu_migrate. upcloud_managed_database_logical_database has no `owner`
+    # argument (unlike Stackit's stackit_postgresflex_database), and Postgres 15+
+    # revokes CREATE on `public` from PUBLIC by default, so nebu_migrate cannot
+    # otherwise create schema_migrations / run migrations.
+    pg_admin_user     = upcloud_managed_database_postgresql.nebu.service_username
+    pg_admin_password = upcloud_managed_database_postgresql.nebu.service_password
     # TLS — "dynamic" uses the same VM-side nginx setup as "alb"; only the cert
     # management differs (UpCloud LB handles it vs. manual PEM upload).
     tls_mode       = var.tls_mode == "dynamic" ? "alb" : var.tls_mode

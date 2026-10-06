@@ -59,6 +59,18 @@ output "media_s3_endpoint" {
   value       = var.enable_media_gateway ? local.s3_endpoint : "disabled"
 }
 
+output "media_access_key_id" {
+  description = "S3-compatible endpoint URL for the UpCloud Managed Object Storage service. Use as NEBU_MINIO_ENDPOINT when configuring external S3 clients."
+  value       = var.enable_media_gateway ? upcloud_managed_object_storage_user_access_key.nebu_media[0].access_key_id : "disabled"
+  sensitive   = true
+}
+
+output "media_secret_access_key" {
+  description = "S3-compatible endpoint URL for the UpCloud Managed Object Storage service. Use as NEBU_MINIO_ENDPOINT when configuring external S3 clients."
+  value       = var.enable_media_gateway ? upcloud_managed_object_storage_user_access_key.nebu_media[0].secret_access_key : "disabled"
+  sensitive   = true
+}
+
 output "element_url" {
   description = "Element Web client URL. Available when enable_element_web = true and tls_mode != 'none'."
   value = (

@@ -57,6 +57,12 @@ variable "vm_plan" {
   default     = "4xCPU-8GB"
 }
 
+variable "vm_size" {
+  description = "UpCloud server storage size in GiB."
+  type        = string
+  default     = "40"
+}
+
 variable "vm_template" {
   description = "UpCloud storage template name for the boot volume. Verify the current name: upctl storage list --type template | grep -i ubuntu"
   type        = string
