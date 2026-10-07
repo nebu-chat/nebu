@@ -18,6 +18,17 @@ locals {
     [for ep in upcloud_managed_object_storage.nebu_media[0].endpoint : ep.domain_name if ep.type == "public"][0],
     ""
   ) : ""
+  # bugfix-upcloud-s3-iam-sts-endpoints (AC3): the same "public"-typed
+  # endpoint entry also carries separate IAM/STS URLs (distinct from the S3
+  # endpoint above) that the S3 driver needs passed through as-is.
+  s3_iam_endpoint = var.enable_media_gateway ? try(
+    [for ep in upcloud_managed_object_storage.nebu_media[0].endpoint : ep.iam_url if ep.type == "public"][0],
+    ""
+  ) : ""
+  s3_sts_endpoint = var.enable_media_gateway ? try(
+    [for ep in upcloud_managed_object_storage.nebu_media[0].endpoint : ep.sts_url if ep.type == "public"][0],
+    ""
+  ) : ""
 }
 
 # ── VM ────────────────────────────────────────────────────────────────────────
@@ -130,6 +141,8 @@ resource "upcloud_server" "nebu" {
     s3_access_key        = local.s3_access_key
     s3_secret_key        = local.s3_secret_key
     s3_endpoint          = local.s3_endpoint
+    s3_iam_endpoint      = local.s3_iam_endpoint
+    s3_sts_endpoint      = local.s3_sts_endpoint
     s3_bucket            = var.s3_bucket
     # UpCloud managed PostgreSQL uses Aiven's internal CA — not in the system
     # trust store. Extract the TLS cert chain at boot via the private SDN.

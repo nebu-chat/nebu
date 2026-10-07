@@ -180,6 +180,44 @@ defmodule Nebu.Media.StorageConfigTest do
   `raw_start_link/1` MFA) and wire it into `Nebu.Application`'s unconditional
   children list, alongside `Nebu.Media.Config.Supervisor` — see the story's
   Technical Requirements (updated in this same fix cycle) for the exact shape.
+
+  ## bugfix-upcloud-s3-iam-sts-endpoints (AC1) — `iam_endpoint`/`sts_endpoint`
+
+  A real UpCloud Managed Object Storage bucket exposes three distinct
+  endpoint URLs (public S3, IAM, STS) — only the public S3 one has ever been
+  wired through (`endpoint`, above). This bugfix adds two new resolved-config
+  keys, `iam_endpoint` and `sts_endpoint`, each resolved from new env vars
+  `NEBU_MINIO_IAM_ENDPOINT`/`NEBU_MINIO_STS_ENDPOINT` via the SAME
+  `:media_storage_env_reader` seam `endpoint` already uses — see the seam
+  contract note above (the real env-var names are added to
+  `server/config/runtime.exs`'s S3 block and to the env-reader map
+  `default_env_reader/0` builds, both out of this file's scope to assert
+  directly).
+
+  Unlike `endpoint` (a bare `host[:port]`, never a full URL, and validated via
+  `validate_candidate_endpoint/1`'s scheme-rejection on the write path),
+  `iam_endpoint`/`sts_endpoint` ARE expected to be full URLs (matching
+  UpCloud's own `iam_url`/`sts_url` shape, e.g.
+  `"https://7mf5k.upcloudobjects.com:4443/iam"`) — they must round-trip
+  through `get/0`/`get_for_connection/0` completely verbatim, with no
+  scheme-stripping and no `validate_candidate_endpoint/1` scheme-rejection
+  applied to them.
+
+  Both fields are infra-provisioned-only: there is no `media_storage_config`
+  DB column for either one (Terraform writes them straight into the VM's env,
+  not into the admin DB), so they are resolved from the env reader with a
+  compiled default of `nil` only — no DB-row precedence to test, unlike every
+  other field `build_resolved/2` already handles. They are not secrets, so
+  `mask_map/1` must never touch them: `get/0` and `get_for_connection/0` are
+  expected to return the identical value for both fields, unlike
+  `access_key`/`secret_key`, which `get/0` masks and `get_for_connection/0`
+  does not.
+
+  `AT1` below is updated (not just extended) to include
+  `iam_endpoint: nil, sts_endpoint: nil` in its exact-equality default-shape
+  assertion, so it stays the single source of truth for the resolved map's
+  full key set and fails loudly if a future change silently drops either new
+  key from `@defaults`.
   """
 
   use ExUnit.Case, async: false
@@ -293,6 +331,12 @@ defmodule Nebu.Media.StorageConfigTest do
   test "AT1: get/0 with no row and no env vars set returns the config.exs-matching defaults, access_key/secret_key masked as nil" do
     # `store` is nil (no row) and the env-reader seam returns %{} (no env vars
     # set) — both wired by `setup`. No GenServer/DB involved.
+    #
+    # bugfix-upcloud-s3-iam-sts-endpoints (AC1): iam_endpoint/sts_endpoint
+    # are added to this exact-equality default-shape assertion so this test
+    # remains the single source of truth for the FULL resolved-map key set —
+    # see the moduledoc's "bugfix-upcloud-s3-iam-sts-endpoints (AC1)" note.
+    # This assertion now passes (GREEN): @defaults has both keys.
     assert StorageConfig.get() == %{
              endpoint: "minio:9000",
              bucket: "nebu-media",
@@ -301,7 +345,9 @@ defmodule Nebu.Media.StorageConfigTest do
              access_key: nil,
              secret_key: nil,
              s3_key_prefix_template: "{media_id}",
-             archive_bucket: nil
+             archive_bucket: nil,
+             iam_endpoint: nil,
+             sts_endpoint: nil
            }
   end
 
@@ -790,6 +836,89 @@ defmodule Nebu.Media.StorageConfigTest do
 
       assert Agent.get(calls, & &1.writer) == 0,
              "no DB write may happen for any endpoint that resolves to a blocked address"
+    end
+  end
+
+  # ════════════════════════════════════════════════════════════════════════
+  # bugfix-upcloud-s3-iam-sts-endpoints — AC1: iam_endpoint/sts_endpoint
+  # resolved config keys. See the moduledoc's "bugfix-upcloud-s3-iam-sts-
+  # endpoints (AC1)" note for the full rationale. The three tests below
+  # (`iam-sts-AT1`, `iam-sts-AT2`, `iam-sts-AT3`) now pass (GREEN):
+  # `Nebu.Media.StorageConfig.get/0` and `get_for_connection/0` return a map
+  # with both fields added to `@defaults`, resolved from
+  # `NEBU_MINIO_IAM_ENDPOINT`/`NEBU_MINIO_STS_ENDPOINT` inside
+  # `build_resolved/2`.
+  # ════════════════════════════════════════════════════════════════════════
+
+  describe "bugfix-upcloud-s3-iam-sts-endpoints: AC1 iam/sts endpoint keys" do
+    test "iam-sts-AT1: get/0 and get_for_connection/0 default iam_endpoint/sts_endpoint to nil with no env vars" do
+      # `setup` already wires the env-reader seam to `fn -> %{} end` (no env
+      # vars set) and `store` to `nil` (no row) — identical premise to AT1,
+      # asserted via dot-access on both read functions instead of AT1's full
+      # map equality, so a failure here points directly at the missing keys
+      # rather than at the whole-map diff.
+      assert StorageConfig.get().iam_endpoint == nil
+      assert StorageConfig.get().sts_endpoint == nil
+      assert StorageConfig.get_for_connection().iam_endpoint == nil
+      assert StorageConfig.get_for_connection().sts_endpoint == nil
+    end
+
+    test "iam-sts-AT2: get/0 and get_for_connection/0 resolve iam_endpoint/sts_endpoint from env vars verbatim, unmasked" do
+      # Real UpCloud-shaped full URLs (scheme + port + path) — unlike
+      # `endpoint`'s bare `host[:port]` contract, these must round-trip with
+      # NO scheme-stripping and no `validate_candidate_endpoint/1`-style
+      # rejection applied.
+      iam_url = "https://7mf5k.upcloudobjects.com:4443/iam"
+      sts_url = "https://7mf5k.upcloudobjects.com:4443/sts"
+
+      Application.put_env(:nebu_http, :media_storage_env_reader, fn ->
+        %{
+          "NEBU_MINIO_IAM_ENDPOINT" => iam_url,
+          "NEBU_MINIO_STS_ENDPOINT" => sts_url
+        }
+      end)
+
+      get_result = StorageConfig.get()
+      conn_result = StorageConfig.get_for_connection()
+
+      assert get_result.iam_endpoint == iam_url
+      assert get_result.sts_endpoint == sts_url
+
+      # Not secrets — get/0 must never mask these (contrast with
+      # access_key/secret_key, AT2 above, where get/0's masked value differs
+      # from get_for_connection/0's plaintext). Asserting BOTH functions
+      # return the exact same verbatim string proves no masking was applied.
+      assert conn_result.iam_endpoint == iam_url
+      assert conn_result.sts_endpoint == sts_url
+    end
+
+    test "iam-sts-AT3: iam_endpoint and sts_endpoint resolve independently — each stays nil when only the other is set" do
+      # Pre-dev test-review MINOR finding: iam-sts-AT2 sets both env vars
+      # together, which can't distinguish a correct per-key maybe_put_env/2
+      # implementation from an (incorrect) coupled one where setting either
+      # var accidentally resolves both. Mirrors default_env_reader/0's own
+      # per-key pattern (one maybe_put_env/2 call per var) by asserting each
+      # var independently.
+      iam_url = "https://7mf5k.upcloudobjects.com:4443/iam"
+      sts_url = "https://7mf5k.upcloudobjects.com:4443/sts"
+
+      Application.put_env(:nebu_http, :media_storage_env_reader, fn ->
+        %{"NEBU_MINIO_IAM_ENDPOINT" => iam_url}
+      end)
+
+      assert StorageConfig.get().iam_endpoint == iam_url
+      assert StorageConfig.get().sts_endpoint == nil
+      assert StorageConfig.get_for_connection().iam_endpoint == iam_url
+      assert StorageConfig.get_for_connection().sts_endpoint == nil
+
+      Application.put_env(:nebu_http, :media_storage_env_reader, fn ->
+        %{"NEBU_MINIO_STS_ENDPOINT" => sts_url}
+      end)
+
+      assert StorageConfig.get().iam_endpoint == nil
+      assert StorageConfig.get().sts_endpoint == sts_url
+      assert StorageConfig.get_for_connection().iam_endpoint == nil
+      assert StorageConfig.get_for_connection().sts_endpoint == sts_url
     end
   end
 

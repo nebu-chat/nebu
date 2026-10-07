@@ -26,6 +26,7 @@ defmodule Nebu.Matrix.Http do
   """
 
   import Plug.Conn
+  require Logger
 
   @doc """
   Builds the fake gRPC stream that carries the trusted Matrix identity.
@@ -138,20 +139,99 @@ defmodule Nebu.Matrix.Http do
 
   defp build_joined_rooms(rooms) do
     Map.new(rooms, fn room ->
+      now_ms = System.system_time(:millisecond)
+
+      # Bugfix sync-state-events-missing-fields: rooms.join.*.state.events entries
+      # are ClientEventWithoutRoomID, exactly like timeline.events — event_id/
+      # origin_server_ts are required, non-nullable fields regardless of whether an
+      # event is surfaced in state or timeline (Oracle-confirmed spec rule). unsigned
+      # is optional but added for parity (AC3), mirroring the timeline block below.
+      # se.event_id/se.origin_server_ts are the REAL persisted values threaded
+      # through by build_state_events/2 — never synthesized/fake.
+      #
+      # Code-review cycle 1 (MINOR-1): when identity is unavailable (event_id ==
+      # "" — a pre-existing legacy room not yet covered by the
+      # 000035_backfill_power_levels_events migration, or a failed event write,
+      # see room/server.ex's fail-open moduledoc section), omit `unsigned`
+      # entirely instead of shipping a ~56-year fake age computed from
+      # origin_server_ts == 0 (Oracle-confirmed: unsigned is optional per
+      # ClientEventWithoutRoomID) — and log so this condition is observable
+      # rather than silently shipped to clients.
+      #
+      # Code-review cycle 2 (MINOR, Logger rate-limiting): this branch sits on
+      # the `/sync` hot path — a room lacking identity would otherwise log
+      # once per sync per connected client, forever, if this were
+      # `Logger.warning`. Downgraded to `Logger.debug`: per this project's
+      # logger level convention (server/config/prod.exs sets `level: :info`),
+      # debug-level logs are compiled in but not emitted in production, so this
+      # is effectively unbounded-safe there while staying fully visible in
+      # dev (`level: :debug`) for local debugging. No separate dedup/counter
+      # mechanism exists elsewhere in the codebase for a single log call, so
+      # one isn't introduced here either (migration 000035 also makes this
+      # branch far less reachable in practice going forward).
       state_events =
         Enum.map(room.state_events, fn se ->
-          %{
+          base = %{
+            "event_id" => se.event_id,
             "type" => se.type,
             "state_key" => se.state_key,
             "content" => decode_content(se.content),
-            "sender" => se.sender
+            "sender" => se.sender,
+            "origin_server_ts" => se.origin_server_ts
           }
-        end)
 
-      now_ms = System.system_time(:millisecond)
+          if se.event_id == "" do
+            Logger.debug(
+              "build_joined_rooms: state event #{se.type}/#{inspect(se.state_key)} in room " <>
+                "#{room.room_id} has no real event identity (event_id/origin_server_ts " <>
+                "unavailable) — omitting unsigned rather than shipping a fake age"
+            )
+
+            base
+          else
+            unsigned = %{"age" => max(1, now_ms - se.origin_server_ts)}
+            # Bugfix unsigned-replaces-state (Matrix CS API v1.19, AC1/AC3/AC4):
+            # se.replaces_state is "" (absent, never a sentinel null) when no
+            # predecessor exists at this (room_id, type, state_key) slot —
+            # NOT gated by history_visibility anywhere in this path (AC4).
+            #
+            # Code-review cycle 1 (MINOR): `is_binary/1` guards against a nil
+            # replaces_state value slipping past `!= ""` (nil != "" is also
+            # true) and getting Map.put'd in as a literal JSON null — the
+            # exact anti-pattern AC3 forbids. se.replaces_state is always a
+            # binary in practice (proto3 string zero value), but this makes
+            # the check correct even if that assumption is ever violated.
+            unsigned =
+              if is_binary(se.replaces_state) and se.replaces_state != "" do
+                Map.put(unsigned, "replaces_state", se.replaces_state)
+              else
+                unsigned
+              end
+
+            Map.put(base, "unsigned", unsigned)
+          end
+        end)
 
       timeline_events =
         Enum.map(room.timeline_events, fn te ->
+          unsigned = %{"age" => max(1, now_ms - te.origin_ts)}
+          # Bugfix unsigned-replaces-state (AC2): only ever non-"" for an entry
+          # that is itself a genuine state event (set upstream in
+          # EventDispatcher.Server.event_map_to_core_event/1, which alone has
+          # the DB signal needed to tell a state event with a real empty-string
+          # state_key apart from a plain message — te.state_key itself is
+          # ambiguous for that; te.is_state_event is the authoritative signal,
+          # see that function's own comment).
+          #
+          # Code-review cycle 1 (MINOR): is_binary/1 guard — see the matching
+          # comment on the state_events block above for why.
+          unsigned =
+            if is_binary(te.replaces_state) and te.replaces_state != "" do
+              Map.put(unsigned, "replaces_state", te.replaces_state)
+            else
+              unsigned
+            end
+
           %{
             "event_id" => te.event_id,
             "type" => te.event_type,
@@ -159,9 +239,9 @@ defmodule Nebu.Matrix.Http do
             "room_id" => te.room_id,
             "content" => decode_content(te.content),
             "origin_server_ts" => te.origin_ts,
-            "unsigned" => %{"age" => max(1, now_ms - te.origin_ts)}
+            "unsigned" => unsigned
           }
-          |> put_state_key(te.state_key)
+          |> put_state_key(te)
         end)
 
       joined = %{
@@ -192,17 +272,41 @@ defmodule Nebu.Matrix.Http do
   # ─── /messages (proto Event list) → Matrix chunk JSON ───────────────────
   # Mirrors gateway/internal/matrix/messages.go getMessagesResponse.
 
-  @doc "Maps a `Core.Event` to the Matrix `/messages` chunk event shape."
+  @doc """
+  Maps a `Core.Event` to the Matrix `/messages` chunk event shape.
+
+  Pure, side-effect-free, no DB access — `e.replaces_state` (bugfix
+  unsigned-replaces-state, AC2) is already populated upstream by
+  `Nebu.Matrix.EventDispatcher.Server.event_maps_to_core_events/1`'s single
+  batched query per response (AC5); by the time an event reaches this
+  function, "" simply means "absent" (AC3 — never a sentinel null), exactly
+  like every other optional field here. `e.replaces_state` is ONLY ever
+  non-"" for an event that is itself a genuine state event (the upstream
+  batch only ever populates it for slots it looked up, which are themselves
+  filtered to real state events) — so checking it alone, with no separate
+  state_key check, correctly adds `unsigned` ONLY for state entries and ONLY
+  the `replaces_state` key (no `age` — a separate, out-of-scope gap for this
+  endpoint, AC2).
+  """
   def message_event(%Core.Event{} = e) do
-    %{
-      "event_id" => e.event_id,
-      "room_id" => e.room_id,
-      "sender" => e.sender_id,
-      "type" => e.event_type,
-      "content" => decode_content(e.content),
-      "origin_server_ts" => e.origin_ts
-    }
-    |> put_state_key(e.state_key)
+    base =
+      %{
+        "event_id" => e.event_id,
+        "room_id" => e.room_id,
+        "sender" => e.sender_id,
+        "type" => e.event_type,
+        "content" => decode_content(e.content),
+        "origin_server_ts" => e.origin_ts
+      }
+      |> put_state_key(e)
+
+    # Code-review cycle 1 (MINOR): is_binary/1 guard — see the matching
+    # comment in build_joined_rooms/1 above for why.
+    if is_binary(e.replaces_state) and e.replaces_state != "" do
+      Map.put(base, "unsigned", %{"replaces_state" => e.replaces_state})
+    else
+      base
+    end
   end
 
   # A state event (m.room.member, m.room.create, m.room.name, …) MUST carry its
@@ -210,6 +314,33 @@ defmodule Nebu.Matrix.Http do
   # state_key is the target user, so without it a client cannot tell that a user joined
   # (Element stays stuck on "Joining…"). Non-state (message) events have no state_key, so
   # only add the field when it is present.
-  defp put_state_key(map, sk) when is_binary(sk) and sk != "", do: Map.put(map, "state_key", sk)
+  #
+  # Code-review cycle 1 (MAJOR-2 — spec-correct fix): `event.state_key` alone
+  # is ambiguous once collapsed to "" — BOTH "not a state event at all" (a
+  # plain m.room.message) AND "a genuine state event whose real state_key IS
+  # the empty string" (m.room.name/topic/power_levels/create) serialise to
+  # the exact same Elixir "" value on the Core.Event struct. Per the Matrix
+  # spec, `state_key` MUST be present on every genuine state event regardless
+  # of its value — omitting it for the empty-string case (the OLD behavior)
+  # made those event types indistinguishable from plain messages, and
+  # self-contradicted a sibling `unsigned.replaces_state` that WAS present.
+  # `event.is_state_event` (set by
+  # EventDispatcher.Server.event_map_to_core_event/1 from the raw DB column's
+  # nil-ness, NOT from the state_key value) is the authoritative signal this
+  # function needs — never re-derive "is this a state event" from state_key
+  # itself.
+  defp put_state_key(map, %{is_state_event: true, state_key: sk}), do: Map.put(map, "state_key", sk)
+  defp put_state_key(map, %{is_state_event: false}), do: map
+
+  # Code-review cycle 2 (MINOR): total-function catch-all, restored. The
+  # cycle-1 rewrite (above) narrowed this from the original `put_state_key(map,
+  # sk) when is_binary(sk)...` + `put_state_key(map, _), do: map` shape (which
+  # was total over any input) to two clauses that only match a map/struct
+  # carrying an `is_state_event` key. Any other input — a malformed/partial
+  # event map missing `is_state_event` entirely, or a value of some other
+  # shape — now falls through safely instead of raising FunctionClauseError
+  # (HTTP 500). The two expected cases above are matched first and still apply
+  # their correct, is_state_event-driven logic; this clause only catches what
+  # they don't.
   defp put_state_key(map, _), do: map
 end

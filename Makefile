@@ -432,6 +432,8 @@ test-iac-validate: test-load-syntax
 	$(DOCKER_TOFU) -c "cd deploy/tofu/examples/stackit && tofu init -backend=false && tofu validate"
 	@echo "==> OpenTofu: validate deploy/tofu/examples/k8s"
 	$(DOCKER_TOFU) -c "cd deploy/tofu/examples/k8s && tofu init -backend=false && tofu validate"
+	@echo "==> OpenTofu: validate deploy/tofu/examples/upcloud"
+	$(DOCKER_TOFU) -c "cd deploy/tofu/examples/upcloud && tofu init -backend=false && tofu validate"
 	@echo "==> Helm: lint deploy/helm/nebu/"
 	$(DOCKER_HELM) -c "helm lint deploy/helm/nebu/"
 	@echo "==> Helm: template render check deploy/helm/nebu/ (default values)"

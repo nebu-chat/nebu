@@ -26,9 +26,24 @@ defmodule Nebu.Matrix.Room.DBBehaviour do
   Returns `{:ok, [user_id], created_at_ms, power_levels_json}` if the room exists.
   Returns `{:error, :not_found}` if the room does not exist.
   Returns `{:error, reason}` on DB error.
+
+  Bugfix sync-state-events-missing-fields (cluster-safety): the real
+  `Nebu.Matrix.Room.DB` additionally returns a 5-tuple,
+  `{:ok, [user_id], created_at_ms, power_levels_json, identity}`, where `identity`
+  is `%{members: %{user_id => {event_id, origin_server_ts}}, power_levels:
+  {event_id, origin_server_ts, sender} | nil}` — the real event identity for each
+  member's join event and the power-levels event, so `Room.Server.do_init/1` can
+  restore them into GenServer state after a crash/restart without them silently
+  reverting to nil (do_init/1 rebuilds `members`/`power_levels` from this call on
+  every restart). Code-review cycle 1 (MINOR-2): the power-levels tuple carries
+  `sender` as a third element (same query, no extra round trip). Callers/fakes
+  that only return the legacy 4-tuple are still fully supported — `do_init/1`
+  falls back to empty identity in that case.
   """
   @callback load_members(room_id :: String.t()) ::
-              {:ok, [String.t()], integer(), String.t()} | {:error, :not_found | term()}
+              {:ok, [String.t()], integer(), String.t()}
+              | {:ok, [String.t()], integer(), String.t(), map()}
+              | {:error, :not_found | term()}
 
   @doc """
   Inserts a new room into the rooms table.
@@ -152,12 +167,25 @@ defmodule Nebu.Matrix.Room.DBBehaviour do
   @doc """
   Returns the room name from the most recent m.room.name event.
 
-  Returns `{:ok, String.t()}` on success.
+  Returns `{:ok, String.t()}` on success. Bugfix sync-state-events-missing-fields
+  (AC2): the real `Nebu.Matrix.Room.DB` returns a wider `{:ok, name, event_id,
+  origin_server_ts}` 4-tuple instead — same query, no extra DB round trip (this
+  is a hot path called on every `/sync`) — so `build_state_events/2` can thread
+  real identity into the `m.room.name` state.events entry. Code-review cycle 1
+  (MINOR-2): the real DB now returns an even wider `{:ok, name, event_id,
+  origin_server_ts, sender}` 5-tuple (still the SAME query, zero extra round
+  trips) so `sender` is no longer left as `""` once the event_id is real.
+  Callers/fakes that return any of the narrower shapes continue to work:
+  `build_state_events/2` and the `upgrade_room` name-copy path match on all of
+  them.
   Returns `{:error, :not_found}` if no m.room.name event exists.
   Returns `{:error, reason}` on DB error.
   """
   @callback get_room_name(room_id :: String.t()) ::
-              {:ok, String.t()} | {:error, :not_found | term()}
+              {:ok, String.t()}
+              | {:ok, String.t(), String.t(), integer()}
+              | {:ok, String.t(), String.t(), integer(), String.t()}
+              | {:error, :not_found | term()}
 
   @doc """
   Returns heroes, joined count, and invited count for `room_id`, excluding `exclude_user_id`.
@@ -238,7 +266,11 @@ defmodule Nebu.Matrix.Room.DBBehaviour do
   Story 9-7: used by build_state_events/2 in EventDispatcher.Server to include
   state events set via PUT /rooms/{roomId}/state/{eventType}.
 
-  Returns `{:ok, [%{type, state_key, content_json, sender}]}` on success.
+  Returns `{:ok, [%{type, state_key, content_json, sender}]}` on success. The real
+  `Nebu.Matrix.Room.DB` additionally includes `event_id`/`origin_server_ts` in each
+  map (bugfix sync-state-events-missing-fields, AC2) — `build_state_events/2` reads
+  them defensively via `Map.get/3` (default `""` / `0`) so fakes that only return
+  the original 4 keys are unaffected.
   Returns `{:error, reason}` on DB error.
   """
   @callback get_generic_state_events(room_id :: String.t()) ::
@@ -246,19 +278,29 @@ defmodule Nebu.Matrix.Room.DBBehaviour do
 
   @doc """
   Returns the content of the m.room.create event for `room_id` (the first such event
-  by origin_server_ts ASC, i.e. the authoritative create event).
+  by origin_server_ts ASC, i.e. the authoritative create event), plus its real
+  identity.
 
   Used by build_state_events/2 so that upgraded rooms return their persisted
   m.room.create content (which includes the `predecessor` field) rather than a
   synthesized fallback that would omit predecessor.
 
-  Returns `{:ok, content_map}` on success.
+  Returns `{:ok, content_map}` on success. Bugfix sync-state-events-missing-fields
+  (AC2): the real `Nebu.Matrix.Room.DB` returns a wider `{:ok, content_map,
+  event_id, origin_server_ts}` 4-tuple instead — same query, no extra DB round
+  trip (hot path called on every `/sync`) — so `build_state_events/2` can thread
+  real identity into the `m.room.create` state.events entry. Callers/fakes that
+  only need existence/content (`check_parent_space_membership/2`,
+  `parent_space_membership_ok?/2`, and any fake still returning the 2-tuple)
+  continue to work unchanged.
   Returns `{:error, :not_found}` if no m.room.create event exists (new room not yet
   persisted, or pre-create-persist legacy room).
   Returns `{:error, reason}` on DB error.
   """
   @callback get_room_create_event(room_id :: String.t()) ::
-              {:ok, map()} | {:error, :not_found | term()}
+              {:ok, map()}
+              | {:ok, map(), String.t(), integer()}
+              | {:error, :not_found | term()}
 
   @doc """
   Returns events in `room_id` that relate to `event_id` via `rel_type`.

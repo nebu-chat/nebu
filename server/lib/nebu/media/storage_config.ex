@@ -172,7 +172,13 @@ defmodule Nebu.Media.StorageConfig do
     access_key: nil,
     secret_key: nil,
     s3_key_prefix_template: "{media_id}",
-    archive_bucket: nil
+    archive_bucket: nil,
+    # bugfix-upcloud-s3-iam-sts-endpoints (AC1): infra-provisioned-only, env-
+    # resolved full URLs (UpCloud IAM/STS endpoints) — no media_storage_config
+    # DB column, so never admin-settable and never masked. See build_resolved/2
+    # and default_env_reader/0 below.
+    iam_endpoint: nil,
+    sts_endpoint: nil
   }
 
   # ── Public API ──────────────────────────────────────────────────────────────
@@ -714,7 +720,15 @@ defmodule Nebu.Media.StorageConfig do
         ),
       s3_key_prefix_template:
         pick(row_get(row, "s3_key_prefix_template"), nil, @defaults.s3_key_prefix_template),
-      archive_bucket: pick(row_get(row, "archive_bucket"), nil, @defaults.archive_bucket)
+      archive_bucket: pick(row_get(row, "archive_bucket"), nil, @defaults.archive_bucket),
+      # bugfix-upcloud-s3-iam-sts-endpoints (AC1): env-only, no DB row to
+      # consult (no media_storage_config column exists for either field) —
+      # deliberately no row_get/1 call here, unlike every field above. Full
+      # URLs (scheme + port + path), so NOT run through
+      # validate_candidate_endpoint/1 — that function's scheme-rejection is
+      # specific to `endpoint`'s bare host[:port] contract.
+      iam_endpoint: pick(nil, Map.get(env, "NEBU_MINIO_IAM_ENDPOINT"), @defaults.iam_endpoint),
+      sts_endpoint: pick(nil, Map.get(env, "NEBU_MINIO_STS_ENDPOINT"), @defaults.sts_endpoint)
     }
   end
 
@@ -1036,6 +1050,11 @@ defmodule Nebu.Media.StorageConfig do
     |> maybe_put_env("NEBU_MINIO_ACCESS_KEY")
     |> maybe_put_env("NEBU_MINIO_SECRET_KEY_FILE")
     |> maybe_put_env("NEBU_MINIO_SECRET_KEY")
+    # bugfix-upcloud-s3-iam-sts-endpoints (AC1): UpCloud Managed Object
+    # Storage's separate IAM/STS endpoint URLs, mirroring runtime.exs's own
+    # NEBU_MINIO_IAM_ENDPOINT/NEBU_MINIO_STS_ENDPOINT reads (AC2).
+    |> maybe_put_env("NEBU_MINIO_IAM_ENDPOINT")
+    |> maybe_put_env("NEBU_MINIO_STS_ENDPOINT")
   end
 
   defp maybe_put_env(map, key) do

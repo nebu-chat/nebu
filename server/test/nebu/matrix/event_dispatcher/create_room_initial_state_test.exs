@@ -343,11 +343,25 @@ defmodule Nebu.Matrix.EventDispatcher.CreateRoomInitialStateTest do
       assert create["content"]["creator"] == "@alice:test.local"
       assert create["content"]["room_version"] == "10"
 
-      # No power_levels emitted through initial_state — only the authoritative one,
-      # which is written via set_power_levels (not as an event in this FakeDB), so
-      # there must be ZERO m.room.power_levels events from the initial_state path.
-      assert state_events(resp.room_id, "m.room.power_levels") == [],
-             "initial_state must not be able to set power levels"
+      # Bugfix sync-state-events-missing-fields (AC2 addendum): set_power_levels now
+      # emits a real backing event (mirroring emit_membership_event/3's pattern), so
+      # the room's authoritative m.room.power_levels event IS now a real event in
+      # this FakeDB — exactly ONE, written by the server during create_room/2 itself,
+      # with the creator as sender. initial_state must not be able to inject a
+      # SECOND, forged m.room.power_levels event escalating @evil.
+      power_levels_events = state_events(resp.room_id, "m.room.power_levels")
+
+      assert length(power_levels_events) == 1,
+             "initial_state must not be able to add a forged/duplicate m.room.power_levels event, " <>
+               "got: #{inspect(power_levels_events)}"
+
+      [authoritative_pl] = power_levels_events
+
+      assert authoritative_pl["sender"] == "@alice:test.local",
+             "the only m.room.power_levels event must be the server-authoritative one (creator-sent)"
+
+      refute get_in(authoritative_pl["content"], ["users", "@evil:test.local"]) == 100,
+             "initial_state must not be able to escalate @evil's power level"
 
       # The legitimate entry still went through.
       [topic] = state_events(resp.room_id, "m.room.topic")
@@ -407,8 +421,10 @@ defmodule Nebu.Matrix.EventDispatcher.CreateRoomInitialStateTest do
   # Matrix CS §createRoom ordering: m.room.create → creator m.room.member →
   # m.room.power_levels → initial_state → m.room.name/topic. A future reorder
   # (e.g. moving apply_initial_state before the creator join, or after name) must
-  # regress this test. power_levels is set via set_power_levels (not an event), so
-  # the assertable event chain is: create < member < initial_state entry < name.
+  # regress this test. Since bugfix sync-state-events-missing-fields, power_levels
+  # IS also a real event (set_power_levels now emits one, AC2 addendum) — this test
+  # only asserts the chain it originally covered (create < member < initial_state
+  # entry < name); it does not additionally assert power_levels' own position.
   describe "create_room/2 — initial_state emit order" do
     test "initial_state events are emitted after create/member and before m.room.name" do
       req = %Core.CreateRoomRequest{

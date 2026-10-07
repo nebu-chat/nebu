@@ -115,6 +115,26 @@ if config_env() in [:prod, :dev] do
   config :nebu_http,
     media_archive_bucket: System.get_env("NEBU_MINIO_ARCHIVE_BUCKET", "nebu-media-archive")
 
+  # bugfix-upcloud-s3-iam-sts-endpoints (AC2): UpCloud Managed Object Storage
+  # exposes separate IAM/STS endpoint URLs alongside the public S3 endpoint
+  # (NEBU_MINIO_ENDPOINT above) — plumbed through as-is (no default, nil when
+  # unset) so the S3 driver config carries them for providers that need them.
+  # Unrelated/unused by MinIO and other S3-compatible backends that don't set
+  # these vars. Mirrors Nebu.Media.StorageConfig's own env resolution of the
+  # same two vars (AC1). An empty string (e.g. cloud-init's s3_iam_endpoint/
+  # s3_sts_endpoint locals falling back to "" when the provider's endpoint
+  # list has no matching entry) is treated the same as unset — normalized to
+  # nil rather than leaking a set-but-empty value.
+  normalize_optional_env = fn
+    nil -> nil
+    "" -> nil
+    value -> value
+  end
+
+  config :nebu_http,
+    media_iam_endpoint: normalize_optional_env.(System.get_env("NEBU_MINIO_IAM_ENDPOINT")),
+    media_sts_endpoint: normalize_optional_env.(System.get_env("NEBU_MINIO_STS_ENDPOINT"))
+
   config :ex_aws,
     access_key_id: minio_access_key,
     secret_access_key: minio_secret_key,

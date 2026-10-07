@@ -534,6 +534,12 @@ write_files:
 %{ if enable_media_gateway ~}
             # Media object storage — server serves /_matrix/media from the S3 bucket.
             NEBU_MINIO_ENDPOINT: "${s3_endpoint}"
+%{ if s3_iam_endpoint != "" ~}
+            NEBU_MINIO_IAM_ENDPOINT: "${s3_iam_endpoint}"
+%{ endif ~}
+%{ if s3_sts_endpoint != "" ~}
+            NEBU_MINIO_STS_ENDPOINT: "${s3_sts_endpoint}"
+%{ endif ~}
             NEBU_MINIO_ACCESS_KEY_FILE: "/run/secrets/s3_access_key"
             NEBU_MINIO_SECRET_KEY_FILE: "/run/secrets/s3_secret_key"
             NEBU_MINIO_BUCKET: "${s3_bucket}"

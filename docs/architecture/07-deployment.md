@@ -141,6 +141,15 @@ The application ships a **single seed migration** (raw SQL, e.g. `000001_init.up
 
 **The down migration** drops all tables and functions in reverse dependency order. Extensions (`pgcrypto`, `uuid-ossp`) are intentionally NOT dropped - they may be shared at the PostgreSQL server level.
 
+### Post-Seed Incremental Migrations
+
+After the seed migration `000001_init`, specific features and bugfixes may introduce new incremental migrations
+(e.g., `000035_backfill_power_levels_events` for the sync-state-events-missing-fields bugfix). These are applied
+in sequence after the seed migration; `Nebu.Release.migrate/0` runs all `.up.sql` files in numeric order at boot.
+Each incremental migration pairs `.up.sql` (apply) and `.down.sql` (rollback) files. Incremental migrations are 
+created only when schema changes or one-time data transformations are necessary; they follow the single-role `nebu_app` pattern
+(no ownership transfers, no legacy grants).
+
 **Local dev reset:**
 
 ```bash
@@ -272,6 +281,7 @@ deploy/
 |---|---|---|---|
 | AWS | ECS Fargate + Aurora Serverless v2 | AWS Aurora PostgreSQL 16 (Serverless v2) | S3 + DynamoDB |
 | STACKIT | VMs + Docker Compose + ALB | STACKIT PostgresFlex (managed PostgreSQL 16) | STACKIT Object Storage (S3-compatible) |
+| UpCloud | VMs + Docker Compose + ALB | UpCloud Managed PostgreSQL | UpCloud Managed Object Storage (S3-compatible) |
 | Kubernetes | Helm Chart (`deploy/helm/nebu/`) | External (operator-provided) | S3-compatible or PostgreSQL |
 
 ### Local IaC Validation
@@ -836,6 +846,78 @@ kind delete cluster --name nebu-dev
 ```
 
 Full operator procedures (upgrade, rollback, HPA configuration, teardown) are in `deploy/tofu/examples/k8s/RUNBOOK.md`.
+
+### UpCloud VM + Managed Services
+
+`deploy/tofu/examples/upcloud/` provisions Nebu on UpCloud infrastructure with VMs, managed PostgreSQL, and Managed Object Storage (S3-compatible). The architecture mirrors Stackit: a single UpCloud VM runs Docker Compose with the Elixir application and optional media gateway, backed by a managed PostgreSQL database and S3-compatible object storage.
+
+**Resources provisioned:**
+
+- `upcloud_server` - Ubuntu 24.04 LTS VM; machine type configurable via `plan` variable (default: `2xCPU-2GB`)
+- `upcloud_managed_postgresql_instance` - Managed PostgreSQL 16 database (single-server deployment; replicas optional)
+- `upcloud_managed_object_storage` - Managed object storage (S3-compatible); provisioned with a bucket and long-lived access credentials
+- `upcloud_loadbalancer` - Application Load Balancer with listener on port 443 (TLS) forwarding to the VM port 8008 (or 8080 in non-TLS mode)
+- DNS records (if `enable_dns = true`) - UpCloud DNS zone + A-record for the deployment
+
+**Configuration Variables:**
+
+| Variable | Type | Default | Purpose |
+|---|---|---|---|
+| `enable_media_gateway` | bool | `false` | Deploy the media gateway with Managed Object Storage |
+| `server_cpu_limit` | string | `"1.0"` | CPU limit for the server container |
+| `server_memory_limit` | string | `"512m"` | Memory limit for the server container |
+| `enable_tls` | bool | `true` | Enable ACME/Let's Encrypt TLS termination on the ALB |
+| `enable_dns` | bool | `false` | Create DNS records via UpCloud DNS |
+
+### UpCloud Media Gateway Support
+
+When `enable_media_gateway = true`, the UpCloud Terraform deployment creates an S3 bucket in Managed Object Storage and wires S3 credentials through the cloud-init template into the Elixir server's environment. The server processes media uploads and downloads against the S3-compatible endpoint using the same `Nebu.Media.StorageConfig` module that supports all platforms (AWS, STACKIT, UpCloud, local MinIO).
+
+**Managed Object Storage Endpoints:**
+
+UpCloud's `upcloud_managed_object_storage` resource exposes per-endpoint metadata including:
+
+- `domain_name` - S3 API hostname and port (e.g. `7mf5k.upcloudobjects.com:443`)
+- `iam_url` - IAM service endpoint for credential provisioning (e.g. `https://7mf5k.upcloudobjects.com:4443/iam`)
+- `sts_url` - STS (Security Token Service) endpoint for AssumeRole-style token exchange (e.g. `https://7mf5k.upcloudobjects.com:4443/sts`)
+
+**Configuration Variables (Media Gateway):**
+
+| Variable | Type | Default | Purpose |
+|---|---|---|---|
+| `s3_access_key` | string (sensitive) | `""` | Access key for UpCloud Managed Object Storage (required when enabled) |
+| `s3_secret_key` | string (sensitive) | `""` | Secret key for UpCloud Managed Object Storage (required when enabled) |
+| `s3_endpoint` | string | Auto-derived | S3 endpoint `domain_name` extracted from `upcloud_managed_object_storage.endpoint` |
+| `s3_iam_endpoint` | string | Auto-derived | IAM endpoint `iam_url` extracted from `upcloud_managed_object_storage.endpoint` |
+| `s3_sts_endpoint` | string | Auto-derived | STS endpoint `sts_url` extracted from `upcloud_managed_object_storage.endpoint` |
+| `s3_bucket` | string | `"nebu-media"` | S3 bucket name for media storage |
+
+**Server Environment Variables (set via cloud-init when `enable_media_gateway = true`):**
+
+```
+NEBU_MINIO_ENDPOINT        — Extracted from UpCloud MOS domain_name (s3_endpoint)
+NEBU_MINIO_IAM_ENDPOINT    — Extracted from UpCloud MOS iam_url (s3_iam_endpoint) — NEW in bugfix-upcloud-s3-iam-sts-endpoints
+NEBU_MINIO_STS_ENDPOINT    — Extracted from UpCloud MOS sts_url (s3_sts_endpoint) — NEW in bugfix-upcloud-s3-iam-sts-endpoints
+NEBU_MINIO_ACCESS_KEY_FILE — /run/secrets/s3_access_key (Docker Secret)
+NEBU_MINIO_SECRET_KEY_FILE — /run/secrets/s3_secret_key (Docker Secret)
+NEBU_MINIO_BUCKET          — From s3_bucket variable
+NEBU_MINIO_USE_SSL         — "true" (UpCloud MOS requires TLS)
+```
+
+**`Nebu.Media.StorageConfig` Integration:**
+
+The server's `Nebu.Media.StorageConfig` module resolves these environment variables at boot time:
+
+- `iam_endpoint` field (optional, `nil` by default) — resolved from `NEBU_MINIO_IAM_ENDPOINT`
+- `sts_endpoint` field (optional, `nil` by default) — resolved from `NEBU_MINIO_STS_ENDPOINT`
+- Both are full URLs (e.g. `https://7mf5k.upcloudobjects.com:4443/iam`), not host:port pairs
+- Neither field is a secret; both are stored and visible in the config table for operator inspection
+
+Note: The new `iam_endpoint` and `sts_endpoint` fields are plumbed through as configuration but are not yet actively consumed by the ExAws S3 client (runtime STS AssumeRole exchange). They are available for future integration when a live UpCloud account confirms a runtime STS flow is required. The bugfix ensures the three URLs (endpoint, iam_url, sts_url) exposed by UpCloud's Managed Object Storage resource are threaded end-to-end into the application's config module, enabling future use cases without further IaC changes.
+
+**Local IaC Validation:**
+
+UpCloud examples are included in the `make test-iac-validate` target, validating all Terraform configurations (AWS, STACKIT, UpCloud, Kubernetes) together with no cloud credentials required.
 
 ---
 

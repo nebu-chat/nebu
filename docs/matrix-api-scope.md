@@ -110,6 +110,13 @@ Client-Server API specification.
 | PUT | `/_matrix/client/v3/profile/{userId}/displayname` | ✅ | Requires JWT auth |
 | PUT | `/_matrix/client/v3/profile/{userId}/avatar_url` | ✅ | Requires JWT auth |
 
+## User Relations and Mutual Rooms
+
+| Method | Endpoint | Status | Notes |
+|---|---|---|---|
+| GET | `/_matrix/client/v1/mutual_rooms` | ✅ | MSC2666 stable endpoint (Matrix CS API v1.19+); query param `user_id=@other:server`; returns paginated list of room_ids via `joined` + `next_batch` (cursor); calls `Nebu.Matrix.EventDispatcher.Server.get_mutual_rooms/4` directly (no Room GenServer involvement); intersects authenticated caller's rooms with target user's rooms; rate-limited tier `mutual_rooms` (120/min, burst 30) |
+| GET | `/_matrix/client/unstable/uk.half-shot.msc2666/user/mutual_rooms` | ✅ | MSC2666 unstable alias (historical compatibility); same handler as stable v1 endpoint; behavioral difference: NEVER paginates (always returns complete `joined` list, no `next_batch`), matching the original unstable-era MSC2666 endpoint behavior |
+
 ## Account Data and Tags
 
 | Method | Endpoint | Status | Notes |

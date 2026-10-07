@@ -142,6 +142,20 @@ defmodule Nebu.ReleaseTest do
       # updated in place, never removed by app code) + sequence USAGE/SELECT
       # to nebu_app. Also extends media_config_update_mutable (ADR-027,
       # Story 9a) with this story's own 4 alert-threshold keys.
+      # 000034 — media-security-admin-control/10d-scan-kill-switch: extends
+      # media_config_update_mutable (ADR-027) with the scan_kill_switch key.
+      # ALTER POLICY only — no new table, no new GRANT required.
+      # 000035 — bugfix sync-state-events-missing-fields (code-review cycle 1,
+      # MAJOR-1): backfills one authoritative m.room.power_levels event per
+      # pre-existing room that has power_levels set but no backing event row
+      # yet (the old code never persisted one). INSERT into the EXISTING
+      # events table only — no new table, no new GRANT required.
+      # 000036 — bugfix unsigned-replaces-state (code-review cycle 2, MAJOR
+      # companion fix): corrects historical events.state_key corruption from
+      # the pre-existing do_send_event/7 `state_key || ""` writer bug (every
+      # non-state event was persisted with state_key = '' instead of NULL).
+      # UPDATEs the EXISTING events table only — no new table, no new GRANT
+      # required.
       assert versions ==
                [
                  1,
@@ -177,7 +191,9 @@ defmodule Nebu.ReleaseTest do
                  31,
                  32,
                  33,
-                 34
+                 34,
+                 35,
+                 36
                ]
 
       # Only *.up.sql files are returned — *.down.sql are excluded.

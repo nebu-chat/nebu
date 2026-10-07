@@ -798,7 +798,16 @@ defmodule Nebu.Web.Router.Protected do
   end
 
   # Flatten a Core.SyncRoomStateEvent into the Matrix state-event JSON shape initialSync
-  # expects. content is JSON bytes; synth event_id/ts since the state struct omits them.
+  # expects. content is JSON bytes. Code-review cycle 1 (MINOR-4): real
+  # event_id/origin_server_ts are now available on `se` (bugfix
+  # sync-state-events-missing-fields widened Core.SyncRoomStateEvent and
+  # threaded real identity through build_state_events/2) — this helper still
+  # synthesizes a fake event_id/`now` timestamp here deliberately, NOT because
+  # the struct omits them. Using the real values here is tracked as a
+  # separate, agreed follow-up (see bug-context.md's Dev Notes:
+  # "/initialSync and /members would still return synthetic values" is flagged
+  # as a loud note, not silently expanded into this bug's scope) — out of scope
+  # for this fix.
   defp initial_sync_state_event(se, room, now) do
     content =
       case se.content do
@@ -1120,6 +1129,120 @@ defmodule Nebu.Web.Router.Protected do
       :error -> 0
     end
   end
+
+  # ── GET /_matrix/client/v1/mutual_rooms ───────────────────────────────────
+  # MSC2666 (Matrix CS API v1.19): rooms the caller currently shares with
+  # `user_id` (both hold membership: join). Pure direct-DB-read — the backend
+  # (EventDispatcher.Server.get_mutual_rooms) calls get_rooms_for_user/1 twice
+  # and intersects; no Room GenServer/:pg/Horde touch.
+  #
+  # Validation order: user_id present → Nebu.Matrix.UserId.valid?/1 → user_id
+  # != caller, all before any DB touch. A forged/malformed `from` pagination
+  # token (decoded inside get_mutual_rooms, own "mr1:" opaque offset token)
+  # fails the same way. All four 400 causes (missing/malformed/self user_id,
+  # bad `from`) use M_INVALID_PARAM uniformly, per MSC2666 — not this
+  # project's usual M_MISSING_PARAM convention for an absent param. A
+  # syntactically-valid but unknown `user_id` returns 200 {count: 0,
+  # joined: []}, never 404 (anti-enumeration).
+  #
+  # Rate-limited via the shared Nebu.Web.Plugs.RateLimit plug, which keys its
+  # token bucket by IP alone, not `{ip, tier}`. This tier's burst: 30 draws
+  # from and can clamp down the SAME per-IP bucket that /sync (burst: 100)
+  # and /login (burst: 10, http_public.ex) also use — a single mutual_rooms
+  # request can temporarily reduce those endpoints' available headroom until
+  # the shared bucket re-accrues. This is a pre-existing property of the
+  # shared plug (keyed by IP, not per endpoint), not something unique to or
+  # fixed by this endpoint.
+  @mutual_rooms_rate_limit Nebu.Web.Plugs.RateLimit.init(
+                             rate_per_min: 120,
+                             burst: 30,
+                             tier: "mutual_rooms"
+                           )
+
+  get "/client/v1/mutual_rooms" do
+    conn = Nebu.Web.Plugs.RateLimit.call(conn, @mutual_rooms_rate_limit)
+
+    if conn.halted do
+      conn
+    else
+      do_mutual_rooms(conn, unstable: false)
+    end
+  end
+
+  # ── GET /client/unstable/uk.half-shot.msc2666/user/mutual_rooms ───────────
+  # Alias for the handler above. The `unstable_features
+  # ["uk.half-shot.msc2666.query_mutual_rooms"]` flag in /versions is what
+  # real clients (matrix-js-sdk/Element) check to decide whether to call this
+  # feature at all, and that flag has always signalled this unstable path
+  # rather than the stable v1 one — so both routes need to exist and work,
+  # sharing one handler.
+  #
+  # This path never paginates: it always returns the complete `joined` list,
+  # never emits `next_batch`, and ignores any `from` query param it receives.
+  # The historical/real-world unstable MSC2666 endpoint never had a
+  # pagination concept (verified against actual historical server
+  # implementations, not assumed), so this calls
+  # EventDispatcher.Server.get_mutual_rooms/4 with `unpaginated: true` rather
+  # than forwarding to the paginated logic unchanged — which would otherwise
+  # silently truncate a legacy client's response once shared rooms exceed one
+  # page. `count` is kept in the body (harmless extra field, costs nothing)
+  # for consistency with the v1 shape. The stable v1 route's own pagination
+  # (page size, `from`/`next_batch`) is unchanged and independent of this
+  # alias.
+  get "/client/unstable/uk.half-shot.msc2666/user/mutual_rooms" do
+    conn = Nebu.Web.Plugs.RateLimit.call(conn, @mutual_rooms_rate_limit)
+
+    if conn.halted do
+      conn
+    else
+      do_mutual_rooms(conn, unstable: true)
+    end
+  end
+
+  defp do_mutual_rooms(conn, opts) do
+    unstable? = Keyword.get(opts, :unstable, false)
+    user = conn.assigns[:current_user]
+    q = conn.query_params
+    target = q["user_id"]
+
+    case validate_mutual_rooms_user_id(target, user) do
+      {:error, :invalid_param} ->
+        error(conn, 400, "M_INVALID_PARAM", "user_id is required and must be a valid, non-self Matrix user ID")
+
+      {:ok, target} ->
+        # The unstable path has no pagination concept, so any `from` it
+        # receives is simply ignored rather than decoded/validated.
+        from = if unstable?, do: nil, else: q["from"]
+
+        case call_core(fn ->
+               Nebu.Matrix.EventDispatcher.Server.get_mutual_rooms(user, target, from,
+                 unpaginated: unstable?
+               )
+             end) do
+          {:ok, resp} ->
+            body = %{"count" => resp.count, "joined" => resp.joined}
+            body = if resp.next_batch, do: Map.put(body, "next_batch", resp.next_batch), else: body
+            send_json(conn, 200, body)
+
+          {:error, err} ->
+            send_error(conn, err)
+        end
+    end
+  end
+
+  # user_id must be present, pass Nebu.Matrix.UserId.valid?/1's shape check, and
+  # not equal the caller's own mxid — all cheap, DB-free, default-deny checks
+  # (consistent with admin_add_room_member/3's existing "validate before any
+  # write" pattern, even though this endpoint only reads).
+  defp validate_mutual_rooms_user_id(user_id, caller) when is_binary(user_id) and user_id != "" do
+    cond do
+      not Nebu.Matrix.UserId.valid?(user_id) -> {:error, :invalid_param}
+      user_id == caller -> {:error, :invalid_param}
+      true -> {:ok, user_id}
+    end
+  end
+
+  defp validate_mutual_rooms_user_id(_user_id, _caller), do: {:error, :invalid_param}
 
   # ── GET /_matrix/client/v3/rooms/{roomId}/members ─────────────────────────
   # Returns the room's m.room.member state events (Element renders the member

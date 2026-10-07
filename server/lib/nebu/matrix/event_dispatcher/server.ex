@@ -1361,7 +1361,7 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
         {:ok, events, next_batch, prev_batch} =
           messages_db_module().fetch_events(room_id, direction, limit, from_token)
 
-        core_events = Enum.map(events, &event_map_to_core_event/1)
+        core_events = event_maps_to_core_events(events)
 
         %Core.GetMessagesResponse{
           events: core_events,
@@ -1405,8 +1405,126 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
       content: content_json,
       origin_ts: Map.get(event, "origin_server_ts", 0),
       server_ts: System.system_time(:millisecond),
-      state_key: Map.get(event, "state_key") || ""
+      state_key: Map.get(event, "state_key") || "",
+      # Code-review cycle 1 (MAJOR-2): the raw DB map's "state_key" key is
+      # Elixir nil ONLY when the events.state_key column itself was SQL NULL
+      # (a genuine non-state event) — a real state event's column is never
+      # NULL, even when its value is "" (m.room.name/topic/power_levels/
+      # create). This is the SAME signal `event_maps_to_core_events/1` below
+      # already uses to build the replaces_state batch; threading it onto the
+      # struct itself lets `Nebu.Matrix.Http.put_state_key/2` tell "genuine
+      # state event with empty state_key" apart from "not a state event at
+      # all" without re-deriving it from the now-collapsed `state_key` field.
+      is_state_event: Map.get(event, "state_key") != nil
     }
+  end
+
+  # Bugfix unsigned-replaces-state (AC5): guards the batched DB lookup behind
+  # function_exported?/3, exactly like forgotten_room_ids/1 above — an
+  # injected FakeDB (fast unit tests that stub messages_db_module/
+  # rooms_db_module without a real Postgres, excluded from :integration) safely
+  # degrades to "no replaces_state anywhere" instead of crashing with
+  # UndefinedFunctionError. The real Nebu.Matrix.Room.DB always implements
+  # fetch_replaces_state/1 (room/db.ex), so production and the
+  # :integration-tagged tests that run against the real Repo get real values.
+  #
+  # Code-review cycle 1 (MINOR): two additions beyond the bare
+  # function_exported?/3 check, mirroring unforget_room/2's double-guard
+  # above (server.ex:57-66):
+  #   - Code.ensure_loaded?/1 FIRST — function_exported?/3 can give a false
+  #     negative for a module that technically defines the function but has
+  #     not been loaded into the code server yet; ensure_loaded?/1 forces that
+  #     before asking.
+  #   - Process.whereis(Nebu.Repo) != nil — messages_db_module/0 defaults to
+  #     the REAL Nebu.Matrix.Room.DB (not a FakeDB) when a test never
+  #     overrides it. That module DOES export fetch_replaces_state/1, so
+  #     function_exported?/3 alone would return true even in a Repo-less unit
+  #     test and crash inside Ecto.Adapters.SQL.query/3 the moment the batch is
+  #     non-empty — exactly the gap this check closes.
+  defp fetch_replaces_state_batch(_mod, []), do: %{}
+
+  defp fetch_replaces_state_batch(mod, slots) do
+    if Code.ensure_loaded?(mod) and function_exported?(mod, :fetch_replaces_state, 1) and
+         Process.whereis(Nebu.Repo) != nil do
+      mod.fetch_replaces_state(slots)
+    else
+      # Debug (not warning): this is the EXPECTED path for every fast,
+      # Repo-less unit test that exercises get_initial_sync/fetch_delta_rooms
+      # with a FakeDB (or the real DB module but no Repo started) — logging at
+      # warning level here would spam test/dev output on every such /sync
+      # call. Mirrors the same hot-path/log-level rationale already
+      # established in Nebu.Matrix.Http.build_joined_rooms/1's own
+      # Logger.debug for a sibling "identity unavailable" condition. The
+      # genuinely actionable failure (a real DB error once Repo IS running)
+      # is logged at warning level inside Room.DB.fetch_replaces_state/1
+      # itself, not here.
+      Logger.debug(
+        "fetch_replaces_state_batch: #{inspect(mod)} unavailable (not loaded/exported, or no " <>
+          "Repo running) — replaces_state omitted for #{length(slots)} slot(s)"
+      )
+
+      %{}
+    end
+  end
+
+  # Bugfix unsigned-replaces-state (AC1/AC2/AC5): batched drop-in replacement
+  # for `Enum.map(raw_events, &event_map_to_core_event/1)` at every call site
+  # that serialises DB event maps into client-facing Core.Event structs (GET
+  # /messages, GET /event/{eventId}, GET .../relations/*, and /sync's
+  # timeline.events via get_initial_sync/fetch_delta_rooms). ONE additional
+  # query for the WHOLE `raw_events` list THIS FUNCTION WAS CALLED WITH (never
+  # call event_map_to_core_event/1 plus a per-event lookup in a loop — that is
+  # the exact N+1 AC5 forbids). The GRANULARITY of that list varies by caller,
+  # consistent with attach_replaces_state_to_state_events/2's own per-room
+  # batching below (Dev Notes' explicitly-sanctioned "per room, not per
+  # event" design — NOT one query for the whole /sync response): for
+  # get_initial_sync/2 and fetch_delta_rooms/3, `raw_events` is ONE room's
+  # timeline window, so this is one additional query per room, same as the
+  # state-side batch; for GET /messages / GET /event/{eventId} / relations,
+  # `raw_events` is that single response's own event list, so it is one query
+  # per response there (there is only one "room" in play for those endpoints).
+  #
+  # `Map.get(ev, "state_key") != nil` is the ONLY reliable "is this raw DB
+  # event a state event" signal here — the state_key VALUE alone is ambiguous
+  # once collapsed onto a Core.Event (both "not a state event" and "a state
+  # event whose real state_key is the empty string" — e.g. m.room.name/topic/
+  # power_levels/create — serialise to the same "" via event_map_to_core_event/1's
+  # `|| ""`). The raw DB map's "state_key" key is Elixir `nil` ONLY when the
+  # `events.state_key` column itself was SQL NULL (a genuine non-state event);
+  # a real state event's column is never NULL, even when its value is "" (see
+  # Room.DB.insert_event/1's own comment on this exact point). This is
+  # DIFFERENT from the pre-existing `Map.has_key?(ev, "state_key")` check a
+  # few dozen lines below in fetch_delta_rooms/3: that check is actually
+  # always-true in practice (every @sql_fetch_events_since-family query
+  # unconditionally SELECTs the state_key column, so the map always has the
+  # key, nil value or not) — harmless there only because "m.room.message"
+  # never collides with a real state event_type. Checking the VALUE against
+  # `nil` (this function) is the correct, non-coincidental test.
+  defp event_maps_to_core_events(raw_events) do
+    core_events = Enum.map(raw_events, &event_map_to_core_event/1)
+
+    slots =
+      raw_events
+      |> Enum.filter(fn ev -> Map.get(ev, "state_key") != nil end)
+      |> Enum.map(fn ev ->
+        {
+          Map.get(ev, "event_id", ""),
+          Map.get(ev, "room_id", ""),
+          Map.get(ev, "event_type", ""),
+          Map.get(ev, "state_key"),
+          Map.get(ev, "origin_server_ts", 0)
+        }
+      end)
+      |> Enum.reject(fn {event_id, _, _, _, _} -> event_id == "" end)
+
+    replaces_state_by_id = fetch_replaces_state_batch(messages_db_module(), slots)
+
+    Enum.map(core_events, fn ce ->
+      case Map.get(replaces_state_by_id, ce.event_id) do
+        nil -> ce
+        replaces -> %{ce | replaces_state: replaces}
+      end
+    end)
   end
 
   def set_power_levels(request, stream) do
@@ -2038,6 +2156,10 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
   # the sender is not a member of → 403.
   defp check_parent_space_membership(parent_space_id, sender_id) do
     # Existence is authoritative on the m.room.create event in the events table.
+    # Bugfix sync-state-events-missing-fields: the real DB's get_room_create_event/1
+    # now returns a wider {:ok, content, event_id, ts} 4-tuple (AC2) — this call site
+    # only cares about existence/content, so both the 4-tuple and the original
+    # 2-tuple (fakes that predate the widening) are matched identically below.
     case rooms_db_module().get_room_create_event(parent_space_id) do
       {:error, :not_found} ->
         raise Nebu.Matrix.Error,
@@ -2050,13 +2172,20 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
           message: "parent space not found: #{parent_space_id}"
 
       {:ok, _create_content} ->
-        parent_state = fetch_room_state(parent_space_id)
+        check_parent_space_membership_finish(parent_space_id, sender_id)
 
-        unless MapSet.member?(parent_state.members, sender_id) do
-          raise Nebu.Matrix.Error,
-            status: Nebu.Matrix.Status.permission_denied(),
-            message: "Sender is not a member of the parent space"
-        end
+      {:ok, _create_content, _event_id, _origin_server_ts} ->
+        check_parent_space_membership_finish(parent_space_id, sender_id)
+    end
+  end
+
+  defp check_parent_space_membership_finish(parent_space_id, sender_id) do
+    parent_state = fetch_room_state(parent_space_id)
+
+    unless MapSet.member?(parent_state.members, sender_id) do
+      raise Nebu.Matrix.Error,
+        status: Nebu.Matrix.Status.permission_denied(),
+        message: "Sender is not a member of the parent space"
     end
   end
 
@@ -2277,6 +2406,136 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
     }
   end
 
+  # ─── AC: GetMutualRooms — MSC2666 shared-room intersection ──────────────────
+  #
+  # Pure direct-DB-read, no Room GenServer/:pg/Horde touch (bugfix-mutual-rooms
+  # bug-context.md §8 — only the id-level join fact matters here, not room
+  # content, unlike get_space_hierarchy which legitimately needs per-room
+  # GenServer state). Calls rooms_db_module().get_rooms_for_user/1 ONCE for the
+  # caller and ONCE for `user_id` (same injectable DI seam get_initial_sync
+  # already uses), intersects the two id sets, sorts deterministically by
+  # room_id (so the offset-window pagination below is stable across calls),
+  # then applies an opaque offset-token page over the sorted list, via the
+  # SHARED `Nebu.Matrix.PageToken` encode/2 + decode/2 helpers (own "mr1:"
+  # prefix, same fail-closed-on-forged-token contract as
+  # Nebu.Matrix.SpaceHierarchy's "h1:" hierarchy cursor — both call sites need
+  # an opaque offset-pagination token with the same fail-closed-on-forged-
+  # token contract, so the codec lives in one shared module instead of being
+  # duplicated). A forged/
+  # malformed `from` token raises Nebu.Matrix.Error(invalid_argument), caught
+  # by the SAME call_core/map_error path protected.ex already uses for
+  # get_space_hierarchy's own `from` token → 400 M_INVALID_PARAM, no bespoke
+  # error plumbing needed.
+  #
+  # `user_id` that is syntactically valid but does not resolve to a real/known
+  # user is NOT special-cased: get_rooms_for_user/1 naturally returns
+  # `{:ok, []}` for such an id, so the intersection is empty and the response
+  # is a plain `{count: 0, joined: []}` — never 404 (MSC2666's own
+  # anti-user-enumeration rule).
+  #
+  # Page size is test-overridable via `Application.put_env(:event_dispatcher,
+  # :mutual_rooms_page_size, n)` (mirrors this module's own
+  # `:event_dispatcher`-namespaced config convention), clamped to a minimum of
+  # 1, so a misconfigured 0/negative value can never reach the pagination
+  # windowing logic, falling back to a real default when unset.
+  # `opts[:unpaginated]` (default `false`) exists because the unstable
+  # MSC2666 alias route (protected.ex) needs a complete, untruncated response:
+  # the historical/unstable endpoint never paginated, so when `true` this
+  # forces offset 0
+  # (the caller already passes `from_token: nil` in that case — see
+  # protected.ex's do_mutual_rooms/2) and an effectively-unlimited page size
+  # (the full sorted intersection length itself), guaranteeing `joined` is
+  # always complete and `next_batch` is always `nil` — without touching the
+  # stable v1 route's own paginated call (which keeps passing `unpaginated:
+  # false`/omitted, i.e. the original behavior, unchanged).
+  def get_mutual_rooms(caller_id, user_id, from_token, opts \\ []) do
+    unpaginated? = Keyword.get(opts, :unpaginated, false)
+
+    with {:ok, decoded_offset} <- decode_mutual_rooms_token(from_token) do
+      # The unpaginated alias always starts from the beginning of the sorted
+      # intersection, regardless of what offset a caller's `from_token` decoded
+      # to — this is enforced here rather than relied upon via caller
+      # convention, since `unpaginated?` and `from_token` are independent
+      # arguments to this public function.
+      offset = if unpaginated?, do: 0, else: decoded_offset
+
+      caller_rooms = mutual_rooms_id_set!(caller_id)
+      target_rooms = mutual_rooms_id_set!(user_id)
+
+      shared = caller_rooms |> MapSet.intersection(target_rooms) |> Enum.sort()
+      total = length(shared)
+      limit = if unpaginated?, do: total, else: mutual_rooms_page_size()
+
+      page = shared |> Enum.drop(offset) |> Enum.take(limit)
+      next_offset = offset + length(page)
+
+      next_batch =
+        if not unpaginated? and next_offset < total,
+          do: encode_mutual_rooms_token(next_offset),
+          else: nil
+
+      %{count: total, joined: page, next_batch: next_batch}
+    else
+      {:error, :invalid_token} ->
+        raise Nebu.Matrix.Error,
+          status: Nebu.Matrix.Status.invalid_argument(),
+          message: "invalid pagination token"
+    end
+  end
+
+  # Wrapped in try/catch (not just a case on {:ok,_}/{:error,_}): a pure-unit
+  # test run with no live Postgres has no Nebu.Repo process at all (AC10's
+  # rate-limit probe runs requests through the FULL handler before the
+  # limiter trips — it is not exempt from reaching this call), and
+  # Ecto.Adapters.SQL.query/3 against an unstarted repo RAISES ("could not
+  # lookup Ecto repo …") rather than returning an {:error, reason} tuple.
+  # Converting that into the same 503 M_UNAVAILABLE path as a genuine DB
+  # error keeps such a request from crashing the caller instead of cleanly
+  # failing closed.
+  defp mutual_rooms_id_set!(user_id) do
+    result =
+      try do
+        rooms_db_module().get_rooms_for_user(user_id)
+      rescue
+        e -> {:error, e}
+      catch
+        :exit, reason -> {:error, reason}
+      end
+
+    case result do
+      {:ok, ids} ->
+        MapSet.new(ids)
+
+      {:error, reason} ->
+        Logger.warning(
+          "mutual_rooms: get_rooms_for_user failed for #{user_id}: #{inspect(reason)}"
+        )
+
+        raise Nebu.Matrix.Error,
+          status: Nebu.Matrix.Status.unavailable(),
+          message: "database unavailable: #{inspect(reason)}"
+    end
+  end
+
+  defp mutual_rooms_page_size do
+    max(Application.get_env(:event_dispatcher, :mutual_rooms_page_size, 50), 1)
+  end
+
+  @mutual_rooms_token_prefix "mr1:"
+
+  defp encode_mutual_rooms_token(offset) when is_integer(offset) and offset >= 0 do
+    Nebu.Matrix.PageToken.encode(@mutual_rooms_token_prefix, offset)
+  end
+
+  defp decode_mutual_rooms_token(nil), do: {:ok, 0}
+  defp decode_mutual_rooms_token(""), do: {:ok, 0}
+
+  defp decode_mutual_rooms_token(token) when is_binary(token) do
+    Nebu.Matrix.PageToken.decode(@mutual_rooms_token_prefix, token)
+  end
+
+  defp decode_mutual_rooms_token(_), do: {:error, :invalid_token}
+
   # ─── AC: GetInitialSync — full state snapshot for all joined rooms ───────────
   #
   # Flow:
@@ -2321,7 +2580,7 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
         fn room_id ->
           try do
             state = room_registry_module().get_state(room_id)
-            state_events = build_state_events(state, room_id)
+            state_events = build_state_events(state, room_id, true)
 
             {:ok, events, _next_batch, prev_batch} =
               messages_db_module().fetch_events(room_id, "b", 20, "")
@@ -2329,9 +2588,12 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
             raw_tl_events =
               events
               |> Enum.reverse()
-              |> Enum.map(&event_map_to_core_event/1)
+              |> event_maps_to_core_events()
 
-            timeline_events = attach_thread_aggregations(raw_tl_events, room_id, user_id)
+            timeline_events =
+              raw_tl_events
+              |> attach_thread_aggregations(room_id, user_id)
+
             limited = length(events) >= 20
             deduped_state = dedup_member_state_events(state_events, timeline_events)
 
@@ -2353,11 +2615,15 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
               _ = Nebu.Matrix.Room.RoomSupervisor.start_room(room_id)
               try do
                 state      = room_registry_module().get_state(room_id)
-                state_evs  = build_state_events(state, room_id)
+                state_evs  = build_state_events(state, room_id, true)
                 {:ok, evs, _next_batch, prev_b} =
                   messages_db_module().fetch_events(room_id, "b", 20, "")
-                raw_tl_evs = evs |> Enum.reverse() |> Enum.map(&event_map_to_core_event/1)
-                tl_evs = attach_thread_aggregations(raw_tl_evs, room_id, user_id)
+                raw_tl_evs = evs |> Enum.reverse() |> event_maps_to_core_events()
+
+                tl_evs =
+                  raw_tl_evs
+                  |> attach_thread_aggregations(room_id, user_id)
+
                 deduped = dedup_member_state_events(state_evs, tl_evs)
                 sync_room =
                   %Core.SyncRoom{
@@ -2663,9 +2929,10 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
         {:ok, events} ->
           try do
             state = room_registry_module().get_state(room_id)
-            raw_timeline_events = Enum.map(events, &event_map_to_core_event/1)
+            raw_timeline_events = event_maps_to_core_events(events)
             thread_roots = thread_root_updates(events, room_id, user_id)
             timeline_events = attach_thread_aggregations(raw_timeline_events, room_id, user_id)
+
             timeline_events = thread_roots ++ timeline_events
             limited = length(events) >= 20
             # When limited, the oldest event's event_id is the backward-pagination
@@ -2684,7 +2951,7 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
               |> MapSet.new(fn ev -> {ev["event_type"] || "", ev["state_key"] || ""} end)
 
             state_events =
-              build_state_events(state, room_id)
+              build_state_events(state, room_id, true)
               |> Enum.reject(fn ev ->
                 MapSet.member?(timeline_state_keys, {ev.type, ev.state_key})
               end)
@@ -2780,7 +3047,25 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
 
   # Build state events for a room: m.room.create + one m.room.member per active member
   # + one m.room.power_levels + one m.room.name (if a name has been stored).
-  defp build_state_events(state, room_id) do
+  #
+  # Bugfix sync-state-events-missing-fields: every Core.SyncRoomStateEvent built here
+  # now carries REAL event_id/origin_server_ts (AC1/AC2), not synthesized placeholders —
+  # see Nebu.Matrix.Http.build_joined_rooms/1 (http.ex) for where these flow into
+  # /sync's rooms.join.*.state.events JSON.
+  #
+  # Code-review cycle 1 (MAJOR-3): `fetch_replaces_state?` (default `false`)
+  # opts IN to the extra batched replaces_state lookup (see
+  # attach_replaces_state_to_state_events/2 below) — it must be `true` ONLY
+  # at the 3 call sites that actually read `replaces_state` off the result
+  # (get_initial_sync/2's two code paths, fetch_delta_rooms/3). The OTHER
+  # callers of this function (get_room_state/2 for /members + /initialSync,
+  # visible_summary_or_forbid!/2, and room_visibility_summary/2 — the latter
+  # invoked PER ROOM, uncapped, inside the space-hierarchy BFS traversal) never
+  # read `replaces_state` off their result (those endpoints use a separately
+  # deferred, pre-existing synthetic-identity path — see this story's Scope
+  # boundary), so they correctly default to `false` and skip the extra query
+  # entirely rather than firing it and discarding the result.
+  defp build_state_events(state, room_id, fetch_replaces_state? \\ false) do
     creator_id =
       case messages_db_module().get_room_creator(room_id) do
         {:ok, id} ->
@@ -2797,48 +3082,118 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
     # upgraded rooms return the `predecessor` field rather than a synthesized fallback.
     # Fall back to synthesized content for rooms created before create-event persistence,
     # or when the DB query fails (e.g. in unit tests without a real DB).
-    create_content =
+    #
+    # Bugfix sync-state-events-missing-fields (AC2): the real DB returns a wider
+    # {:ok, content, event_id, origin_server_ts} 4-tuple — SAME query, no extra DB
+    # round trip (this runs on every /sync, a hot path). The original {:ok,
+    # content} 2-tuple is still matched for fakes that predate this widening.
+    {create_content, create_event_id, create_ts} =
       case messages_db_module().get_room_create_event(room_id) do
+        {:ok, persisted_content, event_id, ts} when is_map(persisted_content) ->
+          {persisted_content, event_id, ts}
         {:ok, persisted_content} when is_map(persisted_content) ->
-          persisted_content
+          {persisted_content, "", 0}
         _ ->
-          %{"creator" => creator_id, "room_version" => "10"}
+          {%{"creator" => creator_id, "room_version" => "10"}, "", 0}
       end
 
     create_event = %Core.SyncRoomStateEvent{
       type: "m.room.create",
       state_key: "",
       content: Jason.encode!(create_content),
-      sender: creator_id
+      sender: creator_id,
+      event_id: create_event_id,
+      origin_server_ts: create_ts
     }
 
+    # member_identity is captured by Room.Server at the moment it applies a join
+    # (handle_call({:join, ...})) and restored from the DB on every restart
+    # (do_init/1) — not re-derived via a per-sync DB round trip (AC2, cluster-safety/
+    # hot-path concern). Map.get/3 defaults to %{} for any state map that predates
+    # this field (e.g. hand-built test state maps for unrelated unit tests).
+    member_identity = Map.get(state, :member_identity, %{})
+
+    # Code-review cycle 1 (MINOR-3): content mirrors EXACTLY what
+    # emit_membership_event/3 (room/server.ex:557-567) actually persists —
+    # `%{"membership" => membership}`, no `displayname` key at all. The previous
+    # synthesized `"displayname" => ""` claimed a key the real event never had,
+    # now observably inconsistent with GET /rooms/{roomId}/event/{eventId} once
+    # member_event_id points at that real persisted event.
     member_events =
       state.members
       |> MapSet.to_list()
       |> Enum.map(fn uid ->
+        {member_event_id, member_ts} = Map.get(member_identity, uid, {"", 0})
+
         %Core.SyncRoomStateEvent{
           type: "m.room.member",
           state_key: uid,
-          content: Jason.encode!(%{"membership" => "join", "displayname" => ""}),
-          sender: uid
+          content: Jason.encode!(%{"membership" => "join"}),
+          sender: uid,
+          event_id: member_event_id,
+          origin_server_ts: member_ts
         }
       end)
+
+    # power_levels_event is captured by Room.Server when set_power_levels applies a
+    # change (AC2 addendum: that handler now also emits a real backing event) and
+    # restored from the DB on every restart. nil (no event yet, or a state map that
+    # predates this field) falls back to "" / 0 / "".
+    #
+    # Code-review cycle 1 (MINOR-2): the identity tuple now carries `sender` as a
+    # third element (both the live Room.Server GenServer state and the DB-restored
+    # value from load_members/1 do this) — matched here, with the original 2-tuple
+    # shape still accepted for state maps/fakes that predate this widening.
+    {pl_event_id, pl_ts, pl_sender} =
+      case Map.get(state, :power_levels_event) do
+        {event_id, ts, sender} -> {event_id, ts, sender}
+        {event_id, ts} -> {event_id, ts, ""}
+        _ -> {"", 0, ""}
+      end
 
     pl_event = %Core.SyncRoomStateEvent{
       type: "m.room.power_levels",
       state_key: "",
       content: Jason.encode!(state.power_levels),
-      sender: ""
+      sender: pl_sender,
+      event_id: pl_event_id,
+      origin_server_ts: pl_ts
     }
 
+    # Bugfix sync-state-events-missing-fields (AC2): the real DB returns a wider
+    # {:ok, name, event_id, origin_server_ts} 4-tuple — SAME query, no extra DB
+    # round trip. Code-review cycle 1 (MINOR-2): the real DB now returns an even
+    # wider {:ok, name, event_id, origin_server_ts, sender} 5-tuple (still the
+    # SAME query) so sender is no longer left as "" once event_id is real. Both
+    # narrower shapes are still matched for fakes that predate these widenings.
     name_events =
       case messages_db_module().get_room_name(room_id) do
+        {:ok, name, event_id, ts, sender} ->
+          [%Core.SyncRoomStateEvent{
+            type: "m.room.name",
+            state_key: "",
+            content: Jason.encode!(%{"name" => name}),
+            sender: sender,
+            event_id: event_id,
+            origin_server_ts: ts
+          }]
+        {:ok, name, event_id, ts} ->
+          [%Core.SyncRoomStateEvent{
+            type: "m.room.name",
+            state_key: "",
+            content: Jason.encode!(%{"name" => name}),
+            sender: "",
+            event_id: event_id,
+            origin_server_ts: ts
+          }]
         {:ok, name} ->
           [%Core.SyncRoomStateEvent{
             type: "m.room.name",
             state_key: "",
             content: Jason.encode!(%{"name" => name}),
-            sender: ""
+            sender: "",
+            event_id: "",
+            origin_server_ts: 0
           }]
         _ -> []
       end
@@ -2854,13 +3209,59 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
               type: ev.type,
               state_key: ev.state_key,
               content: ev.content_json,
-              sender: ev.sender
+              sender: ev.sender,
+              event_id: Map.get(ev, :event_id, ""),
+              origin_server_ts: Map.get(ev, :origin_server_ts, 0)
             }
           end)
         _ -> []
       end
 
-    [create_event] ++ member_events ++ [pl_event] ++ name_events ++ generic_state_events
+    all_state_events =
+      [create_event] ++ member_events ++ [pl_event] ++ name_events ++ generic_state_events
+
+    if fetch_replaces_state? do
+      attach_replaces_state_to_state_events(all_state_events, room_id)
+    else
+      all_state_events
+    end
+  end
+
+  # Bugfix unsigned-replaces-state (AC1/AC3/AC5): ONE additional batched query
+  # per room (not per state event, not per sync response — "per room" is the
+  # Dev Notes' explicitly-sanctioned alternative to "per response"). Enriches
+  # every Core.SyncRoomStateEvent built above with its real predecessor
+  # event_id, if any.
+  #
+  # Code-review cycle 1 (MAJOR-3): this is only REACHED from build_state_events/2
+  # when its caller opted in via `fetch_replaces_state?: true` — up to 3 real
+  # call sites today (get_initial_sync/2's two code paths, fetch_delta_rooms/3),
+  # not the single call site this comment used to describe before that gating
+  # was added. The other build_state_events/2 callers (get_room_state/2,
+  # visible_summary_or_forbid!/2, room_visibility_summary/2) never reach this
+  # function at all — see build_state_events/2's own comment for why.
+  #
+  # m.room.create's own entry is harmlessly included (always resolves to
+  # no match, per Matrix invariant — first-ever event at its slot) rather than
+  # specially filtered out, per the Dev Notes' "including it is also correct".
+  # Entries with event_id == "" (no real persisted identity — legacy rooms
+  # pre-dating migration 000035, see Nebu.Matrix.Http.build_joined_rooms/1's
+  # own comment) are excluded from the batch — there is no stable anchor to
+  # order against for those.
+  defp attach_replaces_state_to_state_events(state_events, room_id) do
+    slots =
+      state_events
+      |> Enum.filter(&(&1.event_id != ""))
+      |> Enum.map(&{&1.event_id, room_id, &1.type, &1.state_key, &1.origin_server_ts})
+
+    replaces_state_by_id = fetch_replaces_state_batch(messages_db_module(), slots)
+
+    Enum.map(state_events, fn se ->
+      case Map.get(replaces_state_by_id, se.event_id) do
+        nil -> se
+        replaces -> %{se | replaces_state: replaces}
+      end
+    end)
   end
 
   # ─── Story direct-room-heroes: attach_heroes/3 ─────────────────────────────
@@ -4618,7 +5019,7 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
   # exactly (get_room_create_event for existence, room state .members for membership).
   defp parent_space_membership_ok?(parent_space_id, sender_id) do
     with true <- is_binary(parent_space_id) and parent_space_id != "",
-         {:ok, _create_content} <- rooms_db_module().get_room_create_event(parent_space_id) do
+         true <- parent_space_create_event_exists?(parent_space_id) do
       try do
         parent_state = fetch_room_state(parent_space_id)
         MapSet.member?(parent_state.members, sender_id)
@@ -4628,6 +5029,18 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
         Nebu.Matrix.Error -> false
       end
     else
+      _ -> false
+    end
+  end
+
+  # Bugfix sync-state-events-missing-fields: get_room_create_event/1's real DB
+  # implementation now returns a wider {:ok, content, event_id, ts} 4-tuple (AC2);
+  # this existence check only cares whether an m.room.create event was found, so
+  # both the 4-tuple and the original 2-tuple (fakes predating the widening) count.
+  defp parent_space_create_event_exists?(parent_space_id) do
+    case rooms_db_module().get_room_create_event(parent_space_id) do
+      {:ok, _create_content} -> true
+      {:ok, _create_content, _event_id, _origin_server_ts} -> true
       _ -> false
     end
   end
@@ -4704,8 +5117,17 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
 
     # MAJOR-1 fix: get_generic_state_events excludes m.room.name, so fetch it
     # separately and prepend it as a synthetic event entry for the copy.
+    #
+    # Bugfix sync-state-events-missing-fields: the real DB's get_room_name/1 now
+    # returns a wider {:ok, name, event_id, ts} 4-tuple (AC2) — this copy path only
+    # needs the name, so both shapes are matched (fakes predating the widening
+    # still return the original 2-tuple).
     name_state_events =
       case messages_db_module().get_room_name(old_room_id) do
+        {:ok, name, _event_id, _ts, _sender} ->
+          [%{type: "m.room.name", state_key: "", content_json: Jason.encode!(%{"name" => name})}]
+        {:ok, name, _event_id, _ts} ->
+          [%{type: "m.room.name", state_key: "", content_json: Jason.encode!(%{"name" => name})}]
         {:ok, name} ->
           [%{type: "m.room.name", state_key: "", content_json: Jason.encode!(%{"name" => name})}]
         {:error, _} ->
@@ -4798,7 +5220,7 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
 
     case messages_db_module().fetch_events_by_relation(room_id, event_id, rel_type, limit, opts) do
       {:ok, events} ->
-        core_events = Enum.map(events, &event_map_to_core_event/1)
+        core_events = event_maps_to_core_events(events)
         %Core.GetRelationsResponse{events: core_events}
 
       {:error, reason} ->
@@ -4836,7 +5258,8 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
 
         case messages_db_module().fetch_event(event_id, room_id) do
           {:ok, event_map} ->
-            %Core.GetEventResponse{event: event_map_to_core_event(event_map)}
+            [core_event] = event_maps_to_core_events([event_map])
+            %Core.GetEventResponse{event: core_event}
 
           {:error, :not_found} ->
             raise Nebu.Matrix.Error,

@@ -1,0 +1,156 @@
+-- Bugfix unsigned-replaces-state, code-review cycle 2 (MAJOR regression companion
+-- migration), REVISED in code-review cycle 3 (MAJOR-1: exclusion-list ->
+-- inclusion-list): corrects historical `events.state_key` corruption caused by a
+-- pre-existing bug (predates this story — commit 816ac955, ~May 2026, originally
+-- story 9-7) in `Nebu.Matrix.Room.Server`'s `do_send_event/7`, which built its
+-- event map with `"state_key" => state_key || ""` before INSERT. `state_key` is
+-- `nil` upstream for every genuine non-state event (event_dispatcher/server.ex's
+-- `send_event/2`, ~line 169: `state_key = if is_state_event, do: raw_state_key,
+-- else: nil` — and the ONLY caller of this whole code path, the HTTP PUT
+-- /_matrix/client/v3/rooms/{roomId}/send/{eventType}/{txnId} handler, ALWAYS
+-- sets `is_state_event: false`, so in practice `state_key` reaching
+-- `do_send_event/7` has literally always been `nil` here) — but the `|| ""`
+-- collapsed that `nil` to the literal empty string immediately before calling
+-- `Room.DB.insert_event/1`, which itself has always passed `state_key` straight
+-- through unchanged (its own fix, story 9-7 code-review MAJOR-2) and therefore
+-- faithfully persisted the ALREADY-corrupted `""` as a stored (NOT NULL) value.
+--
+-- Every event ever sent through POST .../send/{eventType}/{txnId} — not just
+-- `m.room.message`, any event_type a client chooses for that endpoint — was
+-- therefore persisted with `state_key = ''` instead of `state_key = NULL`.
+-- `events.state_key IS NULL` is the sole signal
+-- `Nebu.Matrix.EventDispatcher.Server.event_map_to_core_event/1`'s new
+-- `is_state_event` field (added this same bugfix, cycle 1) relies on to tell a
+-- genuine non-state event apart from a genuine state event whose real
+-- Matrix state_key happens to be the empty string (m.room.create/power_levels/
+-- name/topic/join_rules/etc.) — both serialise to the identical stored `""`
+-- once corrupted, so every historical non-state event is, until this
+-- migration runs, indistinguishable from a real empty-state-key state event.
+-- Left uncorrected, EVERY pre-existing plain message (and any other non-state
+-- event type ever sent) would be misclassified as a state event by that new
+-- logic: it would wrongly gain a `"state_key": ""` in its client-facing JSON,
+-- and — from the 2nd such historical event at the same bogus (room_id,
+-- event_type, "") slot onward — a bogus `unsigned.replaces_state` pointing at
+-- the wrong predecessor. The companion code fix (same cycle,
+-- `room/server.ex`'s `do_send_event/7`) stops this corruption for NEW rows;
+-- this migration corrects the EXISTING ones, once.
+--
+-- ─── Precision: which rows get touched (REVISED, cycle 3, MAJOR-1) ─────────
+--
+-- Cycle 2's version of this migration nulled `state_key` for every row where
+-- `event_type NOT IN (<10 known-legitimate-state types>)` — an EXCLUSION list,
+-- fail-destructive by default: any event_type NOT on that list got nulled,
+-- including a legitimate custom/non-standard STATE event type this migration
+-- had never heard of. That is a real, not hypothetical, gap: `apply_initial_state/3`
+-- (event_dispatcher/server.ex, createRoom's `initial_state` array) has NO
+-- event-type allowlist of its own (only m.room.create/member/power_levels/
+-- encryption are forbidden) — a client can `POST /createRoom` with
+-- `initial_state` containing an arbitrary custom state event type with an
+-- explicitly empty `state_key`, and the old exclusion-list migration would
+-- have silently nulled it, permanently destroying a genuine state event (it
+-- would vanish from `get_generic_state_events/1`'s `state_key IS NOT NULL`
+-- filter and therefore from `/sync` entirely). This is not speculative: this
+-- codebase's OWN test-fixture generator (`matrix_client_compat_test.exs`'s
+-- `seed_synthetic_state_slots/2`, inserting `m.nebu.replaces-state-n1-test.*`
+-- rows with an explicit empty `state_key` to simulate a generic state type)
+-- proves this exact class of event — custom type, legitimately-empty
+-- state_key — is real and already exists in this codebase's own data, and the
+-- old exclusion-list version of this migration DID null those rows (verified
+-- against the live dev/test Postgres: 17 `m.nebu.*` subtypes ended up with
+-- `state_key IS NULL` after the cycle-2 migration ran, alongside the genuine
+-- `m.room.message` corruption it was meant to fix).
+--
+-- This migration now sets `state_key = NULL` ONLY for rows whose `event_type`
+-- is in a small, verified INCLUSION list of event types confirmed to be
+-- NON-state — i.e. event types the pre-existing `do_send_event/7` bug could
+-- plausibly have actually produced a corrupted `state_key = ''` row for. A row
+-- whose `event_type` is NOT on this list is left completely untouched,
+-- regardless of whether it is a known state type, an unknown custom state
+-- type, or anything else — fail-safe: an unanticipated custom type's
+-- legitimately-empty `state_key` is at worst left in its current (possibly
+-- still-corrupted-looking) shape, never destroyed. Under-inclusion here is
+-- safe (a row simply stays un-backfilled); over-inclusion would recreate the
+-- exact destructive problem this revision exists to close, so the list below
+-- is deliberately conservative.
+--
+-- The inclusion list was derived empirically, not guessed:
+--
+--   1. Grep sweep of every call site that sends an event through the generic
+--      non-state `PUT /_matrix/client/v3/rooms/{roomId}/send/{eventType}/
+--      {txnId}` path (the ONLY path `do_send_event/7`'s corrupting `state_key
+--      || ""` could ever have run for — this handler always sets
+--      `is_state_event: false`) AND is actually exercised, as a non-state
+--      event, anywhere in Nebu's own test suite (`server/test/`) or
+--      referenced as an event-type constant in `server/lib/`: the sweep found
+--      exactly ONE such type, `m.room.message` — every `.../send/<type>/...`
+--      call in the entire test suite (matrix_client_compat_test.exs,
+--      matrix_router_test.exs, matrix_room_routes_test.exs,
+--      sync_concurrent_test.exs, regression_sync_load_test.exs,
+--      matrix_room_view_routes_test.exs) uses `m.room.message`. Candidate
+--      types one might expect a real Matrix deployment to send this way
+--      (`m.reaction`, `m.room.redaction`, `m.call.*`, `m.key.verification.*`,
+--      `m.sticker`, `m.room.encrypted`) do not appear ANYWHERE in `server/lib/`
+--      or `server/test/` — Nebu implements no redaction endpoint, no reaction
+--      aggregation, no call signalling, and no key-verification relay today,
+--      so none of these types has ever actually been producible, let alone
+--      produced, by this codebase.
+--   2. Independent verification against this environment's real data
+--      (`SELECT event_type, count(*) FROM events WHERE state_key = '' GROUP
+--      BY event_type`, run against the live dev/test Postgres): every row
+--      with `state_key = ''` in this database today is one of the 8 known
+--      legitimate state types (m.room.power_levels, m.room.name,
+--      m.room.create, m.room.canonical_alias, m.room.topic,
+--      m.room.join_rules, m.room.history_visibility, m.room.tombstone) — none
+--      of source 1's candidate non-state types have EVER produced a
+--      `state_key = ''` row here. The complementary query (`... WHERE
+--      state_key IS NULL GROUP BY event_type`, i.e. what the cycle-2
+--      exclusion-list migration already corrected on this database) shows
+--      exactly `m.room.message` (178 rows — the genuine historical
+--      corruption) plus the 17 `m.nebu.replaces-state-*-test.*` synthetic
+--      test-fixture subtypes discussed above (not a real Matrix type, never
+--      produced in a real deployment, and regenerated fresh — with a fresh
+--      state_key value — every time those specific tests run again, so their
+--      presence/absence here has no bearing on any test's correctness).
+--   3. Source 1 (what's exercised/exists in code) and source 2 (what's
+--      actually been observed in real historical data) agree on exactly one
+--      genuine non-state type: `m.room.message`. No other type passes both
+--      checks, so the inclusion list is exactly that one type — conservative
+--      per this revision's own fail-safe design: anything not independently
+--      confirmed by BOTH sources stays OFF the list rather than being
+--      guessed on.
+--
+-- A deployment that has independently confirmed another genuinely non-state
+-- event type was ever sent through this same corrupted path would need a
+-- manual, type-specific addition to the inclusion list below before
+-- (re-)running this migration there — the same fail-safe posture the old
+-- exclusion-list version's own residual-limitation note already called for,
+-- just inverted: now an addition only ever WIDENS what gets corrected, it can
+-- never cause a previously-safe state type to be destroyed.
+--
+-- ─── Idempotency ────────────────────────────────────────────────────────────
+--
+-- Unlike 000035 (an INSERT-based backfill, which needs an explicit
+-- `NOT EXISTS` guard to avoid duplicating a row on a second run), this is a
+-- plain UPDATE whose own WHERE clause is naturally idempotent: the first run
+-- nulls every matching row's state_key; by definition none of those rows still
+-- satisfy `state_key = ''` afterwards, so a second run's WHERE clause matches
+-- zero rows and the UPDATE is a true no-op. No guard clause is needed beyond
+-- the WHERE clause itself.
+--
+-- ─── GRANT ──────────────────────────────────────────────────────────────────
+--
+-- None needed. Verified (not assumed), same reasoning as 000035's own GRANT
+-- note: this migration only UPDATEs the EXISTING `events` table — no new
+-- table, no new sequence. `nebu_app` already has UPDATE on `events` via
+-- migration 000001_init.up.sql's blanket `GRANT SELECT, INSERT, UPDATE, DELETE
+-- ON ALL TABLES IN SCHEMA public TO nebu_app`
+-- (`Nebu.Matrix.MigrationsGrantTest`'s per-migration-GRANT requirement, AC1,
+-- is scoped to NEW tables created by post-000001 migrations; this migration
+-- creates none).
+
+UPDATE events
+SET state_key = NULL
+WHERE state_key = ''
+  AND event_type IN (
+      'm.room.message'
+  );

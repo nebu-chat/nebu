@@ -542,9 +542,19 @@ defmodule Nebu.RoomTest do
              "expected state_key to be \"\" in stored event, got: #{inspect(stored_event["state_key"])}"
     end
 
-    test "5-arg backward-compat form: stored event contains state_key of empty string" do
-      # AC: When send_event/5 is called (no explicit state_key),
-      # the persisted event map must default to "state_key" => "".
+    test "5-arg backward-compat form: stored event contains state_key of nil (NOT empty string)" do
+      # AC: When send_event/5 is called (no explicit state_key), the call defaults
+      # to `state_key \\ nil` (send_event/6's default clause) — a genuine non-state
+      # event — so the persisted event map must carry "state_key" => nil, exactly
+      # like every other call that never supplies a state_key.
+      #
+      # Code-review cycle 2 (bugfix unsigned-replaces-state, MAJOR fix,
+      # do_send_event/7): this assertion used to expect "state_key" => "" — that
+      # encoded the pre-existing `state_key || ""` writer bug this bugfix fixes
+      # (do_send_event/7 collapsed the correct `nil` to the empty string before
+      # INSERT, which event_map_to_core_event/1's new is_state_event signal then
+      # misread as "this is a genuine state event"). Updated to assert the
+      # CORRECT post-fix value: nil, not "".
       # This verifies the 5-arg backward-compat clause in handle_call delegates correctly.
       room_id = unique_room_id("9-7-state-key-5arg")
       {:ok, _pid} = start_and_track(room_id)
@@ -559,8 +569,9 @@ defmodule Nebu.RoomTest do
         )
 
       [{_, stored_event}] = :ets.lookup(:fake_room_db, {:event, event_id})
-      assert stored_event["state_key"] == "",
-             "expected state_key to be \"\" (default from 5-arg form), got: #{inspect(stored_event["state_key"])}"
+      assert stored_event["state_key"] == nil,
+             "expected state_key to be nil (the 5-arg form never supplies a state_key, so it " <>
+               "is a genuine non-state event — nil, NOT \"\"), got: #{inspect(stored_event["state_key"])}"
     end
 
     # ─── SEC Gate 1 fix: state events use :change_state power level check ─────

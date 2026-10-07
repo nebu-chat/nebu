@@ -172,4 +172,17 @@ The dual model is backward compatible: `POST /login` only mints opaque tokens wh
 session lifetime is controlled by Nebu, not by the upstream OIDC provider. Proactive OIDC RT refresh is
 deferred to Phase 2.
 
+## Known Gaps & Follow-Ups
+
+**Sync state events missing identity — Fixed (bugfix: sync-state-events-missing-fields):**
+State events in `/sync` now include real `event_id`, `origin_server_ts`, `unsigned` fields per the
+Matrix spec. Follow-ups remain:
+- `/initialSync` and `/rooms/{roomId}/members` endpoints still generate synthetic event IDs and use
+  request time as `origin_server_ts` (see `initial_sync_state_event/3` in `router/protected.ex`).
+  These are known as semantically incorrect but present-shaped placeholders; a future story will
+  wire real event identity through these endpoints.
+- `rooms.invite` and `rooms.leave` sections of `/sync` currently omit all state events entirely
+  (hardcoded `{}` in `sync_response/2`). This is a separate, larger gap (documented in
+  `Nebu.Matrix.Http` moduledoc as MINOR-2) and is **not** part of the state-events-missing-fields scope.
+
 _Source: `CLAUDE.md`, §Resolved Architecture Decisions; `_bmad-output/planning-artifacts/architecture.md`, §Core Architectural Decisions_
