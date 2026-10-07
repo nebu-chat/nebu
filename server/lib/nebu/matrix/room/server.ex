@@ -30,13 +30,46 @@ defmodule Nebu.Matrix.Room.Server do
 
   State structure:
     %{
-      room_id:      String.t(),
-      members:      MapSet.t(String.t()),
-      power_levels: map(),          # string-key map — see Nebu.Matrix.Room.PowerLevels
-      created_at:   DateTime.t(),
-      typing_users: MapSet.t(String.t()),  # ephemeral — resets on restart
-      max_members:  non_neg_integer()      # 0 = no limit; Story 6.8
+      room_id:          String.t(),
+      members:          MapSet.t(String.t()),
+      member_identity:  %{String.t() => {event_id :: String.t(), origin_server_ts :: integer()}},
+                        # bugfix sync-state-events-missing-fields: real identity of each
+                        # member's join event, captured at the moment the join is applied
+                        # (not re-derived via a per-sync DB round trip). Restored from the
+                        # DB on every GenServer restart (cluster-safety) by do_init/1.
+      power_levels:     map(),          # string-key map — see Nebu.Matrix.Room.PowerLevels
+      power_levels_event: {event_id :: String.t(), origin_server_ts :: integer(), sender :: String.t()} | nil,
+                        # bugfix sync-state-events-missing-fields (AC2 addendum): real
+                        # identity (+ sender, code-review cycle 1 MINOR-2) of the backing
+                        # m.room.power_levels event, captured when set_power_levels applies
+                        # the change. Restored on restart.
+      created_at:       DateTime.t(),
+      typing_users:     MapSet.t(String.t()),  # ephemeral — resets on restart
+      max_members:      non_neg_integer()      # 0 = no limit; Story 6.8
     }
+
+  ## Fail-open semantics of `member_identity` / `power_levels_event` (code-review
+  ## cycle 1, MINOR-5)
+
+  Both fields are BEST-EFFORT caches of real event identity, not guaranteed-present
+  invariants. Each can legitimately be absent (a member with no entry in
+  `member_identity`, or `power_levels_event: nil`) or STALE (pointing at an older
+  event than the member's/room's actual current state) whenever the backing
+  `insert_event` write failed — `emit_membership_event/3` and
+  `emit_power_levels_event/3` are both deliberately non-fatal: if persistence
+  fails, the membership/power-levels change is still applied to `members`/
+  `power_levels` (the user is still joined; the new power levels still take
+  effect), the identity update is simply skipped, and only a warning is logged.
+  This mirrors the project's general fail-open philosophy for secondary writes
+  (see e.g. `init/1`'s own fail-open DB-error handling above).
+
+  `build_state_events/2` (event_dispatcher/server.ex) relies on this being
+  possible: it defaults to `{"", 0, ""}` / `{"", 0}` identity whenever
+  `member_identity`/`power_levels_event` has no entry for the relevant key, which
+  is exactly how a pre-fix legacy room (no backing event ever written — see the
+  `000035_backfill_power_levels_events` migration) and a post-fix room with a
+  failed event write both present themselves. Do not assume either field is
+  always populated once a member has joined or power levels have been set.
 
   DB writes go through the configurable db_module/0 helper (defaults to Nebu.Matrix.Room.DB).
   Inject a fake via `Application.put_env(:room_manager, :db_module, FakeDB)` in tests.
@@ -210,38 +243,29 @@ defmodule Nebu.Matrix.Room.Server do
 
   defp do_init(room_id) do
     case db_module().load_members(room_id) do
+      {:ok, user_ids, created_at_ms, power_levels_json, identity} ->
+        {:ok, build_init_state(room_id, user_ids, created_at_ms, power_levels_json, identity)}
+
+      # Legacy 4-tuple shape (test fakes that predate the cluster-safety identity
+      # widening, bugfix sync-state-events-missing-fields) — no identity available,
+      # fall back to empty member_identity / nil power_levels_event.
       {:ok, user_ids, created_at_ms, power_levels_json} ->
-        members = MapSet.new(user_ids)
-        created_at = DateTime.from_unix!(created_at_ms, :millisecond)
-        power_levels = parse_power_levels(power_levels_json)
-        # Story 6.8: load max_members from DB; fail-open (default 0 = no limit).
-        max_members =
-          case db_module().load_room_settings(room_id) do
-            {:ok, n} -> n
-            {:error, _} -> 0
-          end
-        {:ok, %{room_id: room_id, members: members, power_levels: power_levels, created_at: created_at, typing_users: MapSet.new(), max_members: max_members}}
+        {:ok,
+         build_init_state(room_id, user_ids, created_at_ms, power_levels_json, %{
+           members: %{},
+           power_levels: nil
+         })}
 
       {:error, :not_found} ->
         case db_module().insert_room(room_id) do
           {:ok, created_at_ms} ->
-            created_at = DateTime.from_unix!(created_at_ms, :millisecond)
             # Story 6.8: load max_members even for new rooms (fail-open: default 0).
             # FakeDBWithMaxMembers test verifies this is called even on first start.
-            max_members =
-              case db_module().load_room_settings(room_id) do
-                {:ok, n} -> n
-                {:error, _} -> 0
-              end
             {:ok,
-             %{
-               room_id: room_id,
-               members: MapSet.new(),
-               power_levels: %{},
-               created_at: created_at,
-               typing_users: MapSet.new(),
-               max_members: max_members
-             }}
+             build_init_state(room_id, [], created_at_ms, "{}", %{
+               members: %{},
+               power_levels: nil
+             })}
 
           {:error, :not_found} ->
             # Stop with :normal so Horde's :transient strategy does not retry — same
@@ -256,6 +280,33 @@ defmodule Nebu.Matrix.Room.Server do
       {:error, reason} ->
         {:stop, reason}
     end
+  end
+
+  # Shared GenServer-state builder for both the "room exists" and "brand new room"
+  # do_init/1 branches. `identity` is `%{members: %{user_id => {event_id, ts}}
+  # , power_levels: {event_id, ts} | nil}` (bugfix sync-state-events-missing-fields,
+  # cluster-safety) — empty/nil for a brand-new room or a legacy 4-tuple load_members
+  # result.
+  defp build_init_state(room_id, user_ids, created_at_ms, power_levels_json, identity) do
+    created_at = DateTime.from_unix!(created_at_ms, :millisecond)
+    power_levels = parse_power_levels(power_levels_json)
+    # Story 6.8: load max_members from DB; fail-open (default 0 = no limit).
+    max_members =
+      case db_module().load_room_settings(room_id) do
+        {:ok, n} -> n
+        {:error, _} -> 0
+      end
+
+    %{
+      room_id: room_id,
+      members: MapSet.new(user_ids),
+      member_identity: Map.get(identity, :members, %{}),
+      power_levels: power_levels,
+      power_levels_event: Map.get(identity, :power_levels),
+      created_at: created_at,
+      typing_users: MapSet.new(),
+      max_members: max_members
+    }
   end
 
   @impl GenServer
@@ -282,8 +333,19 @@ defmodule Nebu.Matrix.Room.Server do
             # detects the join via fetch_events_since — without this event,
             # the room never appeared in rooms.join on the next delta sync
             # ("stuck on Joining…" in Element Web — GAP-1 fix).
-            emit_membership_event(state.room_id, user_id, "join")
-            new_state = %{state | members: MapSet.put(members, user_id)}
+            #
+            # Bugfix sync-state-events-missing-fields (AC2): capture the real
+            # event_id/origin_server_ts into member_identity at the moment the join
+            # is applied, so /sync can thread real identity into m.room.member
+            # state.events entries without a per-sync DB round trip.
+            identity = emit_membership_event(state.room_id, user_id, "join")
+
+            new_state = %{
+              state
+              | members: MapSet.put(members, user_id),
+                member_identity: put_identity(state.member_identity, user_id, identity)
+            }
+
             {:reply, :ok, new_state}
 
           {:error, reason} ->
@@ -301,7 +363,13 @@ defmodule Nebu.Matrix.Room.Server do
         :ok ->
           # Emit m.room.member leave event so sync delta includes the left room.
           emit_membership_event(state.room_id, user_id, "leave")
-          new_state = %{state | members: MapSet.delete(members, user_id)}
+
+          new_state = %{
+            state
+            | members: MapSet.delete(members, user_id),
+              member_identity: Map.delete(state.member_identity, user_id)
+          }
+
           {:reply, :ok, new_state}
 
         {:error, reason} ->
@@ -317,7 +385,12 @@ defmodule Nebu.Matrix.Room.Server do
     else
       case db_module().delete_member(state.room_id, user_id) do
         :ok ->
-          new_state = %{state | members: MapSet.delete(members, user_id)}
+          new_state = %{
+            state
+            | members: MapSet.delete(members, user_id),
+              member_identity: Map.delete(state.member_identity, user_id)
+          }
+
           {:reply, :ok, new_state}
 
         {:error, reason} ->
@@ -337,7 +410,29 @@ defmodule Nebu.Matrix.Room.Server do
     if allowed do
       case db_module().set_power_levels(state.room_id, Jason.encode!(new_levels)) do
         :ok ->
-          {:reply, :ok, %{state | power_levels: new_levels}}
+          # Bugfix sync-state-events-missing-fields (AC2 addendum): m.room.power_levels
+          # previously had NO backing persisted event at all — unlike :join's
+          # emit_membership_event/3, this call only ever wrote the denormalised
+          # rooms.power_levels_json column. Without a real event here,
+          # m.room.power_levels can never acquire a real event_id/origin_server_ts
+          # for /sync no matter how the read side is implemented. Non-fatal on
+          # failure (mirrors emit_membership_event's fail-open philosophy): the
+          # power-levels change is still applied. Security review F-1 (2026-10-04):
+          # the content update (power_levels_json) and the event write are two
+          # separate, non-transactional writes — on emit failure we must nil out
+          # the identity rather than keep the PREVIOUS event's identity attached to
+          # the NEW content, which would ship a real-looking event_id that
+          # dereferences to stale content and lets an event_id-deduping client
+          # silently discard the permission change.
+          identity = emit_power_levels_event(state.room_id, caller_id, new_levels)
+
+          new_state = %{
+            state
+            | power_levels: new_levels,
+              power_levels_event: identity
+          }
+
+          {:reply, :ok, new_state}
 
         {:error, reason} ->
           {:reply, {:error, reason}, state}
@@ -483,6 +578,11 @@ defmodule Nebu.Matrix.Room.Server do
   # Called after successful join/leave DB operations so that incremental sync
   # (GetSyncDelta / fetch_events_since) can detect the membership change.
   # Non-fatal: if event write fails, membership is still applied — we log and continue.
+  #
+  # Bugfix sync-state-events-missing-fields (AC2): returns `{event_id,
+  # origin_server_ts}` on success (nil on failure) so the caller can capture the
+  # real identity into member_identity — /sync threads this into m.room.member
+  # state.events entries instead of synthesizing fake values.
   defp emit_membership_event(room_id, user_id, membership) do
     event_map = %{
       "room_id"          => room_id,
@@ -508,14 +608,64 @@ defmodule Nebu.Matrix.Room.Server do
         # Mirrors send_event broadcast — prevents 30-second sync delay after join/leave.
         members = :pg.get_local_members("room:#{room_id}")
         Enum.each(members, fn pid -> send(pid, {:new_event, signed}) end)
-        :ok
+        {event_id, event_map["origin_server_ts"]}
 
       {:error, reason} ->
         # Non-fatal: membership already applied; log but don't roll back.
         require Logger
         Logger.warning("emit_membership_event: failed to write #{membership} event for #{user_id} in #{room_id}: #{inspect(reason)}")
+        nil
     end
   end
+
+  # Builds, signs, and persists an m.room.power_levels state event.
+  #
+  # Bugfix sync-state-events-missing-fields (AC2 addendum): mirrors
+  # emit_membership_event/3's pattern — before this fix, set_power_levels only
+  # wrote the denormalised rooms.power_levels_json column, so m.room.power_levels
+  # had no backing event at all and could never acquire a real event_id/
+  # origin_server_ts. Returns `{event_id, origin_server_ts, sender}` on success
+  # (nil on failure, non-fatal — the power-levels change is still applied).
+  # Code-review cycle 1 (MINOR-2): sender (= caller_id, already a parameter here)
+  # is carried in the returned tuple so build_state_events/2 can stop leaving
+  # m.room.power_levels.sender as "".
+  defp emit_power_levels_event(room_id, caller_id, new_levels) do
+    event_map = %{
+      "room_id"          => room_id,
+      "type"             => "m.room.power_levels",
+      "state_key"        => "",
+      "sender"           => caller_id,
+      "content"          => new_levels,
+      "origin_server_ts" => Nebu.DB.Helpers.now_ms()
+    }
+
+    event_id      = Nebu.Matrix.EventId.generate(event_map)
+    event_with_id = Map.put(event_map, "event_id", event_id)
+
+    {_pub, priv} = :persistent_term.get(:nebu_signing_key)
+    event_json  = Nebu.Matrix.CanonicalJson.encode!(event_map)
+    signature   = :crypto.sign(:eddsa, :none, event_json, [priv, :ed25519])
+    sig_b64     = Base.encode64(signature)
+    signed      = Map.put(event_with_id, "signatures", %{"nebu" => sig_b64})
+
+    case db_module().insert_event(signed) do
+      :ok ->
+        members = :pg.get_local_members("room:#{room_id}")
+        Enum.each(members, fn pid -> send(pid, {:new_event, signed}) end)
+        {event_id, event_map["origin_server_ts"], caller_id}
+
+      {:error, reason} ->
+        require Logger
+        Logger.warning("emit_power_levels_event: failed to write power_levels event for #{room_id}: #{inspect(reason)}")
+        nil
+    end
+  end
+
+  # Stores `identity` (an {event_id, origin_server_ts} tuple) for `user_id` in
+  # `map`, or leaves `map` unchanged when `identity` is `nil` (emit failed —
+  # non-fatal, matches emit_membership_event/3's fail-open philosophy).
+  defp put_identity(map, _user_id, nil), do: map
+  defp put_identity(map, user_id, identity), do: Map.put(map, user_id, identity)
 
   # Steps 2–6 of send_event: build, sign, persist, broadcast.
   # Extracted to keep handle_call({:send_event, ...}) readable after the Step 1.5
@@ -524,11 +674,30 @@ defmodule Nebu.Matrix.Room.Server do
     # Step 2 — Build event map with string keys only (architecture rule: no atom keys).
     # Story 9-7: include state_key so state events are correctly persisted and
     # returned by GET /rooms/{roomId}/state/{eventType}.
-    # state_key nil (regular events) is stored as "" per Matrix spec.
+    #
+    # Bugfix unsigned-replaces-state, code-review cycle 2 (MAJOR fix): `state_key`
+    # is passed through UNCHANGED, never `|| ""`. The caller (event_dispatcher/
+    # server.ex's send_event/2, ~line 169) already computes the correct value:
+    # `nil` for a genuine non-state event (e.g. m.room.message via POST /send —
+    # the only caller of this function, which always passes is_state_event:
+    # false, so `state_key` here is in practice always `nil` today) and a real
+    # string (possibly "", e.g. m.room.name) for a genuine state event. The
+    # previous `state_key || ""` collapsed that `nil` to `""` BEFORE the DB
+    # INSERT, which `Room.DB.insert_event/1` then faithfully (and correctly,
+    # per ITS OWN "pass state_key through unchanged" contract) persisted as the
+    # literal empty string rather than SQL NULL — corrupting the one signal
+    # (`events.state_key IS NULL`) that `event_map_to_core_event/1`'s
+    # `is_state_event` field depends on to tell "not a state event" apart from
+    # "a state event whose real state_key is empty". Every non-state event ever
+    # sent through this path therefore got misclassified as a state event,
+    # shipping a spurious `state_key: ""` and — from the 2nd event at that
+    # bogus (type, "") slot onward — a bogus `unsigned.replaces_state`. See
+    # priv/migrations/000036_backfill_nonstate_events_null_state_key for the
+    # historical-data correction this bug also requires.
     event_map = %{
       "room_id"          => room_id,
       "type"             => event_type,
-      "state_key"        => state_key || "",
+      "state_key"        => state_key,
       "sender"           => user_id,
       "content"          => content,
       "origin_server_ts" => Nebu.DB.Helpers.now_ms()

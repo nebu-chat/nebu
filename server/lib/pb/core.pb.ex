@@ -9,7 +9,11 @@ defmodule Core.Event do
     origin_ts: 0,
     server_ts: 0,
     state_key: "",
-    unsigned_relations: ""
+    unsigned_relations: "",
+    # Bugfix unsigned-replaces-state (Matrix CS API v1.19) — see proto/core.proto.
+    replaces_state: "",
+    # Code-review cycle 1 (MAJOR-2) — see proto/core.proto.
+    is_state_event: false
   ]
 end
 
@@ -271,7 +275,11 @@ defmodule Core.SyncRoomStateEvent do
     type: "",
     state_key: "",
     content: "",
-    sender: ""
+    sender: "",
+    event_id: "",
+    origin_server_ts: 0,
+    # Bugfix unsigned-replaces-state (Matrix CS API v1.19) — see proto/core.proto.
+    replaces_state: ""
   ]
 end
 

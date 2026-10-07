@@ -238,6 +238,31 @@ defmodule Nebu.Web.MatrixRouterTest do
   end
 
   # ══════════════════════════════════════════════════════════════════════════
+  # GET /_matrix/client/versions advertises the MSC2666 unstable-feature flag
+  # so real clients (matrix-js-sdk, Element) discover
+  # GET /_matrix/client/v1/mutual_rooms. Unauthenticated, static route
+  # (no token, no DB) — PURE UNIT.
+  # ══════════════════════════════════════════════════════════════════════════
+
+  describe "GET /_matrix/client/versions (mutual_rooms unstable-feature flag) — unauthenticated, no DB" do
+    test "advertises uk.half-shot.msc2666.query_mutual_rooms in unstable_features" do
+      conn = call(:get, "/_matrix/client/versions")
+      assert conn.status == 200
+      body = json(conn)
+
+      assert body["unstable_features"]["uk.half-shot.msc2666.query_mutual_rooms"] == true
+    end
+
+    test "does not widen the advertised versions list (v1.19 is NOT claimed)" do
+      conn = call(:get, "/_matrix/client/versions")
+      body = json(conn)
+
+      assert body["versions"] ==
+               ~w(v1.1 v1.2 v1.3 v1.4 v1.5 v1.6 v1.7 v1.8 v1.9 v1.10 v1.11)
+    end
+  end
+
+  # ══════════════════════════════════════════════════════════════════════════
   # MAJOR-1 — GET /_matrix/client/v3/login advertises login flows
   # Unauthenticated, static route (no token, no DB) — PURE UNIT. Mirrors the Go
   # gateway GetLogin handler (login.go): m.login.sso + m.login.token.

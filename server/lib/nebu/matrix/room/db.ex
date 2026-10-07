@@ -6,6 +6,8 @@ defmodule Nebu.Matrix.Room.DB do
   All timestamps stored as BIGINT milliseconds per architecture enforcement rule #1.
   """
 
+  require Logger
+
   @behaviour Nebu.Matrix.Room.DBBehaviour
 
   @sql_load_members """
@@ -15,6 +17,30 @@ defmodule Nebu.Matrix.Room.DB do
 
   @sql_check_room_exists """
   SELECT room_id, created_at, power_levels_json FROM rooms WHERE room_id = $1
+  """
+
+  # Bugfix sync-state-events-missing-fields (AC2/cluster-safety): real identity
+  # (event_id, origin_server_ts) for each user's most recent m.room.member event —
+  # needed so Room.Server.do_init/1 can restore member_identity after a crash/
+  # restart instead of it silently reverting to nil.
+  @sql_member_identities """
+  SELECT DISTINCT ON (state_key) state_key, event_id, origin_server_ts
+  FROM events
+  WHERE room_id = $1 AND event_type = 'm.room.member'
+  ORDER BY state_key, origin_server_ts DESC
+  """
+
+  # Bugfix sync-state-events-missing-fields (AC2 addendum/cluster-safety): real
+  # identity for the room's current m.room.power_levels event — see
+  # Room.Server.handle_call({:set_power_levels, ...}) which now emits this event.
+  # Code-review cycle 1 (MINOR-2): sender is added to this SAME query (zero extra
+  # DB round trips) so build_state_events/2 can carry the real sender alongside
+  # event_id/origin_server_ts instead of leaving m.room.power_levels.sender "" —
+  # now observably inconsistent once the event_id points at a real persisted row.
+  @sql_power_levels_identity """
+  SELECT event_id, origin_server_ts, sender FROM events
+  WHERE room_id = $1 AND event_type = 'm.room.power_levels' AND state_key = ''
+  ORDER BY origin_server_ts DESC LIMIT 1
   """
 
   @sql_insert_room """
@@ -59,12 +85,22 @@ defmodule Nebu.Matrix.Room.DB do
   @doc """
   Loads all active members for the given `room_id`.
 
-  Returns `{:ok, [user_id], created_at_ms, power_levels_json}` (possibly empty list) if the room exists.
+  Returns `{:ok, [user_id], created_at_ms, power_levels_json, identity}` (possibly
+  empty member list) if the room exists, where `identity` is
+  `%{members: %{user_id => {event_id, origin_server_ts}}, power_levels: {event_id,
+  origin_server_ts, sender} | nil}` — the real event identity for each member's
+  join event and the power-levels event (bugfix sync-state-events-missing-fields,
+  cluster-safety: `Room.Server.do_init/1` rebuilds `member_identity`/
+  `power_levels_event` from this on every restart; without it they would silently
+  revert to nil after a crash/restart). Code-review cycle 1 (MINOR-2): the
+  power-levels tuple is now a 3-tuple carrying `sender` too (zero extra DB round
+  trips — same query), so `build_state_events/2` no longer has to leave
+  `m.room.power_levels`'s sender as `""`.
   Returns `{:error, :not_found}` if the room does not exist in the `rooms` table.
   Returns `{:error, reason}` on DB error.
   """
   @spec load_members(String.t()) ::
-          {:ok, [String.t()], integer(), String.t()} | {:error, :not_found | term()}
+          {:ok, [String.t()], integer(), String.t(), map()} | {:error, :not_found | term()}
   def load_members(room_id) do
     # First check if room exists at all (also fetches created_at and power_levels_json)
     case Ecto.Adapters.SQL.query(Nebu.Repo, @sql_check_room_exists, [room_id]) do
@@ -77,7 +113,8 @@ defmodule Nebu.Matrix.Room.DB do
           {:ok, %{rows: rows}} ->
             user_ids = Enum.map(rows, fn [uid] -> uid end)
             pl_json = power_levels_json || "{}"
-            {:ok, user_ids, created_at_ms, pl_json}
+            identity = load_member_power_levels_identity(room_id, user_ids)
+            {:ok, user_ids, created_at_ms, pl_json, identity}
 
           {:error, reason} ->
             {:error, reason}
@@ -86,6 +123,35 @@ defmodule Nebu.Matrix.Room.DB do
       {:error, reason} ->
         {:error, reason}
     end
+  end
+
+  # Bugfix sync-state-events-missing-fields (cluster-safety): fetches real
+  # (event_id, origin_server_ts) identity for each active member's m.room.member
+  # event and for the room's current m.room.power_levels event, so do_init/1 can
+  # restore Room.Server state after a crash/restart without losing identity.
+  # Fails open to empty identity on any DB error — do_init/1 must not be blocked
+  # from starting the room just because this supplementary lookup failed.
+  defp load_member_power_levels_identity(room_id, user_ids) do
+    user_id_set = MapSet.new(user_ids)
+
+    member_identity =
+      case Ecto.Adapters.SQL.query(Nebu.Repo, @sql_member_identities, [room_id]) do
+        {:ok, %{rows: rows}} ->
+          rows
+          |> Enum.filter(fn [uid, _event_id, _ts] -> MapSet.member?(user_id_set, uid) end)
+          |> Map.new(fn [uid, event_id, ts] -> {uid, {event_id, ts}} end)
+
+        {:error, _reason} ->
+          %{}
+      end
+
+    power_levels_event =
+      case Ecto.Adapters.SQL.query(Nebu.Repo, @sql_power_levels_identity, [room_id]) do
+        {:ok, %{rows: [[event_id, ts, sender]]}} -> {event_id, ts, sender}
+        _ -> nil
+      end
+
+    %{members: member_identity, power_levels: power_levels_event}
   end
 
   @sql_update_room_name "UPDATE rooms SET name = $2 WHERE room_id = $1"
@@ -747,32 +813,42 @@ defmodule Nebu.Matrix.Room.DB do
   end
 
   @doc """
-  Returns the content map of the authoritative m.room.create event for `room_id`.
+  Returns the content map of the authoritative m.room.create event for `room_id`,
+  plus its real identity.
 
   Queries the events table for the first m.room.create event (ASC origin_server_ts)
   and decodes its JSONB content. Handles both Postgrex JSONB forms:
     - JSONB object  {"creator":"…","room_version":"10","predecessor":{…}}
     - JSONB string  "{\"creator\":\"…\"}"  — doubly-encoded JSON string
 
-  Returns `{:ok, content_map}` on success.
+  Returns `{:ok, content_map, event_id, origin_server_ts}` on success. Bugfix
+  sync-state-events-missing-fields (AC2): `event_id`/`origin_server_ts` are added
+  to the SAME query (no extra DB round trip — this is a hot path called on every
+  `/sync`) so `build_state_events/2` can thread real identity into the
+  `m.room.create` state.events entry. Callers that only need the content
+  (`check_parent_space_membership/2`, `parent_space_membership_ok?/2`) continue to
+  work against the original `{:ok, content_map}` 2-tuple too, via
+  `normalize_create_event_result/1` in EventDispatcher.Server — test fakes that
+  predate this widening and still return the 2-tuple remain fully supported.
   Returns `{:error, :not_found}` when no m.room.create event exists.
   Returns `{:error, reason}` on DB / decode error.
   """
-  @spec get_room_create_event(String.t()) :: {:ok, map()} | {:error, :not_found | term()}
+  @spec get_room_create_event(String.t()) ::
+          {:ok, map(), String.t(), integer()} | {:error, :not_found | term()}
   def get_room_create_event(room_id) do
     sql = """
     SELECT CASE
       WHEN jsonb_typeof(content) = 'object' THEN content::text
       ELSE (content#>>'{}')
-    END
+    END, event_id, origin_server_ts
     FROM events
     WHERE room_id = $1 AND event_type = 'm.room.create'
     ORDER BY origin_server_ts ASC LIMIT 1
     """
     case Ecto.Adapters.SQL.query(Nebu.Repo, sql, [room_id]) do
-      {:ok, %{rows: [[content_text]]}} when not is_nil(content_text) ->
+      {:ok, %{rows: [[content_text, event_id, ts]]}} when not is_nil(content_text) ->
         case Jason.decode(content_text) do
-          {:ok, map} when is_map(map) -> {:ok, map}
+          {:ok, map} when is_map(map) -> {:ok, map, event_id, ts}
           _                           -> {:error, :not_found}
         end
 
@@ -834,19 +910,70 @@ defmodule Nebu.Matrix.Room.DB do
     end
   end
 
-  @spec get_room_name(String.t()) :: {:ok, String.t()} | {:error, :not_found | term()}
+  @doc """
+  Returns the room's current display name (from the most recent m.room.name
+  event), plus its real identity.
+
+  Bugfix sync-state-events-missing-fields (AC2): `event_id`/`origin_server_ts`
+  are added to this SAME query (no extra DB round trip — hot path called on
+  every `/sync`) so `build_state_events/2` can thread real identity into the
+  `m.room.name` state.events entry. Code-review cycle 1 (MINOR-2): `sender` is
+  added too (same query, still zero extra round trips) so `m.room.name`'s
+  sender is no longer left as `""` once its event_id points at a real
+  persisted row.
+
+  Returns `{:ok, name, event_id, origin_server_ts, sender}` on success.
+  Returns `{:error, :not_found}` if no m.room.name event exists.
+  Returns `{:error, reason}` on DB error.
+
+  Code-review cycle 1 (MINOR): `m.room.name` only ever has `state_key = ''`
+  per the Matrix spec, but the generic `PUT /state/{eventType}` endpoint does
+  not special-case that (`m.room.name` is on `@writable_state_types` with no
+  per-type state_key restriction) — a client could in principle
+  `PUT /state/m.room.name/<non-empty-state-key>`, landing a row at a
+  DIFFERENT slot that this query, without the filter, would still pick up as
+  "the" room name and feed into `build_state_events/2`'s
+  `replaces_state` LATERAL chain for the wrong slot. The `AND state_key = ''`
+  filter keeps this query scoped to the one slot `m.room.name` is actually
+  meant to occupy.
+
+  Code-review cycle 2 (bugfix unsigned-replaces-state) briefly changed this
+  filter to `COALESCE(state_key, '') = ''`, on the premise that a legacy room's
+  `m.room.name` event could have `state_key IS NULL` (pre-dating the
+  `do_send_event/7` writer fix or migration 000036's backfill). Code-review
+  cycle 3 (MAJOR-2) verified that premise FALSE: no genuine `m.room.name` row
+  has ever had a NULL `state_key` — every writer of this event type
+  (`do_create_room/3`, the generic `PUT /state/m.room.name` handler) always
+  passes the literal `""`. Meanwhile, `state_key IS NULL` on an
+  `m.room.name`-typed row is exactly what a NON-state write produces: the
+  generic non-state `PUT /_matrix/client/v3/rooms/{roomId}/send/m.room.name/
+  {txnId}` path (reachable by ANY joined member, gated only by the
+  `:send_event` power level — not `set_room_state/2`'s `:change_state` check)
+  always persists with `state_key = nil` (`do_send_event/7`'s `state_key`
+  parameter is always `nil` on this path — see that function's own comment).
+  The `COALESCE` therefore re-admitted exactly the row this filter exists to
+  keep out: a bogus `m.room.name` sent through the non-state path would be
+  picked up here (if more recent) and silently become "the" room name for
+  every member, bypassing the power-level check the dedicated rename endpoint
+  enforces. Reverted to a bare `state_key = ''` — a NULL `state_key` row is
+  never a genuine `m.room.name` state event and must never match here.
+  """
+  @spec get_room_name(String.t()) ::
+          {:ok, String.t(), String.t(), integer(), String.t()} | {:error, :not_found | term()}
   def get_room_name(room_id) do
     sql = """
     SELECT CASE
       WHEN jsonb_typeof(content) = 'object' THEN content->>'name'
       ELSE ((content#>>'{}')::jsonb)->>'name'
-    END
+    END, event_id, origin_server_ts, sender
     FROM events
-    WHERE room_id = $1 AND event_type = 'm.room.name'
+    WHERE room_id = $1 AND event_type = 'm.room.name' AND state_key = ''
     ORDER BY origin_server_ts DESC LIMIT 1
     """
     case Ecto.Adapters.SQL.query(Nebu.Repo, sql, [room_id]) do
-      {:ok, %{rows: [[name]]}} when not is_nil(name) -> {:ok, name}
+      {:ok, %{rows: [[name, event_id, ts, sender]]}} when not is_nil(name) ->
+        {:ok, name, event_id, ts, sender}
+
       {:ok, _} -> {:error, :not_found}
       {:error, reason} -> {:error, reason}
     end
@@ -1156,6 +1283,92 @@ defmodule Nebu.Matrix.Room.DB do
   end
 
   @doc """
+  Bugfix unsigned-replaces-state (Matrix CS API v1.19): batched "what state
+  event did THIS one replace at its (room_id, event_type, state_key) slot"
+  lookup. ONE query for the WHOLE `slots` list (AC5 — MANDATORY: callers must
+  never invoke this once per state event or once per response-item; always
+  collect every slot that needs an answer first and call this once).
+
+  `slots` is a list of `{event_id, room_id, event_type, state_key,
+  origin_server_ts}` 5-tuples — one per CURRENT state event a caller wants a
+  predecessor for. `event_id`/`origin_server_ts` identify the CURRENT event
+  (the tie-break/ordering anchor); `room_id`/`event_type`/`state_key` identify
+  its slot.
+
+  Returns `%{event_id => predecessor_event_id}` — ONLY for slots that actually
+  have an earlier row at that slot (AC3: a slot with no predecessor is simply
+  ABSENT from the result map; callers must treat a missing key as "no
+  replaces_state", never synthesize null/"").
+
+  Same-`origin_server_ts` ties are broken by `event_id` (AC5/AC7): the
+  predecessor is the row with the largest `(origin_server_ts, event_id)` tuple
+  that is still strictly less than the current event's own tuple, via a
+  `LATERAL` join against `events_room_state_idx
+  (room_id, event_type, state_key, origin_server_ts DESC)`.
+
+  Not part of `Nebu.Matrix.Room.DBBehaviour` (same precedent as
+  `get_generic_state_events/1` / `get_space_children/1` below — a read helper,
+  not part of the Room GenServer's persistence surface) — callers MUST guard
+  with `function_exported?/3` before invoking an injected test double that may
+  not implement it (see `Nebu.Matrix.EventDispatcher.Server`'s
+  `fetch_replaces_state_batch/2` wrapper), so this never breaks a Repo-less
+  FakeDB-based unit test.
+  """
+  @spec fetch_replaces_state([{String.t(), String.t(), String.t(), String.t(), integer()}]) ::
+          %{String.t() => String.t()}
+  def fetch_replaces_state([]), do: %{}
+
+  def fetch_replaces_state(slots) when is_list(slots) do
+    {event_ids, room_ids, event_types, state_keys, origin_server_ts_list} =
+      Enum.reduce(slots, {[], [], [], [], []}, fn
+        {event_id, room_id, event_type, state_key, ts}, {eids, rids, ets, sks, tss} ->
+          {[event_id | eids], [room_id | rids], [event_type | ets], [state_key | sks], [ts | tss]}
+      end)
+
+    sql = """
+    SELECT req.event_id, e.event_id AS replaces_state
+    FROM UNNEST($1::text[], $2::text[], $3::text[], $4::text[], $5::bigint[])
+         AS req(event_id, room_id, event_type, state_key, origin_server_ts)
+    LEFT JOIN LATERAL (
+      SELECT e2.event_id
+      FROM events e2
+      WHERE e2.room_id = req.room_id
+        AND e2.event_type = req.event_type
+        AND e2.state_key = req.state_key
+        AND (e2.origin_server_ts, e2.event_id) < (req.origin_server_ts, req.event_id)
+      ORDER BY e2.origin_server_ts DESC, e2.event_id DESC
+      LIMIT 1
+    ) e ON true
+    """
+
+    case Ecto.Adapters.SQL.query(
+           Nebu.Repo,
+           sql,
+           [event_ids, room_ids, event_types, state_keys, origin_server_ts_list]
+         ) do
+      {:ok, %{rows: rows}} ->
+        Enum.reduce(rows, %{}, fn
+          [_event_id, nil], acc -> acc
+          [event_id, replaces_state], acc -> Map.put(acc, event_id, replaces_state)
+        end)
+
+      {:error, reason} ->
+        # Code-review cycle 1 (MINOR): a dropped index, missing GRANT, or
+        # statement timeout here would otherwise silently disable
+        # unsigned.replaces_state for every slot in `slots`, indistinguishable
+        # from "no predecessor exists anywhere" (AC3's legitimate absent
+        # case). Logger.warning makes a genuine DB failure observable instead.
+        Logger.warning(
+          "fetch_replaces_state: batched replaces_state lookup failed for " <>
+            "#{length(slots)} slot(s), replaces_state disabled for this response: " <>
+            "#{inspect(reason)}"
+        )
+
+        %{}
+    end
+  end
+
+  @doc """
   Returns the most recent state event per (event_type, state_key) for `room_id`,
   excluding event types handled separately (m.room.member, m.room.power_levels,
   m.room.create, m.room.name — those have dedicated DB helpers or are assembled
@@ -1164,14 +1377,18 @@ defmodule Nebu.Matrix.Room.DB do
   Story 9-7: extends build_state_events in EventDispatcher.Server to include
   state events set via PUT /rooms/{roomId}/state/{eventType}.
 
-  Returns `{:ok, [%{type, state_key, content_json, sender}]}` or `{:error, reason}`.
+  Returns `{:ok, [%{type, state_key, content_json, sender, event_id, origin_server_ts}]}`
+  or `{:error, reason}`. Bugfix sync-state-events-missing-fields (AC2): `event_id`/
+  `origin_server_ts` are the real persisted values (both columns already exist on
+  `events` and are already used in the `ORDER BY` below) — added so `/sync`'s
+  state.events entries carry real identity like timeline.events do.
   """
   @spec get_generic_state_events(String.t()) ::
           {:ok, list(map())} | {:error, term()}
   def get_generic_state_events(room_id) do
     sql = """
     SELECT DISTINCT ON (event_type, state_key)
-      event_type, state_key, content::text, sender
+      event_type, state_key, content::text, sender, event_id, origin_server_ts
     FROM events
     WHERE room_id = $1
       AND state_key IS NOT NULL
@@ -1187,12 +1404,14 @@ defmodule Nebu.Matrix.Room.DB do
     case Ecto.Adapters.SQL.query(Nebu.Repo, sql, [room_id]) do
       {:ok, %{rows: rows}} ->
         events =
-          Enum.map(rows, fn [event_type, state_key, content_json, sender] ->
+          Enum.map(rows, fn [event_type, state_key, content_json, sender, event_id, origin_server_ts] ->
             %{
               type: event_type,
               state_key: state_key || "",
               content_json: content_json || "{}",
-              sender: sender || ""
+              sender: sender || "",
+              event_id: event_id || "",
+              origin_server_ts: origin_server_ts || 0
             }
           end)
         {:ok, events}

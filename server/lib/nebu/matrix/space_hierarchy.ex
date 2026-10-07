@@ -175,7 +175,7 @@ defmodule Nebu.Matrix.SpaceHierarchy do
   @doc "Encodes a non-negative BFS offset into an opaque url-safe Base64 cursor."
   @spec encode_token(non_neg_integer()) :: String.t()
   def encode_token(offset) when is_integer(offset) and offset >= 0 do
-    Base.url_encode64(@token_prefix <> Integer.to_string(offset), padding: false)
+    Nebu.Matrix.PageToken.encode(@token_prefix, offset)
   end
 
   @doc """
@@ -186,14 +186,7 @@ defmodule Nebu.Matrix.SpaceHierarchy do
   """
   @spec decode_token(String.t()) :: {:ok, non_neg_integer()} | {:error, :invalid_token}
   def decode_token(token) when is_binary(token) do
-    with {:ok, decoded} <- Base.url_decode64(token, padding: false),
-         @token_prefix <> rest <- decoded,
-         {offset, ""} <- Integer.parse(rest),
-         true <- offset >= 0 do
-      {:ok, offset}
-    else
-      _ -> {:error, :invalid_token}
-    end
+    Nebu.Matrix.PageToken.decode(@token_prefix, token)
   end
 
   def decode_token(_), do: {:error, :invalid_token}

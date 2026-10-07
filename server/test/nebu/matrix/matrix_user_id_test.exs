@@ -50,6 +50,59 @@ defmodule Nebu.Matrix.UserIdTest do
     :ok
   end
 
+  # ── valid?/1 — shape check (bugfix-mutual-rooms Kassandra security review, F-1) ──
+  #
+  # Regression coverage for the regex tightening in user_id.ex: anchors `^`/`$`
+  # (vulnerable to a trailing-newline bypass under Erlang's non-DOLLAR_ENDONLY
+  # `~r//` semantics) → `\A`/`\z`; domain class `[^\s:]+` (249/256 bytes, incl.
+  # ALL control chars and non-ASCII — a log-injection and SQL-control-byte vector)
+  # → `[A-Za-z0-9.\-]+` (ASCII alnum/dot/hyphen only).
+  describe "valid?/1" do
+    test "accepts real-shaped legitimate user_ids" do
+      assert UserId.valid?("@alex:test.local")
+      assert UserId.valid?("@user.name_1=2-3/4+5:example.com")
+      assert UserId.valid?("@a:localhost")
+    end
+
+    test "rejects a trailing newline (the string-end-anchor bypass)" do
+      refute UserId.valid?("@alex:test.local\n")
+    end
+
+    test "rejects an embedded NUL byte in the domain part" do
+      refute UserId.valid?("@alex:test.local" <> <<0>>)
+    end
+
+    test "rejects a high-bit non-ASCII byte in the domain part" do
+      refute UserId.valid?("@alex:test.local" <> <<0x80>>)
+    end
+
+    test "rejects U+2028 LINE SEPARATOR embedded in the domain part" do
+      refute UserId.valid?("@alex:test.lo\u{2028}cal")
+    end
+
+    test "rejects missing '@'" do
+      refute UserId.valid?("alex:test.local")
+    end
+
+    test "rejects missing domain part" do
+      refute UserId.valid?("@alex")
+    end
+
+    test "rejects embedded whitespace" do
+      refute UserId.valid?("@al ex:test.local")
+    end
+
+    test "rejects uppercase localpart" do
+      refute UserId.valid?("@Alex:test.local")
+    end
+
+    test "rejects non-binary input" do
+      refute UserId.valid?(nil)
+      refute UserId.valid?(123)
+      refute UserId.valid?(:alex)
+    end
+  end
+
   describe "localpart/1 fallback chain (no Repo → standard claims)" do
     setup do
       force_no_configured_claim()

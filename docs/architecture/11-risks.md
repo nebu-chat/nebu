@@ -28,6 +28,8 @@
 | Admin route source classification could leak email into operational logs (fixed pre-ship) | Resolved | Story `war-room-mode`, security-review-driven fix |
 | Bootstrap-mode OIDC scope ignored the operator's Step 3 config — providers needing a non-`openid` scope to expose the admin claim could never complete bootstrap | Resolved | `bugfix-bootstrap-scope-ignored`, 2026-07-09 |
 | Admin-logs source-classification: 1 MEDIUM accepted non-blocking after a fix attempt was reverted for an architecture conflict | Accepted risk | Story `admin-logs-monitoring-view`, Kassandra review |
+| State-event forgery (pre-existing, FIXED 2026-10-07) | **CLOSED** | bugfix-unsigned-replaces-state: `Room.Server.do_send_event/7` now persists `state_key` as NULL instead of `""`, preventing any joined member from forging state events via PUT /send/{eventType}. Migration 000036 backfills `m.room.message` rows empirically. Follow-up data remediation query documented; query-filter hardening (F-3/F-4/F-6) deferred. |
+| Search-pipeline encryption exclusion still matches post-fix `state_key = NULL` forged encryption rows (pre-existing, related to above) | Medium | bugfix-unsigned-replaces-state security review F-2: `search/db.ex` predicates must be tightened to `enc.state_key = ''` (not `IS NULL`) after state-forgery path is closed + m.room.encryption guard added to non-state send_event/2 path. Separate /nebu-pipeline bugfix required (not blocking this story). |
 
 ## Technical Debt
 
@@ -38,6 +40,8 @@
 | Real alias storage (`PUT /directory/room/{alias}` currently a stub) | Epic 7 | Medium |
 | Room upgrade implementation (`POST /rooms/{id}/upgrade` returns 501) | Epic 7 (resolved Story 9-27) | Resolved |
 | `GET /joined_rooms` returns empty list (clients use /sync instead) | Epic 7 | Low |
+| Migration 000036 inclusion-list narrowing (`m.room.message` only, m.reaction + custom types deferred) | bugfix-unsigned-replaces-state security review F-1 | Follow-up |
+| Query-filter hardening in `room/db.ex` (F-3/F-4) + fetch_replaces_state/1 array chunking (F-6) | bugfix-unsigned-replaces-state security review | Follow-up |
 | Multi-instance dashboard for hosters | Epic 7 retrospective | Growth |
 | Apple/Google push notifications | PRD §Growth Features | Growth |
 | S3 media backend | PRD §Growth Features | Growth |

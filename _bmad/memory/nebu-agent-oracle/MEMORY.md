@@ -20,6 +20,20 @@ Media Gateway (Epic 12) — missing (post-epic open follow-ups):
   for the `media-security-admin-control` epic proposal (2026-07-01), see dated note below
 - `GET /_matrix/client/v1/media/preview_url` — LOW
 
+Mutual Rooms (MSC2666, new in v1.19, 2026-10-05):
+- `GET /_matrix/client/v1/mutual_rooms` — not implemented as of 2026-10-05 Oracle Gate; this is
+  the first review for it. See session 2026-10-05 for the full compact spec report (response
+  shape, errcodes, pagination, rate-limit quirk).
+- Route-alias quirk (same day, post-review): the historical unstable path
+  `GET /_matrix/client/unstable/uk.half-shot.msc2666/user/mutual_rooms` matches the stable v1
+  shape on HTTP method, query param names (`user_id`, `from`), and response field names
+  (`joined`) — NOT a naming-shim problem. But the real upstream (Synapse) unstable endpoint was
+  NEVER paginated (no `count`, no `next_batch`, ever) — it always returned the complete `joined`
+  list in one response. Nebu's shared handler pages at 50 by default; a pure pass-through alias
+  will silently truncate legacy callers with >50 mutual rooms with one other user. Don't alias
+  as a naive pass-through without addressing this — see session 2026-10-05 follow-up for sourcing
+  (web research, not local spec, since the bundled mirror has no pre-stabilization history).
+
 Threading (Epic 9):
 - `GET /_matrix/client/v1/rooms/{roomId}/relations/{eventId}/m.thread` — required for thread panel; status unknown (check before threading epic).
 
@@ -184,10 +198,23 @@ Full detail: sessions/2026-07-02.md.
 ## Known Spec Decisions
 _Deliberate implementation choices — accepted deviations, spec ambiguity resolutions. Not re-flagged as findings._
 
-### State events return empty event_id (MVP)
+### State events return empty event_id (MVP) — scope widened 2026-10-02
 All `PUT /state/{eventType}` responses return `{"event_id":""}` — Core generates IDs but Gateway drops them. This is a MUST violation; Story 15-11 should fix it. Not yet an accepted deviation — it is a known bug to be resolved.
+Widened scope (bugfix epic, 2026-10-02): `GET /sync` `rooms.join.<room_id>.state.events` entries
+ALSO drop real `event_id`/`origin_server_ts` — confirmed via spec (`state.events` and
+`timeline.events` are both typed `ClientEventWithoutRoomID`, same Required fields, no
+state-vs-timeline carve-out). Same underlying defect family, broader surface than just the PUT
+response. Once the bugfix lands, mark this whole entry resolved instead of leaving it open.
 
 ## Spec Quirks for This Codebase
+
+### Rate limiting — `retry_after_ms` deprecated since v1.10 (2026-10-05)
+§Rate limiting (generic, applies to EVERY 429 across the whole CS API, not just one endpoint):
+`retry_after_ms` was **deprecated in v1.10** in favor of the `Retry-After` HTTP header. It is
+MAY/optional in the 429 JSON body (no "Required:" marker), homeservers SHOULD set the
+`Retry-After` header instead. Any story/AC assuming a body `retry_after_ms` field is spec-
+mandated is wrong — flag it. Found while reviewing `mutual_rooms` (MSC2666) but applies project-
+wide to every 429 response shape.
 
 ### Media — Authenticated Endpoints Freeze (v1.11/v1.12)
 Per §Media Repository v1.18: since v1.11, `/_matrix/media/v3/` download/thumbnail/config are deprecated. Since v1.12, servers SHOULD "freeze" them — newly uploaded media only accessible via authenticated `/_matrix/client/v1/media/` endpoints. Element Web (current) will prefer the authenticated form. Without those endpoints, images uploaded after a hypothetical freeze will not display.

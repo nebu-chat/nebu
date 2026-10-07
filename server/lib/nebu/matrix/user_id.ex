@@ -20,11 +20,28 @@ defmodule Nebu.Matrix.UserId do
 
   # Matrix user_id grammar (CS spec, room version 6+): `@localpart:domain` where the
   # localpart uses `a-z 0-9 . _ = - / +` (the same grammar `sanitize/1` enforces when
-  # deriving an id from a claim) and the domain is a non-empty server name. We are
-  # deliberately strict but not a full RFC server-name parser: a non-empty domain with
-  # no whitespace is sufficient to reject the malformed ids this validation guards
-  # against (story rm4 AC5 — admin add of an unknown/garbage id).
-  @user_id_regex ~r/^@[a-z0-9._=\-\/+]+:[^\s:]+$/
+  # deriving an id from a claim) and the domain is a non-empty server name.
+  #
+  # Two security properties, both load-bearing (bugfix-mutual-rooms Kassandra
+  # security review, finding F-1):
+  #
+  #   * Anchors are `\A`/`\z` (true string-start/end), not `^`/`$`. Elixir's `~r//`
+  #     compiles WITHOUT PCRE_DOLLAR_ENDONLY, so `$` matches before a trailing `\n`
+  #     — a `user_id` with a trailing newline byte would pass this check while not
+  #     being byte-identical to the real id, letting a caller bypass an equality
+  #     check (e.g. the mutual_rooms self-id guard) by appending `\n`.
+  #   * The domain character class is `[A-Za-z0-9.\-]+` — ASCII letters/digits/dot/
+  #     hyphen only — NOT `[^\s:]+`. The old negated class accepted 249 of 256
+  #     possible bytes, including NUL, other control characters, and all high-bit
+  #     (non-ASCII) bytes, because Erlang's `re` `\s` is ASCII-only. Those bytes
+  #     could reach a Postgres query (DB error) and a `Logger.warning` call on a
+  #     failure path (log injection: control bytes, or U+2028 LINE SEPARATOR,
+  #     forging fake extra log lines). The new class still covers every real
+  #     Matrix server name, including IDN/punycode domains (always pure-ASCII
+  #     `xn--...`), and — like the old class — excludes `:`, so port-bearing or
+  #     IPv6-literal server names remain unsupported (true of the original regex
+  #     too, not a new restriction).
+  @user_id_regex ~r/\A@[a-z0-9._=\-\/+]+:[A-Za-z0-9.\-]+\z/
 
   @doc """
   True if `user_id` is a syntactically valid Matrix user_id (`@localpart:domain`).

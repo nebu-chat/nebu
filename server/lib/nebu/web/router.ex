@@ -119,8 +119,18 @@ defmodule Nebu.Web.Router do
     |> put_resp_content_type("application/json")
     |> send_resp(
       200,
+      # Advertises the MSC2666 unstable-feature flag used by matrix-js-sdk/
+      # Element to discover mutual_rooms support. Clients gate on `versions`
+      # containing v1.19 OR this flag, then call the unstable path (GET
+      # /_matrix/client/unstable/uk.half-shot.msc2666/user/mutual_rooms,
+      # never paginated — see protected.ex), not the stable, paginated v1
+      # path. Nebu does not claim v1.19 compliance, so the "versions" list
+      # below is left as-is.
       Jason.encode!(%{
-        "versions" => ~w(v1.1 v1.2 v1.3 v1.4 v1.5 v1.6 v1.7 v1.8 v1.9 v1.10 v1.11)
+        "versions" => ~w(v1.1 v1.2 v1.3 v1.4 v1.5 v1.6 v1.7 v1.8 v1.9 v1.10 v1.11),
+        "unstable_features" => %{
+          "uk.half-shot.msc2666.query_mutual_rooms" => true
+        }
       })
     )
   end

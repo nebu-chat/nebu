@@ -148,7 +148,8 @@ defmodule Nebu.Matrix.SpacesStateEventsIntegrationTest do
         )
 
       assert put.status == 200
-      assert is_binary(json(put)["event_id"])
+      put_event_id = json(put)["event_id"]
+      assert is_binary(put_event_id)
 
       sync = call(:get, "/_matrix/client/v3/sync", nil, auth(admin))
       children = sync_state_events(json(sync), space, "m.space.child")
@@ -157,6 +158,25 @@ defmodule Nebu.Matrix.SpacesStateEventsIntegrationTest do
                ev["state_key"] == child and ev["content"]["via"] == ["nebu.local"]
              end),
              "m.space.child must surface in /sync state, got: #{inspect(children)}"
+
+      # ── Bugfix sync-state-events-missing-fields (AC1/AC2/AC5) ─────────────────
+      # m.space.child flows through the same get_generic_state_events/1 +
+      # build_state_events/2 path as m.room.name/m.room.canonical_alias/etc.
+      # (server.ex:2849-2861) — the state event as it appears inside /sync must
+      # carry the REAL event_id (matching the PUT response's own event_id, not a
+      # synthesized placeholder) and a REAL origin_server_ts (int epoch ms), not
+      # nil/missing.
+      child_event = Enum.find(children, fn ev -> ev["state_key"] == child end)
+      assert child_event != nil
+
+      assert child_event["event_id"] == put_event_id,
+             "m.space.child state event's event_id in /sync must match the REAL persisted " <>
+               "event_id returned by the PUT (AC1 — not synthesized), got " <>
+               "#{inspect(child_event["event_id"])}, expected #{inspect(put_event_id)}"
+
+      assert is_integer(child_event["origin_server_ts"]) and child_event["origin_server_ts"] > 0,
+             "m.space.child state event in /sync must carry a REAL origin_server_ts (int epoch ms), " <>
+               "got: #{inspect(child_event["origin_server_ts"])}"
 
       # Empty content (unlink) → still 200 with an event_id.
       unlink =

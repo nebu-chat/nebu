@@ -199,6 +199,24 @@ message Event {
   int64  server_ts         = 7;  // Unix milliseconds
   string state_key         = 8;  // Matrix state_key (subject of state event, e.g. user_id for m.room.member)
   bytes  unsigned_relations = 9; // Story 9-28: JSON {"m.thread":{"count":N,"latest_event":{...},"current_user_participated":bool}}
+  // Bugfix unsigned-replaces-state (Matrix CS API v1.19): event_id of the state
+  // event this one replaced at its (room_id, event_type, state_key) slot. Only
+  // ever populated when this Event is itself a state event (is_state_event ==
+  // true) AND a predecessor exists. "" = absent (AC3 — never a sentinel null,
+  // this plain-string proto field's own zero value IS the "absent" signal,
+  // same idiom as event_id=="" meaning "no real identity" elsewhere in this
+  // file).
+  string replaces_state     = 10;
+  // Code-review cycle 1 (MAJOR-2): `state_key` alone is ambiguous once a
+  // genuine state event's state_key is "" (e.g. m.room.name/topic/
+  // power_levels/create) — that collapses onto the exact same "" as a plain
+  // non-state event (m.room.message). This boolean is the authoritative
+  // signal (same idiom as SendEventRequest.is_state_event above, SEC Gate 1)
+  // so `Nebu.Matrix.Http.put_state_key/2` can correctly decide whether to
+  // emit `state_key` at all, including as an empty string for a genuine state
+  // event. Always true when this Event is a state event, regardless of its
+  // state_key value.
+  bool   is_state_event      = 11;
 }
 
 // SendEvent
@@ -378,11 +396,27 @@ message GetInitialSyncResponse {
 }
 
 // SyncRoomStateEvent represents a state event in a SyncRoom (needs state_key)
+//
+// NOTE: no longer generated from this file — server/lib/pb/core.pb.ex is a
+// hand-maintained plain Elixir defstruct (ADR-021, grpc-removal). Kept here for
+// historical/reference documentation only; update both files by hand together.
+//
+// Bugfix sync-state-events-missing-fields: event_id/origin_server_ts added so
+// rooms.join.*.state.events entries carry the same required ClientEventWithoutRoomID
+// identity fields as timeline.events (Matrix CS API spec) — both are REAL persisted
+// values, not synthesized.
 message SyncRoomStateEvent {
-  string type      = 1;  // e.g. "m.room.member", "m.room.power_levels"
-  string state_key = 2;
-  bytes  content   = 3;  // JSON-encoded content
-  string sender    = 4;
+  string type             = 1;  // e.g. "m.room.member", "m.room.power_levels"
+  string state_key        = 2;
+  bytes  content          = 3;  // JSON-encoded content
+  string sender           = 4;
+  string event_id         = 5;  // real persisted event_id (never synthesized)
+  int64  origin_server_ts = 6;  // real persisted timestamp, epoch ms
+  // Bugfix unsigned-replaces-state (Matrix CS API v1.19): event_id of the state
+  // event previously current at this (room_id, type, state_key) slot, if any.
+  // "" = absent (AC3 — e.g. always for m.room.create, or any first-ever write
+  // at a slot) — never a sentinel null.
+  string replaces_state    = 7;
 }
 
 // GetSyncDelta — incremental sync request with long-polling

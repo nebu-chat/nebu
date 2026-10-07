@@ -236,13 +236,47 @@ server/lib/nebu/
 │   │                   own identity — Kassandra security review flagged that a future caller using this function with
 │   │                   a client-supplied MXID could create a deactivation/existence oracle (F-4 INFO, accepted risk per
 │   │                   existing M_USER_DEACTIVATED acceptance in MEMORY).
+│   ├── page_token.ex  ← Nebu.Matrix.PageToken (Story: mutual-rooms + space-hierarchy refactor):
+│   │                   shared opaque offset-pagination token codec extracted for reuse across multiple
+│   │                   paginated endpoints. encode/2 and decode/2 accept a string prefix parameter so
+│   │                   each endpoint supplies its own namespace (e.g. "h1:" for space hierarchy via
+│   │                   SpaceHierarchy, "mr1:" for mutual_rooms via EventDispatcher.Server) — prefix
+│   │                   mismatch on decode fails closed. Token format: url-safe Base64 of
+│   │                   `<prefix><offset>`. Moved from a private implementation in SpaceHierarchy (Story 13's
+│   │                   spaces epic) into a shared module to eliminate duplication.
 │   └── event_dispatcher/ ← Nebu.Matrix.EventDispatcher.Server — the in-process command/DTO layer the
 │                       HTTP routers call directly (send_event, create_room, join/leave, get_messages,
 │                       get_room_state, set_presence/typing, get_sync_delta, invalidate_user_sessions,
-│                       get_relations, get_event, search_messages, upgrade_room, bulk_import_users).
+│                       get_relations, get_event, search_messages, upgrade_room, get_mutual_rooms, bulk_import_users).
 │                       pg Process Groups fanout for sync wakeups; membership-scoped FTS via the
 │                       search DB module. Plain Elixir module — no gRPC dependency (ADR-021,
-│                       grpc-removal epic 2026-06-22).
+│                       grpc-removal epic 2026-06-22). build_state_events/2 threads real event
+│                       identity (event_id, origin_server_ts) for state events in sync responses
+│                       from the DB (m.room.create, m.room.name, generic state) and from
+│                       GenServer memory (m.room.member, m.room.power_levels) — ensures spec
+│                       compliance by emitting ClientEventWithoutRoomID fields for all state events
+│                       (bugfix: sync-state-events-missing-fields, migration 000035).
+│                       attach_replaces_state_to_state_events/2 (new, bugfix:
+│                       unsigned-replaces-state, 2026-10-07): enriches sync + /messages + /event
+│                       responses with `unsigned.replaces_state` field (Matrix CS API v1.19 MUST
+│                       behavior) — the event_id of the state event previously current at the same
+│                       (room_id, type, state_key) slot, absent from unsigned if none. Uses a
+│                       single batched SQL query per response via Room.DB.fetch_replaces_state/1
+│                       (UNNEST+LATERAL join against events_room_state_idx index), O(1) per
+│                       response not per-state-event (AC5 N+1 avoidance). SECURITY FIX: pre-fix
+│                       Room.Server.do_send_event/7 collapsed nil state_key to "" before
+│                       persisting, enabling state-event forgery via PUT /send/{anyEventType}
+│                       (unguarded, any joined member at power_level=0, bypasses change_state
+│                       check). Attack class: room rename, join-policy bypass, history-visibility
+│                       bypass, encryption flip. Post-fix: persists as SQL NULL, dropped by
+│                       is_state_event signal. Core.Event proto gains is_state_event field (new,
+│                       server-derived nil-ness of raw state_key column). Migration 000036
+│                       backfills historical corruption via conservative inclusion list (only
+│                       m.room.message empirically confirmed; fail-safe design never deletes
+│                       legitimate state rows). Operator detection query documented; handoff items
+│                       F-1 (pre-fix data remediation), F-2 (separate send-path m.room.encryption
+│                       guard, unblocking search-disable primitive), F-3/F-4/F-6 (query filters,
+│                       array chunking) tracked non-blocking per security review.
 │
 ├── media/            ← Nebu.Media.* — media gateway + security enforcement, in-process behind the OIDC pipeline
 │   ├── http/         ← Matrix /_matrix/media/v3/* + /_matrix/client/v1/media/* (upload, download,
@@ -1797,6 +1831,7 @@ Key command handlers: `send_event`, `create_room`, `join_room`, `get_messages`, 
 `get_relations` (thread relation events for a parent event_id, Story 9-28/9-29),
 `search_messages` (full-text search with membership enforcement, Story 11-3),
 `get_event` (single event fetch by event_id scoped to a room, membership-enforced, Story 11-8),
+`get_mutual_rooms` (MSC2666 shared rooms intersection for two users, paginated, new),
 `bulk_import_users` (admin bulk provisioning of OIDC users, identical flow to first login, Story 14-3a).
 
 > **Historical note:** prior to the `grpc-removal` epic these handlers were defined in a gRPC
@@ -1905,5 +1940,28 @@ Response: `Event event` - the full event proto (same `Event` message used by syn
 > and calls `attach_thread_aggregations/3` so the returned event already carries bundled `m.thread`
 > aggregation data (same as sync responses). The `GetEventRequest` / `GetEventResponse` structs are
 > plain `defstruct` DTOs (historically added to `core.proto`; now hand-maintained).
+
+> **`get_mutual_rooms` handler (MSC2666, new):** `Nebu.Matrix.EventDispatcher.Server.get_mutual_rooms/4` is the
+> in-process entry point for `GET /_matrix/client/v1/mutual_rooms` (stable, CS API v1.19+) and its unstable alias
+> `GET /_matrix/client/unstable/uk.half-shot.msc2666/user/mutual_rooms`. Query param `user_id=@other:server` identifies
+> the target user. Key design decisions:
+>
+> 1. **No Room GenServer involvement** - pure direct-DB read. Calls `Nebu.Matrix.Room.DB.get_rooms_for_user/1` (the same
+>    function `/sync`'s initial-sync path already uses) once for the authenticated caller and once for the target `user_id`,
+>    then computes `MapSet.intersection/2` to yield only rooms both share, sorted by room_id.
+>
+> 2. **Pagination via `Nebu.Matrix.PageToken`** - windows the intersection result using offset-based pagination.
+>    Stable cursor: `Nebu.Matrix.PageToken.encode("mr1:", offset)` (prefix "mr1:" prevents replay against space hierarchy
+>    tokens which use "h1:"). Empty next_batch signals end.
+>
+> 3. **Behavioral dual-mode (stable vs. unstable)** - the stable v1 endpoint always returns a paginated response
+>    (`joined: [...]`, `next_batch: "..." | null`). The unstable MSC2666 endpoint, for historical compatibility with
+>    the original unstable behavior, NEVER paginates (always returns complete `joined` list, `next_batch` field absent).
+>    Same handler, different route/response envelope per spec era.
+>
+> 4. **Rate limiting** - shared RateLimit tier `mutual_rooms` (120 req/min, burst 30). Rate limit bucket is keyed by
+>    source IP only, a pre-existing design property across all tiers (`/login`, `/sync`, `/mutual_rooms`, etc., all
+>    draw from one ETS bucket per IP) — flagged during security review as a known architectural limitation for
+>    follow-up (per-tier isolation not scope of this story).
 
 _Source: `_bmad-output/planning-artifacts/architecture.md`, §Project Structure & Boundaries, §Complete Project Directory Structure; Story 9-19 (room_moderation.go, sync.go, event_dispatcher/server.ex, forgotten_rooms migration); Story 9-22 (per-device sync tokens, device_id in proto); Story 9-24 (GlobalAccountDataDB interface, ListGlobalAccountData, top-level account_data in syncResponse); Story 9-25 (syntheticNextBatch helper, syntheticBatchSeq atomic counter, sinceToken param removed from buildResponseFromBufferedEvents); Story 9-27 (upgrade_room/2 full Matrix §11.35.1 flow, GRPC.RPCError error handling, archive_room_atomic, terminate_child, try/rescue failure audit); Story 9-28 (GetRelations RPC, unsigned_relations field on Event, attach_thread_aggregations, fetch_events_by_relation, count_thread_children, event_in_room?, migration 000042); Story 9-29 (base /relations/{eventId} route, three-segment /{relType}/{eventType} route, dir/event_type/recurse/from query params, prev_batch in response, fetch_events_by_relation/5 dynamic WHERE builder); Story 11-3 (SearchMessages gRPC handler, proto extension, delegated search_db_module pattern, offset-cap security fix); Story 11-4 (search.go Gateway handler, SearchCoreClient consumer interface, §11.14.1 response shape, gRPC error mapping); Story 11-5 (NewUserRateLimiter middleware, per-user 10 req/min for /search, retry_after_ms in body); Story 11-8 (GetEvent RPC, event.go Go handler, fetch_event/2 DB function, core_grpc.pb.ex rpc :GetEvent + rpc :GetRelations bug fix); Story 11-9 (health/info.go NewInfoHandler, Nebu.BuildInfo module, GET /info on pubMux + health server, Admin UI footer via page_data.go SetBuildInfo/newPageData, ErrorMode on PageData, Dockerfile ARG/ldflags injection, docker-compose.yml build args); Story 11-10 (ClaimMappingHandler + ClaimMappingPageData + ClaimMappingConfig in claim_mapping.go, claim-mapping.html template, ClaimSelectionHandler atomic claim persistence in auth.go, ServerConfigReader LoadClaimMapping/SaveClaimMapping extension, FormatUserIDFromClaims signature refactor in grpc/metadata.go, JWTMiddleware userIDClaimLoader param, LoginHandler per-request claim resolution, migration 000044 claim mapping defaults seed); Story 12.16 (media/internal/auth middleware - TokenVerifier interface + fail-closed nil guard; media/internal/config handler; CSP + Cross-Origin-Resource-Policy headers on download/thumbnail; v1 authenticated routes in main.go); oidc-middleware-migration (nebu_http: NebuHttp.Plugs.OidcPlug Bearer-token validation, NebuHttp.JwksCache GenServer with TTL refresh + last-known-good, NebuHttp.Router.Protected /_matrix sub-router — built + unit-tested, NOT yet on the live request path; live cutover owned by matrix-api-migration); media-gateway-migration (nebu_http: NebuHttp.Media + Crypto/DB/Membership/Storage/HttpFetch/SSRF submodules + NebuHttp.Router.Media serving /_matrix/media/v3/* behind OidcPlug; media access-control now a local room_members SQL call replacing the gRPC CheckMembership RPC; ExAws.S3/MinIO storage with Finch pool in NebuHttp.Application; AES-256-GCM at-rest encryption per ADR-011; SSRF-guarded + rate-limited preview_url fetch; inline SQL per ADR-018; replaces the standalone Go media service)_

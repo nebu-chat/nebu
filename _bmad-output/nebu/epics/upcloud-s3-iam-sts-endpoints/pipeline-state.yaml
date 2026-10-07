@@ -1,0 +1,20 @@
+# Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents.
+# Do not edit manually during an active pipeline run.
+# last_updated: 2026-10-01
+# [bugfix-upcloud-s3-iam-sts-endpoints] 2026-10-01T14:24Z committed ✓ (e7eb02ee: ATDD+1 code-review cycle (2 MINOR fixed)+Kassandra CLEAN (2 LOW), integration baseline-diffed zero regression, tofu validate clean)
+# [bugfix-upcloud-s3-iam-sts-endpoints] 2026-10-01T14:24Z arc42-update → done (docs/architecture/07-deployment.md: UpCloud added to Platform Targets table, new 'UpCloud Media Gateway Support' section documenting the 3 endpoint types and the new iam_endpoint/sts_endpoint config fields)
+# [bugfix-upcloud-s3-iam-sts-endpoints] 2026-10-01T14:21Z security-review → Kassandra CLEAN (0 CRITICAL/HIGH/MEDIUM, 2 LOW: F-1 new URL fields lack SSRF guard sibling endpoint gets, currently unexploitable since zero consumers / F-2 runtime.exs vs maybe_put_env empty-string normalization inconsistency; observations O-2 STS plumbing added but long-lived access key still in use, O-5 pre-existing missing prevent_destroy on upcloud bucket matching known Stackit gap) — report docs/stories/security-reports/bugfix-upcloud-s3-iam-sts-endpoints-security-review-2026-10-01.md
+# [bugfix-upcloud-s3-iam-sts-endpoints] 2026-10-01T14:13Z code-review → CLEAN after cycle 1 (both MINORs resolved, independently re-verified by reviewer: 19/19 target tests, tofu validate clean, 1 new accepted INFO on pre-existing maybe_put_env/2 empty-string behavior, not reachable from this stack)
+# [bugfix-upcloud-s3-iam-sts-endpoints] 2026-10-01T14:10Z dev-story cycle 1 → both MINORs fixed (stale RED-phase comments reworded; empty-string-vs-nil guard added to cloud-init.tftpl + runtime.exs normalize_optional_env helper); 19/19 target tests pass, tofu validate clean
+# [bugfix-upcloud-s3-iam-sts-endpoints] 2026-10-01T13:59Z code-review → 0 MAJOR, 2 MINOR (stale RED-phase comments; empty-string vs nil leak in cloud-init/runtime.exs for unset iam/sts endpoint), 5 INFO → cycle 1
+# [bugfix-upcloud-s3-iam-sts-endpoints] 2026-10-01T13:55Z ci-gate → ✓ redeploy+integration (fixed 2635/34 failures vs baseline 2632/32 failures, diffed by name: zero overlap with Media/Storage/S3/ex_aws/runtime.exs/terraform surface, all failures in both runs belong to the pre-existing known-flaky admin-LogsLive/sync-timing/OIDC cluster, non-deterministic subset confirmed by direct comparison); unit suite 2006/2007 (dev-story step, 1 pre-existing flaky confirmed via git stash); UX gate skipped (no admin UI files touched)
+# [bugfix-upcloud-s3-iam-sts-endpoints] 2026-10-01T13:29Z dev-story → done (cycle 0): AC1 storage_config.ex + test file (19/19 target, added iam-sts-AT3 for MINOR), AC2 runtime.exs, AC3-AC5 upcloud terraform (tofu validate clean, local+docker), AC7 Makefile test-iac-validate extended; full unit suite 2006/2007 passed (1 pre-existing flaky MediaDownloadStallTest + 2 pre-existing warnings, confirmed via git stash against baseline)
+# [bugfix-upcloud-s3-iam-sts-endpoints] 2026-10-01T13:14Z test-review → CLEAN (0 MAJOR, 1 MINOR: independent per-field env resolution untested, optional)
+# [bugfix-upcloud-s3-iam-sts-endpoints] 2026-10-01T13:12Z atdd → 3 failing (storage_config_test.exs AC1: iam-sts-AT1, iam-sts-AT2, updated AT1) — AC2-AC7 (runtime.exs+terraform) have no ExUnit RED target, scoped to dev-story direct + review
+# [bugfix-upcloud-s3-iam-sts-endpoints] 2026-10-01T13:02Z pipeline started (--bug: UpCloud S3-compatible Managed Object Storage exposes separate public/iam/sts endpoint types; Nebu.Media.Storage/StorageConfig + runtime.exs only ever wire a single S3 endpoint through NEBU_MINIO_ENDPOINT; deploy/tofu/examples/upcloud/server.tf's s3_endpoint local only extracts the 'public' entry from upcloud_managed_object_storage.nebu_media[0].endpoint, cloud-init.tftpl only injects NEBU_MINIO_ENDPOINT/ACCESS_KEY/SECRET_KEY/BUCKET into the VM env; need IAM + STS endpoint URLs plumbed through both the S3 driver config and the UpCloud tofu stack's VM env vars)
+story: null
+current_step: null
+completed: []
+cycle_count: 0
+blocked_reason: null
+last_updated: "2026-10-01T14:24Z"

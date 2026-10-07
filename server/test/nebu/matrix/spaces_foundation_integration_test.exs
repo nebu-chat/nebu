@@ -113,6 +113,34 @@ defmodule Nebu.Matrix.SpacesFoundationIntegrationTest do
     end
   end
 
+  # Bugfix sync-state-events-missing-fields: find the FULL m.room.create state
+  # event (not just content) for room_id in a /sync response, so tests can assert
+  # on event_id/origin_server_ts/unsigned too.
+  defp sync_create_event(sync_body, room_id) do
+    get_in(sync_body, ["rooms", "join", room_id, "state", "events"])
+    |> Kernel.||([])
+    |> Enum.find(fn ev -> ev["type"] == "m.room.create" end)
+  end
+
+  # Real (event_id, origin_server_ts) for m.room.create, straight from the events
+  # table — the source of truth build_state_events/2 must eventually read from.
+  defp db_create_event_identity(room_id) do
+    {:ok, %{rows: rows}} =
+      Ecto.Adapters.SQL.query(
+        Nebu.Repo,
+        """
+        SELECT event_id, origin_server_ts FROM events
+        WHERE room_id = $1 AND event_type = 'm.room.create' LIMIT 1
+        """,
+        [room_id]
+      )
+
+    case rows do
+      [[event_id, ts]] -> {event_id, ts}
+      [] -> :no_row
+    end
+  end
+
   describe "Spaces foundation — createRoom + room_type" do
     @describetag :integration
 
@@ -168,6 +196,35 @@ defmodule Nebu.Matrix.SpacesFoundationIntegrationTest do
       assert content["type"] == "m.space"
       assert content["creator"] == "@kai:test.local"
       assert content["room_version"] == "10"
+
+      # ── Bugfix sync-state-events-missing-fields (AC1/AC2/AC5) ───────────────
+      # rooms.join.<room_id>.state.events entries are ClientEventWithoutRoomID,
+      # exactly like timeline.events — event_id/origin_server_ts are required,
+      # non-nullable fields. Today Nebu.Matrix.Http.build_joined_rooms/1 drops
+      # both (http.ex:139-149) because Core.SyncRoomStateEvent has no such
+      # fields (proto/core.proto:381-386) — this must be the REAL persisted
+      # value, not a synthesized "now"/fake id (see initial_sync_state_event/3
+      # precedent in protected.ex, which must NOT be copied here).
+      create_event = sync_create_event(json(sync), room_id)
+      assert create_event != nil
+
+      assert is_binary(create_event["event_id"]) and create_event["event_id"] != "",
+             "m.room.create state event in /sync must carry a REAL event_id, got: " <>
+               "#{inspect(create_event["event_id"])}"
+
+      assert is_integer(create_event["origin_server_ts"]) and create_event["origin_server_ts"] > 0,
+             "m.room.create state event in /sync must carry a REAL origin_server_ts (int epoch ms), " <>
+               "got: #{inspect(create_event["origin_server_ts"])}"
+
+      {db_event_id, db_ts} = db_create_event_identity(room_id)
+
+      assert create_event["event_id"] == db_event_id,
+             "m.room.create event_id must be the REAL persisted event_id, got " <>
+               "#{inspect(create_event["event_id"])}, expected #{inspect(db_event_id)}"
+
+      assert create_event["origin_server_ts"] == db_ts,
+             "m.room.create origin_server_ts must be the REAL persisted timestamp, got " <>
+               "#{inspect(create_event["origin_server_ts"])}, expected #{inspect(db_ts)}"
     end
 
     # ─── AC4 — backward compatibility (regular room) ──────────────────────────

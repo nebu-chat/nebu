@@ -58,6 +58,116 @@ The sync handler runs inside the same node as the room/event-dispatch logic; `pg
 fanout wakes the waiting long-poll process directly — no cross-process streaming connection and no
 ring buffer are involved.
 
+**State Event Construction in Sync (bugfix: sync-state-events-missing-fields):**
+
+Every `rooms.join[roomId].state.events[]` entry is constructed by `EventDispatcher.build_state_events/2`
+and serialized in `Http.build_joined_rooms/1`. Spec compliance requires all state events include
+`ClientEventWithoutRoomID` fields (`event_id`, `origin_server_ts`, `unsigned`), not just timeline
+events. The fix threads real event identity:
+- **DB-backed state** (`m.room.create`, `m.room.name`, generic state events): SELECT `event_id` and
+  `origin_server_ts` from the `events` table alongside content/sender (zero added round-trips).
+- **GenServer state-backed** (`m.room.member`, `m.room.power_levels`): capture event identity at the
+  moment each change is applied and persisted in GenServer memory, or restore from DB on restart
+  (widened `load_members/1` contract to 5-tuple).
+- **Power levels persistence** (new): `set_power_levels` now emits a real, signed, persisted Matrix
+  event via `emit_power_levels_event/3` — replaces the prior denormalized column-only approach. New
+  migration `000035_backfill_power_levels_events` backfills one event per pre-existing room.
+- **Serialization**: state events now include `event_id`, `origin_server_ts`, `unsigned` (with `age`);
+  genuinely missing identity is logged at debug level (rare fallback for very old rooms).
+
+**State Event Construction in Sync — `unsigned.replaces_state` (bugfix: unsigned-replaces-state, 2026-10-07):**
+
+Matrix CS API v1.19 adds a MUST-have `unsigned.replaces_state` field on every state event returned to
+clients: the `event_id` of the state event previously current at that `(room_id, type, state_key)`
+slot. Nebu now includes this field across all state-event surfaces: `/sync` state.events + timeline
+(when state-bearing), `/messages` chunk (state-bearing entries only), `/event/{eventId}`,
+`/relations/*`. The field is **absent from `unsigned` entirely** (never `null` or empty string) when no
+prior state event exists at the slot.
+
+```
+Matrix Client      Nebu app (sync handler)              PostgreSQL (events table)
+     │                    │                                        │
+     │  GET /sync         │                                        │
+     │───────────────────►│  build_state_events/2 collects    │
+     │                    │  (room_id, type, state_key,       │
+     │                    │   origin_server_ts) tuples of all  │
+     │                    │  current state events across rooms │
+     │                    │                                        │
+     │                    │  attach_replaces_state_to...       │
+     │                    │  state_events/2 — SINGLE batched   │
+     │                    │  query per sync response:           │
+     │                    │  SELECT req.room_id, type, key     │
+     │                    │    e.event_id AS replaces_state    │
+     │                    │  FROM UNNEST(...) AS req           │
+     │                    │  LEFT JOIN LATERAL (                │
+     │                    │    SELECT event_id FROM events e2  │
+     │                    │    WHERE e2.room_id=req.room_id    │
+     │                    │    AND e2.event_type=req.type      │
+     │                    │    AND e2.state_key=req.key        │
+     │                    │    AND (ts,id) < (req.ts,req.id)   │
+     │                    │    ORDER BY ts DESC, id DESC       │
+     │                    │    LIMIT 1) e ON true              │
+     │                    │──────────────────────────────────►│
+     │                    │  ◄── [(room, type, key,            │
+     │                    │       replaces_state_id), ...]     │
+     │                    │                                        │
+     │                    │  Map replaces_state into unsigned   │
+     │                    │  (key absent if NULL from query)   │
+     │                    │                                        │
+     │  200 {                                                      │
+     │    "rooms": {"join": {                                     │
+     │      "state": {"events": [{                               │
+     │        "type": "m.room.member",                           │
+     │        "state_key": "@user:host",                         │
+     │        "unsigned": {                                       │
+     │          "age": 1234,                                      │
+     │          "replaces_state": "$prev_member_event"           │
+     │        }},                                                 │
+     │        {"type": "m.room.name",                            │
+     │         "unsigned": {"age": 2345}},  ← no replaces_state  │
+     │                                          (first name set) │
+     │      ]}}}                                                  │
+     │◄──────────────────│                                        │
+```
+
+**Key design facts (bugfix: unsigned-replaces-state, AC5 N+1 avoidance):**
+- **Single batched query per response:** the fetch_replaces_state/1 query runs once per sync
+  response (or per /messages chunk, /event call, /relations call), with ONE query covering all
+  state-event slots. Not one per state event (which would be N+1).
+- **Index-backed:** Query uses UNNEST+LATERAL join against the existing
+  `events_room_state_idx(room_id, event_type, state_key, origin_server_ts DESC)` index.
+- **Visibility non-gating (AC4):** `replaces_state` is included regardless of `history_visibility`
+  (explicit spec contrast against `prev_content`; Nebu does not implement `prev_content`).
+- **m.room.create optimization:** For every room's create event (first-ever at its slot),
+  `replaces_state` is always absent. Create events can be omitted from the batch query as a minor
+  optimization (though including them is also correct — they just resolve to NULL).
+- **Stable secondary sort:** Tiebreaker for same-millisecond collisions uses `event_id` (or a similar
+  stable secondary sort), not `origin_server_ts` alone — ensures consistent ordering across retries.
+
+**SECURITY FIX — Pre-existing state-event-forgery privilege escalation (bugfix: unsigned-replaces-state, 2026-10-07):**
+
+Nebu's pre-fix `Room.Server.do_send_event/7` collapsed `nil` state_key to `""` before persisting. This
+enabled **any joined member at power_level 0** (default) to forge state events via
+`PUT /_matrix/client/v3/rooms/{roomId}/send/{eventType}/{txnId}` (no event-type allowlist on this
+path, no :change_state permission check). Forged rows landed in the DB marked `state_key = ''` and
+were consumed by every state-derivation query (`get_room_name/1`, `get_generic_state_events/1`,
+search encryption predicate, admin space queries). **Attack class: room rename, `m.room.join_rules`
+(→ restricted membership-policy bypass), `m.room.history_visibility` (→ private room's summary
+exposed to non-members), `m.room.encryption` (→ ADR-011 managed decryption broken).**
+
+Post-fix: `Room.Server.do_send_event/7` persists state_key as SQL `NULL` instead of `""`. The new
+`Core.Event.is_state_event` field (server-derived: nil-ness of raw `events.state_key` column)
+distinguishes genuine state events from non-state events. Concurrent changes to state-derivation
+queries add `is_state_event = true` or `state_key IS NOT NULL` predicates.
+
+**Migration 000036** (`backfill_nonstate_events_null_state_key`): backfills historical corruption via
+`UPDATE events SET state_key = NULL WHERE state_key = '' AND event_type IN ('m.room.message')`.
+Conservative inclusion-list design: **fail-safe, never deletes legitimate state rows.** For data
+planted during the pre-fix attack window, operators must run a documented detection query before
+deploying; no blind automated remediation. Partial fix for m.room.message only; other type classes
+(e.g. m.reaction, custom types) require manual review and are NOT backfilled (risk of destroying
+legitimate custom state events).
+
 ## Scenario 3a: Public Room Join - Sync Wakeup (GAP-JOIN-PUBLIC, Story 9-19)
 
 After `POST /join/{roomId}` for a **public room** (no prior invite), the sync long-poll must
