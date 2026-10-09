@@ -906,14 +906,32 @@ NEBU_MINIO_USE_SSL         — "true" (UpCloud MOS requires TLS)
 
 **`Nebu.Media.StorageConfig` Integration:**
 
-The server's `Nebu.Media.StorageConfig` module resolves these environment variables at boot time:
-
-- `iam_endpoint` field (optional, `nil` by default) — resolved from `NEBU_MINIO_IAM_ENDPOINT`
-- `sts_endpoint` field (optional, `nil` by default) — resolved from `NEBU_MINIO_STS_ENDPOINT`
+- `iam_endpoint` / `sts_endpoint` fields (optional, `nil` by default) follow the
+  same DB-override-with-env-fallback precedence as `endpoint`/`region`/
+  `archive_bucket`: a saved `media_storage_config` DB value wins, else
+  `NEBU_MINIO_IAM_ENDPOINT`/`NEBU_MINIO_STS_ENDPOINT` is used, else the
+  compiled default (`nil`). This DB-override support (migration `000037`) was
+  added by a follow-on bugfix (`bugfix-add-sts-iam-endpoints-to-admin-ui`) on
+  top of the original env-only fields (`bugfix-upcloud-s3-iam-sts-endpoints`).
 - Both are full URLs (e.g. `https://7mf5k.upcloudobjects.com:4443/iam`), not host:port pairs
 - Neither field is a secret; both are stored and visible in the config table for operator inspection
+- Admin-editable via `/admin/media/settings`, alongside the other storage-target
+  fields. The save path applies a clear/no-op/override rule rather than plain
+  blank-means-omit semantics: submitting the same value that is already in
+  effect (whether DB- or env-sourced) is a no-op; blanking a field that
+  currently has a genuine DB override clears that override back to
+  env-controlled (writes `NULL`); a genuinely different, non-blank value
+  persists as a new DB override. This prevents an untouched, env-pre-filled
+  form field from silently freezing the env value into the DB on an unrelated
+  save (e.g. saving just a credentials change would otherwise promote the
+  pre-filled `iam_endpoint`/`sts_endpoint` into a permanent DB row).
+- Both fields are validated as full `https://` URLs checked against
+  `Nebu.Media.SSRF.checked_target/1` (rejecting private/loopback/link-local/
+  cloud-metadata addresses) before being persisted — added by this bugfix's
+  security review, since these fields are now admin-UI-writable and
+  DB-persisted rather than env-only/no-write-path.
 
-Note: The new `iam_endpoint` and `sts_endpoint` fields are plumbed through as configuration but are not yet actively consumed by the ExAws S3 client (runtime STS AssumeRole exchange). They are available for future integration when a live UpCloud account confirms a runtime STS flow is required. The bugfix ensures the three URLs (endpoint, iam_url, sts_url) exposed by UpCloud's Managed Object Storage resource are threaded end-to-end into the application's config module, enabling future use cases without further IaC changes.
+Note: The `iam_endpoint` and `sts_endpoint` fields are plumbed through as configuration but are not yet actively consumed by the ExAws S3 client (runtime STS AssumeRole exchange). They are available for future integration when a live UpCloud account confirms a runtime STS flow is required. The bugfix ensures the three URLs (endpoint, iam_url, sts_url) exposed by UpCloud's Managed Object Storage resource are threaded end-to-end into the application's config module, enabling future use cases without further IaC changes.
 
 **Local IaC Validation:**
 

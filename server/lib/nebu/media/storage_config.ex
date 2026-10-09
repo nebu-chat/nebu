@@ -173,10 +173,15 @@ defmodule Nebu.Media.StorageConfig do
     secret_key: nil,
     s3_key_prefix_template: "{media_id}",
     archive_bucket: nil,
-    # bugfix-upcloud-s3-iam-sts-endpoints (AC1): infra-provisioned-only, env-
-    # resolved full URLs (UpCloud IAM/STS endpoints) — no media_storage_config
-    # DB column, so never admin-settable and never masked. See build_resolved/2
-    # and default_env_reader/0 below.
+    # bugfix-upcloud-s3-iam-sts-endpoints (AC1) / bugfix-add-sts-iam-endpoints-
+    # to-admin-ui (AC1): env-resolved full URLs (UpCloud IAM/STS endpoints).
+    # Since the latter story, admin-settable via a media_storage_config
+    # DB-override column (same DB > env > default precedence as every other
+    # plain field) — still never masked (not secrets). See build_resolved/2
+    # and default_env_reader/0 below. A non-nil write to either column is
+    # validated by validate_iam_sts_fields/1 in upsert/1's `with` chain (F-1
+    # fix, Kassandra security review, SEC Gate 1, 2026-10-08) — nil (unset)
+    # and env/default-sourced values are never re-validated by this check.
     iam_endpoint: nil,
     sts_endpoint: nil
   }
@@ -217,11 +222,18 @@ defmodule Nebu.Media.StorageConfig do
   `changed_fields` naming ONLY the fields that changed — never their values
   (AC9) — then unconditionally refreshes this node's cache (and broadcasts
   the invalidation to `:pg` peers) before returning `:ok`.
+
+  Also rejects a non-`nil` `iam_endpoint`/`sts_endpoint` in `fields` that is
+  not a full `https://` URL passing `Nebu.Media.SSRF.checked_target/1` (F-1
+  fix, Kassandra security review, SEC Gate 1, 2026-10-08) — see
+  `validate_iam_sts_fields/1` below. `nil` (the explicit "clear this
+  override" value) is always accepted unvalidated.
   """
   @spec upsert(map(), String.t()) :: :ok | {:error, term()}
   def upsert(fields, actor \\ @audit_actor) when is_map(fields) do
     with :ok <- validate_template_field(fields),
-         :ok <- validate_endpoint_field(fields) do
+         :ok <- validate_endpoint_field(fields),
+         :ok <- validate_iam_sts_fields(fields) do
       columns = build_columns(fields)
       writer = Application.get_env(:nebu_http, :media_storage_config_writer, &default_writer/2)
       set_at = System.system_time(:millisecond)
@@ -257,6 +269,59 @@ defmodule Nebu.Media.StorageConfig do
   defp validate_endpoint_field(%{endpoint: endpoint}), do: validate_candidate_endpoint(endpoint)
   defp validate_endpoint_field(_fields), do: :ok
 
+  # F-1 fix (Kassandra security review, SEC Gate 1, 2026-10-08): validates
+  # iam_endpoint/sts_endpoint BEFORE any DB write, whenever `fields` contains
+  # either key — same partial-update-aware gating as validate_template_field/1
+  # and validate_endpoint_field/1 above. Guards the persist path regardless of
+  # caller (not just Nebu.Admin.MediaSettingsController's own controller-level
+  # mirror of this check, `validate_changes_iam_sts/1`), closing the gap the
+  # security review flagged: these two columns were the only admin-writable,
+  # DB-persisted, URL-shaped fields on this table with no scheme assertion and
+  # no SSRF guard — unlike `endpoint` (validate_endpoint_field/1 above) and
+  # `webhook_url` (Nebu.Media.WebhookDelivery), both of which already route
+  # through Nebu.Media.SSRF.checked_target/1 at persist/send time. Prior to
+  # this fix, the only thing that made this acceptable at LOW was "no DB write
+  # path exists at all" — a guarantee the bugfix-add-sts-iam-endpoints-to-
+  # admin-ui story itself removed by adding column_for/2 clauses for both
+  # keys.
+  #
+  # A `nil` value is ALWAYS accepted unvalidated — see
+  # Nebu.Admin.MediaSettingsController.put_env_backed_field/5's rule 2: `nil`
+  # is the explicit "clear this override, go back to env-controlled" value,
+  # not a candidate endpoint to validate. A key absent from `fields` entirely
+  # is likewise untouched (partial-update semantics, same as
+  # validate_endpoint_field/1). Only a non-nil value gets the `https://` +
+  # `SSRF.checked_target/1` check — unlike validate_candidate_endpoint/1 above
+  # (endpoint's own guard), no synthetic scheme prefix needs to be prepended
+  # here: iam_endpoint/sts_endpoint are already full URLs (UpCloud's own
+  # iam_url/sts_url shape), so `SSRF.checked_target/1` is called directly.
+  defp validate_iam_sts_fields(fields) do
+    with :ok <- validate_iam_sts_field(:iam_endpoint, fields),
+         :ok <- validate_iam_sts_field(:sts_endpoint, fields) do
+      :ok
+    end
+  end
+
+  defp validate_iam_sts_field(key, fields) do
+    case Map.fetch(fields, key) do
+      :error -> :ok
+      {:ok, nil} -> :ok
+      {:ok, value} when is_binary(value) -> validate_iam_sts_url(value)
+      {:ok, _other} -> {:error, :invalid_iam_sts_endpoint}
+    end
+  end
+
+  defp validate_iam_sts_url(value) do
+    if String.starts_with?(String.downcase(value), "https://") do
+      case SSRF.checked_target(value) do
+        {:ok, _target} -> :ok
+        {:error, _reason} -> {:error, :invalid_iam_sts_endpoint}
+      end
+    else
+      {:error, :invalid_iam_sts_endpoint}
+    end
+  end
+
   @doc "The `:pg` group used for cross-node cache invalidation (ADR-020)."
   @spec pg_group() :: String.t()
   def pg_group, do: @pg_group
@@ -271,6 +336,36 @@ defmodule Nebu.Media.StorageConfig do
     case safe_load() do
       nil -> :fresh
       row -> {:ok, %{endpoint: Map.get(row, "endpoint"), bucket: Map.get(row, "bucket")}}
+    end
+  end
+
+  @doc """
+  N2-MINOR-1 fix (`bugfix-add-sts-iam-endpoints-to-admin-ui`, finding raised
+  in code-review cycle 2, fixed in dev-story cycle 3): returns the RAW,
+  DB-ONLY `iam_endpoint`/`sts_endpoint` values —
+  `nil` for a field whenever no `media_storage_config` row has ever been
+  written, OR a row exists but that specific column was never overridden.
+  Deliberately NOT `get/0`'s/`build_resolved/2`'s DB>env>default MERGED
+  view — this is the same distinction `persisted_target/0` above already
+  draws for `endpoint`/`bucket` (the AC4 orphan-risk-gate baseline),
+  extended to these two columns.
+
+  This is the baseline `Nebu.Admin.MediaSettingsController.put_env_backed_field/5`
+  needs to tell "a DB override genuinely exists for this field" apart from
+  "the resolved value merely happens to be non-blank because an env var is
+  set" — without it, blanking an env-sourced (no DB override) field cannot
+  be distinguished from blanking a genuine DB override, so the former was
+  incorrectly written as a redundant `SET ... = NULL` (there being nothing
+  to actually clear) plus a false audit `changed_fields` entry, forever
+  non-convergent. Reads the same raw-row ingredient as `persisted_target/0`/
+  `get/0` (the `:media_storage_config_loader` seam, or a real `SELECT` when
+  unset) — never touches `media_files`.
+  """
+  @spec persisted_iam_sts() :: %{iam_endpoint: String.t() | nil, sts_endpoint: String.t() | nil}
+  def persisted_iam_sts do
+    case safe_load() do
+      nil -> %{iam_endpoint: nil, sts_endpoint: nil}
+      row -> %{iam_endpoint: Map.get(row, "iam_endpoint"), sts_endpoint: Map.get(row, "sts_endpoint")}
     end
   end
 
@@ -556,6 +651,11 @@ defmodule Nebu.Media.StorageConfig do
   defp column_for(:use_ssl, value), do: {"use_ssl", value}
   defp column_for(:s3_key_prefix_template, value), do: {"s3_key_prefix_template", value}
   defp column_for(:archive_bucket, value), do: {"archive_bucket", value}
+  # bugfix-add-sts-iam-endpoints-to-admin-ui (AC1): DB-override columns added
+  # by migration 000037 — same plain pass-through shape as every other
+  # non-secret field above.
+  defp column_for(:iam_endpoint, value), do: {"iam_endpoint", value}
+  defp column_for(:sts_endpoint, value), do: {"sts_endpoint", value}
   defp column_for(_unknown_key, _value), do: nil
 
   # AC9: metadata records ONLY which field names changed, never their values
@@ -721,14 +821,17 @@ defmodule Nebu.Media.StorageConfig do
       s3_key_prefix_template:
         pick(row_get(row, "s3_key_prefix_template"), nil, @defaults.s3_key_prefix_template),
       archive_bucket: pick(row_get(row, "archive_bucket"), nil, @defaults.archive_bucket),
-      # bugfix-upcloud-s3-iam-sts-endpoints (AC1): env-only, no DB row to
-      # consult (no media_storage_config column exists for either field) —
-      # deliberately no row_get/1 call here, unlike every field above. Full
-      # URLs (scheme + port + path), so NOT run through
+      # bugfix-add-sts-iam-endpoints-to-admin-ui (AC1): DB row (migration
+      # 000037's iam_endpoint/sts_endpoint columns) > env-var fallback >
+      # compiled default — same precedence as every other plain field above.
+      # Full URLs (scheme + port + path), so NOT run through
       # validate_candidate_endpoint/1 — that function's scheme-rejection is
-      # specific to `endpoint`'s bare host[:port] contract.
-      iam_endpoint: pick(nil, Map.get(env, "NEBU_MINIO_IAM_ENDPOINT"), @defaults.iam_endpoint),
-      sts_endpoint: pick(nil, Map.get(env, "NEBU_MINIO_STS_ENDPOINT"), @defaults.sts_endpoint)
+      # specific to `endpoint`'s bare host[:port] contract. The WRITE path
+      # (a non-nil value reaching upsert/1) is validated separately by
+      # validate_iam_sts_fields/1 — this READ path never re-validates an
+      # already-resolved value, DB-, env-, or default-sourced alike.
+      iam_endpoint: pick(row_get(row, "iam_endpoint"), Map.get(env, "NEBU_MINIO_IAM_ENDPOINT"), @defaults.iam_endpoint),
+      sts_endpoint: pick(row_get(row, "sts_endpoint"), Map.get(env, "NEBU_MINIO_STS_ENDPOINT"), @defaults.sts_endpoint)
     }
   end
 
@@ -868,7 +971,8 @@ defmodule Nebu.Media.StorageConfig do
 
   @sql_load_media_storage_config """
   SELECT endpoint, bucket, region, use_ssl, access_key_encrypted,
-         secret_key_encrypted, s3_key_prefix_template, archive_bucket, set_at
+         secret_key_encrypted, s3_key_prefix_template, archive_bucket,
+         iam_endpoint, sts_endpoint, set_at
   FROM media_storage_config
   WHERE id = 1
   """

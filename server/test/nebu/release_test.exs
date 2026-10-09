@@ -156,6 +156,12 @@ defmodule Nebu.ReleaseTest do
       # non-state event was persisted with state_key = '' instead of NULL).
       # UPDATEs the EXISTING events table only — no new table, no new GRANT
       # required.
+      # 000037 — bugfix-add-sts-iam-endpoints-to-admin-ui: adds the nullable
+      # iam_endpoint/sts_endpoint TEXT columns to media_storage_config (the
+      # admin-DB-override counterpart to bugfix-upcloud-s3-iam-sts-endpoints'
+      # env-only resolution). ALTER TABLE only — no new table, so the
+      # existing `GRANT ... ON media_storage_config TO nebu_app` from 000024
+      # already covers the two new columns; no new GRANT required.
       assert versions ==
                [
                  1,
@@ -193,7 +199,8 @@ defmodule Nebu.ReleaseTest do
                  33,
                  34,
                  35,
-                 36
+                 36,
+                 37
                ]
 
       # Only *.up.sql files are returned — *.down.sql are excluded.

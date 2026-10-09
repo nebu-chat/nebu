@@ -218,6 +218,21 @@ defmodule Nebu.Media.StorageConfigTest do
   assertion, so it stays the single source of truth for the resolved map's
   full key set and fails loudly if a future change silently drops either new
   key from `@defaults`.
+
+  ## bugfix-add-sts-iam-endpoints-to-admin-ui (AC1/AC2) — DB-override columns
+
+  Follow-on to the bugfix above: `media_storage_config` gains two nullable
+  columns, `iam_endpoint TEXT`/`sts_endpoint TEXT`
+  (`priv/migrations/000037_media_storage_config_iam_sts.up/down.sql`), so
+  these two fields now get the SAME DB > env > default per-field precedence
+  as every other plain field (`region`, `archive_bucket`, ...), instead of
+  always resolving from the env reader only. See the new
+  "bugfix-add-sts-iam-endpoints: DB-override columns" describe
+  block below for the net-new DB-row-fixture tests this adds; the three
+  `iam-sts-AT1/AT2/AT3` tests directly above are untouched (env-only
+  regression guard — they run with no DB row seeded, so they continue to
+  exercise the "no row has ever been written" default/env-fallback path
+  exactly as before).
   """
 
   use ExUnit.Case, async: false
@@ -919,6 +934,192 @@ defmodule Nebu.Media.StorageConfigTest do
       assert StorageConfig.get().sts_endpoint == sts_url
       assert StorageConfig.get_for_connection().iam_endpoint == nil
       assert StorageConfig.get_for_connection().sts_endpoint == sts_url
+    end
+
+  end
+
+  # ════════════════════════════════════════════════════════════════════════
+  # bugfix-add-sts-iam-endpoints-to-admin-ui — AC1/AC2: DB-override columns
+  # for iam_endpoint/sts_endpoint, added on top of the env-only resolution
+  # the prior bugfix-upcloud-s3-iam-sts-endpoints story wired (the describe
+  # block directly above, untouched). This adds the SAME DB > env > default
+  # per-field precedence every other plain field in build_resolved/2 already
+  # has (region, archive_bucket, ...), plus the companion masking regression
+  # guard (AC2: these fields are not secrets, so mask_map/1 must never touch
+  # them, DB-sourced or not).
+  #
+  # RED-phase note: today build_resolved/2 passes a literal `nil` (never
+  # `row_get(row, "iam_endpoint"/"sts_endpoint")`) as the DB-value argument to
+  # `pick/3` for both fields (see storage_config.ex ~line 730-731), and
+  # column_for/2 has no clause for either atom key (falls through to the
+  # `column_for(_unknown_key, _value), do: nil` catch-all, so upsert/1 builds
+  # an EMPTY columns map for these keys — AT12's own `:ok` return value is
+  # unaffected, since upsert/1 does not know build_columns/1 silently dropped
+  # them). Every test below therefore fails on a plain, clean assertion
+  # mismatch (the resolved value differs from what was just written/seeded),
+  # never a crash — expected and correct for this RED phase.
+  # ════════════════════════════════════════════════════════════════════════
+
+  describe "bugfix-add-sts-iam-endpoints: DB-override columns" do
+    test "AC1-RT: upsert/1 persists iam/sts to their own DB columns; get/0 reflects them (round trip)",
+         %{calls: calls} do
+      ensure_started()
+
+      # F-1 fix (Kassandra security review, SEC Gate 1, 2026-10-08): upsert/1
+      # now validates iam_endpoint/sts_endpoint via validate_iam_sts_fields/1
+      # (https:// + Nebu.Media.SSRF.checked_target/1), so a literal public IP
+      # is used here (no live DNS lookup needed — mirrors the M-2/M-3 tests'
+      # own convention and AT6's own "93.184.216.34" endpoint fixture above)
+      # instead of a hostname like "7mf5k.upcloudobjects.com" that does not
+      # actually resolve.
+      iam_url = "https://93.184.216.34:4443/iam"
+      sts_url = "https://93.184.216.34:4443/sts"
+
+      assert :ok = StorageConfig.upsert(%{iam_endpoint: iam_url, sts_endpoint: sts_url})
+
+      last_columns = Agent.get(calls, & &1.last_write_columns)
+
+      assert "iam_endpoint" in last_columns,
+             "expected column_for/2 to map :iam_endpoint to its own \"iam_endpoint\" DB column, " <>
+               "got written columns: #{inspect(last_columns)}"
+
+      assert "sts_endpoint" in last_columns,
+             "expected column_for/2 to map :sts_endpoint to its own \"sts_endpoint\" DB column, " <>
+               "got written columns: #{inspect(last_columns)}"
+
+      get_result = StorageConfig.get()
+      conn_result = StorageConfig.get_for_connection()
+
+      assert get_result.iam_endpoint == iam_url
+      assert get_result.sts_endpoint == sts_url
+      assert conn_result.iam_endpoint == iam_url
+      assert conn_result.sts_endpoint == sts_url
+    end
+
+    test "AC1-DB2: get/0 prefers a DB-row iam/sts value over the env var, per field (mirrors AT8)",
+         %{store: store} do
+      # Seed the store directly (simulating a prior upsert/1 that only ever
+      # touched iam_endpoint), exactly like AT8 does for `endpoint` — DB sets
+      # iam_endpoint but leaves sts_endpoint NULL, so the per-field (not
+      # all-or-nothing) precedence can be proven in one test.
+      Agent.update(store, fn _ ->
+        %{
+          "iam_endpoint" => "https://db-iam.example.com:4443/iam",
+          "set_at" => System.system_time(:millisecond)
+        }
+      end)
+
+      Application.put_env(:nebu_http, :media_storage_env_reader, fn ->
+        %{
+          "NEBU_MINIO_IAM_ENDPOINT" => "https://env-iam-should-lose.example.com/iam",
+          "NEBU_MINIO_STS_ENDPOINT" => "https://env-sts-should-win.example.com/sts"
+        }
+      end)
+
+      result = StorageConfig.get()
+      conn_result = StorageConfig.get_for_connection()
+
+      # DB wins for the field the DB row actually set.
+      assert result.iam_endpoint == "https://db-iam.example.com:4443/iam"
+      assert conn_result.iam_endpoint == "https://db-iam.example.com:4443/iam"
+
+      # Env var still wins for the field the DB row left NULL.
+      assert result.sts_endpoint == "https://env-sts-should-win.example.com/sts"
+      assert conn_result.sts_endpoint == "https://env-sts-should-win.example.com/sts"
+    end
+
+    test "AC2-DB3: get/0 does not mask a DB-sourced iam/sts value (not secrets)",
+         %{store: store} do
+      iam_url = "https://db-iam.example.com:4443/iam"
+      sts_url = "https://db-sts.example.com:4443/sts"
+
+      Agent.update(store, fn _ ->
+        %{
+          "iam_endpoint" => iam_url,
+          "sts_endpoint" => sts_url,
+          "set_at" => System.system_time(:millisecond)
+        }
+      end)
+
+      result = StorageConfig.get()
+
+      assert result.iam_endpoint == iam_url,
+             "a DB-sourced iam_endpoint must round-trip through get/0 completely unmasked, " <>
+               "got: #{inspect(result.iam_endpoint)}"
+
+      assert result.sts_endpoint == sts_url,
+             "a DB-sourced sts_endpoint must round-trip through get/0 completely unmasked, " <>
+               "got: #{inspect(result.sts_endpoint)}"
+    end
+  end
+
+  # ════════════════════════════════════════════════════════════════════════
+  # F-1 fix (Kassandra security review, SEC Gate 1, 2026-10-08) —
+  # upsert/1's validate_iam_sts_fields/1 guard
+  # ════════════════════════════════════════════════════════════════════════
+  #
+  # The two new DB-override columns above (iam_endpoint/sts_endpoint) were
+  # admin-UI-writable and DB-persisted with NO scheme assertion and NO SSRF
+  # guard — the only admin-writable, DB-persisted, URL-shaped fields on this
+  # table without one, unlike `endpoint` (validate_endpoint_field/1,
+  # M-3 fix above) and `webhook_url`. This guards the persist path
+  # regardless of caller — these tests call upsert/1 directly, never through
+  # Nebu.Admin.MediaSettingsController, proving the model-layer guard holds
+  # even for a caller that skips the controller's own mirror of this check.
+
+  describe "F-1: upsert/1 iam_endpoint/sts_endpoint scheme + SSRF guard" do
+    test "rejects a non-https iam_endpoint/sts_endpoint and never persists it", %{calls: calls} do
+      for field <- [:iam_endpoint, :sts_endpoint],
+          bad_value <- ["93.184.216.34:4443/iam", "http://93.184.216.34:4443/iam"] do
+        assert {:error, :invalid_iam_sts_endpoint} = StorageConfig.upsert(%{field => bad_value}),
+               "expected #{field}=#{inspect(bad_value)} to be rejected as :invalid_iam_sts_endpoint"
+      end
+
+      assert Agent.get(calls, & &1.writer) == 0,
+             "no DB write may happen for a non-https iam_endpoint/sts_endpoint"
+    end
+
+    test "rejects a private/loopback/link-local/metadata iam_endpoint/sts_endpoint and never persists it",
+         %{calls: calls} do
+      # Literal IPs — no live DNS lookup needed (mirrors the M-2/M-3 SSRF
+      # tests above and webhook_delivery_test.exs's own convention).
+      for field <- [:iam_endpoint, :sts_endpoint],
+          blocked_url <- [
+            "https://127.0.0.1:4443/iam",
+            "https://10.0.0.5:4443/iam",
+            "https://169.254.169.254/iam",
+            "https://192.168.1.1:4443/iam"
+          ] do
+        assert {:error, :invalid_iam_sts_endpoint} = StorageConfig.upsert(%{field => blocked_url}),
+               "expected #{field}=#{blocked_url} to be rejected as :invalid_iam_sts_endpoint"
+      end
+
+      assert Agent.get(calls, & &1.writer) == 0,
+             "no DB write may happen for a blocked-address iam_endpoint/sts_endpoint"
+    end
+
+    test "accepts nil for both iam_endpoint and sts_endpoint (the explicit clear-override value)" do
+      ensure_started()
+
+      assert :ok = StorageConfig.upsert(%{iam_endpoint: nil, sts_endpoint: nil}),
+             "nil must always be accepted unvalidated — it is the explicit " <>
+               "clear-this-override value, not a candidate endpoint"
+    end
+
+    test "accepts a valid https, non-private iam_endpoint/sts_endpoint and persists it", %{
+      calls: calls
+    } do
+      ensure_started()
+
+      iam_url = "https://93.184.216.34:4443/iam"
+      sts_url = "https://93.184.216.34:4443/sts"
+
+      assert :ok = StorageConfig.upsert(%{iam_endpoint: iam_url, sts_endpoint: sts_url})
+
+      last_columns = Agent.get(calls, & &1.last_write_columns)
+
+      assert "iam_endpoint" in last_columns
+      assert "sts_endpoint" in last_columns
     end
   end
 

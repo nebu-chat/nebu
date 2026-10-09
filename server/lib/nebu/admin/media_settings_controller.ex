@@ -92,7 +92,15 @@ defmodule Nebu.Admin.MediaSettingsController do
       is greater than zero, the first submission re-renders at 200 with a
       `role="alert"` warning and a required acknowledgment checkbox instead
       of persisting; checking `confirm_orphan_risk` and resubmitting bypasses
-      the gate.
+      the gate. A non-nil `iam_endpoint`/`sts_endpoint` in the DECIDED
+      changes (i.e. actually about to be written, not merely submitted
+      unchanged) must be a full `https://` URL passing
+      `Nebu.Media.SSRF.checked_target/1`
+      (F-1 fix, Kassandra security review, SEC Gate 1, 2026-10-08; rescoped to
+      the decided value by the R-1 fix, 2026-10-08) — see
+      `validate_changes_iam_sts/1` — mirrored at the persist layer by
+      `Nebu.Media.StorageConfig.validate_iam_sts_fields/1` so the guard holds
+      regardless of caller.
     * `test_connection/2` — resolves the submitted candidate (blank secrets
       resolved server-side against the stored secret) via
       `Nebu.Media.StorageConfig.test_connection/1` and renders a fixed,
@@ -116,6 +124,8 @@ defmodule Nebu.Admin.MediaSettingsController do
                                       "credentials, then try again."
   @storage_invalid_endpoint_message "Endpoint must be a bare host[:port] value " <>
                                        "(no http:// or https:// scheme prefix)."
+  @storage_invalid_iam_sts_message "IAM/STS endpoint must be a full https:// URL and must not " <>
+                                      "resolve to a private, loopback, or link-local address."
 
   @numeric_fields ~w(
     max_upload_size_bytes
@@ -292,6 +302,77 @@ defmodule Nebu.Admin.MediaSettingsController do
   # when blank, so Nebu.Media.StorageConfig.upsert/2's partial-update
   # semantics leave them untouched — this is what makes a blank secret field
   # mean "leave unchanged" (AC2) rather than "clear the stored secret".
+  # iam_endpoint/sts_endpoint are infra metadata about how to reach the
+  # store, not the store target itself — bugfix-add-sts-iam-endpoints-to-
+  # admin-ui (AC3/AC4) deliberately does NOT add them to target_changed?/3's
+  # orphan-risk-gate comparison below (that stays scoped to endpoint/bucket
+  # only).
+  #
+  # code review (cycle 1, MAJOR-1): iam_endpoint/sts_endpoint do NOT use the
+  # plain maybe_put_field/3 blank-omit rule above — they get a multi-rule
+  # cond instead (put_env_backed_field/5 below), because the form PRE-FILLS these
+  # two inputs from the env-resolved value even when no DB override exists
+  # yet (AC5). A plain blank-omit would let an untouched, env-pre-filled
+  # value get silently written to the DB the very first time ANY storage
+  # field is saved on a fresh config, permanently shadowing future
+  # Terraform/env changes to these URLs — that was MAJOR-1.
+  #
+  # code review (cycle 1 re-review, MAJOR-N1): the ORIGINAL cycle-1 fix
+  # baselined rule 2 ("untouched -> omit") on `StorageConfig.env_only_iam_sts/0`
+  # — the env var ALONE, ignoring any existing DB override. That meant: if a
+  # DB override X already existed and the admin deliberately edited the field
+  # to the env value Y (a legitimate change — "go back to what the
+  # environment says, I happen to know what that is"), the submission matched
+  # the env value and was silently discarded — the admin's edit never reached
+  # the DB, with a false "saved successfully" flash. The fix: baseline rule 2
+  # on the ACTUAL CURRENTLY-EFFECTIVE value (`StorageConfig.get()` — DB
+  # override if one exists, else env, else default; the SAME resolved value
+  # this controller already uses elsewhere, e.g. `changed_storage_keys/1`
+  # above), not the env-only value. `env_only_iam_sts/0` is gone — nothing
+  # calls it any more. The rule (now baselined on the resolved value):
+  #
+  #   1. submitted value == current resolved value -> OMIT the key entirely
+  #      (the admin didn't change anything from what's actually in effect,
+  #      whether that's DB- or env-sourced; also covers "both blank" — e.g.
+  #      an env var set to "" on a fresh install — so a field that was never
+  #      meaningfully set never re-issues a redundant `SET ... = NULL` write
+  #      or a bogus audit entry on every save)
+  #   2. submitted value is blank (and differs from a non-blank resolved
+  #      value) -> explicit `nil` (a genuine "clear my override, go back to
+  #      env-controlled" action — reaches column_for/2/build_columns/1 as a
+  #      real `SET column = NULL`, never just omitted)
+  #   3. submitted value is non-blank AND differs from the resolved value
+  #      -> include it (a genuine, deliberate override — persisted exactly
+  #      like every other optional field above, EVEN IF it happens to equal
+  #      the env value, as long as it differs from what was actually in
+  #      effect — this is the MAJOR-N1 fix)
+  #
+  # code review (cycle 2 re-review, N2-MINOR-1 / N2-MINOR-2 fix): two more
+  # refinements, both folded into put_env_backed_field/5 below (now arity 5
+  # — see the plain comment directly above its definition for the full
+  # per-clause breakdown, now 5 clauses, not 3):
+  #
+  #   * N2-MINOR-1 — rule 2 above ("blanked -> explicit nil") used to fire
+  #     whenever the RESOLVED baseline was non-blank, regardless of whether
+  #     that baseline came from an actual DB override or just the env var.
+  #     If no DB override exists for the field, there is nothing to
+  #     "clear" — writing nil over an already-nil column is a pointless
+  #     no-op write that also pollutes the audit trail (changed_fields
+  #     names a field that didn't actually change). Rule 2 now ALSO
+  #     requires `has_db_override?` (from the NEW
+  #     `StorageConfig.persisted_iam_sts/0` accessor, the raw DB-only row —
+  #     never `resolved`/`get/0`'s merged view) before writing an explicit
+  #     nil; a blanked, env-only (no DB override) field is now a plain
+  #     no-op/omit instead.
+  #   * N2-MINOR-2 — a POST that OMITS the param entirely (`params["iam_endpoint"]`
+  #     absent from `params`, not an empty-string VALUE) came through as
+  #     `raw = nil`, indistinguishable from "admin submitted blank" and
+  #     triggering the same clear logic — inconsistent with every other
+  #     optional field (`maybe_put_field/3`), which already treats an absent
+  #     param as "nothing to do," never as "clear this." A genuinely blank
+  #     *submitted* value (`raw = ""`) is unaffected — `blank_to_nil("")`
+  #     still yields `nil` and falls through to the (now has_db_override?-
+  #     gated) clear-or-omit logic below it.
   defp validate_storage_params(params) do
     endpoint = String.trim(params["endpoint"] || "")
     bucket = String.trim(params["bucket"] || "")
@@ -307,15 +388,39 @@ defmodule Nebu.Admin.MediaSettingsController do
         {:error, @storage_invalid_endpoint_message}
 
       true ->
+        resolved = StorageConfig.get()
+        # code review (cycle 2, N2-MINOR-1 fix): the RAW DB-only row — `nil`
+        # per field whenever NO db override currently exists for it — is the
+        # `has_db_override?` baseline put_env_backed_field/5 needs below.
+        # NEVER `resolved` itself (that's the DB>env>default MERGED view,
+        # which can be non-blank purely from an env var with no DB row at
+        # all).
+        persisted_iam_sts = StorageConfig.persisted_iam_sts()
+
         changes =
           %{endpoint: endpoint, bucket: bucket, use_ssl: params["use_ssl"] == "true"}
           |> maybe_put_field(:region, params["region"])
           |> maybe_put_field(:s3_key_prefix_template, params["s3_key_prefix_template"])
           |> maybe_put_field(:archive_bucket, params["archive_bucket"])
+          |> put_env_backed_field(
+            :iam_endpoint,
+            params["iam_endpoint"],
+            resolved.iam_endpoint,
+            not is_nil(blank_to_nil(persisted_iam_sts.iam_endpoint))
+          )
+          |> put_env_backed_field(
+            :sts_endpoint,
+            params["sts_endpoint"],
+            resolved.sts_endpoint,
+            not is_nil(blank_to_nil(persisted_iam_sts.sts_endpoint))
+          )
           |> maybe_put_field(:access_key, params["access_key"])
           |> maybe_put_field(:secret_key, params["secret_key"])
 
-        {:ok, changes}
+        case validate_changes_iam_sts(changes) do
+          :ok -> {:ok, changes}
+          {:error, _reason} -> {:error, @storage_invalid_iam_sts_message}
+        end
     end
   end
 
@@ -330,10 +435,142 @@ defmodule Nebu.Admin.MediaSettingsController do
     String.starts_with?(downcased, "http://") or String.starts_with?(downcased, "https://")
   end
 
+  # F-1 fix (Kassandra security review, SEC Gate 1, 2026-10-08): unlike
+  # `endpoint` (a bare host[:port], guarded above by
+  # invalid_endpoint_scheme?/1), iam_endpoint/sts_endpoint are full URLs
+  # (UpCloud's iam_url/sts_url shape) — they are admin-UI-writable and
+  # DB-persisted (AC1/AC2 of this story) but had NO scheme assertion and NO
+  # SSRF guard, unlike every other admin-writable endpoint-shaped field on
+  # this page (`endpoint`, `webhook_url`). The structural guarantee that
+  # justified leaving these two unvalidated in the predecessor story
+  # (bugfix-upcloud-s3-iam-sts-endpoints) — no DB write path existed at all
+  # — is exactly what this story removed.
+  #
+  # Mirrors `endpoint`'s own two-layer guard shape (controller +
+  # model — see Nebu.Media.StorageConfig.validate_iam_sts_fields/1 for the
+  # persist-path mirror of this same check), adapted for a full URL: require
+  # an `https://` scheme, then run the whole URL through the SAME
+  # `Nebu.Media.SSRF.checked_target/1` guard `endpoint`/`webhook_url` already
+  # use — no synthetic `http://` prefix needed here (unlike
+  # invalid_endpoint_scheme?/1's sibling check for `endpoint`'s bare
+  # host[:port] contract), since these fields are already full URLs.
+  #
+  # R-1 fix (focused follow-up review, 2026-10-08): this validates the
+  # DECIDED `changes` map — the output of put_env_backed_field/5's
+  # clear/no-op/override decision — NOT the raw submitted param. The
+  # original F-1 fix validated params["iam_endpoint"]/params["sts_endpoint"]
+  # unconditionally, in validate_storage_params/1's `cond`, BEFORE `changes`
+  # was even built: an untouched, env-pre-filled value that happens to fail
+  # this very check (e.g. a private/internal address — exactly this
+  # project's own `NEBU_MINIO_ENDPOINT: "minio:9000"` docker-compose
+  # convention, if ever applied to NEBU_MINIO_IAM_ENDPOINT/
+  # NEBU_MINIO_STS_ENDPOINT) would then permanently block EVERY storage
+  # save, not just that field — since the form always re-renders the same
+  # env value, the admin could never again save any storage setting without
+  # manually blanking the field on every single submission, forever.
+  #
+  # A key ABSENT from `changes` (rule 1/N2-MINOR-1/N2-MINOR-2 of
+  # put_env_backed_field/5 — untouched, or env-only-no-op) has nothing to
+  # validate: nothing is being written, so it is skipped. A key present with
+  # value `nil` (rule 2 — an explicit clear) is always valid: `nil` is the
+  # "go back to env-controlled" sentinel, never a candidate URL — mirrors
+  # Nebu.Media.StorageConfig.validate_iam_sts_field/2's own `{:ok, nil} ->
+  # :ok` clause one layer down. Only a key present with a non-nil value
+  # (rule 3 — a genuine, deliberate override actually about to be persisted)
+  # is validated — same https:// + SSRF.checked_target/1 rule as before,
+  # just applied to the right input.
+  defp validate_changes_iam_sts(changes) do
+    with :ok <- validate_change_iam_sts_field(changes, :iam_endpoint) do
+      validate_change_iam_sts_field(changes, :sts_endpoint)
+    end
+  end
+
+  defp validate_change_iam_sts_field(changes, key) do
+    case Map.fetch(changes, key) do
+      :error ->
+        :ok
+
+      {:ok, nil} ->
+        :ok
+
+      {:ok, value} ->
+        if valid_iam_sts_url?(value), do: :ok, else: {:error, :invalid_iam_sts_endpoint}
+    end
+  end
+
+  defp valid_iam_sts_url?(value) do
+    if String.starts_with?(String.downcase(value), "https://") do
+      match?({:ok, _target}, SSRF.checked_target(value))
+    else
+      false
+    end
+  end
+
   defp maybe_put_field(map, key, raw) do
     case blank_to_nil(raw) do
       nil -> map
       value -> Map.put(map, key, value)
+    end
+  end
+
+  # MAJOR-1 fix (cycle 1) / MAJOR-N1 fix (cycle 1 re-review) / N2-MINOR-1,
+  # N2-MINOR-2 fix (cycle 2 re-review): the clear/no-op/override rule for
+  # iam_endpoint/sts_endpoint ONLY — see validate_storage_params/1's comment
+  # above for the full rationale. `resolved_value` is this field's
+  # CURRENTLY-EFFECTIVE value (`StorageConfig.get()` — DB override if one
+  # exists, else env, else default), i.e. exactly what the form pre-filled
+  # this input with. `has_db_override?` is whether a `media_storage_config`
+  # row's OWN column currently holds a non-blank value for this field (the
+  # caller passes `StorageConfig.persisted_iam_sts/0`'s raw DB row, already
+  # normalized through `blank_to_nil/1` — never the resolved/merged view) —
+  # this is what lets rule 2 below tell "there is an actual override to
+  # clear" apart from "the baseline is merely non-blank because of an env
+  # var." Both `submitted`/`baseline` are normalized through `blank_to_nil/1`
+  # before comparing, so an untrimmed env value and a set-but-empty env
+  # value behave identically to their trimmed/nil counterparts (cycle 1
+  # re-review).
+  defp put_env_backed_field(map, key, raw, resolved_value, has_db_override?) do
+    submitted = blank_to_nil(raw)
+    baseline = blank_to_nil(resolved_value)
+
+    cond do
+      # N2-MINOR-2: the param was entirely ABSENT from the POST (never even
+      # an empty-string VALUE) -> always a no-op, never a clear. Only a
+      # scripted/non-browser POST can produce this (every real HTML form
+      # submission sends the field, even blank) — but it must behave like
+      # every other optional field's maybe_put_field/3: "nothing submitted"
+      # means "nothing to do," not "clear this."
+      is_nil(raw) ->
+        map
+
+      # Rule 1: untouched (whether DB- or env-sourced), or both blank -> omit
+      # (no-op, never written — this is what prevents the silent first-save
+      # env->DB promotion AND what makes a set-but-empty env var converge
+      # instead of re-writing NULL-over-NULL forever).
+      submitted == baseline ->
+        map
+
+      # Rule 2: baseline was non-blank, the admin blanked the field, AND a
+      # genuine DB override currently exists for it -> explicit nil (clears
+      # that override back to env-controlled; must reach column_for/2 as a
+      # real SET ... = NULL, never an omission).
+      submitted == nil and has_db_override? ->
+        Map.put(map, key, nil)
+
+      # N2-MINOR-1: baseline was non-blank purely from the env var (no DB
+      # override exists) and the admin blanked the field -> omit, not an
+      # explicit nil. There is nothing to actually clear; writing nil here
+      # would be a pointless, forever-repeating `SET ... = NULL` plus a
+      # false audit changed_fields entry.
+      submitted == nil ->
+        map
+
+      # Rule 3: a genuine, non-blank value that differs from what's
+      # currently in effect -> persist it normally, even if it happens to
+      # equal the env value (MAJOR-N1: a deliberate edit back to the env
+      # value, when a DB override was in effect, must NOT be discarded).
+      true ->
+        Map.put(map, key, submitted)
     end
   end
 
@@ -355,6 +592,8 @@ defmodule Nebu.Admin.MediaSettingsController do
       bucket: String.trim(params["bucket"] || ""),
       region: String.trim(params["region"] || ""),
       use_ssl: params["use_ssl"] == "true",
+      iam_endpoint: blank_to_nil(params["iam_endpoint"]),
+      sts_endpoint: blank_to_nil(params["sts_endpoint"]),
       access_key: blank_to_nil(params["access_key"]),
       secret_key: blank_to_nil(params["secret_key"])
     }
@@ -375,7 +614,9 @@ defmodule Nebu.Admin.MediaSettingsController do
       access_key: nil,
       secret_key: nil,
       s3_key_prefix_template: params["s3_key_prefix_template"] || "",
-      archive_bucket: params["archive_bucket"] || ""
+      archive_bucket: params["archive_bucket"] || "",
+      iam_endpoint: params["iam_endpoint"] || "",
+      sts_endpoint: params["sts_endpoint"] || ""
     }
   end
 

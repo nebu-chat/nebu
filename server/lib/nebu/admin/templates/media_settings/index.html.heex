@@ -241,6 +241,38 @@
       />
     </label>
 
+    <label for="iam_endpoint" class="form-control">
+      <span class="label-text">IAM endpoint (optional)</span>
+      <input
+        type="text"
+        id="iam_endpoint"
+        name="iam_endpoint"
+        value={@storage_config.iam_endpoint}
+        placeholder="https://7mf5k.upcloudobjects.com:4443/iam"
+        class="input input-bordered"
+      />
+      <span class="label-text-alt mt-1 text-base-content/70">
+        A full URL (scheme + host + port + path) — unlike Endpoint above, not a bare host:port.
+        Leave blank to clear an override and follow the environment value.
+      </span>
+    </label>
+
+    <label for="sts_endpoint" class="form-control">
+      <span class="label-text">STS endpoint (optional)</span>
+      <input
+        type="text"
+        id="sts_endpoint"
+        name="sts_endpoint"
+        value={@storage_config.sts_endpoint}
+        placeholder="https://7mf5k.upcloudobjects.com:4443/sts"
+        class="input input-bordered"
+      />
+      <span class="label-text-alt mt-1 text-base-content/70">
+        A full URL (scheme + host + port + path) — unlike Endpoint above, not a bare host:port.
+        Leave blank to clear an override and follow the environment value.
+      </span>
+    </label>
+
     <label for="region" class="form-control">
       <span class="label-text">Region</span>
       <input
