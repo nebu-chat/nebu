@@ -955,7 +955,10 @@ server/lib/nebu/
 │   │                   media_config's hot per-upload/scan-limit invalidation traffic, ADR-027's
 │   │                   separation rationale applied a second time; NOT itself an ADR-027 artifact).
 │   │                   Field catalog: endpoint, bucket, region, use_ssl, access_key, secret_key,
-│   │                   s3_key_prefix_template, archive_bucket. Per-field precedence: DB value (if
+│   │                   s3_key_prefix_template, archive_bucket, iam_endpoint, sts_endpoint (latter
+│   │                   two gained DB-override support via migration 000037, story
+│   │                   bugfix-add-sts-iam-endpoints-to-admin-ui — previously env-only).
+│   │                   Per-field precedence: DB value (if
 │   │                   saved) > `NEBU_MINIO_*`/`NEBU_S3_REGION` env-var fallback (preserving the
 │   │                   pre-existing boot-time `_FILE`-then-plain Docker-secret precedence from
 │   │                   `server/config/runtime.exs`) > compiled default. `access_key`/`secret_key` are
@@ -979,6 +982,12 @@ server/lib/nebu/
 │   │                   has ever been saved, or `:fresh` if none exists — the AC4 orphan-risk-gate
 │   │                   baseline for MediaSettingsController, deliberately NOT get/0's env-var-merged
 │   │                   view since a fresh config must never gate regardless of env-var defaults.
+│   │                   (bugfix-add-sts-iam-endpoints-to-admin-ui adds the analogous
+│   │                   `persisted_iam_sts/0` — same pattern, raw DB-only row for the
+│   │                   `iam_endpoint`/`sts_endpoint` columns, used by MediaSettingsController to tell
+│   │                   "a genuine DB override exists for this field" apart from "the merged view is
+│   │                   non-blank purely from an env var," which decides whether blanking the field in
+│   │                   the admin form should clear the DB override (`NULL`) or be a no-op.)
 │   │                   `test_connection/1` — accepts a candidate map, validates the endpoint has no
 │   │                   `http://`/`https://` scheme prefix (SSRF/transport-downgrade guard,
 │   │                   returning `{:error, :invalid_endpoint}` before any request), resolves blank

@@ -131,6 +131,15 @@ if config_env() in [:prod, :dev] do
     value -> value
   end
 
+  # code review (bugfix-add-sts-iam-endpoints-to-admin-ui, cycle 2, N2-MINOR-3):
+  # these two app-env keys are NOT admin-DB-override-aware and have ZERO
+  # readers anywhere in the codebase (verified by grep) — a stale, divergent
+  # second source of truth now that Nebu.Media.StorageConfig resolves these
+  # same two values with its own DB > env > default precedence (including any
+  # admin-UI override). Any future code that needs the resolved iam/sts
+  # endpoint MUST call Nebu.Media.StorageConfig.get_for_connection/0 instead
+  # of reading these Application.get_env keys directly — do not wire a new
+  # consumer to them.
   config :nebu_http,
     media_iam_endpoint: normalize_optional_env.(System.get_env("NEBU_MINIO_IAM_ENDPOINT")),
     media_sts_endpoint: normalize_optional_env.(System.get_env("NEBU_MINIO_STS_ENDPOINT"))

@@ -815,7 +815,7 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
   @storage_path "/admin/media/settings/storage"
   @test_connection_path "/admin/media/settings/storage/test-connection"
 
-  @storage_fields ~w(endpoint bucket region use_ssl access_key secret_key s3_key_prefix_template archive_bucket)
+  @storage_fields ~w(endpoint bucket region use_ssl access_key secret_key s3_key_prefix_template archive_bucket iam_endpoint sts_endpoint)
 
   # M-2/M-3 fix (epic security review, 2026-07-20): endpoint is now validated
   # via Nebu.Media.SSRF.checked_target/1 on both the test-connection and
@@ -830,7 +830,13 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
     "access_key" => "",
     "secret_key" => "",
     "s3_key_prefix_template" => "{media_id}",
-    "archive_bucket" => ""
+    "archive_bucket" => "",
+    # bugfix-add-sts-iam-endpoints-to-admin-ui (AC3): optional, but NOT the
+    # plain blank-omit convention region/archive_bucket use above — these two
+    # go through put_env_backed_field/5's clear/no-op/override rule instead
+    # (see media_settings_controller.ex for the full rationale).
+    "iam_endpoint" => "",
+    "sts_endpoint" => ""
   }
 
   defp storage_params(overrides \\ %{}), do: Map.merge(@baseline_storage_params, overrides)
@@ -881,7 +887,11 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
     "access_key_encrypted" => nil,
     "secret_key_encrypted" => nil,
     "s3_key_prefix_template" => "{media_id}",
-    "archive_bucket" => nil
+    "archive_bucket" => nil,
+    # bugfix-add-sts-iam-endpoints-to-admin-ui (AC1): unset by default, same
+    # as archive_bucket above — DB row fixture individual tests override.
+    "iam_endpoint" => nil,
+    "sts_endpoint" => nil
   }
 
   defp storage_config_loader_row(overrides \\ %{}),
@@ -1663,6 +1673,966 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
 
       assert conn.resp_body =~ ~s(role="alert"),
              "expected the orphan-risk warning to carry role=\"alert\", body: #{conn.resp_body}"
+    end
+  end
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # bugfix-add-sts-iam-endpoints-to-admin-ui — iam_endpoint/sts_endpoint admin
+  # UI exposure (follow-on to story 11b / bugfix-upcloud-s3-iam-sts-endpoints,
+  # which added these two fields to Nebu.Media.StorageConfig's resolved
+  # config env-only, with no DB-override column and no admin-UI exposure).
+  #
+  # RED-phase note: `validate_storage_params/1` does not read
+  # `params["iam_endpoint"]`/`params["sts_endpoint"]` at all today, and
+  # neither `candidate_from_params/1` nor `storage_config_from_params/1`
+  # include these keys in their returned maps — so every assertion below that
+  # checks a SUBMITTED/non-blank value made it through fails on a plain
+  # value-mismatch (nil/absent vs. the expected submitted value), not a
+  # crash. The `index.html.heex` template also has no iam_endpoint/
+  # sts_endpoint input yet (AC6), so every `field_rendered_with_value?`/
+  # `has_label_or_aria?` assertion below fails for that reason too, until the
+  # dev-story step adds the markup.
+  # ══════════════════════════════════════════════════════════════════════════
+
+  describe "bugfix-add-sts-iam-endpoints AC3: optional form params" do
+    # code review (cycle 1, MAJOR-1): this test previously asserted the plain
+    # blank-omit rule (`refute Map.has_key?(columns, "iam_endpoint")`) that
+    # MAJOR-1's fix deliberately overturns for these two fields ONLY — a
+    # blank submission now clears an existing/potential DB override via an
+    # EXPLICIT `nil`, never a silent omission. Updated to assert the new
+    # 3-way rule's "blank -> explicit nil" + "differs from env -> persisted"
+    # clauses together (still per-field independent); see the two dedicated
+    # MAJOR-1 tests below for the "matches env -> omitted" no-op clause.
+    #
+    # code review (cycle 1 re-review, MAJOR-N1): the rule is now baselined on
+    # `StorageConfig.get()`'s RESOLVED value, not the env-only value — "blank
+    # -> explicit nil" only fires when the resolved baseline was actually
+    # non-blank (there is something to clear). This test's iam_endpoint case
+    # therefore now needs a genuine EXISTING DB override to blank out
+    # (previously it blanked an already-nil field, which under the
+    # MAJOR-N1 fix is correctly a no-op/omit — see the dedicated case-5 test
+    # below for that scenario).
+    test "blank iam/sts is written as an explicit NULL (clears an override), non-blank differing from env is persisted, per field independently" do
+      test_pid = self()
+      old_iam = "https://db-existing.example.com:4443/iam"
+
+      Application.put_env(:nebu_http, :media_storage_config_loader, fn ->
+        storage_config_loader_row(%{
+          "endpoint" => "stable-endpoint:9000",
+          "bucket" => "stable-bucket",
+          "iam_endpoint" => old_iam
+        })
+      end)
+
+      Application.put_env(:nebu_http, :media_files_storage_key_count_fun, fn -> 0 end)
+      Application.put_env(:nebu_http, :media_storage_env_reader, fn -> %{} end)
+
+      Application.put_env(:nebu_http, :media_storage_config_writer, fn columns, set_at ->
+        send(test_pid, {:storage_config_written, columns, set_at})
+        :ok
+      end)
+
+      # F-1 fix (Kassandra security review, SEC Gate 1, 2026-10-08): a
+      # submitted, non-blank sts_endpoint is now validated (https:// +
+      # Nebu.Media.SSRF.checked_target/1), so a literal public IP is used
+      # here (no live DNS lookup needed — mirrors this file's own
+      # @baseline_storage_params["endpoint"] convention) instead of a
+      # hostname like "7mf5k.upcloudobjects.com" that does not resolve.
+      sts_url = "https://93.184.216.34:4443/sts"
+
+      conn =
+        post_storage(
+          storage_params(%{
+            "endpoint" => "stable-endpoint:9000",
+            "bucket" => "stable-bucket",
+            "iam_endpoint" => "",
+            "sts_endpoint" => sts_url
+          })
+        )
+
+      assert conn.status in [200, 302, 303],
+             "expected a save with one blank and one set endpoint field to succeed; got " <>
+               "#{conn.status}: #{conn.resp_body}"
+
+      assert_received {:storage_config_written, columns, _set_at}
+
+      assert Map.has_key?(columns, "iam_endpoint") and Map.get(columns, "iam_endpoint") == nil,
+             "MAJOR-1: a blank iam_endpoint must be written as an EXPLICIT NULL (not omitted) " <>
+               "so it actually clears the existing DB override (#{inspect(old_iam)}) back to " <>
+               "env-controlled, got: #{inspect(columns)}"
+
+      assert Map.get(columns, "sts_endpoint") == sts_url,
+             "expected the submitted sts_endpoint value (differing from the resolved baseline) " <>
+               "to be persisted to its own DB column, got: #{inspect(columns)}"
+    end
+
+    test "MAJOR-1: a blank submission clears an EXISTING DB override back to env-controlled (explicit NULL)" do
+      test_pid = self()
+      old_iam = "https://7mf5k.upcloudobjects.com:4443/iam"
+
+      Application.put_env(:nebu_http, :media_storage_config_loader, fn ->
+        storage_config_loader_row(%{
+          "endpoint" => "stable-endpoint:9000",
+          "bucket" => "stable-bucket",
+          "iam_endpoint" => old_iam
+        })
+      end)
+
+      Application.put_env(:nebu_http, :media_files_storage_key_count_fun, fn -> 0 end)
+      Application.put_env(:nebu_http, :media_storage_env_reader, fn -> %{} end)
+
+      Application.put_env(:nebu_http, :media_storage_config_writer, fn columns, set_at ->
+        send(test_pid, {:storage_config_written, columns, set_at})
+        :ok
+      end)
+
+      conn =
+        post_storage(
+          storage_params(%{
+            "endpoint" => "stable-endpoint:9000",
+            "bucket" => "stable-bucket",
+            "iam_endpoint" => ""
+          })
+        )
+
+      assert conn.status in [200, 302, 303],
+             "expected clearing an existing iam_endpoint override to succeed; got " <>
+               "#{conn.status}: #{conn.resp_body}"
+
+      assert_received {:storage_config_written, columns, _set_at}
+
+      assert Map.has_key?(columns, "iam_endpoint") and Map.get(columns, "iam_endpoint") == nil,
+             "expected a blank iam_endpoint submission (where a DB override of " <>
+               "#{inspect(old_iam)} already exists) to reach the writer as an explicit " <>
+               "SET iam_endpoint = NULL — there is no other UI way to go back to " <>
+               "env-controlled, got: #{inspect(columns)}"
+    end
+
+    test "MAJOR-1: the first save on a fresh config that only changes region does not silently promote the untouched, env-pre-filled iam/sts values into the DB" do
+      test_pid = self()
+
+      # F-1 fix (Kassandra security review, SEC Gate 1, 2026-10-08): these
+      # values are RESUBMITTED verbatim below, so they are validated by the
+      # new https:// + SSRF.checked_target/1 guard even though Rule 1 omits
+      # them from the write — a literal public IP needs no live DNS lookup.
+      iam_env = "https://93.184.216.34:4443/iam"
+      sts_env = "https://93.184.216.34:4443/sts"
+
+      Application.put_env(:nebu_http, :media_storage_config_loader, fn -> nil end)
+      Application.put_env(:nebu_http, :media_files_storage_key_count_fun, fn -> 0 end)
+
+      Application.put_env(:nebu_http, :media_storage_env_reader, fn ->
+        %{
+          "NEBU_MINIO_IAM_ENDPOINT" => iam_env,
+          "NEBU_MINIO_STS_ENDPOINT" => sts_env
+        }
+      end)
+
+      Application.put_env(:nebu_http, :media_storage_config_writer, fn columns, set_at ->
+        send(test_pid, {:storage_config_written, columns, set_at})
+        :ok
+      end)
+
+      # Simulates the exact MAJOR-1 scenario: a never-configured install's
+      # form pre-fills iam_endpoint/sts_endpoint from the env values above
+      # (AC5). The admin only intends to change `region` and submits the
+      # form as rendered — every other field, including the untouched
+      # iam/sts inputs, is resubmitted verbatim, exactly as a real browser
+      # would.
+      conn =
+        post_storage(
+          storage_params(%{
+            "region" => "eu-west-2",
+            "iam_endpoint" => iam_env,
+            "sts_endpoint" => sts_env
+          })
+        )
+
+      assert conn.status in [200, 302, 303],
+             "expected the save to succeed; got #{conn.status}: #{conn.resp_body}"
+
+      assert_received {:storage_config_written, columns, _set_at}
+
+      refute Map.has_key?(columns, "iam_endpoint"),
+             "MAJOR-1: an untouched, env-pre-filled iam_endpoint must NOT be written to the " <>
+               "DB just because an unrelated field (region) was saved — got: #{inspect(columns)}"
+
+      refute Map.has_key?(columns, "sts_endpoint"),
+             "MAJOR-1: an untouched, env-pre-filled sts_endpoint must NOT be written to the " <>
+               "DB just because an unrelated field (region) was saved — got: #{inspect(columns)}"
+
+      assert Map.get(columns, "region") == "eu-west-2",
+             "the actually-changed region must still be persisted normally, got: " <>
+               "#{inspect(columns)}"
+    end
+
+    # code review (cycle 1 re-review, MAJOR-N1): this is the actual
+    # regression the cycle-1 fix introduced — reproduces the exact scenario
+    # from the review finding. A DB override already exists; the admin
+    # deliberately edits the field to the env value (a legitimate,
+    # intentional change — "go back to what the environment says, I happen
+    # to know what that is"). The OLD rule baselined "untouched -> omit" on
+    # `StorageConfig.env_only_iam_sts/0` (env-var-only), so this submission
+    # matched the env value and was silently discarded — the admin's edit
+    # never reached the DB, with a false "saved successfully" flash and no
+    # error, no log. The fix baselines that comparison on the RESOLVED
+    # (DB-override-aware) value instead, so a value that differs from what's
+    # actually in effect is always persisted, even if it happens to equal
+    # the env var.
+    test "MAJOR-N1: a DB override deliberately changed TO the current env value is persisted, not silently discarded" do
+      test_pid = self()
+      db_override_iam = "https://db-override.example.com:4443/iam"
+      # F-1 fix (Kassandra security review, SEC Gate 1, 2026-10-08):
+      # resubmitted below (the whole point of this test), so it must pass
+      # the new https:// + SSRF.checked_target/1 guard — a literal public
+      # IP needs no live DNS lookup. `db_override_iam` above is never
+      # submitted (loader-seam/baseline fixture only), so it is untouched.
+      env_iam = "https://93.184.216.34:4443/iam"
+
+      Application.put_env(:nebu_http, :media_storage_config_loader, fn ->
+        storage_config_loader_row(%{
+          "endpoint" => "stable-endpoint:9000",
+          "bucket" => "stable-bucket",
+          "iam_endpoint" => db_override_iam
+        })
+      end)
+
+      Application.put_env(:nebu_http, :media_files_storage_key_count_fun, fn -> 0 end)
+
+      Application.put_env(:nebu_http, :media_storage_env_reader, fn ->
+        %{"NEBU_MINIO_IAM_ENDPOINT" => env_iam}
+      end)
+
+      Application.put_env(:nebu_http, :media_storage_config_writer, fn columns, set_at ->
+        send(test_pid, {:storage_config_written, columns, set_at})
+        :ok
+      end)
+
+      conn =
+        post_storage(
+          storage_params(%{
+            "endpoint" => "stable-endpoint:9000",
+            "bucket" => "stable-bucket",
+            "iam_endpoint" => env_iam
+          })
+        )
+
+      assert conn.status in [200, 302, 303],
+             "expected the save to succeed; got #{conn.status}: #{conn.resp_body}"
+
+      assert_received {:storage_config_written, columns, _set_at}
+
+      assert Map.has_key?(columns, "iam_endpoint") and Map.get(columns, "iam_endpoint") == env_iam,
+             "MAJOR-N1: changing an existing DB override (#{inspect(db_override_iam)}) to the " <>
+               "current env value (#{inspect(env_iam)}) must be PERSISTED, not silently " <>
+               "discarded just because the submitted value happens to match the env var — " <>
+               "got: #{inspect(columns)}"
+    end
+
+    # code review (cycle 1 re-review, MINOR-2): companion fix bundled with
+    # MAJOR-N1 — `NEBU_MINIO_IAM_ENDPOINT`/`NEBU_MINIO_STS_ENDPOINT` set but
+    # EMPTY (common when a Terraform/env template always defines the var,
+    # just blank by default). The form pre-fills both inputs with "" (the
+    # resolved value), and the admin leaves them untouched. Under the OLD
+    # rule, Rule 1 ("blank submission -> explicit nil") fired unconditionally
+    # with no baseline check, so this resubmitted EVERY single save as a
+    # redundant `SET iam_endpoint = NULL` / `SET sts_endpoint = NULL` plus a
+    # bogus `changed_fields` audit entry claiming the field changed when it
+    # never did. The fix: both sides normalize through `blank_to_nil/1`
+    # before comparing, so submitted (nil) == baseline (nil) -> omit, exactly
+    # like every other already-blank, untouched field.
+    test "MINOR-2: NEBU_MINIO_IAM_ENDPOINT/NEBU_MINIO_STS_ENDPOINT set but empty, on a fresh install, converges — no redundant write, no phantom audit entry" do
+      test_pid = self()
+
+      Application.put_env(:nebu_http, :media_storage_config_loader, fn -> nil end)
+      Application.put_env(:nebu_http, :media_files_storage_key_count_fun, fn -> 0 end)
+
+      Application.put_env(:nebu_http, :media_storage_env_reader, fn ->
+        %{"NEBU_MINIO_IAM_ENDPOINT" => "", "NEBU_MINIO_STS_ENDPOINT" => ""}
+      end)
+
+      Application.put_env(:nebu_http, :media_storage_config_writer, fn columns, set_at ->
+        send(test_pid, {:storage_config_written, columns, set_at})
+        :ok
+      end)
+
+      conn =
+        post_storage(
+          storage_params(%{
+            "region" => "eu-west-2",
+            "iam_endpoint" => "",
+            "sts_endpoint" => ""
+          })
+        )
+
+      assert conn.status in [200, 302, 303],
+             "expected the save to succeed; got #{conn.status}: #{conn.resp_body}"
+
+      assert_received {:storage_config_written, columns, _set_at}
+
+      refute Map.has_key?(columns, "iam_endpoint"),
+             "MINOR-2: a field whose resolved baseline is already blank (env var set but " <>
+               "empty, no DB override) must be OMITTED, not re-written as an explicit NULL, " <>
+               "when the admin leaves it untouched — got: #{inspect(columns)}"
+
+      refute Map.has_key?(columns, "sts_endpoint"),
+             "MINOR-2: same as above for sts_endpoint — got: #{inspect(columns)}"
+
+      assert Map.get(columns, "region") == "eu-west-2",
+             "the actually-changed region must still be persisted normally, got: " <>
+               "#{inspect(columns)}"
+
+      # Nebu.Media.StorageConfig.write_audit/2 derives the audit log's
+      # `changed_fields` directly from `Map.keys/1` of this SAME `fields` map
+      # handed to the writer above — so refuting the keys here already
+      # proves no bogus "iam_endpoint"/"sts_endpoint" audit entry is recorded
+      # for this no-op save; there is no separate audit code path to assert
+      # on.
+    end
+
+    # code review (cycle 2, N2-MINOR-1): distinct from the MINOR-2 test
+    # above (env var set but EMPTY — baseline already blank by construction)
+    # and from the two dedicated MAJOR-1 tests above (a genuine, non-blank
+    # DB override exists). Here the env var is set to a genuine, NON-BLANK
+    # URL, and NO media_storage_config row has ever been written for this
+    # field (has_db_override? must be false) — there is nothing in the DB to
+    # clear. Before this fix, Rule 2 fired on ANY non-blank baseline
+    # (DB- or env-sourced indistinguishably), writing a redundant explicit
+    # `SET iam_endpoint = NULL` plus a false `changed_fields` audit entry on
+    # every single save, forever non-convergent.
+    test "N2-MINOR-1: blanking an env-sourced (no DB override) iam_endpoint is omitted, not written as a redundant explicit NULL" do
+      test_pid = self()
+      env_iam = "https://env-only.example.com:4443/iam"
+
+      Application.put_env(:nebu_http, :media_storage_config_loader, fn -> nil end)
+      Application.put_env(:nebu_http, :media_files_storage_key_count_fun, fn -> 0 end)
+
+      Application.put_env(:nebu_http, :media_storage_env_reader, fn ->
+        %{"NEBU_MINIO_IAM_ENDPOINT" => env_iam}
+      end)
+
+      Application.put_env(:nebu_http, :media_storage_config_writer, fn columns, set_at ->
+        send(test_pid, {:storage_config_written, columns, set_at})
+        :ok
+      end)
+
+      conn =
+        post_storage(
+          storage_params(%{
+            "region" => "eu-west-2",
+            "iam_endpoint" => ""
+          })
+        )
+
+      assert conn.status in [200, 302, 303],
+             "expected the save to succeed; got #{conn.status}: #{conn.resp_body}"
+
+      assert_received {:storage_config_written, columns, _set_at}
+
+      refute Map.has_key?(columns, "iam_endpoint"),
+             "N2-MINOR-1: blanking an env-sourced iam_endpoint with NO existing DB override " <>
+               "must be OMITTED (there is nothing to clear), not written as a redundant " <>
+               "explicit SET iam_endpoint = NULL, got: #{inspect(columns)}"
+
+      assert Map.get(columns, "region") == "eu-west-2",
+             "the actually-changed region must still be persisted normally, got: " <>
+               "#{inspect(columns)}"
+    end
+
+    # code review (cycle 3 re-review, N3-M4): distinct from the N2-MINOR-1
+    # test above in one crucial way — there, `media_storage_config_loader`
+    # returned `nil` (no row has EVER been written at all). Here a row DOES
+    # exist (the loader returns a real row, exercising `persisted_iam_sts/0`'s
+    # `row -> ...` branch, not its `nil -> ...` branch) but that row's OWN
+    # `iam_endpoint` column was never overridden (`nil`, the
+    # `storage_config_loader_row/1` fixture's default). `has_db_override?`
+    # must still correctly read `false` here — if `persisted_iam_sts/0`
+    # or its caller mixed up "no row" with "row exists but this column is
+    # unset," this is the one case that would catch it.
+    test "N3-M4: blanking iam_endpoint when a media_storage_config row exists but that column was never overridden is omitted, not written as a redundant explicit NULL" do
+      test_pid = self()
+      env_iam = "https://row-exists-column-unset.example.com:4443/iam"
+
+      Application.put_env(:nebu_http, :media_storage_config_loader, fn ->
+        storage_config_loader_row(%{
+          "endpoint" => "stable-endpoint:9000",
+          "bucket" => "stable-bucket"
+        })
+      end)
+
+      Application.put_env(:nebu_http, :media_files_storage_key_count_fun, fn -> 0 end)
+
+      Application.put_env(:nebu_http, :media_storage_env_reader, fn ->
+        %{"NEBU_MINIO_IAM_ENDPOINT" => env_iam}
+      end)
+
+      Application.put_env(:nebu_http, :media_storage_config_writer, fn columns, set_at ->
+        send(test_pid, {:storage_config_written, columns, set_at})
+        :ok
+      end)
+
+      conn =
+        post_storage(
+          storage_params(%{
+            "endpoint" => "stable-endpoint:9000",
+            "bucket" => "stable-bucket",
+            "region" => "eu-south-1",
+            "iam_endpoint" => ""
+          })
+        )
+
+      assert conn.status in [200, 302, 303],
+             "expected the save to succeed; got #{conn.status}: #{conn.resp_body}"
+
+      assert_received {:storage_config_written, columns, _set_at}
+
+      refute Map.has_key?(columns, "iam_endpoint"),
+             "N3-M4: a media_storage_config row existing (with its OWN iam_endpoint " <>
+               "column unset) must be treated identically to no row existing at all — " <>
+               "blanking the env-pre-filled field must be OMITTED, not written as a " <>
+               "redundant explicit SET iam_endpoint = NULL, got: #{inspect(columns)}"
+
+      assert Map.get(columns, "region") == "eu-south-1",
+             "the actually-changed region must still be persisted normally, got: " <>
+               "#{inspect(columns)}"
+    end
+
+    # code review (cycle 2, N2-MINOR-2): a POST that OMITS the iam_endpoint
+    # param entirely (the key itself absent from `params`, never even an
+    # empty-string VALUE — only reachable via a scripted/non-browser POST,
+    # every real HTML form submission sends the field) must be a pure no-op,
+    # exactly like every other optional field's maybe_put_field/3. Before
+    # this fix, an absent param came through as `raw = nil`, indistinguishable
+    # from "admin submitted blank," and an EXISTING DB override would be
+    # destructively cleared by a request that never even mentioned the field.
+    test "N2-MINOR-2: a POST that omits iam_endpoint entirely (not blank, absent) is a no-op — an existing DB override survives untouched" do
+      test_pid = self()
+      old_iam = "https://db-existing.example.com:4443/iam"
+
+      Application.put_env(:nebu_http, :media_storage_config_loader, fn ->
+        storage_config_loader_row(%{
+          "endpoint" => "stable-endpoint:9000",
+          "bucket" => "stable-bucket",
+          "iam_endpoint" => old_iam
+        })
+      end)
+
+      Application.put_env(:nebu_http, :media_files_storage_key_count_fun, fn -> 0 end)
+      Application.put_env(:nebu_http, :media_storage_env_reader, fn -> %{} end)
+
+      Application.put_env(:nebu_http, :media_storage_config_writer, fn columns, set_at ->
+        send(test_pid, {:storage_config_written, columns, set_at})
+        :ok
+      end)
+
+      params =
+        storage_params(%{
+          "endpoint" => "stable-endpoint:9000",
+          "bucket" => "stable-bucket",
+          "region" => "eu-west-3"
+        })
+        |> Map.delete("iam_endpoint")
+
+      conn = post_storage(params)
+
+      assert conn.status in [200, 302, 303],
+             "expected the save to succeed; got #{conn.status}: #{conn.resp_body}"
+
+      assert_received {:storage_config_written, columns, _set_at}
+
+      refute Map.has_key?(columns, "iam_endpoint"),
+             "N2-MINOR-2: an iam_endpoint param entirely ABSENT from the POST (not submitted " <>
+               "blank) must be a no-op — the existing DB override (#{inspect(old_iam)}) must " <>
+               "survive untouched, never cleared, got: #{inspect(columns)}"
+
+      assert Map.get(columns, "region") == "eu-west-3",
+             "the actually-changed region must still be persisted normally, got: " <>
+               "#{inspect(columns)}"
+    end
+
+    test "candidate_from_params/1 carries iam/sts through to test_connection/1's candidate map" do
+      test_pid = self()
+
+      Application.put_env(:nebu_http, :media_storage_test_connection_fun, fn candidate ->
+        send(test_pid, {:test_connection_candidate, candidate})
+        :ok
+      end)
+
+      iam_url = "https://7mf5k.upcloudobjects.com:4443/iam"
+      sts_url = "https://7mf5k.upcloudobjects.com:4443/sts"
+
+      conn =
+        post_test_connection(
+          storage_params(%{"iam_endpoint" => iam_url, "sts_endpoint" => sts_url})
+        )
+
+      assert conn.status == 200,
+             "expected the Test Connection POST to re-render the page (200); got #{conn.status}"
+
+      assert_received {:test_connection_candidate, candidate},
+                      "expected Nebu.Media.StorageConfig.test_connection/1 to be called with " <>
+                        "a candidate map"
+
+      assert Map.get(candidate, :iam_endpoint) == iam_url,
+             "expected candidate_from_params/1 to carry iam_endpoint through to the " <>
+               "test-connection candidate map, got: #{inspect(candidate)}"
+
+      assert Map.get(candidate, :sts_endpoint) == sts_url,
+             "expected candidate_from_params/1 to carry sts_endpoint through to the " <>
+               "test-connection candidate map, got: #{inspect(candidate)}"
+    end
+
+    test "storage_config_from_params/1 echoes submitted iam/sts back on a blocked/invalid re-render" do
+      iam_url = "https://7mf5k.upcloudobjects.com:4443/iam"
+      sts_url = "https://7mf5k.upcloudobjects.com:4443/sts"
+
+      conn =
+        post_storage(
+          storage_params(%{
+            "endpoint" => "",
+            "iam_endpoint" => iam_url,
+            "sts_endpoint" => sts_url
+          })
+        )
+
+      assert conn.status == 200,
+             "expected an invalid submission (blank endpoint) to re-render at 200; got " <>
+               "#{conn.status}"
+
+      body = conn.resp_body
+
+      assert field_rendered_with_value?(body, "iam_endpoint", iam_url),
+             "expected the submitted iam_endpoint to be echoed back on the invalid re-render, " <>
+               "body: #{body}"
+
+      assert field_rendered_with_value?(body, "sts_endpoint", sts_url),
+             "expected the submitted sts_endpoint to be echoed back on the invalid re-render, " <>
+               "body: #{body}"
+    end
+  end
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # F-1 fix (Kassandra security review, SEC Gate 1, 2026-10-08) —
+  # iam_endpoint/sts_endpoint scheme + SSRF validation
+  # ══════════════════════════════════════════════════════════════════════════
+  #
+  # iam_endpoint/sts_endpoint were admin-UI-writable and DB-persisted (the
+  # describe block above) with NO scheme assertion and NO SSRF guard — the
+  # only admin-writable, DB-persisted, URL-shaped fields on this page
+  # without one, unlike `endpoint` (invalid_endpoint_scheme?/1 here +
+  # Nebu.Media.StorageConfig.validate_candidate_endpoint/1) and `webhook_url`
+  # (validate_webhook_url/1, "AC3: webhook_url save-time validation" above,
+  # whose test shape these three tests deliberately mirror).
+
+  describe "F-1: iam_endpoint/sts_endpoint scheme + SSRF validation" do
+    test "a non-https iam_endpoint/sts_endpoint is rejected before the save reaches the writer seam" do
+      test_pid = self()
+
+      Application.put_env(:nebu_http, :media_storage_config_loader, fn -> nil end)
+      Application.put_env(:nebu_http, :media_storage_env_reader, fn -> %{} end)
+
+      Application.put_env(:nebu_http, :media_storage_config_writer, fn columns, set_at ->
+        send(test_pid, {:storage_config_written, columns, set_at})
+        :ok
+      end)
+
+      for field <- ["iam_endpoint", "sts_endpoint"],
+          bad_value <- ["93.184.216.34:4443/iam", "http://93.184.216.34:4443/iam"] do
+        conn = post_storage(storage_params(%{field => bad_value}))
+
+        assert conn.status == 200,
+               "a non-https #{field} (#{bad_value}) must re-render at 200, not redirect; " <>
+                 "got #{conn.status}"
+
+        assert conn.resp_body =~ ~r/https/i,
+               "expected an error message mentioning the HTTPS requirement for #{field}=" <>
+                 "#{bad_value}, body: #{conn.resp_body}"
+
+        refute_received {:storage_config_written, _columns, _set_at},
+                        "a non-https #{field} (#{bad_value}) must be rejected before the save " <>
+                          "reaches the writer seam"
+      end
+    end
+
+    test "an https iam_endpoint/sts_endpoint resolving to a private/loopback/link-local address is rejected" do
+      test_pid = self()
+
+      Application.put_env(:nebu_http, :media_storage_config_loader, fn -> nil end)
+      Application.put_env(:nebu_http, :media_storage_env_reader, fn -> %{} end)
+
+      Application.put_env(:nebu_http, :media_storage_config_writer, fn columns, set_at ->
+        send(test_pid, {:storage_config_written, columns, set_at})
+        :ok
+      end)
+
+      # Literal IPs — no live DNS lookup needed (mirrors the webhook_url SSRF
+      # test above and webhook_delivery_test.exs's own convention).
+      for field <- ["iam_endpoint", "sts_endpoint"],
+          blocked_url <- ["https://127.0.0.1/iam", "https://169.254.169.254/iam"] do
+        conn = post_storage(storage_params(%{field => blocked_url}))
+
+        assert conn.status == 200,
+               "a private/link-local #{field} (#{blocked_url}) must re-render at 200, not " <>
+                 "redirect; got #{conn.status}"
+
+        assert conn.resp_body =~ ~r/block|private|not allowed|invalid/i,
+               "expected an error message about the blocked address for #{field}=" <>
+                 "#{blocked_url}, body: #{conn.resp_body}"
+
+        refute_received {:storage_config_written, _columns, _set_at},
+                        "a private/link-local #{field} (#{blocked_url}) must be rejected " <>
+                          "before the save reaches the writer seam"
+      end
+    end
+
+    test "a valid https, non-private iam_endpoint/sts_endpoint still saves successfully (regression)" do
+      test_pid = self()
+
+      Application.put_env(:nebu_http, :media_storage_config_loader, fn -> nil end)
+      Application.put_env(:nebu_http, :media_storage_env_reader, fn -> %{} end)
+
+      Application.put_env(:nebu_http, :media_storage_config_writer, fn columns, set_at ->
+        send(test_pid, {:storage_config_written, columns, set_at})
+        :ok
+      end)
+
+      iam_url = "https://93.184.216.34:4443/iam"
+      sts_url = "https://93.184.216.34:4443/sts"
+
+      conn =
+        post_storage(storage_params(%{"iam_endpoint" => iam_url, "sts_endpoint" => sts_url}))
+
+      assert conn.status in [200, 302, 303],
+             "expected a valid https iam/sts save to succeed; got #{conn.status}: " <>
+               "#{conn.resp_body}"
+
+      assert_received {:storage_config_written, columns, _set_at}
+
+      assert Map.get(columns, "iam_endpoint") == iam_url,
+             "expected the valid iam_endpoint to reach the write seam, got: #{inspect(columns)}"
+
+      assert Map.get(columns, "sts_endpoint") == sts_url,
+             "expected the valid sts_endpoint to reach the write seam, got: #{inspect(columns)}"
+    end
+
+    # ════════════════════════════════════════════════════════════════════
+    # R-1 fix (focused follow-up code review, 2026-10-08) — the F-1 guard
+    # above must validate the DECIDED `changes` value, not the raw submitted
+    # param. The original F-1 fix validated params["iam_endpoint"]/
+    # params["sts_endpoint"] unconditionally, BEFORE `changes` was built —
+    # so an untouched, env-pre-filled value that fails the new scheme/SSRF
+    # check permanently blocked ALL storage saves (not just that field),
+    # since the form always re-renders the same env value on every GET.
+    # ════════════════════════════════════════════════════════════════════
+
+    test "R-1 regression: an untouched, env-sourced iam_endpoint that fails the https/SSRF guard does not block saving an unrelated field" do
+      test_pid = self()
+
+      # Literal loopback IP (no DNS lookup needed) — simulates the shape of
+      # this project's own NEBU_MINIO_ENDPOINT: "minio:9000" docker-compose
+      # convention, if ever applied to NEBU_MINIO_IAM_ENDPOINT.
+      bad_env_iam = "https://127.0.0.1:9000/iam"
+
+      Application.put_env(:nebu_http, :media_storage_config_loader, fn -> nil end)
+      Application.put_env(:nebu_http, :media_files_storage_key_count_fun, fn -> 0 end)
+
+      Application.put_env(:nebu_http, :media_storage_env_reader, fn ->
+        %{"NEBU_MINIO_IAM_ENDPOINT" => bad_env_iam}
+      end)
+
+      Application.put_env(:nebu_http, :media_storage_config_writer, fn columns, set_at ->
+        send(test_pid, {:storage_config_written, columns, set_at})
+        :ok
+      end)
+
+      # Exactly what a real browser does: the admin only intends to change
+      # `region`, but resubmits the env-pre-filled iam_endpoint input
+      # verbatim, untouched.
+      conn =
+        post_storage(
+          storage_params(%{
+            "region" => "eu-west-2",
+            "iam_endpoint" => bad_env_iam
+          })
+        )
+
+      assert conn.status in [200, 302, 303],
+             "R-1: resubmitting an untouched, env-sourced iam_endpoint that fails the " <>
+               "https/SSRF guard must NOT block saving an unrelated field (region); got " <>
+               "#{conn.status}: #{conn.resp_body}"
+
+      assert_received {:storage_config_written, columns, _set_at},
+                      "R-1: the save must actually reach the writer seam, not be rejected"
+
+      refute Map.has_key?(columns, "iam_endpoint"),
+             "R-1: the untouched, invalid-shaped env iam_endpoint must be OMITTED (nothing " <>
+               "changed, nothing to validate) rather than rejected, got: #{inspect(columns)}"
+
+      assert Map.get(columns, "region") == "eu-west-2",
+             "the actually-changed region must still be persisted normally, got: " <>
+               "#{inspect(columns)}"
+    end
+
+    test "R-1: a genuine new iam_endpoint override attempt with an invalid value is still blocked, even when a different value is currently in effect" do
+      test_pid = self()
+
+      Application.put_env(:nebu_http, :media_storage_config_loader, fn ->
+        storage_config_loader_row(%{
+          "endpoint" => "stable-endpoint:9000",
+          "bucket" => "stable-bucket",
+          "iam_endpoint" => "https://93.184.216.34:4443/iam"
+        })
+      end)
+
+      Application.put_env(:nebu_http, :media_files_storage_key_count_fun, fn -> 0 end)
+      Application.put_env(:nebu_http, :media_storage_env_reader, fn -> %{} end)
+
+      Application.put_env(:nebu_http, :media_storage_config_writer, fn columns, set_at ->
+        send(test_pid, {:storage_config_written, columns, set_at})
+        :ok
+      end)
+
+      conn =
+        post_storage(
+          storage_params(%{
+            "endpoint" => "stable-endpoint:9000",
+            "bucket" => "stable-bucket",
+            "iam_endpoint" => "https://127.0.0.1/iam"
+          })
+        )
+
+      assert conn.status == 200,
+             "R-1: a genuinely new, invalid iam_endpoint override must still be rejected " <>
+               "(re-render at 200, not redirect); got #{conn.status}"
+
+      assert conn.resp_body =~ ~r/block|private|not allowed|invalid/i,
+             "expected an error message about the blocked address, body: #{conn.resp_body}"
+
+      refute_received {:storage_config_written, _columns, _set_at},
+                      "R-1: a genuinely new, invalid iam_endpoint override must be rejected " <>
+                        "before reaching the writer seam"
+    end
+
+    test "R-1: a blank submission can still clear an EXISTING DB override even if that override's own stored value is itself invalid-shaped" do
+      test_pid = self()
+
+      # Simulates a bad value that somehow got persisted before this guard
+      # existed — the fix must never make an already-bad DB value
+      # impossible to remove. Never submitted, so it is never itself
+      # validated (only the explicit `nil` clear is).
+      bad_db_iam = "http://insecure-legacy.example.com/iam"
+
+      Application.put_env(:nebu_http, :media_storage_config_loader, fn ->
+        storage_config_loader_row(%{
+          "endpoint" => "stable-endpoint:9000",
+          "bucket" => "stable-bucket",
+          "iam_endpoint" => bad_db_iam
+        })
+      end)
+
+      Application.put_env(:nebu_http, :media_files_storage_key_count_fun, fn -> 0 end)
+      Application.put_env(:nebu_http, :media_storage_env_reader, fn -> %{} end)
+
+      Application.put_env(:nebu_http, :media_storage_config_writer, fn columns, set_at ->
+        send(test_pid, {:storage_config_written, columns, set_at})
+        :ok
+      end)
+
+      conn =
+        post_storage(
+          storage_params(%{
+            "endpoint" => "stable-endpoint:9000",
+            "bucket" => "stable-bucket",
+            "iam_endpoint" => ""
+          })
+        )
+
+      assert conn.status in [200, 302, 303],
+             "expected clearing an existing, invalid-shaped iam_endpoint override to " <>
+               "succeed; got #{conn.status}: #{conn.resp_body}"
+
+      assert_received {:storage_config_written, columns, _set_at}
+
+      assert Map.has_key?(columns, "iam_endpoint") and Map.get(columns, "iam_endpoint") == nil,
+             "expected the blank submission to clear the existing invalid-shaped override " <>
+               "(#{inspect(bad_db_iam)}) via an explicit SET iam_endpoint = NULL — nil is " <>
+               "always a valid 'clear to env-controlled' value regardless of what it " <>
+               "replaces, got: #{inspect(columns)}"
+    end
+  end
+
+  describe "bugfix-add-sts-iam-endpoints AC4: orphan-risk gate regression" do
+    test "changing only iam/sts (no endpoint/bucket change) does not trigger the orphan-risk gate" do
+      test_pid = self()
+
+      Application.put_env(
+        :nebu_http,
+        :media_storage_config_loader,
+        fn ->
+          storage_config_loader_row(%{
+            "endpoint" => "stable-endpoint:9000",
+            "bucket" => "stable-bucket"
+          })
+        end
+      )
+
+      Application.put_env(:nebu_http, :media_files_storage_key_count_fun, fn -> 9 end)
+
+      Application.put_env(:nebu_http, :media_storage_config_writer, fn columns, set_at ->
+        send(test_pid, {:storage_config_written, columns, set_at})
+        :ok
+      end)
+
+      # F-1 fix (Kassandra security review, SEC Gate 1, 2026-10-08): these
+      # are submitted (changed) below, so a literal public IP is used (no
+      # live DNS lookup needed) instead of a non-resolving hostname.
+      iam_url = "https://93.184.216.34:4443/iam"
+      sts_url = "https://93.184.216.34:4443/sts"
+
+      conn =
+        post_storage(
+          storage_params(%{
+            "endpoint" => "stable-endpoint:9000",
+            "bucket" => "stable-bucket",
+            "iam_endpoint" => iam_url,
+            "sts_endpoint" => sts_url
+          })
+        )
+
+      assert conn.status in [200, 302, 303],
+             "expected a normal save when endpoint/bucket are unchanged, even though " <>
+               "iam_endpoint/sts_endpoint changed; got #{conn.status}: #{conn.resp_body}"
+
+      assert_received {:storage_config_written, columns, _set_at},
+                      "changing only iam_endpoint/sts_endpoint must never trigger the " <>
+                        "orphan-risk gate"
+
+      assert Map.get(columns, "iam_endpoint") == iam_url,
+             "expected the changed iam_endpoint to reach the write seam, got: #{inspect(columns)}"
+
+      assert Map.get(columns, "sts_endpoint") == sts_url,
+             "expected the changed sts_endpoint to reach the write seam, got: #{inspect(columns)}"
+    end
+
+    test "changed_storage_keys/1 includes iam/sts in the written columns only when they change" do
+      test_pid = self()
+      # F-1 fix (Kassandra security review, SEC Gate 1, 2026-10-08): literal
+      # public IPs, no live DNS lookup needed. Only `new_sts` actually goes
+      # through the https:// + SSRF.checked_target/1 guard below — the
+      # unchanged `old_iam` is omitted from `changes` by
+      # put_env_backed_field/5's rule 1 (R-1 fix, cycle 5) before validation
+      # ever runs, so it's never re-checked.
+      old_iam = "https://93.184.216.34:4443/iam"
+      new_sts = "https://93.184.216.34:4443/sts-new"
+
+      Application.put_env(:nebu_http, :media_storage_config_loader, fn ->
+        storage_config_loader_row(%{"iam_endpoint" => old_iam, "sts_endpoint" => nil})
+      end)
+
+      Application.put_env(:nebu_http, :media_files_storage_key_count_fun, fn -> 0 end)
+
+      Application.put_env(:nebu_http, :media_storage_config_writer, fn columns, set_at ->
+        send(test_pid, {:storage_config_written, columns, set_at})
+        :ok
+      end)
+
+      conn =
+        post_storage(
+          storage_params(%{
+            # pinned to the loader row's defaults (test-review MINOR-1): isolates
+            # "only iam/sts changed" as the test name implies, independent of the
+            # orphan-risk gate's own endpoint/bucket diffing (bypassed here via
+            # the stubbed zero file count regardless).
+            "endpoint" => "old-endpoint:9000",
+            "bucket" => "old-bucket",
+            # unchanged from the persisted value above
+            "iam_endpoint" => old_iam,
+            # changed (was unset)
+            "sts_endpoint" => new_sts
+          })
+        )
+
+      assert conn.status in [200, 302, 303],
+             "expected a normal save; got #{conn.status}: #{conn.resp_body}"
+
+      assert_received {:storage_config_written, columns, _set_at}
+
+      refute Map.has_key?(columns, "iam_endpoint"),
+             "resubmitting the unchanged iam_endpoint must be diffed out by " <>
+               "changed_storage_keys/1 (no-op field must not be rewritten), got: " <>
+               "#{inspect(columns)}"
+
+      assert Map.get(columns, "sts_endpoint") == new_sts,
+             "the actually-changed sts_endpoint must be included in the written columns, " <>
+               "got: #{inspect(columns)}"
+    end
+  end
+
+  describe "bugfix-add-sts-iam-endpoints AC5: form pre-fill + save round-trip" do
+    test "the storage form pre-fills iam/sts from the env-resolved config when no DB row exists" do
+      Application.put_env(:nebu_http, :media_storage_config_loader, fn -> nil end)
+
+      iam_url = "https://7mf5k.upcloudobjects.com:4443/iam"
+      sts_url = "https://7mf5k.upcloudobjects.com:4443/sts"
+
+      Application.put_env(:nebu_http, :media_storage_env_reader, fn ->
+        %{
+          "NEBU_MINIO_IAM_ENDPOINT" => iam_url,
+          "NEBU_MINIO_STS_ENDPOINT" => sts_url
+        }
+      end)
+
+      conn = get_settings_page()
+
+      assert conn.status == 200,
+             "expected GET /admin/media/settings to render (200); got #{conn.status}"
+
+      body = conn.resp_body
+
+      assert field_rendered_with_value?(body, "iam_endpoint", iam_url),
+             "expected iam_endpoint to pre-fill from NEBU_MINIO_IAM_ENDPOINT when no DB row " <>
+               "exists, body: #{body}"
+
+      assert field_rendered_with_value?(body, "sts_endpoint", sts_url),
+             "expected sts_endpoint to pre-fill from NEBU_MINIO_STS_ENDPOINT when no DB row " <>
+               "exists, body: #{body}"
+    end
+
+    test "once a DB row sets iam/sts, GET /admin/media/settings reflects the DB values over env" do
+      db_iam = "https://db-iam.example.com:4443/iam"
+      db_sts = "https://db-sts.example.com:4443/sts"
+
+      Application.put_env(:nebu_http, :media_storage_config_loader, fn ->
+        storage_config_loader_row(%{"iam_endpoint" => db_iam, "sts_endpoint" => db_sts})
+      end)
+
+      Application.put_env(:nebu_http, :media_storage_env_reader, fn ->
+        %{
+          "NEBU_MINIO_IAM_ENDPOINT" => "https://should-be-ignored.example.com/iam",
+          "NEBU_MINIO_STS_ENDPOINT" => "https://should-be-ignored.example.com/sts"
+        }
+      end)
+
+      conn = get_settings_page()
+
+      assert conn.status == 200,
+             "expected GET /admin/media/settings to render (200); got #{conn.status}"
+
+      body = conn.resp_body
+
+      assert field_rendered_with_value?(body, "iam_endpoint", db_iam),
+             "expected the DB-stored iam_endpoint to win over the env var once a row exists, " <>
+               "body: #{body}"
+
+      assert field_rendered_with_value?(body, "sts_endpoint", db_sts),
+             "expected the DB-stored sts_endpoint to win over the env var once a row exists, " <>
+               "body: #{body}"
+
+      refute field_rendered_with_value?(body, "iam_endpoint", "https://should-be-ignored.example.com/iam"),
+             "the env-var iam_endpoint must NOT override a persisted media_storage_config row"
+
+      refute field_rendered_with_value?(body, "sts_endpoint", "https://should-be-ignored.example.com/sts"),
+             "the env-var sts_endpoint must NOT override a persisted media_storage_config row"
     end
   end
 end
