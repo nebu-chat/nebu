@@ -124,13 +124,34 @@ make test-integration   # Full Docker Compose stack + Godog Gherkin tests
 
 ## Database Migration Strategy (Story 13-14)
 
+### Release note: migration 000038 (matrix_sessions token hashing)
+
+Migration `000038_matrix_sessions_token_hashing` replaces the plaintext `access_token` / `refresh_token` columns of
+`matrix_sessions` by SHA-256 hashes and **deletes ALL Matrix sessions** (`TRUNCATE`, no backfill): every user has to log
+in again once. The release **must be deployed stop-the-world** - stop all nodes, migrate, start the new version; during a
+rolling deploy, old nodes still query the dropped plaintext column and reject every opaque token with 401 (logins 500).
+A rollback (`.down.sql`) deletes all sessions again, and the previous release writes plaintext tokens once more.
+The role in `NEBU_DB_URL_MIGRATE` (or `NEBU_DB_URL` as fallback) must hold the `TRUNCATE` privilege on `matrix_sessions`
+(the table owner has it automatically; `nebu_app` itself only has SELECT/INSERT/UPDATE/DELETE). Runbook pre-check:
+
+```sql
+SELECT tableowner FROM pg_tables WHERE tablename = 'matrix_sessions';
+```
+
+The result must be the migration role (or that role must have been granted `TRUNCATE`).
+
+**User impact (E2EE):** this release logs out EVERY device of EVERY user at once; clients receive 401 without
+`soft_logout` and discard their local E2EE state. Nebu has no server-side key backup (`room_keys/version` returns 404;
+ADR-011 is only Proposed). If encrypted rooms are in use, announce a maintenance window, ask users to export their room
+keys beforehand and re-import them after re-login; otherwise encrypted history becomes unreadable.
+
 ### Squashed Seed Migration
 
 The application ships a **single seed migration** (raw SQL, e.g. `000001_init.up.sql`) that represents the complete current schema in its final state. The previous 49 incremental migration files (000002–000049) have been deleted. Migrations are applied by `Nebu.Release.migrate/0` (raw SQL run by the release before the app boots, ADR-018) — there is no golang-migrate and no ORM.
 
 **Rationale:** Incremental migrations accumulated role-specific ownership transfers (`ALTER TABLE … OWNER TO nebu_migrate`) and backward-compatibility grants (`GRANT EXECUTE … TO nebu`) that required the `nebu_migrate` and `nebu` PostgreSQL roles to exist before migrations ran. On managed database services (Stackit PostgresFlex, AWS Aurora Serverless v2) where the runtime role cannot run `CREATE ROLE` DDL, this caused fresh deployments to fail at migration 24.
 
-**Single-role model:** The squashed migration is designed to run as `nebu_app` (the runtime DB user). All objects are created by `nebu_app`; no ownership transfers or legacy grants are needed.
+**Single-role model:** The squashed migration is designed to run as `nebu_app` (the runtime DB user). All objects are created by `nebu_app`; no ownership transfers or legacy grants are needed. On such deployments `nebu_app` owns `matrix_sessions` and therefore holds `TRUNCATE` for migration 000038; if an installation created the table under another role, use the pre-check above.
 
 **Key characteristics of the seed migration:**
 

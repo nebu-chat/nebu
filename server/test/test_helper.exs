@@ -13,6 +13,11 @@ Nebu.Media.DownloadStall.init_counter()
 # make test-integration (which sets NEBU_DB_URL and starts Nebu.Repo).
 ExUnit.configure(exclude: [:integration])
 
+# Tests tagged :no_repo assert the DB-free unit environment (no Nebu.Repo process, no
+# persisted state). They run in the unit job; in integration runs the Repo is up and other
+# tests leave rows behind, so they are excluded there.
+if Process.whereis(Nebu.Repo), do: ExUnit.configure(exclude: [:integration, :no_repo])
+
 # oidc-bootstrap-only-config (ADR-022): shared helper to install the OidcConfig DB
 # seam (server_config source) — replaces the old :oidc_issuer/:oidc_audience env idiom.
 # Loaded FIRST so support files that reference it (e.g. media_test_support.exs) see a

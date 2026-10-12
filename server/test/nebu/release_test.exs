@@ -162,46 +162,17 @@ defmodule Nebu.ReleaseTest do
       # env-only resolution). ALTER TABLE only — no new table, so the
       # existing `GRANT ... ON media_storage_config TO nebu_app` from 000024
       # already covers the two new columns; no new GRANT required.
-      assert versions ==
-               [
-                 1,
-                 2,
-                 3,
-                 4,
-                 5,
-                 6,
-                 7,
-                 8,
-                 9,
-                 10,
-                 11,
-                 12,
-                 13,
-                 14,
-                 15,
-                 16,
-                 17,
-                 18,
-                 19,
-                 20,
-                 21,
-                 22,
-                 23,
-                 24,
-                 25,
-                 26,
-                 27,
-                 28,
-                 29,
-                 30,
-                 31,
-                 32,
-                 33,
-                 34,
-                 35,
-                 36,
-                 37
-               ]
+      # 000038 (matrix_sessions_token_hashing) and 000039 (user_room_account_data) come from the
+      # bugfix batch `bugfix/fixing-mutual-bugs`. Their numbers are deliberately not hard-coded:
+      # parallel work adds migrations and numbers are renumbered at merge, only uniqueness and
+      # contiguity are asserted.
+      assert versions == Enum.uniq(versions), "migration version numbers must be unique"
+
+      assert versions == Enum.to_list(1..length(versions)),
+             "migration version numbers must be contiguous (no gaps) starting at 1"
+
+      assert length(versions) > 37,
+             "the bugfix batch adds two migrations after 000037 (token hashing, user_room_account_data)"
 
       # Only *.up.sql files are returned — *.down.sql are excluded.
       assert Enum.all?(result, fn {_v, path} -> String.ends_with?(path, ".up.sql") end)

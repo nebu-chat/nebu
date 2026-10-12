@@ -73,6 +73,23 @@ if config_env() in [:prod, :dev] do
     {seconds, ""} when seconds > 0 -> config :nebu_http, uia_fresh_auth_seconds: seconds
     _ -> :ok
   end
+
+  # ── room-account-data-and-read-markers: abuse limits ────────────────────────
+  # NEBU_ROOM_ACCOUNT_DATA_MAX_ROWS_PER_USER: max (room, type) rows one user may store
+  # (default 1000 in Nebu.Matrix.RoomAccountDataStore). NEBU_ROOM_ACCOUNT_DATA_MAX_BYTES:
+  # max size of one content body (default 65536). NEBU_ROOM_ACCOUNT_DATA_MAX_TOTAL_BYTES:
+  # max total content bytes per user (default 4194304). Only strictly-positive integers
+  # within the 64-bit signed range apply; anything else keeps the default (never crashes).
+  for {env, key} <- [
+        {"NEBU_ROOM_ACCOUNT_DATA_MAX_ROWS_PER_USER", :room_account_data_max_rows_per_user},
+        {"NEBU_ROOM_ACCOUNT_DATA_MAX_BYTES", :room_account_data_max_bytes},
+        {"NEBU_ROOM_ACCOUNT_DATA_MAX_TOTAL_BYTES", :room_account_data_max_total_bytes}
+      ] do
+    case Integer.parse(System.get_env(env, "")) do
+      {n, ""} when n > 0 and n <= 9_223_372_036_854_775_807 -> config :nebu, [{key, n}]
+      _ -> :ok
+    end
+  end
 end
 
 # ─── media-gateway-migration: S3/MinIO storage for the Elixir media gateway ──

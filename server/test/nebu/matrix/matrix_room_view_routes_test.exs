@@ -163,7 +163,10 @@ defmodule Nebu.Web.MatrixRoomViewRoutesTest do
       refute_catch_all(conn)
     end
 
-    test "POST .../read_markers is routed → 200 {} no-op", %{token: token} do
+    # room-account-data-and-read-markers (AC6): read_markers is no longer a no-op. For an
+    # unknown room/event it is refused like /receipt (no longer 200 {}); the success
+    # contract lives in read_markers_test.exs and the member case below.
+    test "POST .../read_markers is routed (not the catch-all)", %{token: token} do
       conn =
         call(
           :post,
@@ -173,8 +176,7 @@ defmodule Nebu.Web.MatrixRoomViewRoutesTest do
         )
 
       refute_catch_all(conn)
-      assert conn.status == 200
-      assert json(conn) == %{}
+      assert conn.status in [400, 403, 404], "got #{conn.status}: #{conn.resp_body}"
     end
   end
 
@@ -330,7 +332,7 @@ defmodule Nebu.Web.MatrixRoomViewRoutesTest do
 
     # ── AC3 — read_markers (no-op) ──────────────────────────────────────────
 
-    test "POST .../read_markers → 200 {} (no-op)", %{token: token} do
+    test "POST .../read_markers → 200 {} for a member with a real event", %{token: token} do
       room_id = create_room(token, "read-markers-shape")
       event_id = send_message(token, room_id, "marker target")
 

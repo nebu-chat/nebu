@@ -1,0 +1,17 @@
+# Test review — room-tags (pre-dev)
+Verdict: 2 MAJOR (tests only: they would block a legitimate implementation), 6 MINOR, 8 INFO. AC1–AC6 covered (AC7 docs untested by design). Crash/restart test not needed (Postgres store).
+
+## MAJOR — fix the TESTS FIRST (before implementing)
+- M1: logging test (AC6, ~l.1016-1063) demands `status == 200` for every PUT path including `.../%74ags/u.log7%2Fx`, while the AC2 `%2F` test (~l.479-496) allows `200` (name stored as `u.a/b`) OR `400 M_INVALID_PARAM`. Make the logging test accept `status in [200, 400]` for the `%2F` path and keep the marker assertions (no body/response content in the log) regardless of status (or drop that path from put_paths).
+- M2: the matcher test (~l.1065-1083, "the shared path matcher recognises the tag route shapes") reflects over `RawBodyReader.__info__(:functions)` for a public `*_shape?/1`. That pins an implementation name; the behavior is already proven by the logging test. DELETE this test. Also tighten its weak precondition in the logging test (`assert log =~ "tags" or log =~ "rooms"`): assert on the request-logger's path line so a silent logger cannot make the test pass.
+
+## MINOR (apply in the same test pass)
+- m1 add a cascade test: deleting the USER and/or the ROOM removes the user's `m.tag` row (table discovery as in the other tests; story AC6 says "verify with a test"); reuse the existing room_account_data cascade test pattern if one exists.
+- m2 add tests: invalid (not just missing) bearer token → 401; tag name with invalid UTF-8 (`%FF`) and NUL (`%00`) → 400 M_INVALID_PARAM or a clean handled outcome, never 500 (JSON-encode of the event!); `Retry-After` header and/or `retry_after_ms` on the 429 (assert the header; the body field only if the branch `bugfix/matrix-session-refresh` is merged: do NOT assert retry_after_ms); DELETE on a room without a row creates no sync event; (documentation only: GET not rate-limited).
+- m3 short comments "Nebu decision, not in spec" on the describe blocks for tag name, body, caps and rate limit.
+- m4 the 413-for-oversized-resulting-event contract is a Nebu decision (403 M_RESOURCE_LIMIT_EXCEEDED would be defensible): keep 413 but allow `[413]` only for the single oversized body and accept 413 OR 403 M_RESOURCE_LIMIT_EXCEEDED for "event grows beyond the per-value cap via accumulation" if the implementation prefers; document.
+- m5 leave test (~l.962-988): replace the conditional join fallback by one fixed way to get the user into the room and out of it.
+- m6 cap tests: set `max_rows_per_user` relative to the current row count (count + 1) instead of the literal 1, so a future createRoom writing an account-data row does not break them.
+- INFO i1 long-poll tests: replace `Process.sleep(500)` by a deterministic wait point: `notify_sync` sends to `:pg.get_members("user:#{user_id}")` and the long-poll joins that group → poll (bounded loop) until the member count exceeds the count taken before starting the poll, then write. Keep `elapsed < 8_000`.
+- INFO i4 empty tag name: PUT/DELETE on `.../tags` and `.../tags/` (no name) must answer 400 M_INVALID_PARAM (own route shapes), while `.../tags//u.x` normalizes to the named tag like Plug.Router does (empty segments are dropped): note this in the Dev Notes.
+- INFO i6 Kassandra to decide: the TAG NAME is user content that appears in the logged request path (like other path segments); tests only assert body/response content is not logged.

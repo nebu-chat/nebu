@@ -209,6 +209,7 @@ defmodule Nebu.Admin.LogsLive.TraceMapNodeControlsTest do
   # ══════════════════════════════════════════════════════════════════════
 
   describe "AC4: the off-list endpoints are on the map from mount, with no traffic" do
+    @describetag :no_repo
     test "all three default off endpoints render as satellite nodes with status off" do
       {:ok, _view, html} = mount_trace_map()
       doc = parsed(html)
@@ -279,6 +280,7 @@ defmodule Nebu.Admin.LogsLive.TraceMapNodeControlsTest do
   end
 
   describe "AC4: debug/info/warn broadcasts for off-list endpoints (no capture) are not part of the signal" do
+    @describetag :no_repo
     test "a warning broadcast for an off endpoint changes neither its node nor its domain" do
       {:ok, view, _html} = mount_trace_map()
       broadcast_entry(route_template: @off_keepalive, level: "warning")
@@ -326,6 +328,7 @@ defmodule Nebu.Admin.LogsLive.TraceMapNodeControlsTest do
   end
 
   describe "AC4 amendment: ERRORS on an off endpoint are never silenced (errors-always-persist)" do
+    @describetag :no_repo
     # Story amendment 2026-07-07 (test-review m3, design owner): "logging
     # off" suppresses DEBUG/INFO/WARN collection AND status, but ERROR-level
     # entries always drive node status — an off node with errors in the 60 s
@@ -415,6 +418,7 @@ defmodule Nebu.Admin.LogsLive.TraceMapNodeControlsTest do
   # ══════════════════════════════════════════════════════════════════════
 
   describe "AC1/AC2: the inspected node's Logging section renders labelled selects" do
+    @describetag :no_repo
     test "clicking a satellite shows the Logging section with min-level and retention selects" do
       {:ok, view, _html} = mount_trace_map()
       broadcast_entry(route_template: "/admin/users", level: "info")
@@ -528,6 +532,7 @@ defmodule Nebu.Admin.LogsLive.TraceMapNodeControlsTest do
   # ══════════════════════════════════════════════════════════════════════
 
   describe "AC3: only stat values update on a live tick; the selects survive verbatim" do
+    @describetag :no_repo
     test "a new log entry patches the stats but leaves the select markup identical" do
       {:ok, view, _html} = mount_trace_map()
       broadcast_entry(route_template: "/admin/users", level: "info")
@@ -571,6 +576,7 @@ defmodule Nebu.Admin.LogsLive.TraceMapNodeControlsTest do
   # ══════════════════════════════════════════════════════════════════════
 
   describe "AC5/AC7: clicking an off, non-capturing node never toggles the stream filter" do
+    @describetag :no_repo
     test "no filter chip appears and the node is not marked selected" do
       {:ok, view, _html} = mount_trace_map()
 
@@ -588,6 +594,7 @@ defmodule Nebu.Admin.LogsLive.TraceMapNodeControlsTest do
   # ══════════════════════════════════════════════════════════════════════
 
   describe "AC10: with the inspector controls open, the page still carries no inline JS" do
+    @describetag :no_repo
     # DELIBERATELY GREEN against the shipped Leitstand too (the same class of
     # cheap-insurance regression guard as the leitstand file's own
     # unauthenticated-redirect test): the page is inline-JS-free today, and

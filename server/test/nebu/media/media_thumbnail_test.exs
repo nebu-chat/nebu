@@ -88,7 +88,9 @@ defmodule Nebu.Web.MediaThumbnailTest do
            "thumbnail must return 200, got #{conn.status} — thumbnail route not implemented"
 
     ct = S.header(conn, "content-type")
-    assert String.starts_with?(ct, "image/"), "thumbnail Content-Type must be image/*, got #{inspect(ct)}"
+    # media-download-content-type-and-filename (AC5): exactly the stored thumbnail
+    # type, no appended `; charset=utf-8` (was `starts_with?("image/")`).
+    assert ct == "image/png", "thumbnail Content-Type must be exactly image/png, got #{inspect(ct)}"
 
     assert byte_size(conn.resp_body) > 0, "thumbnail response must carry image bytes"
   end
@@ -99,6 +101,10 @@ defmodule Nebu.Web.MediaThumbnailTest do
     cd = S.header(conn, "content-disposition")
     assert cd != "", "Content-Disposition MUST be present on thumbnail (oracle §1)"
     assert String.starts_with?(cd, "inline")
+
+    # AC5: thumbnails SHOULD carry a filename (e.g. thumbnail.png), never the media_id.
+    assert String.contains?(cd, ~s(filename="thumbnail.png")), "got #{inspect(cd)}"
+    refute String.contains?(cd, @media_id)
 
     assert S.header(conn, "x-content-type-options") == "nosniff"
   end

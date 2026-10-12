@@ -43,7 +43,7 @@ Client-Server API specification.
 
 | Method | Endpoint | Status | Notes |
 |---|---|---|---|
-| GET | `/_matrix/client/v3/sync` | ✅ | Long-poll (max 25s cap, was 30s); initial sync parallel room fetch (Task.async_stream, max_concurrency: 5); top-level global `account_data.events` delivered from durable PostgreSQL store — full on initial sync, changed-only on incremental (consume-once `changed` flag; account-data-durability) |
+| GET | `/_matrix/client/v3/sync` | ✅ | Long-poll (max 25s cap, was 30s); initial sync parallel room fetch (Task.async_stream, max_concurrency: 5); top-level global `account_data.events` delivered from durable PostgreSQL store — full on initial sync, changed-only on incremental (consume-once `changed` flag; account-data-durability); `rooms.join.<id>.account_data.events` delivered from `user_room_account_data` using the `stream_pos` carried in `since`/`next_batch` (`<core>.<pos>`), per device, account-data-only rooms included (room-account-data-and-read-markers) |
 
 ## Room Management
 
@@ -73,7 +73,7 @@ Client-Server API specification.
 | GET | `/_matrix/client/v3/rooms/{roomId}/state/{eventType}/{stateKey}` | ✅ | Get single state event |
 | GET | `/_matrix/client/v3/rooms/{roomId}/event/{eventId}` | ✅ | Single event fetch by ID; membership-enforced via Horde state (Story 11-8) |
 | GET | `/_matrix/client/v3/rooms/{roomId}/context/{eventId}` | ✅ | Event context (before/after) |
-| POST | `/_matrix/client/v3/rooms/{roomId}/read_markers` | 🔶 | Acknowledged, not persisted |
+| POST | `/_matrix/client/v3/rooms/{roomId}/read_markers` | ✅ | `m.fully_read` stored as room account data (event must belong to the room, 400 M_INVALID_PARAM) and synced; `m.read`/`m.read.private` go through the `/receipt` path; membership as `/receipt` (room-account-data-and-read-markers) |
 
 ## Event Relations and Threads
 
@@ -122,12 +122,12 @@ Client-Server API specification.
 | Method | Endpoint | Status | Notes |
 |---|---|---|---|
 | GET | `/_matrix/client/v3/user/{userId}/account_data/{type}` | ✅ | PostgreSQL-backed (durable, `Nebu.Matrix.AccountDataStore`, migration 000011); returns stored bytes verbatim; 404 M_NOT_FOUND if unset; IDOR guard (account-data-durability) |
-| PUT | `/_matrix/client/v3/user/{userId}/account_data/{type}` | ✅ | Persists to PostgreSQL (durable, survives restart, opaque per ADR-011); IDOR guard; delivered via /sync (account-data-durability) |
-| GET | `/_matrix/client/v3/user/{userId}/rooms/{roomId}/account_data/{type}` | ✅ | Per-room account data |
-| PUT | `/_matrix/client/v3/user/{userId}/rooms/{roomId}/account_data/{type}` | ✅ | Per-room account data |
-| GET | `/_matrix/client/v3/user/{userId}/rooms/{roomId}/tags` | ✅ | Room tags |
-| PUT | `/_matrix/client/v3/user/{userId}/rooms/{roomId}/tags/{tag}` | ✅ | Add/update room tag |
-| DELETE | `/_matrix/client/v3/user/{userId}/rooms/{roomId}/tags/{tag}` | ✅ | Remove room tag |
+| PUT | `/_matrix/client/v3/user/{userId}/account_data/{type}` | ✅ | Persists to PostgreSQL (durable, survives restart, opaque per ADR-011); IDOR guard; delivered via /sync (account-data-durability); 405 M_BAD_JSON for `m.fully_read`/`m.push_rules`, 400 M_NOT_JSON for malformed body (room-account-data-and-read-markers) |
+| GET | `/_matrix/client/v3/user/{userId}/rooms/{roomId}/account_data/{type}` | ✅ | Durable room account data (`Nebu.Matrix.RoomAccountDataStore`, migration 000036), verbatim; 403 other user, 400 M_INVALID_PARAM bad roomId, 404 unset (no global fallback); non-member/unknown room 403 |
+| PUT | `/_matrix/client/v3/user/{userId}/rooms/{roomId}/account_data/{type}` | ✅ | Durable verbatim store; 405 M_BAD_JSON for `m.fully_read`/`m.push_rules`, 400 M_NOT_JSON, 413 M_TOO_LARGE (64 KiB), per-user cap 1000 rows (403 M_RESOURCE_LIMIT_EXCEEDED), non-member/unknown room 403; synced in `rooms.join.<id>.account_data`; erased with GDPR erasure |
+| GET | `/_matrix/client/v3/user/{userId}/rooms/{roomId}/tags` | ✅ | Room tags (story room-tags): stored in room account data `m.tag`; `{"tags":{}}` when unset; 403 other user (also admins), 400 M_INVALID_PARAM bad roomId, non-member/unknown room 403; not rate limited |
+| PUT | `/_matrix/client/v3/user/{userId}/rooms/{roomId}/tags/{tag}` | ✅ | Add/overwrite one tag atomically (read-modify-write under the per-user advisory lock); tag name 1-255 BYTES after URL-decoding (400 M_INVALID_PARAM), 400 M_NOT_JSON (also for a PUT without / with a non-JSON Content-Type: stricter than the room account-data PUT, same as the global scope), 400 M_BAD_JSON for non-numeric `order` (any number accepted, range not enforced), 413 M_TOO_LARGE (body, or the m.tag event > 64 KiB after the merge), 403 M_RESOURCE_LIMIT_EXCEEDED (row cap only for a NEW room row; the per-user TOTAL-bytes cap, 4 MiB, also refuses growth of an existing row); Nebu deviation: rate limited (tier `account_data`, shared bucket) although the spec says "Rate-limited: No" |
+| DELETE | `/_matrix/client/v3/user/{userId}/rooms/{roomId}/tags/{tag}` | ✅ | Remove one tag; idempotent (unknown tag 200); the last tag leaves `m.tag` = `{"tags":{}}` so /sync delivers the change; same checks and rate limit as PUT |
 | POST | `/_matrix/client/v3/user/{userId}/filter` | 🔶 | Returns filter_id "0" (unfiltered sync) |
 | GET | `/_matrix/client/v3/user/{userId}/filter/{filterId}` | 🔶 | Returns stored filter (or empty) |
 

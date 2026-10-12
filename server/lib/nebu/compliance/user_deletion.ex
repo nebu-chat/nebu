@@ -8,6 +8,7 @@ defmodule Nebu.Compliance.UserDeletion do
     2. UPDATE users SET deletion_status = 'deletion_in_progress'
     3. UPDATE user_keys SET private_key = NULL, deleted_at = <now_ms> WHERE key_type = 'signing'
     4. UPDATE user_keys SET private_key = NULL, deleted_at = <now_ms> WHERE key_type = 'encryption'
+    4b. DELETE FROM user_room_account_data WHERE user_id = <target> (room account data erasure)
     5. UPDATE users SET deletion_status = 'keys_deleted', keys_deleted_at = <now_ms>
 
   Ecto Repo.transaction/1 Verhalten:
@@ -67,6 +68,7 @@ defmodule Nebu.Compliance.UserDeletion do
             with :ok <- mark_in_progress(target_user_id),
                  :ok <- delete_signing_key(target_user_id, now_ms),
                  :ok <- delete_encryption_key(target_user_id, now_ms),
+                 :ok <- delete_room_account_data(target_user_id),
                  :ok <- mark_keys_deleted(target_user_id, now_ms) do
               now_ms
             end
@@ -186,6 +188,20 @@ defmodule Nebu.Compliance.UserDeletion do
     """
 
     case repo().query(sql, [now_ms, target_user_id]) do
+      {:ok, _} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # ─── Step 4b: GDPR erasure of room-scoped account data ───────────────────────
+  #
+  # room-account-data-and-read-markers: the user's room account data (m.marked_unread,
+  # m.fully_read, future m.tag, ...) is personal data and is physically deleted in the
+  # same transaction. NOTE: admin DEACTIVATION deliberately keeps it (reversible).
+  # Known gap (separate bugfix): the legacy GLOBAL `account_data` rows are not deleted here.
+
+  defp delete_room_account_data(target_user_id) do
+    case repo().query("DELETE FROM user_room_account_data WHERE user_id = $1", [target_user_id]) do
       {:ok, _} -> :ok
       {:error, reason} -> {:error, reason}
     end

@@ -232,4 +232,119 @@ defmodule Nebu.Web.LogStore.RouteNormalizerTest do
                "got: #{inspect(result)}"
     end
   end
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # room-tags: `tags` rule + router-identical segmentation (empty segments
+  # dropped, each segment percent-decoded, never raising)
+  # ══════════════════════════════════════════════════════════════════════════
+
+  describe "room tag name and router-identical anchor detection" do
+    test "the tag name after `tags` is replaced" do
+      assert RouteNormalizer.normalize_route("/_matrix/client/v3/user/@a:b/rooms/!r:b/tags/u.secret-name") ==
+               "/_matrix/client/v3/user/:user_id/rooms/:room_id/tags/:tag"
+    end
+
+    test "the tags collection path (no tag segment) is unchanged" do
+      assert RouteNormalizer.normalize_route("/_matrix/client/v3/user/@a:b/rooms/!r:b/tags") ==
+               "/_matrix/client/v3/user/:user_id/rooms/:room_id/tags"
+    end
+
+    for {label, path} <- [
+          {"percent-encoded anchor", "/v3/user/@a:b/rooms/!r:b/%74ags/u.secret"},
+          {"empty segment before the tag", "/v3/user/@a:b/rooms/!r:b/tags//u.secret"},
+          {"empty segment before the anchor", "/v3/user/@a:b/rooms/!r:b//tags/u.secret"},
+          {"trailing slash", "/v3/user/@a:b/rooms/!r:b/tags/u.secret/"},
+          {"encoded slash inside the tag", "/v3/user/@a:b/rooms/!r:b/tags/u.secret%2Fx"},
+          {"encoded anchor + empty segment", "/v3/user/@a:b/rooms/!r:b/%74ags//u.secret"}
+        ] do
+      test "tags: #{label} does not leak the tag name" do
+        result = RouteNormalizer.normalize_route(unquote(path))
+        refute String.contains?(result, "secret"), "got: #{inspect(result)}"
+        assert String.contains?(result, ":tag"), "got: #{inspect(result)}"
+      end
+    end
+
+    for {label, path} <- [
+          {"percent-encoded anchor", "/v3/user/@a:b/%61ccount_data/org.secret.type"},
+          {"empty segment before the type", "/v3/user/@a:b/account_data//org.secret.type"},
+          {"room scope, encoded anchor", "/v3/user/@a:b/rooms/!r:b/%61ccount_data/org.secret.type"},
+          {"room scope, empty segment", "/v3/user/@a:b/rooms/!r:b//account_data//org.secret.type"},
+          {"trailing slash", "/v3/user/@a:b/account_data/org.secret.type/"}
+        ] do
+      test "account_data: #{label} does not leak the type" do
+        result = RouteNormalizer.normalize_route(unquote(path))
+        refute String.contains?(result, "secret"), "got: #{inspect(result)}"
+        assert String.contains?(result, ":type"), "got: #{inspect(result)}"
+      end
+    end
+
+    test "output keeps the input's structure (empty segments and trailing slash preserved)" do
+      assert RouteNormalizer.normalize_route("/a//tags//u.x/") == "/a//tags//:tag/"
+    end
+
+    test "invalid percent-encoding never raises and still redacts after a valid anchor" do
+      assert RouteNormalizer.normalize_route("/tags/%ZZ%") == "/tags/:tag"
+      assert RouteNormalizer.normalize_route("/%/tags/u.x") == "/%/tags/:tag"
+      assert RouteNormalizer.normalize_route("/%74ags/%E0%A4%A") == "/%74ags/:tag"
+    end
+
+    test "existing placeholders are unchanged" do
+      assert RouteNormalizer.normalize_route("/rooms/!r:b/send/m.room.message/txn1") ==
+               "/rooms/:room_id/send/:event_type/:txn_id"
+
+      assert RouteNormalizer.normalize_route("/devices/ABCDEF") == "/devices/:device_id"
+    end
+  end
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # review cycle 2: no second route_template variant for the same endpoint.
+  # The literals below are the output of the pre-room-tags normalizer
+  # (branch bugfix/sync-room-account-data) and must stay byte-identical.
+  # ══════════════════════════════════════════════════════════════════════════
+
+  describe "outputs unchanged vs. the pre-room-tags normalizer (exact literals)" do
+    @c "/_matrix/client/v3"
+    @cp "/_matrix/client/v3"
+    for {path, expected} <- [
+          {"#{@c}/rooms/!r:b/state/m.room.topic/", "#{@cp}/rooms/:room_id/state/:event_type/:state_key"},
+          {"#{@c}/rooms/!r:b/state/m.room.topic", "#{@cp}/rooms/:room_id/state/:event_type"},
+          {"#{@c}/rooms/!r:b/state/m.room.topic/key", "#{@cp}/rooms/:room_id/state/:event_type/:state_key"},
+          {"#{@c}/rooms/!r:b/state/m.room.topic/key/", "#{@cp}/rooms/:room_id/state/:event_type/:state_key/"},
+          {"#{@c}/rooms/!r:b/state/m.room.topic//", "#{@cp}/rooms/:room_id/state/:event_type/:state_key/"},
+          {"#{@c}/rooms/!r:b/state/", "#{@cp}/rooms/:room_id/state/:event_type"},
+          {"#{@c}/rooms/!r:b/state//", "#{@cp}/rooms/:room_id/state/:event_type/:state_key"},
+          {"#{@c}/rooms/!r:b/state", "#{@cp}/rooms/:room_id/state"},
+          {"#{@c}/rooms/!r:b/send/m.room.message/txn1", "#{@cp}/rooms/:room_id/send/:event_type/:txn_id"},
+          {"#{@c}/rooms/!r:b/send/m.room.message/txn1/", "#{@cp}/rooms/:room_id/send/:event_type/:txn_id/"},
+          {"#{@c}/rooms/!r:b/send/m.room.message/", "#{@cp}/rooms/:room_id/send/:event_type/:txn_id"},
+          {"#{@c}/rooms/!r:b/redact/$e:b/txn9", "#{@cp}/rooms/:room_id/redact/:event_id/:txn_id"},
+          {"#{@c}/rooms/!r:b/redact/$e:b/txn9/", "#{@cp}/rooms/:room_id/redact/:event_id/:txn_id/"},
+          {"#{@c}/rooms/!r:b/redact/$e:b/", "#{@cp}/rooms/:room_id/redact/:event_id/:txn_id"},
+          {"#{@c}/devices/ABC", "#{@cp}/devices/:device_id"},
+          {"#{@c}/devices/ABC/", "#{@cp}/devices/:device_id/"},
+          {"#{@c}/devices", "#{@cp}/devices"},
+          {"#{@c}/user/@a:b/account_data/m.push", "#{@cp}/user/:user_id/account_data/:type"},
+          {"#{@c}/user/@a:b/rooms/!r:b/account_data/m.fully_read/",
+           "#{@cp}/user/:user_id/rooms/:room_id/account_data/:type/"},
+          {"#{@c}/user/@a:b/rooms/!r:b/tags", "#{@cp}/user/:user_id/rooms/:room_id/tags"},
+          {"#{@c}/sync", "#{@cp}/sync"}
+        ] do
+      test "unchanged: #{path}" do
+        assert RouteNormalizer.normalize_route(unquote(path)) == unquote(expected)
+      end
+    end
+
+    test "empty state_key (trailing slash) and no state_key map to distinct, stable templates" do
+      assert RouteNormalizer.normalize_route("/rooms/!r/state/m.room.topic/") ==
+               "/rooms/:room_id/state/:event_type/:state_key"
+
+      assert RouteNormalizer.normalize_route("/rooms/!r/state/m.room.topic") ==
+               "/rooms/:room_id/state/:event_type"
+    end
+
+    test "tag with a trailing slash still yields the single :tag template" do
+      assert RouteNormalizer.normalize_route("/user/@a:b/rooms/!r:b/tags/u.x/") ==
+               "/user/:user_id/rooms/:room_id/tags/:tag/"
+    end
+  end
 end

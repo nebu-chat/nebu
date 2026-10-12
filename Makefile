@@ -163,6 +163,7 @@ test-integration: setup
 	docker run --rm -v $(PWD):/workspace -w /workspace \
 		--network=nebu_default \
 		-e NEBU_DB_URL=postgresql://nebu_app:nebu_app_dev_pw@postgres:5432/nebu \
+		-e NEBU_DB_URL_MIGRATE=postgresql://nebu_migrate:nebu_migrate_dev_pw@postgres:5432/nebu \
 		-e NEBU_TEST_MATRIX_URL=http://server:8008 \
 		-e NEBU_TEST_SERVER_URL=http://server:4000 \
 		-e NEBU_TEST_DEX_URL=http://dex:5556 \
@@ -180,6 +181,7 @@ test-integration-elixir: setup
 	docker run --rm -v $(PWD):/workspace -w /workspace \
 		--network=nebu_default \
 		-e NEBU_DB_URL=postgresql://nebu_app:nebu_app_dev_pw@postgres:5432/nebu \
+		-e NEBU_DB_URL_MIGRATE=postgresql://nebu_migrate:nebu_migrate_dev_pw@postgres:5432/nebu \
 		elixir:1.19-alpine \
 		sh -c "cd server && mix local.hex --force && mix deps.get && mix test --include integration --warnings-as-errors"; \
 	EXIT=$$?; docker compose down; exit $$EXIT
@@ -194,6 +196,7 @@ test-integration-ci: setup
 	docker run --rm -v $(PWD):/workspace -w /workspace \
 		--network=nebu_default \
 		-e NEBU_DB_URL=postgresql://nebu_app:nebu_app_dev_pw@postgres:5432/nebu \
+		-e NEBU_DB_URL_MIGRATE=postgresql://nebu_migrate:nebu_migrate_dev_pw@postgres:5432/nebu \
 		-e NEBU_TEST_MATRIX_URL=http://server:8008 \
 		-e NEBU_TEST_SERVER_URL=http://server:4000 \
 		-e NEBU_TEST_DEX_URL=http://dex:5556 \

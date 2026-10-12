@@ -1,0 +1,37 @@
+# Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents.
+# Do not edit manually during an active pipeline run.
+# last_updated: 2026-10-08
+# [token-hashing-matrix-sessions] 2026-10-08T09:59Z committed ✓ (ATDD+2 dev cycles, code-review 0 MAJOR, Kassandra CLEAN after F-1 TRUNCATE decision, F-2 stop-the-world doc, F-3 internal *_by_hash; full CI isolated nebu-hash: 2767 tests, 29 failures = 28 known-flaky + 1 latency flake)
+# [token-hashing-matrix-sessions] 2026-10-08T09:44Z ci-gate (cycle 1) → isolated nebu-hash run complete: 2767 tests, 29 failures (28 known-flaky + 1 MediaDownloadStall latency flake), none hashing/session related; code-review (cycle 1) → 0 MAJOR 4 MINOR (stale backfill wording, audit report resolution block, none-key test, deployment doc); kassandra delta → CLEAN (F-1/F-2/F-3 CLOSED, D-1..D-3 INFO) → cycle 2 (docs/comments/tests only)
+# [token-hashing-matrix-sessions] 2026-10-08T09:24Z dev-story → done (cycle 1): migration 000035 now TRUNCATEs all sessions (no backfill), F-3 *_by_hash internal + both-keys rejection, docs/runbook, M-1..M-6; 233/233 targeted, 1795/1799 broad (4 known flaky)
+# [token-hashing-matrix-sessions] 2026-10-08T09:05Z code-review → 0 MAJOR 6 MINOR; kassandra → CLEAN (F-1 MEDIUM plaintext residue on disk → Phil: migration deletes all sessions; F-2 stop-the-world note; F-3 *_by_hash internal) → cycle 1; CI gate aborted (obsolete, migration changes)
+# [token-hashing-matrix-sessions] 2026-10-08T08:58Z dev-story → done (cycle 0): migration 000035, hash_token/1, *_by_hash variants, 271/271 targeted green; CI env fix: NEBU_DB_URL_MIGRATE added to Makefile (3 targets) + .gitlab-ci.yml podman job (nebu_app lacks CREATEDB for migration test)
+# [token-hashing-matrix-sessions] 2026-10-08T08:39Z test-review → CLEAN (0 MAJOR, 9 MINOR handed to dev; M-1 logger level makes AC5 log tests ineffective)
+# [token-hashing-matrix-sessions] 2026-10-08T08:35Z atdd → 34/49 red token_hashing_test + 18/18 red migration test + 13 ported test files (131/390 red in combined run, all undefined column/hash_token/no migration)
+# [token-hashing-matrix-sessions] 2026-10-08T08:16Z pipeline started (--bug, create-story skipped; oracle-gate skipped matrix:false; baseline = previous worktree's code-identical run, union of 6 runs saved as known-flaky-union.txt; isolated env nebu-hash)
+# [refresh-worker-and-retry-semantics] 2026-10-08T06:26Z committed ✓ bd4b1705 (ATDD+5 dev cycles, code-review 0 MAJOR, Kassandra CLEAN after F-1/F-2/F-3/N-1/N-3/N-7 fixed, ci-gate story tests green, 33→40 unrelated LiveView/LogStore flakes)
+# [refresh-worker-and-retry-semantics] 2026-10-08T06:01Z dev-story → done (cycle 5): N-7 has_active? matches :current (red→green), maybe_put_new_oidc_rt defp, docs/comments
+# [refresh-worker-and-retry-semantics] 2026-10-08T05:54Z code-review (cycle 4) → 0 MAJOR 2 MINOR (stale comment/doc); kassandra final → CLEAN, LOW N-7 (Phil: fix now); ci-gate cycle 4 → 2699 tests, 38 failures (LiveView/LogStore flakes + MediaUploadVerbTest rate-limit order interaction, not reproducible with seed 536243 alongside our tests) → cycle 5
+# [refresh-worker-and-retry-semantics] 2026-10-07T17:48Z dev-story → done (cycle 4): plug answers every soft-revoked AT with soft_logout (no delete, window removed), worker GREATEST + candidates cap filter; 7 tests red→green incl. active-attacker
+# [refresh-worker-and-retry-semantics] 2026-10-07T17:34Z code-review (cycle 3) → 0 MAJOR 2 MINOR; kassandra delta → CLEAN, F-2 PARTIAL (N-1 MEDIUM active attacker) → cycle 4: plug answers every soft-revoked AT with soft_logout (no delete), worker cap strictly extending + candidates filter; CI cycle3 aborted (obsolete)
+# [refresh-worker-and-retry-semantics] 2026-10-07T17:27Z dev-story → done (cycle 3): F-1 worker cap LEAST(created_at+TTL), F-2 in-flight window 30s then reuse=device delete, F-3 reuse bounded; M-1/M-2/I-A; 9 new tests (6 red→green)
+# [refresh-worker-and-retry-semantics] 2026-10-07T17:05Z security-review → Kassandra CLEAN (0 CRIT/HIGH, 2 MEDIUM F-1 worker unbounded extension, F-2 stolen pending RT takeover; 1 LOW F-3 reuse detection unbounded in time); Phil decided: fix F-1, F-2, F-3 → cycle 3. ci-gate (cycle 2) PASS: 2687 tests, 28 failures (baseline 33), none related
+# [refresh-worker-and-retry-semantics] 2026-10-07T14:24Z code-review (cycle 2) → 0 MAJOR, 2 MINOR (stale test comments, polling filter) → comment/test-only fix; security-review started in parallel
+# [refresh-worker-and-retry-semantics] 2026-10-07T14:22Z dev-story → done (cycle 2): pending/consumed decided by grace_until IS NULL (no NOW() compare), two-connection race test red→green, docs fixed
+# [refresh-worker-and-retry-semantics] 2026-10-07T14:10Z code-review (cycle 1) → 0 MAJOR, 3 MINOR (M1' NOW()=txn start makes M1 fix incomplete, M2' stale doc table, M3' cleanup_expired doc) → cycle 2
+# [refresh-worker-and-retry-semantics] 2026-10-07T14:04Z ci-gate (cycle 1) → PASS for story tests: 2686 tests, 32 failures (baseline 33), none session/refresh related; first attempt aborted by docker 'No such container' infra error
+# [refresh-worker-and-retry-semantics] 2026-10-07T13:49Z dev-story → done (cycle 1): M1 atomic replay check, M2 503 on retry exhaustion, M3 OIDC RT preserved, M4 docs, M5 get_by_refresh_token removed; 3 new tests red→green
+# [refresh-worker-and-retry-semantics] 2026-10-07T13:37Z code-review → 0 MAJOR, 5 MINOR (M1 TOCTOU replay, M2 503 on retry exhaustion, M3 OIDC RT loss, M4 stale docs, M5 dead code) → cycle 1
+# [refresh-worker-and-retry-semantics] 2026-10-07T13:35Z ci-gate → PASS for story tests (2683 tests, +51 new all green); 33 failures = same count as baseline, 5/33 names differ, all unrelated admin LiveView flakes
+# [refresh-worker-and-retry-semantics] 2026-10-07T13:20Z dev-story → done (cycle 0), targeted suites 110/110 + 647/647 green, no migration
+# [refresh-worker-and-retry-semantics] 2026-10-07T13:08Z test-review → CLEAN (0 MAJOR, 8 MINOR handed to dev)
+# [refresh-worker-and-retry-semantics] 2026-10-07T13:06Z atdd → 28 failing tests (refresh_semantics_test.exs 46 tests; refresh_worker_test.exs AC1 tightened)
+# [refresh-worker-and-retry-semantics] 2026-10-07T12:57Z baseline-integration → ⚠ FAILING pre-existing (2632 tests, 33 failures; dex host port overridden to 15556 locally)
+# [refresh-worker-and-retry-semantics] 2026-10-07T12:44Z oracle-gate → spec context captured; AC4 soft_logout corrected, AC7 (5xx on transient /refresh) added
+# [refresh-worker-and-retry-semantics] 2026-10-07T12:42Z pipeline started (--bug, create-story skipped)
+story: null
+current_step: null
+completed: []
+cycle_count: 0
+blocked_reason: null
+last_updated: "2026-10-08T09:59Z"

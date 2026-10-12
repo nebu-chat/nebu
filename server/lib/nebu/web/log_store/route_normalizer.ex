@@ -44,6 +44,8 @@ defmodule Nebu.Web.LogStore.RouteNormalizer do
     * `.../account_data/{type}` (both `/user/{userId}/account_data/{type}`
       and `/user/{userId}/rooms/{roomId}/account_data/{type}`) — `type` (1
       after `"account_data"`)
+    * `.../rooms/{roomId}/tags/{tag}` — the room-tag name (1 after `"tags"`):
+      user-chosen content (`u.<anything>`), so it must not reach the request log
 
   `eventType` values (e.g. `m.room.message`) are not secret/sensitive, but
   are replaced anyway for consistent endpoint-level grouping — matching the
@@ -72,6 +74,7 @@ defmodule Nebu.Web.LogStore.RouteNormalizer do
   @txn_id_placeholder ":txn_id"
   @device_id_placeholder ":device_id"
   @account_data_type_placeholder ":type"
+  @tag_placeholder ":tag"
   @opaque_id_placeholder ":id"
 
   # anchor literal segment => %{offset => placeholder}. `offset` is counted
@@ -82,7 +85,8 @@ defmodule Nebu.Web.LogStore.RouteNormalizer do
     "state" => %{1 => @event_type_placeholder, 2 => @state_key_placeholder},
     "redact" => %{2 => @txn_id_placeholder},
     "devices" => %{1 => @device_id_placeholder},
-    "account_data" => %{1 => @account_data_type_placeholder}
+    "account_data" => %{1 => @account_data_type_placeholder},
+    "tags" => %{1 => @tag_placeholder}
   }
 
   # A conservative, ADDITIONAL heuristic for opaque hex/UUID-shaped segments
@@ -118,29 +122,58 @@ defmodule Nebu.Web.LogStore.RouteNormalizer do
     |> Enum.join("/")
   end
 
-  # Builds a `%{segment_index => placeholder}` map for every `@anchor_rules`
-  # entry whose literal anchor segment (e.g. `"state"`, `"send"`, `"devices"`)
-  # is present in `segments`. Structural, position-based detection — each
-  # matched segment is replaced UNCONDITIONALLY, regardless of shape/content
-  # (Oracle gate; same rule already applied to `state_key`, generalized here
-  # to `event_type`/`txn_id`/`device_id`/account-data `type`, none of which
-  # carry a Matrix sigil and are realistically NOT hex/UUID-shaped, so the
-  # generic `@opaque_id_regex` fallback below would otherwise leave them
-  # leaking verbatim — code-review M2).
+  # Builds a `%{raw_segment_index => placeholder}` map for every `@anchor_rules`
+  # entry whose literal anchor segment (e.g. `"state"`, `"send"`, `"tags"`) is
+  # present. Structural, position-based detection — each matched segment is
+  # replaced UNCONDITIONALLY, regardless of shape/content (Oracle gate; same
+  # rule already applied to `state_key`, generalized to `event_type`/`txn_id`/
+  # `device_id`/account-data `type`/room `tag`, none of which carry a Matrix
+  # sigil — code-review M2).
+  #
+  # Router-identical segmentation (room-tags review): `Plug.Router` matches on
+  # `path_info`, i.e. it DROPS empty segments (`a//b` == `a/b`) and
+  # percent-decodes each segment (`%74ags` == `tags`). The anchor and offsets
+  # are therefore computed on that same view (empty segments removed, each
+  # segment decoded with the never-raising `safe_decode/1`), so a path the
+  # router accepts cannot dodge a placeholder via `//` or percent-encoding.
+  # The returned indices refer back to the RAW split list, so the output keeps
+  # the input's structure (empty segments / trailing slash are preserved; only
+  # the matched segments are replaced). EVERY occurrence of an anchor applies
+  # (over-redaction of a literal anchor-named segment is harmless).
   defp special_index_map(segments) do
-    segment_count = length(segments)
+    # [{raw_index, decoded_segment}] of the non-empty segments, in order.
+    routed =
+      segments
+      |> Enum.with_index()
+      |> Enum.reject(fn {segment, _idx} -> segment == "" end)
+      |> Enum.map(fn {segment, idx} -> {idx, safe_decode(segment)} end)
 
-    Enum.reduce(@anchor_rules, %{}, fn {anchor, offsets}, acc ->
-      case Enum.find_index(segments, &(&1 == anchor)) do
-        nil ->
+    # Trailing empty raw segments (trailing slash) directly after the last
+    # routed segment still count as target slots: `PUT .../state/m.room.topic/`
+    # is the legal EMPTY-state_key request and must keep yielding
+    # `.../state/:event_type/:state_key` (not a second route_template variant
+    # for the same endpoint). They are targets only, never anchors.
+    last_raw_idx = routed |> List.last({-1, nil}) |> elem(0)
+    trailing_raw = Enum.to_list((last_raw_idx + 1)..(length(segments) - 1)//1)
+
+    raw_by_pos =
+      (Enum.map(routed, &elem(&1, 0)) ++ trailing_raw) |> List.to_tuple()
+
+    slot_count = tuple_size(raw_by_pos)
+
+    routed
+    |> Enum.with_index()
+    |> Enum.reduce(%{}, fn {{_raw_idx, decoded}, pos}, acc ->
+      case Map.fetch(@anchor_rules, decoded) do
+        :error ->
           acc
 
-        anchor_idx ->
+        {:ok, offsets} ->
           Enum.reduce(offsets, acc, fn {offset, placeholder}, acc2 ->
-            idx = anchor_idx + offset
+            target = pos + offset
 
-            if idx < segment_count do
-              Map.put(acc2, idx, placeholder)
+            if target < slot_count do
+              Map.put(acc2, elem(raw_by_pos, target), placeholder)
             else
               acc2
             end

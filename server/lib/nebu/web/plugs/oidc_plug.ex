@@ -66,10 +66,11 @@ defmodule Nebu.Web.Plugs.OidcPlug do
 
   # ── Opaque Nebu session token path (oidc-session-refresh) ──────────────────
   # Mirrors the Go middleware WithOpaqueSessionCheck:
-  #   * not found / revoked → 401 M_UNKNOWN_TOKEN (no soft_logout)
+  #   * not found           → 401 M_UNKNOWN_TOKEN (no soft_logout)
+  #   * soft-revoked        → 401 M_UNKNOWN_TOKEN + soft_logout: true (never deletes, N-1)
   #   * expired             → 401 M_UNKNOWN_TOKEN + soft_logout: true (AC5, spec SHOULD)
-  #   * valid               → assign current_user/claims; close any open grace
-  #                           window the first time the AT is used (AC4)
+  #   * valid               → assign current_user/claims; consume the pending old
+  #                           RT(s) the first time the new AT is used (AC4)
   defp call_opaque(conn, token) do
     alias Nebu.Matrix.Session.MatrixSessionStore, as: Store
 
@@ -77,10 +78,16 @@ defmodule Nebu.Web.Plugs.OidcPlug do
       :error ->
         deny(conn, "M_UNKNOWN_TOKEN", "Invalid or unknown token")
 
-      {:ok, %{revoked_at: revoked}} when not is_nil(revoked) ->
+      {:ok, %{revoked_at: %DateTime{}}} ->
         # A hard-revoked AT (logout) is gone (DELETE); a soft-revoked AT (the old
-        # half of a rotation) must not authenticate requests either.
-        deny(conn, "M_UNKNOWN_TOKEN", "Token has been logged out")
+        # half of a rotation, pending OR already consumed) must not authenticate
+        # requests. It is ALWAYS answered with soft_logout:true and NEVER deletes
+        # anything here (N-1): a legitimate client with an in-flight request just
+        # refreshes. Reuse detection happens only on the (bounded) /refresh path:
+        # a victim of an active takeover refreshes with its consumed RT -> reuse ->
+        # device destroyed (visible end of the takeover); a victim of a passive
+        # takeover recovers with its still-pending RT.
+        deny_soft_logout(conn, "M_UNKNOWN_TOKEN", "Token has been superseded")
 
       {:ok, sess} ->
         cond do
@@ -100,8 +107,8 @@ defmodule Nebu.Web.Plugs.OidcPlug do
             deny_soft_logout(conn, "M_UNKNOWN_TOKEN", "Account has been deactivated")
 
           true ->
-            # Close the old RT's grace window the first time the new AT is used (AC4).
-            # Gated on an open-grace check so the common path takes no extra write.
+            # Consume the pending old RT the first time the new AT is used (AC4).
+            # Gated on a pending-sibling check so the common path takes no extra write.
             if Store.has_open_grace_window?(token) do
               _ = Store.mark_access_token_used(token)
             end

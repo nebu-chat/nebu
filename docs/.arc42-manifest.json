@@ -1,6 +1,6 @@
 {
   "generated_at": "2026-10-07T16:45:00Z",
-  "generator": "bmad-maintain-arc42 skill (delta update for bugfix: unsigned-replaces-state \u2014 Matrix CS API v1.19 unsigned.replaces_state field on state events; new Core.Event.is_state_event proto field; SECURITY FIX: pre-existing HIGH state-event-forgery privilege escalation in Room.Server.do_send_event/7 (any joined member could forge state events via PUT /send/{eventType}), now closed by nil-ness discrimination + state_key NULL backfill migration 000036; batched fetch_replaces_state/1 query design (UNNEST+LATERAL, O(1) per sync response), extended to /messages /event /relations endpoints; known handoff items F-1/F-2/F-3/F-4/F-6 tracked non-blocking per security review)",
+  "generator": "bmad-maintain-arc42 skill (delta update for bugfix: unsigned-replaces-state — Matrix CS API v1.19 unsigned.replaces_state field on state events; new Core.Event.is_state_event proto field; SECURITY FIX: pre-existing HIGH state-event-forgery privilege escalation in Room.Server.do_send_event/7 (any joined member could forge state events via PUT /send/{eventType}), now closed by nil-ness discrimination + state_key NULL backfill migration 000036; batched fetch_replaces_state/1 query design (UNNEST+LATERAL, O(1) per sync response), extended to /messages /event /relations endpoints; known handoff items F-1/F-2/F-3/F-4/F-6 tracked non-blocking per security review)",
   "source_artifacts": [
     "_bmad-output/planning-artifacts/architecture.md",
     "_bmad-output/planning-artifacts/prd.md",
@@ -90,26 +90,26 @@
     },
     "docs/architecture/05-building-blocks.md": {
       "editable": false,
-      "generated_at": "2026-10-07T16:45:00Z",
-      "source": "docs/stories/bugfix/fix-matrix-client-v1-media-download-thumbnail-routes/fix-matrix-client-v1-media-download-thumbnail-routes.md (prior delta: media-security-admin-control epic + sync-state-events-missing-fields) + mutual-rooms-MSC2666 endpoint story (EventDispatcher.Server.get_mutual_rooms/4, PageToken module) + bugfix-unsigned-replaces-state story (attach_replaces_state_to_state_events/2, fetch_replaces_state/1, Core.Event.is_state_event, state-event-forgery fix in Room.Server.do_send_event/7, migration 000036)",
+      "generated_at": "2026-10-08T15:08:13Z",
+      "source": "docs/stories/matrix-spec-gaps/room-tags.md (prior delta: docs/stories/matrix-spec-gaps/room-account-data-and-read-markers.md (prior delta: docs/stories/bugfix/fix-matrix-client-v1-media-download-thumbnail-routes/fix-matrix-client-v1-media-download-thumbnail-routes.md (prior delta: docs/stories/media-securi)",
       "arc42_section": "05 Building Block View"
     },
     "docs/architecture/06-runtime.md": {
       "editable": false,
-      "generated_at": "2026-10-07T16:45:00Z",
-      "source": "_bmad-output/planning-artifacts/architecture.md (prior delta) + bugfix-unsigned-replaces-state story (new Scenario 3-unsigned-replaces-state: batched query design, security fix details, migration 000036 backfill rationale)",
+      "generated_at": "2026-09-01T07:13:16Z",
+      "source": "_bmad-output/planning-artifacts/architecture.md",
       "arc42_section": "06 Runtime View"
     },
     "docs/architecture/07-deployment.md": {
       "editable": false,
-      "generated_at": "2026-10-04T07:52:31Z",
+      "generated_at": "2026-09-01T07:13:16Z",
       "source": "_bmad-output/planning-artifacts/architecture.md",
       "arc42_section": "07 Deployment View"
     },
     "docs/architecture/08-concepts.md": {
       "editable": false,
-      "generated_at": "2026-09-02T14:56:47Z",
-      "source": "docs/stories/enhanced-logging/war-room-dedicated-page.md",
+      "generated_at": "2026-10-08T15:08:13Z",
+      "source": "docs/stories/matrix-spec-gaps/room-tags.md (prior delta: docs/stories/matrix-spec-gaps/room-account-data-and-read-markers.md (prior delta: docs/stories/enhanced-logging/war-room-dedicated-page.md))",
       "arc42_section": "08 Cross-cutting Concepts"
     },
     "docs/architecture/09-decisions.md": {
@@ -216,8 +216,8 @@
     },
     "docs/matrix-api-scope.md": {
       "editable": false,
-      "generated_at": "2026-10-05T14:09:31Z",
-      "source": "server/lib/nebu/web/router.ex, server/lib/nebu/web/router/protected.ex (bugfix-fix-matrix-client-v1-media-download-thumbnail-routes + mutual-rooms-MSC2666 endpoint story)",
+      "generated_at": "2026-10-08T15:08:13Z",
+      "source": "docs/stories/matrix-spec-gaps/room-tags.md (prior delta: docs/stories/matrix-spec-gaps/room-account-data-and-read-markers.md (prior delta: server/lib/nebu/web/router.ex, server/lib/nebu/web/router/client_v1_media.ex (docs/stories/bugfix/fix-matrix-client-v1-media-download-thumbnail-routes/fix-matrix-client)",
       "arc42_section": "Matrix API Scope"
     },
     "docs/roadmap.md": {

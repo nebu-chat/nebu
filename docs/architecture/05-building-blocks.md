@@ -214,14 +214,22 @@ server/lib/nebu/
 │   │                   PostgreSQL source of truth — Story s2-device-lifecycle-at-login);
 │   │                   Sweeper (hourly best-effort eviction of expired jwt_device_bindings +
 │   │                   uia_sessions rows — Story s3, supervised under Nebu.Repo's children);
-│   │                   RefreshWorker (periodic per-row proactive redemption of matrix_sessions'
-│   │                   stored upstream OIDC refresh token shortly before expires_at, so legacy
-│   │                   Element Web SSO-token-login clients that never call POST /refresh stay
-│   │                   logged in — interval/lookahead configurable via
+│   │                   RefreshWorker (periodic per-row proactive revalidation of matrix_sessions'
+│   │                   stored upstream OIDC refresh token shortly before expires_at; it addresses
+│   │                   rows by their SHA-256 access_token_hash, since the table stores only token
+│   │                   hashes, never plaintext tokens; it extends the
+│   │                   session IN PLACE (same access/refresh token, expires_at only ever grows, capped
+│   │                   at created_at + session TTL) and never rotates tokens the client must know, so
+│   │                   legacy clients that never call POST /refresh stay logged in and clients that do
+│   │                   refresh are not invalidated — interval/lookahead configurable via
 │   │                   NEBU_MATRIX_REFRESH_WORKER_INTERVAL_MS /
-│   │                   NEBU_MATRIX_REFRESH_WORKER_LOOKAHEAD_SECONDS, defaults 5min/1h — Story
-│   │                   server-paced-session-refresh/background-session-refresh-worker,
-│   │                   supervised alongside Sweeper under Nebu.Repo's children)
+│   │                   NEBU_MATRIX_REFRESH_WORKER_LOOKAHEAD_SECONDS, defaults 5min/1h — Stories
+│   │                   server-paced-session-refresh/background-session-refresh-worker and
+│   │                   matrix-session-refresh-fixes/refresh-worker-and-retry-semantics, supervised
+│   │                   alongside Sweeper under Nebu.Repo's children); RefreshErrors (single
+│   │                   transient-vs-confirmed classification of IdP/DB errors for the worker and
+│   │                   POST /refresh: transient → 503 + Retry-After, session untouched; confirmed →
+│   │                   401 and device session deleted)
 │   ├── presence/     ← Presence status (online/offline/unavailable)
 │   ├── signature/    ← Ed25519 signing (:crypto eddsa), Nebu.EventId.generate/1 (SHA-256 content
 │   │                   hash), RFC 8785 canonical JSON
@@ -281,6 +289,9 @@ server/lib/nebu/
 ├── media/            ← Nebu.Media.* — media gateway + security enforcement, in-process behind the OIDC pipeline
 │   ├── http/         ← Matrix /_matrix/media/v3/* + /_matrix/client/v1/media/* (upload, download,
 │   │                   download/{fileName}, thumbnail, config, preview_url); lifecycle-gated by state machine.
+│   │                   Download serves the stored Content-Type unchanged (inline/attachment per the Matrix spec inline
+│   │                   list, active-content types neutralized to octet-stream), delivers the upload filename in
+│   │                   Content-Disposition, and thumbnails only jpeg/png/apng/gif/webp (else 400) — see 08-concepts.md.
 │   │                   Story 2d extends `download` (NOT `thumbnail` — out of scope) with an opt-in
 │   │                   `?timeout_ms=N` download-stall wait for `:quarantined`/`:scanning` media, delegating
 │   │                   to `Nebu.Media.DownloadStall` before falling through to the unchanged 1c response
@@ -1707,6 +1718,28 @@ server/lib/nebu/
 > existing device ID is rejected (`400 M_INVALID_PARAM`) before any write. All material is opaque
 > — this is an E2EE-readiness directory orthogonal to encryption; `m.room.encryption` is still
 > rejected (`403 M_FORBIDDEN`, ADR-011).
+
+> **Room-scoped account data (story `room-account-data-and-read-markers`):** migration 000039 adds
+> `user_room_account_data` keyed `(user_id, room_id, type)` (verbatim TEXT `content_json`, monotonic
+> `stream_pos` from a sequence, FKs to `users`/`rooms` with `ON DELETE CASCADE`).
+> `Nebu.Matrix.RoomAccountDataStore` (plain module, inline SQL, ADR-018/020) backs `PUT/GET
+> /user/{userId}/rooms/{roomId}/account_data/{type}` and `POST /rooms/{roomId}/read_markers`
+> (`m.fully_read`); both live in `Nebu.Web.Router.Protected`. `/sync` (`do_sync/1`) reads the position
+> from the suffix of the `since` token (`<core token>.<pos>`), fills `rooms.join.<id>.account_data.events`
+> via `Nebu.Matrix.Http.sync_response/3`, adds account-data-only rooms and appends the new position to
+> `next_batch`. `Nebu.Web.Plugs.JsonBody` + `Nebu.Web.Plugs.RawBodyReader` keep the raw body for
+> byte-exact storage and map `RequestTooLargeError` to 413 for account-data routes;
+> `EventDispatcher.Server.ensure_room_member!/2` is shared with `send_receipt/2`. GDPR erasure deletes the
+> rows in `UserDeletion`. Design: `docs/architecture/08-concepts.md` (Account Data).
+
+> **Room tags (story `room-tags`):** `GET/PUT/DELETE /user/{userId}/rooms/{roomId}/tags[/{tag}]` in
+> `Nebu.Web.Router.Protected` store tags in the room account data event `m.tag` of
+> `Nebu.Matrix.RoomAccountDataStore` (no new table, no migration). Tag writes use the new atomic
+> `RoomAccountDataStore.update/4` (read-modify-write in one transaction under the per-user advisory lock, caps
+> and `notify_sync` as in `put/4`). `Nebu.Web.Plugs.RawBodyReader` gains `room_tags_shape?/1`,
+> `opaque_content_shape?/1` and `opaque_content_put?/1` (shared by `JsonBody` and `RequestLogger`, router-identical
+> segment normalization). /sync delivery and GDPR erasure are inherited from room account data. Design:
+> `docs/architecture/08-concepts.md` (Room tags).
 
 > **Durable global account data (story `account-data-durability`):** migration 000011 adds
 > `account_data`, keyed by `(user_id, type)`, storing the account-data value verbatim in a TEXT

@@ -259,6 +259,7 @@ defmodule Nebu.Admin.LogsLive.TraceMapTest do
   # ══════════════════════════════════════════════════════════════════════
 
   describe "AC1: /admin/logs/trace-map mounts the new LiveView with the correct active-nav" do
+    @describetag :no_repo
     test "mounting succeeds and highlights the Trace Map child nav item, not Live Stream" do
       {:ok, _view, html} = mount_trace_map()
       doc = parsed(html)
@@ -315,6 +316,7 @@ defmodule Nebu.Admin.LogsLive.TraceMapTest do
   # ══════════════════════════════════════════════════════════════════════
 
   describe "AC2: radial SVG map — nebu is always present, domains/satellites appear as observed" do
+    @describetag :no_repo
     test "on mount with no traffic yet, only the nebu node is rendered, at the spec's viewBox" do
       {:ok, _view, html} = mount_trace_map()
       doc = parsed(html)
@@ -428,6 +430,7 @@ defmodule Nebu.Admin.LogsLive.TraceMapTest do
   # ══════════════════════════════════════════════════════════════════════
 
   describe "AC4: visual states — worst-child propagation from satellite to domain to nebu" do
+    @describetag :no_repo
     # NOTE on scope (revised by enhanced-logging/trace-map-node-controls): the
     # story's own "Known Gaps (Out of Scope, Follow-up Story)" section
     # deferred "Long-polling endpoints off by default" / "Temporary capture"
@@ -492,6 +495,7 @@ defmodule Nebu.Admin.LogsLive.TraceMapTest do
   end
 
   describe "AC4/AC5: selection is orthogonal to health status" do
+    @describetag :no_repo
     test "selecting a healthy node marks it selected without changing its health status" do
       {:ok, view, _html} = mount_trace_map()
       broadcast_entry(route_template: "/admin/users", level: "info")
@@ -516,6 +520,7 @@ defmodule Nebu.Admin.LogsLive.TraceMapTest do
   # ══════════════════════════════════════════════════════════════════════
 
   describe "AC5: clicking a satellite toggles it as a stream filter and updates the URL" do
+    @describetag :no_repo
     test "clicking once selects the node, adds a chip, and patches the URL" do
       {:ok, view, _html} = mount_trace_map()
       broadcast_entry(route_template: "/admin/users", level: "info")
@@ -555,6 +560,7 @@ defmodule Nebu.Admin.LogsLive.TraceMapTest do
   end
 
   describe "AC5: multi-select is OR-within-the-endpoint-dimension" do
+    @describetag :no_repo
     test "selecting two different satellites shows two chips, both aria-pressed=true" do
       {:ok, view, _html} = mount_trace_map()
       broadcast_entry(route_template: "/admin/users", level: "info")
@@ -578,6 +584,7 @@ defmodule Nebu.Admin.LogsLive.TraceMapTest do
   end
 
   describe "AC5: clicking nebu clears every active filter" do
+    @describetag :no_repo
     test "clear all via the nebu node removes all selections and chips" do
       {:ok, view, _html} = mount_trace_map()
       broadcast_entry(route_template: "/admin/users", level: "info")
@@ -618,6 +625,7 @@ defmodule Nebu.Admin.LogsLive.TraceMapTest do
   end
 
   describe "AC5: a filter chip's remove control removes just that one filter" do
+    @describetag :no_repo
     test "removing one of two chips leaves the other active" do
       {:ok, view, _html} = mount_trace_map()
       broadcast_entry(route_template: "/admin/users", level: "info")
@@ -647,6 +655,7 @@ defmodule Nebu.Admin.LogsLive.TraceMapTest do
   end
 
   describe "AC5: bookmarkable URLs — handle_params/3 seeds @active_filters from the query string" do
+    @describetag :no_repo
     test "a bracket-array ?endpoint[]=...&endpoint[]=... URL pre-selects both nodes on mount" do
       {:ok, _view, html} =
         mount_trace_map("endpoint%5B%5D=%2Fadmin%2Fusers&endpoint%5B%5D=%2Fadmin%2Frooms")
@@ -674,6 +683,7 @@ defmodule Nebu.Admin.LogsLive.TraceMapTest do
   end
 
   describe "AC5: domain convenience — clicking a domain filters to that domain" do
+    @describetag :no_repo
     test "clicking a domain node selects it and its chip appears using the DOMAIN key" do
       {:ok, view, _html} = mount_trace_map()
       broadcast_entry(route_template: "/admin/users", level: "info")
@@ -743,6 +753,7 @@ defmodule Nebu.Admin.LogsLive.TraceMapTest do
   # ══════════════════════════════════════════════════════════════════════
 
   describe "AC6: war-room banner — hidden by default (no active session, no Nebu.Repo)" do
+    @describetag :no_repo
     # UX gate V1 (dev cycle 2): the original assertions pinned
     # role="status"/aria-live="polite" ON the banner — an aria-live misuse,
     # because the banner contains the per-second-ticking elapsed clock
@@ -805,6 +816,7 @@ defmodule Nebu.Admin.LogsLive.TraceMapTest do
   # ══════════════════════════════════════════════════════════════════════
 
   describe "AC7: every node carries the data a hover/focus tooltip needs, with no sensitive content" do
+    @describetag :no_repo
     test "a satellite node's tooltip data includes name, route, status, and counts" do
       {:ok, view, _html} = mount_trace_map()
       broadcast_entry(route_template: "/admin/users", level: "warning")
@@ -833,6 +845,7 @@ defmodule Nebu.Admin.LogsLive.TraceMapTest do
   # ══════════════════════════════════════════════════════════════════════
 
   describe "AC8: inspector panel — empty state, then populated once a node is clicked" do
+    @describetag :no_repo
     test "on mount, the inspector shows its empty-state copy" do
       {:ok, _view, html} = mount_trace_map()
       doc = parsed(html)
@@ -886,6 +899,7 @@ defmodule Nebu.Admin.LogsLive.TraceMapTest do
   end
 
   describe "AC8: legend — always visible, exactly 6 states" do
+    @describetag :no_repo
     test "the legend renders 6 rows even before any node has been observed" do
       {:ok, _view, html} = mount_trace_map()
       doc = parsed(html)
@@ -903,6 +917,7 @@ defmodule Nebu.Admin.LogsLive.TraceMapTest do
   # ══════════════════════════════════════════════════════════════════════
 
   describe "AC9: level filter pills default to all-active" do
+    @describetag :no_repo
     test "DEBUG/INFO/WARN/ERROR are all aria-pressed=true on mount" do
       {:ok, _view, html} = mount_trace_map()
       doc = parsed(html)
@@ -916,6 +931,7 @@ defmodule Nebu.Admin.LogsLive.TraceMapTest do
   end
 
   describe "AC9: leitstand shortcut — click one while all active isolates it; click it again restores all" do
+    @describetag :no_repo
     test "clicking INFO while all 4 are active leaves ONLY INFO active" do
       {:ok, view, _html} = mount_trace_map()
 
@@ -982,6 +998,7 @@ defmodule Nebu.Admin.LogsLive.TraceMapTest do
   end
 
   describe "AC9: stream content is filtered by level AND by the active endpoint selection" do
+    @describetag :no_repo
     # dev-story correction: the original step clicked the WARN pill while all
     # 4 levels were active — which, per AC9's leitstand shortcut (pinned by
     # this file's OWN "AC9: leitstand shortcut" describe block above), leaves
@@ -1029,6 +1046,7 @@ defmodule Nebu.Admin.LogsLive.TraceMapTest do
   end
 
   describe "AC9: the resizer's static, accessible markup contract" do
+    @describetag :no_repo
     test "role=separator, aria-orientation=horizontal, tabindex=0, has a label naming the resize action" do
       {:ok, _view, html} = mount_trace_map()
       resizer = find(parsed(html), ~s([data-testid="trace-map-resizer"]))
@@ -1053,6 +1071,7 @@ defmodule Nebu.Admin.LogsLive.TraceMapTest do
   # ══════════════════════════════════════════════════════════════════════
 
   describe "AC10: every node is a focusable, labeled, toggle-state-exposing element" do
+    @describetag :no_repo
     test "a satellite node's aria-label mentions its route, status, and counts" do
       {:ok, view, _html} = mount_trace_map()
       broadcast_entry(route_template: "/admin/users", level: "error")
@@ -1080,6 +1099,7 @@ defmodule Nebu.Admin.LogsLive.TraceMapTest do
   end
 
   describe "AC10: a live region announces newly-detected errors" do
+    @describetag :no_repo
     test "the announcer region is present with role=status/aria-live=polite" do
       {:ok, _view, html} = mount_trace_map()
       announcer = find(parsed(html), ~s([data-testid="trace-map-announcer"]))
@@ -1109,6 +1129,7 @@ defmodule Nebu.Admin.LogsLive.TraceMapTest do
   end
 
   describe "AC10: DOM order places nebu before domains before their satellites (natural Tab order)" do
+    @describetag :no_repo
     test "nebu -> domain -> its satellites, in document order" do
       {:ok, view, _html} = mount_trace_map()
       broadcast_entry(route_template: "/admin/users", level: "info")
@@ -1133,6 +1154,7 @@ defmodule Nebu.Admin.LogsLive.TraceMapTest do
   # ══════════════════════════════════════════════════════════════════════
 
   describe "AC11: no inline <script> tags or inline event-handler attributes anywhere on the page" do
+    @describetag :no_repo
     test "the rendered page contains no INLINE <script> tag (external, src=-bearing tags are fine) and no on*= inline handlers" do
       {:ok, _view, html} = mount_trace_map()
 
@@ -1155,6 +1177,7 @@ defmodule Nebu.Admin.LogsLive.TraceMapTest do
   # ══════════════════════════════════════════════════════════════════════
 
   describe "code-review M1: single-segment routes (their own domain) must not double-count" do
+    @describetag :no_repo
     # `TraceMapTree.domain_for_endpoint("/health") == "/health"` — the node
     # key list built at ingest ([route, domain, "nebu"]) therefore contained
     # "/health" TWICE, and every event recorded twice into that node's
@@ -1207,6 +1230,7 @@ defmodule Nebu.Admin.LogsLive.TraceMapTest do
   end
 
   describe "code-review m1: duplicate endpoint[] values in a crafted/bookmarked URL are deduplicated" do
+    @describetag :no_repo
     # Without Enum.uniq/1 in normalize_selected/1, ?endpoint[]=X&endpoint[]=X
     # seeded @selected with X twice — two identical chips, and toggle_node's
     # List.delete/2 removed only ONE occurrence per click.
@@ -1299,6 +1323,7 @@ defmodule Nebu.Admin.LogsLive.TraceMapTest do
   # ══════════════════════════════════════════════════════════════════════
 
   describe "AC14: the Logs submenu's \"Configuration\" child is disambiguated (Option A: rename)" do
+    @describetag :no_repo
     test "the logs-config nav child's label is no longer the bare word \"Configuration\"" do
       {:ok, _view, html} = mount_trace_map()
       doc = parsed(html)

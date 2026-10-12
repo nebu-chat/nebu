@@ -171,6 +171,46 @@ defmodule Nebu.Web.Plugs.RequestLogger.PayloadRedactorTest do
       refute String.contains?(redacted, "syt_alice_from_url_abc123"),
              "raw access_token value must not survive redaction of a query string"
     end
+
+    test "a raw query string containing filename= is redacted (upload ?filename= may be personal data)" do
+      for qs <- ["filename=Anna-Schmidt-Kuendigung.pdf&x=1", "x=1&filename=Anna%20Schmidt.pdf"] do
+        redacted = PayloadRedactor.redact_payload(qs)
+
+        refute String.contains?(redacted, "Schmidt"), "filename value leaked: #{inspect(redacted)}"
+        assert String.contains?(redacted, "x=1")
+      end
+    end
+  end
+
+  describe "filename query param with percent-encoded NAME (review MIN-1)" do
+    test "encoded key variants are masked; plain/encoded values, multi-params" do
+      for qs <- [
+            "fil%65name=Anna-Schmidt.pdf",
+            "x=1&fil%65name=Anna-Schmidt.pdf&y=2",
+            "?%66ilename=Anna-Schmidt.pdf",
+            "filename=Anna%20Schmidt.pdf&y=2",
+            "fil%65name=Anna%20Schmidt.pdf",
+            "x=1&filename=Anna-Schmidt.pdf&fil%65name=Bob-Schmidt.pdf"
+          ] do
+        redacted = PayloadRedactor.redact_payload(qs)
+        refute String.contains?(redacted, "Schmidt"), "leaked: #{inspect(redacted)}"
+      end
+
+      redacted = PayloadRedactor.redact_payload("x=1&fil%65name=Anna-Schmidt.pdf&y=2")
+      assert redacted =~ "x=1"
+      assert redacted =~ "y=2"
+    end
+
+    test "x-filename is masked (substring pass) and unrelated encoded keys are untouched" do
+      refute PayloadRedactor.redact_payload("x-filename=Anna-Schmidt.pdf") =~ "Schmidt"
+      assert PayloadRedactor.redact_payload("na%6De=keepme&z=1") == "na%6De=keepme&z=1"
+    end
+
+    test "invalid percent-encoding does not crash" do
+      assert is_binary(PayloadRedactor.redact_payload("bad%ZZkey=v&fil%65name=Anna-Schmidt.pdf"))
+      refute PayloadRedactor.redact_payload("bad%ZZkey=v&fil%65name=Anna-Schmidt.pdf") =~ "Schmidt"
+      assert PayloadRedactor.redact_payload("a%=b&%=c") == "a%=b&%=c"
+    end
   end
 
   # ══════════════════════════════════════════════════════════════════════════

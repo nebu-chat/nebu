@@ -1,0 +1,35 @@
+# Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents.
+# Do not edit manually during an active pipeline run.
+# last_updated: 2026-10-08
+# [room-tags] 2026-10-08T15:08Z committed ✓ (ATDD+3 dev cycles, code-review 0 MAJOR, Kassandra CLEAN (tag names redacted in request log), full isolated CI 2808 tests/31 failures all known flaky)
+# [room-tags] 2026-10-08T14:46Z dev-story → done (cycle 2): normalizer restored for empty state_key (7 tests red→green, 22-path reference comparison identical except intended :tag); 239/240 narrow, 2230/2265 broad (34 known flaky + OidcPlugTest denylist on reused DB)
+# [room-tags] 2026-10-08T14:24Z review (cycle 1, normalizer-focused) → 0 MAJOR 1 MINOR (empty state_key + trailing slash yields a second route_template variant) → cycle 2 (final); CI aborted (obsolete)
+# [room-tags] 2026-10-08T14:22Z dev-story → done (cycle 1): route_normalizer tags anchor + router-identical segment split (13 tests red→green), flipped leak test, update/4 cap only on growth, dead matcher removed, docs; 486/489 targeted (3 known flaky), 2255/2276 broad (21 known flaky)
+# [room-tags] 2026-10-08T13:50Z code-review (cycle 0) → 0 MAJOR 3 MINOR; kassandra → CLEAN (MEDIUM tag names in request log path/route_template → redact via route_normalizer anchor; LOW normalizer segment split) → cycle 1; CI gate aborted (obsolete)
+# [room-tags] 2026-10-08T13:45Z dev-story → done (cycle 0): update/4 atomic RMW under advisory lock, 3 tag routes + nameless 400, tag-aware request logger matchers, docs; 136/136 targeted, 1489/1492 broad (3 known flaky)
+# [room-tags] 2026-10-08T13:26Z test-review → 2 MAJOR (test-side: %2F contradiction, function-name coupling) + 6 MINOR → dev fixes tests FIRST, then implements
+# [room-tags] 2026-10-08T13:24Z atdd → 56 tests (room_tags_test.exs), 55 red / 1 green (401 guard)
+# [room-tags] 2026-10-08T13:15Z pipeline started (--bug, stacked on bugfix/sync-room-account-data); oracle-gate done upfront; isolated env nebu-tags
+# [room-account-data-and-read-markers] 2026-10-08T13:00Z committed ✓ (ATDD+3 dev cycles, code-review 0 MAJOR in final cycle, Kassandra CLEAN, full isolated CI 2709 tests/27 failures: 26 known flaky + release_test migration list fixed and verified)
+# [room-account-data-and-read-markers] 2026-10-08T12:41Z dev-story → done (cycle 2): shared path matcher (decoded segments, empty dropped), strict global PUT (413/400 M_NOT_JSON/400 M_BAD_JSON), rate-limit test env var, docs; 6 tests red→green; 1427/1433 broad (6 known flaky)
+# [room-account-data-and-read-markers] 2026-10-08T12:21Z code-review (cycle 1) → 0 MAJOR 4 MINOR (matcher vs router decode, global PUT empty/non-JSON body, test env var, docs); kassandra delta → CLEAN (LOW #12 same as M2, #13 same as M1) → cycle 2 (final)
+# [room-account-data-and-read-markers] 2026-10-08T12:17Z dev-story → done (cycle 1): regression fixed (exact path shapes + 413 + no silent {}), total byte cap 4MiB + rate limit 60/min/user, debug-log content suppressed, token position bounded/clamped, read_markers fully_read first + cap-exempt, non-object global body 400; 16/16 hardening (14 red→green), 1423/1426 broad (3 known flaky)
+# [room-account-data-and-read-markers] 2026-10-08T11:54Z code-review (cycle 0) → 1 MAJOR (global PUT >1MB overwrites with {} — regression from over-broad account_data path match) + 5 MINOR; kassandra → CLEAN (3 MEDIUM: same regression, no total byte cap per user, content in DEBUG logs; 3 LOW) → cycle 1; CI gate aborted (obsolete)
+# [room-account-data-and-read-markers] 2026-10-08T11:48Z dev-story → done (cycle 0): migration 000035 user_room_account_data, since-token <core>.<pos>, per-device positions, 78/78 targeted green, 1408/1410 broad (2 known flaky); NOTE migration 000035 also exists on bugfix/token-hashing-matrix-sessions → renumber at merge
+# [room-account-data-and-read-markers] 2026-10-08T11:26Z test-review → 2 MAJOR (deactivation pin, weakened old test) fixed by dev as FIRST step per user-approved flow + 9 MINOR; proceeding
+# [room-account-data-and-read-markers] 2026-10-08T11:23Z atdd → 69 tests, 50 red (room_account_data_test + read_markers_test; matrix_room_view_routes_test adjusted), 19 green regression guards
+# [room-account-data-and-read-markers] 2026-10-08T11:09Z pipeline started (--bug); oracle-gate done upfront (verification of audit finding: feature gap + 2 real MUST violations); baseline = earlier main-based runs (known-flaky-union from open-chat-bugfix logs); isolated env nebu-sync
+# [media-download-content-type-and-filename] 2026-10-08T12:31Z committed ✓ (ATDD+2 dev cycles, code-review 0 MAJOR, Kassandra CLEAN, full isolated CI 2848 tests/30 failures known flaky; last cycle (log redaction+docs) verified by targeted run 613/613)
+# [media-download-content-type-and-filename] 2026-10-08T12:28Z ci-gate (cycle 1) → complete isolated run: 2848 tests, 30 failures (24 known flaky + 6 WarRoomExclusiveScopeTest that pass alone, order dependent, unrelated); code-review (cycle 1) → 0 MAJOR 3 MINOR; kassandra delta → CLEAN → cycle 2 (final, redaction of encoded key, stale comments, doc drift)
+# [media-download-content-type-and-filename] 2026-10-08T12:00Z dev-story → done (cycle 1): neutralize? predicate (+xml, JS family, xsl, mixed-replace), async filename 500 fixed, 255-byte cap, Cf/bidi stripped, admin list shows sanitized name, filename redacted in debug log; 610/610 media+plugs, 27 broad failures (26 known flaky + OidcPlugTest denylist on reused DB)
+# [media-download-content-type-and-filename] 2026-10-08T11:46Z code-review (cycle 0) → 0 MAJOR 4 MINOR (neutralization families, async filename 500, filename length, bidi); kassandra → CLEAN (1 MEDIUM same as M1, 2 LOW, INFO: auth must stay Bearer-only, filename in debug log) → cycle 1; CI gate aborted (obsolete)
+# [media-download-content-type-and-filename] 2026-10-08T11:39Z dev-story → done (cycle 0): content-type preserved, spec inline list, filename persisted+encoded+sanitized, thumbnail types only; 1775/1777 combined (2 known flaky)
+# [media-download-content-type-and-filename] 2026-10-08T11:27Z test-review → CLEAN (0 MAJOR, 6 MINOR handed to dev: loosen over-rigid filename escaping/header equality, document asymmetries)
+# [media-download-content-type-and-filename] 2026-10-08T11:25Z atdd → 125 tests (media_response_content_type_test.exs), 95 red / 30 green guards; media_download_test + media_thumbnail_test adjusted (4 old tests tightened)
+# [media-download-content-type-and-filename] 2026-10-08T11:10Z pipeline started (--bug); oracle-gate done upfront (verification of audit finding: partly false; real MUST violations: octet-stream rewrite, filename dropped, thumbnail mislabel); isolated env nebu-media
+story: null
+current_step: null
+completed: []
+cycle_count: 0
+blocked_reason: null
+last_updated: "2026-10-08T15:08Z"

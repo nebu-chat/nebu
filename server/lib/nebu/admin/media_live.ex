@@ -946,9 +946,14 @@ defmodule Nebu.Admin.MediaLive do
   defp present_or_dash(""), do: "—"
   defp present_or_dash(value), do: to_string(value)
 
-  defp identity_display(nil, media_id), do: {:code, media_id}
-  defp identity_display("", media_id), do: {:code, media_id}
-  defp identity_display(filename, _media_id), do: {:text, filename}
+  # Shows the SANITIZED name (no bidi/format spoofing, length-capped); a name
+  # that sanitizes to nothing falls back to the media_id.
+  defp identity_display(filename, media_id) do
+    case Nebu.Media.display_filename(filename) do
+      nil -> {:code, media_id}
+      name -> {:text, name}
+    end
+  end
 
   defp uploader_display(nil), do: "—"
   defp uploader_display(""), do: "—"

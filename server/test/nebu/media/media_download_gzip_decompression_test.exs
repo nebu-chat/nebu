@@ -510,7 +510,7 @@ defmodule Nebu.Web.MediaDownloadGzipDecompressionTest do
   # code-review MINOR fix (cycle 1) — fast, DB-free unit coverage for
   # Nebu.Media.DB.to_map/1's OWN positional mapping. Unlike
   # DBLookupCompressedKeyTest above (real Postgres, :integration-tagged),
-  # this hand-builds a 13-element list matching to_map/1's documented
+  # this hand-builds a 14-element list matching to_map/1's documented
   # column order and calls it directly — no Nebu.Repo required — so it
   # runs under the fast `make test-unit-elixir` gate. NOTE: this does NOT
   # exercise `@sql_lookup` itself — it cannot catch a regression that drops
@@ -533,7 +533,7 @@ defmodule Nebu.Web.MediaDownloadGzipDecompressionTest do
 
     # Matches to_map/1's documented column order: media_id, server_name,
     # content_type, file_size, aes_key_hex, nonce_hex, uploader_user_id,
-    # uploaded_at, deleted, state, storage_key, archived_at, compressed.
+    # uploaded_at, deleted, state, storage_key, archived_at, compressed, filename.
     defp raw_row(media_id, compressed) do
       [
         media_id,
@@ -548,7 +548,8 @@ defmodule Nebu.Web.MediaDownloadGzipDecompressionTest do
         "released",
         "storage/#{media_id}",
         nil,
-        compressed
+        compressed,
+        "report.pdf"
       ]
     end
 
@@ -567,6 +568,7 @@ defmodule Nebu.Web.MediaDownloadGzipDecompressionTest do
                storage_key: "storage/media-id-compressed-true",
                archived_at: nil,
                compressed: true,
+               filename: "report.pdf",
                room_id: nil
              }
     end
@@ -586,6 +588,7 @@ defmodule Nebu.Web.MediaDownloadGzipDecompressionTest do
                storage_key: "storage/media-id-compressed-false",
                archived_at: nil,
                compressed: false,
+               filename: "report.pdf",
                room_id: nil
              }
     end

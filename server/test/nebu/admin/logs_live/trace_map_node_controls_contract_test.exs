@@ -194,6 +194,7 @@ defmodule Nebu.Admin.LogsLive.TraceMapNodeControlsContractTest do
   end
 
   describe "AC5: active?/1 is DB-guarded (unit-test contract, no Nebu.Repo running)" do
+    @describetag :no_repo
     test "with no Repo, no endpoint has an active capture" do
       refute Process.whereis(Nebu.Repo),
              "precondition: this is the DB-free unit environment"
@@ -209,6 +210,7 @@ defmodule Nebu.Admin.LogsLive.TraceMapNodeControlsContractTest do
   # ══════════════════════════════════════════════════════════════════════
 
   describe "AC4: should_persist?/2 blocks off-list routes with no active capture" do
+    @describetag :no_repo
     # Levels probed DB-free: "warning" (the /1 catch-all — unconditionally
     # true at level policy, so a `false` here can ONLY come from the
     # off-list branch) and "error" (same catch-all). "debug"/"info" read

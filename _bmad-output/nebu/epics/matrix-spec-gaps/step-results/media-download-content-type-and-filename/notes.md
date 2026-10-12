@@ -1,0 +1,5 @@
+# Notes (media-download-content-type-and-filename)
+- Column `media_files.filename` exists (migration 000025): no new migration needed.
+- ATDD assumptions: text/* may keep the original charset or be served bare (utf-8 forbidden if the original declared another charset); thumbnail extension per type is a set (jpeg → jpg|jpeg, apng → apng|png); CR/LF/control chars in filename → 200 or 400 accepted but no header may contain CR/LF/control or an injected header; stored types are handled case-insensitively; implementation must tolerate a missing `:filename` key in lookup rows (old fakes).
+- Flaky (pre-existing, not from this story): `AlertNotifierTest` scan_failed webhook and `MediaUploadVerbTest` AC4 rate-limit burst are order dependent in full `test/nebu/media` runs with random seeds (green with seeds 1 and 2).
+- Old tests tightened: media_download_test.exs (exact Content-Type == image/jpeg, no media_id/filename in disposition), media_thumbnail_test.exs (exact image/png, filename="thumbnail.png").
