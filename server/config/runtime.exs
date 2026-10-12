@@ -161,6 +161,15 @@ if config_env() in [:prod, :dev] do
     media_iam_endpoint: normalize_optional_env.(System.get_env("NEBU_MINIO_IAM_ENDPOINT")),
     media_sts_endpoint: normalize_optional_env.(System.get_env("NEBU_MINIO_STS_ENDPOINT"))
 
+  # Opt-in: let the admin-configured storage endpoints (endpoint/iam_endpoint/
+  # sts_endpoint) resolve to private addresses (RFC1918, CGNAT, IPv6 ULA).
+  # Required for UpCloud's `*-private.upcloudobjects.com` endpoints, which
+  # resolve to 100.64.0.0/10. Loopback/link-local/metadata stay blocked, and
+  # preview_url/webhooks are never affected. Default: strict (false).
+  config :nebu_http,
+    media_storage_allow_private_endpoints:
+      System.get_env("NEBU_STORAGE_ALLOW_PRIVATE_ENDPOINTS", "false") == "true"
+
   config :ex_aws,
     access_key_id: minio_access_key,
     secret_access_key: minio_secret_key,

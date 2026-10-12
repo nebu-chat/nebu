@@ -124,8 +124,7 @@ defmodule Nebu.Admin.MediaSettingsController do
                                       "credentials, then try again."
   @storage_invalid_endpoint_message "Endpoint must be a bare host[:port] value " <>
                                        "(no http:// or https:// scheme prefix)."
-  @storage_invalid_iam_sts_message "IAM/STS endpoint must be a full https:// URL and must not " <>
-                                      "resolve to a private, loopback, or link-local address."
+  @storage_invalid_iam_sts_message "IAM/STS endpoint is invalid."
 
   @numeric_fields ~w(
     max_upload_size_bytes
@@ -211,7 +210,8 @@ defmodule Nebu.Admin.MediaSettingsController do
         |> put_status(200)
         |> render_settings(state_from_config(Config.get()),
           storage_config: storage_config_from_params(params),
-          test_connection_result: {:error, @storage_invalid_endpoint_message}
+          test_connection_result:
+            {:error, StorageConfig.describe_invalid_endpoint(candidate.endpoint)}
         )
 
       {:error, reason} ->
@@ -288,6 +288,12 @@ defmodule Nebu.Admin.MediaSettingsController do
         conn
         |> put_flash(:info, "Storage settings saved")
         |> redirect(to: "/admin/media/settings")
+
+      {:error, :invalid_endpoint} ->
+        conn
+        |> put_status(200)
+        |> put_flash(:error, StorageConfig.describe_invalid_endpoint(Map.get(changes, :endpoint)))
+        |> render_settings(state_from_config(Config.get()))
 
       {:error, _reason} ->
         conn
@@ -419,7 +425,7 @@ defmodule Nebu.Admin.MediaSettingsController do
 
         case validate_changes_iam_sts(changes) do
           :ok -> {:ok, changes}
-          {:error, _reason} -> {:error, @storage_invalid_iam_sts_message}
+          {:error, reason} -> {:error, @storage_invalid_iam_sts_message <> " " <> reason}
         end
     end
   end
@@ -494,15 +500,29 @@ defmodule Nebu.Admin.MediaSettingsController do
         :ok
 
       {:ok, value} ->
-        if valid_iam_sts_url?(value), do: :ok, else: {:error, :invalid_iam_sts_endpoint}
+        iam_sts_url_problem(value)
     end
   end
 
-  defp valid_iam_sts_url?(value) do
+  # `:ok`, or `{:error, human_readable_reason}` — the reason is shown to the
+  # admin (and logged) so a DNS failure or a private-resolving host is not
+  # reported as the same generic "invalid URL".
+  defp iam_sts_url_problem(value) do
     if String.starts_with?(String.downcase(value), "https://") do
-      match?({:ok, _target}, SSRF.checked_target(value))
+      case SSRF.checked_target(value, allow_private: SSRF.allow_private_storage?()) do
+        {:ok, _target} ->
+          :ok
+
+        {:error, reason} ->
+          Logger.warning(
+            "Nebu.Admin.MediaSettingsController: IAM/STS endpoint #{inspect(value)} rejected: " <>
+              SSRF.describe_error(reason)
+          )
+
+          {:error, "Rejected: " <> SSRF.describe_error(reason) <> "."}
+      end
     else
-      false
+      {:error, "The URL must start with https://."}
     end
   end
 

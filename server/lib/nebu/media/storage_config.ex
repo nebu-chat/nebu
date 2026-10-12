@@ -313,9 +313,17 @@ defmodule Nebu.Media.StorageConfig do
 
   defp validate_iam_sts_url(value) do
     if String.starts_with?(String.downcase(value), "https://") do
-      case SSRF.checked_target(value) do
-        {:ok, _target} -> :ok
-        {:error, _reason} -> {:error, :invalid_iam_sts_endpoint}
+      case SSRF.checked_target(value, allow_private: SSRF.allow_private_storage?()) do
+        {:ok, _target} ->
+          :ok
+
+        {:error, reason} ->
+          Logger.warning(
+            "Nebu.Media.StorageConfig: IAM/STS endpoint #{inspect(value)} rejected: " <>
+              SSRF.describe_error(reason)
+          )
+
+          {:error, :invalid_iam_sts_endpoint}
       end
     else
       {:error, :invalid_iam_sts_endpoint}
@@ -1067,14 +1075,43 @@ defmodule Nebu.Media.StorageConfig do
         {:error, :invalid_endpoint}
 
       true ->
-        case SSRF.checked_target("http://" <> endpoint) do
-          {:ok, _target} -> :ok
-          {:error, _reason} -> {:error, :invalid_endpoint}
+        case SSRF.checked_target("http://" <> endpoint, allow_private: SSRF.allow_private_storage?()) do
+          {:ok, _target} ->
+            :ok
+
+          {:error, reason} ->
+            Logger.warning(
+              "Nebu.Media.StorageConfig: storage endpoint #{inspect(endpoint)} rejected: " <>
+                SSRF.describe_error(reason)
+            )
+
+            {:error, :invalid_endpoint}
         end
     end
   end
 
   defp validate_candidate_endpoint(_), do: {:error, :invalid_endpoint}
+
+  @doc """
+  Admin-facing explanation of why `endpoint` failed `validate_candidate_endpoint/1`
+  (`{:error, :invalid_endpoint}` carries no detail). Re-runs the check on the
+  error path only, so the happy path pays no extra DNS lookup.
+  """
+  @spec describe_invalid_endpoint(term()) :: String.t()
+  def describe_invalid_endpoint(endpoint) when is_binary(endpoint) do
+    downcased = String.downcase(endpoint)
+
+    if String.starts_with?(downcased, "http://") or String.starts_with?(downcased, "https://") do
+      "Endpoint must be a bare host[:port] value (no http:// or https:// scheme prefix)."
+    else
+      case SSRF.checked_target("http://" <> endpoint, allow_private: SSRF.allow_private_storage?()) do
+        {:ok, _target} -> "Endpoint is not valid."
+        {:error, reason} -> "Endpoint rejected: " <> SSRF.describe_error(reason) <> "."
+      end
+    end
+  end
+
+  def describe_invalid_endpoint(_), do: "Endpoint must be a bare host[:port] value."
 
   # AC3: any blank secret in the candidate is resolved against the
   # CURRENTLY stored decrypted secret (via get_for_connection/0) — this is

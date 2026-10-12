@@ -540,6 +540,10 @@ write_files:
 %{ if s3_sts_endpoint != "" ~}
             NEBU_MINIO_STS_ENDPOINT: "${s3_sts_endpoint}"
 %{ endif ~}
+            # The VM reaches Managed Object Storage over the private network; the
+            # *-private endpoints resolve to CGNAT addresses (100.64.0.0/10) that the
+            # storage-endpoint SSRF guard otherwise rejects.
+            NEBU_STORAGE_ALLOW_PRIVATE_ENDPOINTS: "true"
             NEBU_MINIO_ACCESS_KEY_FILE: "/run/secrets/s3_access_key"
             NEBU_MINIO_SECRET_KEY_FILE: "/run/secrets/s3_secret_key"
             NEBU_MINIO_BUCKET: "${s3_bucket}"

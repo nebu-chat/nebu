@@ -1123,6 +1123,68 @@ defmodule Nebu.Media.StorageConfigTest do
     end
   end
 
+  describe "NEBU_STORAGE_ALLOW_PRIVATE_ENDPOINTS opt-in (UpCloud *-private endpoints, CGNAT)" do
+    setup do
+      previous = Application.get_env(:nebu_http, :media_storage_allow_private_endpoints)
+
+      on_exit(fn ->
+        case previous do
+          nil -> Application.delete_env(:nebu_http, :media_storage_allow_private_endpoints)
+          value -> Application.put_env(:nebu_http, :media_storage_allow_private_endpoints, value)
+        end
+      end)
+
+      :ok
+    end
+
+    test "default: a CGNAT iam_endpoint/endpoint is rejected" do
+      Application.delete_env(:nebu_http, :media_storage_allow_private_endpoints)
+
+      assert {:error, :invalid_iam_sts_endpoint} =
+               StorageConfig.upsert(%{iam_endpoint: "https://100.126.127.4:4443/iam"})
+
+      assert {:error, :invalid_endpoint} = StorageConfig.upsert(%{endpoint: "100.126.127.4:443"})
+    end
+
+    test "opt-in: CGNAT/RFC1918 iam_endpoint and endpoint are persisted", %{calls: calls} do
+      ensure_started()
+      Application.put_env(:nebu_http, :media_storage_allow_private_endpoints, true)
+
+      assert :ok =
+               StorageConfig.upsert(%{
+                 endpoint: "100.126.127.4:443",
+                 iam_endpoint: "https://100.126.127.4:4443/iam",
+                 sts_endpoint: "https://10.0.0.5:4443/sts"
+               })
+
+      assert Agent.get(calls, & &1.writer) == 1
+    end
+
+    test "opt-in: loopback/link-local/metadata stay rejected", %{calls: calls} do
+      Application.put_env(:nebu_http, :media_storage_allow_private_endpoints, true)
+
+      for endpoint <- ["127.0.0.1:9000", "169.254.169.254:80"] do
+        assert {:error, :invalid_endpoint} = StorageConfig.upsert(%{endpoint: endpoint})
+      end
+
+      assert {:error, :invalid_iam_sts_endpoint} =
+               StorageConfig.upsert(%{iam_endpoint: "https://169.254.169.254/iam"})
+
+      assert Agent.get(calls, & &1.writer) == 0
+    end
+
+    test "describe_invalid_endpoint/1 names the real reason" do
+      Application.delete_env(:nebu_http, :media_storage_allow_private_endpoints)
+
+      assert StorageConfig.describe_invalid_endpoint("https://host:443") =~ "no http:// or https://"
+
+      msg = StorageConfig.describe_invalid_endpoint("100.126.127.4:443")
+      assert msg =~ "private"
+      assert msg =~ "NEBU_STORAGE_ALLOW_PRIVATE_ENDPOINTS"
+      refute msg =~ "bare host"
+    end
+  end
+
   # ── helpers ────────────────────────────────────────────────────────────────
 
   # Pins the AC8 masked-marker format this file assumes (see moduledoc):

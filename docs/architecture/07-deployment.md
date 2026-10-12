@@ -923,6 +923,11 @@ NEBU_MINIO_ACCESS_KEY_FILE — /run/secrets/s3_access_key (Docker Secret)
 NEBU_MINIO_SECRET_KEY_FILE — /run/secrets/s3_secret_key (Docker Secret)
 NEBU_MINIO_BUCKET          — From s3_bucket variable
 NEBU_MINIO_USE_SSL         — "true" (UpCloud MOS requires TLS)
+NEBU_STORAGE_ALLOW_PRIVATE_ENDPOINTS — default "false"; the UpCloud cloud-init sets it to "true". Set to "true" to allow the storage
+                              endpoint and IAM/STS URLs to resolve to private addresses (RFC1918, CGNAT
+                              100.64.0.0/10, IPv6 ULA) — required for UpCloud `*-private.upcloudobjects.com`
+                              endpoints. Loopback/link-local/metadata stay blocked; preview_url and webhooks
+                              are unaffected.
 ```
 
 **`Nebu.Media.StorageConfig` Integration:**
