@@ -497,22 +497,48 @@ dispatch is by the *absence of a dot* (opaque tokens are 64-hex; JWTs always con
 ADR-018 — no Ecto schema/repository) maintains a `matrix_sessions` row with:
 
 ```
-access_token (PK)  ← Opaque hex string (32 bytes = 64 hex chars, no dots)
-refresh_token      ← Opaque hex string (32 bytes), UNIQUE, rotated on each refresh
+access_token_hash  ← PK. Lowercase hex SHA-256 of the opaque access token (the token itself — 32 random bytes =
+                     64 hex chars, no dots — is returned to the client once and NEVER stored)
+refresh_token_hash ← UNIQUE NOT NULL. Lowercase hex SHA-256 of the opaque refresh token (rotated by each client
+                     /refresh, never by the worker; the plaintext is never stored)
 oidc_refresh_token ← AES-256-GCM encrypted OIDC RT from Keycloak (via Nebu.Web.SecretBox; optional, for future OIDC refresh)
 user_id            ← Matrix user ID (@user:server.name)
 device_id          ← From JWT "did" claim or SSO device registration
 expires_at         ← Absolute wall-clock time (Nebu controls expiry: NOW() + 8 hours)
-revoked_at         ← Set on logout or session invalidation (immediate, no grace)
-grace_until        ← Grace window end time for old refresh token after rotation (NOW() + 60s)
+revoked_at         ← Set when a client /refresh rotates the row away (old half of a rotation); logout/invalidations DELETE rows
+grace_until        ← NULL on a rotated-away row = PENDING (old RT valid until the new AT/RT is used); set to NOW() = CONSUMED
 created_at         ← Session creation timestamp
 ```
 
 **Token validation:** `Nebu.Web.Plugs.OidcPlug` dispatches by token shape — an opaque token is any
 bearer value with no `.` (JWTs always contain two dots). The JWT path is unchanged.
 
+**Hashed token storage (story `token-hashing-matrix-sessions`, migration 000038):** `matrix_sessions` stores
+only SHA-256 hashes of the access and refresh token (like `jwt_device_bindings` already does), so a read-only
+DB leak (backup, replica, SQL injection) yields no usable session. Both tokens are 256-bit random values, so an
+unsalted hash is sufficient (no KDF/pepper). The store API keeps taking plaintext tokens at its boundary;
+session maps it returns carry only `:access_token_hash` / `:refresh_token_hash`. Code that knows a row only by
+its hash (RefreshWorker, the `/refresh` rotation) uses hash-addressed variants (`get_by_access_token_hash/1`,
+`extend_in_place_by_hash/3`, `delete_by_access_token_hash/1`, `rotate_tokens/1` with `:old_access_token_hash`); these are internal (`@doc false`), accept only values read
+from the DB and must never receive a client-supplied value (pass-the-hash); `rotate_tokens/1` rejects params
+carrying both `:old_access_token` and `:old_access_token_hash`.
+Multi-row sibling updates lock in `access_token_hash` order. Hashes and tokens are never logged.
+
+**Migration 000038 invalidates ALL sessions (forced one-time re-login).** The up migration `TRUNCATE`s
+`matrix_sessions` (no backfill): `DROP COLUMN` would leave the plaintext bytes in the table file and a backfill
+`UPDATE` would leave old row versions, so keeping the sessions would keep plaintext residue on disk, in backups,
+WAL and replicas. `TRUNCATE` gives the table a new file, and since every session is dead, any residue is worthless.
+Every user logs in again once. The down migration also deletes all sessions (plaintext cannot be restored from
+hashes) and, after a rollback, code of the previous release writes plaintext tokens again.
+
+**This release must be deployed stop-the-world** (stop ALL nodes, run the migration, start the new version). In a
+rolling / multi-node deploy, nodes still on the old code query the dropped `access_token` column and answer every
+opaque-token request with a hard 401 (no `soft_logout`) and fail logins with 500 until they are replaced.
+
 When the bearer token is opaque:
-1. Look up the row via `MatrixSessionStore` by `access_token`
+1. Look up the row via `MatrixSessionStore.get_by_access_token/1`, which hashes the presented token
+   (`MatrixSessionStore.hash_token/1`, the single hashing seam) and compares by indexed equality on
+   `access_token_hash` — presenting the stored hash as a bearer therefore does not authenticate
 2. If not found: `401 M_UNKNOWN_TOKEN "Invalid token"`
 3. If found but `revoked_at IS NOT NULL`: `401 M_UNKNOWN_TOKEN "Token has been logged out"`
 4. If found but expired (re-check `is_active` / `expires_at < NOW()`): `401 M_UNKNOWN_TOKEN` with
@@ -572,8 +598,11 @@ Matrix previously did not, leaving up to 8h between a deprovisioning event at th
 noticing it (`deactivate_user`'s immediate opaque-session hard-delete was the only other kill-switch).
 That detection-latency gap is now "next refresh attempt", matching the admin side:
 
-1. Extract `refresh_token` from the request body; look up the session (including grace-window state).
-   Not found / grace-expired → `401 M_UNKNOWN_TOKEN` with `soft_logout: true` (unchanged).
+1. Extract `refresh_token` from the request body and classify it (`MatrixSessionStore.resolve_refresh_token/1`):
+   current RT, PENDING old RT (replay, see "Refresh token validity" below), CONSUMED RT, or unknown.
+   Unknown → `401 M_UNKNOWN_TOKEN` WITHOUT `soft_logout`. Consumed → token reuse: the device's session is
+   deleted and the response is `401 M_UNKNOWN_TOKEN` WITHOUT `soft_logout` (the session is destroyed, so the
+   client must discard its state).
 2. **(AC1) IdP re-validation, BEFORE any local rotation:** decrypt the session's stored
    `oidc_refresh_token` (`Nebu.Web.SecretBox`) and redeem it at the IdP token endpoint
    (`grant_type=refresh_token`) via the shared `Nebu.Web.OidcTokenExchange.refresh/2` — the SAME
@@ -581,24 +610,19 @@ That detection-latency gap is now "next refresh attempt", matching the admin sid
    `Nebu.Admin.Auth.exchange_refresh_token/1` uses (extracted once, called by both domains — no second
    independent copy). A `:matrix_oidc_refresh_override` test seam (1-arity fun over the decrypted RT,
    mirroring `:admin_oidc_refresh_override`) short-circuits the HTTP+JWT-verify leg in tests.
-3. **(AC2) Fail-closed on ANY failure, with two distinct branches depending on WHY it failed** — IdP
-   rejection/network error, decrypt failure, no stored OIDC RT, or the user having since been
-   deactivated (re-checked via the SAME `Nebu.Matrix.Session.TokenValidator.validate/4` gate the login
-   path uses) all respond `401 M_UNKNOWN_TOKEN` with `soft_logout: true`. What happens to the opaque
-   session row differs:
-   - **Confirmed rejection/deprovisioning** (IdP rejects the RT, decrypt failure, no stored OIDC RT, or
-     a confirmed `{:error, :deactivated}` verdict): immediately hard-delete the opaque session row for
-     that `(user_id, device_id)` (`MatrixSessionStore.delete_for_user_device/2`) so neither a retried
-     `/refresh` nor the still-live old opaque access token can succeed afterwards.
-   - **Transient re-check failure** (`check_still_active/2`'s call to `TokenValidator.validate/4` fails
-     with anything other than a confirmed `{:error, :deactivated}` — e.g. a DB hiccup — wrapped as
-     `{:error, {:transient_check_failed, reason}}`): this is NOT proof of deprovisioning, so the session
-     row is left intact. This one request still fails closed (401), but a later `/refresh` attempt can
-     succeed once the transient issue clears, instead of a legitimate session being permanently killed
-     over an unrelated infra blip.
+3. **(AC2/AC7) Failures are classified** by `Nebu.Matrix.Session.RefreshErrors.transient?/1` — the single
+   source of truth shared with the background worker:
+   - **Transient** (`{:transient_check_failed, _}` e.g. DB hiccup, `{:token_endpoint_unreachable, _}`,
+     `{:discovery_failed, _}`, IdP status `>= 500` or `429`): `503` with a `Retry-After` header
+     (`M_UNKNOWN`, or `M_LIMIT_EXCEEDED` + `retry_after_ms` for an IdP 429). The session row is left
+     untouched and a later retry with the same refresh token succeeds. Reason: Matrix clients log out on
+     any 4xx and retry on 5xx, so a transient problem must never surface as 4xx.
+   - **Confirmed rejection** (IdP 400/401/other, `invalid_grant`, `:deactivated`, decrypt failure, no stored
+     OIDC RT): `401 M_UNKNOWN_TOKEN` WITHOUT `soft_logout` and the device's rows are hard-deleted
+     (`MatrixSessionStore.delete_for_user_device/2`). `soft_logout: true` is reserved for an expired access
+     token on an authenticated request while the session still exists.
 
-   There is no local-only fallback in either branch — a failed IdP round-trip never silently degrades
-   to the old purely-local extension behavior.
+   There is no local-only fallback in either branch.
 4. **(AC3) On success**, the new opaque tokens' lifetime is computed via the SAME
    `session_expires_at/1` function login uses (`min(fresh_id_token.exp, now + ceiling)`), fed the
    FRESH claims returned by the IdP round-trip — not a flat ceiling. This restores login/refresh
@@ -609,8 +633,14 @@ That detection-latency gap is now "next refresh attempt", matching the admin sid
    `:new_oidc_refresh_token` param; when the IdP returns none, the previous encrypted OIDC RT is
    carried over unchanged (that carry-over was already `rotate_tokens/1`'s behavior — this story is
    the first caller to ever actually populate the fresh-RT side of it).
-6. Rotate atomically: write the new opaque tokens and mark the old row `revoked_at = NOW()`,
-   `grace_until = NOW() + 60s` (unchanged, `rotate_tokens/1`).
+6. Rotate atomically (`rotate_tokens/1`, single transaction): soft-revoke the active row
+   (`revoked_at = NOW()`, `grace_until = NULL` = pending) and insert the new row. Redeeming the CURRENT
+   refresh token additionally consumes every older pending refresh token of the device
+   (`consume_pending_siblings`). A concurrent `/refresh` that lost the row race is re-resolved (bounded retries) and served as
+   a replay or denied. A replayed pending token is re-validated inside the rotation transaction (row lock):
+   if the client consumed it during the IdP round trip, nothing is issued and the device is invalidated
+   (token reuse). If the retries are exhausted while the session is intact, the answer is `503` +
+   `Retry-After` (never a 4xx, which would make clients discard their state).
 7. Return `200 {"access_token", "refresh_token", "expires_in_ms"}`.
 
 **Shared IdP token exchange (`Nebu.Web.OidcTokenExchange`):** extracts the ~20-line
@@ -638,21 +668,38 @@ neither starts without a DB. Each cycle:
    configurable lookahead window of `NOW()` (`NEBU_MATRIX_REFRESH_WORKER_LOOKAHEAD_SECONDS`, default 1h).
    Since `rotate_tokens/1` always soft-revokes the old row in the same transaction as inserting the new
    one, at most one non-revoked row exists per device at a time — a plain `revoked_at IS NULL` filter
-   already excludes every grace-period sibling, so a stale rotated-away row is never touched.
-2. **Re-checks per row (TOCTOU-safe)** immediately before calling the IdP — re-selects by `access_token`
+   already excludes every rotated-away (pending/consumed) sibling, so a stale row is never touched.
+2. **Re-checks per row (TOCTOU-safe)** immediately before calling the IdP — re-selects by `access_token_hash`
    and skips silently (no-op, no resurrection) if the row was deleted or revoked since step 1 (e.g. by
    `delete_one_device` or a racing client-driven refresh).
-3. **Redeems via the SAME reused logic** as the client-driven path — `HttpPublic.revalidate_with_idp/1`
-   and `MatrixSessionStore.rotate_tokens/1` — no second, parallel IdP-exchange implementation.
-4. **On success**, the new `expires_at` is computed by the SAME `session_expires_at/1` cap login/`/refresh`
-   already use (`min(fresh_oidc_exp, now + ceiling)`) — never unbounded, never a separately-invented rule.
+3. **Redeems via the SAME reused logic** as the client-driven path — `HttpPublic.revalidate_with_idp/1` —
+   no second, parallel IdP-exchange implementation.
+4. **On success, extends the SAME row IN PLACE** (`MatrixSessionStore.extend_in_place_by_hash/3`:
+   `UPDATE ... SET expires_at, oidc_refresh_token WHERE access_token_hash = $1 AND revoked_at IS NULL`).
+   The worker NEVER rotates: the client never learns rotated tokens, so rotating would log it out. The
+   opaque access and refresh token stay unchanged; no new row, no `revoked_at`, no grace window. The new
+   `expires_at` is computed by the SAME `session_expires_at/1` cap login/`/refresh` already use
+   (`min(fresh_oidc_exp, now + ceiling)`) — never unbounded. In addition (F-1) the
+  extension is capped absolutely at `created_at + matrix_session_ttl_seconds` of the row
+  (`GREATEST(expires_at, LEAST($new_expires_at, created_at + ttl))`, strictly extending, never shortening): a device that never refreshes itself cannot be kept alive
+  forever through the worker (a stolen opaque AT of a dormant device dies at the cap). A client `/refresh`
+  creates a new row with a fresh `created_at`, so well-behaved clients never hit the cap; at the cap the
+  worker simply stops extending and the normal expiry/`soft_logout` path applies. Rows at/over the cap
+  (`created_at + ttl <= NOW()`) are not even selected as candidates (N-3), so there is no pointless IdP
+  redemption that would keep resetting the IdP idle timer; the client's own `/refresh` re-validates. Rows that an
+  earlier worker version extended beyond the cap keep their `expires_at` (GREATEST): deploy logs out nobody;
+  only clients inside the OLD 60 s grace window at deploy time are logged out once (rows with a time-valued
+  `grace_until` count as consumed). Note: the stale COMMENT on `matrix_sessions.grace_until` in the applied
+  migration `000001_init.up.sql` is intentionally not edited (applied migration); the semantics are NULL = pending,
+  NOT NULL = consumed. Worker and client `/refresh` therefore never
+   invalidate each other (both are atomic single-row statements guarded by `revoked_at IS NULL`).
 5. **On failure**, only a CONFIRMED upstream rejection/deprovisioning signal (e.g. `:deactivated`, an
    explicit IdP rejection of that refresh token, decrypt failure) hard-deletes the session row — scoped to
    the EXACT row just acted on (`MatrixSessionStore.delete_by_access_token/1`, guarded
    `WHERE access_token = $1 AND revoked_at IS NULL`), **not** the wider `delete_for_user_device/2`. This
    narrower scope matters specifically for this worker: under clustering (ADR-020), multiple nodes may race
    to redeem the same rotating upstream refresh token, and a losing node's failure must not be able to
-   reach across and delete the winning node's freshly-rotated replacement row. A merely TRANSIENT error
+   reach across and delete a row another node/`/refresh` already superseded. A merely TRANSIENT error
    (DB hiccup, IdP unreachable/discovery failure, IdP 5xx/429) is NOT treated as rejection — the row is left
    intact and simply expires via the bounded TTL if the transient condition persists, avoiding a brief IdP
    outage or rolling restart turning into a mass, self-inflicted hard-delete of every near-expiry session
@@ -665,10 +712,37 @@ the worker's bounded rolling TTL remains the fail-safe ceiling if a delete is ev
 this is additive hardening of the existing legacy-login session-refresh path, not a new architectural
 decision.
 
-**Grace period semantics (Spec MUST):**
+**Refresh token validity (Matrix CS API v1.18, "Refreshing access tokens"):**
 
-The 60-second grace window lets a client that failed to persist the `/refresh` response retry with the
-same old refresh token without error. After the window the old refresh token returns `401 M_UNKNOWN_TOKEN`.
+The spec has NO fixed grace window: the old refresh token "remains valid until the new access token or
+refresh token is used, at which point the old refresh token is revoked". Nebu implements exactly that:
+
+- After a client `/refresh`, the old row is PENDING (`revoked_at` set, `grace_until IS NULL`). A client that
+  lost the response may retry with the old refresh token at ANY later time (not just 60 s): the server
+  rotates the device's active row again (replay) and returns a fresh pair. The old token is never valid
+  beyond the session's own `expires_at` (the device must still have an unexpired active row).
+- The old token becomes CONSUMED (`grace_until = NOW()`) the first time the new access token authenticates a
+  request (`OidcPlug.call_opaque/1` → `mark_access_token_used/1`) or the new refresh token is redeemed.
+- Presenting a consumed refresh token is treated as token reuse (hardening borrowed from the OAuth refresh
+  grant): `401 M_UNKNOWN_TOKEN` WITHOUT `soft_logout` and only THAT device's session is deleted; other
+  devices of the user are unaffected. The detection is BOUNDED (F-3): it only fires while the consumed row is
+  younger than the session TTL ceiling (`created_at + matrix_session_ttl_seconds`) AND the device still has an
+  active row (any non-revoked row, i.e. exactly what the `:current` path would redeem, even if its access token
+  has already expired; N-7). An older leaked token, or a token of a dead device, is a plain `401` that deletes
+  nothing (otherwise any historical RT would be a remote-logout vector).
+- Takeover handling (F-2 / N-1): a stolen, still-PENDING old RT can be replayed to rotate the device's active row,
+  which supersedes the victim's tokens (soft-revoked). `OidcPlug.call_opaque/1` answers EVERY soft-revoked access
+  token (pending or already consumed) with `401 M_UNKNOWN_TOKEN` + `soft_logout: true` and NEVER deletes or
+  detects reuse itself (no time window, no wall-clock heuristic; a legitimate in-flight request, e.g. a `/sync`
+  long-poll that started before a rotation, simply makes the client refresh). Reuse detection lives only on the
+  bounded `/refresh` path (F-3). Outcomes: a PASSIVE attacker (replays RT0, does not use the session) -> the victim
+  gets `soft_logout`, refreshes with its still-pending RT1 and wins the device back (attacker's tokens die). An
+  ACTIVE attacker (uses his new AT2 immediately, which consumes the victim's pending RT1) -> the victim still gets
+  `soft_logout`, refreshes with the now-consumed RT1 -> reuse -> the device is deleted -> BOTH parties are logged
+  out; that visible logout is the end of the takeover.
+- An expired access token with a still-valid refresh token keeps `401 M_UNKNOWN_TOKEN` + `soft_logout: true`.
+- `POST /refresh` keeps its own per-IP rate limit (429 `M_LIMIT_EXCEEDED` with `retry_after_ms`, spec-defined);
+  the limit (30/min, burst 10) is far above legitimate refresh traffic.
 
 **Logout:** `POST /logout` deletes the user's `matrix_sessions` rows (immediate, no grace window).
 
@@ -684,7 +758,7 @@ admin-deactivated user's opaque sessions are invalidated immediately.
 | Encrypted OIDC RT | Yes — AES-256-GCM (`Nebu.Web.SecretBox`) in the cookie; used for active refresh | Yes (future: allows Keycloak session binding) |
 | Lifetime control | `session_exp = min(id_token.exp, now + 8h)` | `min(oidc_exp, now + 8h)` for all Matrix clients |
 | Refresh pattern | When `admin_oidc_refresh_mode = offline`: silent OIDC RT exchange on HTTP requests within a 120 s pre-expiry window, admin-group gate re-evaluated each refresh. Default `online` → no `offline_access`, no silent refresh (see refresh-mode config below) | On-demand via `/refresh` endpoint; `matrix_oidc_refresh_mode` (default `offline`) controls whether `offline_access` is requested |
-| Grace period | None (refresh failure / lost group → clear session, redirect `/admin/login`) | 60s grace after token rotation (AC4) |
+| Grace period | None (refresh failure / lost group → clear session, redirect `/admin/login`) | No fixed window: the old refresh token stays PENDING (`grace_until IS NULL`) until the new access token is used or the new refresh token is redeemed, then CONSUMED (`grace_until` set); reuse of a consumed token deletes that device's session |
 
 ## Cryptography
 
@@ -913,6 +987,96 @@ in the `sync_tokens` table (composite PK, migration 000041).
 DB transaction that deletes the `sync_tokens` + `sessions` rows for that device). ETS is NOT evicted
 (other devices may still be active).
 
+## Account Data - Global and Room-Scoped (Stories account-data-durability, room-account-data-and-read-markers)
+
+Matrix account data ("Client Config") is private, per-user, opaque client state in two scopes.
+
+| Scope | Store | Table | /sync location | Incremental delivery |
+|---|---|---|---|---|
+| Global | `Nebu.Matrix.AccountDataStore` | `account_data` (000011) | top-level `account_data.events` | consume-once per-USER `changed` flag |
+| Room | `Nebu.Matrix.RoomAccountDataStore` | `user_room_account_data` (000039) | `rooms.join.<roomId>.account_data.events` | monotonic `stream_pos` vs. the position in the client's `since` token (per DEVICE) |
+
+Both stores are PostgreSQL + inline SQL (ADR-018, cluster-correct per ADR-020) and keep the content
+VERBATIM as TEXT (ADR-011, byte-exact round trip; for room scope the raw request body is captured by
+`Nebu.Web.Plugs.RawBodyReader`). The Room store is type-agnostic so the follow-up `room-tags` story
+(`m.tag`) can reuse it. A dormant legacy table `room_account_data` (000001/000002; JSONB, forced RLS)
+is intentionally NOT used.
+
+### Room account data endpoints and error matrix
+
+`PUT/GET /_matrix/client/v3/user/{userId}/rooms/{roomId}/account_data/{type}`. Check order (everything
+before the room/membership lookup, so nothing leaks): `{userId}` != caller 403 `M_FORBIDDEN` (admins too);
+PUT of `m.fully_read`/`m.push_rules` 405 `M_BAD_JSON` (server managed, MUST, global and room scope; GET stays
+allowed); invalid roomId 400 `M_INVALID_PARAM`; body > limit 413 `M_TOO_LARGE` (the parser's
+`RequestTooLargeError` is mapped for these routes in `Nebu.Web.Plugs.JsonBody`); malformed / non-object body
+400 `M_NOT_JSON`. Then membership: an unknown room and a room the user is not in both answer
+403 `M_FORBIDDEN` (same response, no existence leak; Matrix does not require membership, but unrestricted
+writes would allow room-id probing and storage abuse). GET of an unset type is 404 `M_NOT_FOUND`
+(no fallback to the global value).
+
+Limits (abuse protection): content body <= 65536 bytes (`NEBU_ROOM_ACCOUNT_DATA_MAX_BYTES`), at most 1000
+rows per user (`NEBU_ROOM_ACCOUNT_DATA_MAX_ROWS_PER_USER`; a new row beyond the cap is refused with 403
+`M_RESOURCE_LIMIT_EXCEEDED`, overwriting an existing row always works). The cap is enforced under a
+per-user advisory lock, so concurrent writers cannot overshoot it.
+
+### Incremental /sync per device (the position in the token)
+
+Nebu's `next_batch`/`since` token is `<core token>[.<room-account-data position>]`. The core token is the
+opaque value the sync core stores per user (unchanged semantics: a mismatching/stale core token triggers the
+documented fallback to a full initial sync). The decimal suffix is the highest `stream_pos` of the user's
+room account data that THIS client has received. Every insert/update of a row draws a new `stream_pos` from a
+sequence; `/sync` returns rows with `stream_pos > since_pos` for the rooms the user is joined to. Because the
+position lives in each client's own token (not in a server-side flag), any number of devices each receive
+every change exactly once; this also holds on the fallback-to-initial path (the position is taken from the
+client's token, not from the stored core token). A token WITHOUT suffix (issued before this feature) means
+position 0, i.e. the first sync after the upgrade re-delivers all room account data once. Writers hold a
+per-user advisory lock while drawing the position, so per user position order equals commit order and a
+reader that saw position N cannot miss a still-uncommitted smaller one. A room whose ONLY change is account
+data is added to `rooms.join` with empty timeline/state; rooms newly joined in a delta get ALL their account
+data. A PUT wakes the user's long-polling `/sync` (`{:account_data_changed, room}` via the `user:<id>` :pg
+group) and `/sync` skips long-polling when changes are already pending.
+
+### read_markers
+
+`POST /rooms/{roomId}/read_markers` checks membership like `/receipt` (404 unknown room, 403 non-member),
+validates that an `m.fully_read` event belongs to the room (400 `M_INVALID_PARAM`) before writing anything,
+sends `m.read`/`m.read.private` through the same `Server.send_receipt/2` path as `/receipt`, and stores
+`m.fully_read` as room account data `{"event_id": ...}` (delivered via /sync like any other entry).
+
+### Room tags (story room-tags)
+
+`GET /user/{userId}/rooms/{roomId}/tags`, `PUT`/`DELETE .../tags/{tag}` are a thin layer over the room account
+data event `m.tag` (`{"tags": {name: {"order": n, ...}}}`); there is NO separate table. PUT/DELETE are an
+atomic read-modify-write: `RoomAccountDataStore.update/4` reads the current event, applies a pure merge fun and
+writes the result in ONE transaction under the per-user advisory lock (same cap/size checks as `put/4`, fresh
+`stream_pos`, `notify_sync`), so concurrent tag writes of one user never lose each other (cluster-safe, ADR-020).
+A direct `PUT .../account_data/m.tag` stays allowed and replaces the whole event (last writer wins, never a
+corrupted event); a malformed stored `m.tag` (`tags` missing / not an object) is treated as `{}` for
+modification and unknown top-level keys are preserved. /sync needs no tag code: the single `m.tag` row per room
+is delivered like any room account data (exactly one `m.tag` event per room, per-device `stream_pos`, long-poll
+wake-up via `notify_sync`). A DELETE that changes nothing (unknown tag, room without row) writes nothing and
+creates no sync event; deleting the LAST tag leaves `{"tags":{}}` as the row (the store has no tombstone) so
+/sync delivers the change. The request logger treats the tag routes like account-data content (no body and no
+response capture, shared router-identical matcher `RawBodyReader.room_tags_shape?/1`); the tag NAME is user
+content and is redacted from the request log: `RouteNormalizer` replaces the segment after `tags` with `:tag`
+(in `path` and `route_template`), using the router-identical segment view (empty segments dropped,
+percent-decoded). Error behavior: 400 `M_NOT_JSON` for a tag PUT without / with a non-JSON Content-Type
+(stricter than the room account-data PUT, same as the global scope); 413 `M_TOO_LARGE` for a body or a merged
+`m.tag` event above 64 KiB; 403 `M_RESOURCE_LIMIT_EXCEEDED` for the row cap (NEW room rows only) and for the
+per-user total-bytes cap (4 MiB), which also refuses growth of an existing row. The 64 KiB per-event cap only
+applies when the event grows, so a tag can still be deleted after an operator lowered the cap.
+
+### Erasure / deactivation, known limitations
+
+GDPR erasure (`Nebu.Compliance.UserDeletion.delete_user_keys/3`) deletes the user's room account data in its
+transaction; admin deactivation does NOT (reversible); deleting a room cascades via FK. Known, not fixed
+here: (a) global `account_data` rows are not deleted by erasure; (b) the global `changed` flag is consumed per
+USER, so a second device can miss a global change (a device that syncs first clears the flag; reproduce with
+two since tokens, one PUT, two syncs); (c) the catch-all answers 404 `M_NOT_FOUND` instead of
+`M_UNRECOGNIZED`; (d) a room dropped from an initial sync by the 10 s room-fetch timeout does not get its
+account data until the entry changes again; (e) `rooms.leave.*.account_data` and sync filters for account data
+are not implemented.
+
 ## Device Identity vs Device Keys (Story s1-device-registry-model)
 
 A **device** is a first-class entity, modelled separately from the cryptographic key blob a client
@@ -1107,9 +1271,12 @@ Content-Type enforcement to prevent stored XSS:
 | Phase | Rule | Mechanism |
 |---|---|---|
 | Upload - blocklist | `text/html`, `application/xhtml+xml`, `text/javascript`, `application/javascript`, `image/svg+xml`, `application/x-shockwave-flash` → 400 M_BAD_JSON | `blockedContentTypes` map; normalized with `mime.ParseMediaType` (strips params) |
-| Download - safe inline | `image/jpeg`, `image/png`, `image/gif`, `image/webp`, `image/avif`, `audio/mpeg`, `audio/ogg`, `video/mp4`, `video/webm`, `application/pdf`, `text/plain` → `Content-Disposition: inline` | `safeInlineContentTypes` map; normalize with `strings.SplitN(...,";",2)` |
-| Download - unsafe fallback | All other stored types → `Content-Type: application/octet-stream`, `Content-Disposition: attachment` | Prevents inline rendering of pre-allowlist uploads |
+| Download - Content-Type | The stored (upload) type is served unchanged as base type (no charset appended; `put_resp_content_type(ct, nil)`). Missing/unparseable types (no `/`) and active-content types neutralized by category (the internal neutralization predicate in `Nebu.Media`: `text/html`, `application/xhtml+xml`, `text/xml`, `application/xml`, `image/svg+xml`, `application/x-shockwave-flash`, ANY `*+xml` suffix, `text/xsl`, `multipart/x-mixed-replace`, the WHATWG JavaScript MIME family incl. `application/ecmascript`/`text/jscript`/…, plus `application/wasm`, `text/x-component`, `text/cache-manifest`) → `application/octet-stream` + `attachment`. The JS family is deliberately NOT in the upload blocklist (legitimate to share; neutralized on download, legacy rows included) | Matrix spec v1.12+ ("exactly the same as the original upload, or reasonably close"); `Nebu.Media.disposition_for/1` |
+| Download - inline list | Spec inline list (26 types: `text/css`, `text/plain`, `text/csv`, `application/json`, `application/ld+json`, `image/{jpeg,gif,png,apng,webp,avif}`, `video/{mp4,webm,ogg,quicktime}`, `audio/{mp4,webm,aac,mpeg,ogg,wave,wav,x-wav,x-pn-wav,flac,x-flac}`) → `Content-Disposition: inline`; everything else (incl. `application/pdf`) → `attachment` | Disposition is computed from the served type; this replaces the former "octet-stream for everything not allowlisted" model (changed deliberately in `media-download-content-type-and-filename`; defense in depth now = attachment + CSP sandbox + nosniff + CORP + upload blocklist) |
+| Download - filename | `{fileName}` path segment > stored upload filename > no `filename` parameter (never the media_id). ASCII-safe `filename="..."` (`"`/`\` escaped), plus `filename*=UTF-8''<percent-encoded>` for non-ASCII; control characters and bidi/invisible format characters (Unicode `Cf`, e.g. U+202E) are stripped (no header injection / filename spoofing); the stored filename and the output (incl. the path segment) are capped at 255 bytes on a codepoint boundary; an empty path segment falls back to the stored name; the admin media list shows the same sanitized name (`Nebu.Media.display_filename/1`) | `Nebu.Media.content_disposition/2`; `media_files.filename` persisted on sync and async upload |
+| Thumbnail | Only `image/jpeg`, `image/png`, `image/apng`, `image/gif`, `image/webp` are served (exact type, `inline`, `thumbnail.<ext>`); any other stored type → 400 M_UNKNOWN (membership 403 is checked first) | Never relabels non-images as `image/png` |
 | All download responses | `X-Content-Type-Options: nosniff` always set | Prevent MIME sniffing |
+| Watch-flag (security) | This design relies on ALL media routes accepting only the `Authorization: Bearer` header (`OidcPlug`). Any change adding `?access_token=`, cookie auth or unauthenticated v3 media MUST re-trigger the security review (JS-typed uploads would become same-origin scripts; Admin UI CSP `script-src 'self'`). | Kassandra 2026-10-08 F-4 |
 
 **Media Gateway - Upload JWT Validation + Fail-Closed OIDC Startup (Stories 12.7, 12.8):**
 
@@ -1172,7 +1339,7 @@ GET /_matrix/client/v1/media/download/{serverName}/{mediaId}/{fileName} → auth
 GET /_matrix/client/v1/media/thumbnail/{serverName}/{mediaId} → authMW.Wrap(thumbnailHandler)
 ```
 
-The `{fileName}` path segment maps to `r.PathValue("fileName")` inside the download handler for the `Content-Disposition` filename. When the route without `{fileName}` is matched, `PathValue` returns `""` and the handler falls back to `mediaId`.
+The `{fileName}` path segment maps to `r.PathValue("fileName")` inside the download handler for the `Content-Disposition` filename. When the route without `{fileName}` is matched, `PathValue` returns `""` and the handler uses the stored upload filename and, if none exists, omits the `filename` parameter (never the media_id).
 
 **Security response headers on download and thumbnail (Matrix spec §Media Repository SHOULD, v1.4+):**
 

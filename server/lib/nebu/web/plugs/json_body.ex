@@ -38,6 +38,7 @@ defmodule Nebu.Web.Plugs.JsonBody do
                  parsers: [:json],
                  json_decoder: Jason,
                  length: 1_000_000,
+                 body_reader: {Nebu.Web.Plugs.RawBodyReader, :read_body, []},
                  pass: ["*/*"]
                )
 
@@ -53,6 +54,18 @@ defmodule Nebu.Web.Plugs.JsonBody do
   def call(conn, _opts) do
     Plug.Parsers.call(conn, @parser_opts)
   rescue
+    e in Plug.Parsers.RequestTooLargeError ->
+      # The account-data PUT routes (exact shapes, global + room) and the room-tag PUT routes
+      # answer 413 M_TOO_LARGE themselves (they check :body_too_large); every other route —
+      # including paths that merely contain an `account_data` / `tags` segment — keeps Plug's
+      # default (re-raise → 413).
+      if Nebu.Web.Plugs.RawBodyReader.opaque_content_put?(conn) do
+        %{conn | body_params: %{}}
+        |> Plug.Conn.assign(:body_too_large, true)
+      else
+        reraise e, __STACKTRACE__
+      end
+
     Plug.Parsers.ParseError ->
       # Malformed JSON body. Mark it and continue; the matched handler decides
       # the response (login → 400 M_NOT_JSON). body_params stays empty.

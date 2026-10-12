@@ -216,6 +216,17 @@ defmodule Nebu.Web.Plugs.RequestLogger do
   defp extract_user_id(_other), do: nil
 
   defp redacted_request_body(conn) do
+    if account_data_content?(conn), do: nil, else: redacted_request_body_params(conn)
+  end
+
+  # Account data (global + room scope) and the room-tag routes are opaque, client-defined USER
+  # CONTENT (tag orders / fields, markers, secret-storage blobs): neither the request nor the response body is ever captured, not
+  # even redacted (Logging Law: no user content in logs).
+  defp account_data_content?(conn) do
+    Nebu.Web.Plugs.RawBodyReader.opaque_content_shape?(conn.request_path)
+  end
+
+  defp redacted_request_body_params(conn) do
     case conn.body_params do
       %Plug.Conn.Unfetched{} ->
         nil
@@ -259,7 +270,8 @@ defmodule Nebu.Web.Plugs.RequestLogger do
   # via the `with`/`else` below; this is purely an efficiency guard, and the
   # whole call is already lazy via `Logger.debug(fn -> ... end)`).
   defp redacted_response_body(conn) do
-    with true <- json_content_type?(conn),
+    with false <- account_data_content?(conn),
+         true <- json_content_type?(conn),
          body when is_binary(body) <- conn.resp_body,
          {:ok, decoded} <- Jason.decode(body) do
       PayloadRedactor.redact_payload(decoded)

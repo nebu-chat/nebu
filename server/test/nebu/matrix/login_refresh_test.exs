@@ -551,7 +551,7 @@ defmodule Nebu.Matrix.LoginRefreshTest do
     end
 
     # MINOR-2 (added): AC6 "already-used-and-replaced RT → 401" at the HTTP level.
-    # Rotate RT_A → (AT_B, RT_B), use AT_B once (closes the old RT's grace window),
+    # Rotate RT_A → (AT_B, RT_B), use AT_B once (consumes the old RT),
     # then re-presenting RT_A must be rejected.
     test "rotated-then-used old RT → 401 M_UNKNOWN_TOKEN (AC6 HTTP level)", %{priv_jwk: priv} do
       login_token = mint_login_token(priv, "oidc-rt-from-keycloak")
@@ -567,7 +567,7 @@ defmodule Nebu.Matrix.LoginRefreshTest do
       rt_a = json(login)["refresh_token"]
 
       # matrix-refresh-revalidates-with-idp: stub the mandatory IdP round-trip
-      # (this test is about opaque RT rotation/grace mechanics, not the IdP
+      # (this test is about opaque RT rotation (pending/consumed) mechanics, not the IdP
       # contact itself).
       put_matrix_oidc_refresh_override(fn _decrypted_rt ->
         {:ok, %{"sub" => current_sub(), "exp" => future_exp()}, nil}
@@ -577,7 +577,7 @@ defmodule Nebu.Matrix.LoginRefreshTest do
       assert refresh.status == 200
       at_b = json(refresh)["access_token"]
 
-      # Use the new AT once — this closes the grace window on the old (RT_A) row.
+      # Use the new AT once — this consumes the old (RT_A) row.
       sync = call(:get, "/_matrix/client/v3/sync", nil, auth(at_b))
       assert sync.status == 200
 
@@ -610,8 +610,8 @@ defmodule Nebu.Matrix.LoginRefreshTest do
       {:ok, _} =
         Ecto.Adapters.SQL.query(
           Nebu.Repo,
-          "UPDATE matrix_sessions SET expires_at = NOW() - INTERVAL '1 second' WHERE access_token = $1",
-          [at]
+          "UPDATE matrix_sessions SET expires_at = NOW() - INTERVAL '1 second' WHERE access_token_hash = $1",
+          [Nebu.Matrix.Session.MatrixSessionStore.hash_token(at)]
         )
 
       resp = call(:get, "/_matrix/client/v3/sync", nil, auth(at))
@@ -738,8 +738,8 @@ defmodule Nebu.Matrix.LoginRefreshTest do
     {:ok, %{rows: rows}} =
       Ecto.Adapters.SQL.query(
         Nebu.Repo,
-        "SELECT oidc_refresh_token FROM matrix_sessions WHERE access_token = $1",
-        [access_token]
+        "SELECT oidc_refresh_token FROM matrix_sessions WHERE access_token_hash = $1",
+        [Nebu.Matrix.Session.MatrixSessionStore.hash_token(access_token)]
       )
 
     case rows do
@@ -823,7 +823,7 @@ defmodule Nebu.Matrix.LoginRefreshTest do
       assert json(retry)["errcode"] == "M_UNKNOWN_TOKEN"
     end
 
-    test "IdP rejection sets soft_logout: true on the 401 (parity with the existing expired-token envelope)",
+    test "IdP rejection destroys the session: 401 M_UNKNOWN_TOKEN WITHOUT soft_logout (Matrix: client must discard state)",
          %{priv_jwk: priv} do
       login_token = mint_login_token(priv, "oidc-rt-from-keycloak")
 
@@ -844,9 +844,13 @@ defmodule Nebu.Matrix.LoginRefreshTest do
       body = json(refresh)
       assert body["errcode"] == "M_UNKNOWN_TOKEN"
 
-      assert body["soft_logout"] == true,
-             "spec-relevant parity: /refresh's 401 on IdP rejection should carry soft_logout:true, " <>
-               "matching the existing expired-opaque-AT 401 envelope (AC5 describe block above)"
+      # matrix-session-refresh-fixes (AC4/AC7, Oracle 2026-10-07): the session was
+      # really destroyed (confirmed rejection deletes it), so soft_logout must be
+      # absent/false - soft_logout:true would make the client KEEP its E2EE/device
+      # state for a device the server no longer knows. (Only the expired-AT 401 on
+      # an authenticated request, session still alive, carries soft_logout:true.)
+      refute body["soft_logout"] == true,
+             "a destroyed session must not carry soft_logout: true; body=#{refresh.resp_body}"
     end
   end
 
@@ -1348,7 +1352,7 @@ defmodule Nebu.Matrix.LoginRefreshTest do
       end
     end
 
-    test "fails the request closed (401) WITHOUT hard-deleting the opaque session row",
+    test "fails the request with a transient 503 + Retry-After WITHOUT hard-deleting the opaque session row",
          %{priv_jwk: priv, user_id: uid} do
       login_token = mint_login_token(priv, "oidc-rt-from-keycloak")
 
@@ -1365,7 +1369,7 @@ defmodule Nebu.Matrix.LoginRefreshTest do
 
       # Sanity check: the session row exists and its AT works before the
       # transient failure is injected.
-      assert {:ok, _} = Nebu.Matrix.Session.MatrixSessionStore.get_by_refresh_token(rt)
+      assert {:ok, _, :current} = Nebu.Matrix.Session.MatrixSessionStore.resolve_refresh_token(rt)
       assert call(:get, "/_matrix/client/v3/sync", nil, auth(at)).status == 200
 
       # The IdP round-trip itself succeeds (fresh claims come back fine) — the
@@ -1379,15 +1383,19 @@ defmodule Nebu.Matrix.LoginRefreshTest do
 
       refresh = call(:post, "/_matrix/client/v3/refresh", %{"refresh_token" => rt})
 
-      assert refresh.status == 401
-      assert json(refresh)["errcode"] == "M_UNKNOWN_TOKEN"
+      # matrix-session-refresh-fixes AC7: a transient failure is 5xx (Matrix clients
+      # log out on any 4xx and retry on 5xx) and carries Retry-After.
+      assert refresh.status == 503
+      assert json(refresh)["errcode"] == "M_UNKNOWN"
+      assert [retry_after] = get_resp_header(refresh, "retry-after")
+      assert String.to_integer(retry_after) > 0
 
       # m1: unlike a CONFIRMED rejection/deprovisioning, a transient check
       # failure must NOT hard-delete the opaque session row — Store.delete_for_user_device/2
       # must not have fired. Verified by reading the row back via the ORIGINAL
       # refresh token: if the delete path had (wrongly) fired, this lookup
       # would return :error just like it does in the m2/deprovisioning tests.
-      assert {:ok, sess} = Nebu.Matrix.Session.MatrixSessionStore.get_by_refresh_token(rt)
+      assert {:ok, sess, :current} = Nebu.Matrix.Session.MatrixSessionStore.resolve_refresh_token(rt)
       assert sess.user_id == uid
 
       # The original opaque AT is therefore still live too — the session was

@@ -52,7 +52,7 @@ defmodule Nebu.Media.DB do
   @sql_lookup """
   SELECT media_id, server_name, content_type, file_size, aes_key_hex, nonce_hex,
          uploader_user_id, uploaded_at, deleted, state, storage_key, archived_at,
-         compressed
+         compressed, filename
   FROM media_files
   WHERE server_name = $1 AND media_id = $2
   LIMIT 1
@@ -469,7 +469,7 @@ defmodule Nebu.Media.DB do
   # (column order MUST match `@sql_lookup`'s SELECT list exactly). Public
   # (but @doc false, not part of this module's real public API — `lookup/2`
   # is) purely so a fast, DB-free unit test can construct a synthetic
-  # 13-element row tuple by hand and assert `:compressed` (and every other
+  # 14-element row tuple by hand and assert `:compressed` (and every other
   # column) lands at the correct position in THIS function's own positional
   # mapping. It does NOT exercise `@sql_lookup` itself — a regression that
   # drops a column from that SELECT list changes the arity of the list
@@ -491,7 +491,8 @@ defmodule Nebu.Media.DB do
         state,
         storage_key,
         archived_at,
-        compressed
+        compressed,
+        filename
       ]) do
     %{
       media_id: media_id,
@@ -555,7 +556,9 @@ defmodule Nebu.Media.DB do
       # (`Nebu.Media.fetch_and_decrypt/3`), so this is the single place that
       # must surface it — without it, a compressed-at-rest object is served
       # still gzip-wrapped, mislabeled with the original Content-Type.
-      compressed: compressed
+      compressed: compressed,
+      # Original upload filename (nullable; media_files.filename, migration 000025).
+      filename: filename
     }
   end
 

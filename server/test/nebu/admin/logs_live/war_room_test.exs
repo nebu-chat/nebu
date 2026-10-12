@@ -291,6 +291,7 @@ defmodule Nebu.Admin.LogsLive.WarRoomTest do
   # ══════════════════════════════════════════════════════════════════════
 
   describe "amendment 1 (AC12): /admin/logs/war-room dispatches the NEW dedicated page" do
+    @describetag :no_repo
     test "renders the War Room page, not the old Live Stream stub" do
       {:ok, _view, html} = mount_via_router("/admin/logs/war-room")
       doc = parsed(html)
@@ -518,6 +519,7 @@ defmodule Nebu.Admin.LogsLive.WarRoomTest do
   # ══════════════════════════════════════════════════════════════════════
 
   describe "AC4: an empty session list shows the placeholder message" do
+    @describetag :no_repo
     test "with zero sessions (DB-free unit-test contract — no Nebu.Repo running), the empty-state message is shown" do
       refute Process.whereis(Nebu.Repo),
              "precondition: this is the DB-free unit environment (mirrors " <>
@@ -645,6 +647,7 @@ defmodule Nebu.Admin.LogsLive.WarRoomTest do
   end
 
   describe "AC6: the detail view 404s for a non-existent session id" do
+    @describetag :no_repo
     test "an invalid room_id shows a 404 message with a link back to the list" do
       {:ok, _view, html} =
         mount_via_router("/admin/logs/war-room/00000000-0000-0000-0000-000000000000")
@@ -666,6 +669,7 @@ defmodule Nebu.Admin.LogsLive.WarRoomTest do
   # ══════════════════════════════════════════════════════════════════════
 
   describe "AC7/AC8: the pre-session scoping form renders with every required field" do
+    @describetag :no_repo
     test "the form contains reason/scope/user_id/device_id/max_entries/max_duration_s + Start button" do
       {:ok, _view, html} = mount_list()
       doc = parsed(html)
@@ -687,6 +691,7 @@ defmodule Nebu.Admin.LogsLive.WarRoomTest do
   end
 
   describe "amendment 3: AC8's live-activity preview reuses TraceMapBubble for level+source (:readonly), not a second radial map" do
+    @describetag :no_repo
     test "the preview renders level and source dimension bubbles in :readonly mode" do
       {:ok, _view, html} = mount_list()
       doc = parsed(html)
@@ -739,6 +744,7 @@ defmodule Nebu.Admin.LogsLive.WarRoomTest do
   # ══════════════════════════════════════════════════════════════════════
 
   describe "AC9: exclusive scope mode shows an exclude-list selector sourced from long_polling_endpoints/0" do
+    @describetag :no_repo
     test "selecting scope=\"exclusive\" reveals checkboxes for every canonical off-list endpoint" do
       {:ok, view, _html} = mount_list()
 
@@ -916,6 +922,7 @@ defmodule Nebu.Admin.LogsLive.WarRoomTest do
   # nav_item sidebar entry, covered by amendment 1's own describe block
   # above).
   describe "AC7/AC8: broad/noisy-scope warnings are shown on the dedicated page" do
+    @describetag :no_repo
     test "scope=\"all\" shows the broad-scope warning" do
       {:ok, _view, html} = mount_list()
       assert find(parsed(html), ~s([data-testid="war-room-warning-all"]))
@@ -934,6 +941,7 @@ defmodule Nebu.Admin.LogsLive.WarRoomTest do
   # ══════════════════════════════════════════════════════════════════════
 
   describe "AC13: accessibility contract" do
+    @describetag :no_repo
     test "the page uses semantic h1/h2 headings" do
       {:ok, _view, html} = mount_list()
       doc = parsed(html)

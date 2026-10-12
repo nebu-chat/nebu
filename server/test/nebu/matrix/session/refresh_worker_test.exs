@@ -59,9 +59,9 @@ defmodule Nebu.Matrix.Session.RefreshWorkerTest do
       (re-SELECT immediately before calling the seam, or a WHERE-guarded
       UPDATE...RETURNING as part of the rotate step), the end DB state must
       show no resurrected/rotated row for the deleted device.
-    * Grace-period-safe selection (AC4): the candidate query must select only
-      `revoked_at IS NULL` rows — a soft-revoked grace-period sibling
-      (`revoked_at IS NOT NULL AND grace_until > NOW()`) must never be handed to
+    * Pending-sibling-safe selection (AC4): the candidate query must select only
+      `revoked_at IS NULL` rows — a soft-revoked pending sibling
+      (`revoked_at IS NOT NULL AND grace_until IS NULL`) must never be handed to
       the IdP-exchange seam.
 
   ## Why these tests MUST FAIL right now (red phase)
@@ -288,8 +288,8 @@ defmodule Nebu.Matrix.Session.RefreshWorkerTest do
     {:ok, _} =
       Ecto.Adapters.SQL.query(
         Nebu.Repo,
-        "UPDATE matrix_sessions SET expires_at = NOW() + ($2 * INTERVAL '1 second') WHERE access_token = $1",
-        [access_token, seconds_from_now]
+        "UPDATE matrix_sessions SET expires_at = NOW() + ($2 * INTERVAL '1 second') WHERE access_token_hash = $1",
+        [Store.hash_token(access_token), seconds_from_now]
       )
 
     :ok
@@ -299,8 +299,8 @@ defmodule Nebu.Matrix.Session.RefreshWorkerTest do
     {:ok, %{rows: [[expires_at]]}} =
       Ecto.Adapters.SQL.query(
         Nebu.Repo,
-        "SELECT expires_at FROM matrix_sessions WHERE access_token = $1",
-        [access_token]
+        "SELECT expires_at FROM matrix_sessions WHERE access_token_hash = $1",
+        [Store.hash_token(access_token)]
       )
 
     expires_at
@@ -310,8 +310,8 @@ defmodule Nebu.Matrix.Session.RefreshWorkerTest do
     {:ok, %{rows: rows}} =
       Ecto.Adapters.SQL.query(
         Nebu.Repo,
-        "SELECT revoked_at FROM matrix_sessions WHERE access_token = $1",
-        [access_token]
+        "SELECT revoked_at FROM matrix_sessions WHERE access_token_hash = $1",
+        [Store.hash_token(access_token)]
       )
 
     case rows do
@@ -420,49 +420,29 @@ defmodule Nebu.Matrix.Session.RefreshWorkerTest do
 
       run_one_refresh_cycle()
 
-      # AC1: the row's expires_at must have been extended (either the same row
-      # was updated in place, or — if the worker reuses rotate_tokens/2's
-      # soft-revoke-and-insert semantics — a new active row for (uid, "AC1DEV")
-      # now has a later expires_at and remains authenticatable via a NEW opaque
-      # AT). Either way, SOME live token for this device must now authenticate
-      # successfully with an expiry strictly later than the original bound.
-      #
-      # Test-setup fix: `Store.get_by_access_token/1` has NO `revoked_at`
-      # filter (see matrix_session_store.ex get_by_access_token/1) — it always
-      # returns `{:ok, row}` for a KNOWN access token, even a soft-revoked one.
-      # Since `rotate_tokens/1` (the reuse this story mandates) soft-revokes
-      # the OLD row rather than deleting it, `sess.access_token` is ALWAYS
-      # found here after a rotation — the original `:error` branch (meant for
-      # "the old AT is gone, a rotation happened") was therefore unreachable.
-      # Dispatch on `revoked_at` instead of `{:ok, _} | :error` so the correct
-      # branch's assertions actually run for whichever strategy the worker
-      # uses, without changing what either branch asserts.
-      case Store.get_by_access_token(sess.access_token) do
-        {:ok, %{revoked_at: nil} = still_here} ->
-          assert DateTime.compare(still_here.expires_at, original_expires_at) == :gt,
-                 "AC1: expires_at must be extended beyond the original nearing bound"
+      # matrix-session-refresh-fixes AC1: the worker extends the SAME row in
+      # place - the client's access token must stay the live token (the client
+      # never learns rotated tokens), expires_at extended, no revoked sibling.
+      assert {:ok, %{revoked_at: nil} = still_here} = Store.get_by_access_token(sess.access_token),
+             "AC1: the client's access token must remain the active, non-revoked row"
 
-          resp = call(:get, "/_matrix/client/v3/sync", nil, auth(sess.access_token))
-          assert resp.status == 200
+      assert DateTime.compare(still_here.expires_at, original_expires_at) == :gt,
+             "AC1: expires_at must be extended beyond the original nearing bound"
 
-        _ ->
-          # The worker rotated to a new AT (rotate_tokens/2 semantics) — find the
-          # live row for this (user, device) and assert ITS expires_at is later.
-          {:ok, %{rows: [[new_at, new_expires_at]]}} =
-            Ecto.Adapters.SQL.query(
-              Nebu.Repo,
-              "SELECT access_token, expires_at FROM matrix_sessions WHERE user_id = $1 AND device_id = $2 AND revoked_at IS NULL",
-              [uid, "AC1DEV"]
-            )
+      assert still_here.refresh_token_hash == Store.hash_token(sess.refresh_token),
+             "AC1: the client's refresh token must be unchanged by the worker"
 
-          assert DateTime.compare(new_expires_at, original_expires_at) == :gt,
-                 "AC1: the rotated row's expires_at must be extended beyond the original nearing bound"
+      {:ok, %{rows: [[row_count]]}} =
+        Ecto.Adapters.SQL.query(
+          Nebu.Repo,
+          "SELECT COUNT(*) FROM matrix_sessions WHERE user_id = $1 AND device_id = $2",
+          [uid, "AC1DEV"]
+        )
 
-          resp = call(:get, "/_matrix/client/v3/sync", nil, auth(new_at))
+      assert row_count == 1, "AC1: in-place extension must not create a sibling row"
 
-          assert resp.status == 200,
-                 "AC1: the extended session's (possibly rotated) access token must still authenticate"
-      end
+      resp = call(:get, "/_matrix/client/v3/sync", nil, auth(sess.access_token))
+      assert resp.status == 200
     end
   end
 
@@ -590,11 +570,11 @@ defmodule Nebu.Matrix.Session.RefreshWorkerTest do
   end
 
   # ══════════════════════════════════════════════════════════════════════════
-  # AC4 — grace-period sibling safety: only the active, latest row is refreshed
+  # AC4 — pending sibling safety: only the active, latest row is refreshed
   # ══════════════════════════════════════════════════════════════════════════
 
-  describe "AC4: grace-period-safe row selection" do
-    test "only the active (non-revoked) row is refreshed; the soft-revoked grace sibling is left alone",
+  describe "AC4: pending-sibling-safe row selection" do
+    test "only the active (non-revoked) row is refreshed; the soft-revoked pending sibling is left alone",
          %{priv_jwk: priv, user_id: uid} do
       sub = current_sub()
       sess = login_device(priv, sub, "oidc-rt-grace", "AC4DEV")
@@ -614,9 +594,8 @@ defmodule Nebu.Matrix.Session.RefreshWorkerTest do
           new_expires_at: DateTime.add(DateTime.utc_now(), 30 * 60, :second)
         })
 
-      # Old (soft-revoked) row: keep its grace window OPEN (grace_until in the
-      # future) but also push its expires_at into the nearing window, so a
-      # buggy worker that ignores revoked_at would try to refresh it too.
+      # Old (soft-revoked) row: keep it PENDING (grace_until NULL) but also
+      # push its expires_at into the nearing window, so a buggy worker that ignores revoked_at would try to refresh it too.
       set_expires_at(sess.access_token, 30 * 60)
 
       test_pid = self()
@@ -640,7 +619,7 @@ defmodule Nebu.Matrix.Session.RefreshWorkerTest do
       # Sanity: the OLD row (now soft-revoked) must still show revoked_at set —
       # proving the worker did not "un-revoke" or otherwise touch it.
       assert revoked_at_for(sess.access_token) not in [nil, :gone],
-             "AC4: the grace-period sibling row must remain soft-revoked, untouched by the worker"
+             "AC4: the pending sibling row must remain soft-revoked, untouched by the worker"
 
       # And the new active row must be the one whose expires_at moved forward
       # (extended past the 30-minute nearing bound it was NOT even set to —
@@ -657,7 +636,7 @@ defmodule Nebu.Matrix.Session.RefreshWorkerTest do
                active_expires_at,
                DateTime.utc_now() |> DateTime.add(35 * 60, :second)
              ) == :gt,
-             "AC4: the ACTIVE row must be the one extended, not the grace-period sibling"
+             "AC4: the ACTIVE row must be the one extended, not the pending sibling"
     end
 
     defp drain_idp_calls(acc) do
@@ -697,7 +676,7 @@ defmodule Nebu.Matrix.Session.RefreshWorkerTest do
       # threads forward across cycles — a `for` loop re-reads the OUTER
       # binding every iteration and would silently re-check the SAME
       # access_token three times instead of following a rotated token.
-      Enum.reduce(1..3, sess.access_token, fn cycle, current_at ->
+      Enum.reduce(1..3, Store.hash_token(sess.access_token), fn cycle, current_at ->
         # Test-setup fix: `session_expires_at/1` (http_public.ex, reused
         # verbatim by the worker per this story) computes its ceiling from
         # `System.system_time(:second)` — SECOND-granular, truncated (floored)
@@ -724,20 +703,27 @@ defmodule Nebu.Matrix.Session.RefreshWorkerTest do
         # genuinely follows a rotated token across cycles (AC5's whole point)
         # instead of silently re-reading the same now-stale, revoked row's
         # unchanged expires_at three times.
-        {live_at, live_expires_at} =
-          case Store.get_by_access_token(current_at) do
-            {:ok, %{revoked_at: nil} = s} ->
-              {current_at, s.expires_at}
+        # Token-hashing port: the plaintext of a rotated token is unrecoverable from
+        # the DB (only its hash is stored), so this loop threads the access_token_HASH
+        # of the live row instead of the plaintext token.
+        {live_hash, live_expires_at} =
+          case Ecto.Adapters.SQL.query(
+                 Nebu.Repo,
+                 "SELECT expires_at FROM matrix_sessions WHERE access_token_hash = $1 AND revoked_at IS NULL",
+                 [current_at]
+               ) do
+            {:ok, %{rows: [[exp]]}} ->
+              {current_at, exp}
 
             _ ->
-              {:ok, %{rows: [[at2, exp2]]}} =
+              {:ok, %{rows: [[h2, exp2]]}} =
                 Ecto.Adapters.SQL.query(
                   Nebu.Repo,
-                  "SELECT access_token, expires_at FROM matrix_sessions WHERE user_id = $1 AND device_id = $2 AND revoked_at IS NULL",
+                  "SELECT access_token_hash, expires_at FROM matrix_sessions WHERE user_id = $1 AND device_id = $2 AND revoked_at IS NULL",
                   [sess.user_id, "AC5DEV"]
                 )
 
-              {at2, exp2}
+              {h2, exp2}
           end
 
         assert DateTime.compare(live_expires_at, cap) != :gt,
@@ -747,8 +733,14 @@ defmodule Nebu.Matrix.Session.RefreshWorkerTest do
         # Re-arm the NEXT cycle: push expires_at back into the nearing window
         # again so the loop actually exercises repeated refreshes (deterministic,
         # no sleeping across cycles).
-        set_expires_at(live_at, 10)
-        live_at
+        {:ok, _} =
+          Ecto.Adapters.SQL.query(
+            Nebu.Repo,
+            "UPDATE matrix_sessions SET expires_at = NOW() + (10 * INTERVAL '1 second') WHERE access_token_hash = $1",
+            [live_hash]
+          )
+
+        live_hash
       end)
     end
   end
@@ -818,8 +810,8 @@ defmodule Nebu.Matrix.Session.RefreshWorkerTest do
       {:ok, _} =
         Ecto.Adapters.SQL.query(
           Nebu.Repo,
-          "UPDATE matrix_sessions SET expires_at = NOW() - INTERVAL '1 second' WHERE access_token = $1",
-          [sess.access_token]
+          "UPDATE matrix_sessions SET expires_at = NOW() - INTERVAL '1 second' WHERE access_token_hash = $1",
+          [Store.hash_token(sess.access_token)]
         )
 
       resp = call(:get, "/_matrix/client/v3/sync", nil, auth(sess.access_token))
@@ -1265,14 +1257,10 @@ defmodule Nebu.Matrix.Session.RefreshWorkerTest do
             sess.access_token
 
           _ ->
-            {:ok, %{rows: [[at2]]}} =
-              Ecto.Adapters.SQL.query(
-                Nebu.Repo,
-                "SELECT access_token FROM matrix_sessions WHERE user_id = $1 AND device_id = $2 AND revoked_at IS NULL",
-                [sess.user_id, "AC1BDEV"]
-              )
-
-            at2
+            # Token-hashing port: a rotated token's plaintext is unrecoverable (only its
+            # hash is stored). The worker extends IN PLACE (prior story AC1), so a rotated
+            # row here would itself be a regression.
+            flunk("background refresh must extend in place, never rotate the access token")
         end
 
       resp = call(:get, "/_matrix/client/v3/sync", nil, auth(live_at))

@@ -68,8 +68,8 @@ defmodule Nebu.Matrix.Session.RefreshWorker do
 
   security-review fix cycle-2 (HIGH finding #1): the confirmed-rejection
   hard-delete is scoped to the EXACT row this worker re-selected
-  (`Store.delete_by_access_token/1`, guarded `WHERE access_token = $1 AND
-  revoked_at IS NULL`) — NOT the wider `(user_id, device_id)` pair
+  (`Store.delete_by_access_token_hash/1`, guarded by the row's hash AND
+  `revoked_at IS NULL`) — NOT the wider `(user_id, device_id)` pair
   `Store.delete_for_user_device/2` deletes. See "Cluster safety" below for
   why the wide-scoped delete is unsafe here specifically (it is safe, and
   still used, for the client-driven `/refresh` path and explicit
@@ -100,29 +100,44 @@ defmodule Nebu.Matrix.Session.RefreshWorker do
   class of self-inflicted DoS as finding #2, just gated on the raw HTTP status
   code path instead of the network/discovery-failure path.
 
+  ## In-place extension, never rotation (matrix-session-refresh-fixes AC1/AC2)
+
+  The worker NEVER rotates the opaque access/refresh token: the client never
+  receives rotated tokens, so rotating would log it out (revoked AT -> 401 without
+  `soft_logout`, old RT eventually unusable). A successful IdP re-validation only
+  updates `expires_at` (and a provider-rotated encrypted OIDC refresh token) on the
+  SAME row via `Store.extend_in_place_by_hash/3` (keyed by the row's hash, guarded by
+  `revoked_at IS NULL`). The worker only ever knows rows by their `access_token_hash`
+  (matrix_sessions holds no plaintext token), hence the `*_by_hash` store variants.
+  No new row, no `revoked_at`, no pending/consumed state change. The
+  client's own `/refresh` and the worker therefore never invalidate each other.
+
   ## Reuse, not duplication (AC1/AC6, story Dev Note 2)
 
   All actual IdP-exchange, decrypt, and rotation mechanics are delegated to
   the existing `Nebu.Matrix.HttpPublic.revalidate_with_idp/1` (which itself
   calls through `exchange_oidc_refresh_token/1`, honoring the
   `:matrix_oidc_refresh_override` test seam) and
-  `Nebu.Matrix.Session.MatrixSessionStore.rotate_tokens/1`. This worker
+  `Nebu.Matrix.Session.MatrixSessionStore.extend_in_place/3`. This worker
   contains zero HTTP/JWT logic of its own.
 
   ## Cluster safety (ADR-020)
 
   Row selection is deterministic wall-clock comparison, so multiple nodes MAY
-  select and attempt to redeem the same row concurrently. `rotate_tokens/1`
-  soft-revokes the old row inside a transaction guarded by `WHERE
-  access_token = $1 AND revoked_at IS NULL` — the loser of the race finds
-  0 rows updated and returns `:error`, which this worker simply logs and
-  moves on from (no crash, no double local extension, no double IdP charge
-  beyond the redemption call itself already made by the losing node — an
-  accepted, bounded cost identical to any other concurrent-refresh race in
-  this codebase).
+  select and attempt to redeem the same row concurrently. The worker never
+  rotates: `Store.extend_in_place/3` is one atomic statement guarded by
+  `revoked_at IS NULL`, so racing nodes simply both extend the same row (the
+  last write wins, harmless). If a client `/refresh` rotated the row away first,
+  `extend_in_place/3` matches 0 rows and the worker skips the extension; a
+  provider-rotated OIDC refresh token obtained from the IdP is then written to
+  the device's CURRENT active row (`Store.store_rotated_oidc_rt/3`, guarded by
+  `revoked_at IS NULL`) so the rotating IdP's new token is not lost. Two nodes (or
+  the worker and `/refresh`) redeeming the SAME OIDC refresh token at the same
+  time against a rotating IdP stays an accepted, pre-existing limitation: the
+  loser's redemption fails and is classified by `RefreshErrors`.
 
-  security-review fix cycle-2 (HIGH finding #1): the ROTATION path above was
-  always race-safe, but the pre-existing fail-closed hard-delete path was
+  security-review fix cycle-2 (HIGH finding #1): the extension path above is
+  race-safe, but the fail-closed hard-delete path originally was
   NOT — it deleted by `(user_id, device_id)` (`delete_for_user_device/2`),
   reaching across to any row for that device, not just the one this worker
   acted on. Since upstream IdPs (Dex default, RFC 9700 recommendation) rotate
@@ -133,8 +148,8 @@ defmodule Nebu.Matrix.Session.RefreshWorker do
   wide `(user_id, device_id)` scope, it would delete the WINNER's freshly
   rotated row — an attacker-independent, self-inflicted DoS forcing
   unnecessary re-login on an actively-refreshed, legitimate session. Fixed by
-  scoping the delete to `Store.delete_by_access_token(sess.access_token)`
-  (`WHERE access_token = $1 AND revoked_at IS NULL`) — the same true per-row
+  scoping the delete to `Store.delete_by_access_token_hash(sess.access_token_hash)`
+  (guarded by `revoked_at IS NULL`) — the same true per-row
   atomicity `rotate_tokens/1`'s guarded UPDATE already has, so a loser's
   delete against an already-superseded row matches 0 rows and cannot touch
   the winner's replacement.
@@ -144,6 +159,7 @@ defmodule Nebu.Matrix.Session.RefreshWorker do
   require Logger
 
   alias Nebu.Matrix.HttpPublic
+  alias Nebu.Matrix.Session.RefreshErrors
   alias Nebu.Matrix.Session.MatrixSessionStore, as: Store
 
   @default_interval_ms 5 * 60 * 1000
@@ -204,8 +220,8 @@ defmodule Nebu.Matrix.Session.RefreshWorker do
   # device_id) that is within the lookahead window is a candidate. Since only
   # one row per device can ever have revoked_at IS NULL at a time (rotation
   # soft-revokes the old row before inserting the new one), a plain
-  # `revoked_at IS NULL` filter already excludes every grace-period sibling —
-  # no separate GROUP BY/window function is needed to pick "the latest" row.
+  # `revoked_at IS NULL` filter already excludes every soft-revoked (pending or
+  # consumed) sibling — no GROUP BY/window function is needed.
   # code-review cycle-1 MINOR (m3): "only one non-revoked row per device" is an
   # INVARIANT MAINTAINED BY CONVENTION in `rotate_tokens/1` (it always
   # soft-revokes the old row in the same transaction as inserting the new
@@ -213,17 +229,21 @@ defmodule Nebu.Matrix.Session.RefreshWorker do
   # on `(user_id, device_id) WHERE revoked_at IS NULL`). If that convention is
   # ever violated by a future code path, this filter would silently select
   # more than one "active" row per device.
+  # N-3: rows at/over the absolute cap (created_at + session TTL) are NOT candidates:
+  # they can never be extended again, so redeeming the IdP RT would be a no-op that
+  # only keeps resetting the IdP idle timer. The client's own /refresh re-validates.
   defp candidates do
     case safe_query(
            """
-           SELECT access_token
+           SELECT access_token_hash
              FROM matrix_sessions
             WHERE revoked_at IS NULL
               AND expires_at <= NOW() + ($1 * INTERVAL '1 second')
+              AND created_at + ($2::bigint * INTERVAL '1 second') > NOW()
            """,
-           [lookahead_seconds()]
+           [lookahead_seconds(), Nebu.Web.SessionConfig.matrix_session_ttl_seconds()]
          ) do
-      {:ok, %{rows: rows}} -> Enum.map(rows, fn [access_token] -> access_token end)
+      {:ok, %{rows: rows}} -> Enum.map(rows, fn [access_token_hash] -> access_token_hash end)
       {:error, _} -> []
     end
   end
@@ -232,8 +252,8 @@ defmodule Nebu.Matrix.Session.RefreshWorker do
   # anything else — in particular before calling revalidate_with_idp/1 (the
   # IdP-exchange seam). If the row is gone or has been revoked since the
   # candidate list was built, skip it silently (fail-closed, no resurrection).
-  defp refresh_row(access_token) do
-    case Store.get_by_access_token(access_token) do
+  defp refresh_row(access_token_hash) do
+    case Store.get_by_access_token_hash(access_token_hash) do
       {:ok, %{revoked_at: nil} = sess} ->
         redeem(sess)
 
@@ -303,24 +323,20 @@ defmodule Nebu.Matrix.Session.RefreshWorker do
   # rejection, matching the existing fail-closed-in-direction philosophy for
   # genuinely unknown codes — this fix narrows ONLY the known-transient 5xx/429
   # family, it does not broaden transience to arbitrary status codes.
-  defp transient?({:transient_check_failed, _reason}), do: true
-  defp transient?({:token_endpoint_unreachable, _reason}), do: true
-  defp transient?({:discovery_failed, _reason}), do: true
-  defp transient?({:token_endpoint_status, status}) when status >= 500 or status == 429, do: true
-  defp transient?(_other), do: false
+  # Classification lives in `RefreshErrors.transient?/1` (shared with /refresh).
 
   defp redeem(sess) do
     case HttpPublic.revalidate_with_idp(sess) do
       {:ok, fresh_claims, new_oidc_rt} ->
-        rotate(sess, fresh_claims, new_oidc_rt)
+        extend(sess, fresh_claims, new_oidc_rt)
 
       {:error, reason} ->
-        if transient?(reason) do
+        if RefreshErrors.transient?(reason) do
           Logger.warning(
             "matrix refresh worker: transient failure re-checking active status, session left intact",
             user_id: sess.user_id,
             device_id: sess.device_id,
-            reason: inspect(reason)
+            reason: RefreshErrors.describe(reason)
           )
 
           :ok
@@ -329,47 +345,44 @@ defmodule Nebu.Matrix.Session.RefreshWorker do
             "matrix refresh worker: confirmed upstream rejection, hard-invalidating session",
             user_id: sess.user_id,
             device_id: sess.device_id,
-            reason: inspect(reason)
+            reason: RefreshErrors.describe(reason)
           )
 
           # security-review fix (HIGH finding #1): scope the fail-closed
           # delete to the EXACT row this worker re-selected and acted on
-          # (`sess.access_token`, still-active at the TOCTOU re-check above),
+          # (`sess.access_token_hash`, still-active at the TOCTOU re-check above),
           # NOT the wider (user_id, device_id) pair. Under the supported
           # clustered deployment, a sibling node may have already WON a race
           # to redeem the same (rotating) upstream refresh token and rotated
           # this device to a brand-new healthy row before this node's own
-          # redemption attempt failed. `delete_by_access_token/1` is guarded
-          # by `WHERE access_token = $1 AND revoked_at IS NULL`, giving this
+          # redemption attempt failed. `delete_by_access_token_hash/1` is guarded
+          # by `WHERE access_token_hash = $1 AND revoked_at IS NULL`, giving this
           # delete the same true per-row atomicity `rotate_tokens/1`'s
           # guarded UPDATE already has: if the winner already soft-revoked
           # (or deleted) this exact row, this delete matches 0 rows and
           # cannot reach across to touch the winner's new row. The bounded
           # TTL (AC5/AC6) still covers the case where this delete itself
           # were ever to fail/miss.
-          :ok = Store.delete_by_access_token(sess.access_token)
+          :ok = Store.delete_by_access_token_hash(sess.access_token_hash)
           :ok
         end
     end
   end
 
-  # AC5: new_expires_at is derived from session_expires_at/1 — the SAME
-  # min(oidc_exp, now+ceiling) cap login/`/refresh` use. Never re-implemented.
-  defp rotate(sess, fresh_claims, new_oidc_rt) do
+  # AC1/AC5: extend the SAME row in place. new_expires_at is derived from
+  # session_expires_at/1 — the SAME min(oidc_exp, now+ceiling) cap login and
+  # `/refresh` use. Tokens are never rotated here (the client would not learn them).
+  defp extend(sess, fresh_claims, new_oidc_rt) do
     new_expires_at = HttpPublic.session_expires_at(fresh_claims)
 
-    rotate_params =
-      %{
-        old_access_token: sess.access_token,
-        new_access_token: Store.generate_opaque_token(),
-        new_refresh_token: Store.generate_opaque_token(),
-        new_expires_at: new_expires_at
-      }
-      |> HttpPublic.maybe_put_new_oidc_rt(new_oidc_rt)
+    enc_oidc_rt =
+      if is_binary(new_oidc_rt) and new_oidc_rt != "",
+        do: Nebu.Web.SecretBox.encrypt(new_oidc_rt),
+        else: nil
 
-    case Store.rotate_tokens(rotate_params) do
+    case Store.extend_in_place_by_hash(sess.access_token_hash, new_expires_at, enc_oidc_rt) do
       :ok ->
-        Logger.info("matrix refresh worker: session extended",
+        Logger.info("matrix refresh worker: session revalidated (expiry extended up to the absolute cap)",
           user_id: sess.user_id,
           device_id: sess.device_id
         )
@@ -377,12 +390,18 @@ defmodule Nebu.Matrix.Session.RefreshWorker do
         :ok
 
       :error ->
-        # Lost a concurrent-refresh race (ADR-020 cluster safety), or the row
-        # was revoked/deleted between the re-check above and this call — the
-        # winner (another node, or a racing delete_one_device) already
-        # determined the outcome for this row. Not an error worth raising.
+        # The row was revoked/deleted between the re-check above and this call
+        # (e.g. a racing /refresh rotation, logout or delete_one_device). The
+        # winner determined the outcome; nothing to extend. Not an error.
+        # M3: but a provider-rotated OIDC RT must not be dropped (the IdP already
+        # invalidated the previous one): persist it on the device's CURRENT active
+        # row, if any (guarded, never resurrects a revoked/deleted device).
+        if enc_oidc_rt do
+          _ = Store.store_rotated_oidc_rt(sess.user_id, sess.device_id, enc_oidc_rt)
+        end
+
         Logger.info(
-          "matrix refresh worker: rotate skipped (row no longer active — concurrent refresh or deletion)",
+          "matrix refresh worker: extend skipped (row no longer active — concurrent refresh or deletion)",
           user_id: sess.user_id,
           device_id: sess.device_id
         )

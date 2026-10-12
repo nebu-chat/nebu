@@ -34,15 +34,51 @@ defmodule Nebu.Media do
 
   alias Nebu.Media.{Crypto, SSRF}
 
-  # Matrix v1.12 safe-inline allowlist (mirrors download/handler.go
-  # safeInlineContentTypes). Everything else → application/octet-stream + attachment.
+  # Matrix spec (v1.12+) inline allowlist for Content-Disposition. It steers
+  # ONLY the disposition (inline vs attachment); the Content-Type itself is
+  # served as uploaded. Everything else → attachment.
   @safe_inline_types ~w(
-    image/jpeg image/png image/gif image/webp image/avif
-    audio/mpeg audio/ogg
-    video/mp4 video/webm
-    application/pdf
-    text/plain
+    text/css text/plain text/csv
+    application/json application/ld+json
+    image/jpeg image/gif image/png image/apng image/webp image/avif
+    video/mp4 video/webm video/ogg video/quicktime
+    audio/mp4 audio/webm audio/aac audio/mpeg audio/ogg audio/wave audio/wav
+    audio/x-wav audio/x-pn-wav audio/flac audio/x-flac
   )
+
+  # Types browsers render as active content (stored-XSS vector). Never served
+  # with their own type, even if a legacy row holds one: octet-stream +
+  # attachment (defense in depth on top of CSP sandbox, nosniff and the
+  # upload blocklist).
+  @neutralized_types ~w(
+    text/html application/xhtml+xml text/xml application/xml image/svg+xml
+    text/javascript application/javascript application/x-shockwave-flash
+  )
+
+  # WHATWG "JavaScript MIME type" essence list, plus script-ish carriers
+  # (wasm, HTC components, app-cache manifests). Neutralized by category on
+  # download (Kassandra F-1). Deliberately NOT added to @blocked_upload_types:
+  # sharing a .js/.wasm file is legitimate and download already serves it as
+  # octet-stream + attachment (legacy rows included).
+  @js_mime_types ~w(
+    application/ecmascript application/javascript application/x-ecmascript
+    application/x-javascript text/ecmascript text/javascript text/javascript1.0
+    text/javascript1.1 text/javascript1.2 text/javascript1.3 text/javascript1.4
+    text/javascript1.5 text/jscript text/livescript text/x-ecmascript
+    text/x-javascript application/wasm text/x-component text/cache-manifest
+  )
+
+  # Longest filename (bytes) stored and echoed in Content-Disposition.
+  @max_filename_bytes 255
+
+  # Thumbnail types per spec, with the file extension used for the filename.
+  @thumbnail_types %{
+    "image/jpeg" => "jpg",
+    "image/png" => "png",
+    "image/apng" => "apng",
+    "image/gif" => "gif",
+    "image/webp" => "webp"
+  }
 
   # Content types rejected at upload — renderable as HTML/JS (stored-XSS vector).
   # Mirrors upload.go blockedContentTypes.
@@ -204,13 +240,48 @@ defmodule Nebu.Media do
   # S3-write->persist implementation in this module (AC2).
   defp store_upload(conn, user, content_type, body) do
     server = server_name()
-    create_and_store(conn, server, user, content_type, body, _retried? = false)
+    conn = fetch_query_params(conn)
+    filename = query_filename(conn)
+    create_and_store(conn, server, user, content_type, filename, body, _retried? = false)
+  end
+
+  # Shared by the sync and async upload paths: non-binary (map/list), empty
+  # -> nil; otherwise capped to 255 bytes on a codepoint boundary.
+  defp query_filename(conn) do
+    case conn.query_params["filename"] do
+      name when is_binary(name) and name != "" -> truncate_utf8(name, @max_filename_bytes)
+      _ -> nil
+    end
+  end
+
+  # Truncates to at most `max` bytes without splitting a codepoint. Invalid
+  # UTF-8 bytes are dropped (they cannot be stored in a TEXT column anyway).
+  defp truncate_utf8(name, max) do
+    if byte_size(name) <= max and String.valid?(name) do
+      name
+    else
+      name |> do_truncate(max, []) |> Enum.reverse() |> IO.iodata_to_binary()
+    end
+  end
+
+  defp do_truncate(rest, left, acc) do
+    case String.next_codepoint(rest) do
+      nil ->
+        acc
+
+      {cp, tail} ->
+        cond do
+          not String.valid?(cp) -> do_truncate(tail, left, acc)
+          byte_size(cp) > left -> acc
+          true -> do_truncate(tail, left - byte_size(cp), [cp | acc])
+        end
+    end
   end
 
   # `retried?` caps the media_id-collision retry to exactly one attempt,
   # mirroring do_create/3's own convention for create/1 above — a SECOND
   # {:error, :media_id_taken} in a row surfaces as a 500 instead of looping.
-  defp create_and_store(conn, server, user, content_type, body, retried?) do
+  defp create_and_store(conn, server, user, content_type, filename, body, retried?) do
     media_id = generate_media_id()
 
     case state_machine_module().create_quarantined(%{
@@ -232,7 +303,7 @@ defmodule Nebu.Media do
         # story); a candidate for a future lifecycle/reaper story (ADR-030) to
         # sweep stuck :quarantined rows that never got a scan job, alongside
         # whatever mechanism that story already plans for :reserved rows.
-        case encrypt_compress_and_store(created_media_id, server, content_type, nil, body) do
+        case encrypt_compress_and_store(created_media_id, server, content_type, filename, body) do
           :ok ->
             scan_enqueue_module().enqueue(created_media_id)
             send_json(conn, 200, %{"content_uri" => "mxc://#{server}/#{created_media_id}"})
@@ -242,7 +313,7 @@ defmodule Nebu.Media do
         end
 
       {:error, :media_id_taken} when not retried? ->
-        create_and_store(conn, server, user, content_type, body, true)
+        create_and_store(conn, server, user, content_type, filename, body, true)
 
       {:error, _reason} ->
         error(conn, 500, "M_UNKNOWN", "Failed to store media file")
@@ -399,7 +470,7 @@ defmodule Nebu.Media do
 
       true ->
         conn = fetch_query_params(conn)
-        filename = conn.query_params["filename"]
+        filename = query_filename(conn)
 
         case read_full_body(conn, max_bytes) do
           {:too_large, conn} ->
@@ -537,7 +608,10 @@ defmodule Nebu.Media do
     maybe_await_stall(server_name, media_id, clamped_stall_ms(conn.query_params["timeout_ms"]))
 
     with_authorised_media(conn, server_name, media_id, fn conn, row, plaintext ->
-      serve_bytes(conn, row.content_type, plaintext, file_name || media_id)
+      # `{fileName}` path segment wins, but an empty / fully-sanitized-away
+      # segment falls back to the stored upload filename.
+      name = sanitize_filename(file_name) || Map.get(row, :filename)
+      serve_bytes(conn, row.content_type, plaintext, name)
     end)
   end
 
@@ -625,12 +699,17 @@ defmodule Nebu.Media do
     with_authorised_media(conn, server_name, media_id, fn conn, row, plaintext ->
       # Thumbnail generation via libvips/Image is intentionally NOT used: the
       # Alpine build/test container has no native vips toolchain, and the Matrix
-      # spec permits streaming the original for small images. We serve the
-      # decrypted original inline as an image/* response (AC7 asserts the response
-      # contract — 200 + image Content-Type + bytes + inline Content-Disposition —
-      # not exact pixel dimensions). On-demand resizing is a tracked follow-up.
-      ct = if image_type?(row.content_type), do: row.content_type, else: "image/png"
-      serve_inline_image(conn, ct, plaintext, media_id)
+      # spec permits streaming the original for small images. Only the spec's
+      # thumbnail types are served (with their exact stored type, inline and a
+      # `thumbnail.<ext>` filename); anything else cannot be thumbnailed ->
+      # 400 M_UNKNOWN. Membership (403) is checked before this (no type leak).
+      # On-demand resizing is a tracked follow-up.
+      base = base_type(row.content_type)
+
+      case Map.fetch(@thumbnail_types, base) do
+        {:ok, ext} -> serve_inline_image(conn, base, plaintext, "thumbnail." <> ext)
+        :error -> error(conn, 400, "M_UNKNOWN", "Cannot thumbnail this content")
+      end
     end)
   end
 
@@ -1114,23 +1193,23 @@ defmodule Nebu.Media do
   # ── byte serving + Range (AC2/AC3 + oracle §1/§2/§4) ───────────────────────
 
   defp serve_bytes(conn, content_type, plaintext, file_name) do
-    {ct, disposition} = disposition_for(content_type, file_name)
+    {ct, disposition_type} = disposition_for(content_type)
 
     conn
     |> put_resp_header("accept-ranges", "bytes")
-    |> put_resp_header("content-disposition", disposition)
+    |> put_resp_header("content-disposition", content_disposition(disposition_type, file_name))
     |> put_resp_header("cross-origin-resource-policy", "cross-origin")
     |> put_resp_header(
       "content-security-policy",
       "sandbox; default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; object-src 'self';"
     )
-    |> put_resp_content_type(ct)
+    |> put_resp_content_type(ct, nil)
     |> maybe_send_ranged(plaintext)
   end
 
   defp serve_inline_image(conn, content_type, bytes, file_name) do
     conn
-    |> put_resp_header("content-disposition", ~s(inline; filename="#{file_name}"))
+    |> put_resp_header("content-disposition", content_disposition("inline", file_name))
     |> put_resp_header("cross-origin-resource-policy", "cross-origin")
     # F-4: serve the inline (thumbnail) path with the SAME CSP/sandbox header set
     # as serve_bytes/4 so content-serving posture is consistent (defense in depth
@@ -1140,7 +1219,7 @@ defmodule Nebu.Media do
       "content-security-policy",
       "sandbox; default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; object-src 'self';"
     )
-    |> put_resp_content_type(content_type)
+    |> put_resp_content_type(content_type, nil)
     |> send_resp(200, bytes)
   end
 
@@ -1207,17 +1286,89 @@ defmodule Nebu.Media do
 
   # ── Content-Disposition (oracle §1) ────────────────────────────────────────
 
-  defp disposition_for(content_type, file_name) do
+  # Returns {content_type_to_serve, "inline" | "attachment"}. The stored type
+  # is served unchanged (base type, lowercased, no charset). Only a
+  # missing/unparseable type or an active-content type is neutralized to
+  # application/octet-stream. Disposition is computed from the type served.
+  defp disposition_for(content_type) do
     base = base_type(content_type)
 
-    if base in @safe_inline_types do
-      {content_type, ~s(inline; filename="#{file_name}")}
-    else
-      {"application/octet-stream", ~s(attachment; filename="#{file_name}")}
+    cond do
+      not valid_media_type?(base) -> {"application/octet-stream", "attachment"}
+      neutralize?(base) -> {"application/octet-stream", "attachment"}
+      base in @safe_inline_types -> {base, "inline"}
+      true -> {base, "attachment"}
     end
   end
 
-  defp image_type?(content_type), do: String.starts_with?(base_type(content_type), "image/")
+  # Active-content categories (by normalized base type): exact list, any
+  # `+xml` structured-syntax suffix (WHATWG "XML MIME type"), XSL, the
+  # multipart replace type and the JavaScript family. None of the 26 spec
+  # inline types ends in `+xml` (application/ld+json is `+json`).
+  defp neutralize?(base) do
+    base in @neutralized_types or String.ends_with?(base, "+xml") or
+      base in ~w(text/xsl multipart/x-mixed-replace) or base in @js_mime_types
+  end
+
+  # type "/" subtype made of RFC 7231 token characters only (no CR/LF/space/
+  # control chars, so the value can never break a header).
+  defp valid_media_type?(base), do: Regex.match?(~r{\A[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+\z}, base)
+
+  # Builds the Content-Disposition value. `filename` is optional: nil/empty
+  # (after sanitizing) yields NO filename parameter. Control characters are
+  # stripped (never reach a header); `"` and `\` are escaped inside the
+  # ASCII-safe quoted-string; non-ASCII names additionally get an RFC 6266 /
+  # 5987 `filename*=UTF-8''<percent-encoded>` parameter.
+  defp content_disposition(type, file_name) do
+    case sanitize_filename(file_name) do
+      nil ->
+        type
+
+      name ->
+        if ascii_only?(name) do
+          ~s(#{type}; filename="#{escape_quoted(name)}")
+        else
+          fallback = for(<<c::utf8 <- name>>, into: "", do: if(c in 32..126, do: <<c>>, else: "_"))
+
+          ~s(#{type}; filename="#{escape_quoted(fallback)}"; filename*=UTF-8''#{percent_encode(name)})
+        end
+    end
+  end
+
+  @doc """
+  The filename as it is offered for download / shown in the admin media list:
+  control characters, bidi/invisible format characters (Unicode `Cf`) and
+  U+2028/2029 removed, trimmed, capped to 255 bytes. `nil` when nothing is
+  left (or the input is not a binary).
+  """
+  @spec display_filename(term()) :: String.t() | nil
+  def display_filename(name), do: sanitize_filename(name)
+
+  defp sanitize_filename(name) when is_binary(name) do
+    clean =
+      if String.valid?(name) do
+        name
+        |> String.to_charlist()
+        |> Enum.reject(&(&1 < 32 or &1 in 127..159 or &1 in [0x2028, 0x2029]))
+        |> List.to_string()
+        |> then(&Regex.replace(~r/\p{Cf}/u, &1, ""))
+      else
+        for <<c <- name>>, c in 32..126, into: "", do: <<c>>
+      end
+
+    case clean |> truncate_utf8(@max_filename_bytes) |> String.trim() do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp sanitize_filename(_), do: nil
+
+  defp ascii_only?(name), do: name |> :binary.bin_to_list() |> Enum.all?(&(&1 in 32..126))
+
+  defp escape_quoted(name), do: name |> String.replace("\\", "\\\\") |> String.replace("\"", "\\\"")
+
+  defp percent_encode(name), do: URI.encode(name, &URI.char_unreserved?/1)
 
   defp base_type(nil), do: ""
 

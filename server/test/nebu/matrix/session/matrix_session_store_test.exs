@@ -2,7 +2,7 @@ defmodule Nebu.Matrix.Session.MatrixSessionStoreTest do
   @moduledoc """
   RED-phase ATDD tests for `oidc-session-refresh` — store layer.
 
-  Unit-level CRUD + grace-period semantics for
+  Unit-level CRUD + pending/consumed refresh-token semantics for
   `Nebu.Matrix.Session.MatrixSessionStore`. Mirrors the Go reference
   `gateway/internal/db/matrix_session_store_test.go`.
 
@@ -25,7 +25,7 @@ defmodule Nebu.Matrix.Session.MatrixSessionStoreTest do
   `make test-integration` (sets NEBU_DB_URL, starts Nebu.Repo). Same pattern
   as the other `server/test/nebu/matrix/*_integration_test.exs`.
 
-  Covered ACs (store layer): AC4 (grace period), AC6 (unknown/used RT).
+  Covered ACs (store layer): AC4 (pending/consumed RT), AC6 (unknown/used RT).
   """
   use ExUnit.Case, async: false
 
@@ -47,8 +47,8 @@ defmodule Nebu.Matrix.Session.MatrixSessionStoreTest do
     {:ok, _} =
       Ecto.Adapters.SQL.query(
         Nebu.Repo,
-        "UPDATE matrix_sessions SET #{column} = #{sql_value} WHERE access_token = $1",
-        [access_token]
+        "UPDATE matrix_sessions SET #{column} = #{sql_value} WHERE access_token_hash = $1",
+        [Store.hash_token(access_token)]
       )
 
     :ok
@@ -72,7 +72,7 @@ defmodule Nebu.Matrix.Session.MatrixSessionStoreTest do
   end
 
   # ══════════════════════════════════════════════════════════════════════════
-  # create/1 + get_by_access_token/1 + get_by_refresh_token/1
+  # create/1 + get_by_access_token/1 + resolve_refresh_token/1
   # ══════════════════════════════════════════════════════════════════════════
 
   describe "create/1 and lookups" do
@@ -87,11 +87,11 @@ defmodule Nebu.Matrix.Session.MatrixSessionStoreTest do
       assert sess.expires_at
     end
 
-    test "create then get_by_refresh_token returns the session fields" do
+    test "create then resolve_refresh_token returns the active session fields" do
       user = unique_user()
       %{refresh_token: rt} = create_session(user_id: user)
 
-      assert {:ok, sess} = Store.get_by_refresh_token(rt)
+      assert {:ok, sess, :current} = Store.resolve_refresh_token(rt)
       assert sess.user_id == user
     end
 
@@ -99,8 +99,8 @@ defmodule Nebu.Matrix.Session.MatrixSessionStoreTest do
       assert :error = Store.get_by_access_token(opaque())
     end
 
-    test "get_by_refresh_token for an unknown token → :error (AC6)" do
-      assert :error = Store.get_by_refresh_token(opaque())
+    test "resolve_refresh_token for an unknown token → :error (AC6)" do
+      assert :error = Store.resolve_refresh_token(opaque())
     end
   end
 
@@ -123,7 +123,7 @@ defmodule Nebu.Matrix.Session.MatrixSessionStoreTest do
                })
 
       assert {:ok, _} = Store.get_by_access_token(new_at)
-      assert {:ok, _} = Store.get_by_refresh_token(new_rt)
+      assert {:ok, _, :current} = Store.resolve_refresh_token(new_rt)
     end
 
     test "rotating an unknown old access token → :error" do
@@ -153,8 +153,8 @@ defmodule Nebu.Matrix.Session.MatrixSessionStoreTest do
       {:ok, %{rows: rows}} =
         Ecto.Adapters.SQL.query(
           Nebu.Repo,
-          "SELECT oidc_refresh_token FROM matrix_sessions WHERE access_token = $1",
-          [new_at]
+          "SELECT oidc_refresh_token FROM matrix_sessions WHERE access_token_hash = $1",
+          [Store.hash_token(new_at)]
         )
 
       assert [[^enc]] = rows
@@ -162,12 +162,12 @@ defmodule Nebu.Matrix.Session.MatrixSessionStoreTest do
   end
 
   # ══════════════════════════════════════════════════════════════════════════
-  # AC4 — grace period: old RT valid once more, until the new AT is used.
+  # AC4 — pending/consumed: old RT valid once more, until the new AT is used.
   # Deterministic: we manipulate grace_until via SQL, never Process.sleep.
   # ══════════════════════════════════════════════════════════════════════════
 
-  describe "grace period (AC4)" do
-    test "after rotate, the old RT is still resolvable during the grace window" do
+  describe "pending/consumed refresh token (AC4)" do
+    test "after rotate, the old RT is still resolvable while it is pending" do
       %{access_token: at_a, refresh_token: rt_a} = create_session()
 
       :ok =
@@ -178,14 +178,14 @@ defmodule Nebu.Matrix.Session.MatrixSessionStoreTest do
           new_expires_at: DateTime.add(DateTime.utc_now(), 3600, :second)
         })
 
-      # rotate set grace_until = NOW() + 60s on the old row → still valid.
-      assert {:ok, sess} = Store.get_by_refresh_token(rt_a),
-             "old RT must remain valid during the 60s grace window (Matrix MUST)"
+      # rotate leaves grace_until NULL on the old row = PENDING → still valid.
+      assert {:ok, sess, :replay} = Store.resolve_refresh_token(rt_a),
+             "old RT must remain valid (pending) until the new tokens are used (Matrix MUST)"
 
-      assert sess
+      assert is_nil(sess.revoked_at), "a replay is served from the device's ACTIVE row"
     end
 
-    test "old RT is NOT resolvable once its grace window has elapsed" do
+    test "old RT is NOT resolvable once it is consumed (grace_until set)" do
       %{access_token: at_a, refresh_token: rt_a} = create_session()
 
       :ok =
@@ -196,13 +196,13 @@ defmodule Nebu.Matrix.Session.MatrixSessionStoreTest do
           new_expires_at: DateTime.add(DateTime.utc_now(), 3600, :second)
         })
 
-      # Force the grace window into the past (no sleep).
+      # Mark the old row CONSUMED (grace_until set; no sleep).
       set_column(at_a, "grace_until", "NOW() - INTERVAL '1 second'")
 
-      assert :error = Store.get_by_refresh_token(rt_a)
+      assert {:consumed, _} = Store.resolve_refresh_token(rt_a)
     end
 
-    test "mark_access_token_used closes the old RT grace window early (AC4)" do
+    test "mark_access_token_used consumes the pending old RT early (AC4)" do
       user = unique_user()
       device = unique_device()
       %{access_token: at_a, refresh_token: rt_a} = create_session(user_id: user, device_id: device)
@@ -216,17 +216,17 @@ defmodule Nebu.Matrix.Session.MatrixSessionStoreTest do
           new_expires_at: DateTime.add(DateTime.utc_now(), 3600, :second)
         })
 
-      # Grace still open right after rotate.
-      assert {:ok, _} = Store.get_by_refresh_token(rt_a)
+      # Old RT still pending right after rotate.
+      assert {:ok, _, :replay} = Store.resolve_refresh_token(rt_a)
 
-      # First use of the new AT closes the grace window for the soft-revoked sibling.
+      # First use of the new AT consumes the pending RT of the soft-revoked sibling.
       assert :ok = Store.mark_access_token_used(new_at)
 
-      assert :error = Store.get_by_refresh_token(rt_a),
+      assert {:consumed, _} = Store.resolve_refresh_token(rt_a),
              "after the new AT is used, the old RT must no longer be valid (AC4)"
     end
 
-    test "mark_access_token_used is idempotent (no error on a token with no open grace siblings)" do
+    test "mark_access_token_used is idempotent (no error on a token with no pending siblings)" do
       %{access_token: at} = create_session()
       assert :ok = Store.mark_access_token_used(at)
       assert :ok = Store.mark_access_token_used(at)

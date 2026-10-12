@@ -348,6 +348,10 @@ defmodule Nebu.Web.Plugs.RequestLogger.PayloadRedactor do
   # input" guarantee is most directly about.
   @content_string_keys ~w(body)
 
+  # `key=value` style content: the media upload `?filename=` query param is
+  # user-supplied (possibly personal) text.
+  @content_query_keys ~w(filename)
+
   # Strings are treated as opaque — never `Jason.decode`d (see moduledoc):
   # that would risk fabricating structure from malformed input, or, for
   # binary media payloads, corrupting/misinterpreting raw bytes. As a
@@ -363,6 +367,8 @@ defmodule Nebu.Web.Plugs.RequestLogger.PayloadRedactor do
   # existing, already-safe `access_token=` handling this replaces/extends).
   defp redact_string(value) do
     value
+    |> redact_query_style(@content_query_keys, @message_content)
+    |> redact_encoded_query_keys(@content_query_keys, @message_content)
     |> redact_query_style(@credential_string_keys, @redacted)
     |> redact_json_string_style(@credential_string_keys, @redacted)
     |> redact_json_string_style(@content_string_keys, @message_content)
@@ -379,6 +385,32 @@ defmodule Nebu.Web.Plugs.RequestLogger.PayloadRedactor do
         acc
       end
     end)
+  end
+
+  # Plug decodes percent-encoded parameter NAMES as well, so `?fil%65name=x`
+  # is stored as `filename` but is invisible to the literal match above.
+  # Decode each `name=value` pair's name and mask the value when it equals one
+  # of `keys` (case-sensitive, exact: `x-filename` is NOT decoded to `filename`
+  # and is left to the substring pass). Only runs when a `%` is present;
+  # invalid percent-encoding in a name is tolerated (pair left unchanged).
+  defp redact_encoded_query_keys(value, keys, replacement) do
+    if String.contains?(value, "%") and String.contains?(value, "=") do
+      Regex.replace(~r/([^&\s"'?=]+)=([^&\s"']*)/, value, fn whole, name, _val ->
+        if name != "" and decoded_query_name(name) in keys do
+          name <> "=" <> replacement
+        else
+          whole
+        end
+      end)
+    else
+      value
+    end
+  end
+
+  defp decoded_query_name(name) do
+    URI.decode_www_form(name)
+  rescue
+    ArgumentError -> nil
   end
 
   # `"key": "value"` style — a malformed/unparseable JSON-ish fragment that

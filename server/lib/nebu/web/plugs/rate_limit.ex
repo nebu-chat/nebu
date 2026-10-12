@@ -1,6 +1,6 @@
 defmodule Nebu.Web.Plugs.RateLimit do
   @moduledoc """
-  Per-IP token-bucket rate limiting (matrix-api-migration, F-3).
+  Per-IP (or per-user, see `key: :user`) token-bucket rate limiting (matrix-api-migration, F-3).
 
   Ports the Go gateway's per-IP limiter (`gateway/internal/middleware/ratelimit.go`,
   `NewIPRateLimiter`) into the Elixir stack so the brute-force / verification-DoS
@@ -12,8 +12,9 @@ defmodule Nebu.Web.Plugs.RateLimit do
       plug Nebu.Web.Plugs.RateLimit, rate_per_min: 30, burst: 10, tier: "login"
 
   On exhaustion responds `429` with the Matrix envelope
-  `{"errcode":"M_LIMIT_EXCEEDED","error":"Rate limit exceeded"}` plus a
-  `Retry-After` header (seconds), and halts (Go parity).
+  `{"errcode":"M_LIMIT_EXCEEDED","error":"Rate limit exceeded","retry_after_ms":N}`
+  plus a `Retry-After` header (seconds), and halts (Go parity + Matrix spec
+  `retry_after_ms`).
 
   ## Algorithm
 
@@ -34,6 +35,14 @@ defmodule Nebu.Web.Plugs.RateLimit do
   node restart all buckets reset to full — a restart cannot be used to bypass a
   sustained attack because the steady-state rate (`rate_per_min`) still bounds
   throughput within seconds of restart. No persistence is required or desirable.
+
+  ## Bucket key (`key:` option)
+
+  `key: :ip` (default) buckets by the peer IP. `key: :user` buckets by
+  `{tier, conn.assigns[:current_user]}` (falls back to the IP when no user is assigned)
+  so an authenticated write route is limited per account, not per shared NAT address.
+  Buckets are never evicted: ETS growth is unbounded but small (one entry per distinct
+  key, i.e. per account for `key: :user`, roughly 100 bytes each).
 
   ## IP extraction
 
@@ -83,16 +92,21 @@ defmodule Nebu.Web.Plugs.RateLimit do
       # tokens per millisecond
       rate_per_ms: rate_per_min / 60_000.0,
       burst: burst,
-      tier: Keyword.get(opts, :tier, "default")
+      tier: Keyword.get(opts, :tier, "default"),
+      # :ip (default) buckets by peer IP shared across tiers (login/sync);
+      # :user buckets by `{tier, conn.assigns[:current_user]}` (falls back to the IP when
+      # no user is assigned). Use :user for authenticated write routes, so one account
+      # cannot be throttled by (or hide behind) a shared NAT address.
+      key: Keyword.get(opts, :key, :ip)
     }
   end
 
   @impl Plug
-  def call(conn, %{rate_per_ms: rate_per_ms, burst: burst} = _opts) do
+  def call(conn, %{rate_per_ms: rate_per_ms, burst: burst} = opts) do
     if disabled?() do
       conn
     else
-      ip = ip_key(conn)
+      ip = bucket_key(conn, opts)
       now = now_ms()
 
       case take_token(ip, now, rate_per_ms, burst) do
@@ -142,7 +156,13 @@ defmodule Nebu.Web.Plugs.RateLimit do
   end
 
   defp too_many(conn, retry_after_s) do
-    body = Jason.encode!(%{"errcode" => "M_LIMIT_EXCEEDED", "error" => "Rate limit exceeded"})
+    # Matrix spec (rate limiting): 429 SHOULD carry `retry_after_ms` in the body.
+    body =
+      Jason.encode!(%{
+        "errcode" => "M_LIMIT_EXCEEDED",
+        "error" => "Rate limit exceeded",
+        "retry_after_ms" => retry_after_s * 1000
+      })
 
     conn
     |> put_resp_content_type("application/json")
@@ -150,6 +170,15 @@ defmodule Nebu.Web.Plugs.RateLimit do
     |> send_resp(429, body)
     |> halt()
   end
+
+  defp bucket_key(conn, %{key: :user, tier: tier}) do
+    case conn.assigns[:current_user] do
+      user when is_binary(user) and user != "" -> {tier, user}
+      _ -> ip_key(conn)
+    end
+  end
+
+  defp bucket_key(conn, _opts), do: ip_key(conn)
 
   defp ip_key(conn) do
     case conn.remote_ip do

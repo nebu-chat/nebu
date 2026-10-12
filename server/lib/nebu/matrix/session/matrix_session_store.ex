@@ -4,8 +4,22 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
 
   Plain module, inline parameterised SQL via `Nebu.Repo` (ADR-018 — no Ecto
   schema, no Repository/Service layer). Backs the `matrix_sessions` table that
-  already exists in the canonical schema
-  (`server/priv/migrations/000001_init.up.sql`); this story adds NO migration.
+  exists in the canonical schema (`server/priv/migrations/000001_init.up.sql`);
+  migration 000038 (token-hashing-matrix-sessions) replaced the plaintext token
+  columns by their SHA-256 hashes.
+
+  ## Hashed storage (token-hashing-matrix-sessions)
+
+  The table never holds a plaintext access/refresh token: its keys are
+  `access_token_hash` (PRIMARY KEY) and `refresh_token_hash` (UNIQUE NOT NULL), the
+  lowercase hex SHA-256 of the token (`hash_token/1`, the ONLY place a token is
+  hashed). Both tokens are 256-bit random values, so an unsalted hash is enough.
+  The public API keeps taking PLAINTEXT tokens (the value the client presents);
+  every lookup/update/delete hashes it first and compares by indexed equality.
+  Session maps returned by the store carry only `:access_token_hash` /
+  `:refresh_token_hash` (a token is never read back). Callers that know a row only
+  by its hash (`RefreshWorker`, the `/refresh` rotation) use the `*_by_hash`
+  variants or the `:old_access_token_hash` rotate param.
 
   Ports the Go reference `gateway/internal/db/matrix_session_store.go`.
 
@@ -17,18 +31,36 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
   from a JWT) and persists them here together with the AES-256-GCM-encrypted OIDC
   refresh token and a Nebu-controlled `expires_at = min(oidc_exp, now + 8h)`.
 
-  ## Token rotation + grace period (Matrix CS API v1.18 §refreshing-access-tokens)
+  ## Token rotation + "valid until used" (Matrix CS API v1.18 §refreshing-access-tokens)
+
+  Spec rule (legacy `POST /refresh`): "the old refresh token remains valid until
+  the new access token or refresh token is used, at which point the old refresh
+  token is revoked". There is NO fixed time window in the spec.
 
   `POST /refresh` calls `rotate_tokens/1`, which in a SINGLE transaction:
 
-    * soft-revokes the old row (`revoked_at = NOW()`,
-      `grace_until = NOW() + INTERVAL '60 seconds'`), and
+    * soft-revokes the old row (`revoked_at = NOW()`, `grace_until = NULL`), and
     * inserts the new AT/RT row, carrying over the encrypted OIDC RT.
 
-  The old refresh token therefore stays resolvable via `get_by_refresh_token/1`
-  during the 60-second grace window (spec MUST: old RT valid until the new tokens
-  are used) — `mark_access_token_used/1` closes that window early the first time
-  the new access token is used.
+  A soft-revoked row with `grace_until IS NULL` is PENDING: its refresh token is
+  still redeemable (a client that lost the response retries with it, and is served
+  by rotating the device's active row again) for as long as the device's active
+  row has not expired (the session's own `expires_at` is the upper bound). The
+  row is CONSUMED (`grace_until` set to a past/now timestamp) the first time the
+  new access token authenticates a request (`mark_access_token_used/1`) or the
+  new refresh token is redeemed (`consume_pending_siblings` in `rotate_tokens/1`).
+  Presenting a consumed refresh token is token reuse (see `resolve_refresh_token/1`).
+
+  PENDING vs CONSUMED is decided ONLY by `grace_until IS NULL` / `IS NOT NULL`,
+  never by comparing it with `NOW()`: in Postgres `NOW()` is the transaction START,
+  so a time comparison could read a token consumed by a concurrent transaction as
+  still pending. The null test is re-evaluated by Postgres after a row-lock wait,
+  so it is race-free. (Legacy rows carrying a future `grace_until` from the old
+  fixed-window design count as consumed — the safe direction.) Multi-row sibling
+  updates lock their rows in `access_token_hash` order to rule out lock-order deadlocks.
+
+  The background `RefreshWorker` never rotates: it extends the active row IN PLACE
+  (`extend_in_place/3`), so the tokens the client holds stay valid.
 
   All token values are opaque secrets; this module never logs them.
   """
@@ -42,6 +74,14 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
   """
   @spec generate_opaque_token() :: String.t()
   def generate_opaque_token, do: :crypto.strong_rand_bytes(32) |> Base.encode16(case: :lower)
+
+  @doc """
+  The single hashing seam: lowercase hex SHA-256 of a token string. Tokens are
+  256-bit random values, so no salt/KDF is needed. Raises for non-binary input.
+  """
+  @spec hash_token(String.t()) :: String.t()
+  def hash_token(token) when is_binary(token),
+    do: :crypto.hash(:sha256, token) |> Base.encode16(case: :lower)
 
   @doc """
   Inserts a new session row.
@@ -68,10 +108,10 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
       query(
         """
         INSERT INTO matrix_sessions
-          (access_token, refresh_token, oidc_refresh_token, user_id, device_id, expires_at, auth_time, created_at)
+          (access_token_hash, refresh_token_hash, oidc_refresh_token, user_id, device_id, expires_at, auth_time, created_at)
         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
         """,
-        [at, rt, enc_oidc_rt, user_id, device_id, expires_at, auth_time]
+        [hash_token(at), hash_token(rt), enc_oidc_rt, user_id, device_id, expires_at, auth_time]
       )
 
     :ok
@@ -85,8 +125,8 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
   @spec get_auth_context(String.t()) :: {:ok, map()} | :error
   def get_auth_context(access_token) when is_binary(access_token) do
     case safe_query(
-           "SELECT user_id, device_id, auth_time FROM matrix_sessions WHERE access_token = $1",
-           [access_token]
+           "SELECT user_id, device_id, auth_time FROM matrix_sessions WHERE access_token_hash = $1",
+           [hash_token(access_token)]
          ) do
       {:ok, %{rows: [[user_id, device_id, auth_time]]}} ->
         {:ok, %{user_id: user_id, device_id: device_id, auth_time: auth_time}}
@@ -99,78 +139,176 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
   @doc """
   Looks up a session by opaque access token. Returns `{:ok, session}` or `:error`.
 
-  The session map exposes `:access_token`, `:refresh_token`, `:oidc_refresh_token`
+  The session map exposes `:access_token_hash`, `:refresh_token_hash`, `:oidc_refresh_token`
   (encrypted, may be `nil`), `:user_id`, `:device_id`, `:expires_at`,
   `:revoked_at`, `:grace_until`. The expiry decision is made by the caller
   (`OidcPlug`) so the AC5 `soft_logout` path can distinguish expired from absent.
   """
   @spec get_by_access_token(String.t()) :: {:ok, map()} | :error
-  def get_by_access_token(access_token) when is_binary(access_token) do
-    case safe_query(select_sql("access_token = $1"), [access_token]) do
+  def get_by_access_token(access_token) when is_binary(access_token),
+    do: get_by_access_token_hash(hash_token(access_token))
+
+  @doc false
+  # INTERNAL - pass-the-hash warning: only for hash values read from the DB (RefreshWorker,
+  # HttpPublic.rotate_attempt). NEVER pass a client-supplied value here: a leaked hash
+  # must not act as a credential. Public API takes plaintext tokens only.
+  @spec get_by_access_token_hash(String.t()) :: {:ok, map()} | :error
+  def get_by_access_token_hash(access_token_hash) when is_binary(access_token_hash) do
+    case safe_query(select_sql("access_token_hash = $1"), [access_token_hash]) do
       {:ok, %{rows: [row]}} -> {:ok, row_to_session(row)}
       _ -> :error
     end
   end
 
   @doc """
-  Looks up a session by opaque refresh token, honouring the grace window.
+  Classifies a presented refresh token for `POST /refresh`.
 
-  Returns the row when `revoked_at IS NULL` (active) OR `grace_until > NOW()`
-  (a soft-revoked old RT still inside its grace window, AC4). A revoked row whose
-  grace window has elapsed, or an unknown token, yields `:error` (AC6).
+    * `{:ok, active_session, :current}` — the token is the device's active RT.
+    * `{:ok, active_session, :replay}` — the token was rotated away but is still
+      PENDING (new tokens unused, session not expired): the caller serves it by
+      rotating the device's ACTIVE row (returned, so its — possibly newer — OIDC
+      refresh token is the one redeemed at the IdP).
+    * `{:consumed, session}` — rotated away AND already consumed, the consumed row
+      younger than the session TTL ceiling, and the device still has an active
+      row (redeemable, same as `:current`, even if its AT has expired): token reuse (bounded, F-3).
+    * `:error` — unknown, hard-revoked, pending but the session expired, or consumed
+      but outside the reuse bound (old token / dead device: plain 401, no deletion).
+    * `{:error, :unavailable}` — the DB could not be queried (transient).
   """
-  @spec get_by_refresh_token(String.t()) :: {:ok, map()} | :error
-  def get_by_refresh_token(refresh_token) when is_binary(refresh_token) do
+  @spec resolve_refresh_token(String.t()) ::
+          {:ok, map(), :current | :replay} | {:consumed, map()} | :error | {:error, :unavailable}
+  def resolve_refresh_token(refresh_token) when is_binary(refresh_token) do
+    sql =
+      """
+      SELECT access_token_hash, refresh_token_hash, oidc_refresh_token, user_id, device_id,
+             expires_at, revoked_at, grace_until,
+             (grace_until IS NOT NULL),
+             (created_at + ($2::bigint * INTERVAL '1 second') > NOW()),
+             EXISTS(SELECT 1 FROM matrix_sessions a
+                     WHERE a.user_id = matrix_sessions.user_id
+                       AND a.device_id = matrix_sessions.device_id
+                       AND a.revoked_at IS NULL)
+        FROM matrix_sessions
+       WHERE refresh_token_hash = $1
+      """
+
+    case safe_query(sql, [hash_token(refresh_token), Nebu.Web.SessionConfig.matrix_session_ttl_seconds()]) do
+      {:ok, %{rows: []}} ->
+        :error
+
+      {:ok, %{rows: [row]}} ->
+        {consumed?, row} = List.pop_at(row, 8)
+        {young?, row} = List.pop_at(row, 8)
+        {has_active?, row} = List.pop_at(row, 8)
+        sess = row_to_session(row)
+
+        cond do
+          is_nil(sess.revoked_at) -> {:ok, sess, :current}
+          # F-3: reuse detection is bounded. Only a YOUNG consumed row (created within
+          # the session TTL ceiling) of a device that still has an active (redeemable) row counts
+          # as reuse; an old leaked RT is a plain 401 and must not log the device out.
+          consumed? and young? and has_active? -> {:consumed, sess}
+          consumed? -> :error
+          true -> active_sibling(sess)
+        end
+
+      _ ->
+        {:error, :unavailable}
+    end
+  end
+
+  defp active_sibling(%{user_id: user_id, device_id: device_id}) do
     case safe_query(
-           select_sql("refresh_token = $1 AND (revoked_at IS NULL OR grace_until > NOW())"),
-           [refresh_token]
+           select_sql("user_id = $1 AND device_id = $2 AND revoked_at IS NULL AND expires_at > NOW()"),
+           [user_id, device_id]
          ) do
-      {:ok, %{rows: [row]}} -> {:ok, row_to_session(row)}
-      _ -> :error
+      {:ok, %{rows: [row | _]}} -> {:ok, row_to_session(row), :replay}
+      {:ok, %{rows: []}} -> :error
+      _ -> {:error, :unavailable}
     end
   end
 
   @doc """
   Atomically rotates a session's AT+RT pair (single transaction).
 
-  Soft-revokes the old row (`revoked_at = NOW()`, `grace_until = NOW() + 60s`) and
-  inserts the new row, carrying over the encrypted OIDC RT unless `:new_oidc_refresh_token`
-  supplies a fresh one. Returns `:error` if the old access token is unknown /
-  already revoked (the caller maps that to 401).
+  Soft-revokes the old row (`revoked_at = NOW()`, `grace_until = NULL` = pending:
+  the old RT stays valid until the new tokens are used) and inserts the new row,
+  carrying over the encrypted OIDC RT unless `:new_oidc_refresh_token` supplies a
+  fresh one (provider-rotated). Returns `:error` if the old access token is
+  unknown / already revoked (the caller maps that to a re-resolve or 401), and
+  `{:error, :consumed}` when `:replay_refresh_token` is no longer pending.
 
-  `params`: `:old_access_token`, `:new_access_token`, `:new_refresh_token`,
+  `params`: `:old_access_token` (plaintext) or, INTERNAL ONLY, `:old_access_token_hash`
+  (for the `/refresh` rotation, which holds a session map read from the DB; never a
+  client-supplied value - pass-the-hash). Passing BOTH keys raises `ArgumentError`
+  (callers map that to a 503 via `safe_rotate`); passing neither is also rejected.
+  `:new_access_token`, `:new_refresh_token`,
   `:new_expires_at` (DateTime), optional `:new_oidc_refresh_token` (already
-  AES-256-GCM encrypted — story `matrix-refresh-revalidates-with-idp` AC4:
-  `Nebu.Matrix.HttpPublic.do_refresh_with/2` is the first caller to actually
-  populate this when the IdP round-trip it now performs returns a
-  provider-rotated OIDC refresh token; previously this param existed but was
-  never supplied by any caller, so the encrypted OIDC RT only ever carried
-  over unchanged).
+  AES-256-GCM encrypted).
+
+  `:consume_pending_siblings` (default `false`): set when the client redeemed the
+  device's CURRENT refresh token — that proves it holds the newest tokens, so every
+  older pending refresh token of the device is consumed in the same transaction.
+  Not set when serving a replay of a pending (old) refresh token.
+
+  `:replay_refresh_token` (optional): the pending (rotated-away) refresh token the
+  client presented. Its state is re-validated INSIDE this transaction (row locked
+  `FOR UPDATE`, after the active row was claimed — same lock order as every other
+  writer), because the IdP round trip between `resolve_refresh_token/1` and this
+  call can take seconds, during which the legitimate client may have used its new
+  access token and thereby consumed the presented token. If it is no longer pending
+  the transaction rolls back and `{:error, :consumed}` is returned (token reuse).
   """
-  @spec rotate_tokens(map()) :: :ok | :error
+  @spec rotate_tokens(map()) :: :ok | :error | {:error, :consumed}
   def rotate_tokens(%{
-        old_access_token: old_at,
         new_access_token: new_at,
         new_refresh_token: new_rt,
         new_expires_at: new_expires_at
       } = params) do
     new_oidc_rt = Map.get(params, :new_oidc_refresh_token)
+    old_h = old_access_token_hash(params)
+    new_at_h = hash_token(new_at)
+    new_rt_h = hash_token(new_rt)
 
     txn =
       Nebu.Repo.transaction(fn ->
-        # 1. Soft-revoke the old row. grace_until gives the old RT a 60s window.
+        # 1. Soft-revoke the old row (atomic single-row statement; exactly one
+        #    concurrent rotation of the same row wins). grace_until stays NULL:
+        #    the old RT is PENDING until the new tokens are used.
         case query(
                """
                UPDATE matrix_sessions
-                  SET revoked_at = NOW(), grace_until = NOW() + INTERVAL '60 seconds'
-                WHERE access_token = $1 AND revoked_at IS NULL
+                  SET revoked_at = NOW(), grace_until = NULL
+                WHERE access_token_hash = $1 AND revoked_at IS NULL
                """,
-               [old_at]
+               [old_h]
              ) do
           {:ok, %{num_rows: 0}} ->
             Nebu.Repo.rollback(:not_found)
 
           {:ok, _} ->
+            # 1b. M1 (TOCTOU): a replayed pending RT must STILL be pending now.
+            #     FOR UPDATE serialises against a concurrent mark_access_token_used/1.
+            case Map.get(params, :replay_refresh_token) do
+              nil ->
+                :ok
+
+              replay_rt ->
+                case query(
+                       """
+                       SELECT 1 FROM matrix_sessions
+                        WHERE refresh_token_hash = $1
+                          AND revoked_at IS NOT NULL
+                          AND grace_until IS NULL
+                          FOR UPDATE
+                       """,
+                       [hash_token(replay_rt)]
+                     ) do
+                  {:ok, %{num_rows: 0}} -> Nebu.Repo.rollback(:consumed)
+                  {:ok, _} -> :ok
+                end
+            end
+
             # 2. Read the old row to copy user_id/device_id, (default) the OIDC RT,
             #    and — S3 — the auth_time VERBATIM. A refresh is NOT a fresh
             #    authentication, so it must carry over the original auth_time
@@ -178,21 +316,40 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
             #    freshness gate (story Dev Notes).
             {:ok, %{rows: [[user_id, device_id, old_enc_oidc_rt, old_auth_time]]}} =
               query(
-                "SELECT user_id, device_id, oidc_refresh_token, auth_time FROM matrix_sessions WHERE access_token = $1",
-                [old_at]
+                "SELECT user_id, device_id, oidc_refresh_token, auth_time FROM matrix_sessions WHERE access_token_hash = $1",
+                [old_h]
               )
 
             enc_oidc_rt = new_oidc_rt || old_enc_oidc_rt
+
+            if Map.get(params, :consume_pending_siblings, false) do
+              {:ok, _} =
+                query(
+                  """
+                  UPDATE matrix_sessions
+                     SET grace_until = NOW()
+                   WHERE access_token_hash IN (
+                           SELECT access_token_hash FROM matrix_sessions
+                            WHERE user_id = $1 AND device_id = $2
+                              AND access_token_hash != $3
+                              AND revoked_at IS NOT NULL
+                              AND grace_until IS NULL
+                            ORDER BY access_token_hash
+                              FOR UPDATE)
+                  """,
+                  [user_id, device_id, old_h]
+                )
+            end
 
             # 3. Insert the new row, carrying auth_time over unchanged.
             {:ok, _} =
               query(
                 """
                 INSERT INTO matrix_sessions
-                  (access_token, refresh_token, oidc_refresh_token, user_id, device_id, expires_at, auth_time, created_at)
+                  (access_token_hash, refresh_token_hash, oidc_refresh_token, user_id, device_id, expires_at, auth_time, created_at)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
                 """,
-                [new_at, new_rt, enc_oidc_rt, user_id, device_id, new_expires_at, old_auth_time]
+                [new_at_h, new_rt_h, enc_oidc_rt, user_id, device_id, new_expires_at, old_auth_time]
               )
 
             :ok
@@ -202,20 +359,32 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
     case txn do
       {:ok, :ok} -> :ok
       {:error, :not_found} -> :error
+      {:error, :consumed} -> {:error, :consumed}
     end
   end
 
+  defp old_access_token_hash(%{old_access_token: _, old_access_token_hash: _}),
+    do: raise(ArgumentError, "rotate_tokens/1: pass either :old_access_token or :old_access_token_hash, not both")
+
+  defp old_access_token_hash(%{old_access_token_hash: h}) when is_binary(h), do: h
+  defp old_access_token_hash(%{old_access_token: at}) when is_binary(at), do: hash_token(at)
+
+  defp old_access_token_hash(_),
+    do: raise(ArgumentError, "rotate_tokens/1: :old_access_token or :old_access_token_hash required")
+
   @doc """
-  Closes the grace window of any soft-revoked sibling row for the same user+device
-  the first time `access_token` is used (AC4 — old RT invalid once new tokens are
-  used). Idempotent: a no-op when no open grace sibling exists, and harmless on an
+  Consumes every PENDING soft-revoked sibling row of the same user+device the
+  first time `access_token` is used (the old RT is invalid once the new AT is
+  used). Idempotent: a no-op when no pending sibling exists, and harmless on an
   unknown token.
   """
   @spec mark_access_token_used(String.t()) :: :ok
   def mark_access_token_used(access_token) when is_binary(access_token) do
+    at_h = hash_token(access_token)
+
     case query(
-           "SELECT user_id, device_id FROM matrix_sessions WHERE access_token = $1",
-           [access_token]
+           "SELECT user_id, device_id FROM matrix_sessions WHERE access_token_hash = $1",
+           [at_h]
          ) do
       {:ok, %{rows: [[user_id, device_id]]}} ->
         {:ok, _} =
@@ -223,12 +392,16 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
             """
             UPDATE matrix_sessions
                SET grace_until = NOW()
-             WHERE user_id = $1 AND device_id = $2
-               AND revoked_at IS NOT NULL
-               AND grace_until > NOW()
-               AND access_token != $3
+             WHERE access_token_hash IN (
+                     SELECT access_token_hash FROM matrix_sessions
+                      WHERE user_id = $1 AND device_id = $2
+                        AND revoked_at IS NOT NULL
+                        AND grace_until IS NULL
+                        AND access_token_hash != $3
+                      ORDER BY access_token_hash
+                        FOR UPDATE)
             """,
-            [user_id, device_id, access_token]
+            [user_id, device_id, at_h]
           )
 
         :ok
@@ -240,11 +413,10 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
   end
 
   @doc """
-  Indicates whether `access_token` has an OPEN grace window on a soft-revoked
-  sibling (same user+device), folded into one query (Go `LookupOpaqueToken`
-  has_grace EXISTS subquery). Lets `OidcPlug` skip `mark_access_token_used/1` —
-  and its write — on the common request path where no rotation happened.
-  Only meaningful when the AT itself is not revoked.
+  Indicates whether `access_token` has a PENDING soft-revoked sibling (same
+  user+device), folded into one query. Lets `OidcPlug` skip
+  `mark_access_token_used/1` — and its write — on the common request path where
+  no rotation happened. Only meaningful when the AT itself is not revoked.
   """
   @spec has_open_grace_window?(String.t()) :: boolean()
   def has_open_grace_window?(access_token) when is_binary(access_token) do
@@ -254,14 +426,14 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
              SELECT 1 FROM matrix_sessions s2
               WHERE s2.user_id = m.user_id
                 AND s2.device_id = m.device_id
-                AND s2.access_token != m.access_token
+                AND s2.access_token_hash != m.access_token_hash
                 AND s2.revoked_at IS NOT NULL
-                AND s2.grace_until > NOW()
+                AND s2.grace_until IS NULL
            )
            FROM matrix_sessions m
-           WHERE m.access_token = $1 AND m.revoked_at IS NULL
+           WHERE m.access_token_hash = $1 AND m.revoked_at IS NULL
            """,
-           [access_token]
+           [hash_token(access_token)]
          ) do
       {:ok, %{rows: [[true]]}} -> true
       _ -> false
@@ -269,19 +441,88 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
   end
 
   @doc """
+  Extends the ACTIVE row `access_token` IN PLACE (background `RefreshWorker`):
+  sets `expires_at` and, when the IdP rotated it, the encrypted OIDC refresh token
+  (`nil` keeps the stored blob). Access and refresh token are never touched, so the
+  tokens the client holds stay valid. Atomic single-row statement guarded by
+  `revoked_at IS NULL`; returns `:error` when the row is gone or no longer active.
+
+  F-1: the extension is capped at `created_at + matrix_session_ttl_seconds` (absolute
+  bound from the issuance of THIS row). A client `/refresh` creates a new row with a
+  fresh `created_at`, so the cap only bounds devices that never refresh themselves.
+  At the cap the worker simply stops extending: the row expires normally and the
+  client gets the `soft_logout` path. Strictly extending: `GREATEST(expires_at, ...)`
+  guarantees the value is never shortened (also for rows that earlier worker versions
+  extended beyond the cap).
+  """
+  @spec extend_in_place(String.t(), DateTime.t(), String.t() | nil) :: :ok | :error
+  def extend_in_place(access_token, %DateTime{} = new_expires_at, enc_oidc_rt)
+      when is_binary(access_token),
+      do: extend_in_place_by_hash(hash_token(access_token), new_expires_at, enc_oidc_rt)
+
+  @doc false
+  # INTERNAL - pass-the-hash warning: only for hash values read from the DB (RefreshWorker,
+  # HttpPublic.rotate_attempt). NEVER pass a client-supplied value here: a leaked hash
+  # must not act as a credential. Public API takes plaintext tokens only.
+  @spec extend_in_place_by_hash(String.t(), DateTime.t(), String.t() | nil) :: :ok | :error
+  def extend_in_place_by_hash(access_token_hash, %DateTime{} = new_expires_at, enc_oidc_rt)
+      when is_binary(access_token_hash) do
+    case query(
+           """
+           UPDATE matrix_sessions
+              SET expires_at = GREATEST(expires_at, LEAST($2, created_at + ($4::bigint * INTERVAL '1 second'))),
+                  oidc_refresh_token = COALESCE($3, oidc_refresh_token)
+            WHERE access_token_hash = $1 AND revoked_at IS NULL
+           """,
+           [
+             access_token_hash,
+             new_expires_at,
+             enc_oidc_rt,
+             Nebu.Web.SessionConfig.matrix_session_ttl_seconds()
+           ]
+         ) do
+      {:ok, %{num_rows: 1}} -> :ok
+      {:ok, _} -> :error
+    end
+  end
+
+  @doc """
+  Stores a provider-rotated encrypted OIDC refresh token on the CURRENT active row
+  of `(user_id, device_id)`. Used by the `RefreshWorker` when `extend_in_place/3`
+  lost a race against a client `/refresh` (the row it extended was rotated away):
+  the IdP already invalidated the previous OIDC RT, so the new one must not be
+  dropped. Guarded by `revoked_at IS NULL` (no resurrection of revoked rows);
+  `:error` when the device has no active row any more.
+  """
+  @spec store_rotated_oidc_rt(String.t(), String.t(), String.t()) :: :ok | :error
+  def store_rotated_oidc_rt(user_id, device_id, enc_oidc_rt)
+      when is_binary(user_id) and is_binary(device_id) and is_binary(enc_oidc_rt) do
+    case query(
+           """
+           UPDATE matrix_sessions
+              SET oidc_refresh_token = $3
+            WHERE user_id = $1 AND device_id = $2 AND revoked_at IS NULL
+           """,
+           [user_id, device_id, enc_oidc_rt]
+         ) do
+      {:ok, %{num_rows: n}} when n >= 1 -> :ok
+      {:ok, _} -> :error
+    end
+  end
+
+  @doc """
   Hard-revokes a session by deleting rows (logout).
 
   Looks up the presented access token's `(user_id, device_id)` and deletes ALL
-  rows for that pair — the presented row plus any soft-revoked rotated siblings
-  still lingering inside their grace window (MINOR-1: stop logout from leaving
-  siblings behind; the periodic `cleanup_expired/0` sweeper is still deferred).
+  rows for that pair — the presented row plus every soft-revoked (pending or
+  consumed) rotated sibling, so logout leaves no redeemable refresh token behind.
   If the access token is unknown, this is a no-op `:ok`.
   """
   @spec revoke(String.t()) :: :ok
   def revoke(access_token) when is_binary(access_token) do
     case query(
-           "SELECT user_id, device_id FROM matrix_sessions WHERE access_token = $1",
-           [access_token]
+           "SELECT user_id, device_id FROM matrix_sessions WHERE access_token_hash = $1",
+           [hash_token(access_token)]
          ) do
       {:ok, %{rows: [[user_id, device_id]]}} ->
         {:ok, _} =
@@ -346,9 +587,9 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
   end
 
   @doc """
-  Deletes a SINGLE session row by its exact `access_token`, but ONLY while it
-  is still the active (non-revoked) row — `WHERE access_token = $1 AND
-  revoked_at IS NULL`.
+  Deletes a SINGLE session row by its exact access token (hashed internally), but
+  ONLY while it is still the active (non-revoked) row — guarded by
+  `revoked_at IS NULL`. See `delete_by_access_token_hash/1`.
 
   security-review fix (server-paced-session-refresh / background-session-refresh-worker,
   HIGH finding #1): `Nebu.Matrix.Session.RefreshWorker.redeem/1`'s fail-closed
@@ -358,10 +599,10 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
   node runs its own instance of the worker against the same shared table; two
   nodes can race to redeem the same (rotating) upstream refresh token. The
   winner rotates to a healthy NEW row and soft-revokes the old one
-  (`rotate_tokens/1`, guarded `UPDATE ... WHERE access_token=$1 AND
-  revoked_at IS NULL`); the loser's redemption then fails (the RT was already
+  (`rotate_tokens/1`, guarded UPDATE on the access token hash with
+  `revoked_at IS NULL`); the loser's redemption then fails (the RT was already
   consumed) and must NOT delete the winner's brand-new row. Scoping this
-  delete by the loser's OWN (now stale) `access_token` AND `revoked_at IS
+  delete by the loser's OWN (now stale) access token hash AND `revoked_at IS
   NULL` gives it the same true per-row atomicity `rotate_tokens/1` already
   has: if another node already superseded this row (soft-revoked or deleted
   it), this delete matches 0 rows and cannot touch a sibling/replacement row.
@@ -378,10 +619,18 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
   Best-effort like the other delete helpers: never raises.
   """
   @spec delete_by_access_token(String.t()) :: :ok
-  def delete_by_access_token(access_token) when is_binary(access_token) do
+  def delete_by_access_token(access_token) when is_binary(access_token),
+    do: delete_by_access_token_hash(hash_token(access_token))
+
+  @doc false
+  # INTERNAL - pass-the-hash warning: only for hash values read from the DB (RefreshWorker,
+  # HttpPublic.rotate_attempt). NEVER pass a client-supplied value here: a leaked hash
+  # must not act as a credential. Public API takes plaintext tokens only.
+  @spec delete_by_access_token_hash(String.t()) :: :ok
+  def delete_by_access_token_hash(access_token_hash) when is_binary(access_token_hash) do
     case safe_query(
-           "DELETE FROM matrix_sessions WHERE access_token = $1 AND revoked_at IS NULL",
-           [access_token]
+           "DELETE FROM matrix_sessions WHERE access_token_hash = $1 AND revoked_at IS NULL",
+           [access_token_hash]
          ) do
       {:ok, _} ->
         :ok
@@ -399,6 +648,11 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
   Deletes sessions whose `expires_at` is more than 7 days in the past. Returns the
   number of rows deleted. Not wired to a periodic sweeper yet (no supervised
   session sweeper exists) — call it from one when added.
+
+  NOTE: pending soft-revoked rows (old refresh tokens) now live until their own
+  `expires_at` (no 60s window), so `matrix_sessions` grows by one row per client
+  refresh until logout / device delete / this cleanup. A periodic sweeper is a
+  named follow-up (see the story's Dev Notes); it is deliberately not wired here.
   """
   @spec cleanup_expired() :: non_neg_integer()
   def cleanup_expired do
@@ -430,17 +684,17 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
 
   defp select_sql(where) do
     """
-    SELECT access_token, refresh_token, oidc_refresh_token, user_id, device_id,
+    SELECT access_token_hash, refresh_token_hash, oidc_refresh_token, user_id, device_id,
            expires_at, revoked_at, grace_until
       FROM matrix_sessions
      WHERE #{where}
     """
   end
 
-  defp row_to_session([at, rt, enc_oidc_rt, user_id, device_id, expires_at, revoked_at, grace_until]) do
+  defp row_to_session([at_h, rt_h, enc_oidc_rt, user_id, device_id, expires_at, revoked_at, grace_until]) do
     %{
-      access_token: at,
-      refresh_token: rt,
+      access_token_hash: at_h,
+      refresh_token_hash: rt_h,
       oidc_refresh_token: enc_oidc_rt,
       user_id: user_id,
       device_id: device_id,
@@ -451,7 +705,7 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
   end
 
   # NOTE (enhanced-logging/matrix-payload-debug-logging, CI-gate cycle-2 bug 2):
-  # this module binds opaque access/refresh tokens (credentials) as SQL
+  # this module binds token hashes (and encrypted OIDC refresh tokens) as SQL
   # parameters in every query. Ecto's default query logger would emit those
   # bound params verbatim at :debug level. Rather than disabling logging on a
   # per-call-site basis here, the fix is global: `config :nebu, Nebu.Repo,

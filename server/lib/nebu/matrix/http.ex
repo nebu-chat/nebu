@@ -119,11 +119,11 @@ defmodule Nebu.Matrix.Http do
   new work beyond this story's scope and is tracked as a follow-up. `join`
   carries the fan-out events that AC2 asserts on.
   """
-  def sync_response(next_batch, rooms) when is_list(rooms) do
+  def sync_response(next_batch, rooms, room_account_data \\ %{}) when is_list(rooms) do
     %{
       "next_batch" => next_batch,
       "rooms" => %{
-        "join" => build_joined_rooms(rooms),
+        "join" => build_joined_rooms(rooms, room_account_data),
         # invite/leave deferred — see moduledoc above (MINOR-2): no membership
         # data in proto SyncRoom; tracked as a follow-up.
         "invite" => %{},
@@ -137,7 +137,7 @@ defmodule Nebu.Matrix.Http do
     }
   end
 
-  defp build_joined_rooms(rooms) do
+  defp build_joined_rooms(rooms, room_account_data) do
     Map.new(rooms, fn room ->
       now_ms = System.system_time(:millisecond)
 
@@ -251,7 +251,7 @@ defmodule Nebu.Matrix.Http do
           "limited" => room.limited,
           "prev_batch" => room.prev_batch
         },
-        "account_data" => %{"events" => []}
+        "account_data" => %{"events" => Map.get(room_account_data, room.room_id, [])}
       }
 
       {room.room_id, joined}

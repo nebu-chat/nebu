@@ -676,7 +676,7 @@ defmodule Nebu.Matrix.DeviceLifecycleLoginTest do
   # Mirrors the oidc-session-refresh invariants (login_refresh_test.exs) so this
   # story's changes are caught if they break /refresh:
   #   * /refresh → new access_token + refresh_token + expires_in_ms
-  #   * old RT honors its grace window, then is revoked once the new AT is used
+  #   * old RT stays valid while pending, then is revoked once the new AT is used
   #   * an expired AT → 401 M_UNKNOWN_TOKEN with soft_logout: true
   # These SHOULD stay green; they are mirrored (not duplicate-broken).
   # ══════════════════════════════════════════════════════════════════════════
@@ -706,7 +706,7 @@ defmodule Nebu.Matrix.DeviceLifecycleLoginTest do
       end
     end
 
-    test "rotated-then-used old RT → 401 M_UNKNOWN_TOKEN (grace window closes)", %{priv_jwk: priv} do
+    test "rotated-then-used old RT → 401 M_UNKNOWN_TOKEN (RT consumed)", %{priv_jwk: priv} do
       if Process.whereis(Nebu.Repo) do
         login = login_opaque(priv)
         rt_a = login["refresh_token"]
@@ -716,7 +716,7 @@ defmodule Nebu.Matrix.DeviceLifecycleLoginTest do
         assert refresh.status == 200
         at_b = json(refresh)["access_token"]
 
-        # Use the new AT once — closes the grace window on the old RT row.
+        # Use the new AT once — consumes the old RT row.
         assert call(:get, "/_matrix/client/v3/sync", nil, auth(at_b)).status == 200
 
         reuse = call(:post, "/_matrix/client/v3/refresh", %{"refresh_token" => rt_a})
@@ -735,8 +735,8 @@ defmodule Nebu.Matrix.DeviceLifecycleLoginTest do
         {:ok, _} =
           Ecto.Adapters.SQL.query(
             Nebu.Repo,
-            "UPDATE matrix_sessions SET expires_at = NOW() - INTERVAL '1 second' WHERE access_token = $1",
-            [at]
+            "UPDATE matrix_sessions SET expires_at = NOW() - INTERVAL '1 second' WHERE access_token_hash = $1",
+            [Nebu.Matrix.Session.MatrixSessionStore.hash_token(at)]
           )
 
         resp = call(:get, "/_matrix/client/v3/sync", nil, auth(at))

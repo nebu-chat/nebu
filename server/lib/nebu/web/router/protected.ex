@@ -26,6 +26,20 @@ defmodule Nebu.Web.Router.Protected do
   alias Nebu.Matrix.DeviceKeyStore
   alias Nebu.Matrix.CrossSigningKeyStore
 
+  # Server-managed account data types: clients MUST NOT set them (405 M_BAD_JSON), global
+  # and room scope (Matrix CS, Client Config). Reading them is allowed.
+  @server_managed_account_data_types ["m.fully_read", "m.push_rules"]
+
+  # Per-USER rate limit of the account-data PUT routes (global + room scope): 60 writes/min,
+  # burst 30. Real clients write a handful of entries per minute (tags, marked_unread);
+  # this only stops scripted floods. Bucketed by user (not IP), separate tier "account_data".
+  @account_data_write_rate_limit Nebu.Web.Plugs.RateLimit.init(
+                                   rate_per_min: 60,
+                                   burst: 30,
+                                   tier: "account_data",
+                                   key: :user
+                                 )
+
   plug Nebu.Web.Plugs.OidcPlug
   plug :fetch_query_params
   plug :match
@@ -59,18 +73,33 @@ defmodule Nebu.Web.Router.Protected do
     since = q["since"]
     timeout_ms = parse_timeout(q["timeout"])
 
+    # room-account-data-and-read-markers: Nebu's `next_batch`/`since` token is
+    # `<core token>[.<room account data position>]`. The core token (opaque base64, no
+    # '.') keeps its existing per-user stored-token semantics; the suffix is the
+    # `stream_pos` up to which this client has received ROOM account data (per DEVICE,
+    # because it lives in the client's own token). A token without a suffix (issued
+    # before this feature) means position 0 = "all room account data" (delivered once).
+    {core_since, since_pos} = split_since_token(since)
+    has_since? = is_binary(core_since) and core_since != ""
+
     # S2 AC5: advance the device's last_seen_ts/last_seen_ip on this authenticated
     # activity, THROTTLED inside the store so back-to-back /syncs don't hammer the DB.
     # Best-effort: must never fail the /sync it rides on.
     touch_device_last_seen(conn)
 
-    {next_batch, rooms} =
-      if is_binary(since) and since != "" do
+    # Room account data already waiting for this token → do not long-poll.
+    timeout_ms =
+      if has_since? and Nebu.Matrix.RoomAccountDataStore.pending?(user, since_pos),
+        do: 0,
+        else: timeout_ms
+
+    {next_batch, rooms, fallback?} =
+      if has_since? do
         delta =
           Nebu.Matrix.EventDispatcher.Server.get_sync_delta(
             %Core.GetSyncDeltaRequest{
               user_id: user,
-              since_token: since,
+              since_token: core_since,
               timeout_ms: timeout_ms,
               device_id: ""
             },
@@ -81,10 +110,8 @@ defmodule Nebu.Web.Router.Protected do
         # unknown/stale since_token it transparently falls back to an initial
         # sync and sets delta.fallback_to_initial: true while putting the full
         # snapshot in delta.rooms and a fresh delta.since_token. The HTTP /sync
-        # response shape is identical in both cases (next_batch + joined rooms),
-        # so we use the resolved fields directly — the flag carries no extra
-        # response semantics for this endpoint.
-        {delta.since_token, delta.rooms}
+        # response shape is identical in both cases (next_batch + joined rooms).
+        {delta.since_token, delta.rooms, delta.fallback_to_initial}
       else
         initial =
           Nebu.Matrix.EventDispatcher.Server.get_initial_sync(
@@ -92,16 +119,82 @@ defmodule Nebu.Web.Router.Protected do
             stream(user)
           )
 
-        {initial.since_token, initial.rooms}
+        {initial.since_token, initial.rooms, true}
       end
 
+    # Rooms the user newly joined in this delta: the client has never seen their
+    # account data, so deliver ALL of it (not only changes after the position).
+    full_rooms = if has_since? and not fallback?, do: newly_joined_room_ids(rooms, user), else: []
+
+    {latest_pos, ad_entries} =
+      Nebu.Matrix.RoomAccountDataStore.list_for_sync(user, since_pos, full_rooms)
+
+    # A room whose ONLY change is account data must still appear in rooms.join
+    # (empty timeline/state). Only for true deltas — initial/fallback already carry
+    # every joined room.
+    present = MapSet.new(rooms, & &1.room_id)
+
+    extra_rooms =
+      if has_since? and not fallback? do
+        ad_entries
+        |> Enum.map(&elem(&1, 0))
+        |> Enum.uniq()
+        |> Enum.reject(&MapSet.member?(present, &1))
+        |> Enum.map(fn rid ->
+          %Core.SyncRoom{room_id: rid, state_events: [], timeline_events: [], limited: false, prev_batch: ""}
+        end)
+      else
+        []
+      end
+
+    room_ad =
+      Enum.group_by(
+        ad_entries,
+        fn {rid, _t, _c} -> rid end,
+        fn {_rid, t, c} -> %{"type" => t, "content" => c} end
+      )
+
     response =
-      sync_response(next_batch, rooms)
+      sync_response(next_batch <> "." <> Integer.to_string(latest_pos), rooms ++ extra_rooms, room_ad)
       |> put_device_e2e_counts(conn)
-      |> put_cross_signing_device_lists(conn, since)
-      |> put_global_account_data(conn, since)
+      |> put_cross_signing_device_lists(conn, core_since)
+      |> put_global_account_data(conn, core_since)
 
     send_json(conn, 200, response)
+  end
+
+  # `<core>[.<pos>]` → {core, pos}; nil → {nil, 0}.
+  #
+  # The position suffix is recognised ONLY as a trailing `.` + ASCII digits (so `+5`, `-1`,
+  # `5x`, an empty suffix or `a.b.c` are NOT positions: the whole token stays the core and
+  # an unknown core falls back to an initial sync). The core is the whole token minus that
+  # trailing digit suffix (the real core is opaque base64 without '.'). A digit suffix with
+  # more than 19 digits or a value above int8 max (9_223_372_036_854_775_807) is still
+  # stripped but yields position 0 (= redeliver all room account data) so it can never
+  # reach the database as an out-of-range parameter. A position above the user's latest
+  # is clamped by `RoomAccountDataStore.list_for_sync/3` (it returns the real latest).
+  @max_token_pos 9_223_372_036_854_775_807
+
+  defp split_since_token(since) when is_binary(since) do
+    case Regex.run(~r/\A(.+)\.([0-9]+)\z/s, since) do
+      [_, core, digits] ->
+        pos = if byte_size(digits) <= 19, do: String.to_integer(digits), else: 0
+        {core, if(pos <= @max_token_pos, do: pos, else: 0)}
+
+      _ ->
+        {since, 0}
+    end
+  end
+
+  defp split_since_token(_), do: {nil, 0}
+
+  defp newly_joined_room_ids(rooms, user) do
+    for room <- rooms,
+        Enum.any?(room.timeline_events, fn ev ->
+          ev.event_type == "m.room.member" and ev.state_key == user and
+            match?({:ok, %{"membership" => "join"}}, Jason.decode(ev.content))
+        end),
+        do: room.room_id
   end
 
   # Top-level `account_data.events` (Matrix CS §GET /sync). Global account data is
@@ -550,28 +643,349 @@ defmodule Nebu.Web.Router.Protected do
   # ADR-011: content is opaque (client-encrypted secret-storage / cross-signing keys);
   # the server never parses or decrypts it. Storing it enables NO encryption.
   put "/client/v3/user/:user_id/account_data/:type" do
-    authenticated_user = conn.assigns[:current_user]
-    decoded_user = URI.decode_www_form(user_id)
-    decoded_type = URI.decode_www_form(type)
+    conn = Nebu.Web.Plugs.RateLimit.call(conn, @account_data_write_rate_limit)
 
-    if decoded_user != authenticated_user do
-      error(conn, 403, "M_FORBIDDEN", "You can only write your own account data")
+    if conn.halted do
+      conn
     else
-      json_body = Jason.encode!(body_params(conn))
-      Nebu.Matrix.AccountDataStore.put(decoded_user, decoded_type, json_body)
-      send_json(conn, 200, %{})
+      do_put_global_account_data(conn, user_id, type)
     end
   end
 
+  # `user_id` / `type` are used as Plug.Router already percent-decoded them (path params);
+  # NO extra `URI.decode_www_form` (it would turn a literal `+` into a space and make the
+  # global scope store `a+b` under a different key than the room scope).
+  defp do_put_global_account_data(conn, user_id, type) do
+    authenticated_user = conn.assigns[:current_user]
+
+    cond do
+      user_id != authenticated_user ->
+        error(conn, 403, "M_FORBIDDEN", "You can only write your own account data")
+
+      # Matrix CS (Client Config): servers MUST reject setting m.fully_read / m.push_rules
+      # (server managed; global AND room scope). Reads stay allowed.
+      type in @server_managed_account_data_types ->
+        error(conn, 405, "M_BAD_JSON", "Cannot set account data of server-managed type #{type}")
+
+      # Body > 1 MB: JsonBody replaced body_params with %{} — storing that would silently
+      # overwrite the user's (secret-storage / cross-signing) value, so refuse BEFORE storing.
+      conn.assigns[:body_too_large] == true ->
+        error(conn, 413, "M_TOO_LARGE", "Account data content too large")
+
+      conn.assigns[:json_parse_error] == true ->
+        error(conn, 400, "M_NOT_JSON", "Request body is not valid JSON")
+
+      true ->
+        # Same discipline as the room scope: the RAW body decides. Empty / non-JSON /
+        # no Content-Type (parser skipped) → 400 M_NOT_JSON (Synapse parity: clients
+        # without a JSON Content-Type are rejected), non-object → 400 M_BAD_JSON, and an
+        # oversized body (any Content-Type) → 413. The stored value is never silently
+        # replaced by `{}`.
+        put_global_account_data_body(conn, user_id, type)
+    end
+  end
+
+  @global_account_data_max_bytes 1_000_000
+
+  defp put_global_account_data_body(conn, user_id, type) do
+    case conn.assigns[:raw_body] do
+      raw when is_binary(raw) ->
+        cond do
+          byte_size(raw) > @global_account_data_max_bytes ->
+            error(conn, 413, "M_TOO_LARGE", "Account data content too large")
+
+          raw == "" or not valid_json?(raw) ->
+            error(conn, 400, "M_NOT_JSON", "Request body is not valid JSON")
+
+          not json_object?(raw) ->
+            error(conn, 400, "M_BAD_JSON", "Request body must be a JSON object")
+
+          true ->
+            Nebu.Matrix.AccountDataStore.put(user_id, type, Jason.encode!(body_params(conn)))
+            send_json(conn, 200, %{})
+        end
+
+      _ ->
+        # Parser skipped (no / non-JSON Content-Type): size-check, then refuse.
+        if byte_size(raw_request_body(conn, @global_account_data_max_bytes)) > @global_account_data_max_bytes do
+          error(conn, 413, "M_TOO_LARGE", "Account data content too large")
+        else
+          error(conn, 400, "M_NOT_JSON", "Request body is not valid JSON (Content-Type: application/json required)")
+        end
+    end
+  end
+
+  # ── Room-scoped account data (story room-account-data-and-read-markers) ───────
+  # PUT/GET /user/{userId}/rooms/{roomId}/account_data/{type}. Durable PostgreSQL store
+  # (Nebu.Matrix.RoomAccountDataStore), content VERBATIM (ADR-011), delivered in
+  # /sync rooms.join.<roomId>.account_data.events. Check order (all BEFORE any room /
+  # membership lookup, so they cannot leak room existence): user==auth (403), server-
+  # managed type (405 M_BAD_JSON), roomId syntax (400 M_INVALID_PARAM), body size (413),
+  # body JSON object (400 M_NOT_JSON). Then membership: a non-member and an unknown room
+  # get the SAME 403 M_FORBIDDEN (Matrix does not require membership for account data,
+  # but an unrestricted write would let anyone probe room ids and fill storage).
+  put "/client/v3/user/:user_id/rooms/:room_id/account_data/:type" do
+    conn = Nebu.Web.Plugs.RateLimit.call(conn, @account_data_write_rate_limit)
+
+    if conn.halted do
+      conn
+    else
+      do_put_room_account_data(conn, user_id, room_id, type)
+    end
+  end
+
+  defp do_put_room_account_data(conn, user_id, room_id, type) do
+    authenticated_user = conn.assigns[:current_user]
+
+    cond do
+      user_id != authenticated_user ->
+        error(conn, 403, "M_FORBIDDEN", "You can only write your own account data")
+
+      type in @server_managed_account_data_types ->
+        error(conn, 405, "M_BAD_JSON", "Cannot set account data of server-managed type #{type}")
+
+      not valid_room_id?(room_id) ->
+        error(conn, 400, "M_INVALID_PARAM", "Invalid room id")
+
+      type == "" or byte_size(type) > 255 ->
+        error(conn, 400, "M_INVALID_PARAM", "Invalid account data type")
+
+      conn.assigns[:body_too_large] == true ->
+        error(conn, 413, "M_TOO_LARGE", "Account data content too large")
+
+      conn.assigns[:json_parse_error] == true ->
+        error(conn, 400, "M_NOT_JSON", "Request body is not valid JSON")
+
+      true ->
+        raw = raw_request_body(conn)
+
+        cond do
+          byte_size(raw) > Nebu.Matrix.RoomAccountDataStore.max_bytes() ->
+            error(conn, 413, "M_TOO_LARGE", "Account data content too large")
+
+          not json_object?(raw) ->
+            error(conn, 400, "M_NOT_JSON", "Request body must be a JSON object")
+
+          true ->
+            with :ok <- require_room_member(authenticated_user, room_id),
+                 :ok <- Nebu.Matrix.RoomAccountDataStore.put(authenticated_user, room_id, type, raw) do
+              send_json(conn, 200, %{})
+            else
+              {:error, :limit_exceeded} ->
+                error(conn, 403, "M_RESOURCE_LIMIT_EXCEEDED", "Room account data limit exceeded")
+
+              {:error, {status, errcode, message}} ->
+                error(conn, status, errcode, message)
+
+              {:error, _db} ->
+                error(conn, 500, "M_UNKNOWN", "Internal server error")
+            end
+        end
+    end
+  end
+
+  get "/client/v3/user/:user_id/rooms/:room_id/account_data/:type" do
+    authenticated_user = conn.assigns[:current_user]
+
+    cond do
+      user_id != authenticated_user ->
+        error(conn, 403, "M_FORBIDDEN", "You can only read your own account data")
+
+      not valid_room_id?(room_id) ->
+        error(conn, 400, "M_INVALID_PARAM", "Invalid room id")
+
+      true ->
+        with :ok <- require_room_member(authenticated_user, room_id),
+             {:ok, json_body} <- Nebu.Matrix.RoomAccountDataStore.get(authenticated_user, room_id, type) do
+          conn
+          |> put_resp_content_type("application/json")
+          |> send_resp(200, json_body)
+        else
+          :error -> error(conn, 404, "M_NOT_FOUND", "Account data not found")
+          {:error, {status, errcode, message}} -> error(conn, status, errcode, message)
+        end
+    end
+  end
+
+  # ── Room tags (story room-tags) ─────────────────────────────────────────────
+  # GET    /user/{userId}/rooms/{roomId}/tags
+  # PUT    /user/{userId}/rooms/{roomId}/tags/{tag}     body = tag object, e.g. {"order": 0.25}
+  # DELETE /user/{userId}/rooms/{roomId}/tags/{tag}
+  # Tags live in the room account data event `m.tag` ({"tags": {name => tag object}}) of
+  # Nebu.Matrix.RoomAccountDataStore; PUT/DELETE are an atomic read-modify-write of that event
+  # (RoomAccountDataStore.update/4: one transaction under the per-user advisory lock) so
+  # concurrent tag writes never lose each other. Check order = room account data PUT:
+  # user==auth (403), roomId syntax (400 M_INVALID_PARAM), tag name (400 M_INVALID_PARAM),
+  # body size (413), body JSON object (400 M_NOT_JSON), `order` a JSON number (400 M_BAD_JSON),
+  # then membership (identical 403 for non-member and unknown room). Writes share the
+  # `account_data` rate-limit bucket (GET is not limited). The tag name is user content: it is
+  # never echoed in an error message. PUT/DELETE without a name (`.../tags`, `.../tags/`) → 400.
+  get "/client/v3/user/:user_id/rooms/:room_id/tags" do
+    authenticated_user = conn.assigns[:current_user]
+
+    cond do
+      user_id != authenticated_user ->
+        error(conn, 403, "M_FORBIDDEN", "You can only read your own tags")
+
+      not valid_room_id?(room_id) ->
+        error(conn, 400, "M_INVALID_PARAM", "Invalid room id")
+
+      true ->
+        with :ok <- require_room_member(authenticated_user, room_id) do
+          tags =
+            case Nebu.Matrix.RoomAccountDataStore.get(authenticated_user, room_id, "m.tag") do
+              {:ok, json} -> json |> decode_tag_event() |> tags_of_event()
+              :error -> %{}
+            end
+
+          send_json(conn, 200, %{"tags" => tags})
+        else
+          {:error, {status, errcode, message}} -> error(conn, status, errcode, message)
+        end
+    end
+  end
+
+  put "/client/v3/user/:user_id/rooms/:room_id/tags" do
+    conn = Nebu.Web.Plugs.RateLimit.call(conn, @account_data_write_rate_limit)
+    if conn.halted, do: conn, else: do_room_tag_write(conn, user_id, room_id, "", :put)
+  end
+
+  delete "/client/v3/user/:user_id/rooms/:room_id/tags" do
+    conn = Nebu.Web.Plugs.RateLimit.call(conn, @account_data_write_rate_limit)
+    if conn.halted, do: conn, else: do_room_tag_write(conn, user_id, room_id, "", :delete)
+  end
+
+  put "/client/v3/user/:user_id/rooms/:room_id/tags/:tag" do
+    conn = Nebu.Web.Plugs.RateLimit.call(conn, @account_data_write_rate_limit)
+    if conn.halted, do: conn, else: do_room_tag_write(conn, user_id, room_id, tag, :put)
+  end
+
+  delete "/client/v3/user/:user_id/rooms/:room_id/tags/:tag" do
+    conn = Nebu.Web.Plugs.RateLimit.call(conn, @account_data_write_rate_limit)
+    if conn.halted, do: conn, else: do_room_tag_write(conn, user_id, room_id, tag, :delete)
+  end
+
+  defp do_room_tag_write(conn, user_id, room_id, tag, method) do
+    authenticated_user = conn.assigns[:current_user]
+
+    cond do
+      user_id != authenticated_user ->
+        error(conn, 403, "M_FORBIDDEN", "You can only change your own tags")
+
+      not valid_room_id?(room_id) ->
+        error(conn, 400, "M_INVALID_PARAM", "Invalid room id")
+
+      not valid_tag_name?(tag) ->
+        error(conn, 400, "M_INVALID_PARAM", "Invalid tag name")
+
+      method == :delete ->
+        write_room_tag(conn, authenticated_user, room_id, &remove_tag(&1, tag))
+
+      conn.assigns[:body_too_large] == true ->
+        error(conn, 413, "M_TOO_LARGE", "Tag content too large")
+
+      conn.assigns[:json_parse_error] == true ->
+        error(conn, 400, "M_NOT_JSON", "Request body is not valid JSON")
+
+      true ->
+        put_room_tag_body(conn, authenticated_user, room_id, tag)
+    end
+  end
+
+  # The RAW body decides (RawBodyReader keeps it for JSON content types). A body the JSON parser
+  # skipped (no / non-JSON Content-Type) is size-checked, then refused (400 M_NOT_JSON), like the
+  # global account-data scope: a tag is never stored from a body that was not sent as JSON.
+  defp put_room_tag_body(conn, user, room_id, tag) do
+    max = Nebu.Matrix.RoomAccountDataStore.max_bytes()
+
+    case conn.assigns[:raw_body] do
+      raw when is_binary(raw) ->
+        cond do
+          byte_size(raw) > max ->
+            error(conn, 413, "M_TOO_LARGE", "Tag content too large")
+
+          not json_object?(raw) ->
+            error(conn, 400, "M_NOT_JSON", "Request body must be a JSON object")
+
+          true ->
+            {:ok, tag_object} = Jason.decode(raw)
+
+            if Map.has_key?(tag_object, "order") and not is_number(tag_object["order"]) do
+              error(conn, 400, "M_BAD_JSON", "Tag order must be a number")
+            else
+              write_room_tag(conn, user, room_id, &put_tag(&1, tag, tag_object))
+            end
+        end
+
+      _ ->
+        if byte_size(raw_request_body(conn)) > max,
+          do: error(conn, 413, "M_TOO_LARGE", "Tag content too large"),
+          else: error(conn, 400, "M_NOT_JSON", "Request body is not valid JSON (Content-Type: application/json required)")
+    end
+  end
+
+  defp write_room_tag(conn, user, room_id, fun) do
+    with :ok <- require_room_member(user, room_id),
+         :ok <- Nebu.Matrix.RoomAccountDataStore.update(user, room_id, "m.tag", fun) do
+      send_json(conn, 200, %{})
+    else
+      {:error, :limit_exceeded} ->
+        error(conn, 403, "M_RESOURCE_LIMIT_EXCEEDED", "Room account data limit exceeded")
+
+      {:error, :too_large} ->
+        error(conn, 413, "M_TOO_LARGE", "Tag content too large")
+
+      {:error, {status, errcode, message}} ->
+        error(conn, status, errcode, message)
+
+      {:error, _db} ->
+        error(conn, 500, "M_UNKNOWN", "Internal server error")
+    end
+  end
+
+  # Tag name: 1..255 BYTES after URL-decoding (Matrix CS), valid UTF-8, no NUL (Nebu decision).
+  defp valid_tag_name?(tag),
+    do: tag != "" and byte_size(tag) <= 255 and String.valid?(tag) and not String.contains?(tag, <<0>>)
+
+  # Pure merge functions run inside RoomAccountDataStore.update/4 (transaction + advisory
+  # lock). A malformed stored event is treated as {} (`tags` missing / not an object → %{});
+  # unknown top-level keys are preserved.
+  defp put_tag(current_json, tag, tag_object) do
+    event = decode_tag_event(current_json)
+    tags = Map.put(tags_of_event(event), tag, tag_object)
+    {:ok, Jason.encode!(Map.put(event, "tags", tags))}
+  end
+
+  defp remove_tag(nil, _tag), do: :unchanged
+
+  defp remove_tag(current_json, tag) do
+    event = decode_tag_event(current_json)
+    tags = tags_of_event(event)
+
+    if Map.has_key?(tags, tag),
+      do: {:ok, Jason.encode!(Map.put(event, "tags", Map.delete(tags, tag)))},
+      else: :unchanged
+  end
+
+  defp decode_tag_event(nil), do: %{}
+
+  defp decode_tag_event(json) do
+    case Jason.decode(json) do
+      {:ok, map} when is_map(map) -> map
+      _ -> %{}
+    end
+  end
+
+  defp tags_of_event(%{"tags" => tags}) when is_map(tags), do: tags
+  defp tags_of_event(_event), do: %{}
+
   get "/client/v3/user/:user_id/account_data/:type" do
     authenticated_user = conn.assigns[:current_user]
-    decoded_user = URI.decode_www_form(user_id)
-    decoded_type = URI.decode_www_form(type)
 
-    if decoded_user != authenticated_user do
+    if user_id != authenticated_user do
       error(conn, 403, "M_FORBIDDEN", "You can only read your own account data")
     else
-      case Nebu.Matrix.AccountDataStore.get(decoded_user, decoded_type) do
+      case Nebu.Matrix.AccountDataStore.get(user_id, type) do
         {:ok, json_body} ->
           conn
           |> put_resp_content_type("application/json")
@@ -1293,14 +1707,111 @@ defmodule Nebu.Web.Router.Protected do
   end
 
   # ── POST /_matrix/client/v3/rooms/{roomId}/read_markers ───────────────────
-  # No-op (200 {}). Nebu has no fully-read-marker store — it tracks read RECEIPTS
-  # (m.read, via the /receipt endpoint) but not the separate `m.fully_read`
-  # marker, which is best-effort client UI state. A 200 {} is spec-valid and
-  # clients tolerate it; we deliberately do NOT forward m.read here to avoid
-  # double-counting a receipt the client already sets via /receipt. Authenticated
-  # (Protected pipeline); acting user is the token user, so there is no IDOR.
-  post "/client/v3/rooms/:_room_id/read_markers" do
-    send_json(conn, 200, %{})
+  # Body: {"m.fully_read": "$ev", "m.read": "$ev", "m.read.private": "$ev"} (all optional).
+  #   * membership/authorization = /receipt (Server.ensure_room_member!: 404 unknown room,
+  #     403 non-member) — checked FIRST for every marker;
+  #   * m.read / m.read.private go through Server.send_receipt, i.e. exactly the /receipt
+  #     path (same validation, same upsert);
+  #   * m.fully_read is stored as the user's room account data event `m.fully_read`
+  #     ({"event_id": ...}) and delivered via /sync. The event must belong to the room
+  #     (400 M_INVALID_PARAM otherwise). m.fully_read is server-managed and EXEMPT from the
+  #     per-user row/total caps, so validation (member, event) is the only refusal before
+  #     the first write; the m.fully_read store runs FIRST and the receipts after it, so a
+  #     failing m.fully_read store (DB error) writes no receipts.
+  post "/client/v3/rooms/:room_id/read_markers" do
+    user = conn.assigns[:current_user]
+    params = body_params(conn)
+    markers = Map.take(params, ["m.fully_read", "m.read", "m.read.private"])
+
+    cond do
+      conn.assigns[:json_parse_error] == true ->
+        error(conn, 400, "M_NOT_JSON", "Request body is not valid JSON")
+
+      not Enum.all?(markers, fn {_k, v} -> is_binary(v) and v != "" end) ->
+        error(conn, 400, "M_INVALID_PARAM", "Read marker values must be event ids")
+
+      true ->
+        with {:ok, _} <-
+               call_core(fn -> Nebu.Matrix.EventDispatcher.Server.ensure_room_member!(room_id, user) end),
+             :ok <- check_fully_read_event(room_id, markers["m.fully_read"]),
+             :ok <- store_fully_read(user, room_id, markers["m.fully_read"]),
+             :ok <- send_marker_receipts(user, room_id, markers) do
+          send_json(conn, 200, %{})
+        else
+          {:error, {status, errcode, message}} -> error(conn, status, errcode, message)
+        end
+    end
+  end
+
+  defp check_fully_read_event(_room_id, nil), do: :ok
+
+  defp check_fully_read_event(room_id, event_id) do
+    if Nebu.Matrix.RoomAccountDataStore.event_in_room?(room_id, event_id),
+      do: :ok,
+      else: {:error, {400, "M_INVALID_PARAM", "m.fully_read event does not belong to this room"}}
+  end
+
+  defp send_marker_receipts(user, room_id, markers) do
+    Enum.reduce_while(["m.read", "m.read.private"], :ok, fn type, :ok ->
+      case markers[type] do
+        nil ->
+          {:cont, :ok}
+
+        event_id ->
+          req = %Core.SendReceiptRequest{room_id: room_id, user_id: user, receipt_type: type, event_id: event_id}
+
+          case call_core(fn -> Nebu.Matrix.EventDispatcher.Server.send_receipt(req, stream(user)) end) do
+            {:ok, _} -> {:cont, :ok}
+            {:error, err} -> {:halt, {:error, err}}
+          end
+      end
+    end)
+  end
+
+  defp store_fully_read(_user, _room_id, nil), do: :ok
+
+  defp store_fully_read(user, room_id, event_id) do
+    case Nebu.Matrix.RoomAccountDataStore.put(user, room_id, "m.fully_read", Jason.encode!(%{"event_id" => event_id})) do
+      :ok -> :ok
+      {:error, :limit_exceeded} -> {:error, {403, "M_RESOURCE_LIMIT_EXCEEDED", "Too many room account data entries"}}
+      {:error, _} -> {:error, {500, "M_UNKNOWN", "Internal server error"}}
+    end
+  end
+
+  # Room-account-data helpers ---------------------------------------------------
+
+  # Matrix room id syntax: "!" + opaque localpart, no whitespace, max 255 bytes.
+  defp valid_room_id?(room_id),
+    do: byte_size(room_id) <= 255 and Regex.match?(~r/\A![^\s\/]+\z/u, room_id)
+
+  # Same 403 for "unknown room" and "not a member" → no room-existence leak.
+  defp require_room_member(user, room_id) do
+    case call_core(fn -> Nebu.Matrix.EventDispatcher.Server.ensure_room_member!(room_id, user) end) do
+      {:ok, _} -> :ok
+      {:error, {404, _, _}} -> {:error, {403, "M_FORBIDDEN", "You are not a member of this room"}}
+      {:error, err} -> {:error, err}
+    end
+  end
+
+  # The raw bytes the client sent (cached by RawBodyReader for account-data routes).
+  defp raw_request_body(conn, max_bytes \\ Nebu.Matrix.RoomAccountDataStore.max_bytes()) do
+    case conn.assigns[:raw_body] do
+      body when is_binary(body) ->
+        body
+
+      _ ->
+        # Parser skipped (non-JSON content type): read it here, bounded.
+        case Plug.Conn.read_body(conn, length: max_bytes + 1) do
+          {:ok, body, _conn} -> body
+          _ -> String.duplicate("x", max_bytes + 1)
+        end
+    end
+  end
+
+  defp valid_json?(raw), do: match?({:ok, _}, Jason.decode(raw))
+
+  defp json_object?(raw) do
+    match?({:ok, m} when is_map(m), Jason.decode(raw))
   end
 
   # ── POST /_matrix/client/v3/rooms/{roomId}/upgrade ────────────────────────

@@ -741,7 +741,8 @@ Matrix Client      Nebu app (refresh handler)                PostgreSQL (matrix_
      │  Authorization: Bearer <new_hex>                             │
      │────────────────────►│  OidcPlug (opaque-token branch)        │
      │                     │  SELECT FROM matrix_sessions           │
-     │                     │  WHERE access_token=$1 (opaque)        │
+     │                     │  WHERE access_token_hash=$1            │
+     │                     │  (= SHA-256 hex of the opaque token)   │
      │                     │─────────────────────────────────────────►
      │                     │  ◄── {user_id, device_id, expires_at}  │
      │                     │  If not found: 401 M_UNKNOWN_TOKEN      │
@@ -768,9 +769,11 @@ Keycloak's access token expires after 5 minutes — this decoupling is what fixe
 5 min" regression (the OIDC RT is refreshed transparently if configured).
 
 **Database:** New table `matrix_sessions` (migration 000001 squash) with columns:
-- `access_token` (PK), `refresh_token` (UNIQUE), `oidc_refresh_token` (encrypted AES-256-GCM),
-  `user_id`, `device_id`, `expires_at`, `revoked_at`, `grace_until`, `created_at`.
-- Indexes on `refresh_token`, `user_id`, `expires_at`.
+- `access_token_hash` (PK), `refresh_token_hash` (UNIQUE NOT NULL) - lowercase hex SHA-256 of the opaque
+  tokens; plaintext tokens are never stored (migration 000038, story `token-hashing-matrix-sessions`),
+  `oidc_refresh_token` (encrypted AES-256-GCM), `user_id`, `device_id`, `expires_at`, `revoked_at`,
+  `grace_until`, `created_at`, `auth_time`.
+- Indexes: the PK and the UNIQUE constraint on the hash columns, plus `user_id`, `expires_at`.
 
 **Plug dispatch:** `Nebu.Web.Plugs.OidcPlug` detects opaque tokens (no `.` character) and routes them to
 the `MatrixSessionStore` lookup branch instead of OIDC JWT validation; the JWT path is unchanged.

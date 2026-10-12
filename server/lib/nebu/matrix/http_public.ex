@@ -22,6 +22,7 @@ defmodule Nebu.Matrix.HttpPublic do
   require Logger
 
   import Nebu.Matrix.Http
+  alias Nebu.Matrix.Session.RefreshErrors
 
   alias Nebu.Web.SessionConfig
 
@@ -529,23 +530,23 @@ defmodule Nebu.Matrix.HttpPublic do
   #   * UNAUTHENTICATED (spec MUST — registered before the OidcPlug catch-all).
   #   * body {refresh_token}: empty/missing → 400 M_MISSING_PARAM; malformed JSON →
   #     400 M_NOT_JSON.
-  #   * unknown / revoked / grace-expired RT → 401 M_UNKNOWN_TOKEN (AC6).
+  #   * unknown RT → 401 M_UNKNOWN_TOKEN (AC6). A rotated-away RT stays valid until
+  #     the new AT/RT is used (spec) and is served by rotating the device's active
+  #     row again ("replay", lost-response retry). A CONSUMED RT is token reuse →
+  #     401 M_UNKNOWN_TOKEN WITHOUT soft_logout, device session invalidated.
   #   * otherwise (AC1): decrypt the stored OIDC refresh token and redeem it at
   #     the IdP token endpoint (grant_type=refresh_token) BEFORE any local
   #     rotation — via the shared Nebu.Web.OidcTokenExchange.refresh/2, behind
   #     the :matrix_oidc_refresh_override test seam (mirrors
   #     :admin_oidc_refresh_override).
-  #   * AC2: ANY failure (IdP rejection/network error, decrypt failure, missing
-  #     OIDC RT, or the freshly-verified user being deactivated) is FAIL-CLOSED
-  #     for THIS response — 401 M_UNKNOWN_TOKEN + soft_logout: true. No
-  #     local-only fallback. For CONFIRMED deprovisioning/IdP rejection, the
-  #     opaque session is ALSO immediately hard-invalidated
-  #     (delete_for_user_device/2) so a retry with the same RT cannot slip
-  #     through and the old opaque AT stops working right away. A merely
-  #     TRANSIENT failure re-checking is_active (e.g. a DB hiccup — tagged
-  #     `{:transient_check_failed, _}`) fails this request the same way but
-  #     does NOT hard-delete the session row, since it is not proof of
-  #     deprovisioning (code-review cycle-1 m1).
+  #   * AC2/AC7: failures are classified by RefreshErrors.transient?/1 (shared with
+  #     the RefreshWorker). TRANSIENT (IdP unreachable / discovery failure / IdP
+  #     5xx or 429 / DB hiccup) → 503 + Retry-After, session untouched, retry with
+  #     the same RT works (Matrix clients log out on any 4xx and retry on 5xx).
+  #     CONFIRMED (IdP rejection, deactivated, decrypt failure, no OIDC RT) → 401
+  #     M_UNKNOWN_TOKEN WITHOUT soft_logout (the session is really destroyed, the
+  #     client must discard its state) and delete_for_user_device/2. No
+  #     local-only fallback.
   #   * AC3: on success, the new opaque tokens' expires_at is derived from the
   #     SAME session_expires_at/1 function login uses, fed the FRESH claims
   #     from the IdP round-trip (not a flat ceiling).
@@ -571,48 +572,58 @@ defmodule Nebu.Matrix.HttpPublic do
     error(conn, 400, "M_MISSING_PARAM", "refresh_token is required")
   end
 
+  # Max re-resolutions when a concurrent /refresh won the row we tried to rotate.
+  @refresh_race_retries 12
+
   defp do_refresh_with(conn, refresh_token) do
     alias Nebu.Matrix.Session.MatrixSessionStore, as: Store
 
-    case Store.get_by_refresh_token(refresh_token) do
+    case Store.resolve_refresh_token(refresh_token) do
       :error ->
-        error(conn, 401, "M_UNKNOWN_TOKEN", "Unknown or expired refresh token")
+        refresh_denied(conn)
 
-      {:ok, sess} ->
+      {:error, :unavailable} ->
+        refresh_unavailable(conn, {:transient_check_failed, :db_unavailable})
+
+      {:consumed, sess} ->
+        # Reuse of a consumed refresh token (spec SHOULD, borrowed from the OAuth
+        # refresh grant): hard-invalidate THIS device only.
+        Logger.warning("matrix session refresh: consumed refresh token reused, invalidating device session",
+          user_id: sess.user_id,
+          device_id: sess.device_id
+        )
+
+        :ok = Store.delete_for_user_device(sess.user_id, sess.device_id)
+        refresh_denied(conn)
+
+      {:ok, sess, mode} ->
         case revalidate_with_idp(sess) do
           {:ok, fresh_claims, new_oidc_rt} ->
-            do_rotate(conn, sess, fresh_claims, new_oidc_rt)
-
-          # code-review cycle-1 MINOR (m1): a transient failure while
-          # re-checking is_active (e.g. a DB hiccup) is NOT confirmed
-          # deprovisioning — fail THIS request closed (still 401, AC2's
-          # response guarantee is unchanged) WITHOUT hard-deleting the session
-          # row, so a later refresh attempt can succeed once the transient
-          # issue clears instead of permanently killing a legitimate session
-          # over an unrelated infra blip.
-          {:error, {:transient_check_failed, reason}} ->
-            Logger.warning(
-              "matrix session refresh: transient failure re-checking active status, session left intact",
-              user_id: sess.user_id,
-              device_id: sess.device_id,
-              reason: inspect(reason)
-            )
-
-            deny_soft_logout(conn, "Unknown or expired refresh token")
+            do_rotate(conn, refresh_token, sess, mode, fresh_claims, new_oidc_rt)
 
           {:error, reason} ->
-            Logger.warning("matrix session refresh: IdP re-validation failed, invalidating session",
-              user_id: sess.user_id,
-              device_id: sess.device_id,
-              reason: inspect(reason)
-            )
+            if RefreshErrors.transient?(reason) do
+              Logger.warning(
+                "matrix session refresh: transient failure re-validating with IdP, session left intact",
+                user_id: sess.user_id,
+                device_id: sess.device_id,
+                reason: RefreshErrors.describe(reason)
+              )
 
-            # AC2: fail-closed — hard-invalidate the opaque session for this
-            # user+device NOW (not merely refuse this one response) so neither
-            # a retried /refresh nor the still-live opaque AT can succeed
-            # afterwards. No local-only fallback.
-            :ok = Store.delete_for_user_device(sess.user_id, sess.device_id)
-            deny_soft_logout(conn, "Unknown or expired refresh token")
+              refresh_unavailable(conn, reason)
+            else
+              Logger.warning("matrix session refresh: IdP re-validation rejected, invalidating session",
+                user_id: sess.user_id,
+                device_id: sess.device_id,
+                reason: RefreshErrors.describe(reason)
+              )
+
+              # AC2: fail-closed — hard-invalidate the opaque session for this
+              # user+device NOW so neither a retried /refresh nor the still-live
+              # opaque AT can succeed afterwards.
+              :ok = Store.delete_for_user_device(sess.user_id, sess.device_id)
+              refresh_denied(conn)
+            end
         end
     end
   end
@@ -707,23 +718,36 @@ defmodule Nebu.Matrix.HttpPublic do
   # function login uses. AC4: a provider-rotated OIDC RT is re-encrypted and
   # threaded through; a nil RT lets rotate_tokens/1 carry the old encrypted
   # blob over unchanged (its pre-existing behavior).
-  defp do_rotate(conn, sess, fresh_claims, new_oidc_rt) do
-    alias Nebu.Matrix.Session.MatrixSessionStore, as: Store
-
-    new_at = Store.generate_opaque_token()
-    new_rt = Store.generate_opaque_token()
+  #
+  # `sess` is the device's ACTIVE row (for a :replay of a pending old RT, the active
+  # sibling). Redeeming the CURRENT RT consumes all older pending RTs of the device
+  # (`consume_pending_siblings`); replaying a pending RT does not. If a concurrent
+  # /refresh won the row first (rotate_tokens/1 → :error) the token is re-resolved:
+  # the loser is then served as a replay of the (now pending) token, or denied.
+  defp do_rotate(conn, refresh_token, sess, mode, fresh_claims, new_oidc_rt) do
     new_expires_at = session_expires_at(fresh_claims)
 
-    rotate_params =
+    base_params =
       %{
-        old_access_token: sess.access_token,
-        new_access_token: new_at,
-        new_refresh_token: new_rt,
+        new_access_token: Nebu.Matrix.Session.MatrixSessionStore.generate_opaque_token(),
+        new_refresh_token: Nebu.Matrix.Session.MatrixSessionStore.generate_opaque_token(),
         new_expires_at: new_expires_at
       }
       |> maybe_put_new_oidc_rt(new_oidc_rt)
 
-    case Store.rotate_tokens(rotate_params) do
+    rotate_attempt(conn, refresh_token, sess, mode, base_params, @refresh_race_retries)
+  end
+
+  defp rotate_attempt(conn, refresh_token, sess, mode, base_params, retries_left) do
+    alias Nebu.Matrix.Session.MatrixSessionStore, as: Store
+
+    params =
+      base_params
+      |> Map.put(:old_access_token_hash, sess.access_token_hash)
+      |> Map.put(:consume_pending_siblings, mode == :current)
+      |> put_replay_token(mode, refresh_token)
+
+    case safe_rotate(params) do
       :ok ->
         Logger.info("matrix session refreshed",
           user_id: sess.user_id,
@@ -731,36 +755,109 @@ defmodule Nebu.Matrix.HttpPublic do
         )
 
         send_json(conn, 200, %{
-          "access_token" => new_at,
-          "refresh_token" => new_rt,
-          "expires_in_ms" => expires_in_ms(new_expires_at)
+          "access_token" => base_params.new_access_token,
+          "refresh_token" => base_params.new_refresh_token,
+          "expires_in_ms" => expires_in_ms(base_params.new_expires_at)
         })
 
+      :unavailable ->
+        refresh_unavailable(conn, {:transient_check_failed, :db_unavailable})
+
+      {:error, :consumed} ->
+        # M1 (TOCTOU): the replayed RT was consumed (the client used its new
+        # tokens) while the IdP round trip was in flight. Token reuse (AC4):
+        # nothing is issued, the device's session is invalidated.
+        Logger.warning("matrix session refresh: pending refresh token consumed during IdP round trip, invalidating device session",
+          user_id: sess.user_id,
+          device_id: sess.device_id
+        )
+
+        :ok = Store.delete_for_user_device(sess.user_id, sess.device_id)
+        refresh_denied(conn)
+
+      :error when retries_left > 0 ->
+        # Lost a rotation race (cluster-safe: exactly one winner per row).
+        case Store.resolve_refresh_token(refresh_token) do
+          {:ok, active, new_mode} ->
+            rotate_attempt(conn, refresh_token, active, new_mode, base_params, retries_left - 1)
+
+          {:consumed, consumed} ->
+            :ok = Store.delete_for_user_device(consumed.user_id, consumed.device_id)
+            refresh_denied(conn)
+
+          {:error, :unavailable} ->
+            refresh_unavailable(conn, {:transient_check_failed, :db_unavailable})
+
+          :error ->
+            refresh_denied(conn)
+        end
+
       :error ->
-        # Race: the session was revoked between lookup and rotate.
-        error(conn, 401, "M_UNKNOWN_TOKEN", "Refresh token no longer valid")
+        # M2: retries exhausted while the session is intact (every attempt lost to
+        # a concurrent refresh). A 4xx would make clients discard their state, so
+        # report a retryable 503 + Retry-After instead.
+        Logger.warning("matrix session refresh: rotation race retries exhausted, session left intact",
+          user_id: sess.user_id,
+          device_id: sess.device_id
+        )
+
+        refresh_unavailable(conn, {:transient_check_failed, :race_retries_exhausted})
     end
   end
 
-  # `def` (not `defp`): reused verbatim by `Nebu.Matrix.Session.RefreshWorker`
-  # so a provider-rotated OIDC RT returned by the background redemption is
-  # encrypted and threaded into `rotate_tokens/1` the SAME way `/refresh` does
-  # (no second encrypt-and-thread copy). Same-domain call (ADR-020 unaffected).
-  @doc false
+  defp put_replay_token(params, :replay, refresh_token), do: Map.put(params, :replay_refresh_token, refresh_token)
+  defp put_replay_token(params, _mode, _refresh_token), do: Map.delete(params, :replay_refresh_token)
+
+  # Test seam `:matrix_refresh_rotate_override` (1-arity fun on the rotate params
+  # returning `:ok | :error | {:error, :consumed}`) lets tests force a lost race.
+  defp safe_rotate(params) do
+    case Application.get_env(:nebu_http, :matrix_refresh_rotate_override) do
+      fun when is_function(fun, 1) -> fun.(params)
+      _ -> Nebu.Matrix.Session.MatrixSessionStore.rotate_tokens(params)
+    end
+  rescue
+    _ -> :unavailable
+  catch
+    :exit, _ -> :unavailable
+  end
+
+  # Encrypts a provider-rotated OIDC RT and threads it into `rotate_tokens/1` params.
   @spec maybe_put_new_oidc_rt(map(), String.t() | nil) :: map()
-  def maybe_put_new_oidc_rt(params, new_rt) when is_binary(new_rt) and new_rt != "" do
+  defp maybe_put_new_oidc_rt(params, new_rt) when is_binary(new_rt) and new_rt != "" do
     Map.put(params, :new_oidc_refresh_token, Nebu.Web.SecretBox.encrypt(new_rt))
   end
 
-  def maybe_put_new_oidc_rt(params, _no_new_rt), do: params
+  defp maybe_put_new_oidc_rt(params, _no_new_rt), do: params
 
-  # AC2 (spec SHOULD parity with the existing expired-opaque-AT 401 envelope,
-  # OidcPlug.deny_soft_logout/2): every fail-closed rejection path on /refresh
-  # (IdP contact failure, deprovisioning, missing OIDC RT) responds with
-  # soft_logout: true so clients know to re-login rather than treat it as a
-  # hard auth failure.
-  defp deny_soft_logout(conn, message) do
-    send_json(conn, 401, %{"errcode" => "M_UNKNOWN_TOKEN", "error" => message, "soft_logout" => true})
+  # Destroyed / unknown session: 401 M_UNKNOWN_TOKEN WITHOUT soft_logout (spec: a
+  # missing/false soft_logout tells the client to discard its persisted state,
+  # which is correct because the session no longer exists).
+  defp refresh_denied(conn) do
+    error(conn, 401, "M_UNKNOWN_TOKEN", "Unknown or expired refresh token")
+  end
+
+  # AC7: transient failure → 5xx (clients retry on 5xx but log out on any 4xx),
+  # always with Retry-After. IdP throttling (429) is reported as M_LIMIT_EXCEEDED
+  # (still HTTP 503) with retry_after_ms.
+  defp refresh_unavailable(conn, reason) do
+    retry_s = RefreshErrors.retry_after_seconds(reason)
+
+    body =
+      case reason do
+        {:token_endpoint_status, 429} ->
+          %{
+            "errcode" => "M_LIMIT_EXCEEDED",
+            "error" => "Identity provider is rate limiting, retry later",
+            "retry_after_ms" => retry_s * 1000
+          }
+
+        _ ->
+          %{"errcode" => "M_UNKNOWN", "error" => "Identity provider temporarily unavailable, retry later"}
+      end
+
+    conn
+    |> put_resp_header("retry-after", Integer.to_string(retry_s))
+    |> send_json(503, body)
   end
 
   # Matrix device IDs: a UUIDv4-shaped opaque string (matches login.go).

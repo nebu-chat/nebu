@@ -116,13 +116,23 @@ defmodule Nebu.Web.MediaDownloadTest do
     # image/jpeg is on the safe inline allowlist.
     assert String.starts_with?(cd, "inline"),
            "image/jpeg is on the inline allowlist; got Content-Disposition: #{inspect(cd)}"
+
+    # AC4: this upload has no filename -> the `filename` parameter must be
+    # excluded (spec MUST); the old behavior leaked the media_id as filename.
+    refute String.contains?(cd, @media_id),
+           "media_id must never be used as the filename, got #{inspect(cd)}"
+    refute String.contains?(cd, "filename"), "no filename known -> no filename parameter, got #{inspect(cd)}"
   end
 
   test "download response Content-Type matches stored type and carries nosniff", %{token: token} do
     conn = get(download_path(), S.auth(token))
 
     ct = S.header(conn, "content-type")
-    assert String.contains?(ct, "image/jpeg"), "Content-Type must match stored type, got #{inspect(ct)}"
+    # media-download-content-type-and-filename (AC1): the stored type is served
+    # EXACTLY (spec v1.12 MUST) — previously `contains?` tolerated the
+    # `; charset=utf-8` Plug appended to every type, which the spec forbids for
+    # non-text types. Goes red until put_resp_content_type(ct, nil) lands.
+    assert ct == "image/jpeg", "Content-Type must be exactly the stored type, got #{inspect(ct)}"
 
     assert S.header(conn, "x-content-type-options") == "nosniff"
   end

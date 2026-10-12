@@ -1678,6 +1678,27 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
         message: "missing user_id in request"
     end
 
+    ensure_room_member!(room_id, user_id)
+
+    case receipt_db_module().upsert_receipt(room_id, user_id, receipt_type, event_id) do
+      :ok ->
+        %Core.SendReceiptResponse{}
+
+      {:error, reason} ->
+        raise Nebu.Matrix.Error,
+          status: Nebu.Matrix.Status.internal(),
+          message: "upsert_receipt failed: #{inspect(reason)}"
+    end
+  end
+
+  @doc """
+  Raises `Nebu.Matrix.Error` (not_found when the room does not exist, permission_denied
+  when `user_id` is not a member) unless `user_id` is a member of `room_id`.
+
+  Shared by `send_receipt/2` and `POST /rooms/{roomId}/read_markers` so both refuse
+  identically (room-account-data-and-read-markers).
+  """
+  def ensure_room_member!(room_id, user_id) do
     # Room existence check — start on demand (mirrors sync.ex line 1034–1035).
     # start_room/1 is idempotent: returns {:ok, pid} whether the GenServer was
     # already running or was just started from DB. {:error, _} maps to not_found
@@ -1711,16 +1732,7 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
             status: Nebu.Matrix.Status.permission_denied(),
             message: "#{user_id} is not a member of #{room_id}"
         end
-
-        case receipt_db_module().upsert_receipt(room_id, user_id, receipt_type, event_id) do
-          :ok ->
-            %Core.SendReceiptResponse{}
-
-          {:error, reason} ->
-            raise Nebu.Matrix.Error,
-              status: Nebu.Matrix.Status.internal(),
-              message: "upsert_receipt failed: #{inspect(reason)}"
-        end
+        :ok
     end
   end
 
@@ -2875,6 +2887,14 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
                 flush_long_poll_timeout()
                 :pg.join("room:#{new_room_id}", self())
                 fetch_delta_rooms(Enum.uniq([new_room_id | room_ids]), last_event_id, user_id)
+
+              {:account_data_changed, _room_id} ->
+                # Room account data changed for this user (room-account-data-and-read-markers).
+                # Return an empty delta; the HTTP layer re-reads room account data after
+                # this call returns, so the change is delivered in this very response.
+                Process.cancel_timer(timer_ref)
+                flush_long_poll_timeout()
+                []
 
               {:new_leave, recv_room_id} ->
                 # User left a room — wake up immediately so Go's buildLeaveRooms can find it via DB query.
