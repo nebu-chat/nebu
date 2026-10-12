@@ -589,5 +589,21 @@ include:
       devguard_token: "$DEVGUARD_TOKEN"
       devguard_api_url: "$DEVGUARD_API_URL"
       devguard_web_ui: "https://devguard.opencode.de"
+      # build_args defaults to "--context $CI_PROJECT_DIR --dockerfile
+      # $CI_PROJECT_DIR/Dockerfile", which assumes a repo-root Dockerfile. Ours
+      # lives at server/Dockerfile (mirrors the build-server-image job below),
+      # so devguard:build_oci_image failed with "please provide a valid path
+      # to a Dockerfile within the build context" until this was pointed there.
+      build_args: "--context $CI_PROJECT_DIR/server --dockerfile server/Dockerfile"
     rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule"'
+# devguard-ci-components exposes no input to disable individual jobs, so the
+# only way to turn one off is to override it by job name after the include.
+# IaC scanning (devguard:infrastructure_as_code_scanning) only has
+# deploy/tofu/examples/* to scan — operator-facing deployment recommendations
+# (ADR-012), not infrastructure Nebu itself runs — so findings there aren't
+# actionable for this repo. Skipped outright (not allow_failure) so it stops
+# showing red on the weekly Renovate schedule pipeline.
+devguard:infrastructure_as_code_scanning:
+  rules:
+    - when: never
