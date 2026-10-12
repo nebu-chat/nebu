@@ -49,23 +49,58 @@ defmodule Nebu.Media.SSRF do
   (all resolved addresses are checked; if any is blocked the whole url is
   rejected), or `{:error, reason}`.
   """
-  @spec checked_target(String.t()) :: {:ok, target()} | {:error, atom()}
-  def checked_target(url) when is_binary(url) do
+  @spec checked_target(String.t(), keyword()) :: {:ok, target()} | {:error, atom()}
+  def checked_target(url, opts \\ [])
+
+  def checked_target(url, opts) when is_binary(url) do
     uri = URI.parse(url)
 
     cond do
       uri.scheme not in ["http", "https"] -> {:error, :bad_scheme}
       is_nil(uri.host) or uri.host == "" -> {:error, :no_host}
-      true -> check_host(uri.scheme, uri.host)
+      true -> check_host(uri.scheme, uri.host, Keyword.get(opts, :allow_private, false))
     end
   end
 
-  def checked_target(_), do: {:error, :invalid_url}
+  def checked_target(_, _opts), do: {:error, :invalid_url}
 
-  defp check_host(scheme, host) do
+  @doc """
+  Whether the operator opted in (`NEBU_STORAGE_ALLOW_PRIVATE_ENDPOINTS=true`,
+  wired in `config/runtime.exs`) to object-storage endpoints that resolve to a
+  private address. Only the admin-configured storage endpoints
+  (`endpoint`/`iam_endpoint`/`sts_endpoint`) consult this — `preview_url` and
+  webhooks never do.
+
+  UpCloud's `*-private.upcloudobjects.com` endpoints resolve to carrier-grade
+  NAT addresses (100.64.0.0/10), which are blocked by default.
+  """
+  @spec allow_private_storage?() :: boolean()
+  def allow_private_storage? do
+    Application.get_env(:nebu_http, :media_storage_allow_private_endpoints, false) == true
+  end
+
+  @doc """
+  Human-readable reason for a `checked_target/2` error, for admin-facing
+  messages (never for attacker-controlled flows).
+  """
+  @spec describe_error(atom()) :: String.t()
+  def describe_error(:blocked_address),
+    do:
+      "the host resolves to a private, loopback, link-local or carrier-grade-NAT address " <>
+        "(set NEBU_STORAGE_ALLOW_PRIVATE_ENDPOINTS=true to allow private storage endpoints)"
+
+  def describe_error(:bad_scheme), do: "the URL scheme must be http:// or https://"
+  def describe_error(:no_host), do: "the URL has no host"
+
+  def describe_error(reason) when reason in [:nxdomain, :no_address, :timeout],
+    do: "the host could not be resolved via DNS (#{reason})"
+
+  def describe_error(reason), do: "the endpoint could not be validated (#{inspect(reason)})"
+
+  defp check_host(scheme, host, allow_private) do
     case resolve(host) do
       {:ok, [first | _] = addrs} ->
-        if Enum.any?(addrs, &blocked_ip?/1) do
+        if Enum.any?(addrs, &blocked_ip?(&1, allow_private)) do
           {:error, :blocked_address}
         else
           {:ok, %{scheme: scheme, host: host, ip: first}}
@@ -100,32 +135,51 @@ defmodule Nebu.Media.SSRF do
     end
   end
 
-  # ── IPv4 blocked ranges ────────────────────────────────────────────────────
-  defp blocked_ip?({0, _, _, _}), do: true
-  defp blocked_ip?({10, _, _, _}), do: true
-  defp blocked_ip?({127, _, _, _}), do: true
-  defp blocked_ip?({169, 254, _, _}), do: true
-  defp blocked_ip?({172, b, _, _}) when b >= 16 and b <= 31, do: true
-  defp blocked_ip?({192, 168, _, _}), do: true
-  # RFC 6598 carrier-grade NAT 100.64.0.0/10
-  defp blocked_ip?({100, b, _, _}) when b >= 64 and b <= 127, do: true
-  defp blocked_ip?({a, _, _, _}) when a >= 224, do: true
-  defp blocked_ip?({_, _, _, _}), do: false
-
-  # ── IPv6 blocked ranges ────────────────────────────────────────────────────
-  # ::1 loopback
-  defp blocked_ip?({0, 0, 0, 0, 0, 0, 0, 1}), do: true
-  # :: unspecified
-  defp blocked_ip?({0, 0, 0, 0, 0, 0, 0, 0}), do: true
-  # fc00::/7 unique-local
-  defp blocked_ip?({a, _, _, _, _, _, _, _}) when a >= 0xFC00 and a <= 0xFDFF, do: true
-  # fe80::/10 link-local
-  defp blocked_ip?({a, _, _, _, _, _, _, _}) when a >= 0xFE80 and a <= 0xFEBF, do: true
-  # IPv4-mapped ::ffff:a.b.c.d — re-check the embedded v4 address.
-  defp blocked_ip?({0, 0, 0, 0, 0, 0xFFFF, g, h}) do
-    blocked_ip?({div(g, 256), rem(g, 256), div(h, 256), rem(h, 256)})
+  # With `allow_private` (storage endpoints only, operator opt-in) the
+  # private/internal ranges — RFC1918, CGNAT, IPv6 unique-local — are allowed.
+  # Loopback, link-local (incl. the 169.254.169.254 metadata address),
+  # unspecified and multicast/reserved addresses stay blocked unconditionally.
+  defp blocked_ip?(ip, allow_private) do
+    cond do
+      always_blocked?(ip) -> true
+      allow_private -> false
+      true -> private_ip?(ip)
+    end
   end
 
-  defp blocked_ip?({_, _, _, _, _, _, _, _}), do: false
-  defp blocked_ip?(_), do: true
+  # ── Always blocked ─────────────────────────────────────────────────────────
+  defp always_blocked?({0, _, _, _}), do: true
+  defp always_blocked?({127, _, _, _}), do: true
+  defp always_blocked?({169, 254, _, _}), do: true
+  defp always_blocked?({a, _, _, _}) when a >= 224, do: true
+  defp always_blocked?({_, _, _, _}), do: false
+  # ::1 loopback
+  defp always_blocked?({0, 0, 0, 0, 0, 0, 0, 1}), do: true
+  # :: unspecified
+  defp always_blocked?({0, 0, 0, 0, 0, 0, 0, 0}), do: true
+  # fe80::/10 link-local
+  defp always_blocked?({a, _, _, _, _, _, _, _}) when a >= 0xFE80 and a <= 0xFEBF, do: true
+  # IPv4-mapped ::ffff:a.b.c.d — re-check the embedded v4 address.
+  defp always_blocked?({0, 0, 0, 0, 0, 0xFFFF, g, h}) do
+    always_blocked?({div(g, 256), rem(g, 256), div(h, 256), rem(h, 256)})
+  end
+
+  defp always_blocked?({_, _, _, _, _, _, _, _}), do: false
+  defp always_blocked?(_), do: true
+
+  # ── Private ranges (blocked unless `allow_private`) ────────────────────────
+  defp private_ip?({10, _, _, _}), do: true
+  defp private_ip?({172, b, _, _}) when b >= 16 and b <= 31, do: true
+  defp private_ip?({192, 168, _, _}), do: true
+  # RFC 6598 carrier-grade NAT 100.64.0.0/10
+  defp private_ip?({100, b, _, _}) when b >= 64 and b <= 127, do: true
+  defp private_ip?({_, _, _, _}), do: false
+  # fc00::/7 unique-local
+  defp private_ip?({a, _, _, _, _, _, _, _}) when a >= 0xFC00 and a <= 0xFDFF, do: true
+
+  defp private_ip?({0, 0, 0, 0, 0, 0xFFFF, g, h}) do
+    private_ip?({div(g, 256), rem(g, 256), div(h, 256), rem(h, 256)})
+  end
+
+  defp private_ip?(_), do: false
 end
