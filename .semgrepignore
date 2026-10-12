@@ -3,9 +3,23 @@
 # gitignore-style patterns, read automatically by semgrep — no CLI flag exists
 # for this in devguard-scanner v1.6.0 (verified via `devguard-scanner sast --help`).
 #
-# skills/  — vendored BMAD skill docs/scripts, not shipped application code
-# deploy/  — example/recommended IaC (Terraform, Helm) for operators, not code we ship
-# e2e/     — Playwright/Gherkin test fixtures (e.g. fake credentials, insecure-by-design samples)
+# skills/        — vendored BMAD skill docs/scripts, not shipped application code
+# deploy/        — example/recommended IaC (Terraform, Helm) for operators, not code we ship
+# e2e/           — Playwright/Gherkin test fixtures (e.g. fake credentials, insecure-by-design samples)
+# docs/          — story/architecture markdown, e.g. documented example bcrypt hashes for dev Dex users
+# dev/           — local dev stack config (dev/dex/config.yaml example credentials, ADR-012)
+# docker/        — e2e/dev-only nginx configs and CI Dockerfiles, not the shipped server image
+# .github/       — mirror-only workflow config, not run on this GitLab-hosted repo
+# _bmad-output/  — pipeline-generated epic artifacts/write-ups, not shipped code
+# phoenix*.min.js — vendored Phoenix/Phoenix LiveView JS bundled into priv/static, not authored by us
+# server/test/   — test fixtures (e.g. fake Twilio-key-shaped cross-signing test data)
 skills/
 deploy/
 e2e/
+docs/
+dev/
+docker/
+.github/
+_bmad-output/
+server/priv/static/assets/phoenix*.min.js
+server/test/

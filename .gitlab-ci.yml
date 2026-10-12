@@ -596,21 +596,25 @@ include:
       # to a Dockerfile within the build context" until this was pointed there.
       build_args: "--context $CI_PROJECT_DIR/server --dockerfile server/Dockerfile"
     rules:
-    - if: '$CI_PIPELINE_SOURCE == "schedule"'
-    # TEMPORARY — test rig for this branch only, remove before merging.
-    # Normally devguard only runs on the weekly Renovate schedule. This lets it
-    # also run on this branch's MR pipeline (chore/* doesn't match any branch
-    # pattern in workflow:rules below, so a plain push here won't start a
-    # pipeline at all — open an MR to trigger it) to verify the IaC-skip,
-    # .semgrepignore and build_args fixes above once, then revert this line.
-    - if: '$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == "chore/skip-devguard-iac-scan"'
+    # Decoupled from the Renovate schedule (CI_PIPELINE_SOURCE == "schedule")
+    # on purpose: DevGuard scans the actual code on main, not every weekly
+    # dependency-update run. Runs once per push/merge to main.
+    - if: '$CI_COMMIT_BRANCH == "main"'
 # devguard-ci-components exposes no input to disable individual jobs, so the
 # only way to turn one off is to override it by job name after the include.
 # IaC scanning (devguard:infrastructure_as_code_scanning) only has
 # deploy/tofu/examples/* to scan — operator-facing deployment recommendations
 # (ADR-012), not infrastructure Nebu itself runs — so findings there aren't
 # actionable for this repo. Skipped outright (not allow_failure) so it stops
-# showing red on the weekly Renovate schedule pipeline.
+# showing red on main.
+#
+# The include's own `rules:` above only match on main, so on every other
+# pipeline (schedule, MRs, release/*) the component isn't pulled in at all and
+# this override is this job's ONLY definition. GitLab requires
+# script:/run:/trigger: on every job regardless of its rules:, so a bare
+# `rules: when: never` is invalid in that case — hence the no-op script here.
 devguard:infrastructure_as_code_scanning:
+  script:
+    - 'echo "Skipped: deploy/ is example/recommended IaC (ADR-012), not real infrastructure."'
   rules:
     - when: never
