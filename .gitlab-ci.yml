@@ -597,6 +597,13 @@ include:
       build_args: "--context $CI_PROJECT_DIR/server --dockerfile server/Dockerfile"
     rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule"'
+    # TEMPORARY — test rig for this branch only, remove before merging.
+    # Normally devguard only runs on the weekly Renovate schedule. This lets it
+    # also run on this branch's MR pipeline (chore/* doesn't match any branch
+    # pattern in workflow:rules below, so a plain push here won't start a
+    # pipeline at all — open an MR to trigger it) to verify the IaC-skip,
+    # .semgrepignore and build_args fixes above once, then revert this line.
+    - if: '$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == "chore/skip-devguard-iac-scan"'
 # devguard-ci-components exposes no input to disable individual jobs, so the
 # only way to turn one off is to override it by job name after the include.
 # IaC scanning (devguard:infrastructure_as_code_scanning) only has
