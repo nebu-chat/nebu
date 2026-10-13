@@ -29,13 +29,17 @@ RUN MIX_ENV=prod mix release
 
 FROM alpine:3.23 AS runtime
 RUN apk add --no-cache libstdc++ openssl ncurses curl
+# Dockerfile security scan (missing-user-entrypoint): don't run the release as root.
+RUN addgroup -S nebu && adduser -S -D -H -G nebu nebu
+WORKDIR /app
 ARG GIT_COMMIT=unknown
 ARG BUILD_TIME=unknown
 ARG RELEASE_VERSION=unknown
 ENV GIT_COMMIT=${GIT_COMMIT}
 ENV BUILD_TIME=${BUILD_TIME}
 ENV RELEASE_VERSION=${RELEASE_VERSION}
-COPY --from=builder /app/_build/prod/rel/nebu ./
+COPY --from=builder --chown=nebu:nebu /app/_build/prod/rel/nebu ./
+USER nebu
 # go-removal-cleanup (full-elixir-stack): the server now owns DB migrations (formerly run
 # by the Go gateway). Run Nebu.Release.migrate/0 before booting the server. `exec`
 # replaces the shell so OTP receives SIGTERM/SIGINT for graceful shutdown.
