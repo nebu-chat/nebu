@@ -6,7 +6,6 @@
 [![Status](https://img.shields.io/badge/status-pre--alpha-BA7517?style=flat-square)](#)
 
 <!-- Build status -->
-[![GitHub Actions](https://github.com/innoq/nebu/actions/workflows/ci.yml/badge.svg)](https://github.com/innoq/nebu/actions)
 [![GitLab CI](https://gitlab.opencode.de/nebu/nebu-server/badges/main/pipeline.svg)](https://gitlab.opencode.de/nebu/nebu-server/-/pipelines)
 
 <!-- Tech stack -->

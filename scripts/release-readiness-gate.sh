@@ -7,7 +7,7 @@
 # Usage: bash scripts/release-readiness-gate.sh [--all|--quick|--report]
 #
 # Modes:
-#   --all    (default) Run all seven sub-suites including history scan.
+#   --all    (default) Run all five sub-suites including history scan.
 #   --quick  Skip scripts/scan-secrets.sh --history (faster iteration).
 #   --report Run --all and write JSON report to release-readiness-report.json.
 #
@@ -46,9 +46,7 @@ SUITES=(
     "scripts/verify-readme-attribution.sh"
     "scripts/verify-contributing.sh"
     "scripts/verify-security-policy.sh"
-    "scripts/verify-ci-config.sh"
     "scripts/verify-issue-pr-templates.sh"
-    "scripts/verify-repo-metadata.sh"
 )
 SCAN_SECRETS_SCRIPT="scripts/scan-secrets.sh"
 
@@ -207,19 +205,15 @@ main() {
 
     preflight_check
 
-    # Run the six verify scripts (always)
+    # Run the four verify scripts (always)
     run_suite "verify-readme-attribution.sh" \
         bash "${REPO_ROOT}/scripts/verify-readme-attribution.sh"
     run_suite "verify-contributing.sh" \
         bash "${REPO_ROOT}/scripts/verify-contributing.sh"
     run_suite "verify-security-policy.sh" \
         bash "${REPO_ROOT}/scripts/verify-security-policy.sh"
-    run_suite "verify-ci-config.sh" \
-        bash "${REPO_ROOT}/scripts/verify-ci-config.sh"
     run_suite "verify-issue-pr-templates.sh" \
         bash "${REPO_ROOT}/scripts/verify-issue-pr-templates.sh"
-    run_suite "verify-repo-metadata.sh" \
-        bash "${REPO_ROOT}/scripts/verify-repo-metadata.sh"
 
     # History scan: run for --all and --report; skip for --quick
     if [[ "${MODE}" == "--quick" ]]; then

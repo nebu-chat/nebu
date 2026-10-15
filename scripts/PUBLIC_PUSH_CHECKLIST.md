@@ -13,13 +13,13 @@ _Do not commit `release-readiness-report.json` to history._
 
 ### Step 1: Run release-readiness-gate.sh --all
 
-Run the master gate to confirm all seven verify suites pass.
+Run the master gate to confirm all five verify suites pass.
 
 ```bash
 bash scripts/release-readiness-gate.sh --all
 ```
 
-_Expected result:_ `GATE: 7/7 PASS` and exit code 0.
+_Expected result:_ `GATE: 5/5 PASS` and exit code 0.
 
 _Rollback:_ Investigate the failing suite (output names the failing script).
 Fix the underlying issue before proceeding. Do not proceed to Step 2 with

@@ -12,7 +12,7 @@
   "prHourlyLimit": 4,
   "packageRules": [
     {
-      "description": "Auto-merge digest-only updates (SHA pin refreshes for GitHub Actions)",
+      "description": "Auto-merge digest-only updates (SHA pin refreshes)",
       "matchUpdateTypes": ["digest"],
       "automerge": true,
       "automergeType": "pr",
@@ -36,12 +36,6 @@
       "groupName": "OpenTofu / Terraform providers"
     },
     {
-      "description": "Group GitHub Actions tag version updates (separate from auto-merged digest updates)",
-      "matchManagers": ["github-actions"],
-      "matchUpdateTypes": ["major", "minor", "patch"],
-      "groupName": "GitHub Actions"
-    },
-    {
       "description": "Group Docker image updates across Dockerfiles, Compose files, and GitLab CI jobs",
       "matchManagers": ["dockerfile", "docker-compose", "gitlabci"],
       "groupName": "Docker images"
@@ -49,10 +43,9 @@
   ],
   "customManagers": [
     {
-      "description": "Track gitleaks version pinned as env var in both CI files",
+      "description": "Track gitleaks version pinned as env var in .gitlab-ci.yml",
       "customType": "regex",
       "fileMatch": [
-        "^\\.github/workflows/ci\\.yml$",
         "^\\.gitlab-ci\\.yml$"
       ],
       "matchStrings": [

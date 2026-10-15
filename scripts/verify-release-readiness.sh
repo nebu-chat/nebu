@@ -9,7 +9,7 @@
 #
 # 12 tests covering:
 #   1.  release-readiness-gate.sh exists and is executable
-#   2.  Gate script invokes all seven sub-scripts
+#   2.  Gate script invokes all five sub-scripts
 #   3.  Gate script has --all / --quick / --report mode flags
 #   4.  Pre-flight aborts when a sub-script is missing (mktemp sandbox)
 #   5.  Full run against real repo exits 0
@@ -113,14 +113,14 @@ test_release_gate_script_exists_and_executable() {
 }
 
 # =============================================================================
-# TEST 2 — test_release_gate_invokes_all_seven_scripts
+# TEST 2 — test_release_gate_invokes_all_five_scripts
 #
 # AC 2
 # Given: scripts/release-readiness-gate.sh exists
-# When:  grep for each of the seven sub-script references
-# Then:  all seven greps return exit code 0
+# When:  grep for each of the five sub-script references
+# Then:  all five greps return exit code 0
 # =============================================================================
-test_release_gate_invokes_all_seven_scripts() {
+test_release_gate_invokes_all_five_scripts() {
     if [[ ! -f "${GATE_SCRIPT}" ]]; then
         echo "    ERROR: scripts/release-readiness-gate.sh does not exist — cannot check sub-script references" >&2
         return 1
@@ -132,9 +132,7 @@ test_release_gate_invokes_all_seven_scripts() {
         "verify-contributing.sh"
         "verify-security-policy.sh"
         "scan-secrets.sh"
-        "verify-ci-config.sh"
         "verify-issue-pr-templates.sh"
-        "verify-repo-metadata.sh"
     )
     for s in "${scripts[@]}"; do
         if ! grep -q "${s}" "${GATE_SCRIPT}"; then
@@ -200,7 +198,7 @@ test_release_gate_preflight_aborts_when_subscript_missing() {
     # Replicate minimal directory structure: sandbox/scripts/
     mkdir -p "${sandbox}/scripts"
 
-    # Copy only the gate script — deliberately omit all seven sub-scripts
+    # Copy only the gate script — deliberately omit all five sub-scripts
     cp "${GATE_SCRIPT}" "${sandbox}/scripts/release-readiness-gate.sh"
 
     # Run from sandbox, capture output and exit code
@@ -228,7 +226,7 @@ test_release_gate_preflight_aborts_when_subscript_missing() {
 # TEST 5 — test_release_gate_full_run_against_real_repo
 #
 # AC 4 (integration)
-# Given: live feature/github-readiness branch with all seven verify scripts
+# Given: live feature/github-readiness branch with all four verify scripts
 # When:  bash scripts/release-readiness-gate.sh --quick
 #        (--quick skips history scan for speed; still exercises all other suites)
 # Then:  exit code 0 AND output contains "GATE:" followed by "PASS"
@@ -493,7 +491,7 @@ main() {
     echo ""
 
     run_test "test_release_gate_script_exists_and_executable"
-    run_test "test_release_gate_invokes_all_seven_scripts"
+    run_test "test_release_gate_invokes_all_five_scripts"
     run_test "test_release_gate_three_modes"
     run_test "test_release_gate_preflight_aborts_when_subscript_missing"
     run_test "test_release_gate_full_run_against_real_repo"

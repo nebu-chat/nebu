@@ -93,6 +93,7 @@ stages:
   - test
   - oci-image
   - attestation
+  - mirror
 # ─── CI Image Builds ──────────────────────────────────────────────────────────
 # Kaniko builds container images without a Docker daemon.
 # The -debug variant ships a busybox shell so before_script works.
@@ -582,6 +583,35 @@ create-release-tag:
     - echo "Tag ${VERSION} created."
   rules:
     - if: '$CI_COMMIT_BRANCH =~ /^release\/v\d+\.\d+\.\d+$/'
+# ─── GitHub Mirror ─────────────────────────────────────────────────────────────
+# Syncs `main` to the read-only GitHub sister repository (nebu-chat/nebu) once
+# the whole main pipeline is green (last stage). Nothing is built on GitHub; the
+# mirror carries a README banner pointing back here (see scripts/mirror-to-github.sh).
+#
+# Setup: create a fine-grained GitHub PAT with "Contents: read & write" on
+# nebu-chat/nebu and store it as CI variable GITHUB_MIRROR_TOKEN (masked,
+# protected). Without the variable this job is not created (e.g. on forks).
+#
+# resource_group serialises syncs so two quick merges cannot race each other;
+# interruptible: false keeps a newer push from cancelling a sync mid-push.
+sync-github-mirror:
+  stage: mirror
+  image: alpine:latest
+  interruptible: false
+  resource_group: github-mirror
+  variables:
+    GIT_DEPTH: "0"
+    MIRROR_REPO: "nebu-chat/nebu"
+    MIRROR_TOKEN: "${GITHUB_MIRROR_TOKEN}"
+    SOURCE_URL: "${CI_PROJECT_URL}"
+  before_script:
+    - apk add --no-cache git
+    # The runner's checkout is owned by a different uid than the job user.
+    - git config --global --add safe.directory "${CI_PROJECT_DIR}"
+  script:
+    - sh scripts/mirror-to-github.sh
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" && $CI_PIPELINE_SOURCE != "schedule" && $GITHUB_MIRROR_TOKEN'
 include:
   - remote: "https://gitlab.opencode.de/l3montree/devguard-ci-components/-/raw/v1.6.0/templates/full.yml"
     inputs:
