@@ -63,6 +63,8 @@ defmodule Nebu.Web.MatrixClientCompatTest do
     priv_jwk = Map.put(priv_map, "kid", @kid)
 
     Application.put_env(:nebu_http, :server_name, @server_name)
+    # story create-room-invites-direct (DATA adaptation): POST /invite refuses foreign-domain invitees, the domain is :event_dispatcher's server_name
+    Nebu.Test.ServerName.pin!(@server_name)
     Nebu.Web.OidcTestSupport.configure(@issuer, @audience)
 
     Application.put_env(:nebu_http, :oidc_jwks, [pub_jwk])
@@ -143,6 +145,29 @@ defmodule Nebu.Web.MatrixClientCompatTest do
       conn = call(:get, "/_matrix/client/v3/room_keys/version")
       assert conn.status == 401
       assert json(conn)["errcode"] == "M_MISSING_TOKEN"
+    end
+
+    # story room-keys-version-post-stub AC2 — the creation stub is behind the same gate as the GET
+    test "POST /room_keys/version with NO Bearer → 401 M_MISSING_TOKEN" do
+      conn = call(:post, "/_matrix/client/v3/room_keys/version", %{"algorithm" => "x"})
+      assert conn.status == 401
+      assert json(conn)["errcode"] == "M_MISSING_TOKEN"
+    end
+
+    test "POST /room_keys/version with a bad token → 401 M_UNKNOWN_TOKEN" do
+      conn =
+        call(:post, "/_matrix/client/v3/room_keys/version", %{"algorithm" => "x"}, auth("not-a-token"))
+
+      assert conn.status == 401
+      assert json(conn)["errcode"] == "M_UNKNOWN_TOKEN"
+    end
+
+    test "POST /room_keys/version with a JWT-shaped garbage token → 401 (the path Element's JWT takes)" do
+      conn =
+        call(:post, "/_matrix/client/v3/room_keys/version", %{"algorithm" => "x"}, auth("aaa.bbb.ccc"))
+
+      assert conn.status == 401
+      assert json(conn)["errcode"] == "M_UNKNOWN_TOKEN"
     end
 
     # AC 4 — MSC3814 dehydrated_device
@@ -268,6 +293,17 @@ defmodule Nebu.Web.MatrixClientCompatTest do
       assert versions["available"]["10"] == "stable"
     end
 
+    # Story create-room-input-validation (AC1, D1): Nebu implements ONE rule set and answers createRoom / upgrade
+    # M_UNSUPPORTED_ROOM_VERSION for everything else, so /capabilities must not advertise anything else.
+    test "GET /capabilities → m.room_versions is exactly {default: 10, available: {10: stable}} and the default is one of the available versions", %{token: token} do
+      conn = call(:get, "/_matrix/client/v3/capabilities", nil, auth(token))
+      assert conn.status == 200
+
+      versions = json(conn)["capabilities"]["m.room_versions"]
+      assert versions == %{"default" => "10", "available" => %{"10" => "stable"}}
+      assert Map.has_key?(versions["available"], versions["default"]), "m.room_versions.default MUST be one of the available versions"
+    end
+
     test "GET /pushrules/ → 200 empty-but-valid global ruleset", %{token: token} do
       conn = call(:get, "/_matrix/client/v3/pushrules/", nil, auth(token))
       assert conn.status == 200
@@ -365,6 +401,67 @@ defmodule Nebu.Web.MatrixClientCompatTest do
       body = json(conn)
       assert body["errcode"] == "M_NOT_FOUND"
       assert body["error"] == "No backup found"
+    end
+
+    # story room-keys-version-post-stub (AC1, AC3, AC4): Element Web creates a key backup right after
+    # the cross-signing bootstrap of a first login; without a 2xx it shows "Unable to set up keys".
+    # The Go gateway had this stub (dropped by the Elixir migration): accept, store nothing.
+    # D1 "nothing stored": proven by the DB-free environment (no Nebu.Repo process: a handler that touched the
+    # database would fail here); the handler is one `send_json` line (no DB, no body read).
+    @tag :no_repo
+    test "POST /room_keys/version with valid Bearer → 200 {version: \"1\"} (stub, nothing stored)", %{token: token} do
+      assert Process.whereis(Nebu.Repo) == nil
+      body = %{
+        "algorithm" => "m.megolm_backup.v1.curve25519-aes-sha2",
+        "auth_data" => %{"public_key" => "AAAA", "signatures" => %{}}
+      }
+
+      conn = call(:post, "/_matrix/client/v3/room_keys/version", body, auth(token))
+      assert conn.status == 200
+      assert json(conn) == %{"version" => "1"}
+      assert Plug.Conn.get_resp_header(conn, "content-type") |> hd() =~ "application/json"
+    end
+
+    test "POST /room_keys/version is idempotent and GET still says no backup afterwards", %{token: token} do
+      for _ <- 1..2 do
+        conn = call(:post, "/_matrix/client/v3/room_keys/version", %{"algorithm" => "x"}, auth(token))
+        assert conn.status == 200
+        assert json(conn) == %{"version" => "1"}
+      end
+
+      # D5: the stub ignores the body entirely (nothing is stored): an empty and a malformed body are a 200 too
+      conn = call(:post, "/_matrix/client/v3/room_keys/version", nil, auth(token))
+      assert {conn.status, json(conn)} == {200, %{"version" => "1"}}
+
+      bad =
+        conn(:post, "/_matrix/client/v3/room_keys/version", "{not json")
+        |> put_req_header("content-type", "application/json")
+        |> put_req_header("authorization", "Bearer " <> token)
+        |> Nebu.Web.Router.call(@router_opts)
+
+      assert {bad.status, json(bad)} == {200, %{"version" => "1"}}
+
+      conn = call(:get, "/_matrix/client/v3/room_keys/version", nil, auth(token))
+      assert conn.status == 404
+      assert json(conn)["errcode"] == "M_NOT_FOUND"
+      assert json(conn)["error"] == "No backup found"
+    end
+
+    test "only the creation stub exists: room_keys/keys and room_keys/version/{v} stay M_UNRECOGNIZED", %{token: token} do
+      for {method, path} <- [
+            {:put, "/_matrix/client/v3/room_keys/keys"},
+            {:get, "/_matrix/client/v3/room_keys/keys"},
+            {:delete, "/_matrix/client/v3/room_keys/version/1"},
+            {:get, "/_matrix/client/v3/room_keys/version/1"}
+          ] do
+        conn = call(method, path, nil, auth(token))
+        assert json(conn)["errcode"] == "M_UNRECOGNIZED", "#{method} #{path}: #{conn.status} #{conn.resp_body}"
+        assert conn.status in [404, 405], "#{method} #{path}: #{conn.status}"
+
+        # the fall-through is the same without a token (RU10: the catch-all runs before authentication)
+        anon = call(method, path)
+        assert json(anon)["errcode"] == "M_UNRECOGNIZED", "anonymous #{method} #{path}: #{anon.status}"
+      end
     end
 
     # AC 4 — MSC3814 dehydrated_device: 404 M_NOT_FOUND (no dehydrated device)
@@ -692,8 +789,8 @@ defmodule Nebu.Web.MatrixClientCompatTest do
       {:ok, user_id: uid, token: token}
     end
 
-    defp create_sync_room(token, name) do
-      conn = call(:post, "/_matrix/client/v3/createRoom", %{"name" => name}, auth(token))
+    defp create_sync_room(token, name, extra \\ %{}) do
+      conn = call(:post, "/_matrix/client/v3/createRoom", Map.merge(%{"name" => name}, extra), auth(token))
       assert conn.status == 200, "createRoom must succeed"
       json(conn)["room_id"]
     end
@@ -709,7 +806,7 @@ defmodule Nebu.Web.MatrixClientCompatTest do
     # legitimately land two writes in the SAME millisecond, and without this
     # tie-break this helper's "which one is current" answer could flap
     # between runs, same class of flakiness the production
-    # Room.DB.fetch_replaces_state/1 query already guards against via its own
+    # Room.DB.fetch_state_predecessors/1 query already guards against via its own
     # `(origin_server_ts, event_id)` tuple ordering.
     defp db_event_identity(room_id, type, state_key) do
       {:ok, %{rows: rows}} =
@@ -1553,9 +1650,9 @@ defmodule Nebu.Web.MatrixClientCompatTest do
       :ok
     end
 
-    # m.room.power_levels has NO HTTP route either (the generic PUT /state/
-    # {eventType} endpoint explicitly REJECTS it, 403 — "dedicated authorized
-    # paths" per protected.ex's own comment) — same direct-call pattern.
+    # m.room.power_levels HAS an HTTP route since story power-levels-enforcement (PUT /state/
+    # m.room.power_levels through the room-process writer, v10 change rules); this helper keeps
+    # the direct dispatcher call (the same client-mode writer) — same direct-call pattern.
     defp set_power_levels_direct(room_id, caller_id, new_levels) do
       req = %Core.SetPowerLevelsRequest{
         room_id: room_id,
@@ -1579,23 +1676,40 @@ defmodule Nebu.Web.MatrixClientCompatTest do
     # (origin_server_ts, event_id)" — using a (ts, event_id) TUPLE comparison
     # (not origin_server_ts alone) so this oracle is also the correctness
     # reference for the same-millisecond tie-break test below (AC5/AC7).
+    #
+    # story member-event-prev-content (DELIBERATE re-pin of the oracle, AC5): an `m.room.member` slot is ordered with the D3 key
+    # `(origin_server_ts, r, event_id)`, `r = 4 - rank(membership)` (ban 0 < leave 1 < invite 2 < knock 3 < join 4, unknown = leave), exactly the
+    # sync partition's order; every other slot keeps `(origin_server_ts, event_id)` (r = 0). The scenarios of this describe block write their
+    # member events `tick`-separated, so their expectations are unchanged; the oracle is computed in Elixir, independent of the SQL fragments.
     defp db_replaces_state(room_id, type, state_key, origin_server_ts, event_id) do
       {:ok, %{rows: rows}} =
         Ecto.Adapters.SQL.query(
           Nebu.Repo,
-          """
-          SELECT event_id FROM events
-          WHERE room_id = $1 AND event_type = $2 AND state_key = $3
-            AND (origin_server_ts, event_id) < ($4, $5)
-          ORDER BY origin_server_ts DESC, event_id DESC
-          LIMIT 1
-          """,
-          [room_id, type, state_key, origin_server_ts, event_id]
+          "SELECT event_id, origin_server_ts, content FROM events WHERE room_id = $1 AND event_type = $2 AND state_key = $3",
+          [room_id, type, state_key]
         )
 
-      case rows do
-        [[prev_event_id]] -> prev_event_id
-        [] -> :none
+      rank = fn content ->
+        membership =
+          case content do
+            %{"membership" => m} -> m
+            text when is_binary(text) -> with {:ok, %{"membership" => m}} <- Jason.decode(text), do: m, else: (_ -> nil)
+            _ -> nil
+          end
+
+        if type == "m.room.member", do: 4 - Map.get(%{"ban" => 0, "leave" => 1, "invite" => 2, "knock" => 3, "join" => 4}, membership, 1), else: 0
+      end
+
+      own_content = Enum.find_value(rows, fn [id, _ts, content] -> if id == event_id, do: content end)
+      own_key = {origin_server_ts, rank.(own_content), event_id}
+
+      rows
+      |> Enum.map(fn [id, ts, content] -> {ts, rank.(content), id} end)
+      |> Enum.filter(&(&1 < own_key))
+      |> Enum.max(fn -> nil end)
+      |> case do
+        {_ts, _r, prev_event_id} -> prev_event_id
+        nil -> :none
       end
     end
 
@@ -1651,7 +1765,7 @@ defmodule Nebu.Web.MatrixClientCompatTest do
     # `Enum.find` behavior) could land on a stale, superseded transition
     # instead of the current one; picking the latest by (origin_server_ts,
     # event_id) always finds the real current state event, exactly like the
-    # production `fetch_replaces_state` query's own tie-break.
+    # production `fetch_state_predecessors` query's own tie-break.
     defp find_event(state_events, timeline_events, type, state_key) do
       (state_events ++ timeline_events)
       |> Enum.filter(fn ev -> ev["type"] == type and (ev["state_key"] || "") == state_key end)
@@ -1950,7 +2064,9 @@ defmodule Nebu.Web.MatrixClientCompatTest do
 
     test "m.room.member: kick then rejoin sets replaces_state via DB lookup (AC1, AC2, AC7)",
          %{token: owner_token, user_id: owner_id, priv: priv} do
-      room_id = create_sync_room(owner_token, "replaces-state-kick-rejoin-room")
+      # Story create-room-presets-power-levels-topic (AC16, DATA adaptation): the KICKED user comes back without a new invite, which is only
+      # possible in a public room (a default room is invite-only now and the kick ends the invitation). The test is about replaces_state.
+      room_id = create_sync_room(owner_token, "replaces-state-kick-rejoin-room", %{"preset" => "public_chat"})
 
       {bob_id, bob_token} =
         bootstrap_secondary_user(
@@ -2062,7 +2178,7 @@ defmodule Nebu.Web.MatrixClientCompatTest do
     # ── AC2 — /messages + GET /event/{eventId} ─────────────────────────────
 
     test "GET /messages and GET /event carry replaces_state for state entries only (AC2)",
-         %{token: token} do
+         %{token: token, user_id: user_id} do
       room_id = create_sync_room(token, "replaces-state-messages-room")
 
       topic1_conn =
@@ -2113,8 +2229,10 @@ defmodule Nebu.Web.MatrixClientCompatTest do
       assert topic2_chunk_entry != nil,
              "the second topic event must appear in the /messages chunk"
 
-      assert topic2_chunk_entry["unsigned"] == %{"replaces_state" => topic1_id},
-             "a /messages chunk entry for a state event must carry ONLY unsigned.replaces_state " <>
+      # story member-event-prev-content (DELIBERATE re-pin; old -> new): the unsigned of a state event with a predecessor is exactly the three keys
+      # replaces_state + prev_content + prev_sender (still no age — follow-up fl (b)); it was `%{"replaces_state" => topic1_id}` before.
+      assert topic2_chunk_entry["unsigned"] == %{"replaces_state" => topic1_id, "prev_content" => %{"topic" => "v1"}, "prev_sender" => user_id},
+             "a /messages chunk entry for a state event must carry exactly unsigned.replaces_state + prev_content + prev_sender " <>
                "(no age — separate, pre-existing, out-of-scope gap), got: " <>
                "#{inspect(topic2_chunk_entry["unsigned"])}"
 
@@ -2136,8 +2254,9 @@ defmodule Nebu.Web.MatrixClientCompatTest do
 
       assert event_conn.status == 200
 
-      assert json(event_conn)["unsigned"] == %{"replaces_state" => topic1_id},
-             "GET /event/{eventId} must carry the same unsigned.replaces_state via the shared mapper"
+      # story member-event-prev-content (DELIBERATE re-pin; old -> new): the same three keys through the shared mapper
+      assert json(event_conn)["unsigned"] == %{"replaces_state" => topic1_id, "prev_content" => %{"topic" => "v1"}, "prev_sender" => user_id},
+             "GET /event/{eventId} must carry the same unsigned.replaces_state + prev_content + prev_sender via the shared mapper"
     end
 
     # Code-review cycle 2 regression guard: the test gap that let the cycle-1
@@ -2251,6 +2370,11 @@ defmodule Nebu.Web.MatrixClientCompatTest do
     test "replaces_state present despite most-restrictive history_visibility (AC4)",
          %{token: token} do
       room_id = create_sync_room(token, "replaces-state-visibility-room")
+
+      # Story create-room-presets-power-levels-topic (AC16, DATA adaptation): createRoom writes a preset history_visibility (`shared`) into the
+      # slot this test overwrites with `invited`; the latest value is read by origin_server_ts (ms), so a PUT in the SAME millisecond would tie.
+      start_ms = System.system_time(:millisecond)
+      Stream.repeatedly(fn -> Process.sleep(1) end) |> Enum.take_while(fn _ -> System.system_time(:millisecond) <= start_ms end)
 
       hv_conn =
         call(
@@ -2616,10 +2740,26 @@ defmodule Nebu.Web.MatrixClientCompatTest do
           auth(member_token)
         )
 
-      assert bypass_conn.status == 200,
-             "the non-state send path must be reachable by a joined non-power-user member " <>
-               "(cycle-2 review's claim) — got #{bypass_conn.status}, body: " <>
-               "#{inspect(json(bypass_conn))}"
+      # story power-levels-enforcement (D12 + D5 (a), AC16 re-pin; was: `200`): new rooms carry `events["m.room.name"]: 50`
+      # and `/send` now enforces `events[type]` for message events too, so the non-power member is refused outright
+      assert bypass_conn.status == 403,
+             "the non-state send path of m.room.name is gated by events[m.room.name] (50) for a non-power member " <>
+               "— got #{bypass_conn.status}, body: #{inspect(json(bypass_conn))}"
+
+      assert json(bypass_conn) == %{"errcode" => "M_FORBIDDEN", "error" => "You do not have a high enough power level to send this event"}
+
+      # the COALESCE regression guard itself (the subject of this test): a message event of type m.room.name that IS
+      # accepted (the owner reaches events[m.room.name]) must still not become the room's name
+      owner_bypass_conn =
+        call(
+          :put,
+          "/_matrix/client/v3/rooms/#{URI.encode_www_form(room_id)}/send/m.room.name/rename-bypass-txn-2",
+          %{"name" => "NOT A RENAME (a message event)"},
+          auth(owner_token)
+        )
+
+      assert owner_bypass_conn.status == 200,
+             "the non-state send path must be reachable for a sender at events[m.room.name] — got #{owner_bypass_conn.status}"
 
       sync = call(:get, "/_matrix/client/v3/sync", nil, auth(owner_token))
       assert sync.status == 200

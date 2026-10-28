@@ -26,7 +26,9 @@ defmodule Nebu.Web.RoomAccountDataTest do
   @audience "nebu-gateway"
   @kid "room-account-data-test-key-1"
   @router_opts Nebu.Web.Router.init([])
-  @catch_all %{"errcode" => "M_NOT_FOUND", "error" => "Unrecognized request"}
+  # story oauth-room-summary-unrecognized (af): the router fall-through answers 404 M_UNRECOGNIZED now (was
+  # M_NOT_FOUND); the constant MUST follow, otherwise the `refute ... == @catch_all` checks become vacuous.
+  @catch_all %{"errcode" => "M_UNRECOGNIZED", "error" => "Unrecognized request"}
 
   # ── helpers ────────────────────────────────────────────────────────────────
 
@@ -99,6 +101,11 @@ defmodule Nebu.Web.RoomAccountDataTest do
   defp refute_catch_all(conn) do
     refute json(conn) == @catch_all,
            "route is missing — request fell through to the 404 catch-all (status #{conn.status})"
+
+    # story oauth-room-summary-unrecognized (review m4): also fail on the sibling-method 405 body and on any
+    # 404 / 405 M_UNRECOGNIZED, not only on the exact 404 body (a wrong-method fall-through would pass otherwise).
+    refute conn.status in [404, 405] and json(conn)["errcode"] == "M_UNRECOGNIZED",
+           "route is missing or has the wrong method — fell through to M_UNRECOGNIZED (status #{conn.status})"
   end
 
   defp sync(token, since \\ nil) do

@@ -28,7 +28,9 @@ defmodule Nebu.Web.RoomTagsTest do
   @audience "nebu-gateway"
   @kid "room-tags-test-key-1"
   @router_opts Nebu.Web.Router.init([])
-  @catch_all %{"errcode" => "M_NOT_FOUND", "error" => "Unrecognized request"}
+  # story oauth-room-summary-unrecognized (af): the router fall-through answers 404 M_UNRECOGNIZED now (was
+  # M_NOT_FOUND); the constant MUST follow, otherwise the `refute ... == @catch_all` checks become vacuous.
+  @catch_all %{"errcode" => "M_UNRECOGNIZED", "error" => "Unrecognized request"}
 
   # ── helpers ────────────────────────────────────────────────────────────────
 
@@ -46,6 +48,8 @@ defmodule Nebu.Web.RoomTagsTest do
       |> Map.put("use", "sig")
 
     Application.put_env(:nebu_http, :server_name, @server_name)
+    # story create-room-invites-direct (DATA adaptation): POST /invite refuses foreign-domain invitees, the domain is :event_dispatcher's server_name
+    Nebu.Test.ServerName.pin!(@server_name)
     Nebu.Web.OidcTestSupport.configure(@issuer, @audience)
     Application.put_env(:nebu_http, :oidc_jwks, [pub_jwk])
 
@@ -117,6 +121,11 @@ defmodule Nebu.Web.RoomTagsTest do
   defp refute_catch_all(conn) do
     refute json(conn) == @catch_all,
            "route is missing — request fell through to the 404 catch-all (status #{conn.status})"
+
+    # story oauth-room-summary-unrecognized (review m4): also fail on the sibling-method 405 body and on any
+    # 404 / 405 M_UNRECOGNIZED, not only on the exact 404 body (a wrong-method fall-through would pass otherwise).
+    refute conn.status in [404, 405] and json(conn)["errcode"] == "M_UNRECOGNIZED",
+           "route is missing or has the wrong method — fell through to M_UNRECOGNIZED (status #{conn.status})"
   end
 
   defp assert_error(conn, status, errcode) do

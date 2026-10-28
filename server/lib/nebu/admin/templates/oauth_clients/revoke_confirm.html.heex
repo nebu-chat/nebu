@@ -1,0 +1,116 @@
+<div class="admin-oauth-clients" data-page="oauth-revoke-confirm">
+  <h1 class="text-2xl font-bold mb-2">Revoke OAuth client</h1>
+  <p class="mb-4">
+    <a href="/admin/oauth/clients" class="link link-primary" data-role="back-to-list">Back to approved clients</a>
+  </p>
+
+  <%!-- A mismatch of the typed host is shown WITH the field (below); every other error stays a toast here. --%>
+  <p
+    :if={Phoenix.Flash.get(@flash, :error) && !Phoenix.Flash.get(@flash, :confirm_host_error)}
+    class="alert alert-error my-4 max-w-3xl"
+    role="alert"
+    data-role="toast"
+    data-toast-kind="error"
+  >
+    {Phoenix.Flash.get(@flash, :error)}
+  </p>
+
+  <dl class="mb-4 max-w-3xl" data-role="client-summary">
+    <%!-- The verified host first: the name is an unverified, client-chosen claim. --%>
+    <div class="mb-2">
+      <dt class="text-sm text-base-content/70">Host (verified when the client registered)</dt>
+      <dd class="font-semibold break-all" data-role="client-host">{@client.client_host || "(no host stored)"}</dd>
+    </div>
+    <div class="mb-2">
+      <dt class="text-sm text-base-content/70">Name (unverified claim)</dt>
+      <dd class="break-all" data-field="client-name">{display_name(@client)}</dd>
+    </div>
+    <div class="mb-2">
+      <dt class="text-sm text-base-content/70">Client id</dt>
+      <dd class="font-mono text-sm break-all" data-field="client-id">{@client.client_id}</dd>
+    </div>
+    <div class="mb-2">
+      <dt class="text-sm text-base-content/70">Signed-in devices</dt>
+      <dd class="font-semibold">
+        <span data-role="revoke-device-count">{sessions_text(@device_count)}</span>
+        <span :if={@device_count == :unknown} class="font-normal"> (could not be read; the devices are removed all the same)</span>
+      </dd>
+    </div>
+  </dl>
+
+  <div class="alert alert-warning mb-4 max-w-3xl" data-role="revoke-consequences">
+    <div>
+      <h2 class="font-semibold">What happens when you revoke this client</h2>
+      <ul class="list-disc ml-5 mt-1 text-sm">
+        <li>All of its sessions end now: the apps of your users are signed out at their next request.</li>
+        <li>Its devices and their end-to-end encryption keys are deleted. Users sign in again on a new device, and rooms may show those devices as removed.</li>
+        <li>Open sign-in requests and unused authorization codes of this client stop working.</li>
+        <li>The client is listed under Revoked clients and can never be approved again with the same registration data. This cannot be undone.</li>
+      </ul>
+    </div>
+  </div>
+
+  <%!-- A plain form, no JavaScript confirm: the browser reports a user-activated submit (Sec-Fetch-User), which
+       the server requires for this action. The typed host replaces the confirm() dialog. --%>
+  <form method="post" action={@revoke_path} data-role="revoke-confirm-form" class="card bg-base-200 p-4 max-w-3xl">
+    <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+    <input type="hidden" name="_click_proof" value="" data-click-proof />
+    <div class="mb-3">
+      <label for="confirm-host" class="block text-sm font-medium mb-1">
+        Type <span class="font-mono font-semibold break-all">{expected_value(@expected)}</span> to confirm
+      </label>
+      <input
+        type="text"
+        id="confirm-host"
+        name="confirm_host"
+        required
+        autofocus
+        autocomplete="off"
+        autocapitalize="off"
+        spellcheck="false"
+        class={["input input-bordered input-sm w-full max-w-md", Phoenix.Flash.get(@flash, :confirm_host_error) && "input-error"]}
+        aria-describedby={if Phoenix.Flash.get(@flash, :confirm_host_error), do: "confirm-host-error confirm-host-help", else: "confirm-host-help"}
+        aria-invalid={Phoenix.Flash.get(@flash, :confirm_host_error) && "true"}
+      />
+      <p
+        :if={Phoenix.Flash.get(@flash, :confirm_host_error)}
+        id="confirm-host-error"
+        class="text-sm text-error mt-1"
+        role="alert"
+        data-role="toast"
+        data-toast-kind="error"
+      >
+        {Phoenix.Flash.get(@flash, :confirm_host_error)}
+      </p>
+      <p id="confirm-host-help" class="text-xs text-base-content/70 mt-1">
+        Enter {expected_label(@expected)}, exactly as shown. Capitals do not matter for a host.
+      </p>
+    </div>
+    <div class="mb-3">
+      <label for="revoke-reason" class="block text-sm font-medium mb-1">Reason (optional, max 500)</label>
+      <input
+        type="text"
+        id="revoke-reason"
+        name="reason"
+        maxlength="500"
+        autocomplete="off"
+        class="input input-bordered input-sm w-full max-w-md"
+        aria-describedby="revoke-reason-help"
+      />
+      <p id="revoke-reason-help" class="text-xs text-base-content/70 mt-1">
+        Shown in the list of revoked clients and recorded in the audit log.
+      </p>
+    </div>
+    <p class="text-sm mb-3" data-role="reauth-state" data-reauth={if @reauth_fresh, do: "fresh", else: "needed"}>
+      <span :if={@reauth_fresh}>You signed in again a moment ago: you can revoke now.</span>
+      <span :if={!@reauth_fresh}>
+        Revoking asks you to sign in again with your identity provider first. You return to this page afterwards and
+        must type the host and the reason again.
+      </span>
+    </p>
+    <div class="flex flex-wrap items-center gap-3">
+      <a href="/admin/oauth/clients" class="btn btn-ghost" data-role="revoke-cancel">Cancel</a>
+      <button type="submit" class="btn btn-error" data-role="revoke-confirm">Revoke client</button>
+    </div>
+  </form>
+</div>

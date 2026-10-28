@@ -104,6 +104,32 @@ defmodule Nebu.Web.TokenDenylist do
   end
 
   @doc """
+  Like `revoke/3`, but REPORTS a failed durable (database) write: `:ok` once the entry is in the ETS set
+  AND the database, `{:error, reason}` when the database write failed (the ETS entry is kept). Used where a
+  silent failure would leave a credential alive while the caller reports success (story
+  oauth-token-revocation-logout, review cycle 1: `POST /logout/all`).
+  """
+  @spec revoke_checked(String.t() | nil, String.t(), integer()) :: :ok | {:error, term()}
+  def revoke_checked(jti, token, exp) when is_integer(exp) do
+    ensure_table()
+    db_k = db_key(jti, token)
+    k = key(jti, token)
+
+    if k == nil do
+      Logger.warning("TokenDenylist.revoke_checked called with no usable key — token cannot be revoked")
+      {:error, :no_key}
+    else
+      try do
+        :ets.insert(@table, {k, exp})
+      rescue
+        ArgumentError -> :ok
+      end
+
+      db_revoke_checked(db_k, exp)
+    end
+  end
+
+  @doc """
   Revokes a token by its SHA-256 hex digest (S3 F-1 kill-switch).
 
   When a device is deleted, the only handle we hold for a JWT bound to it is the
@@ -113,9 +139,14 @@ defmodule Nebu.Web.TokenDenylist do
   So inserting a denylist entry keyed by that hash means the next request carrying
   the bound JWT resolves `revoked?(jti, token) == true` and OidcPlug rejects it with
   401 M_UNKNOWN_TOKEN. `exp` (unix seconds) bounds the entry's lifetime; a `nil`/non-
-  integer exp is a no-op (nothing durable to anchor the entry to). Best-effort.
+  integer exp is NOT revoked durably: `{:error, :no_exp}` (story oauth-legacy-coexistence C13).
+
+  Returns `:ok` once the entry is in the node-local ETS set AND the database (cluster wide), and
+  `{:error, reason}` when the database write failed (the ETS entry is kept: the token is dead on THIS
+  node). Callers that delete the token's binding row must do so ONLY on `:ok` (C13): otherwise the
+  token would authenticate again, device-less, on every other node.
   """
-  @spec revoke_by_hash(String.t() | nil, integer() | nil) :: :ok
+  @spec revoke_by_hash(String.t() | nil, integer() | nil) :: :ok | {:error, term()}
   def revoke_by_hash(token_hash, exp) when is_binary(token_hash) and token_hash != "" and is_integer(exp) do
     ensure_table()
 
@@ -127,9 +158,12 @@ defmodule Nebu.Web.TokenDenylist do
 
     # DB key for a hash-based entry is the plain hex string (same encoding hash_db_key
     # produces), so a cross-node lookup via db_revoked_any? finds it.
-    db_revoke(token_hash, exp)
-    :ok
+    db_revoke_checked(token_hash, exp)
   end
+
+  # No expiry => nothing durable to anchor the entry to: the caller must treat the revocation as
+  # NOT confirmed (story oauth-legacy-coexistence, C13: it keeps the binding and fails closed).
+  def revoke_by_hash(token_hash, nil) when is_binary(token_hash) and token_hash != "", do: {:error, :no_exp}
 
   def revoke_by_hash(_token_hash, _exp), do: :ok
 
@@ -222,6 +256,22 @@ defmodule Nebu.Web.TokenDenylist do
   end
 
   defp db_revoke(nil, _exp), do: :ok
+
+  defp db_revoke_checked(nil, _exp), do: :ok
+
+  defp db_revoke_checked(db_key, exp) when is_binary(db_key) do
+    sql =
+      "INSERT INTO invalidated_tokens (token_hash, expires_at) VALUES ($1, $2) ON CONFLICT (token_hash) DO NOTHING"
+
+    case safe_query(sql, [db_key, exp]) do
+      {:ok, _} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("TokenDenylist.db_revoke failed", reason: inspect(reason))
+        {:error, reason}
+    end
+  end
 
   # ── DB read fallback (best-effort, AC2, AC4, AC6, AC8) ───────────────────────
 

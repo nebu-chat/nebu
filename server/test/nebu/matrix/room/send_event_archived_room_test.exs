@@ -76,6 +76,12 @@ defmodule Nebu.Matrix.Room.SendEventArchivedRoomTest do
       :ok
     end
 
+    # story power-levels-enforcement (D10): the room process writes a power-level change through ONE call; the fake models the
+    # transaction with its own column write AND event insert (a failure of either is the change's failure)
+    def apply_power_levels_change(room_id, json, event) do
+      with :ok <- set_power_levels(room_id, json), do: insert_event(event)
+    end
+
     def set_power_levels(room_id, power_levels_json) do
       :ets.insert(:send_archived_test_db, {{:power_levels, room_id}, power_levels_json})
       :ok
@@ -171,6 +177,12 @@ defmodule Nebu.Matrix.Room.SendEventArchivedRoomTest do
     def insert_event(event) do
       :ets.insert(:send_archived_test_db, {{:event, event["event_id"]}, event})
       :ok
+    end
+
+    # story power-levels-enforcement (D10): the room process writes a power-level change through ONE call; the fake models the
+    # transaction with its own column write AND event insert (a failure of either is the change's failure)
+    def apply_power_levels_change(room_id, json, event) do
+      with :ok <- set_power_levels(room_id, json), do: insert_event(event)
     end
 
     def set_power_levels(room_id, power_levels_json) do
@@ -290,6 +302,8 @@ defmodule Nebu.Matrix.Room.SendEventArchivedRoomTest do
       room_id = unique_room_id("toctou-archived")
 
       {:ok, _pid} = start_and_track(room_id)
+      # story power-levels-enforcement (D5 (d), AC16 re-pin): the room process checks the membership BEFORE the archived status, so the sender joins first
+      :ok = Nebu.Matrix.Room.Server.join(room_id, "@alice:test.local")
 
       # Act: send_event on a room that is "archived" in the DB at check time.
       result =
@@ -330,6 +344,8 @@ defmodule Nebu.Matrix.Room.SendEventArchivedRoomTest do
       txn_id = "txn-toctou-ets-1"
 
       {:ok, _pid} = start_and_track(room_id)
+      # story power-levels-enforcement (D5 (d), AC16 re-pin): the room process checks the membership BEFORE the archived status, so the sender joins first
+      :ok = Nebu.Matrix.Room.Server.join(room_id, user_id)
 
       result =
         Nebu.Matrix.Room.Server.send_event(
@@ -344,7 +360,8 @@ defmodule Nebu.Matrix.Room.SendEventArchivedRoomTest do
              "expected {:error, :room_archived}, got: #{inspect(result)}"
 
       # ETS dedup table must NOT contain the txn_id.
-      assert :ets.lookup(:NebuTxnDedup, {room_id, user_id, txn_id}) == [],
+      # story state-writer-redaction (DELIBERATE re-pin, Kassandra #5; old -> new): the /send txn key is {room, user, {:send, event_type, txn}} (a txn id is scoped to its path incl. the event type); was {room, user, txn}
+      assert :ets.lookup(:NebuTxnDedup, {room_id, user_id, {:send, "m.room.message", txn_id}}) == [],
              "expected :NebuTxnDedup to be empty for #{inspect({room_id, user_id, txn_id})}"
     end
   end
@@ -363,6 +380,8 @@ defmodule Nebu.Matrix.Room.SendEventArchivedRoomTest do
       room_id = unique_room_id("active-room-send")
 
       {:ok, _pid} = start_and_track(room_id)
+      # story power-levels-enforcement (D5 (d), AC16 re-pin): the room process checks the membership BEFORE the archived status, so the sender joins first
+      :ok = Nebu.Matrix.Room.Server.join(room_id, "@alice:test.local")
 
       # Act
       result =
@@ -394,6 +413,8 @@ defmodule Nebu.Matrix.Room.SendEventArchivedRoomTest do
       txn_id = "txn-idem-active-1"
 
       {:ok, _pid} = start_and_track(room_id)
+      # story power-levels-enforcement (D5 (d), AC16 re-pin): the room process checks the membership BEFORE the archived status, so the sender joins first
+      :ok = Nebu.Matrix.Room.Server.join(room_id, user_id)
 
       content = %{"msgtype" => "m.text", "body" => "Idempotent"}
 
@@ -440,6 +461,8 @@ defmodule Nebu.Matrix.Room.SendEventArchivedRoomTest do
       room_id = unique_room_id("toctou-race")
 
       {:ok, _pid} = start_and_track(room_id)
+      # story power-levels-enforcement (D5 (d), AC16 re-pin): the room process checks the membership BEFORE the archived status, so the sender joins first
+      :ok = Nebu.Matrix.Room.Server.join(room_id, "@charlie:test.local")
 
       # Verify GenServer is running (in-memory state = "active" since init succeeded)
       state = Nebu.Matrix.Room.Server.get_state(room_id)

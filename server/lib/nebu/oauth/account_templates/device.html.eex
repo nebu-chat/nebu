@@ -1,0 +1,18 @@
+<p>
+<a data-role="device-sign-out" class="button danger" href="<%= device_href("org.matrix.device_delete", @device.device_id) %>" aria-label="Sign out this device: <%= device_name(@device) %> (<%= @device.device_id %>)">Sign out this device</a>
+</p>
+<dl>
+<dt>Name</dt>
+<dd><%= device_name(@device) %></dd>
+<dt>Device ID</dt>
+<dd><%= @device.device_id %></dd>
+<dt>App (name claimed by the app)</dt>
+<dd><%= app_label(@device) %></dd>
+<dt>Last active</dt>
+<dd><%= time_tag(@device.last_seen_ts, "Never") %></dd>
+<dt>Last IP</dt>
+<dd><%= @device.last_seen_ip || "Unknown" %></dd>
+<dt>Added</dt>
+<dd><%= time_tag(@device.created_at, "Unknown") %></dd>
+</dl>
+<p><a href="/account?action=org.matrix.devices_list">Back to all devices</a></p>

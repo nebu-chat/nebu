@@ -1,0 +1,19 @@
+KNOWN  12 Nebu.Admin.RoomsFallbackNameTest
+KNOWN  3 Nebu.Web.AdminOidcLoginTest
+KNOWN  3 Nebu.Admin.TemporaryCaptureManagerTest
+KNOWN  3 Nebu.Admin.LogsLive.TraceMapNodeControlsTest
+NEW    2 Nebu.Web.LogStore.RetentionTest
+NEW    1 Nebu.Admin.AdminStaleRoomsTest
+KNOWN  1 Nebu.Admin.LogsLive.WarRoomTest
+NEW    1 Nebu.Workers.MediaScanWorkerAuditBridgeTest
+NEW    1 Nebu.Admin.MediaAttentionBadgeTest
+NEW    1 Nebu.Matrix.Session.SweeperTest
+KNOWN  1 Nebu.Matrix.MatrixSsoTest
+KNOWN  1 Nebu.Matrix.SsoLoginTest
+---- not in known:
+Nebu.Admin.AdminStaleRoomsTest | list_rooms stale filter (AC3) returns exactly the active + 0-member room
+Nebu.Workers.MediaScanWorkerAuditBridgeTest | scanning -> :infected audit entry has outcome success (AC6 timestamp is a DB-column default, not story-specific code — see AuditLogEntry/audit_log.event_time)
+Nebu.Web.LogStore.RetentionTest | INFO max-count cap (new, symmetric with the existing DEBUG cap) 1000 INFO entries capped to log_retention_info_max_count=500 leaves only the 500 most recent
+Nebu.Web.LogStore.RetentionTest | AC8: DEBUG max-count cap 1000 DEBUG entries capped to log_retention_debug_max_count=500 leaves only the 500 most recent
+Nebu.Admin.MediaAttentionBadgeTest | AT4: initial_count/0 — fresh DB-derived COUNT over exactly the AC2 state set each of the 6 admin LiveViews assigns the badge count fresh at mount, not an inheri
+Nebu.Matrix.Session.SweeperTest | AC8: Sweeper.sweep/0 (via its :sweep message handler) actually invokes retention pruning an old INFO row seeded directly in operational_logs is pruned when the 

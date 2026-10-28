@@ -30,6 +30,14 @@ defmodule Nebu.Application do
     #    under concurrent first requests (security re-review R-2). ──
     Nebu.Web.TokenDenylist.init_table()
     Nebu.Web.Plugs.RateLimit.init_table()
+    # per-user membership-write tiers (NEBU_RATE_LIMIT_{CREATE_ROOM,INVITE,JOIN}_*): one value-free warning per rejected setting
+    Nebu.Web.RateLimitTiers.warn_invalid_settings()
+    # story membership-state-model (D19): the limit of concurrent member-state reads (NEBU_MEMBER_SLICE_MAX_CONCURRENCY)
+    Nebu.Matrix.MemberSliceGate.warn_invalid_setting()
+    # a server name that leaves less than 18 bytes of a 255-byte Matrix user id for the localpart: refuse to boot (value-free message)
+    check_server_name_length!(Application.get_env(:event_dispatcher, :server_name))
+    # Trusted-proxy CIDR allowlist (NEBU_TRUSTED_PROXY_CIDRS), parsed once, before the listener starts.
+    Nebu.Web.ClientIP.load_config()
     Nebu.Matrix.AccountDataStore.init_table()
 
     # enhanced-logging/matrix-payload-debug-logging (CI-gate cycle-2, global fix):
@@ -162,6 +170,13 @@ defmodule Nebu.Application do
           # Nebu.Health.Server gen_tcp listener was removed too — it bound the same
           # port 4000 as Bandit and only ever worked by losing the race; /health and
           # /info are now Bandit routes.)
+          # Per-node eviction of idle rate-limit buckets (stateless; the ETS table is not owned by it).
+          Nebu.Web.RateLimitSweeper,
+          # story membership-state-model (D19, security cycle 3): the node-wide gate of the member-state reads; before Bandit
+          Nebu.Matrix.MemberSliceGate,
+          # story oauth-hardening-hygiene (HY4): owner of the per-node OAuth ETS caches (config TTL cache and
+          # decoded signing keys); after the Repo, before Bandit, so no request process ever creates a table.
+          Nebu.OAuth.CacheOwner,
           {Bandit, plug: Nebu.Web.Router, port: http_port()}
         ]
 
@@ -218,6 +233,23 @@ defmodule Nebu.Application do
       ],
       else: []
   end
+
+  # Story event-size-limit (D12): a Matrix user id is at most 255 bytes, and `Nebu.Matrix.UserId.from_claims/2` hashes every id of
+  # 255 bytes or more into a form of EXACTLY 255 bytes (a prefix of the localpart, `-`, 16 hex characters). A server name above 235
+  # bytes leaves less than 18 bytes of the id for the localpart: no such id can be formed, so the node REFUSES TO BOOT (fail fast).
+  # The message carries the byte size only (a count, never the value). Public for the test (`@doc false`), pure apart from the raise.
+  @doc false
+  @spec check_server_name_length!(term()) :: :ok
+  def check_server_name_length!(server_name) when is_binary(server_name) do
+    if Nebu.Matrix.UserId.server_name_leaves_room?(server_name) do
+      :ok
+    else
+      raise "NEBU_SERVER_NAME is #{byte_size(server_name)} bytes long: a Matrix user id (at most 255 bytes) would have fewer than " <>
+              "18 bytes left for the localpart; refusing to start, use a server name of at most 235 bytes"
+    end
+  end
+
+  def check_server_name_length!(_not_configured), do: :ok
 
   # Story 13-6: libcluster Cluster.Supervisor only when topologies are configured
   # (prod/dev with CLUSTER_STRATEGY set). Test / single-node mode skip it.

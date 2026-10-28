@@ -78,7 +78,10 @@ defmodule Nebu.Admin.ConfigControllerTest do
   defp endpoint_call(conn), do: @endpoint.call(conn, @endpoint.init([]))
 
   defp post_sso_schemes(value) do
+    # story sso-origins-admin-hardening: the strict fetch metadata of a form submit and a fresh re-authentication marker
     build_admin_conn(:post, "/admin/config/sso-schemes")
+    |> put_session("admin_reauth", Nebu.OAuth.TestSupport.fresh_marker("admin-1", 0, "auth_time", "/admin/config"))
+    |> Nebu.OAuth.TestSupport.put_strict_fetch_headers()
     |> Map.put(:body_params, %{"sso_extra_redirect_schemes" => value})
     |> endpoint_call()
   end

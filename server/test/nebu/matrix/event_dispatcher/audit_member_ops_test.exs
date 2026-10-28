@@ -92,6 +92,12 @@ defmodule Nebu.Matrix.EventDispatcher.AuditMemberOpsTest do
       :ok
     end
 
+    # story power-levels-enforcement (D10): the room process writes a power-level change through ONE call; the fake models the
+    # transaction with its own column write AND event insert (a failure of either is the change's failure)
+    def apply_power_levels_change(room_id, json, event) do
+      with :ok <- set_power_levels(room_id, json), do: insert_event(event)
+    end
+
     def set_power_levels(room_id, power_levels_json) do
       :ets.insert(:audit_member_ops_test_db, {{:power_levels, room_id}, power_levels_json})
       :ok
@@ -108,15 +114,40 @@ defmodule Nebu.Matrix.EventDispatcher.AuditMemberOpsTest do
     # admin_remove_room_member → leave_room consults get_personal_room_id/1 for the
     # personal-room leave guard. Return :none so the guard never blocks the test.
     def get_personal_room_id(_user_id), do: {:ok, :none}
+
+    # Story create-room-presets-power-levels-topic (AC16, DATA adaptation of the fake): join_room/2 decides on the join rule and the latest
+    # membership of the user (D1) and reads both through the injected modules. This suite is about the AUDIT rows, not about who may join:
+    # the fake serves the join rule of a private room (`invite`, what createRoom's default preset writes) and "never a member before".
+    # Nobody gets in without the invitation that admin_add_room_member/3 establishes first (the FakeInviteDB below remembers it).
+    def get_generic_state_events(_room_id) do
+      {:ok, [%{type: "m.room.join_rules", state_key: "", content_json: ~s({"join_rule":"invite"}), sender: "@admin:test.local", event_id: "$jr:test.local", origin_server_ts: 1}]}
+    end
+
+    def get_member_membership(_room_id, _user_id), do: {:ok, nil}
+    # story sync-membership-partition (D13, DATA adaptation): the join decision also reads the latest member event (never a member event here)
+    def latest_member_event(_room_id, _user_id), do: {:ok, nil}
   end
 
   # ─── FakeInviteDB (mirrors audit_room_ops_test.exs) ──────────────────────────
 
   defmodule FakeInviteDB do
-    def accept_invitation(_room_id, _user_id), do: :ok
-    def insert_invitation(_room_id, _inviter, _invitee), do: :ok
-    def reject_invitation(_room_id, _user_id), do: :ok
-    def get_pending_invite_rooms_for_user(_user_id), do: {:ok, []}
+    # Story create-room-presets-power-levels-topic (AC16, DATA adaptation of the fake): the invitation the force-add establishes must be
+    # PENDING for the join that follows (invite-only rooms, D1), and accepted by it.
+    def insert_invitation(room_id, _inviter, invitee), do: (:ets.insert(:audit_member_ops_test_db, {{:invite, room_id, invitee}, :pending}); :ok)
+    def accept_invitation(room_id, invitee), do: (:ets.insert(:audit_member_ops_test_db, {{:invite, room_id, invitee}, :accepted}); :ok)
+    def reject_invitation(room_id, invitee), do: (:ets.insert(:audit_member_ops_test_db, {{:invite, room_id, invitee}, :rejected}); :ok)
+
+    def get_pending_invite_rooms_for_user(invitee) do
+      {:ok, :ets.match(:audit_member_ops_test_db, {{:invite, :"$1", invitee}, :pending}) |> List.flatten()}
+    end
+
+    # story sync-membership-partition (D13, DATA adaptation): the pending row WITH invited_at (this suite has no member events)
+    def pending_invitation(room_id, invitee) do
+      case :ets.lookup(:audit_member_ops_test_db, {:invite, room_id, invitee}) do
+        [{_, :pending}] -> {:ok, 1}
+        _ -> {:ok, nil}
+      end
+    end
   end
 
   # ─── Setup / Teardown ────────────────────────────────────────────────────────
@@ -183,7 +214,7 @@ defmodule Nebu.Matrix.EventDispatcher.AuditMemberOpsTest do
 
   defp stop_room(room_id) do
     case Nebu.Matrix.Room.RoomSupervisor.lookup_room(room_id) do
-      {:ok, pid} -> if Process.alive?(pid), do: GenServer.stop(pid, :normal, 5_000)
+      {:ok, pid} -> if Process.alive?(pid), do: (try do GenServer.stop(pid, :normal, 5_000) catch :exit, _ -> :ok end)
       _ -> :ok
     end
   end

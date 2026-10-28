@@ -9,6 +9,7 @@ option go_package = "github.com/nebu/nebu/internal/grpc/pb";
 service CoreService {
   // Matrix operations (unary request/response)
   rpc SendEvent(SendEventRequest)           returns (SendEventResponse);
+  rpc RedactEvent(RedactEventRequest)       returns (RedactEventResponse);  // story state-writer-redaction
   rpc CreateRoom(CreateRoomRequest)         returns (CreateRoomResponse);
   rpc JoinRoom(JoinRoomRequest)             returns (JoinRoomResponse);
   rpc LeaveRoom(LeaveRoomRequest)           returns (LeaveRoomResponse);
@@ -207,6 +208,13 @@ message Event {
   // same idiom as event_id=="" meaning "no real identity" elsewhere in this
   // file).
   string replaces_state     = 10;
+  // Story member-event-prev-content (D10): the predecessor's content (JSON text
+  // of the object) and sender at the same slot. Set TOGETHER with replaces_state
+  // (never one without the others) and only for a state event with a predecessor;
+  // "" = absent. Rendered by Nebu.Matrix.Http as unsigned.prev_content /
+  // unsigned.prev_sender next to unsigned.replaces_state.
+  string prev_content       = 12;
+  string prev_sender        = 13;
   // Code-review cycle 1 (MAJOR-2): `state_key` alone is ambiguous once a
   // genuine state event's state_key is "" (e.g. m.room.name/topic/
   // power_levels/create) — that collapses onto the exact same "" as a plain
@@ -217,6 +225,13 @@ message Event {
   // event. Always true when this Event is a state event, regardless of its
   // state_key value.
   bool   is_state_event      = 11;
+  // Story state-writer-redaction (D5, D6): the target of a writer-made redaction
+  // event (rendered as the top-level `redacts` and `content.redacts`) and, for a
+  // redacted event, the served redaction event as JSON text of an object
+  // (rendered as unsigned.redacted_because, the content then being {}).
+  // "" = absent (never null).
+  string redacts            = 14;
+  string redacted_because   = 15;
 }
 
 // SendEvent
@@ -231,6 +246,20 @@ message SendEventRequest {
   bool   is_state_event = 8;  // SEC Gate 1: true when this is a state event (even if state_key="")
 }
 message SendEventResponse {
+  string event_id = 1;
+}
+
+// RedactEvent — story state-writer-redaction (D1, D7, D13): PUT /rooms/{roomId}/redact/{eventId}/{txnId}.
+// content_json is the validated body object without a `redacts` key (the path wins); decided and written by
+// the room process (Room.Server.redact/5).
+message RedactEventRequest {
+  string room_id      = 1;
+  string sender_id    = 2;
+  string event_id     = 3;  // the target
+  string txn_id       = 4;  // idempotency key, scoped to the /redact path and the target
+  string content_json = 5;
+}
+message RedactEventResponse {
   string event_id = 1;
 }
 
@@ -253,6 +282,27 @@ message CreateRoomRequest {
   // and before name/topic. "" when absent. Cannot clobber m.room.create or
   // forge another user's m.room.member (see EventDispatcher.Server.create_room/2).
   string          initial_state_json    = 7;
+  // Story create-room-input-validation (comment-level parity only: the in-process
+  // Elixir struct Core.CreateRoomRequest carries these two as RAW client JSON values
+  // so the core can tell a wrong type (M_BAD_JSON) from a wrong value; they are not
+  // wire fields): `room_version` (nil/absent = server default "10", anything but the
+  // supported string = 400 M_UNSUPPORTED_ROOM_VERSION) and `room_alias_name` (the
+  // desired alias localpart; nil/absent = no explicit alias, see
+  // EventDispatcher.Server.validate_create_room_request/1).
+  // Story create-room-presets-power-levels-topic (same comment-level parity; raw
+  // client JSON values of any type in the in-process struct): `preset`
+  // (private_chat | public_chat | trusted_private_chat; nil/absent = derived from
+  // `visibility`), `visibility` (public | private; nil/absent = private),
+  // `power_level_content_override` (an object merged shallowly over the default
+  // m.room.power_levels content; nil/absent = nothing) and `topic` above (a raw
+  // value; the router answers a PRESENT JSON null with 400 M_BAD_JSON, the core
+  // reads nil as absent).
+  // Story create-room-invites-direct (same comment-level parity): `invite` (a raw
+  // client value of any type; the core validates a list of at most 50 local user
+  // ids, nil/absent = no invitations) and `invite_3pid` (a raw client value; the core
+  // refuses every well-shaped third-party invite with 403 M_THREEPID_DENIED, nil / []
+  // = none). `is_direct` above is a boolean; the router answers a present non-boolean,
+  // non-null value with 400 M_BAD_JSON.
 }
 message CreateRoomResponse {
   string room_id = 1;
@@ -387,12 +437,32 @@ message SendReceiptResponse {}
 
 // GetInitialSync — returns full state snapshot for all of a user's joined rooms
 message GetInitialSyncRequest {
-  string user_id = 1;
+  string user_id   = 1;
+  string device_id = 2;  // story sync-token-per-device (D1, D4): since-token key of the authenticated device; "" = the per-user row (device-less clients)
 }
 
+// NOTE (story sync-membership-partition): the /sync partition fields below (join_room_ids, invite_rooms, leave_rooms,
+// SyncInviteRoom, StrippedStateEvent, full_state) were added to the hand-maintained structs in server/lib/pb/core.pb.ex;
+// this file documents them in parity (no codegen, ADR-021). `rooms` stays the DELIVERED joined rooms.
 message GetInitialSyncResponse {
-  string            since_token = 1;  // opaque token — becomes next_batch in HTTP response
-  repeated SyncRoom rooms       = 2;
+  string                  since_token   = 1;  // opaque token — becomes next_batch in HTTP response
+  repeated SyncRoom       rooms         = 2;  // joined rooms (the initial sync delivers every one of them)
+  repeated string         join_room_ids = 3;  // the WHOLE join class (delivered or not)
+  repeated SyncInviteRoom invite_rooms  = 4;  // rooms.invite: stripped invite_state per pending invitation
+  repeated SyncRoom       leave_rooms   = 5;  // rooms.leave: always empty in an initial sync (no include_leave support)
+}
+
+// StrippedStateEvent: exactly the four properties the Matrix spec allows in invite_state.
+message StrippedStateEvent {
+  string type      = 1;
+  string state_key = 2;
+  string sender    = 3;
+  bytes  content   = 4;  // JSON-encoded content
+}
+
+message SyncInviteRoom {
+  string                      room_id      = 1;
+  repeated StrippedStateEvent invite_state = 2;
 }
 
 // SyncRoomStateEvent represents a state event in a SyncRoom (needs state_key)
@@ -417,6 +487,10 @@ message SyncRoomStateEvent {
   // "" = absent (AC3 — e.g. always for m.room.create, or any first-ever write
   // at a slot) — never a sentinel null.
   string replaces_state    = 7;
+  // Story member-event-prev-content (D10): same meaning as Event.prev_content /
+  // Event.prev_sender (JSON text of the predecessor's content; "" = no predecessor).
+  string prev_content      = 8;
+  string prev_sender       = 9;
 }
 
 // GetSyncDelta — incremental sync request with long-polling
@@ -425,15 +499,21 @@ message GetSyncDeltaRequest {
   string since_token = 2;  // opaque token from previous next_batch
   int64  timeout_ms  = 3;  // long-poll wait time; 0 = return immediately; max 30000
   string device_id   = 4;  // device-scoped since-token lookup key (Story 9-22)
+  bool   full_state  = 5;  // sync-membership-partition (D14): every joined room with its full state, returns at once
 }
 
 message GetSyncDeltaResponse {
-  string               since_token         = 1;  // new next_batch token for the client
-  repeated SyncRoom    rooms               = 2;  // only rooms with new events
-  bool                 fallback_to_initial = 3;  // true if since_token was unknown → full sync
+  string                  since_token           = 1;  // new next_batch token for the client
+  repeated SyncRoom       rooms                 = 2;  // joined rooms with new events (+ full_state rooms)
+  bool                    fallback_to_initial   = 3;  // true if since_token was unknown → full sync
+  repeated string         join_room_ids         = 4;  // sync-membership-partition: the WHOLE join class
+  repeated SyncInviteRoom invite_rooms          = 5;  // NEW invitations since the token (stripped invite_state)
+  repeated SyncRoom       leave_rooms           = 6;  // NEW leaves: timeline bounded at the leave event, state empty
+  repeated string         newly_joined_room_ids = 7;  // sync-stream-position: join rooms that were no joined room of the device's base
 }
 
-// SyncRoom represents one joined room's state in an initial sync
+// SyncRoom represents one room's snapshot: a joined room's state and timeline (initial sync, incremental delta), or the leave window of
+// a room the user left (leave_rooms: empty state_events, the timeline bounded at the leave event)
 message SyncRoom {
   string                      room_id              = 1;
   repeated SyncRoomStateEvent state_events         = 2;
@@ -515,6 +595,7 @@ message UnbanUserRequest {
   string room_id   = 1;
   string caller_id = 2;
   string target_id = 3;
+  string reason    = 4;  // optional (story moderation-routes-atomic-ban, D10)
 }
 message UnbanUserResponse {}
 

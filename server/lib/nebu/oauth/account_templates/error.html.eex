@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title><%= @title %></title>
+<style><%= @css %></style>
+</head>
+<body>
+<main data-page="account-error" data-error="<%= @code %>">
+<h1><%= @heading %></h1>
+<p><%= @explanation %></p>
+<h2>What you can do</h2>
+<ul>
+<%= for item <- @actions do %>
+<li><%= item %></li>
+<% end %>
+</ul>
+<%= if @restart do %>
+<p><a href="/account">Back to the account page</a></p>
+<% end %>
+</main>
+</body>
+</html>

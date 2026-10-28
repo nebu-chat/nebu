@@ -13,10 +13,16 @@ resource "stackit_alb_certificate" "nebu" {
 
 # ── Application Load Balancer (tls_mode = "alb") ──────────────────────────────
 # L7 ALB with TLS termination at the load balancer.
-# go-removal-cleanup: targets the Docker Compose nginx proxy on the VM (port 80),
-# which forwards to the server container (Bandit listener, container port 4000).
-# Port 443 HTTPS → VM:80 (nginx proxy → server:4000)
-# Port 80  HTTP  → VM:80 (nginx proxy → server:4000)
+# go-removal-cleanup: targets the Docker Compose nginx proxy on the VM, which forwards to the
+# server container (Bandit listener, container port 4000).
+# Port 443 HTTPS → VM:8081 (nginx proxy → server:4000). 8081 is the ONLY nginx listener that may
+#                          carry the realip directives (lb_real_ip_cidrs).
+# Port 80  HTTP  → VM:80   (nginx proxy: 308 redirect to https; no realip, trusts no X-Forwarded-For).
+#
+# Both ALB listeners are HTTP-level (PROTOCOL_HTTPS / PROTOCOL_HTTP), so X-Forwarded-For is produced
+# by the ALB. The provider (stackit_application_load_balancer) has no redirect action, so the
+# HTTP→HTTPS redirect lives in the VM nginx :80 listener. Verify with the negative test (README)
+# that the ALB APPENDS the client address before setting lb_real_ip_cidrs.
 
 resource "stackit_application_load_balancer" "nebu" {
   count            = var.tls_mode == "alb" ? 1 : 0
@@ -35,6 +41,28 @@ resource "stackit_application_load_balancer" "nebu" {
   target_pools = [
     {
       name        = "matrix-api"
+      target_port = 8081
+      targets = [
+        {
+          display_name = stackit_server.nebu.name
+          ip           = stackit_network_interface.nebu.ipv4
+        }
+      ]
+      active_health_check = {
+        interval            = "10s"
+        interval_jitter     = "3s"
+        timeout             = "5s"
+        healthy_threshold   = 3
+        unhealthy_threshold = 3
+        http_health_checks = {
+          ok_status = ["200"]
+          path      = "/_matrix/client/versions"
+        }
+      }
+    },
+    {
+      # Target of the plain-HTTP listener: nginx :80 redirects everything except the health path.
+      name        = "matrix-api-http"
       target_port = 80
       targets = [
         {
@@ -87,7 +115,7 @@ resource "stackit_application_load_balancer" "nebu" {
         hosts = [{
           host = var.server_name
           rules = [{
-            target_pool = "matrix-api"
+            target_pool = "matrix-api-http"
             web_socket  = false
             path = {
               prefix = "/"

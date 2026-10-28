@@ -58,23 +58,37 @@ pages:
 variables:
   DOCKER_DRIVER: overlay2
   # go-removal-cleanup (full-elixir-stack): CI_GO_IMAGE removed with the Go layer.
-  CI_ELIXIR_IMAGE: $CI_REGISTRY_IMAGE/ci-elixir:1.19
+  #
+  # The CI Elixir image. The TAG IS THE ELIXIR MINOR (docker/Dockerfile.ci.elixir builds FROM elixir:1.20-alpine, the same base as the
+  # production image server/Dockerfile): it used to be tagged 1.19 while it contained 1.20, so a reader (and a registry pull) was lied to.
+  # Every job below uses this variable, nothing spells the tag out. Bumping the Elixir minor = change FROM in docker/Dockerfile.ci.elixir
+  # AND this tag in ONE commit: the changed Dockerfile triggers `build-ci-elixir` in that merge request / main pipeline BEFORE the unit
+  # stage pulls the new tag. If the tag does not exist yet in the registry (first run on a fresh project / registry cleanup):
+  # run `build-ci-elixir` (and `build-ci-dex`) manually once, see "CI Image Builds" below.
+  CI_ELIXIR_IMAGE: $CI_REGISTRY_IMAGE/ci-elixir:1.20
   GITLEAKS_VERSION: "8.24.3"
-# Duplicate pipeline prevention:
-# feature/* and bugfix/* branches never run branch pipelines — only MR pipelines.
-# This eliminates the race condition where a branch pipeline starts before the MR
-# exists ($CI_OPEN_MERGE_REQUESTS is empty at push time) and then the MR pipeline
-# starts on top of it. Protected branches (main, release/*, hotfix/*) still
-# run branch pipelines. Tag pipelines (v*.*.* SemVer) trigger the release stage.
+# Which pipelines exist at all (a job's own rules: can only choose among these):
+#   * a SemVer tag (the release stage), a merge request pipeline, a schedule (Renovate), a manual "Run pipeline" (web / api);
+#   * main, release/* and hotfix/* branches (protected: branch pipelines as before);
+#   * feature/*, bugfix/*, chore/* branches ONLY while they have NO open merge request. With an open merge request the merge request
+#     pipeline is the one pipeline of that push (`$CI_OPEN_MERGE_REQUESTS` is non-empty from the push after the MR was opened on): no
+#     duplicate branch + MR pipeline. Before the first MR exists such a branch gets a branch pipeline, so a pushed branch is never
+#     untested. (The old rules created NO pipeline at all for a feature / bugfix branch without an MR, so the unit tests silently did not
+#     run; a branch pipeline started by the push BEFORE the MR was opened can still finish next to the first MR pipeline: both test the same
+#     commit, the second push onward only creates the MR pipeline.)
+# Tag pipelines (v*.*.* SemVer) trigger the release stage; RC/beta tags (v1.0.0-rc1) are intentionally excluded.
 workflow:
   rules:
-    # RC/beta tags (v1.0.0-rc1) are intentionally excluded — only stable SemVer triggers release.
     - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: '$CI_PIPELINE_SOURCE == "schedule"'
+    - if: '$CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api"'
     - if: '$CI_COMMIT_BRANCH == "main"'
     - if: '$CI_COMMIT_BRANCH =~ /^release\//'
     - if: '$CI_COMMIT_BRANCH =~ /^hotfix\//'
+    - if: '$CI_COMMIT_BRANCH =~ /^(feature|bugfix|chore)\// && $CI_OPEN_MERGE_REQUESTS'
+      when: never
+    - if: '$CI_COMMIT_BRANCH =~ /^(feature|bugfix|chore)\//'
 # Defaults applied to every job unless overridden.
 # - `timeout: 30 minutes` bounds runaway jobs (Kassandra 8.6 review M-3).
 # - `interruptible: true` cancels superseded pipelines on the same ref so a
@@ -94,6 +108,23 @@ stages:
   - oci-image
   - attestation
   - mirror
+# ─── Shared rules ─────────────────────────────────────────────────────────────
+# `workflow:rules` above decides which pipelines exist; these only pick the jobs of an existing pipeline.
+# Code / docs / scan jobs: every merge request pipeline and every branch pipeline (main, release/*, hotfix/*, feature|bugfix|chore/* without an MR).
+# Not on tag and schedule pipelines (a tag publishes the release image only).
+.rules-code: &rules_code
+  - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  - if: '$CI_COMMIT_BRANCH'
+# Deployment code (OpenTofu / Helm): the same pipelines, but only when deploy/ changed (always on release/* and for a manual run).
+.rules-deploy: &rules_deploy
+  - if: '$CI_COMMIT_BRANCH =~ /^release\//'
+  - if: '$CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api"'
+  - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    changes:
+      - deploy/**/*
+  - if: '$CI_COMMIT_BRANCH'
+    changes:
+      - deploy/**/*
 # ─── CI Image Builds ──────────────────────────────────────────────────────────
 # Kaniko builds container images without a Docker daemon.
 # The -debug variant ships a busybox shell so before_script works.
@@ -118,51 +149,59 @@ stages:
 build-ci-elixir:
   !!merge <<: *build_ci_image
   script:
-    - /kaniko/executor --context "${CI_PROJECT_DIR}" --dockerfile docker/Dockerfile.ci.elixir --destination "${CI_REGISTRY_IMAGE}/ci-elixir:1.19" --cache=true --cache-ttl=168h
+    - /kaniko/executor --context "${CI_PROJECT_DIR}" --dockerfile docker/Dockerfile.ci.elixir --destination "${CI_ELIXIR_IMAGE}" --cache=true --cache-ttl=168h
   rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
+    # Built whenever the Dockerfile changes (the merge request / branch / main pipeline that carries the change builds the image BEFORE the
+    # unit stage pulls it: stage order). Everywhere else it is a manual, non-blocking job: the way to (re)build the image by hand
+    # (fresh registry, expired tag): open a pipeline on main or the branch (Run pipeline) and start `build-ci-elixir` / `build-ci-dex`.
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH'
       changes: [docker/Dockerfile.ci.elixir]
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-      changes: [docker/Dockerfile.ci.elixir]
-    - when: manual
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH'
+      when: manual
       allow_failure: true
 build-ci-dex:
   !!merge <<: *build_ci_image
   script:
     - /kaniko/executor --context "${CI_PROJECT_DIR}" --dockerfile docker/Dockerfile.dex-ci --destination "${CI_REGISTRY_IMAGE}/ci-dex:v2.45.1" --cache=true --cache-ttl=168h
   rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH'
       changes: [docker/Dockerfile.dex-ci, dev/dex/config.yaml]
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-      changes: [docker/Dockerfile.dex-ci, dev/dex/config.yaml]
-    - when: manual
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH'
+      when: manual
       allow_failure: true
 # ─── Unit Tests ───────────────────────────────────────────────────────────────
 # go-removal-cleanup (full-elixir-stack): lint-go and test-unit-go were removed along
 # with the Go layer. Only the Elixir unit suite remains.
+# The unit suite needs NO database (the DB-bound tests are tagged :integration and excluded; `test/test_helper.exs` decides). `compile --force`
+# first: a restored `_build` cache would otherwise not recompile, and `--warnings-as-errors` can only fail on warnings of a compile that happened.
+# Cache: `deps` / `_build` only (paths outside the project directory such as ~/.hex are never cached by GitLab; Hex and rebar are baked into the image).
 test-unit-elixir:
   stage: unit
-  image: $CI_REGISTRY_IMAGE/ci-elixir:1.19
+  image: $CI_ELIXIR_IMAGE
   script:
-    - cd server && mix deps.get && MIX_ENV=test mix compile && mix test --warnings-as-errors
+    - cd server && mix deps.get && MIX_ENV=test mix compile --force --warnings-as-errors && mix test --warnings-as-errors
   cache:
     key: "mix-${CI_COMMIT_REF_SLUG}"
     paths:
       - server/deps
       - server/_build
-      - ~/.hex
-      - ~/.mix
+  rules: *rules_code
+# Compatibility lane: server/mix.exs promises `elixir: "~> 1.19"` while production and the lane above run 1.20. The public 1.19 image has no
+# Hex / rebar baked in. Non-blocking: a failure here means "1.19 broke", not "the build is red".
+test-unit-elixir-1-19:
+  stage: unit
+  image: elixir:1.19-alpine
+  script:
+    - mix local.hex --force && mix local.rebar --force
+    - cd server && mix deps.get && MIX_ENV=test mix compile --force --warnings-as-errors && mix test --warnings-as-errors
+  allow_failure: true
   rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
-    - if: '$CI_COMMIT_BRANCH =~ /^feature\//'
-    - if: '$CI_COMMIT_BRANCH =~ /^bugfix\//'
-    - if: '$CI_COMMIT_BRANCH =~ /^release\//'
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == "main"'
 # ─── Secret Scan ──────────────────────────────────────────────────────────────
 secret-scan:
   stage: verify
   # go-removal-cleanup (full-elixir-stack): ci-go image removed; this is a shell-only job.
-  image: $CI_REGISTRY_IMAGE/ci-elixir:1.19
+  image: $CI_ELIXIR_IMAGE
   timeout: 30 minutes
   interruptible: true
   before_script:
@@ -187,17 +226,12 @@ secret-scan:
     when: always
     paths:
       - gitleaks-report.json
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
-    - if: '$CI_COMMIT_BRANCH =~ /^feature\//'
-    - if: '$CI_COMMIT_BRANCH =~ /^bugfix\//'
-    - if: '$CI_COMMIT_BRANCH =~ /^release\//'
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  rules: *rules_code
 # ─── Verify Docs ──────────────────────────────────────────────────────────────
 verify-docs:
   stage: verify
   # go-removal-cleanup (full-elixir-stack): ci-go image removed; this is a shell-only job.
-  image: $CI_REGISTRY_IMAGE/ci-elixir:1.19
+  image: $CI_ELIXIR_IMAGE
   before_script:
     # Bare elixir-alpine image: the verify-*.sh scripts are bash and need python3
     # (manifest validation) + npx markdownlint-cli (node/npm); git diffs the
@@ -211,13 +245,12 @@ verify-docs:
     - scripts/verify-docs.sh
   allow_failure: false
   rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
-    - if: '$CI_COMMIT_BRANCH =~ /^feature\//'
-    - if: '$CI_COMMIT_BRANCH =~ /^bugfix\//'
+    # bugfix branches / merge requests of a bugfix branch: a stale arc42 manifest only warns (a bugfix does not refresh the architecture docs)
+    - if: '$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^bugfix\// || $CI_COMMIT_BRANCH =~ /^bugfix\//'
       variables:
         MANIFEST_FRESHNESS_WARN_ONLY: "true"
-    - if: '$CI_COMMIT_BRANCH =~ /^release\//'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
 # ─── App Image Builds ─────────────────────────────────────────────────────────
 # Kaniko builds the server application image and pushes it to the GitLab registry
 # tagged with the commit SHA. No DinD required.
@@ -285,29 +318,24 @@ integration-test:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       when: manual
       allow_failure: true
-# ─── Element Web Browser E2E ───────────────────────────────────────────────────
-# Story e2e-browser-ci-and-dex-reliability (epic e2e-test-rehab) — AC3.
+# ─── Browser E2E (Playwright, three jobs) ───────────────────────────────────────
+# Both run `scripts/e2e-ci.sh` (the same entry point as `make test-e2e-element-ci` / `make test-e2e-oauth-ci`): compose starts the stack in the
+# DinD daemon with PUBLISHED ports, Playwright runs in a container on the HOST network, so the origins the Element config and the Dex redirect
+# URIs are registered for (localhost:7070 / :8008, dex.localtest.me:5556, nebu.localtest.me:7443) are reached as they are (`--add-host` instead of
+# /etc/hosts). The Playwright image tag follows @playwright/test of e2e/package-lock.json (the old Makefile target pinned 1.44 next to a 1.59 lockfile:
+# browser and library versions did not match). `npm ci` instead of `npm install`.
 #
-# Runs the `element-web` Playwright/BDD project against a real Element Web SPA
-# driven through the full OIDC Authorization-Code + PKCE flow with Dex up.
+# Why the DinD docker-tagged runner and amd64: the `dexidp/dex` image is amd64; under emulation (Apple Silicon) it is too slow for a reliable gate
+# (the OIDC login warm-up times out), natively it is fine. Same constraint as `integration-test`.
 #
-# Why this job (and why amd64):
-#   The `dexidp/dex` image is amd64. On developer Apple-Silicon machines it runs
-#   under emulation and is too slow to be a reliable gate — the browser login
-#   warmup times out before Dex finishes redirecting. This job pins the work to a
-#   docker-tagged amd64 runner where Dex runs NATIVELY, so it is the dependable
-#   gate for browser verification (local emulated runs are best-effort only).
+# Trigger policy (all three): MANUAL everywhere, like `integration-test` (a full run is 20-60 minutes and the jobs need a docker-tagged DinD runner,
+# which not every GitLab instance has: an automatic job without such a runner sits in `pending` forever). Start them via Run pipeline -> the manual
+# job, or locally with the `make test-e2e-*` targets; a manual job with `allow_failure: true` never blocks. They run from the prebuilt `build-server-image` registry image on merge request and main pipelines (NEBU_E2E_PREBUILT=1:
+# one Kaniko build, no 5-10 minute image build in the DinD daemon); a branch pipeline (no merge request) builds the image in DinD.
+# `allow_failure: true` on purpose: a documented set of known failing scenarios remains (docs/architecture/07-deployment.md, "Browser e2e jobs",
+# and e2e/KNOWN-FAILURES.md); the job is the signal, the list says which red scenarios are expected. Remove `allow_failure` once the list is empty.
 #
-#   It is pinned to runners tagged `docker` (DinD) because `make test-e2e-element-ci`
-#   uses docker compose (Dex + server + element sidecar) and runs Playwright in a
-#   host-networked container so the browser reaches the localhost:7070 / :8008 /
-#   :5556 origins that the Element config and Dex redirect URIs are registered for.
-#
-# The Makefile target runs `npm run preflight` first (AC1) — if Dex did not come
-# up the job fails fast with "Dex unreachable" instead of a 30s navigation timeout.
-#
-# Manual + allow_failure so pipelines on plain K8s runners are never blocked;
-# trigger on a docker-tagged amd64 runner. Mirrors the integration-test policy.
+# e2e-element-web: the `element-web` project (Element Web SPA through the full OIDC Authorization Code + PKCE flow with Dex).
 e2e-element-web:
   stage: integration
   tags:
@@ -319,10 +347,11 @@ e2e-element-web:
   variables:
     DOCKER_HOST: tcp://docker:2375
     DOCKER_TLS_CERTDIR: ""
-    # amd64 native Dex — default timeouts are fine; raise here if a runner is slow.
+    # amd64 native Dex: the default timeouts are fine; raise here if a runner is slow.
     NEBU_E2E_NAV_TIMEOUT_MS: "60000"
+  timeout: 60 minutes
   before_script:
-    - apk add --no-cache make openssl
+    - apk add --no-cache bash make openssl
     - until docker info; do sleep 1; done
     - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
     - echo "$DOCKER_REGISTRY_PASS" | docker login "$DOCKER_REGISTRY" --username "$DOCKER_REGISTRY_USER" --password-stdin
@@ -333,12 +362,100 @@ e2e-element-web:
     paths:
       - e2e/playwright-report/
       - e2e/test-results/
+      - e2e/server.log
+    reports:
+      junit: e2e/junit.xml
     expire_in: 1 week
   rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == "main"'
+      variables:
+        NEBU_E2E_PREBUILT: "1"
       when: manual
       allow_failure: true
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
+      when: manual
+      allow_failure: true
+# e2e-admin-ui: the Admin UI scenarios (project `admin-ui`) on the plain-http stack, WITHOUT the OAuth groups (those need the https stack below).
+e2e-admin-ui:
+  stage: integration
+  tags:
+    - docker
+  image: docker:latest
+  services:
+    - name: docker:dind
+      command: ["--tls=false"]
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+    NEBU_E2E_NAV_TIMEOUT_MS: "60000"
+  timeout: 60 minutes
+  before_script:
+    - apk add --no-cache bash make openssl
+    - until docker info; do sleep 1; done
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+    - echo "$DOCKER_REGISTRY_PASS" | docker login "$DOCKER_REGISTRY" --username "$DOCKER_REGISTRY_USER" --password-stdin
+  script:
+    - make test-e2e-admin-ci
+  artifacts:
+    when: always
+    paths:
+      - e2e/playwright-report/
+      - e2e/test-results/
+      - e2e/server.log
+    reports:
+      junit: e2e/junit.xml
+    expire_in: 1 week
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == "main"'
+      variables:
+        NEBU_E2E_PREBUILT: "1"
+      when: manual
+      allow_failure: true
+    - if: '$CI_COMMIT_BRANCH'
+      when: manual
+      allow_failure: true
+# e2e-oauth-https: the OAuth 2.0 authorization server scenarios (features/oauth, oauth-client-approvals / -revocation, oauth-switch of the admin-ui
+# project) against the HTTPS front door of dev/tls: nginx with a local CA (generated in the job), ONE origin https://nebu.localtest.me:7443 for
+# Element, the Matrix API, /oauth2 and the admin UI, `oauth_enabled=true` with the issuer = that origin (the consent and account POSTs check their
+# Origin against the issuer, which a fake issuer on http://localhost cannot satisfy). Playwright runs with certificate errors ignored and the
+# host mapping above; the client redirect targets (*.e2e.example, localhost:53682) are answered by local stub servers (e2e/fixtures/client-stubs.ts:
+# Playwright cannot intercept the second hop of a redirect).
+e2e-oauth-https:
+  stage: integration
+  tags:
+    - docker
+  image: docker:latest
+  services:
+    - name: docker:dind
+      command: ["--tls=false"]
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+    NEBU_E2E_NAV_TIMEOUT_MS: "60000"
+  timeout: 45 minutes
+  before_script:
+    - apk add --no-cache bash make openssl
+    - until docker info; do sleep 1; done
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+    - echo "$DOCKER_REGISTRY_PASS" | docker login "$DOCKER_REGISTRY" --username "$DOCKER_REGISTRY_USER" --password-stdin
+  script:
+    - make test-e2e-oauth-ci
+  artifacts:
+    when: always
+    paths:
+      - e2e/playwright-report/
+      - e2e/test-results/
+      - e2e/server.log
+    reports:
+      junit: e2e/junit.xml
+    expire_in: 1 week
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == "main"'
+      variables:
+        NEBU_E2E_PREBUILT: "1"
+      when: manual
+      allow_failure: true
+    - if: '$CI_COMMIT_BRANCH'
       when: manual
       allow_failure: true
 # Daemonless alternative to integration-test for plain K8s runners (no DinD).
@@ -392,7 +509,7 @@ integration-test-podman:
 
 integration-test-k8s:
   stage: integration
-  image: $CI_REGISTRY_IMAGE/ci-elixir:1.19
+  image: $CI_ELIXIR_IMAGE
   services:
     - name: postgres:16-alpine
       alias: postgres
@@ -474,18 +591,7 @@ validate-iac:
     - echo "==> Validating deploy/tofu/examples/upcloud"
     - (cd deploy/tofu/examples/upcloud && tofu init -backend=false && tofu validate)
     - echo "==> IaC validation passed."
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
-      changes:
-        - deploy/**/*
-    - if: '$CI_COMMIT_BRANCH =~ /^feature\//'
-    - if: '$CI_COMMIT_BRANCH =~ /^bugfix\//'
-      changes:
-        - deploy/**/*
-    - if: '$CI_COMMIT_BRANCH =~ /^release\//'
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-      changes:
-        - deploy/**/*
+  rules: *rules_deploy
 # Story 13-4a: Helm chart lint and template render check.
 # Uses alpine/helm which ships only helm — separate job from validate-iac (different image).
 # AC1: helm lint 0 warnings; AC2: helm template renders valid YAML.
@@ -500,18 +606,7 @@ validate-helm:
     - echo "==> Template render check deploy/helm/nebu/"
     - helm template nebu deploy/helm/nebu/ --set server.image.tag=validate > /dev/null
     - echo "==> Helm validation passed."
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
-      changes:
-        - deploy/**/*
-    - if: '$CI_COMMIT_BRANCH =~ /^feature\//'
-    - if: '$CI_COMMIT_BRANCH =~ /^bugfix\//'
-      changes:
-        - deploy/**/*
-    - if: '$CI_COMMIT_BRANCH =~ /^release\//'
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-      changes:
-        - deploy/**/*
+  rules: *rules_deploy
 # ─── Release Image Builds ─────────────────────────────────────────────────────
 # Triggered exclusively by SemVer Git tags (e.g. git tag v1.0.0 && git push origin v1.0.0).
 # Produces the versioned image: <CI_REGISTRY_IMAGE>/nebu-server:<semver>.
@@ -538,19 +633,23 @@ release-server-image:
 #   3. Add a scheduled pipeline: Settings → CI/CD → Schedules → weekly on main
 #
 # Renovate reads renovate.json from the repo root and opens MRs for updates.
-.renovate:
+# NOTE: this used to be the HIDDEN job `.renovate` (a leading dot = a template nobody extends), so the weekly schedule never ran it and a
+# scheduled pipeline had no job at all. It is a real job now, created only for a schedule that has RENOVATE_TOKEN (without the token the
+# schedule is a no-op instead of a red job).
+renovate:
   stage: .pre
-  image: renovate/renovate:latest
+  image: renovate/renovate:44
   variables:
     RENOVATE_PLATFORM: gitlab
     RENOVATE_ENDPOINT: "${CI_SERVER_URL}/api/v4"
-    RENOVATE_TOKEN: "${RENOVATE_TOKEN}"
     RENOVATE_REPOSITORIES: '["${CI_PROJECT_PATH}"]'
     LOG_LEVEL: info
   script:
+    # RENOVATE_TOKEN comes from the masked CI variable of the same name (renovate reads it from the environment)
     - renovate
+  allow_failure: true
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $RENOVATE_TOKEN'
 # ─── Release Tag Creation ──────────────────────────────────────────────────────
 # Runs at the end of the release/* branch pipeline — after all lint, unit, scan,
 # verify, build, and integration stages have passed successfully.
@@ -565,7 +664,7 @@ release-server-image:
 # intentional, to prevent overwriting an existing release tag.
 create-release-tag:
   stage: release
-  image: alpine:latest
+  image: alpine:3.23
   interruptible: false
   variables:
     GIT_STRATEGY: none

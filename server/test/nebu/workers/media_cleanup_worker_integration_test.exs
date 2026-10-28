@@ -139,7 +139,9 @@ defmodule Nebu.Workers.MediaCleanupWorkerIntegrationTest do
   # (MAX(inserted_at) < NOW() - retention_interval) actually fires. `now()` cannot
   # be backdated; this ledger row's `inserted_at` is the one legitimate stand-in,
   # exactly mirroring how the sibling :infected query's age is anchored.
-  defp backdate_deleted_transition!(media_id, days_ago) do
+  defp backdate_deleted_transition!(media_id, days_ago), do: backdate_transition!(media_id, "deleted", days_ago)
+
+  defp backdate_transition!(media_id, to_state, days_ago) do
     conn = migrate_role_conn!()
 
     try do
@@ -154,9 +156,9 @@ defmodule Nebu.Workers.MediaCleanupWorkerIntegrationTest do
         """
         UPDATE media_state_transitions
            SET inserted_at = NOW() - ($2 || ' days')::interval
-         WHERE media_id = $1 AND to_state = 'deleted'
+         WHERE media_id = $1 AND to_state = $3
         """,
-        [media_id, Integer.to_string(days_ago)]
+        [media_id, Integer.to_string(days_ago), to_state]
       )
     after
       Postgrex.query!(
@@ -211,6 +213,10 @@ defmodule Nebu.Workers.MediaCleanupWorkerIntegrationTest do
 
     Application.put_env(:nebu_http, :media_storage_module, FakeStorage)
     on_exit(fn -> Application.delete_env(:nebu_http, :media_storage_module) end)
+
+    # the default-window tests must not see a value saved by a developer or leaked by another test
+    Nebu.OAuth.TestSupport.privileged_sql!("DELETE FROM media_config WHERE key IN ('deleted_days', 'infected_days')", [])
+    on_exit(fn -> Nebu.OAuth.TestSupport.privileged_sql!("DELETE FROM media_config WHERE key IN ('deleted_days', 'infected_days')", []) end)
 
     :ok
   end
@@ -269,5 +275,109 @@ defmodule Nebu.Workers.MediaCleanupWorkerIntegrationTest do
     assert row.state == "deleted", "must not be hard-deleted while inside the retention window"
     assert row.storage_key == storage_key
     assert count_hard_deleted_audit_rows!(mid) == 0
+  end
+
+  # ─── story media-cleanup-reads-media-config (follow-up du): the REAL media_config rows decide ──
+
+  # media_config has no DELETE policy for the runtime role (FORCE ROW LEVEL SECURITY): a plain Repo DELETE silently deletes nothing
+  defp set_config!(key, value) do
+    Nebu.OAuth.TestSupport.privileged_sql!(
+      "INSERT INTO media_config (key, value, set_at) VALUES ($1, $2, 1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+      [key, value]
+    )
+  end
+
+  defp infected_row!(suffix, days_ago) do
+    mid = media_id(suffix)
+    insert_media_file!(mid, :scanning, "storage-key-#{mid}")
+    on_exit(fn -> cleanup!(mid) end)
+    assert {:ok, :infected} = Nebu.Media.StateMachine.transition(mid, :infected, {:system, nil}, %{})
+    backdate_transition!(mid, "infected", days_ago)
+    mid
+  end
+
+  defp deleted_row!(suffix, days_ago) do
+    mid = media_id(suffix)
+    insert_media_file!(mid, :quarantined, "storage-key-#{mid}")
+    on_exit(fn -> cleanup!(mid) end)
+    assert {:ok, :deleted} = Media.admin_delete(mid, "@kai:test.local")
+    backdate_deleted_transition!(mid, days_ago)
+    mid
+  end
+
+  describe "retention windows from the real media_config table" do
+    test "a stored deleted_days of 10 deletes a row 11 days old and keeps one 9 days old (days, real interval arithmetic, no restart)" do
+      set_config!("deleted_days", "10")
+      old = deleted_row!("cfg10_old", 11)
+      young = deleted_row!("cfg10_young", 9)
+
+      assert :ok = perform_job(MediaCleanupWorker, %{})
+
+      assert fetch_row!(old).state == "hard_deleted"
+      assert fetch_row!(young).state == "deleted"
+    end
+
+    test "a window longer than the default keeps a row the old default (30 days) would have deleted; a later shortening deletes it at the next run" do
+      set_config!("deleted_days", "90")
+      mid = deleted_row!("cfg90", 31)
+
+      assert :ok = perform_job(MediaCleanupWorker, %{})
+      assert fetch_row!(mid).state == "deleted", "window 90: 31 days old stays"
+
+      set_config!("deleted_days", "30")
+      assert :ok = perform_job(MediaCleanupWorker, %{})
+      assert fetch_row!(mid).state == "hard_deleted", "the admin shortened the window: the next run deletes it, no restart"
+    end
+
+    test "fail-safe: a damaged stored value (not a number / negative / too large) deletes nothing, however old the row" do
+      mid = deleted_row!("cfg_damaged", 3000)
+
+      for bad <- ["abc", "", "-5", "3651"] do
+        set_config!("deleted_days", bad)
+
+        capture = ExUnit.CaptureLog.capture_log([level: :error], fn -> assert :ok = perform_job(MediaCleanupWorker, %{}) end)
+
+        assert fetch_row!(mid).state == "deleted", "stored #{inspect(bad)}: nothing may be deleted"
+        assert capture =~ "retention config unavailable"
+      end
+    end
+
+    test "the default :infected window is 7 days against the real interval arithmetic (8 days old deleted, 6 days old kept)" do
+      old = infected_row!("def_inf_old", 8)
+      young = infected_row!("def_inf_young", 6)
+
+      assert :ok = perform_job(MediaCleanupWorker, %{})
+
+      assert fetch_row!(old).state == "hard_deleted"
+      assert fetch_row!(young).state == "infected"
+    end
+
+    test "a stored infected_days of 3 deletes a 4 day old and keeps a 2 day old :infected row; 0 deletes a :deleted row of yesterday; 3650 keeps a 3649 day old one" do
+      set_config!("infected_days", "3")
+      i_old = infected_row!("cfg3_old", 4)
+      i_young = infected_row!("cfg3_young", 2)
+      assert :ok = perform_job(MediaCleanupWorker, %{})
+      assert fetch_row!(i_old).state == "hard_deleted"
+      assert fetch_row!(i_young).state == "infected"
+
+      set_config!("deleted_days", "0")
+      d_yesterday = deleted_row!("cfg0", 1)
+      assert :ok = perform_job(MediaCleanupWorker, %{})
+      assert fetch_row!(d_yesterday).state == "hard_deleted"
+
+      set_config!("deleted_days", "3650")
+      d_old = deleted_row!("cfg3650", 3649)
+      assert :ok = perform_job(MediaCleanupWorker, %{})
+      assert fetch_row!(d_old).state == "deleted"
+    end
+
+    test "a damaged infected_days also stops the :deleted phase (all-or-nothing read), the row stays" do
+      set_config!("infected_days", "abc")
+      mid = deleted_row!("cfg_infected_damaged", 3000)
+
+      ExUnit.CaptureLog.capture_log(fn -> assert :ok = perform_job(MediaCleanupWorker, %{}) end)
+
+      assert fetch_row!(mid).state == "deleted"
+    end
   end
 end

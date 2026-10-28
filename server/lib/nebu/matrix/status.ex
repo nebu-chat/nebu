@@ -27,6 +27,7 @@ defmodule Nebu.Matrix.Status do
           | :unauthenticated
           | :unavailable
           | :internal
+          | :too_large
 
   @spec ok() :: :ok
   def ok, do: :ok
@@ -57,4 +58,11 @@ defmodule Nebu.Matrix.Status do
 
   @spec internal() :: :internal
   def internal, do: :internal
+
+  @doc """
+  The request would make the server write an event or accept a body larger than its limits (story `event-size-limit`): answered as
+  HTTP 413 `M_TOO_LARGE` by `Nebu.Matrix.Http.call_core/1`.
+  """
+  @spec too_large() :: :too_large
+  def too_large, do: :too_large
 end

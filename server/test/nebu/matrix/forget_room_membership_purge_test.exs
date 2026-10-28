@@ -16,7 +16,7 @@ defmodule Nebu.Matrix.ForgetRoomMembershipPurgeTest do
     AC1  forget after leave persists a `forgotten_rooms` row + 200 {}
     AC2  forget while still joined → 400 M_BAD_STATE, writes nothing (regression)
     AC3  forgotten room excluded from initial /sync (join/invite/leave)
-    AC4  forgotten room excluded from incremental /sync (leave path)
+    AC4  forgotten room excluded from incremental /sync (rooms.leave path, story sync-membership-partition)
     AC5  per-user isolation — A's forget does not affect B's sync
     AC6  re-join clears the forget (row removed, room reappears)
     AC7  idempotent forget — second POST → 200 {}, still exactly one row
@@ -67,6 +67,8 @@ defmodule Nebu.Matrix.ForgetRoomMembershipPurgeTest do
     priv_jwk = Map.put(priv_map, "kid", @kid)
 
     Application.put_env(:nebu_http, :server_name, @server_name)
+    # story create-room-invites-direct (DATA adaptation): POST /invite refuses foreign-domain invitees, the domain is :event_dispatcher's server_name
+    Nebu.Test.ServerName.pin!(@server_name)
     Nebu.Web.OidcTestSupport.configure(@issuer, @audience)
 
     Application.put_env(:nebu_http, :oidc_jwks, [pub_jwk])
@@ -123,8 +125,10 @@ defmodule Nebu.Matrix.ForgetRoomMembershipPurgeTest do
     :ok
   end
 
-  defp create_room(token, name) do
-    conn = call(:post, "/_matrix/client/v3/createRoom", %{"name" => name}, auth(token))
+  # `extra` is merged into the createRoom body (story create-room-presets-power-levels-topic: AC6 re-joins its own room, which needs a
+  # PUBLIC room, `%{"preset" => "public_chat"}`: nobody is left to invite the only member back into an invite-only room).
+  defp create_room(token, name, extra \\ %{}) do
+    conn = call(:post, "/_matrix/client/v3/createRoom", Map.merge(%{"name" => name}, extra), auth(token))
     assert conn.status == 200, "createRoom must succeed to set up the scenario"
     json(conn)["room_id"]
   end
@@ -148,6 +152,24 @@ defmodule Nebu.Matrix.ForgetRoomMembershipPurgeTest do
     conn = call(:get, path, nil, auth(token))
     assert conn.status == 200, "sync must return 200"
     json(conn)
+  end
+
+  # Waits until the millisecond clock has advanced (at most 50 ms): the incremental sync reads `origin_server_ts > anchor`, so the leave
+  # event must not be stamped in the millisecond of the anchor event (story sync-membership-partition).
+  defp tick do
+    # past the newest event of the last seconds: createRoom stamps its chain up to several ms ahead of the clock (follow-up eu F-4)
+    {:ok, %{rows: [[newest]]}} =
+      Ecto.Adapters.SQL.query(Nebu.Repo, "SELECT coalesce(max(origin_server_ts), 0) FROM events WHERE origin_server_ts > $1", [System.system_time(:millisecond) - 10_000])
+
+    wait_ms(fn -> System.system_time(:millisecond) > newest end, 300)
+  end
+
+  defp wait_ms(fun, attempts) do
+    cond do
+      fun.() -> :ok
+      attempts <= 0 -> :timeout
+      true -> (Process.sleep(1); wait_ms(fun, attempts - 1))
+    end
   end
 
   # Returns true if `room_id` appears in ANY section of the sync rooms map.
@@ -231,16 +253,22 @@ defmodule Nebu.Matrix.ForgetRoomMembershipPurgeTest do
   # ════════════════════════════════════════════════════════════════════════
   # AC4 — excluded from incremental /sync (the recently-left re-surfacing path)
   #
-  # NOTE on sections: the current HTTP sync renderer (Nebu.Matrix.Http) hardcodes
-  # rooms.invite and rooms.leave to {} (a documented deferred gap), so a recently-left
-  # room is actually surfaced via the recently-left → fetch_delta_rooms path into
-  # rooms.JOIN, not rooms.leave. `room_in_sync?/2` checks join+invite+leave together, so
-  # the assertions are correct regardless of which section the room would appear in —
-  # the AC is "absent from ANY section", which is what the fix guarantees.
+  # Story sync-membership-partition (AC16, DELIBERATE re-pin; old -> new):
+  #   * old comment: "the HTTP sync renderer hardcodes rooms.invite and rooms.leave to {} ... a recently-left room is surfaced via the
+  #     recently-left -> fetch_delta_rooms path into rooms.JOIN". New: a left room is delivered ONCE in `rooms.leave` (the leave window,
+  #     bounded at the leave event) and never in `rooms.join`; the section the control sees is asserted, not "any section".
+  #   * old control: "a left (not yet forgotten) room appears in SOME section" -> new: `rooms.leave.<room>` (NOT rooms.join) with B's leave
+  #     event as the LAST timeline event. The control still proves the test exercises the left-room path (a vacuous pass is impossible).
+  #   * old final call: `sync(token, since=<the OLD since>)` reused a token the control call had already replaced, so it was in fact an
+  #     INITIAL-sync fallback, not an incremental sync. New: the final assertion uses the CONTROL's `next_batch` (a real incremental sync)
+  #     and, additionally, a fresh initial sync.
+  #   * new test: a room forgotten BEFORE its leave was delivered never shows the leave (the forget wins over a NEW leave, rule 1).
+  # `room_in_sync?/2` still checks join + invite + leave: the AC is "absent from ANY section".
   # ════════════════════════════════════════════════════════════════════════
 
   describe "AC4 — incremental sync exclusion" do
     test "a forgotten room is absent from every section of an incremental /sync", %{
+      user_id: uid,
       token: token
     } do
       room_id = create_room(token, "ac4-incremental")
@@ -250,24 +278,46 @@ defmodule Nebu.Matrix.ForgetRoomMembershipPurgeTest do
       since = initial["next_batch"]
       assert is_binary(since)
 
-      # Control: a left-but-NOT-yet-forgotten room DOES re-surface in incremental
-      # sync (via the recently-left → join-section path) — this proves the test
-      # actually exercises the recently-left code path the fix targets, so the AC4
-      # assertion below is a real regression check, not a vacuous pass.
+      # Control: a left-but-NOT-yet-forgotten room is delivered in rooms.LEAVE (never in rooms.join), with the leave event as the last
+      # timeline event — this proves the test actually exercises the left-room path the fix targets, so the exclusion assertions below
+      # are real regression checks, not vacuous passes.
+      tick()
       leave_room(token, room_id)
       control = sync(token, "since=#{URI.encode_www_form(since)}&timeout=0")
 
-      assert room_in_sync?(control, room_id),
-             "a left (not yet forgotten) room must appear in incremental sync — " <>
+      assert Map.has_key?(control["rooms"]["leave"] || %{}, room_id),
+             "a left (not yet forgotten) room must appear in rooms.leave of the incremental sync — " <>
                "if it does not, AC4's exclusion assertion would pass vacuously"
 
-      # Now forget it and re-issue the SAME incremental sync.
+      refute Map.has_key?(control["rooms"]["join"] || %{}, room_id), "a left room is never delivered in rooms.join (follow-up ez)"
+
+      last = control["rooms"]["leave"][room_id]["timeline"]["events"] |> List.last()
+      assert {last["type"], last["state_key"], last["content"]["membership"]} == {"m.room.member", uid, "leave"}
+
+      # Now forget it and issue a REAL incremental sync with the token the control call returned.
       assert forget_room(token, room_id).status == 200
 
-      # Incremental sync (timeout=0 so it returns immediately, no long-poll).
-      body = sync(token, "since=#{URI.encode_www_form(since)}&timeout=0")
+      body = sync(token, "since=#{URI.encode_www_form(control["next_batch"])}&timeout=0")
       refute room_in_sync?(body, room_id),
              "forgotten room must not re-surface in any section of incremental sync"
+
+      # and a fresh initial sync does not list it either
+      fresh = sync(token)
+      refute room_in_sync?(fresh, room_id), "forgotten room must not be listed by a fresh initial sync"
+    end
+
+    test "a room forgotten BEFORE its leave was delivered never shows the leave in any section (the forget wins over a new leave)", %{
+      token: token
+    } do
+      room_id = create_room(token, "ac4-forget-before-delivery")
+      since = sync(token)["next_batch"]
+
+      tick()
+      leave_room(token, room_id)
+      assert forget_room(token, room_id).status == 200
+
+      body = sync(token, "since=#{URI.encode_www_form(since)}&timeout=0")
+      refute room_in_sync?(body, room_id), "the leave of a forgotten room is not delivered"
     end
   end
 
@@ -317,7 +367,8 @@ defmodule Nebu.Matrix.ForgetRoomMembershipPurgeTest do
       user_id: uid,
       token: token
     } do
-      room_id = create_room(token, "ac6-rejoin")
+      # DATA adaptation (AC16): re-joining after the own leave needs an open room; the room is public_chat, the assertions are unchanged.
+      room_id = create_room(token, "ac6-rejoin", %{"preset" => "public_chat"})
       leave_room(token, room_id)
       assert forget_room(token, room_id).status == 200
       assert forgotten_row_count(uid, room_id) == 1

@@ -43,9 +43,20 @@ defmodule Nebu.Web.Router.ClientV1Media do
 
   alias Nebu.Media
 
-  plug Nebu.Web.Plugs.OidcPlug
+  # Pipeline (story oauth-room-summary-unrecognized, RU10): :match runs BEFORE authentication so the
+  # catch-all (marked `nebu_unrecognized: true`) answers an unimplemented endpoint with a spec
+  # `M_UNRECOGNIZED` without a credential check; every real route still runs the OidcPlug.
   plug :match
+  plug :authenticate
   plug :dispatch
+
+  @doc """
+  Runs `Nebu.Web.Plugs.OidcPlug` for every matched route; skipped ONLY when the catch-all marked the conn
+  (`conn.private[:nebu_unrecognized] === true`, strict boolean, fail closed).
+  """
+  @spec authenticate(Plug.Conn.t(), term()) :: Plug.Conn.t()
+  def authenticate(%Plug.Conn{private: %{nebu_unrecognized: true}} = conn, _opts), do: conn
+  def authenticate(conn, _opts), do: Nebu.Web.Plugs.OidcPlug.call(conn, Nebu.Web.Plugs.OidcPlug.init([]))
 
   get "/download/:server_name/:media_id/:file_name" do
     Media.download(conn, server_name, media_id, file_name)
@@ -59,9 +70,19 @@ defmodule Nebu.Web.Router.ClientV1Media do
     Media.thumbnail(conn, server_name, media_id)
   end
 
-  match _ do
-    conn
-    |> put_resp_content_type("application/json")
-    |> send_resp(404, Jason.encode!(%{"errcode" => "M_NOT_FOUND", "error" => "Unrecognized request"}))
+  # Fall-through (RU9 - RU11): 404 for an unknown path, 405 + Allow when another method routes here.
+  match _, private: %{nebu_unrecognized: true} do
+    Nebu.Web.Unrecognized.respond(conn, allowed_methods(conn))
+  end
+
+  # The methods this router has a real clause for at the request path (a probe selects a clause, it never
+  # dispatches; the marker is removed first, RU11).
+  defp allowed_methods(conn) do
+    path = Plug.Router.Utils.decode_path_info!(conn)
+    conn = %{conn | private: Map.delete(conn.private, :nebu_unrecognized)}
+
+    Nebu.Web.Unrecognized.probe(conn, fn c ->
+      do_match(c, c.method, path, c.host).private[:nebu_unrecognized] !== true
+    end)
   end
 end

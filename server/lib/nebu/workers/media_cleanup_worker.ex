@@ -71,9 +71,16 @@ defmodule Nebu.Workers.MediaCleanupWorker do
   `Application.get_env(:nebu_http, :media_cleanup_repo_module, Nebu.Repo)`,
   `:media_state_machine_module`, `:media_storage_module`,
   `:media_audit_writer_module` — the SAME seam keys `Nebu.Media`/Story 2e
-  already read, swappable independently for tests. Retention config is a
-  SEPARATE, `:nebu`-namespaced key: `Application.get_env(:nebu, :media_cleanup,
-  [])`, with `deleted_days: 30` / `infected_days: 7` fallbacks.
+  already read, swappable independently for tests.
+
+  ## Retention windows (story media-cleanup-reads-media-config, follow-up `du`)
+
+  `deleted_days` / `infected_days` come from the `media_config` table (the Admin media settings) through
+  `Nebu.Media.Config.retention_days/0`, read at EVERY run (no restart, no cache; defaults without a stored
+  value: 30 / 7 = the former `config :nebu, :media_cleanup` values, which no longer exist). FAIL-SAFE: when the
+  table cannot be read or a stored value is not an integer in 0..3650 the two fresh-candidate phases are skipped
+  with one ERROR line (no values) and nothing new is deleted; the completion sweep (rows that are already
+  `:hard_deleted`) still runs. `0` days = the shortest retention (delete at the next run).
   """
 
   use Oban.Worker, queue: :media_cleanup, max_attempts: 5
@@ -138,8 +145,23 @@ defmodule Nebu.Workers.MediaCleanupWorker do
 
   @impl Oban.Worker
   def perform(%Oban.Job{}) do
-    process_fresh_candidates(@sql_select_deleted_candidates, "deleted", deleted_days())
-    process_fresh_candidates(@sql_select_infected_candidates, "infected", infected_days())
+    # The windows are read from media_config at EVERY run (story media-cleanup-reads-media-config, follow-up du):
+    # an unreadable or damaged value deletes NOTHING new (never a guessed default); the completion sweep below
+    # only finishes rows that are already :hard_deleted, so it still runs.
+    case Nebu.Media.Config.retention_days() do
+      {:ok, %{deleted_days: deleted_days, infected_days: infected_days}} ->
+        Logger.info("MediaCleanupWorker: retention deleted_days=#{deleted_days} infected_days=#{infected_days}")
+        process_fresh_candidates(@sql_select_deleted_candidates, "deleted", deleted_days)
+        process_fresh_candidates(@sql_select_infected_candidates, "infected", infected_days)
+
+      {:error, reason} ->
+        Logger.error(
+          "MediaCleanupWorker: retention config unavailable, nothing deleted from :deleted / :infected this run " <>
+            "(reason=#{inspect(reason)}; check the media_config rows deleted_days / infected_days, see 07-deployment " <>
+            "\"Media retention windows\")"
+        )
+    end
+
     process_completion_candidates()
 
     :ok
@@ -302,9 +324,4 @@ defmodule Nebu.Workers.MediaCleanupWorker do
 
   defp audit_writer,
     do: Application.get_env(:nebu_http, :media_audit_writer_module, Nebu.Compliance.AuditWriter)
-
-  defp deleted_days, do: media_cleanup_config() |> Keyword.get(:deleted_days, 30)
-  defp infected_days, do: media_cleanup_config() |> Keyword.get(:infected_days, 7)
-
-  defp media_cleanup_config, do: Application.get_env(:nebu, :media_cleanup, [])
 end

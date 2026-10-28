@@ -286,7 +286,7 @@ defmodule Nebu.Media.StorageConfigTest do
     # oidc_claim_cache_test.exs's `OidcClaimCache.reset_for_test()` call at
     # the top of its own `setup`.
     if pid = Process.whereis(Nebu.Media.StorageConfig) do
-      if Process.alive?(pid), do: GenServer.stop(pid)
+      if Process.alive?(pid), do: (try do GenServer.stop(pid) catch :exit, _ -> :ok end)
     end
 
     {:ok, audit_bucket} = Agent.start_link(fn -> [] end)
@@ -332,7 +332,7 @@ defmodule Nebu.Media.StorageConfigTest do
       Application.delete_env(:nebu_http, :media_storage_env_reader)
 
       if pid = Process.whereis(Nebu.Media.StorageConfig) do
-        if Process.alive?(pid), do: GenServer.stop(pid)
+        if Process.alive?(pid), do: (try do GenServer.stop(pid) catch :exit, _ -> :ok end)
       end
     end)
 
@@ -1303,5 +1303,79 @@ defmodule Nebu.Media.StorageConfigTest do
     end)
 
     fun.()
+  end
+
+  # ─── story admin-forms-gate-sweep D4 (follow-up de, Kassandra design review): the stored credentials belong to the stored endpoint ───
+
+  describe "admin-forms-gate-sweep D4: stored credentials only for the stored endpoint" do
+    setup do
+      test_pid = self()
+
+      Application.put_env(:nebu_http, :media_storage_env_reader, fn ->
+        %{
+          "NEBU_MINIO_ENDPOINT" => "93.184.216.34:9000",
+          "NEBU_MINIO_BUCKET" => "stored-bucket",
+          "NEBU_S3_REGION" => "us-east-1",
+          "NEBU_MINIO_USE_SSL" => "true",
+          "NEBU_MINIO_ACCESS_KEY" => "STORED-ACCESS-KEY",
+          "NEBU_MINIO_SECRET_KEY" => "stored-secret-key"
+        }
+      end)
+
+      Application.put_env(:nebu_http, :media_storage_test_connection_fun, fn candidate ->
+        send(test_pid, {:test_connection_called, candidate})
+        :ok
+      end)
+
+      on_exit(fn -> Application.delete_env(:nebu_http, :media_storage_test_connection_fun) end)
+      :ok
+    end
+
+    defp candidate(overrides \\ %{}) do
+      Map.merge(%{endpoint: "93.184.216.34:9000", bucket: "stored-bucket", region: "us-east-1", use_ssl: true, access_key: nil, secret_key: nil}, overrides)
+    end
+
+    test "blank keys + the stored endpoint and scheme: the stored credentials are used (unchanged behaviour)" do
+      assert :ok = StorageConfig.test_connection(candidate())
+      assert_received {:test_connection_called, c}
+      assert c.access_key == "STORED-ACCESS-KEY" and c.secret_key == "stored-secret-key"
+    end
+
+    test "the STORED endpoint is compared trimmed (blanks around the stored value do not break the match)" do
+      Application.put_env(:nebu_http, :media_storage_env_reader, fn ->
+        %{"NEBU_MINIO_ENDPOINT" => "  93.184.216.34:9000 ", "NEBU_MINIO_USE_SSL" => "true", "NEBU_MINIO_ACCESS_KEY" => "STORED-ACCESS-KEY", "NEBU_MINIO_SECRET_KEY" => "stored-secret-key"}
+      end)
+
+      assert :ok = StorageConfig.test_connection(candidate())
+      assert_received {:test_connection_called, %{access_key: "STORED-ACCESS-KEY"}}
+    end
+
+    test "blank keys + ANOTHER endpoint: :secret_required, the test function is never called" do
+      assert {:error, :secret_required} = StorageConfig.test_connection(candidate(%{endpoint: "93.184.216.35:9000"}))
+      assert {:error, :secret_required} = StorageConfig.test_connection(candidate(%{endpoint: "93.184.216.34:9001"}))
+      refute_received {:test_connection_called, _}
+    end
+
+    test "blank keys + the same endpoint but the scheme flipped (use_ssl): refused too" do
+      assert {:error, :secret_required} = StorageConfig.test_connection(candidate(%{use_ssl: false}))
+      refute_received {:test_connection_called, _}
+    end
+
+    test "ONE blank key counts as blank: a typed key for another endpoint never picks up the stored other one" do
+      assert {:error, :secret_required} = StorageConfig.test_connection(candidate(%{endpoint: "93.184.216.35:9000", access_key: "typed-access"}))
+      assert {:error, :secret_required} = StorageConfig.test_connection(candidate(%{endpoint: "93.184.216.35:9000", secret_key: "typed-secret"}))
+      refute_received {:test_connection_called, _}
+    end
+
+    test "typed access AND secret key work for another endpoint and never mix with the stored ones" do
+      assert :ok = StorageConfig.test_connection(candidate(%{endpoint: "93.184.216.35:9000", access_key: "typed-access", secret_key: "typed-secret"}))
+      assert_received {:test_connection_called, c}
+      assert c.access_key == "typed-access" and c.secret_key == "typed-secret"
+    end
+
+    test "the IAM / STS endpoints are not part of the comparison (the test never contacts them)" do
+      assert :ok = StorageConfig.test_connection(candidate(%{iam_endpoint: "https://iam.other.example", sts_endpoint: "https://sts.other.example"}))
+      assert_received {:test_connection_called, %{access_key: "STORED-ACCESS-KEY"}}
+    end
   end
 end

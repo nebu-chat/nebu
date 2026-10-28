@@ -166,6 +166,32 @@ dns_mode = "external"
 # Requires tls_mode = "acme" or "alb" (lifecycle precondition enforced by tofu apply).
 # enable_element_web = false
 
+# ── Client-IP trust (ADR-033 TP1-TP14, follow-ups ap1) ────────────────────────
+# Per-IP rate limits (login, sync, OAuth, account) are keyed on the client address. Nebu honours
+# X-Forwarded-For ONLY from peers in NEBU_TRUSTED_PROXY_CIDRS. The cloud-init template wires this
+# for you: nginx on the VM is the single trusted hop and overwrites X-Forwarded-For with ONE address.
+#   tls_mode = "alb" / "dynamic": trusts only the nginx proxy container (fixed address .10 of compose_subnet)
+#   tls_mode = "acme":  trusts the compose bridge gateway (.1), valid because 8008/8080 are bound to 127.0.0.1
+#   tls_mode = "none":  NO trusted proxy; 8008 stays public because the LB targets it
+# compose_subnet = "172.30.0.0/24"   # must not overlap network_cidr
+#
+# Override (replaces the derived value, applies to every tls_mode). ONLY list a hop that APPENDS or
+# overwrites the client address; never an UpCloud load balancer that merely forwards a client-written
+# X-Forwarded-For, and never a network from which untrusted clients can reach the server.
+# trusted_proxy_cidrs = ""
+#
+# Real client IP behind the UpCloud load balancer (tls_mode = `alb` / `dynamic` only): list the EXACT LB hop address(es)
+# as /32 so NGINX resolves the client (right-most X-Forwarded-For address that is not a listed hop).
+# Only the :8081 nginx listener (target of the HTTPS frontend) honours them; the plain-HTTP :80
+# listener never does. Never list the whole network_cidr or a 0.0.0.0/0-style range (refused by
+# validation, entries must also lie inside network_cidr).
+# Empty (default) = all clients share the LB's rate-limit bucket (today's behaviour: safe against
+# spoofing, NOT safe for availability; do NOT enable `oauth_enabled` in this state, `tofu plan` warns).
+# Verify FIRST that the LB appends the client address and that a forged client header cannot
+# survive, over https:// and http:// (README, "Reverse-proxy routes, client-IP trust and access logs").
+# Addresses: `tofu output lb_private_addresses`.
+# lb_real_ip_cidrs = ["10.0.0.4/32"]
+
 # ── Container resource limits ─────────────────────────────────────────────────
 # Default values are tuned for a 4xCPU-8GB VM.
 # Adjust if using a larger or smaller VM plan.

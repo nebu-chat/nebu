@@ -1,0 +1,5 @@
+# test-review media-retention-audit-atomic (pre-dev, nebu-test-reviewer, 2026-10-15)
+1 MAJOR, 9 MINOR, INFO. Applied before / during dev: M1 AC5 race test for the default state WITHOUT a row (advisory lock, not only FOR UPDATE) + released_delete_after_days race; m4 "any other error: no retry, no refresh" (DB-free + a trigger on media_config); m6 ERROR log lines counted
+(exactly one), the vacuous refute fixed, the refusal of a shortening logs a value-free ERROR too (story D2b); m1 xmin proof only secondary (savepoint assumption commented, no technique in the test name), static test 1 reduced; m5 loader counter only from the Config process;
+m9 integration fixtures (DROP ... IF EXISTS, `me = self()`, await_blocked over pg_locks); m7 matrix slimmed (raising-writer mode one shortening + one lengthening per key); m8 doc pins loosened; i3 the value 0 (decided later through Kassandra MEDIUM-1: 0 = off like nil for released_delete_after_days).
+The retry contract ("retry after every audit failure, the guard refuses a shortening") was judged correct: a pre-classification before the first attempt would be racy.

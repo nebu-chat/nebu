@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title><%= @title %></title>
+<style><%= @css %></style>
+</head>
+<body>
+<%= if @signed_in do %>
+<header>
+<p class="who">Signed in as <strong><%= @user_id %></strong></p>
+<nav aria-label="Account">
+<ul>
+<li><a href="/account?action=org.matrix.profile"<%= if @nav == :profile do %> aria-current="page"<% end %>>Profile</a></li>
+<li><a href="/account?action=org.matrix.devices_list"<%= if @nav == :devices do %> aria-current="page"<% end %>>Devices</a></li>
+<li><a href="/account?action=org.matrix.cross_signing_reset"<%= if @nav == :reset do %> aria-current="page"<% end %>>Reset identity</a></li>
+</ul>
+</nav>
+</header>
+<% end %>
+<main data-page="account" data-action="<%= @action %>">
+<h1><%= @heading %></h1>
+<%= if @notice do %>
+<p class="notice <%= @notice.kind %>" role="<%= @notice.role %>" data-role="notice" data-notice="<%= @notice.code %>"><strong><%= @notice.label %></strong> <%= @notice.text %></p>
+<% end %>
+<%= @inner %>
+<%= if @logout do %>
+<form method="post" action="/account/logout" class="logout">
+<input type="hidden" name="csrf_token" value="<%= @csrf_token %>">
+<button type="submit" data-role="sign-out">Sign out of the account page</button>
+</form>
+<% end %>
+</main>
+</body>
+</html>

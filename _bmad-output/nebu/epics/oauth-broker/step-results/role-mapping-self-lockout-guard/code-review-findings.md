@@ -1,0 +1,4 @@
+# code-review role-mapping-self-lockout-guard (nebu-code-reviewer, 2026-10-15, cycle 0)
+0 CRITICAL, 0 MAJOR, 4 MINOR, 5 INFO. Core logic verified (predicate equivalence, fail-closed, refusal order, marker untouched, conventions).
+MINOR (all applied in dev cycle 1): (1) retry dead end: the kept marker stays valid 5 minutes, so the "sign in again" advice was not enough -> link to a new sign-in for :not_in_token / :unknown; (2) the rpc command in the message was not runnable verbatim -> full `bin/nebu rpc 'IO.inspect(Nebu.Release.reset_admin_group_claim("<value>"))'`, pinned by a test; (3) cookie budget under-tested -> realistic cookie test (2 KB refresh token blob, flash, CSRF), cap lowered from 64 to 32 values (3871 bytes measured); (4) story D2 wording.
+INFO applied: @page constants, "sorted order" wording, a value-free Logger.info on refusals. Accepted: unkeyed hash prefix in a signed cookie (the reader is the session holder).

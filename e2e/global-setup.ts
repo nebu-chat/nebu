@@ -32,6 +32,8 @@ import { ensureStorageState, getApiSession, createRoom } from './fixtures/dex-au
 import { doBootstrapAdmin } from './fixtures/admin-bootstrap';
 import { NEBU_USERS } from './fixtures/users';
 import { assertDexReachable } from './fixtures/dex-preflight';
+import { startClientStubs, STUB_CHROMIUM_ARGS } from './fixtures/client-stubs';
+import { queryServerConfigValue, upsertServerConfig } from './fixtures/db';
 
 const AUTH_STATE_DIR = path.join(__dirname, 'auth-state');
 const MAX_AGE_MS = 12 * 60 * 60 * 1000; // 12 hours
@@ -44,7 +46,10 @@ function isStateFresh(name: string): boolean {
   return (Date.now() - stat.mtimeMs) < MAX_AGE_MS;
 }
 
-export default async function globalSetup(): Promise<void> {
+export default async function globalSetup(): Promise<() => Promise<void>> {
+  // The client side of the OAuth redirects (see fixtures/client-stubs.ts); the returned teardown stops them.
+  const stopStubs = await startClientStubs();
+
   // Ensure output directory exists
   if (!fs.existsSync(AUTH_STATE_DIR)) {
     fs.mkdirSync(AUTH_STATE_DIR, { recursive: true });
@@ -68,7 +73,7 @@ export default async function globalSetup(): Promise<void> {
   if (process.env.NEBU_SKIP_BOOTSTRAP === '1') {
     console.log('[global-setup] NEBU_SKIP_BOOTSTRAP=1 — skipping doBootstrapAdmin (bootstrap wizard scenarios).');
   } else {
-    const adminBrowser = await chromium.launch();
+    const adminBrowser = await chromium.launch({ args: STUB_CHROMIUM_ARGS });
     try {
       const adminCtx  = await adminBrowser.newContext();
       const adminPage = await adminCtx.newPage();
@@ -85,22 +90,43 @@ export default async function globalSetup(): Promise<void> {
     }
   }
 
+  // An already bootstrapped stack may predate the Matrix client scopes (the wizard step above only runs on a fresh
+  // database): without `profile` the Matrix localpart is the opaque `sub`, not alex / marie / kai.
+  // Skipped when the stack has no direct DB access (NEBU_DB_URL / psql / docker exec): then the scopes must be set by the operator.
+  if (process.env.NEBU_SKIP_BOOTSTRAP !== '1') {
+    try {
+      if (!queryServerConfigValue('matrix_oidc_extra_scopes')) {
+        console.log("[global-setup] matrix_oidc_extra_scopes is empty -> setting 'profile email' (Matrix localparts alex / marie / kai)");
+        upsertServerConfig('matrix_oidc_extra_scopes', 'profile email');
+      }
+    } catch (e) {
+      console.warn(`[global-setup] Could not ensure matrix_oidc_extra_scopes: ${e}`);
+    }
+  }
+
   // M-5 fix: skip warm-up only when all active users are fresh (state + sidecar both present)
-  if (
+  // NEBU_E2E_SKIP_USER_WARMUP=1: the https oauth stack (CI job e2e-oauth-https) has no Element Web at localhost:7070 and
+  // its scenarios need no Matrix user sessions: skip the warm-up and the test rooms instead of waiting out three timeouts.
+  const skipWarmup = process.env.NEBU_E2E_SKIP_USER_WARMUP === '1';
+  if (skipWarmup) {
+    console.log('[global-setup] NEBU_E2E_SKIP_USER_WARMUP=1 — skipping the user warm-up and the test rooms');
+  } else if (
     isStateFresh('alex') &&
     isStateFresh('marie') &&
+    isStateFresh('tom') &&
     isStateFresh('kai')
   ) {
-    console.log('[global-setup] auth-state/{alex,marie,kai}.{json,token.json} are all fresh — skipping warm-up');
+    console.log('[global-setup] auth-state/{alex,marie,tom,kai}.{json,token.json} are all fresh — skipping warm-up');
   } else {
-    console.log('[global-setup] Warming storageState + token sidecars for alex + marie + kai...');
-    const browser = await chromium.launch();
+    console.log('[global-setup] Warming storageState + token sidecars for alex + marie + tom + kai...');
+    const browser = await chromium.launch({ args: STUB_CHROMIUM_ARGS });
 
     try {
       // Warm active users sequentially to avoid Dex being saturated by parallel OIDC flows.
       // Errors are non-fatal: admin-UI tests don't need Element Web storage state.
       // Element-web tests will fail naturally if sidecars are missing.
-      for (const user of [NEBU_USERS.alex, NEBU_USERS.marie, NEBU_USERS.kai]) {
+      // story power-levels-enforcement: tom is kicked in power-levels.feature through the API, so his session is warmed too
+      for (const user of [NEBU_USERS.alex, NEBU_USERS.marie, NEBU_USERS.tom, NEBU_USERS.kai]) {
         try {
           await ensureStorageState(browser, user);
           console.log(`[global-setup] Warmed ${user.name}.`);
@@ -113,6 +139,8 @@ export default async function globalSetup(): Promise<void> {
       await browser.close();
     }
   }
+
+  if (skipWarmup) return stopStubs;
 
   // Create a test room via Matrix API so the admin Rooms page has at least one entry.
   // Uses alex's token sidecar (always available after warm-up or fresh-state check above).
@@ -134,4 +162,6 @@ export default async function globalSetup(): Promise<void> {
   } catch (e) {
     console.warn(`[global-setup] Could not create test room: ${e}. Rooms page test may fail.`);
   }
+
+  return stopStubs;
 }

@@ -1,0 +1,7 @@
+<dl>
+<dt>Matrix ID</dt>
+<dd><%= @user_id %></dd>
+<dt>Display name</dt>
+<dd><%= @display_name || "Not set" %></dd>
+</dl>
+<p>You change your display name in your Matrix app. Deactivating your account and changing your password are managed by your administrator and your company account.</p>

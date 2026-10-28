@@ -1,0 +1,164 @@
+  ?column?  | length 
+------------+--------
+ list bytes | 720040
+(1 row)
+
+===== planner own choice, 20 invitees (10 of them with an ignore list), 20 000 rows
+                                                                                                                                                                                                        
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Append  (cost=23.58..2367.76 rows=21 width=48) (actual time=0.046..12.384 rows=21 loops=1)
+   Buffers: shared hit=1005
+   InitPlan 1 (returns $0)
+     ->  Aggregate  (cost=23.57..23.58 rows=1 width=8) (actual time=0.045..0.045 rows=1 loops=1)
+           Buffers: shared hit=29
+           ->  Limit  (cost=0.29..23.51 rows=5 width=4) (actual time=0.023..0.042 rows=13 loops=1)
+                 Buffers: shared hit=29
+                 ->  Index Only Scan using room_invitations_pending_inviter_idx on room_invitations  (cost=0.29..23.51 rows=5 width=4) (actual time=0.023..0.041 rows=13 loops=1)
+                       Index Cond: (inviter_id = '@xp7:test.local'::text)
+                       Heap Fetches: 26
+                       Buffers: shared hit=29
+   ->  Result  (cost=0.00..0.01 rows=1 width=48) (actual time=0.046..0.046 rows=1 loops=1)
+         Buffers: shared hit=29
+   ->  Nested Loop Left Join  (cost=0.41..2344.07 rows=20 width=48) (actual time=0.072..12.334 rows=20 loops=1)
+         Buffers: shared hit=976
+         ->  Function Scan on unnest i  (cost=0.00..0.20 rows=20 width=32) (actual time=0.005..0.007 rows=20 loops=1)
+         ->  Index Scan using account_data_pkey on account_data a  (cost=0.41..8.44 rows=1 width=52) (actual time=0.545..0.545 rows=0 loops=20)
+               Index Cond: ((user_id = i.invitee) AND (type = 'm.ignored_user_list'::text))
+               Buffers: shared hit=98
+         SubPlan 2
+           ->  Aggregate  (cost=100.41..100.42 rows=1 width=8) (actual time=0.015..0.015 rows=1 loops=20)
+                 Buffers: shared hit=823
+                 ->  Limit  (cost=0.57..100.33 rows=7 width=4) (actual time=0.007..0.014 rows=6 loops=20)
+                       Buffers: shared hit=823
+                       ->  Nested Loop  (cost=0.57..100.33 rows=7 width=4) (actual time=0.007..0.014 rows=6 loops=20)
+                             Buffers: shared hit=823
+                             ->  Index Scan using room_invitations_invitee_idx on room_invitations r  (cost=0.29..42.22 rows=7 width=19) (actual time=0.004..0.007 rows=6 loops=20)
+                                   Index Cond: (invitee_id = i.invitee)
+                                   Filter: ((accepted_at IS NULL) AND (rejected_at IS NULL) AND (((CASE WHEN pg_input_is_valid(a.content_json, 'jsonb'::text) THEN ((a.content_json)::jsonb -> 'ignored_
+                                   Rows Removed by Filter: 4
+                                   Buffers: shared hit=460
+                             ->  Index Scan using users_pkey on users u  (cost=0.28..8.30 rows=1 width=24) (actual time=0.001..0.001 rows=1 loops=121)
+                                   Index Cond: (user_id = r.inviter_id)
+                                   Filter: is_active
+                                   Buffers: shared hit=363
+         SubPlan 3
+           ->  Aggregate  (cost=8.32..8.33 rows=1 width=8) (actual time=0.002..0.002 rows=1 loops=20)
+                 Buffers: shared hit=55
+                 ->  Limit  (cost=0.29..8.30 rows=1 width=4) (actual time=0.002..0.002 rows=0 loops=20)
+                       Buffers: shared hit=55
+                       ->  Index Only Scan using room_invitations_pending_inviter_idx on room_invitations r_1  (cost=0.29..8.30 rows=1 width=4) (actual time=0.001..0.002 rows=0 loops=20)
+                             Index Cond: ((inviter_id = '@xp7:test.local'::text) AND (invitee_id = i.invitee))
+                             Heap Fetches: 14
+                             Buffers: shared hit=55
+ Planning:
+   Buffers: shared hit=156
+ Planning Time: 0.788 ms
+ Execution Time: 12.488 ms
+(48 rows)
+
+===== single invitee with a ~900 KB ignore list (@xp1007, 10 pending rows)
+                                                                                                                                                                                                        
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Append  (cost=23.58..140.81 rows=2 width=48) (actual time=0.027..9.877 rows=2 loops=1)
+   Buffers: shared hit=122
+   InitPlan 1 (returns $0)
+     ->  Aggregate  (cost=23.57..23.58 rows=1 width=8) (actual time=0.026..0.026 rows=1 loops=1)
+           Buffers: shared hit=29
+           ->  Limit  (cost=0.29..23.51 rows=5 width=4) (actual time=0.008..0.024 rows=13 loops=1)
+                 Buffers: shared hit=29
+                 ->  Index Only Scan using room_invitations_pending_inviter_idx on room_invitations  (cost=0.29..23.51 rows=5 width=4) (actual time=0.008..0.023 rows=13 loops=1)
+                       Index Cond: (inviter_id = '@xp7:test.local'::text)
+                       Heap Fetches: 26
+                       Buffers: shared hit=29
+   ->  Result  (cost=0.00..0.01 rows=1 width=48) (actual time=0.027..0.027 rows=1 loops=1)
+         Buffers: shared hit=29
+   ->  Nested Loop Left Join  (cost=0.41..117.21 rows=1 width=48) (actual time=9.846..9.848 rows=1 loops=1)
+         Buffers: shared hit=93
+         ->  Function Scan on unnest i  (cost=0.00..0.01 rows=1 width=32) (actual time=0.004..0.004 rows=1 loops=1)
+         ->  Index Scan using account_data_pkey on account_data a  (cost=0.41..8.44 rows=1 width=52) (actual time=9.759..9.759 rows=1 loops=1)
+               Index Cond: ((user_id = i.invitee) AND (type = 'm.ignored_user_list'::text))
+               Buffers: shared hit=32
+         SubPlan 2
+           ->  Aggregate  (cost=100.41..100.42 rows=1 width=8) (actual time=0.064..0.064 rows=1 loops=1)
+                 Buffers: shared hit=44
+                 ->  Limit  (cost=0.57..100.33 rows=7 width=4) (actual time=0.042..0.061 rows=7 loops=1)
+                       Buffers: shared hit=44
+                       ->  Nested Loop  (cost=0.57..100.33 rows=7 width=4) (actual time=0.042..0.060 rows=7 loops=1)
+                             Buffers: shared hit=44
+                             ->  Index Scan using room_invitations_invitee_idx on room_invitations r  (cost=0.29..42.22 rows=7 width=19) (actual time=0.026..0.040 rows=7 loops=1)
+                                   Index Cond: (invitee_id = i.invitee)
+                                   Filter: ((accepted_at IS NULL) AND (rejected_at IS NULL) AND (((CASE WHEN pg_input_is_valid(a.content_json, 'jsonb'::text) THEN ((a.content_json)::jsonb -> 'ignored_
+                                   Rows Removed by Filter: 3
+                                   Buffers: shared hit=23
+                             ->  Index Scan using users_pkey on users u  (cost=0.28..8.30 rows=1 width=24) (actual time=0.003..0.003 rows=1 loops=7)
+                                   Index Cond: (user_id = r.inviter_id)
+                                   Filter: is_active
+                                   Buffers: shared hit=21
+         SubPlan 3
+           ->  Aggregate  (cost=8.32..8.33 rows=1 width=8) (actual time=0.015..0.015 rows=1 loops=1)
+                 Buffers: shared hit=17
+                 ->  Limit  (cost=0.29..8.30 rows=1 width=4) (actual time=0.011..0.013 rows=7 loops=1)
+                       Buffers: shared hit=17
+                       ->  Index Only Scan using room_invitations_pending_inviter_idx on room_invitations r_1  (cost=0.29..8.30 rows=1 width=4) (actual time=0.011..0.012 rows=7 loops=1)
+                             Index Cond: ((inviter_id = '@xp7:test.local'::text) AND (invitee_id = i.invitee))
+                             Heap Fetches: 14
+                             Buffers: shared hit=17
+ Planning:
+   Buffers: shared hit=8
+ Planning Time: 0.359 ms
+ Execution Time: 11.064 ms
+(48 rows)
+
+===== enable_seqscan = off
+                                                                                                                                                                                                        
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Append  (cost=23.58..258.02 rows=3 width=48) (actual time=0.039..10.732 rows=3 loops=1)
+   Buffers: shared hit=172
+   InitPlan 1 (returns $0)
+     ->  Aggregate  (cost=23.57..23.58 rows=1 width=8) (actual time=0.038..0.038 rows=1 loops=1)
+           Buffers: shared hit=29
+           ->  Limit  (cost=0.29..23.51 rows=5 width=4) (actual time=0.017..0.036 rows=13 loops=1)
+                 Buffers: shared hit=29
+                 ->  Index Only Scan using room_invitations_pending_inviter_idx on room_invitations  (cost=0.29..23.51 rows=5 width=4) (actual time=0.017..0.035 rows=13 loops=1)
+                       Index Cond: (inviter_id = '@xp7:test.local'::text)
+                       Heap Fetches: 26
+                       Buffers: shared hit=29
+   ->  Result  (cost=0.00..0.01 rows=1 width=48) (actual time=0.039..0.039 rows=1 loops=1)
+         Buffers: shared hit=29
+   ->  Nested Loop Left Join  (cost=0.41..234.41 rows=2 width=48) (actual time=9.364..10.691 rows=2 loops=1)
+         Buffers: shared hit=143
+         ->  Function Scan on unnest i  (cost=0.00..0.02 rows=2 width=32) (actual time=0.006..0.007 rows=2 loops=1)
+         ->  Index Scan using account_data_pkey on account_data a  (cost=0.41..8.44 rows=1 width=52) (actual time=4.646..4.646 rows=1 loops=2)
+               Index Cond: ((user_id = i.invitee) AND (type = 'm.ignored_user_list'::text))
+               Buffers: shared hit=36
+         SubPlan 2
+           ->  Aggregate  (cost=100.41..100.42 rows=1 width=8) (actual time=0.066..0.067 rows=1 loops=2)
+                 Buffers: shared hit=88
+                 ->  Limit  (cost=0.57..100.33 rows=7 width=4) (actual time=0.042..0.064 rows=7 loops=2)
+                       Buffers: shared hit=88
+                       ->  Nested Loop  (cost=0.57..100.33 rows=7 width=4) (actual time=0.041..0.062 rows=7 loops=2)
+                             Buffers: shared hit=88
+                             ->  Index Scan using room_invitations_invitee_idx on room_invitations r  (cost=0.29..42.22 rows=7 width=19) (actual time=0.030..0.045 rows=7 loops=2)
+                                   Index Cond: (invitee_id = i.invitee)
+                                   Filter: ((accepted_at IS NULL) AND (rejected_at IS NULL) AND (((CASE WHEN pg_input_is_valid(a.content_json, 'jsonb'::text) THEN ((a.content_json)::jsonb -> 'ignored_
+                                   Rows Removed by Filter: 3
+                                   Buffers: shared hit=46
+                             ->  Index Scan using users_pkey on users u  (cost=0.28..8.30 rows=1 width=24) (actual time=0.002..0.002 rows=1 loops=14)
+                                   Index Cond: (user_id = r.inviter_id)
+                                   Filter: is_active
+                                   Buffers: shared hit=42
+         SubPlan 3
+           ->  Aggregate  (cost=8.32..8.33 rows=1 width=8) (actual time=0.010..0.010 rows=1 loops=2)
+                 Buffers: shared hit=19
+                 ->  Limit  (cost=0.29..8.30 rows=1 width=4) (actual time=0.008..0.009 rows=4 loops=2)
+                       Buffers: shared hit=19
+                       ->  Index Only Scan using room_invitations_pending_inviter_idx on room_invitations r_1  (cost=0.29..8.30 rows=1 width=4) (actual time=0.007..0.008 rows=4 loops=2)
+                             Index Cond: ((inviter_id = '@xp7:test.local'::text) AND (invitee_id = i.invitee))
+                             Heap Fetches: 14
+                             Buffers: shared hit=19
+ Planning:
+   Buffers: shared hit=8
+ Planning Time: 0.382 ms
+ Execution Time: 10.823 ms
+(48 rows)
+

@@ -97,7 +97,8 @@ defmodule Nebu.Web.OidcConfig do
     matrix_oidc_refresh_mode: nil,
     admin_oidc_extra_scopes: nil,
     admin_oidc_refresh_mode: nil,
-    sso_extra_redirect_schemes: nil
+    sso_extra_redirect_schemes: nil,
+    sso_redirect_allowed_origins: nil
   }
 
   # ── Public API ──────────────────────────────────────────────────────────────
@@ -215,6 +216,23 @@ defmodule Nebu.Web.OidcConfig do
   end
 
   @doc """
+  Returns the raw `sso_redirect_allowed_origins` string from `server_config` (the normalized, comma+space
+  separated https origins of the operator list, story `legacy-sso-redirect-confirmation`, D5), or `nil` when
+  not set. Same shape and ETS fallback as `get_sso_extra_redirect_schemes/0`; a failed `server_config` read
+  yields `nil` (an empty list: every https target is confirmed, fail closed).
+  """
+  @spec get_sso_redirect_allowed_origins() :: binary() | nil
+  def get_sso_redirect_allowed_origins do
+    raw =
+      case :ets.whereis(@table) do
+        :undefined -> load_from_db()
+        _ -> read_from_ets()
+      end
+
+    Map.get(raw, :sso_redirect_allowed_origins)
+  end
+
+  @doc """
   Forces a synchronous re-read from `server_config` and updates the ETS cache.
   Also broadcasts an invalidation to peer nodes via `:pg` (ADR-020 / M-3).
   Pass a pid when targeting a non-registered instance (e.g. in tests).
@@ -296,15 +314,11 @@ defmodule Nebu.Web.OidcConfig do
     end
   end
 
-  @sql_load_oidc_config """
-  SELECT key, value FROM server_config
-  WHERE key IN (
-    'oidc_issuer', 'oidc_audience', 'oidc_jwks_uri',
-    'matrix_oidc_extra_scopes', 'matrix_oidc_refresh_mode',
-    'admin_oidc_extra_scopes', 'admin_oidc_refresh_mode',
-    'sso_extra_redirect_schemes'
-  )
-  """
+  @sql_load_oidc_config "SELECT key, value FROM server_config WHERE key IN (" <>
+                          "'oidc_issuer', 'oidc_audience', 'oidc_jwks_uri', " <>
+                          "'matrix_oidc_extra_scopes', 'matrix_oidc_refresh_mode', " <>
+                          "'admin_oidc_extra_scopes', 'admin_oidc_refresh_mode', " <>
+                          "'sso_extra_redirect_schemes', 'sso_redirect_allowed_origins')"
 
   defp load_from_db do
     if Process.whereis(Nebu.Repo) != nil do
@@ -326,7 +340,10 @@ defmodule Nebu.Web.OidcConfig do
             admin_oidc_refresh_mode: nilify(map["admin_oidc_refresh_mode"]),
             # story fix-and-configure-sso-redirect-schemes (AC6/AC7): nil when unset
             # (Nebu.Matrix.SsoLogin.extra_redirect_schemes/0 treats nil/"" as []).
-            sso_extra_redirect_schemes: nilify(map["sso_extra_redirect_schemes"])
+            sso_extra_redirect_schemes: nilify(map["sso_extra_redirect_schemes"]),
+            # story legacy-sso-redirect-confirmation (G3-3, D5): the operator list of https origins whose legacy
+            # SSO logins skip the confirmation page; nil when unset (read as an empty list).
+            sso_redirect_allowed_origins: nilify(map["sso_redirect_allowed_origins"])
           }
 
         {:error, reason} ->

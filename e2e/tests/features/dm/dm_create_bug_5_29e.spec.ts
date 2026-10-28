@@ -208,8 +208,10 @@ test.describe('Story 5.29e — Bug 2: DM creation hangs (profile 404 + keys/quer
     expect(roomId).toMatch(/^!/);
 
     // Step 2: Alex accepts the invitation by joining.
+    // Story create-room-invites-direct (AC18, static adaptation): the spec endpoint POST /rooms/{roomId}/join is NOT routed on Nebu
+    // (docs/matrix-api-scope.md); Element joins with POST /join/{roomIdOrAlias}, which createRoom's invite makes possible for the DM partner.
     const joinResp = await request.post(
-      `${BASE}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/join`,
+      `${BASE}/_matrix/client/v3/join/${encodeURIComponent(roomId)}`,
       {
         headers: { Authorization: `Bearer ${alexToken}` },
       }

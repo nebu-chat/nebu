@@ -8,9 +8,19 @@ defmodule Nebu.Matrix.Search.DB do
   Uses raw SQL via Ecto.Adapters.SQL.query/3 — consistent with Nebu.Matrix.Room.DB pattern.
   Membership filter: left_at IS NULL (NOT membership = 'join' — there is no membership column).
   Encrypted rooms (rooms with a m.room.encryption state event) are excluded from search results.
+  Story state-writer-redaction (D6): redacted events are excluded (NOT EXISTS a writer-made redaction of the row), and so is every
+  `m.replace` edit whose ORIGINAL is redacted (security cycle 1, Kassandra #2: "Remove" on an edited message removes its text from
+  search too; the edits themselves stay served elsewhere, the spec does not redact them).
   """
 
+  # Story history-visibility-enforcement (D9): every result is filtered by the ONE visibility fragment of `Nebu.Matrix.Room.DB`
+  # for the viewer `$1` (the trusted session user) over ALL rooms of the membership gate (the same `left_at IS NULL` rows), in the
+  # same statement; ranking, LIMIT / OFFSET and the exclusions are unchanged, so `next_batch` and the count follow the filtered set.
+  @hv_in "WITH hv_in AS (SELECT ARRAY(SELECT room_id FROM room_members WHERE user_id = $1 AND left_at IS NULL) AS rooms, $1::text AS viewer),"
+
   @sql_search_messages """
+  #{@hv_in}
+  #{Nebu.Matrix.Room.DB.history_visibility_sql()}
   SELECT
     e.event_id,
     e.room_id,
@@ -20,6 +30,7 @@ defmodule Nebu.Matrix.Search.DB do
     e.origin_server_ts,
     ts_rank_cd(e.search_vector, websearch_to_tsquery('pg_catalog.simple', $2)) AS rank
   FROM events e
+  #{Nebu.Matrix.Room.DB.history_visibility_join()}
   WHERE
     e.search_vector @@ websearch_to_tsquery('pg_catalog.simple', $2)
     AND e.event_type = 'm.room.message'
@@ -33,12 +44,21 @@ defmodule Nebu.Matrix.Search.DB do
         AND enc.event_type = 'm.room.encryption'
         AND (enc.state_key = '' OR enc.state_key IS NULL)
     )
+    AND NOT EXISTS (SELECT 1 FROM events r WHERE r.room_id = e.room_id AND r.redacts = e.event_id)
+    AND NOT (
+      COALESCE(e.content->'m.relates_to'->>'rel_type', '') = 'm.replace'
+      AND EXISTS (SELECT 1 FROM events r WHERE r.room_id = e.room_id AND r.redacts = e.content->'m.relates_to'->>'event_id')
+    )
+    AND #{Nebu.Matrix.Room.DB.history_visibility_predicate()}
   ORDER BY rank DESC, e.origin_server_ts DESC
   LIMIT $3
   OFFSET $4
   """
 
+  # with a room filter the fragment reads only the filtered rooms of the gate (results outside `$5` are never kept)
   @sql_search_messages_with_room_filter """
+  WITH hv_in AS (SELECT ARRAY(SELECT room_id FROM room_members WHERE user_id = $1 AND left_at IS NULL AND room_id = ANY($5)) AS rooms, $1::text AS viewer),
+  #{Nebu.Matrix.Room.DB.history_visibility_sql()}
   SELECT
     e.event_id,
     e.room_id,
@@ -48,6 +68,7 @@ defmodule Nebu.Matrix.Search.DB do
     e.origin_server_ts,
     ts_rank_cd(e.search_vector, websearch_to_tsquery('pg_catalog.simple', $2)) AS rank
   FROM events e
+  #{Nebu.Matrix.Room.DB.history_visibility_join()}
   WHERE
     e.search_vector @@ websearch_to_tsquery('pg_catalog.simple', $2)
     AND e.event_type = 'm.room.message'
@@ -61,6 +82,12 @@ defmodule Nebu.Matrix.Search.DB do
         AND enc.event_type = 'm.room.encryption'
         AND (enc.state_key = '' OR enc.state_key IS NULL)
     )
+    AND NOT EXISTS (SELECT 1 FROM events r WHERE r.room_id = e.room_id AND r.redacts = e.event_id)
+    AND NOT (
+      COALESCE(e.content->'m.relates_to'->>'rel_type', '') = 'm.replace'
+      AND EXISTS (SELECT 1 FROM events r WHERE r.room_id = e.room_id AND r.redacts = e.content->'m.relates_to'->>'event_id')
+    )
+    AND #{Nebu.Matrix.Room.DB.history_visibility_predicate()}
     AND e.room_id = ANY($5)
   ORDER BY rank DESC, e.origin_server_ts DESC
   LIMIT $3
@@ -77,6 +104,14 @@ defmodule Nebu.Matrix.Search.DB do
   """
   @spec sql_search_messages() :: String.t()
   def sql_search_messages, do: @sql_search_messages
+
+  @doc """
+  Story history-visibility-enforcement (security cycle 1 / 2, INFO-8): the search read under the request statement timeout of
+  `Nebu.Matrix.Room.DB.with_read_timeout/1` (one transaction, `SET LOCAL statement_timeout = '2s'`). Not part of a behaviour:
+  callers must guard with `function_exported?/3`.
+  """
+  @spec with_read_timeout((-> term())) :: term()
+  def with_read_timeout(fun) when is_function(fun, 0), do: Nebu.Matrix.Room.DB.with_read_timeout(fun)
 
   @doc """
   Executes a full-text search scoped to rooms where `user_id` is an active member

@@ -10,6 +10,9 @@ Feature: Admin UI — OIDC Claim Mapping Configuration
   #   - Sidebar has a "Claim Mapping" entry in the Settings section
   #   - "Claim mapping updated" is added to the flash allowlist
   #
+  # Story admin-config-privileged-forms-sweep (cw): saving the claim mapping needs a FRESH admin sign-in (strict fetch metadata + a marker bound to
+  # /admin/config/claim-mapping): the save steps go through the Dex login form once (helper saveMappingFormWithAdminReauth).
+  #
   # Runner: playwright-bdd (Cucumber-based Playwright runner)
   # Step definitions: e2e/step-definitions/admin/claim-mapping.steps.ts
   #
@@ -79,14 +82,14 @@ Feature: Admin UI — OIDC Claim Mapping Configuration
     When the operator navigates to "/admin/config/claim-mapping"
     And the operator clears the field "oidc_user_id_claim"
     And the operator fills in "oidc_user_id_claim" with "preferred_username"
-    And the operator clicks "Save"
+    And the operator saves the claim mapping form
     Then the page shows "Claim mapping updated"
     And the claim mapping form has "oidc_user_id_claim" pre-filled with "preferred_username"
     # Restore the product default so this update does not leak into other scenarios
     # on the shared (non-reset) stack — @ac10-claim-mapping-settings expects "name".
     When the operator clears the field "oidc_user_id_claim"
     And the operator fills in "oidc_user_id_claim" with "name"
-    And the operator clicks "Save"
+    And the operator saves the claim mapping form
     Then the page shows "Claim mapping updated"
     And the claim mapping form has "oidc_user_id_claim" pre-filled with "name"
 
@@ -100,6 +103,6 @@ Feature: Admin UI — OIDC Claim Mapping Configuration
     And the operator is logged in as admin
     When the operator navigates to "/admin/config/claim-mapping"
     And the operator clears the field "oidc_user_id_claim"
-    And the operator clicks "Save"
+    And the operator saves the claim mapping form
     Then the page shows a validation error for "oidc_user_id_claim"
     And the page does not show "Claim mapping updated"

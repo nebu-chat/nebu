@@ -17,7 +17,14 @@ defmodule Nebu.Matrix.SsoLogin do
       `id_token` via the SINGLE shared `Nebu.Web.Plugs.OidcPlug.verify_token/2`
       path, constant-time-check the `nonce`, mint a **short-lived (30s) single-use
       opaque loginToken** mapped to the verified `id_token` in `SsoStore`, and 302
-      back to the original `redirectUrl` with `?loginToken=<opaque>`.
+      back to the original `redirectUrl` with `?loginToken=<opaque>`. Since story
+      `legacy-sso-redirect-confirmation` (epic SEC gate 3, G3-3) that only holds for a `:direct`
+      target (loopback, deep-link scheme) or an https origin that is LISTED
+      (`Nebu.Matrix.SsoRedirect.listed?/1`); an UNLISTED https target gets no loginToken but a
+      confirmation page (`Nebu.Matrix.SsoConfirm`, `303` to `GET .../sso/confirm`), and only
+      Continue mints the token. `redirectUrl` is classified by `Nebu.Matrix.SsoRedirect.classify/1`
+      (stricter parsing, still the unchanged `400`), and pre-existing `loginToken` parameters of the
+      `redirectUrl` are removed before the new one is appended.
 
   The client then calls `POST /_matrix/client/v3/login` with
   `{"type":"m.login.token","token":"<opaque>"}`. `Nebu.Matrix.HttpPublic.do_login`
@@ -37,28 +44,27 @@ defmodule Nebu.Matrix.SsoLogin do
   defaults). `offline_access` is added when `matrix_oidc_refresh_mode` is "offline".
   Scope resolution itself is centralized in `Nebu.Web.OidcScopes.resolve_scope/1`
   (story `centralize-scope-resolution`) — this module only calls it.
+
+  ## OAuth broker leg (epic oauth-broker, story oauth-authorize-idp-delegation-code)
+
+  The callback is SHARED with Nebu's OAuth authorization server (ADR-033 D1): a `state` with
+  the `o2.` tag is handed to `Nebu.OAuth.handle_idp_callback/1` before anything of the legacy
+  branch runs (the OAuth flow state lives in the database, never in `SsoStore`). The IdP request
+  builder (`idp_authorize_url/4`) and the IdP login completion (`complete_idp_login/4`) are
+  shared by the legacy login, the UIA fallback and the OAuth leg; the OAuth domain reaches them
+  only through `Nebu.Matrix.idp_authorize_location/2`, `idp_complete_login/4` and
+  `provision_login_user/1` (ADR-020).
   """
   import Plug.Conn
   import Nebu.Matrix.Http, only: [error: 4]
 
   require Logger
 
-  alias Nebu.Matrix.SsoStore
+  alias Nebu.Matrix.{SsoConfirm, SsoRedirect, SsoStore}
 
   # State (user-typing-at-IdP) window and opaque-loginToken replay window.
   @state_ttl_seconds 600
   @login_token_ttl_seconds 30
-
-  # Schemes that are NEVER allowed as a redirectUrl even if an operator misconfigures
-  # an allowlist — they can exfiltrate the loginToken via script/file/opaque-data URIs.
-  @scheme_denylist ~w(javascript data file vbscript blob)
-
-  # Default Matrix-client deep-link schemes always accepted (Element / SchildiChat /
-  # FluffyChat). Corrected (story fix-and-configure-sso-redirect-schemes, AC1): the
-  # previous list contained two schemes that do not match any real client
-  # ("io.element.fluffychat", "fluffychat") — SchildiChat's real scheme is
-  # "schildichat" and FluffyChat's real scheme is "im.fluffychat.auth".
-  @default_deep_link_schemes ~w(element schildichat im.fluffychat.auth)
 
   # ── GET /sso/redirect[/:idp] ────────────────────────────────────────────────
 
@@ -74,15 +80,63 @@ defmodule Nebu.Matrix.SsoLogin do
       not is_binary(redirect_url) or redirect_url == "" ->
         error(conn, 400, "M_MISSING_PARAM", "redirectUrl is required")
 
-      not redirect_url_allowed?(redirect_url) ->
+      match?({:reject, _}, SsoRedirect.classify(redirect_url)) ->
         # Do NOT echo the full url back (avoid reflected-XSS / info leak) — only
         # the parsed+escaped scheme is ever rendered, and only on the HTML path.
         Logger.warning("matrix SSO: redirectUrl rejected by allowlist")
         reject_redirect(conn, redirect_url)
 
       true ->
-        do_redirect(conn, redirect_url)
+        # story oauth-legacy-coexistence (C4/C5): `action` is read only AFTER the redirectUrl checks (the
+        # error order is unchanged) and only honoured while OAuth is offered.
+        do_redirect(conn, redirect_url, nil, sso_action(conn))
     end
+  end
+
+  # C4: the stable `action`, else the unstable `org.matrix.msc3824.action` (matrix-js-sdk sends both
+  # with the same value). Only the exact values "login" / "register" count; anything else (absent,
+  # empty, other case, a map/list from `action[]=`, over-long) is IGNORED, never a 4xx. Precedence: a
+  # VALID stable value wins; an invalid stable value falls through to the unstable one; both invalid =>
+  # nil. A repeated key resolves through `conn.query_params` (Plug: the last value wins). The raw value
+  # is never logged and never forwarded; only the mapped `prompt` reaches the IdP (C6).
+  #
+  # `action` is honoured for the one advertised identity provider only (`GET /login` lists `id: "oidc"`):
+  # no `{idpId}` segment or `oidc`. An arbitrary `{idpId}` behaves exactly as today (the segment is
+  # ignored by the legacy redirect, which serves the one IdP), i.e. WITHOUT `action` support.
+  defp sso_action(conn) do
+    if sso_idp(conn) in [nil, "oidc"] do
+      [conn.query_params["action"], conn.query_params["org.matrix.msc3824.action"]]
+      |> Enum.find(&(&1 in ["login", "register"]))
+    end
+  end
+
+  # The `{idpId}` path segment of `/sso/redirect/{idpId}` (nil for `/sso/redirect`). The router forwards with
+  # the prefix stripped, so `path_info` is exactly `["sso", "redirect"]` or `["sso", "redirect", idpId]`
+  # (matched directly: an idpId that is literally named "redirect" is an idpId, not the route).
+  defp sso_idp(conn) do
+    case conn.path_info do
+      ["sso", "redirect", idp] -> idp
+      _ -> nil
+    end
+  end
+
+  # C5: `prompt=create` replaces `prompt=login` ONLY for `action=register`, while OAuth is offered, and
+  # when the IdP's discovery document lists `create` (the story-2 D11 rule); otherwise `login`. The
+  # OAuth-offered predicate is asked ONLY when an action is present, so a plain redirect costs nothing new
+  # and the URL while OAuth is not offered stays byte-identical to the pre-broker one.
+  defp legacy_prompt("register", doc) do
+    values = doc["prompt_values_supported"]
+    if is_list(values) and "create" in values and oauth_aware?(), do: "create", else: "login"
+  end
+
+  defp legacy_prompt(_action, _doc), do: "login"
+
+  defp oauth_aware? do
+    Nebu.OAuth.oauth_aware?()
+  rescue
+    _ -> false
+  catch
+    :exit, _ -> false
   end
 
   # story sso-redirect-error-page/html-error-page-for-rejected-sso-redirect-scheme:
@@ -230,9 +284,10 @@ defmodule Nebu.Matrix.SsoLogin do
     """
   end
 
-  defp do_redirect(conn, redirect_url, uia_session \\ nil) do
+  defp do_redirect(conn, redirect_url, uia_session, action \\ nil) do
     with {:ok, cfg} <- oidc_config(),
-         {:ok, authorize} <- discover(cfg.issuer, "authorization_endpoint") do
+         {:ok, doc} <- discovery_doc(cfg.issuer),
+         {:ok, authorize} <- doc_url(doc, "authorization_endpoint") do
       verifier = pkce_verifier()
       challenge = pkce_challenge(verifier)
       state = random_token(16)
@@ -249,48 +304,101 @@ defmodule Nebu.Matrix.SsoLogin do
              @state_ttl_seconds
            ) do
         :ok ->
-          base_params = %{
-            "response_type" => "code",
-            "client_id" => cfg.client_id,
-            "redirect_uri" => callback_url(conn),
-            "scope" => scope_list(),
-            "state" => state,
-            "nonce" => nonce,
-            "code_challenge" => challenge,
-            "code_challenge_method" => "S256",
-            # prompt=login forces the IdP to re-auth (avoids replaying a cached,
-            # already-denylisted id_token after logout) — Go parity.
-            "prompt" => "login"
-          }
-
           # M-1: the UIA step-up fallback (uia_session set) must force a GENUINELY fresh
           # IdP authentication, not silently reuse an existing IdP SSO-session cookie.
           # `prompt=login` is advisory; several IdPs honour an existing session. Adding
           # `max_age=0` forces the IdP to re-authenticate the user (or refuse) so the
           # returned auth_time is trustworthy. ONLY on the UIA-fallback path — the normal
           # login redirect keeps `prompt=login` alone so login UX is not degraded.
-          params_map =
-            if is_binary(uia_session) and uia_session != "" do
-              Map.put(base_params, "max_age", "0")
-            else
-              base_params
-            end
+          max_age = if is_binary(uia_session) and uia_session != "", do: "0"
 
-          query = URI.encode_query(params_map)
+          location =
+            idp_authorize_url(authorize, conn, cfg, %{
+              state: state,
+              nonce: nonce,
+              code_challenge: challenge,
+              prompt: legacy_prompt(action, doc),
+              max_age: max_age
+            })
 
           conn
           |> put_resp_header("cache-control", "no-store")
-          |> put_resp_header("location", authorize <> "?" <> query)
+          |> put_resp_header("location", location)
           |> send_resp(302, "")
 
         {:error, :store_full} ->
           Logger.warning("matrix SSO: state store full, rejecting redirect")
           error(conn, 429, "M_LIMIT_EXCEEDED", "Too many pending SSO flows")
+
+        {:error, :unavailable} ->
+          Logger.warning("matrix SSO: state store unavailable, rejecting redirect")
+          error(conn, 503, "M_UNAVAILABLE", "SSO is not available")
       end
     else
       {:error, reason} ->
         Logger.error("matrix SSO redirect failed: #{inspect(reason)}")
         error(conn, 503, "M_UNAVAILABLE", "SSO is not available")
+    end
+  end
+
+  # The ONE builder of the IdP authorization request (legacy /sso/redirect, the UIA fallback and
+  # the OAuth broker leg, story oauth-authorize-idp-delegation-code AC6): the single IdP client
+  # (ADR-022), the SHARED registered callback, the scope of the OIDC Scopes Law
+  # (`Nebu.Web.OidcScopes`, nothing hardcoded), PKCE S256. `max_age=0` only for the UIA fallback and the OAuth leg.
+  defp idp_authorize_url(authorize_endpoint, conn, cfg, p) do
+    params = %{
+      "response_type" => "code",
+      "client_id" => cfg.client_id,
+      "redirect_uri" => callback_url(conn),
+      "scope" => scope_list(),
+      "state" => p.state,
+      "nonce" => p.nonce,
+      "code_challenge" => p.code_challenge,
+      "code_challenge_method" => "S256",
+      # prompt=login forces the IdP to re-auth (avoids replaying a cached,
+      # already-denylisted id_token after logout) — Go parity.
+      "prompt" => p.prompt
+    }
+
+    params = if p[:max_age], do: Map.put(params, "max_age", p.max_age), else: params
+    authorize_endpoint <> "?" <> URI.encode_query(params)
+  end
+
+  @doc false
+  # OAuth broker leg (epic oauth-broker, story oauth-authorize-idp-delegation-code AC6, D3, D11),
+  # reached only through `Nebu.Matrix.idp_authorize_location/2`. Builds the IdP authorization
+  # URL for the caller-generated, OAuth-tagged `state` with the SAME builder and helpers as the
+  # legacy redirect, but stores NOTHING in the node-local SsoStore: the IdP PKCE verifier and nonce
+  # are returned to the caller, which persists them in the database (cluster safe).
+  #
+  # `prompt` toward the IdP is the legacy `login`, replaced by `create` only when the caller asks
+  # for it AND the IdP's discovery document lists `create` in `prompt_values_supported`;
+  # `max_age=0` always (F-2). Discovery happens before anything is generated, so a failure persists nothing.
+  def oauth_idp_authorize_location(conn, %{state: state} = params) when is_binary(state) do
+    with {:ok, cfg} <- oidc_config(),
+         {:ok, doc} <- discovery_doc(cfg.issuer),
+         {:ok, authorize} <- doc_url(doc, "authorization_endpoint") do
+      verifier = pkce_verifier()
+      nonce = random_token(32)
+
+      prompt =
+        if params[:prompt] == "create" and "create" in List.wrap(doc["prompt_values_supported"]),
+          do: "create",
+          else: "login"
+
+      location =
+        idp_authorize_url(authorize, conn, cfg, %{
+          state: state,
+          nonce: nonce,
+          code_challenge: pkce_challenge(verifier),
+          prompt: prompt,
+          # Kassandra F-2: `prompt` is advisory (and `create` replaces `login`), so the OAuth leg
+          # ALWAYS asks the IdP for a genuinely fresh authentication; the client's own `max_age`
+          # is never forwarded.
+          max_age: "0"
+        })
+
+      {:ok, %{location: location, verifier: verifier, nonce: nonce}}
     end
   end
 
@@ -340,6 +448,13 @@ defmodule Nebu.Matrix.SsoLogin do
     idp_error = conn.query_params["error"]
 
     cond do
+      # Epic oauth-broker (story oauth-authorize-idp-delegation-code, AC7, D1/D2): the SAME
+      # IdP-registered callback serves the OAuth broker leg. An `o2.`-tagged state (also a
+      # malformed one) is handed to the OAuth domain BEFORE anything of the legacy branch runs
+      # (no SsoStore pop, no Matrix JSON errors, no fallback into redirect/1).
+      Nebu.OAuth.oauth_idp_state?(state) ->
+        Nebu.OAuth.handle_idp_callback(conn)
+
       is_binary(idp_error) and idp_error != "" ->
         # Consume the state to prevent replay, then fail.
         if is_binary(state), do: SsoStore.pop_state(state)
@@ -367,10 +482,8 @@ defmodule Nebu.Matrix.SsoLogin do
         error(conn, 400, "M_UNKNOWN", "Invalid or expired SSO state")
 
       {:ok, entry} ->
-        with {:ok, cfg} <- oidc_config(),
-             {:ok, id_token, oidc_refresh_token} <- exchange(conn, code, entry.verifier, cfg),
-             {:ok, claims} <- Nebu.Web.Plugs.OidcPlug.verify_token(id_token),
-             :ok <- check_nonce(claims, entry.nonce) do
+        with {:ok, %{id_token: id_token, claims: claims, idp_refresh_token: oidc_refresh_token}} <-
+               complete_idp_login(conn, code, entry.verifier, entry.nonce) do
           if is_binary(entry.uia_session) and entry.uia_session != "" do
             # S3: this was a UIA m.login.sso completion, not a normal login. Complete
             # the UIA session ONLY when the freshly-authenticated identity matches the
@@ -378,24 +491,129 @@ defmodule Nebu.Matrix.SsoLogin do
             # render a failure page WITHOUT marking the stage complete.
             complete_uia(conn, entry.uia_session, claims)
           else
-            opaque = random_token(32)
-
-            # oidc-session-refresh: carry the OIDC refresh token through the
-            # single-use loginToken so POST /login can mint a long-lived opaque Nebu
-            # session when the client asks for refresh_token: true. nil → JWT fallback.
-            SsoStore.put_login_token(opaque, id_token, @login_token_ttl_seconds,
-              oidc_refresh_token: oidc_refresh_token
-            )
-
-            conn
-            |> put_resp_header("cache-control", "no-store")
-            |> put_resp_header("location", append_login_token(entry.redirect_url, opaque))
-            |> send_resp(302, "")
+            finish_legacy_login(conn, entry, id_token, claims, oidc_refresh_token)
           end
         else
           {:error, reason} ->
             Logger.warning("matrix SSO callback failed: #{inspect(reason)}")
             error(conn, 403, "M_FORBIDDEN", "SSO login failed")
+        end
+    end
+  end
+
+  # Story legacy-sso-redirect-confirmation (G3-3, D3): the decision AFTER the IdP login and BEFORE any loginToken
+  # exists. `:direct` targets (loopback, deep-link / operator schemes) and https targets whose origin is LISTED keep
+  # today's response (302, loginToken appended); an UNLISTED https target gets NO token: the verified login is parked
+  # and the browser is sent to the confirmation page (`Nebu.Matrix.SsoConfirm`). A stored URL that no longer
+  # classifies (a state created by an older node during a rolling deploy) is today's 403 (value-free WARNING).
+  defp finish_legacy_login(conn, entry, id_token, claims, oidc_refresh_token) do
+    case SsoRedirect.classify(entry.redirect_url) do
+      :direct ->
+        redirect_with_login_token(conn, entry.redirect_url, id_token, oidc_refresh_token)
+
+      {:confirmable, target} ->
+        if SsoRedirect.listed?(target.origin, entry.redirect_url) do
+          redirect_with_login_token(conn, entry.redirect_url, id_token, oidc_refresh_token)
+        else
+          server = Application.get_env(:nebu_http, :server_name, "localhost")
+
+          SsoConfirm.begin(conn, %{
+            id_token: id_token,
+            oidc_refresh_token: oidc_refresh_token,
+            redirect_url: entry.redirect_url,
+            user_id: Nebu.Matrix.UserId.from_claims(claims, server),
+            target: target
+          })
+        end
+
+      {:reject, _reason} ->
+        Logger.warning("matrix SSO: the redirectUrl of the pending login is not permitted, login refused")
+        error(conn, 403, "M_FORBIDDEN", "SSO login failed")
+    end
+  end
+
+  defp redirect_with_login_token(conn, redirect_url, id_token, oidc_refresh_token) do
+    case mint_login_token(id_token, oidc_refresh_token) do
+      # review cycle 2 (INFO-3): a store that does not answer never stored the token, so do not redirect with it
+      # (the pre-existing `:store_full` decision, redirecting anyway, is unchanged)
+      {_opaque, {:error, :unavailable}} ->
+        Logger.warning("matrix SSO: login token store unavailable, rejecting the callback")
+        error(conn, 503, "M_UNAVAILABLE", "SSO is not available")
+
+      {opaque, _stored} ->
+        conn
+        |> put_resp_header("cache-control", "no-store")
+        |> put_resp_header("location", append_login_token(redirect_url, opaque))
+        |> send_resp(302, "")
+    end
+  end
+
+  @doc false
+  # Mints the opaque, single-use, 30 s loginToken for a verified IdP login (the callback for a direct / listed
+  # target, `Nebu.Matrix.SsoConfirm` after Continue). oidc-session-refresh: carries the OIDC refresh token through
+  # the single-use loginToken so POST /login can mint a long-lived opaque Nebu session when the client asks for
+  # refresh_token: true (nil -> JWT fallback). `{opaque, :ok | {:error, :store_full}}`.
+  def mint_login_token(id_token, oidc_refresh_token) do
+    opaque = random_token(32)
+
+    {opaque,
+     SsoStore.put_login_token(opaque, id_token, @login_token_ttl_seconds, oidc_refresh_token: oidc_refresh_token)}
+  end
+
+  @doc false
+  # The ONE completion of an IdP login (legacy callback AND the OAuth broker leg, story
+  # oauth-authorize-idp-delegation-code AC7.10): code exchange (PKCE verifier, the same
+  # `callback_url/1` as the authorize request, the `:matrix_sso_token_override` seam), id_token
+  # verification through the single shared `OidcPlug.verify_token/2` path, constant-time nonce
+  # check. `{:ok, %{id_token:, claims:, idp_refresh_token:}}` or `{:error, reason}`.
+  def complete_idp_login(conn, code, verifier, nonce) do
+    with {:ok, cfg} <- oidc_config(),
+         {:ok, id_token, idp_refresh_token} <- exchange(conn, code, verifier, cfg),
+         {:ok, claims} <- Nebu.Web.Plugs.OidcPlug.verify_token(id_token),
+         :ok <- check_nonce(claims, nonce) do
+      {:ok, %{id_token: id_token, claims: claims, idp_refresh_token: idp_refresh_token}}
+    end
+  end
+
+  @doc false
+  # Story oauth-authorize-idp-delegation-code D18 (via `Nebu.Matrix.provision_login_user/1`): the
+  # provisioning half of `Nebu.Matrix.HttpPublic.provision_and_respond/6` (legacy POST /login),
+  # duplicated on purpose instead of refactoring the legacy login — keep the two in sync (a test
+  # pins identical `users` rows). Device registration and session creation are NOT part of it
+  # (story 3). `{:ok, %{user_id:, auth_time: unix_seconds | nil}}`, `{:error, :deactivated}` or
+  # `{:error, reason}`.
+  def provision_login_user(claims) when is_map(claims) do
+    server = Application.get_env(:nebu_http, :server_name, "localhost")
+    user_id = Nebu.Matrix.UserId.from_claims(claims, server)
+
+    display_name = claims["preferred_username"] || claims["name"] || ""
+    email = claims["email"] || ""
+
+    case Nebu.Matrix.Session.TokenValidator.validate(user_id, "user", display_name, email) do
+      {:ok, user} ->
+        dn = if display_name == "", do: nil, else: display_name
+        _ = Nebu.Matrix.Profile.DB.upsert_profile(user.user_id, dn, nil)
+
+        is_new = Map.get(user, :is_new, false)
+        Nebu.Matrix.EventDispatcher.Server.run_post_login_provisioning(user.user_id, is_new)
+
+        {:ok, %{user_id: user.user_id, auth_time: login_auth_time(claims)}}
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  # Same rule as `HttpPublic.login_auth_time/1`: the id_token's auth_time, else iat.
+  defp login_auth_time(claims) do
+    case claims["auth_time"] do
+      t when is_integer(t) ->
+        t
+
+      _ ->
+        case claims["iat"] do
+          t when is_integer(t) -> t
+          _ -> nil
         end
     end
   end
@@ -455,56 +673,12 @@ defmodule Nebu.Matrix.SsoLogin do
   list (single source of truth — ADR-018/ADR-021).
   """
   @spec scheme_denylist() :: [String.t()]
-  def scheme_denylist, do: @scheme_denylist
+  def scheme_denylist, do: SsoRedirect.scheme_denylist()
 
   @doc false
-  def redirect_url_allowed?(raw) when is_binary(raw) and raw != "" do
-    uri = URI.parse(raw)
-    scheme = uri.scheme && String.downcase(uri.scheme)
-
-    cond do
-      # Scheme must be present (rejects "/relative" and bare strings).
-      is_nil(scheme) or scheme == "" -> false
-      # Denylist wins over every allowlist entry.
-      scheme in @scheme_denylist -> false
-      # https — always safe (TLS prevents MITM token capture).
-      scheme == "https" -> true
-      # http — loopback only (dev).
-      scheme == "http" -> uri.host in ["localhost", "127.0.0.1"]
-      # Matrix-client deep links.
-      scheme in @default_deep_link_schemes -> true
-      scheme in extra_redirect_schemes() -> true
-      true -> false
-    end
-  end
-
-  def redirect_url_allowed?(_), do: false
-
-  # AC6/AC7 (story fix-and-configure-sso-redirect-schemes): the extra allowlist is
-  # now runtime-configurable via the Admin UI (`server_config.sso_extra_redirect_schemes`),
-  # read through the SAME cluster-aware ETS cache as OIDC config
-  # (`Nebu.Web.OidcConfig`) — no per-request DB call, no NEBU_SSO_REDIRECT_SCHEMES
-  # env var (ADR-022, removed). The `:sso_redirect_schemes_reader` 0-arity seam lets
-  # unit tests inject a scheme list directly without a running cache/GenServer/DB.
-  defp extra_redirect_schemes do
-    case Application.get_env(:nebu_http, :sso_redirect_schemes_reader) do
-      fun when is_function(fun, 0) ->
-        fun.() |> List.wrap() |> Enum.map(&String.downcase/1)
-
-      _ ->
-        case Nebu.Web.OidcConfig.get_sso_extra_redirect_schemes() do
-          str when is_binary(str) and str != "" ->
-            str
-            |> String.split(",", trim: true)
-            |> Enum.map(&(&1 |> String.trim() |> String.downcase()))
-            |> Enum.reject(&(&1 == ""))
-            |> Enum.uniq()
-
-          _ ->
-            []
-        end
-    end
-  end
+  # Boolean view of `Nebu.Matrix.SsoRedirect.classify/1` (the ONE classification, story
+  # legacy-sso-redirect-confirmation D1): true unless the URL is rejected.
+  def redirect_url_allowed?(raw), do: not match?({:reject, _}, SsoRedirect.classify(raw))
 
   # ── nonce (replay protection, constant-time) ────────────────────────────────
 
@@ -524,16 +698,52 @@ defmodule Nebu.Matrix.SsoLogin do
   # ── append loginToken to the client redirectUrl (Go fragment-aware logic) ────
 
   @doc false
+  # Story legacy-sso-redirect-confirmation D20 (oracle m3, spec "should be removed before adding the new one"): every
+  # `loginToken` parameter of the base (the part before the first `#`) and of the FRAGMENT's own `?` query part
+  # (Element Web's hash routing) is dropped first. Only a parameter whose name is exactly `loginToken` (after
+  # percent-decoding the name) is removed; every other parameter, its order and its encoding stay byte-identical and
+  # a URL without a `loginToken` parameter gives the pre-story output.
   def append_login_token(redirect_to, token) do
     case String.split(redirect_to, "#", parts: 2) do
       [base, fragment] ->
+        base = strip_login_token(base)
         sep = if String.contains?(base, "?"), do: "&", else: "?"
-        base <> sep <> "loginToken=" <> token <> "#" <> fragment
+        base <> sep <> "loginToken=" <> token <> "#" <> strip_login_token(fragment)
 
       [base] ->
+        base = strip_login_token(base)
         sep = if String.contains?(base, "?"), do: "&", else: "?"
         base <> sep <> "loginToken=" <> token
     end
+  end
+
+  # `prefix?query` -> the same without `loginToken` parameters; the `?` is dropped when nothing is left.
+  defp strip_login_token(part) do
+    case String.split(part, "?", parts: 2) do
+      [prefix, query] ->
+        params = String.split(query, "&")
+        kept = Enum.reject(params, &login_token_param?/1)
+
+        cond do
+          length(kept) == length(params) -> part
+          kept == [] -> prefix
+          true -> prefix <> "?" <> Enum.join(kept, "&")
+        end
+
+      [_no_query] ->
+        part
+    end
+  end
+
+  defp login_token_param?(param) do
+    [name | _] = String.split(param, "=", parts: 2)
+    percent_decode(name) == "loginToken"
+  end
+
+  defp percent_decode(name) do
+    URI.decode(name)
+  rescue
+    ArgumentError -> name
   end
 
   # ── OIDC config (server_config only — ADR-022) ──────────────────────────────
@@ -720,11 +930,7 @@ defmodule Nebu.Matrix.SsoLogin do
   # Built from the request scheme+host so the dev (http://localhost:8008) and any
   # https origin both register the same fixed path. Honours X-Forwarded-Proto.
   defp callback_url(conn) do
-    scheme =
-      case get_req_header(conn, "x-forwarded-proto") do
-        ["https" | _] -> "https"
-        _ -> if conn.scheme == :https, do: "https", else: "http"
-      end
+    scheme = Nebu.Web.RequestScheme.scheme(conn)
 
     host =
       case get_req_header(conn, "host") do
@@ -738,14 +944,23 @@ defmodule Nebu.Matrix.SsoLogin do
   # ── discovery (shared TLS-verifying OidcMetadata fetcher + override seam) ────
 
   defp discover(issuer, field) do
+    with {:ok, doc} <- discovery_doc(issuer), do: doc_url(doc, field)
+  end
+
+  defp discovery_doc(issuer) do
     with {:ok, body} <- Nebu.Matrix.OidcMetadata.fetch(issuer),
-         {:ok, doc} <- Jason.decode(body) do
-      case doc[field] do
-        url when is_binary(url) and url != "" -> {:ok, url}
-        _ -> {:error, {:discovery_missing, field}}
-      end
+         {:ok, %{} = doc} <- Jason.decode(body) do
+      {:ok, doc}
     else
+      {:ok, _not_an_object} -> {:error, {:discovery_failed, :not_an_object}}
       {:error, reason} -> {:error, {:discovery_failed, reason}}
+    end
+  end
+
+  defp doc_url(doc, field) do
+    case doc[field] do
+      url when is_binary(url) and url != "" -> {:ok, url}
+      _ -> {:error, {:discovery_missing, field}}
     end
   end
 

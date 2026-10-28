@@ -1,0 +1,1 @@
+7477 tests, 25 failures = the 24 known + Nebu.Web.LogStore.RetentionTest INFO max-count (timing flake: green alone twice in a fresh DB)

@@ -30,8 +30,8 @@ resource "upcloud_firewall_rules" "nebu" {
   }
 
   # Inbound: HTTP (port 80) for HTTP→HTTPS redirect.
-  # tls_mode = "acme": nginx handles the redirect.
-  # tls_mode = "alb": LB port-80 listener routes to the VM nginx proxy → server.
+  # tls_mode = "acme": nginx handles the redirect (and certbot HTTP-01).
+  # tls_mode = "alb" / "dynamic": the LB redirects; VM nginx :80 only redirects + answers the LB probe.
   dynamic "firewall_rule" {
     for_each = var.tls_mode != "none" ? [1] : []
     content {
@@ -41,6 +41,22 @@ resource "upcloud_firewall_rules" "nebu" {
       destination_port_start = "80"
       destination_port_end   = "80"
       comment                = "HTTP (redirect or LB probe)"
+    }
+  }
+
+  # Inbound: nginx realip/TLS-terminated listener (:8081) from the private network only
+  # (tls_mode = "alb" / "dynamic"). Only the LB lives there; the public side is never opened.
+  dynamic "firewall_rule" {
+    for_each = contains(["alb", "dynamic"], var.tls_mode) ? [1] : []
+    content {
+      action                 = "accept"
+      direction              = "in"
+      protocol               = "tcp"
+      source_address_start   = cidrhost(var.network_cidr, 0)
+      source_address_end     = cidrhost(var.network_cidr, -1)
+      destination_port_start = "8081"
+      destination_port_end   = "8081"
+      comment                = "nginx proxy :8081 (LB → VM, private network only)"
     }
   }
 

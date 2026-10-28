@@ -48,7 +48,10 @@ server/lib/nebu/
 │   │                   Nebu.Web.Router.ClientV1Media — both matched BEFORE the generic /_matrix
 │   │                   catch-all (Plug.Router is top-down, so forward ordering is load-bearing);
 │   │                   everything else under /_matrix runs the OIDC pipeline via
-│   │                   Nebu.Web.Router.Protected; forwards /admin to the Phoenix Admin endpoint;
+│   │                   Nebu.Web.Router.Protected; forwards /admin to the Phoenix Admin endpoint; forwards /account to Nebu.OAuth.Http
+│   │                   (`init_opts: [action: :account]`, story oauth-account-management, ADR-033 A2: placed with the other OAuth
+│   │                   forwards, before /_matrix and the catch-all; cors/2 skips CORSPlug for `path_info: ["account" | _]` so no
+│   │                   `access-control-*` header and no preflight answer exists on /account*, A4);
 │   │                   before_send sets X-Content-Type-Options: nosniff on EVERY response
 │   ├── router/       ← sub-routers forwarded from router.ex, one Plug.Router module per Matrix
 │   │   │               sub-surface, each running its own OidcPlug pipeline
@@ -56,6 +59,12 @@ server/lib/nebu/
 │   │   │               Client-Server API router (forward "/_matrix", matched LAST, after every
 │   │   │               more specific /_matrix/* prefix above it): sync, send, createRoom/join,
 │   │   │               profile PUT, presence, /search, keys, device management, relations, etc.
+│   │   │               Story oauth-account-management (A14): `POST /keys/device_signing/upload` decides a cross-signing
+│   │   │               REPLACEMENT by the `:auth_api` assign: legacy => byte-identical `403`; OAuth and not live => the same `403`;
+│   │   │               OAuth with `auth.session` => ONE transaction (Uia.consume + key write, failed write rolls the consume back);
+│   │   │               otherwise the `m.oauth` 401 challenge (url from Nebu.OAuth.cross_signing_reset_url/0, pending session reused).
+│   │   │               params bind the approval to `device_id` + the SHA-256 of the canonical JSON of ALL supplied keys; the
+│   │   │               "unchanged" re-upload rule compares only the supplied keys (master_key required)
 │   │   ├── media.ex     ← Nebu.Web.Router.Media — deprecated `/_matrix/media/v3/*` routes (upload,
 │   │   │               download[/{fileName}], thumbnail, preview_url), forwarded from
 │   │   │               "/_matrix/media"; own OidcPlug pipeline (every media route authenticated);
@@ -81,13 +90,15 @@ server/lib/nebu/
 │   │                   out of scope for this bugfix — see docs/matrix-api-scope.md).
 │   ├── oidc_config.ex ← Nebu.Web.OidcConfig — GenServer + ETS cache for OIDC issuer, audience,
 │   │                   JWKS URI, and (since fix-and-configure-sso-redirect-schemes) the Admin-UI
-│   │                   -managed sso_extra_redirect_schemes string, all resolved from server_config.
+│   │                   -managed sso_extra_redirect_schemes string and (since legacy-sso-redirect-confirmation)
+│   │                   the sso_redirect_allowed_origins list, all resolved from server_config.
 │   │                   Per-request DB lookups on hot paths (OIDC + SSO redirectUrl validation) are
 │   │                   unacceptable, so values are cached in :nebu_http_oidc_config ETS table.
 │   │                   Cluster-aware via :pg broadcast on refresh (ADR-020), triggered by both the
 │   │                   Bootstrap Wizard and Nebu.Admin.DB.upsert_server_config/1 (Admin UI edits).
 │   │                   Used by OidcPlug (issuer/audience), JwksCache (JWKS URI), and SsoLogin
-│   │                   (extra redirect schemes for the redirectUrl allowlist).
+│   │                   (extra redirect schemes for the redirectUrl allowlist) and SsoRedirect.listed?/2
+│   │                   (get_sso_redirect_allowed_origins/0, the operator origin list).
 │   │                   Operational contract: the configured issuer must resolve from both the Nebu
 │   │                   network and end-user browsers — Nebu never rewrites discovery-document URLs
 │   │                   (bugfix-oidc-public-endpoint-urls; dev: Dex issuer dex.localtest.me + compose alias).
@@ -99,7 +110,14 @@ server/lib/nebu/
 │   ├── token_denylist.ex ← Nebu.Web.TokenDenylist — ETS denylist of revoked access tokens; POST
 │   │                   /logout records the presented token; the OIDC plug consults it AFTER crypto
 │   │                   verification; keyed by JWT jti else SHA-256(raw token); entries self-expire
-│   │                   at the token exp; volatile (Postgres-backed persistence is follow-up hardening)
+│   │                   at the token exp; volatile (Postgres-backed persistence is follow-up hardening).
+│   │                   Story oauth-token-revocation-logout: revoke_checked/3 (durable insert whose failure is
+│   │                   reported; the node's ETS entry stays so the token is dead there; used by
+│   │                   `POST /logout/all` for the caller's raw JWT: a failed write => 500). Story
+│   │                   oauth-legacy-coexistence: revoke_by_hash/2 itself now returns `:ok | {:error, term}`
+│   │                   (`{:error, :no_exp}` without an expiry; story 4's separate checked variant was merged
+│   │                   into it, one implementation) and is called only by `DeviceBinding.kill_device_jwts/3`, which deletes a
+│   │                   binding row only after a confirmed write (a failed write keeps it, fail closed)
 │   ├── oidc_claims.ex ← Nebu.Web.OidcClaims — pure, stateless recursive OIDC-claims-map walker;
 │   │                   claim_value_matches?/2 (arbitrary-depth value search) and
 │   │                   flatten_discovered_claims/2 (claims → dot-path {key, value} pairs, e.g.
@@ -108,7 +126,9 @@ server/lib/nebu/
 │   │                   and the Bootstrap Wizard's claim-picker share one walker instead of two that
 │   │                   could drift apart. Trust-boundary rationale (no depth guard — signed,
 │   │                   verified IdP token is the boundary) travels with the code as a comment.
-│   └── plugs/        ← OidcPlug (Bearer validation: alg allowlist RS*/ES*/PS*, JWKS kid select,
+│   └── plugs/        ← OidcPlug (story oauth-token-revocation-logout: assigns `:auth_api` ("oauth" for an opaque
+│                       OAuth access token, "legacy" for a JWT or legacy opaque token) at authentication time so
+│                       `POST /logout` picks the OAuth or the legacy branch; Bearer validation: alg allowlist RS*/ES*/PS*, JWKS kid select,
 │                       Assent/JOSE verify of sig+exp+iss+aud+sub, issuer/audience from env var
 │                       OR OidcConfig cache, denylist check, idempotent TTL-cached user
 │                       provisioning), RateLimit (per-IP token bucket: /login 30/min burst 10,
@@ -129,6 +149,14 @@ server/lib/nebu/
 │   ├── request_logger/ ← PayloadRedactor (pure, recursive two-category redaction: credentials
 │   │                   like password/access_token/Authorization → ***REDACTED***; message
 │   │                   content like event body/topic/name → ***MESSAGE_CONTENT***)
+│   │                   Story oauth-account-management (A22): also redacts `csrf_token` (map keys and form strings) and the
+│   │                   `session` of a UIA challenge response (`flows` + `session`); RequestLogger logs `/account` and `/account/*`
+│   │                   query strings with parameter NAMES only (`device_id` / `session_id` never reach access logs); `Nebu.Web.Plugs
+│   │                   .JsonBody` skips `/account*` (the POST handlers read the raw form body once via Nebu.OAuth.FormPost)
+│   ├── request_scheme.ex ← Nebu.Web.RequestScheme (story oauth-account-management, review cycle 1 i3, ADR-033 A8): the ONE helper that
+│   │                   decides whether a request is https: `conn.scheme == :https` OR the FIRST `X-Forwarded-Proto` value is `https`;
+│   │                   used by the router (.well-known), SsoLogin.callback_url/1, Nebu.OAuth.Authorize and Nebu.OAuth.Account (cookie
+│   │                   name / `Secure` attribute), so the callback URL, the metadata and the cookies cannot disagree behind a proxy
 │   ├── log_store/      ← LogStore (operational log store — persistent, mutable, admin-configurable
 │   │                   diagnostic log capture; separate from compliance audit logs, ADR-018 inline SQL):
 │   │   ├── handler.ex  — central Erlang :logger handler (attached at boot, non-blocking) that
@@ -202,6 +230,21 @@ server/lib/nebu/
 │   │                   writes; single `m.login.sso` stage, Option B fresh-auth window
 │   │                   (NEBU_UIA_FRESH_AUTH_SECONDS, default 900s); DB-backed single-use `uia_sessions`
 │   │                   bound to (user_id, op, params) — cluster-correct (ADR-020), Story s3
+│   │                   Story oauth-account-management (A15): `op = "cross_signing_reset"` rows are the approval records of the
+│   │                   `m.oauth` stage (`stage_complete = TRUE` = approved on the account page); `complete/2` (legacy `m.login.sso`
+│   │                   fallback) gains `AND op <> 'cross_signing_reset'` and `load/1` refuses such rows, so an IdP login in the
+│   │                   legacy fallback can never approve a reset. New functions: `mint_session_checked/3` (`{:ok, id} | :error`),
+│   │                   `find_pending/3` (the caller's still-pending session for the same (user, params)), `open_reset_request/3`
+│   │                   (advisory-lock serialized per (user, device), one pending request per device, cap 5 per user),
+│   │                   `consume/4` (atomic single use) and `cleanup_expired/0` (now actually scheduled, see OAuthFlowPurgeWorker)
+│   ├── account_management.ex ← Nebu.Matrix.AccountManagement (story oauth-account-management, ADR-033 A1/A7/A12/A15/A16; PRIVATE,
+│   │                   reached only through the `Nebu.Matrix` facade functions `account_identity/1` (user id derived like the login,
+│   │                   error-aware `is_active` read, `auth_time` claim only), `account_devices/1` (error-aware, never `[]` on an
+│   │                   outage; devices + `auth_api`/`client_id` via OAuthSessionStore.device_sessions/1), `account_profile/1`,
+│   │                   `cross_signing_reset_requests/1`, `approve_cross_signing_reset/2`, `decline_cross_signing_reset/2` (single atomic
+│   │                   conditional UPDATEs on `uia_sessions`, only `op = 'cross_signing_reset'`) and `purge_expired_uia_sessions/0`).
+│   │                   Inline SQL (ADR-018); never raises; compile-time guarded test seam `:account_matrix_repo`.
+│   │                   `Nebu.Matrix.CanonicalJson.sha256_hex/1` is the one place that hashes the supplied cross-signing keys
 │   ├── device_id.ex ← Nebu.Matrix.DeviceId — device_id ingress validation (≤255 bytes, no control
 │   │                   chars) at POST /login + POST /keys/upload (Story s3, F-2)
 │   ├── room/         ← Horde.DynamicSupervisor + Room GenServer (state, history, power levels);
@@ -211,7 +254,16 @@ server/lib/nebu/
 │   │                   (user_id, device_id) key); BulkImporter (admin bulk OIDC provisioning, same
 │   │                   flow as first-login provisioning); DeviceBinding (token→device store for
 │   │                   raw OIDC-JWT sessions, keyed by SHA-256(token), per-node 60s TTL ETS cache,
-│   │                   PostgreSQL source of truth — Story s2-device-lifecycle-at-login);
+│   │                   PostgreSQL source of truth — Story s2-device-lifecycle-at-login; story oauth-legacy-coexistence, ADR-033 C11/C13: the
+│   │                   REFUSAL semantics: put/4 returns `:ok | {:error, :oauth_device}` (a raw JWT is never bound to a device with an
+│   │                   OAuth session; the conflict update only refreshes `exp` for the SAME (user, device), a different target affects 0
+│   │                   rows and is refused, so a kept binding cannot be re-pointed), lookup/1 marks a binding REFUSED when its device has
+│   │                   an OAuth session OR no `devices` row any more (a kept binding therefore kills the JWT through the database on
+│   │                   every node, after the 60 s cache TTL), and kill_device_jwts/3 `(user_id, device_id, opts) :: :ok | {:error, :partial}`
+│   │                   is THE one JWT kill-switch (every bound JWT is denylisted via TokenDenylist.revoke_by_hash/2, a binding row is
+│   │                   deleted only after a confirmed write, a kept row => `{:error, :partial}` + WARNING, `except_hash:` spares the
+│   │                   caller's own token); used by delete_user_device/2, the teardown of end_device_session/2 and
+│   │                   OAuthSession.kill_bound_jwts/2, which still never fails the grant);
 │   │                   Sweeper (hourly best-effort eviction of expired jwt_device_bindings +
 │   │                   uia_sessions rows — Story s3, supervised under Nebu.Repo's children);
 │   │                   RefreshWorker (periodic per-row proactive revalidation of matrix_sessions'
@@ -229,7 +281,48 @@ server/lib/nebu/
 │   │                   alongside Sweeper under Nebu.Repo's children); RefreshErrors (single
 │   │                   transient-vs-confirmed classification of IdP/DB errors for the worker and
 │   │                   POST /refresh: transient → 503 + Retry-After, session untouched; confirmed →
-│   │                   401 and device session deleted)
+│   │                   401 and device session deleted);
+│   │                   OAuthSessionStore (story oauth-token-endpoint, ADR-033 T1/T2/T27: inline SQL over the
+│   │                   `auth_api = 'oauth'` rows of matrix_sessions — issue (device-reuse delete + insert in one
+│   │                   transaction, devices row upserted FIRST as the serialization lock), rotate (`FOR UPDATE`,
+│   │                   guarded UPDATE, same devices row lock), PENDING/CONSUMED refresh-token states, revoke by
+│   │                   device or by oauth_code_hash). Story oauth-token-revocation-logout (R2/R11/R17) adds the logout
+│   │                   teardown: end_session_for_token/1 (ONE transaction: plain SELECT of the row by either token hash,
+│   │                   devices row `FOR UPDATE`, re-check after the lock, DELETE of every matrix_sessions row of the
+│   │                   device, device/key tables via the raising DeviceKeyStore.delete_device!/3), end_device/2,3
+│   │                   (same locked teardown, optional repo argument) and oauth_device_ids/1; lock order devices ->
+│   │                   matrix_sessions everywhere. MatrixSessionStore refresh/extension SQL and the RefreshWorker
+│   │                   act on `auth_api = 'legacy'` rows only; DeviceBinding.put/4 refuses to bind a raw IdP JWT to
+│   │                   a device that has an OAuth session (guarded INSERT ... SELECT ... WHERE NOT EXISTS) and
+│   │                   DeviceBinding.lookup/1 returns device + `oauth_device?` in one cached query (T25); story oauth-account-management (A12):
+│   │                   `device_sessions/1` returns the newest live `matrix_sessions` row per device (`auth_api`, `client_id`) for the
+│   │                   account device list — the only module family allowed to read `matrix_sessions` (token-hashing grep guard))
+│   ├── oauth_session.ex ← Nebu.Matrix.OAuthSession — OAuth session logic in the Matrix domain (T1/T7/T10/T11/T28):
+│   │                   issue/1 (T7: the JWT kill switch denylists raw IdP JWTs bound to the reused device AFTER the
+│   │                   commit), resolve_refresh_token/1, refresh/4 (IdP re-validation with RefreshErrors, T28
+│   │                   IdP-refresh-token race guard: a rejection is skipped only when the device row carries a NEW IdP
+│   │                   refresh-token ciphertext; bounded race retries), revoke_device_session/2,
+│   │                   revoke_sessions_for_code/1. Story oauth-token-revocation-logout (R1/R2/R15/R17/R24, ADR-033):
+│   │                   revoke_token/1 (RFC 7009 lookup of an access OR refresh token in any state, format check, one
+│   │                   atomic teardown of session + device + keys, then best-effort S3 JWT kill-switch and legacy
+│   │                   per-device rows), end_device_session/2 (OAuth `POST /logout`), end_all_for_user/1 and
+│   │                   end_all_devices/1 (`POST /logout/all` and GDPR erasure: union of `devices` rows and
+│   │                   matrix_sessions device ids, each torn down with the locked atomic teardown; the JWT bindings
+│   │                   are deleted only after every denylist write was confirmed); every function catches exits and
+│   │                   never raises. Exposed to Nebu.OAuth ONLY through the facade functions
+│   │                   Nebu.Matrix.oauth_issue_session/1, oauth_resolve_refresh_token/1, oauth_refresh_session/4,
+│   │                   oauth_revoke_device_session/2, oauth_revoke_sessions_for_code/1 and, since story 4,
+│   │                   oauth_revoke_token/1 (`{:ok, :revoked, info} | {:ok, :unknown} | {:error, :unavailable}`) and
+│   │                   oauth_end_user_sessions/1 (`{:ok, [device_id]} | {:error, :unavailable}`); the web layer
+│   │                   additionally uses end_all_user_devices/1 (step 3 of `/logout/all`, so Nebu.Web never reaches
+│   │                   into OAuthSession). Story oauth-legacy-coexistence (C12):
+│   │                   `Nebu.Matrix.end_device_session/2` (`:ok | {:error, :unavailable}`, atomic teardown + confirmed JWT kill-switch +
+│   │                   legacy session rows) is also THE teardown of every non-preserved device deletion by legacy callers
+│   │                   (`DELETE /devices/{id}`, `POST /delete_devices` via `delete_one_device/3`) and of the Admin UI
+│   │                   (`Nebu.Matrix.delete_user_device/2`, `:ok | {:error, :unavailable}`), so a concurrent OAuth rotation cannot leave
+│   │                   a working token behind a deleted device; the preserved own-device branch of a fresh-UIA self-delete keeps its
+│   │                   steps. A static test keeps
+│   │                   lib/nebu/oauth/*.ex free of Matrix-internal module names, ADR-020
 │   ├── presence/     ← Presence status (online/offline/unavailable)
 │   ├── signature/    ← Ed25519 signing (:crypto eddsa), Nebu.EventId.generate/1 (SHA-256 content
 │   │                   hash), RFC 8785 canonical JSON
@@ -640,10 +733,10 @@ server/lib/nebu/
 │   │   │                   `:media_alerts` queue). Hard-deletes `media_files` rows that have sat
 │   │   │                   in `:deleted` (Story 6a's `admin_delete/2`) or `:infected` (Story 4b's
 │   │   │                   scan worker) past a per-state retention window — `deleted_days: 30` /
-│   │   │                   `infected_days: 7`, read from a STATIC `Application.get_env(:nebu,
-│   │   │                   :media_cleanup, [])` `config.exs` entry, deliberately NOT yet one of
-│   │   │                   Story 9a's admin-configurable `media_config` keys (forward-compat note
-│   │   │                   only, not a dependency of this story). Adds the sibling
+│   │   │                   `infected_days: 7` (defaults), read at every run from the admin-configurable
+│   │   │                   `media_config` table via `Nebu.Media.Config.retention_days/0` (story
+│   │   │                   media-cleanup-reads-media-config; fail-safe: an unreadable or damaged value
+│   │   │                   deletes nothing; first shipped with a static `config.exs` entry). Adds the sibling
 │   │   │                   `infected -> hard_deleted` guard-table edge to `Nebu.Media.StateMachine`
 │   │   │                   (the pre-existing `deleted -> hard_deleted` edge, added by Story 2e,
 │   │   │                   was the only one before this story) and a `media_hard_deleted`
@@ -912,7 +1005,12 @@ server/lib/nebu/
 │   │                   GenServer + ETS `:protected` cache + Erlang `:pg` cluster-aware invalidation
 │   │                   for admin-configurable media policy values (ADR-027, dedicated table separate
 │   │                   from server_config per ADR-027's rationale — media_config writes never trigger
-│   │                   OIDC/logging cache invalidation). Public API: `get/0` returns map of 15 policy
+│   │                   OIDC/logging cache invalidation). Public API: `retention_days/0` (strict, uncached read of
+│   │                   `deleted_days` / `infected_days` for the MediaCleanupWorker, `{:error, _}` instead of
+│   │                   defaults when unreadable; story media-cleanup-reads-media-config); `damaged_keys/0` (the
+│   │                   sorted keys of stored rows that cannot be decoded: such a row is skipped, only that key uses its
+│   │                   default, the key is logged and shown as a warning on /admin/media/settings, never the value; story
+│   │                   media-config-tolerant-loader); `get/0` returns map of 15 policy
 │   │                   keys — 9a's original 10 (max_upload_size_bytes, max_file_size_bytes,
 │   │                   max_pending_per_user, max_stall_ms, deleted_days, infected_days,
 │   │                   orphaned_hours, webhook_url, released_delete_after_days, mime_denylist)
@@ -926,7 +1024,10 @@ server/lib/nebu/
 │   │                   actor) is sole write path: validates per-key (non-negative integers; webhook_url
 │   │                   requires https + Nebu.Media.SSRF.check/1; mime_denylist requires comma-separated
 │   │                   plausible MIME-type prefixes), writes to media_config table (RLS-gated), logs
-│   │                   media_config_updated audit entry, broadcasts `:invalidate_media_config` via
+│   │                   media_config_updated audit entry (best-effort after the write; for the three
+│   │                   retention keys released_delete_after_days/deleted_days/infected_days in ONE
+│   │                   transaction with the value: a refused shortening answers {:error, {:audit, _}}),
+│   │                   broadcasts `:invalidate_media_config` via
 │   │                   `:pg` to peer nodes. 60s TTL fallback ensures stale security-relevant values
 │   │                   (MIME denylist, upload/scan limits) are not served indefinitely on broadcast
 │   │                   miss. Mirrors Nebu.Web.OidcConfig's exact pattern (ETS + :pg + TTL), adapted
@@ -1037,6 +1138,152 @@ server/lib/nebu/
 │                       link-local / CGNAT / cloud-metadata / IPv4-mapped / IPv6-ULA; resolve-once
 │                       IP-pinning for http (https-SNI DNS-rebind TOCTOU = residual accepted risk)
 │
+├── oauth/            ← Nebu.OAuth.* — OAuth 2.0 authorization server (broker model, ADR-033, epic oauth-broker)
+│   ├── http.ex       ← Nebu.OAuth.Http — HTTP handlers for the RFC 8414 metadata endpoint (GET
+│   │                   /_matrix/client/v1/auth_metadata) and the RFC 7591 Dynamic Client Registration
+│   │                   endpoint (POST /oauth2/register); routes GET /oauth2/authorize to Nebu.OAuth.Authorize
+│   │                   (story oauth-authorize-idp-delegation-code) and, since story oauth-token-endpoint, POST /oauth2/token,
+│   │                   GET /oauth2/jwks and GET /.well-known/openid-configuration (Nebu's own document, byte-identical to
+│   │                   auth_metadata). Returns 404 M_UNRECOGNIZED while oauth_enabled=false (T22: the token/jwks/openid-
+│   │                   configuration paths answer `{"errcode":"M_UNRECOGNIZED"}` WITHOUT an `error` member; unreadable
+│   │                   config => 503 `{}` + Retry-After: 5). CORS `*` without credentials on those three paths (T32).
+│   │                   Story oauth-token-revocation-logout: also routes `POST /oauth2/revoke` (action `:revoke`) with a
+│   │                   TWO-state gate (R13: only an unreadable config answers 503 `{}`; revoke stays live while OAuth
+│   │                   is disabled or the issuer is invalid), 405 incl. HEAD, sub-path 404, CORS `*` on every status (R14).
+│   │                   Supports OPTIONS preflight with CORS headers. Rate limiting per IP and globally
+│   │                   (three bucket families: junk, loose, strict per story AC6 + ADR-033 "Registration
+│   │                   rate limits").
+│   ├── registration.ex ← Nebu.OAuth.Registration — request validation (RFC 7591 + spec extensions):
+│   │                   validates redirect_uris (web/native formats), application_type, client_uri,
+│   │                   logo/tos/policy URIs, response_types/grant_types with defaults + unknown-ignore
+│   │                   semantics. Returns error codes: invalid_redirect_uri, invalid_client_metadata,
+│   │                   invalid_request.
+│   ├── client_store.ex ← Nebu.OAuth.ClientStore — inline-SQL registration persistence (ADR-018):
+│   │                   CREATE/lookup oauth_clients; computes SHA-256 metadata_hash; deduplicates via
+│   │                   ON CONFLICT (metadata_hash) DO NOTHING; pending registrations start at status='pending';
+│   │                   rate limit checks and pending caps (global + per-host). Pending-purge cron job
+│   │                   Nebu.Workers.OAuthPendingPurgeWorker (hourly, Oban queue oauth_cleanup). Story
+│   │                   oauth-account-management (review cycle 1 m7): `client_names/1` resolves a list of `client_id`s to the
+│   │                   registrations' `client_name` in ONE query (device list: "App (name claimed by the app)", rendered escaped).
+│   ├── config.ex      ← Nebu.OAuth.Config — three-state (enabled/disabled/unknown) config reader for
+│   │                   server_config.oauth_enabled, oauth_issuer_url; fail-closed (404 M_UNRECOGNIZED)
+│   │                   on unknown state. Story oauth-legacy-coexistence (ADR-033 C1/C2): live_state/0 `{:live, issuer} | :unknown | :off` is
+│   │                   THE liveness predicate (enabled AND valid issuer, per request, no cache); the kill switch of token/JWKS/openid-
+│   │                   configuration (Nebu.OAuth.Http) and `auth_metadata` delegate to it, and the public facade `Nebu.OAuth.oauth_aware?/0`
+│   │                   is `match?({:live, _}, live_state())` (never raises), so the OAuth-aware login flags and the SSO `action` are present
+│   │                   IFF `auth_metadata` answers 200; `Nebu.Matrix.HttpPublic.versions/1` (story oauth-versions-switch) lists v1.1-v1.15 on the same predicate (else v1.1-v1.11, fail closed); `Authorize.live_issuer/0` and `Http.auth_issuer/1` delegate to `live_state/0`.
+│   │                   token_settings/0 (story oauth-token-endpoint): oauth_access_token_ttl_seconds (60..3600, default 900),
+│   │                   oauth_idp_revalidation (per_refresh | off, default per_refresh); never raises.
+│   ├── discovery.ex   ← Nebu.Web.Plugs.OAuthDiscovery — router plug routing discovery endpoints
+│   │                   (/_matrix/client/v1/auth_issuer, /unstable/.../auth_issuer/auth_metadata) to either
+│   │                   Nebu.OAuth.Http (while oauth_enabled=true) or the IdP passthrough
+│   │                   (Nebu.Matrix.HttpPublic, while oauth_enabled=false or :unknown state). See ADR-033
+│   │                   "Discovery: one issuer".
+│   ├── authorize.ex   ← Nebu.OAuth.Authorize — flow orchestration (story oauth-authorize-idp-delegation-code,
+│   │                   ADR-033 D1-D23): handle_authorize/2 (GET /oauth2/authorize: validate, persist the request,
+│   │                   302 to the IdP, set the per-flow browser-binding cookie) and handle_idp_callback/1 (OAuth
+│   │                   branch of the shared IdP callback: atomic consume of the request, cookie check, IdP code
+│   │                   exchange + id_token/nonce verification via Nebu.Matrix, provisioning, issue the Nebu
+│   │                   authorization code, 302 to the client with code/state/iss). Per-IP buckets
+│   │                   {"oauth_authorize", ip} / {"oauth_callback", ip} (600/h each).
+│   ├── authorize_request.ex ← Nebu.OAuth.AuthorizeRequest — pure: raw-query parse (duplicates/percent-encoding,
+│   │                   D13), redirect-URI matching (exact, loopback port exception), PKCE S256, response_mode
+│   │                   default/override (D10), RFC 6749 4.1.2.1 error table + redirect building (iss, RFC 9207).
+│   ├── scope.ex       ← Nebu.OAuth.Scope — pure: Matrix scope parser for both prefixes (stable urn:matrix:client:,
+│   │                   unstable urn:matrix:org.matrix.msc2967.client:), api:* required, exactly one device:<id>
+│   │                   with its own device-id validator (D6-D8), `openid` kept (D23).
+│   ├── authz_store.ex ← Nebu.OAuth.AuthzStore — inline SQL (ADR-018) over oauth_authz_requests: capped INSERT
+│   │                   (10 000 live rows), atomic DELETE ... RETURNING ..., (expires_at > now()) AS live (single
+│   │                   use, cluster safe, D3), batched purge. Repo seam :nebu_http, :oauth_repo.
+│   ├── code_store.ex  ← Nebu.OAuth.CodeStore — inline SQL over oauth_codes: insert/1 (hash-only), consume/1
+│   │                   via UPDATE ... WHERE used_at IS NULL AND expires_at > now() RETURNING (exactly one winner)
+│   │                   with reuse detection ({:reused, row}, D17), batched FOR UPDATE SKIP LOCKED purge, hash/1.
+│   ├── pages.ex       ← Nebu.OAuth.Pages — the ONE renderer for all non-redirect outcomes (accessible HTML:
+│   │                   unknown_client, invalid_redirect_uri, client_pending/rejected, invalid_state, rate_limited,
+│   │                   ...), strict CSP with compile-time style hash, no-store headers, no CORS. Since story oauth-account-management (review cycle 1 M1)
+│   │                   `put_flow_headers/1` sends `Referrer-Policy: same-origin` (under `no-referrer` browsers send `Origin: null` for the
+│   │                   account page's own form POSTs); `Nebu.OAuth.AccountPages` reuses it for every `/account*` response.
+│   ├── token.ex       ← Nebu.OAuth.Token — token endpoint orchestration (story oauth-token-endpoint, ADR-033 T1-T33):
+│   │                   handle_token/2 for POST /oauth2/token. authorization_code grant (atomic code consume,
+│   │                   client/redirect URI/PKCE binding, session issuance, ES256 id_token when `openid` is granted)
+│   │                   and refresh_token grant (rotation, Refresh-Retry, reuse detection, IdP re-validation per
+│   │                   refresh, scope narrowing). RFC 6749 4xx bodies; EVERY 5xx is `{}` + Retry-After (T20: no
+│   │                   `error` member, so oidc-client-ts / matrix-js-sdk retry instead of logging out); rescue => 500 `{}`.
+│   │                   Buckets {"oauth_token", ip} (600/h, 429) and {"oauth_token_refresh", ip} (6000/h, answers 503
+│   │                   `{}`, never 429). Reaches the Matrix domain ONLY via the five Nebu.Matrix.oauth_* facade functions. The form-POST plumbing lives in Nebu.OAuth.FormPost (story 4).
+│   ├── form_post.ex   ← Nebu.OAuth.FormPost — the form-POST plumbing shared by token and revoke (story
+│   │                   oauth-token-revocation-logout, R1/R8; MOVED out of Nebu.OAuth.Token, byte-identical behaviour):
+│   │                   raw body read once, 16 KiB cap, no query string, duplicate/control-character => invalid_request,
+│   │                   JSON/error/5xx `{}` + Retry-After responses, ip_string/1.
+│   ├── revoke.ex      ← Nebu.OAuth.Revoke — RFC 7009 revocation endpoint (story oauth-token-revocation-logout, ADR-033
+│   │                   R1-R14, R21): handle_revoke/2 for POST /oauth2/revoke. No client authentication (`client_id` only
+│   │                   compared for the log line), bucket {"oauth_revoke", ip} 60/min burst 600 charged after the parse
+│   │                   and before any DB access (429), `200 {}` (application/json) for revoked, unknown, malformed and
+│   │                   legacy tokens alike (no oracle), 503 `{}` + Retry-After on a storage error, rescue => 500 `{}`;
+│   │                   INFO log `outcome=revoked|ignored client_id_match=...` only. Reaches the Matrix domain ONLY via
+│   │                   Nebu.Matrix.oauth_revoke_token/1.
+│   ├── token_request.ex ← Nebu.OAuth.TokenRequest — pure: form parsing of the raw body (16 KiB cap, no query string,
+│   │                   duplicates/control characters => invalid_request, empty = omitted), client auth `none` checks,
+│   │                   PKCE S256 verification, scope narrowing with prefix-normalized Matrix tokens (T13).
+│   ├── id_token.ex    ← Nebu.OAuth.IdToken — pure: claims (`iss`, `sub`, `aud`, `iat`, `exp = iat+300`, `auth_time`,
+│   │                   `nonce` on the code grant only) and ES256 signing (alg is a code constant, never input).
+│   ├── signing_key_store.ex ← Nebu.OAuth.SigningKeyStore — inline SQL over oauth_signing_keys (migration 000042):
+│   │                   ensure_active_key/0 (lazy, cluster-safe single-winner generation via INSERT ... ON CONFLICT DO
+│   │                   NOTHING + re-SELECT), verified load (decrypted key checked against `kid` AND `public_jwk`),
+│   │                   JWKS publication of the active + unexpired retired keys; private JWK only as SecretBox ciphertext.
+│   ├── account.ex     ← Nebu.OAuth.Account — HTTP orchestration of every `/account*` request and of the account branch of the IdP
+│   │                   callback (story oauth-account-management, ADR-033 A1-A27): live check (`Config.live_state/0`, 404/503 page
+│   │                   otherwise), per-IP bucket `{"oauth_account", ip}` (600/h, 429 page), sign-in through the shared callback (state
+│   │                   `o2.acct.` + 43 base64url, binding cookie `nebu_acct_<16 hex>`, atomic consume, `Nebu.Matrix.idp_complete_login/4`
+│   │                   + `account_identity/1`, `auth_time` freshness, rotation), browser session cookie (`__Host-nebu_account` on https,
+│   │                   `nebu_account` on plain http), CSRF (token derived from the cookie + Origin / Sec-Fetch checks, before
+│   │                   freshness), re-auth freshness (300 s), actions and Post/Redirect/Get with fixed `notice` codes. Reaches the Matrix
+│   │                   domain ONLY through the Nebu.Matrix facade; the static test keeps it free of Matrix-internal module names.
+│   │                   `Nebu.OAuth.Metadata.build/1` adds `account_management_uri` / `account_management_actions_supported` (A18)
+│   ├── account_store.ex ← Nebu.OAuth.AccountStore — inline SQL (ADR-018) over `oauth_account_login_requests` and
+│   │                   `oauth_account_sessions` (migration 000043): capped INSERT, atomic `DELETE ... RETURNING` consume of the login
+│   │                   request, ONE atomic sliding `UPDATE ... RETURNING` session lookup (idle 900 s, absolute 3600 s, cluster safe),
+│   │                   rotation transaction (new session + delete of the replaced one + per-user cap of 20), batched purge
+│   ├── account_pages.ex ← Nebu.OAuth.AccountPages — standalone HTML renderer for the account page (NOT the admin layout / DaisyUI):
+│   │                   EEx templates in `account_templates/{layout,error,device_table,overview,profile,devices,device,delete_confirm,
+│   │                   reset}.html.eex` compiled with `Phoenix.HTML.Engine` (auto-escaping), ONE inline CSS block allowed by its SHA-256 in
+│   │                   the CSP (`default-src 'none'; form-action 'self'; frame-ancestors 'none'`), `X-Frame-Options: DENY`, WCAG 2.1 AA,
+│   │                   `data-page` / `data-role` hooks for e2e, error pages `data-page="account-error"`
+│   └── public_api.ex  ← Nebu.OAuth — public-API module (ADR-020): approve_registration/3, reject_registration/3
+│                       (audit logged, for Nebu.Admin) and, for the Matrix callback / story 3: oauth_idp_state?/1,
+│                       handle_idp_callback/1, consume_authorization_code/1, purge_expired_flow_state/0 and, since story
+│                       oauth-legacy-coexistence, oauth_aware?/0 (the ONLY way the Matrix domain learns whether OAuth is offered, ADR-033 C1;
+│                       HttpPublic.login_flows/1 and SsoLogin.redirect/1 call it, never Nebu.OAuth.Config).
+│                       Story oauth-token-endpoint: the three new endpoints are routed straight to Nebu.OAuth.Http
+│                       (:token, :jwks, :openid_configuration); consume_authorization_code/1 is used by Nebu.OAuth.Token;
+│                       ClientStore.touch_last_used/1 refreshes oauth_clients.last_used_at at most once per hour (T30).
+│                       Story oauth-account-management: handle_idp_callback/1 (no longer a plain defdelegate) dispatches `"o2.acct." <> _`
+│                       to Nebu.OAuth.Account FIRST and everything else to Authorize unchanged; cross_signing_reset_url/0
+│                       (`{:ok, url} | :unavailable`, the ONE Matrix -> OAuth call, used by protected.ex for the `m.oauth` challenge);
+│                       purge_expired_account_state/0 (`{:ok, %{login_requests: n, sessions: m}}`).
+│
+├── workers/oauth_flow_purge_worker.ex ← Nebu.Workers.OAuthFlowPurgeWorker — Oban cron every 10 min (queue
+│                       oauth_cleanup, max_attempts 3): purges expired oauth_authz_requests and oauth_codes kept
+│                       24 h after expiry via Nebu.OAuth.purge_expired_flow_state/0. Correctness never depends on it. Story
+│                       oauth-account-management (A23): also runs Nebu.OAuth.purge_expired_account_state/0 (expired account login
+│                       requests and sessions) and Nebu.Matrix.purge_expired_uia_sessions/0 (expired `uia_sessions` rows only, so legacy
+│                       UIA is unchanged); runs all three and returns the first error.
+│                       The IdP leg itself stays in the Matrix domain (it owns the IdP client): Nebu.Matrix
+│                       .idp_authorize_location/2, idp_complete_login/4, provision_login_user/1 wrap the same
+│                       SsoLogin builder/completion the legacy login uses (ADR-033 D22); SsoLogin.callback/1
+│                       branches first on the `o2.` state tag. Story oauth-legacy-coexistence (C4/C5): SsoLogin.redirect/1 parses `action`
+│                       (stable wins, invalid stable falls through to `org.matrix.msc3824.action`, exact `login`/`register` only, repeated
+│                       key => last value), honours it only for no `{idpId}` or `oidc` and only while oauth_aware?/0 (asked only when an
+│                       action is present), and maps `register` to `prompt=create` iff the IdP document lists it as a list; the discovery
+│                       document is read once. RequestLogger masks the VALUE of every query key starting with `action` /
+│                       `org.matrix.msc3824.action` on the SSO-redirect paths (C6, Kassandra L-2).
+│
+├── workers/client_ip_check_worker.ex ← Nebu.Workers.ClientIPCheckWorker — Oban cron every 6 h (`37 */6 * * *`, queue
+│                       oauth_cleanup, max_attempts 1; story client-ip-misconfiguration-warnings, epic SEC gate 3 G3-2): reads
+│                       Nebu.Matrix.device_address_spread/1 (counts over `devices` active in the last 24 h) and WARNs when at least
+│                       10 devices of at least 5 users were seen from at most 2 addresses (collapsed client address behind a
+│                       proxy / load balancer). Read-only and informational: no block of oauth_enabled, never logs an address.
+│
 ├── admin/            ← Nebu.Admin.* — Phoenix HTTP controller + LiveView Admin UI + admin OIDC login
 │   ├── endpoint.ex   ← Phoenix.Endpoint with server: false — NO separate listener; the top router
 │   │                   forwards the /admin subtree by calling it, so admin pages ride the same Bandit
@@ -1108,7 +1355,7 @@ server/lib/nebu/
 │   │                   (POST .../devices/:device_id/rename) and delete_device/2 (POST
 │   │                   .../devices/:device_id + _method=DELETE) — PRG, :require_admin-gated, CSRF;
 │   │                   reaches devices ONLY through the Nebu.Matrix facade (ADR-020), never
-│   │                   DeviceKeyStore directly; audits on success + failure (device-management S4)
+│   │                   DeviceKeyStore directly; audits on success + failure (device-management S4; story oauth-legacy-coexistence C12: a failed teardown shows a flash `:error` and a `failure`/`delete_failed` audit row instead of raising)
 │   ├── spaces_controller.ex     ← Spaces management HTTP controller
 │   ├── config_controller.ex     ← Server configuration HTTP controller
 │   ├── claim_mapping_controller.ex ← OIDC claim mapping HTTP controller
@@ -1714,7 +1961,8 @@ server/lib/nebu/
 > ADR-018) mirrors `Nebu.Matrix.DeviceKeyStore` (migration 000009): `keys/device_signing/upload`
 > persists, `keys/query` echoes the stored objects, `keys/signatures/upload` merges signatures
 > (validate-then-persist, caller-identity guard), and `/sync` surfaces the uploading user's own ID
-> in `device_lists.changed` by consuming the flag. A cross-signing key ID colliding with an
+> in `device_lists.changed` by consuming the flag (device-less requests only since story `sync-token-per-device`;
+> device-bound requests compare `changed_pos` with the device's position, see below). A cross-signing key ID colliding with an
 > existing device ID is rejected (`400 M_INVALID_PARAM`) before any write. All material is opaque
 > — this is an E2EE-readiness directory orthogonal to encryption; `m.room.encryption` is still
 > rejected (`403 M_FORBIDDEN`, ADR-011).
@@ -1750,14 +1998,28 @@ server/lib/nebu/
 > /user/{userId}/account_data/{type}` now persist/read the durable row (survive restart,
 > cluster-correct per ADR-020); the `user==auth` IDOR guard and 404-absent behaviour are
 > unchanged. `GET /sync` delivers the top-level `account_data.events` from this store via
-> `put_global_account_data/3` in `Nebu.Web.Router.Protected`: an INITIAL sync (no `since`)
-> returns ALL entries (`list_all_and_clear/1`); an INCREMENTAL sync returns only entries whose
-> `changed` flag is set, read-and-cleared atomically (`UPDATE … RETURNING`,
-> `list_changed_and_clear/1`). This closes the recovery-durability gap that
+> `put_global_deliveries/6` in `Nebu.Web.Router.Protected` (was `put_global_account_data/3`). For a
+> DEVICE-LESS request (an unbound raw IdP JWT; since story `sync-token-per-device` the only case that
+> uses the flag): an INITIAL sync (no `since`) returns ALL entries (`list_all_and_clear/1`); an
+> INCREMENTAL sync returns only entries whose `changed` flag is set, read-and-cleared atomically
+> (`UPDATE … RETURNING`, `list_changed_and_clear/1`). Device-bound requests are delivered by position
+> (see the next note). This closes the recovery-durability gap that
 > `cross-signing-readback` deliberately left out — Element's `m.secret_storage.*` /
 > `m.cross_signing.*` recovery material now survives restarts and is delivered to the client.
 > (Supersedes the volatile-ETS description and the Go-era Story 9-24 `room_account_data WHERE
 > room_id = ''` approach noted below, which the Elixir stack does not use for global account data.)
+
+> **Per-device since token and global positions (story `sync-token-per-device`, follow-up `fd`):**
+> `do_sync/1` passes the authenticated device (`conn.assigns[:device_id]`) to the core, which reads and writes
+> the `(user_id, device_id)` row of `sync_tokens` (the initial sync through the new `device_id` field 2 of
+> `GetInitialSyncRequest`); an unbound raw IdP JWT keeps the `''` row. Migration 000052 adds the sequence
+> `sync_global_pos_seq`, `account_data.stream_pos`, `cross_signing_keys.changed_pos` and the two columns
+> `sync_tokens.account_data_pos` / `cross_signing_pos`. `AccountDataStore.put/3` and `CrossSigningKeyStore.put_keys/2`
+> draw a position in one transaction under the per-user advisory lock `sync_global|<user_id>`; `put/3` then wakes the
+> user's waiting `/sync` (`{:account_data_changed, nil}`, `:pg.get_members/1`). A device-bound `/sync` delivers by
+> position (`put_global_deliveries/6`: `list_since_checked/2`, `changed_since?/2`, `PgStore.get_positions/2` /
+> `advance_positions/5`, and `rewind_account_data_position/4` when the account data read of an initial-shaped answer
+> failed) and never clears a flag; the consume-once flags described above stay for device-less requests only.
 
 > **Full-text search column in Story 11-1 (ADR-010):** migration 000042 adds a `search_vector tsvector`
 > column to the `events` table, populated by a PL/pgSQL trigger (`events_search_vector_trigger`)
@@ -1768,6 +2030,9 @@ server/lib/nebu/
 > queries. All existing events were backfilled during the migration. This is the database
 > foundation for `POST /_matrix/client/v3/search` (Epic 11). Scope enforcement at query time:
 > `WHERE room_id = ANY($membership_room_ids)` prevents cross-room leakage.
+> The second trigger on `events` is `events_room_pos_trigger` (migration 000053, story events-room-position, a documented
+> exception to ADR-018): `BEFORE INSERT` it draws the per-room position `events.room_pos` from the counter `rooms.event_pos`
+> under the `rooms` row lock (see the 000053 note in `07-deployment.md`).
 
 > **Global account data in sync responses (Story 9-24):** `syncResponse` gains a top-level
 > `AccountData syncAccountDataSection` field (JSON key `account_data`, never omitted) that carries
@@ -1843,16 +2108,56 @@ server/lib/nebu/
 >   `display_name`/`last_seen_ts`/`last_seen_ip`) so the detail page can show a "created" column.
 > - `rename_user_device/3` — renames a device's `display_name`, scoped to the OWNING `user_id`;
 >   returns `:ok` on a hit, `:error` for an unknown/foreign device (no IDOR — `:error` maps to a flash).
-> - `delete_user_device/2` — revoke + delete in one call: fires the **S3 per-device JWT kill-switch
->   first** (`TokenDenylist.revoke_by_hash/2` for every `jwt_device_bindings` row of the pair, then
->   drops the bindings + the opaque session), then removes the device identity row and all key
->   material. User-scoped, best-effort/idempotent, returns `:ok`. Unlike the Matrix self-delete path
+> - `delete_user_device/2` — revoke + delete in one call. Since story oauth-legacy-coexistence (ADR-033 C12/C13) it
+>   delegates to `Nebu.Matrix.end_device_session/2`: the atomic, `devices`-row-locked teardown of every
+>   `matrix_sessions` row of the device plus device identity and key material in one transaction, followed by the
+>   **S3 per-device JWT kill-switch** `DeviceBinding.kill_device_jwts/3` (bindings are deleted only after a confirmed
+>   `TokenDenylist.revoke_by_hash/2` write) and the legacy session rows. User-scoped, idempotent, returns
+>   `:ok | {:error, :unavailable}` (the Admin controller turns the error into a flash + `failure` audit row). Unlike the Matrix self-delete path
 >   it preserves no caller credential — an admin acts on another user's device, so EVERY bound token
 >   is revoked.
 >
 > The facade keeps the Admin controller thin and the cross-domain boundary explicit: Admin → `Nebu.Matrix`
 > facade → (DeviceKeyStore / TokenDenylist / DeviceBinding / MatrixSessionStore). No new migration
 > (S4 reuses S1–S3 schema), no new ADR. Orthogonal to E2EE (ADR-011).
+>
+> **Story oauth-token-revocation-logout (ADR-033 R1/R17/R24):** `Nebu.Matrix.DeviceKeyStore` gains `@device_tables` and
+> `delete_device!/3` (raising variant with a repo parameter, so the statements run on the teardown transaction's connection;
+> `delete_device/2` is unchanged). The `Nebu.Matrix` facade gains `oauth_revoke_token/1`, `oauth_end_user_sessions/1` and
+> `end_all_user_devices/1` (see `Nebu.Matrix.OAuthSession` above); the erasure path (`delete_user_keys/2`, success branch only)
+> calls the OAuth/legacy session kill after its commit.
+
+### OAuth broker, phase 2 (gate-closing stories; ADR-033 "Phase 2 summary")
+
+Delta to the `oauth/` tree above; all modules are in the single OTP app, cross-domain calls still go through the public API modules (ADR-020). Detail: ADR-033 sections of the named stories.
+
+| Building block | Responsibility | Story / ADR ids |
+|---|---|---|
+| `Nebu.Web.Plugs.ClientIP` + `Nebu.Web.ClientIP` | ONE client-IP resolution: `X-Forwarded-For` honoured only when the direct peer is inside `NEBU_TRUSTED_PROXY_CIDRS` (rightmost untrusted hop); `get/1` = exact address (`devices.last_seen_ip`, `oauth_clients.created_from_ip`), `bucket/1` = rate-limit key (IPv4 per address, IPv6 per /64). Every per-IP `RateLimit` consumer uses it. `Nebu.Web.RateLimitSweeper` evicts idle buckets per node. W1 (TP13): `Nebu.Web.ClientIP.note_untrusted_forwarding/0` (`@doc false`, called by the plug on the untrusted-peer branch only when the request carries `X-Forwarded-For`) logs ONE static WARNING per node and 10 minutes; the throttle is a node-local `:atomics` slot created by `configure/1` (not `RateLimit`, which `NEBU_RATE_LIMIT_DISABLED` switches off); resolution is unchanged and no address or header value is ever logged | oauth-trusted-proxy-client-ip (TP), client-ip-misconfiguration-warnings (W1) |
+| `Nebu.Workers.ClientIPCheckWorker` (`workers/client_ip_check_worker.ex`), `Nebu.Matrix.device_address_spread/1` -> `Nebu.Matrix.DeviceKeyStore.address_spread/1` | W2: Oban cron `37 */6 * * *` (`config/config.exs`, `Oban.Plugins.Cron`; existing limit-1 queue `oauth_cleanup`, `max_attempts: 1`, read-only despite the queue name). The worker calls ONLY the facade (ADR-020; plus `Nebu.OAuth.oauth_aware?/0` for the log text); `address_spread/1` runs one count-only aggregate over `devices` (`count(*)`, `count(DISTINCT user_id)`, `count(DISTINCT last_seen_ip)` since `since_ms`, never selecting an address) under `SET LOCAL statement_timeout = '5s'`, no index, no migration; returns `{:ok, %{devices, users, addresses}}` or `{:error, reason}`, never raises. Pure `assess/1` (`@doc false`): `:collapsed` iff at least 10 devices, at least 5 users and 1..2 addresses; then ONE WARNING `client IP: all <n> devices of <u> users ...` (three integers and `oauth_offered`, no address). Informational only, it never blocks `oauth_enabled` | client-ip-misconfiguration-warnings (W2, D2, D8) |
+| `deploy/tofu/examples/{upcloud,stackit}/client_ip_check.tf` | W3: one OpenTofu `check "client_ip_resolution"` block per reference template (warning on `plan` / `apply`, never an error; variables / locals only): `alb` / `dynamic` with an empty `lb_real_ip_cidrs` (both templates) and, UpCloud only, the TCP-mode frontends (`none` / `acme`, no PROXY protocol, ap3). No assert for Stackit `acme` / `none` (NLB source preservation unverified, ap7). A non-empty list silences it without proving correctness | client-ip-misconfiguration-warnings (W3, D3) |
+| `Nebu.OAuth.SourceKey`, `Nebu.OAuth.PublicSuffix` | hashed per-source key (/64) for the per-source caps on live authorize / login / consent requests and pending registrations; built-in public-suffix list (registrable domain as the per-host cap key, shared-hosting badge) | oauth-dcr-abuse-hardening (AH) |
+| `Nebu.OAuth.Consent`, `ConsentStore`, `ConsentPage`, `Freshness` | consent on every authorization: the IdP callback stores a consent row (`oauth_consent_requests`, TTL <= 5 min) and 303s to `/oauth2/consent`; only `Consent` calls `CodeStore.insert`; `Freshness` evaluates the raw `auth_time` claim (absent = not fresh, fail closed); `ConsentPage` embeds `Nebu.Web.ArmScript.script()` (Allow is `aria-disabled`, armed after real interaction, FR21) and keeps COOP `same-origin` | oauth-authorize-freshness (FR) |
+| `Nebu.OAuth.BrowserPost` | shared strict browser-POST checks (`Origin`, `Sec-Fetch-Site`, navigation metadata incl. `Sec-Fetch-User`, CSRF) for consent, account page, admin approve / revoke; for WebKit (no `Sec-Fetch-User`) the click proof `_click_proof` (`check_fetch_metadata/3`) | FR8, SO1-SO6, SO9 |
+| `Nebu.Web.ClickProofScript` | the ONE shared click-proof script (sets the hidden `_click_proof` field on a trusted click; byte-identical in `app.js`, CSP-pinned inline on the `/account` reset page) | SO9 |
+| `oauth_idp_refresh_leases` (000045) inside `Nebu.Matrix.OAuthSession` | per-device lease that serializes the IdP leg of a refresh (followers: `503` + `Retry-After: 2`) | FR15 |
+| `Nebu.OAuth.ClientStore.revoke/3`, `Nebu.OAuth.revoke_client/3`, `Nebu.Admin.OAuthClientsController`, `Nebu.Release.revoke_oauth_client/2`, `revoke_all_oauth_sessions/0` | status `revoked` (migration 000046) with a same-transaction cascade teardown; admin lists of approved / revoked clients; operator RPC | oauth-client-revocation (CR, SO) |
+| `Nebu.Matrix.legacy_logout_device/1` (+ `OAuthSession.end_legacy_device/1`) | per-device legacy `POST /logout`; legacy `rotate_tokens/1` takes the devices lock | legacy-logout-per-device (LL) |
+| `Nebu.Web.Unrecognized` (router helper) | `M_UNRECOGNIZED` 404 / 405 for Matrix fall-throughs without authentication; `GET /_matrix/client/v1/room_summary/{roomIdOrAlias}` (local only) | oauth-room-summary-unrecognized (RU) |
+| `Nebu.OAuth.Config` cache + `Nebu.OAuth.CacheOwner` | per-node ETS cache of the switch state (`NEBU_OAUTH_CONFIG_CACHE_MS`, default 2 s) and of the signing key, owned by a supervised process; the documented bounded-staleness exception to ADR-020 (HY2) | oauth-hardening-hygiene (HY) |
+| `Nebu.OAuth.SigningKeyStore`, `Nebu.Release.rotate_oauth_signing_key/0`, `replace_oauth_signing_key/1` | pre-published `next` key (000047, 900 s rule in the database), two-call rotation, emergency replacement | HY11-HY13 |
+| `Nebu.Matrix.SsoRedirect` | Matrix-private, stateless: `classify/1` of a legacy SSO `redirectUrl` (`{:reject, reason}` / `:direct` / `{:confirmable, %{origin, host, port, path}}`; strict syntax: length, control bytes, backslash, userinfo, `%` in the authority, numeric host lookalikes), `listed?/2` (exact-origin allowlist in this order: `https://<server_name>`, the operator list, then `Nebu.OAuth.trusted_redirect_url?/2`; fail closed), `normalize_origin_list/1` (the one validator of the operator list), `valid_https_host?/1`, `host_label/1`. `SsoLogin.redirect_url_allowed?/1` is now `classify/1 != {:reject, _}` | legacy-sso-redirect-confirmation (G3-3), ADR-033 |
+| `Nebu.Matrix.SsoConfirm`, `Nebu.Matrix.SsoConfirmPage` | confirmation step of the legacy SSO login for an unlisted https target: `begin/2` (called by `SsoLogin` at the IdP callback instead of minting a `loginToken`: parks the verified login, sets the binding cookie, `303` to `GET /_matrix/client/v3/login/sso/confirm`) and `handle/1` (GET page / POST Continue or Cancel; per-IP bucket, form parse, Origin + fetch metadata, binding cookie, CSRF, then the single-use pop). The page module renders standalone HTML with hash-pinned CSP, flow headers and NO `Cross-Origin-Opener-Policy` (popup web clients need `window.opener`) | same |
+| `Nebu.Web.ArmScript` (shared infrastructure) | ONE hash-pinned ES5 script that arms a `data-arm` button only after dwell time and real interaction elsewhere (`aria-disabled`, never `disabled`; reset on `hashchange`); defined in `Nebu.Web` so the SSO confirmation page and the OAuth consent page (`Nebu.OAuth.ConsentPage`, story consent-arming-hardening, G3-5) embed the same bytes without a Matrix <-> OAuth dependency; the button name in its live-region messages is taken from the armed button's own text | same |
+| `Nebu.Matrix.SsoStore` tag `:confirm` | pending confirmation `put_confirm/3` / `peek_confirm/1` / `pop_confirm/1` (key = raw SHA-256 of the binding cookie, TTL 300 s, cap 10 000 per node, single-use per node, `pg`-replicated best effort like the `loginToken` tag); every call catches the GenServer `:exit` (`{:error, :unavailable}` / `:error`) and `format_status/1` redacts payloads | same |
+| `Nebu.OAuth.trusted_redirect_url?/2`, `parse_form_post/1`, `check_fetch_metadata/2` (facade), `ClientStore.approved_redirect_uris/1`, `Config.configured_issuer/1` | the ONLY points the Matrix confirmation touches in the OAuth domain (ADR-020): issuer origin, or a redirect URL equal to / below a registered https redirect URI of an `approved` client (500 ms bounded query, errors answer `false`); the shared hardened form parser; the shared fetch-metadata rules | same |
+| `Nebu.Matrix.normalize_sso_redirect_origins/1`, `OidcConfig` key `sso_redirect_allowed_origins`, admin form `POST /admin/config/sso-origins` (`ConfigController.save_sso_origins/2`), migration 000048 | Admin list of trusted redirect origins: validated through the Matrix facade before any write, cached cluster-wide via `Nebu.Admin.DB.upsert_server_config/1` (`@scope_cache_keys`), one `sso_redirect_origins_changed` audit row per successful save; 000048 re-creates the `config_update_mutable` policy with `sso_redirect_allowed_origins` AND the missing `sso_extra_redirect_schemes` | same |
+| `Nebu.Admin.OAuthSwitch`, `Nebu.OAuth.SwitchStore`, `Nebu.OAuth.save_switch/2`, admin form `POST /admin/config/oauth-switch` (`ConfigController.save_oauth_switch/2`), audit action `oauth_switch_changed` | Admin UI writer of `oauth_enabled` / `oauth_issuer_url`: pure validation + status list (`OAuthSwitch`), one transaction of both upserts and the audit row (`SwitchStore`, asymmetric for the kill switch), cache drop on the saving node; same protection as the SSO trust forms (`OAuthAdminHelpers.gate/3`) | admin-oauth-switch (AS1-AS12) |
+| `Nebu.Admin.DB.save_config_audited/2`, `Nebu.Admin.OAuthAdminHelpers.save_config_audited/3` / `subset?/4`, test seam `:admin_config_tx` | One transaction for the value and the audit row of the privileged `server_config` saves (role / claim mapping, SSO origin / scheme lists, scopes, refresh mode, log retention; the pattern of `SwitchStore`); policy when the audit row cannot be written: ADR-033 SO10 addendum, the narrowing is re-checked under a row lock (story admin-config-audit-atomic) | same |
+| `Nebu.Admin.Auth.role_claim_fingerprint/1` / `reauth_role_check/2`, `Nebu.Web.OidcClaims.string_values_at/2`, `RoleMappingController` | Self-lock-out guard of the role mapping: the fresh sign-in leaves hashed claim values in the marker of `/admin/config/role-mapping`, the save is refused when the new value is not among them (story role-mapping-self-lockout-guard, ADR-033 SO10 addendum) | same |
+| `Nebu.Admin.OAuthAdminHelpers.click_gate/2` (controller plug) and `back_path/1`, `/admin/media/settings` marker forms, `StorageConfig.resolve_candidate_secrets/1` | Every non-bootstrap admin form post / DELETE is behind the strict fetch-metadata gate; the media policy and the storage target also need a fresh sign-in; the test connection reuses stored credentials only for the stored endpoint (story admin-forms-gate-sweep, ADR-033 SO11) | same |
+
+Not built (deferred): the device-list change log for `device_lists.changed` on device deletion (story `device-lists-changed-on-deletion`, backlog; gate (s) is re-scoped to "before encrypted rooms are allowed", ADR-011).
 
 ## Level 2 - In-Process Command & DTO Layer
 

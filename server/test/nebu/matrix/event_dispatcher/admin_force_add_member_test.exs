@@ -89,6 +89,12 @@ defmodule Nebu.Matrix.EventDispatcher.AdminForceAddMemberTest do
       :ok
     end
 
+    # story power-levels-enforcement (D10): the room process writes a power-level change through ONE call; the fake models the
+    # transaction with its own column write AND event insert (a failure of either is the change's failure)
+    def apply_power_levels_change(room_id, json, event) do
+      with :ok <- set_power_levels(room_id, json), do: insert_event(event)
+    end
+
     def set_power_levels(room_id, power_levels_json) do
       :ets.insert(:admin_force_add_test_db, {{:power_levels, room_id}, power_levels_json})
       :ok
@@ -102,9 +108,15 @@ defmodule Nebu.Matrix.EventDispatcher.AdminForceAddMemberTest do
 
     def get_personal_room_id(_user_id), do: {:ok, :none}
 
+    # Story create-room-presets-power-levels-topic (AC16, DATA adaptation of the fake): join_room/2 reads the latest membership of the target
+    # (D1: a banned user is refused before the rule) through rooms_db_module(); this fake is that module. A target never seen before: nil.
+    def get_member_membership(_room_id, _user_id), do: {:ok, nil}
+    # story sync-membership-partition (D13, DATA adaptation): the join decision also reads the latest member event (never a member event here)
+    def latest_member_event(_room_id, _user_id), do: {:ok, nil}
+
     # Serve a join_rule="invite" m.room.join_rules state event so the room is
-    # private (invite-only). This is what enforce_restricted_join! reads via
-    # restricted_join_state/1; "invite" is a no-op for restricted enforcement.
+    # private (invite-only). This is what the join decision (authorize_join!/2) reads: an
+    # `invite` rule admits the force-add only through the pending invitation it establishes.
     def get_generic_state_events(room_id) do
       case :ets.lookup(:admin_force_add_test_db, {:room, room_id}) do
         [] ->
@@ -127,8 +139,8 @@ defmodule Nebu.Matrix.EventDispatcher.AdminForceAddMemberTest do
   #
   # Records invitations in ETS so the test can assert the force-add established a
   # proper pending invite before the join. get_pending_invite_rooms_for_user/1
-  # reflects the recorded (not-yet-accepted) invites so enforce_restricted_join!
-  # would see the invite for a restricted room.
+  # reflects the recorded (not-yet-accepted) invites so the join decision (authorize_join!/2)
+  # sees the invite of an invite-only or restricted room.
 
   defmodule FakeInviteDB do
     def insert_invitation(room_id, _inviter, invitee) do
@@ -149,6 +161,15 @@ defmodule Nebu.Matrix.EventDispatcher.AdminForceAddMemberTest do
         |> Enum.map(fn [room_id] -> room_id end)
 
       {:ok, rooms}
+    end
+
+    # story sync-membership-partition (D13, DATA adaptation): the join decision reads the pending row WITH invited_at (any value: this
+    # suite has no member events, so no leave can be at least as new)
+    def pending_invitation(room_id, invitee) do
+      case :ets.lookup(:admin_force_add_test_db, {:invite, room_id, invitee}) do
+        [{_, :pending}] -> {:ok, 1}
+        _ -> {:ok, nil}
+      end
     end
   end
 
@@ -208,7 +229,7 @@ defmodule Nebu.Matrix.EventDispatcher.AdminForceAddMemberTest do
 
   defp stop_room(room_id) do
     case Nebu.Matrix.Room.RoomSupervisor.lookup_room(room_id) do
-      {:ok, pid} -> if Process.alive?(pid), do: GenServer.stop(pid, :normal, 5_000)
+      {:ok, pid} -> if Process.alive?(pid), do: (try do GenServer.stop(pid, :normal, 5_000) catch :exit, _ -> :ok end)
       _ -> :ok
     end
   end

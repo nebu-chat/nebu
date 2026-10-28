@@ -44,4 +44,29 @@ defmodule Nebu.ApplicationTest do
                inspect(Application.get_env(:nebu, Nebu.Repo))
     end
   end
+
+  # story event-size-limit (D12, code review cycle 1): a server name that leaves fewer than 18 bytes of a 255-byte user id for the localpart is a
+  # configuration error: the node refuses to boot, with a message that names the byte size and never the value
+  describe "check_server_name_length!/1 (D12 boot check)" do
+    defp server_of(n), do: String.duplicate("s", n - 4) <> ".org"
+
+    test "a server name of at most 235 bytes (and an unset one) is accepted" do
+      assert Nebu.Application.check_server_name_length!("test.local") == :ok
+      assert Nebu.Application.check_server_name_length!(server_of(235)) == :ok
+      assert Nebu.Application.check_server_name_length!(nil) == :ok
+    end
+
+    test "236 bytes and more refuse to boot; the message names the byte size and does not contain the server name" do
+      for n <- [236, 237, 300] do
+        name = "marker" <> String.duplicate("z", n - 10) <> ".org"
+        assert byte_size(name) == n
+
+        error = assert_raise RuntimeError, fn -> Nebu.Application.check_server_name_length!(name) end
+        assert error.message =~ "#{n} bytes"
+        assert error.message =~ "235"
+        refute error.message =~ "marker", "the message must not echo the value"
+        refute error.message =~ "zzzz"
+      end
+    end
+  end
 end

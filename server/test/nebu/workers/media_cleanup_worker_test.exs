@@ -44,13 +44,10 @@ defmodule Nebu.Workers.MediaCleanupWorkerTest do
   #     Nebu.Compliance.AuditWriter)` — the SAME seam key `Nebu.Media`'s own
   #     `audit_writer/0` (6a) already reads. Swapped for `FakeAuditWriter`
   #     below.
-  #   - Retention config: `Application.get_env(:nebu, :media_cleanup, [])`
-  #     (note: DIFFERENT app-key namespace, `:nebu` not `:nebu_http` — per the
-  #     story's own Technical Requirements) with `Keyword.get(_, :deleted_days,
-  #     30)` / `Keyword.get(_, :infected_days, 7)` fallbacks. Set explicitly in
-  #     `setup/0` below for test determinism (the real static
-  #     `config :nebu, :media_cleanup, ...` entry in `config/config.exs` is
-  #     dev-story's job, deliberately not added during this ATDD step).
+  #   - Retention config: since story media-cleanup-reads-media-config (follow-up
+  #     du) `Nebu.Media.Config.retention_days/0` (the `media_config` table; the
+  #     `:media_config_loader` seam below), NOT `Application.get_env(:nebu,
+  #     :media_cleanup)` any more (that key is dead; a test pins that).
   #
   # ## Fakes
   #
@@ -91,6 +88,8 @@ defmodule Nebu.Workers.MediaCleanupWorkerTest do
   # `{:null_update, media_id}` tags across FakeStorage and FakeRepo's
   # null-columns branch — this is what test 9 uses to prove delete-then-null
   # ordering (ADR-032), not just that both eventually happened.
+
+  import ExUnit.CaptureLog
 
   alias Nebu.Workers.MediaCleanupWorker
 
@@ -376,13 +375,15 @@ defmodule Nebu.Workers.MediaCleanupWorkerTest do
     Application.put_env(:nebu_http, :media_state_machine_module, FakeStateMachine)
     Application.put_env(:nebu_http, :media_storage_module, FakeStorage)
     Application.put_env(:nebu_http, :media_audit_writer_module, FakeAuditWriter)
-    Application.put_env(:nebu, :media_cleanup, deleted_days: 30, infected_days: 7)
+    # story media-cleanup-reads-media-config (follow-up du): the retention windows come from
+    # Nebu.Media.Config.retention_days/0 (media_config); an empty table = the effective defaults 30 / 7.
+    Application.put_env(:nebu_http, :media_config_loader, fn -> %{} end)
 
     on_exit(fn ->
       for name <- @all_agents do
         case Process.whereis(name) do
           nil -> :ok
-          pid -> if Process.alive?(pid), do: Agent.stop(pid)
+          pid -> if Process.alive?(pid), do: (try do Agent.stop(pid) catch :exit, _ -> :ok end)
         end
       end
 
@@ -390,6 +391,7 @@ defmodule Nebu.Workers.MediaCleanupWorkerTest do
       Application.delete_env(:nebu_http, :media_state_machine_module)
       Application.delete_env(:nebu_http, :media_storage_module)
       Application.delete_env(:nebu_http, :media_audit_writer_module)
+      Application.delete_env(:nebu_http, :media_config_loader)
       Application.delete_env(:nebu, :media_cleanup)
     end)
 
@@ -804,5 +806,211 @@ defmodule Nebu.Workers.MediaCleanupWorkerTest do
            end),
            "the worker's own repo seam must never issue an UPDATE/DELETE against " <>
              "media_state_transitions — the only legal write is transition/4's own INSERT"
+  end
+
+  # ─── story media-cleanup-reads-media-config (follow-up du): the windows come from media_config ──
+
+  # the media_config rows the loader seam of Nebu.Media.Config returns (string keys, as the default loader does)
+  defp stored_config(map), do: Application.put_env(:nebu_http, :media_config_loader, fn -> map end)
+
+  defp hard_deleted?(media_id), do: Enum.any?(transition_calls(), fn {mid, to, _a, _m} -> mid == media_id and to == :hard_deleted end)
+
+  describe "retention from media_config" do
+    test "AC1 no stored rows: the effective defaults are unchanged, :deleted after 30 days, :infected after 7 (younger rows stay)" do
+      seed_deleted("d-31", now_ms() - days_ms(31))
+      seed_deleted("d-29", now_ms() - days_ms(29))
+      seed_infected("i-8", now_ms() - days_ms(8))
+      seed_infected("i-6", now_ms() - days_ms(6))
+
+      assert :ok = perform_job(MediaCleanupWorker, %{})
+
+      assert hard_deleted?("d-31") and hard_deleted?("i-8")
+      refute hard_deleted?("d-29")
+      refute hard_deleted?("i-6")
+    end
+
+    test "AC2 stored windows (deleted 10, infected 3) decide: older rows are hard-deleted, younger ones stay, the audit names the window" do
+      stored_config(%{"deleted_days" => 10, "infected_days" => 3})
+      seed_deleted("d-11", now_ms() - days_ms(11))
+      seed_deleted("d-9", now_ms() - days_ms(9))
+      seed_infected("i-4", now_ms() - days_ms(4))
+      seed_infected("i-2", now_ms() - days_ms(2))
+
+      assert :ok = perform_job(MediaCleanupWorker, %{})
+
+      assert hard_deleted?("d-11") and hard_deleted?("i-4")
+      refute hard_deleted?("d-9")
+      refute hard_deleted?("i-2")
+
+      windows = for {_a, "media_hard_deleted", "media", id, meta, "success"} <- audit_calls(), into: %{}, do: {id, meta.retention_days}
+      assert windows == %{"d-11" => 10, "i-4" => 3}
+    end
+
+    test "AC2 a longer stored window keeps what the old default would have deleted (deleted 90, infected 90: 31 / 8 days old stay)" do
+      stored_config(%{"deleted_days" => 90, "infected_days" => 90})
+      seed_deleted("d-31", now_ms() - days_ms(31))
+      seed_infected("i-8", now_ms() - days_ms(8))
+
+      assert :ok = perform_job(MediaCleanupWorker, %{})
+
+      refute hard_deleted?("d-31")
+      refute hard_deleted?("i-8")
+      assert storage_calls() == []
+    end
+
+    test "AC2 the two windows are independent: the SQL gets the string of each integer (days, never seconds or hours)" do
+      stored_config(%{"deleted_days" => 12, "infected_days" => 5})
+
+      assert :ok = perform_job(MediaCleanupWorker, %{})
+
+      params = for {sql, [p]} <- repo_calls(), sql =~ "media_state_transitions", do: {String.contains?(sql, "'infected'"), p}
+      assert {true, "5"} in params and {false, "12"} in params
+    end
+
+    test "AC3 a LENGTHENING takes effect at the next run too: after 15 -> 365 a 20 day old row is kept (the destructive direction of a stale value)" do
+      stored_config(%{"deleted_days" => 15})
+      seed_deleted("d-10", now_ms() - days_ms(10))
+      assert :ok = perform_job(MediaCleanupWorker, %{})
+      refute hard_deleted?("d-10")
+
+      seed_deleted("d-20", now_ms() - days_ms(20))
+      stored_config(%{"deleted_days" => 365})
+      assert :ok = perform_job(MediaCleanupWorker, %{})
+      refute hard_deleted?("d-20"), "the admin lengthened the window to 365: no stale 15 day value may delete it"
+    end
+
+    test "AC3 a change of the stored value takes effect at the next run, in the same process, without a restart" do
+      seed_deleted("d-20", now_ms() - days_ms(20))
+
+      assert :ok = perform_job(MediaCleanupWorker, %{})
+      refute hard_deleted?("d-20"), "20 days old, window 30: kept"
+
+      stored_config(%{"deleted_days" => 15})
+      assert :ok = perform_job(MediaCleanupWorker, %{})
+      assert hard_deleted?("d-20"), "the admin shortened the window to 15: the next run deletes it"
+    end
+
+    test "AC5 a window of 0 days deletes every row of that state whose ledger time is in the past (the documented shortest retention)" do
+      stored_config(%{"deleted_days" => 0, "infected_days" => 0})
+      seed_deleted("d-1h", now_ms() - 3_600_000)
+      seed_infected("i-1h", now_ms() - 3_600_000)
+
+      assert :ok = perform_job(MediaCleanupWorker, %{})
+
+      assert hard_deleted?("d-1h") and hard_deleted?("i-1h")
+    end
+
+    test "AC5 the upper bound 3650 days is accepted: a 3649 day old row stays, a 3651 day old one is hard-deleted" do
+      stored_config(%{"deleted_days" => 3650, "infected_days" => 3650})
+      seed_deleted("d-3649", now_ms() - days_ms(3649))
+      seed_deleted("d-3651", now_ms() - days_ms(3651))
+
+      assert :ok = perform_job(MediaCleanupWorker, %{})
+
+      refute hard_deleted?("d-3649")
+      assert hard_deleted?("d-3651"), "3650 is a valid window, not a fail-safe skip"
+    end
+
+    test "AC2 the unit is DAYS: both candidate queries bind the window as ($1 || ' days')::interval (never hours / seconds)" do
+      stored_config(%{"deleted_days" => 12, "infected_days" => 5})
+
+      assert :ok = perform_job(MediaCleanupWorker, %{})
+
+      window_queries = for {sql, [_p]} <- repo_calls(), sql =~ "media_state_transitions", do: sql
+      assert length(window_queries) == 2
+      for sql <- window_queries, do: assert(sql =~ ~r/\(\$1 \|\| ' days'\)::interval/, "the unit of the window is days")
+    end
+
+    test "AC6 the dead application key :media_cleanup is not read any more (a window of 1 day there changes nothing)" do
+      Application.put_env(:nebu, :media_cleanup, deleted_days: 1, infected_days: 1)
+      seed_deleted("d-5", now_ms() - days_ms(5))
+      seed_infected("i-3", now_ms() - days_ms(3))
+
+      assert :ok = perform_job(MediaCleanupWorker, %{})
+
+      refute hard_deleted?("d-5")
+      refute hard_deleted?("i-3")
+    end
+  end
+
+  describe "AC4 retention config that cannot be trusted: nothing is deleted (fail-safe)" do
+    defp seed_everything_ancient do
+      seed_deleted("d-ancient", now_ms() - days_ms(3000))
+      seed_infected("i-ancient", now_ms() - days_ms(3000))
+      seed_hard_deleted_intermediate("h-crashed", %{storage_key: "storage-key-h-crashed"})
+    end
+
+    defp assert_nothing_new_deleted do
+      refute hard_deleted?("d-ancient")
+      refute hard_deleted?("i-ancient")
+      assert bucket_row("d-ancient").storage_key != nil
+      assert bucket_row("i-ancient").storage_key != nil
+    end
+
+    test "an unreadable media_config (the loader raises, exits, answers an error) deletes nothing from :deleted / :infected, the job is still :ok" do
+      for {label, fun} <- [raise: fn -> raise "db down" end, exit: fn -> exit(:noproc) end, error: fn -> {:error, :timeout} end, nil: fn -> nil end] do
+        Application.put_env(:nebu_http, :media_config_loader, fun)
+        seed_everything_ancient()
+
+        log = capture_log([level: :error], fn -> send(self(), {:result, perform_job(MediaCleanupWorker, %{})}) end)
+
+        assert_received {:result, :ok}
+        assert_nothing_new_deleted()
+        assert log =~ "retention config unavailable", "#{label}: one ERROR line explains why nothing was deleted"
+        assert transition_calls() == [], "#{label}"
+      end
+    end
+
+    test "an invalid stored value (negative, 3651, huge, not a number, empty, nil) deletes nothing, for either key" do
+      for key <- ["deleted_days", "infected_days"], bad <- [-1, 3651, 1_000_000_000_000, "abc", "", nil, 2.5] do
+        stored_config(%{key => bad})
+        seed_everything_ancient()
+
+        log = capture_log([level: :error], fn -> send(self(), {:result, perform_job(MediaCleanupWorker, %{})}) end)
+
+        assert_received {:result, :ok}
+        assert_nothing_new_deleted()
+        assert log =~ "retention config unavailable", "#{key} = #{inspect(bad)}"
+      end
+    end
+
+    test "the log line names no value (a stored value is never echoed)" do
+      stored_config(%{"deleted_days" => "secret-ish-9999999", "infected_days" => 5})
+      seed_everything_ancient()
+
+      log = capture_log([level: :error], fn -> send(self(), {:result, perform_job(MediaCleanupWorker, %{})}) end)
+
+      assert log =~ "retention config unavailable", "the log is not empty: the refutes below are meaningful"
+      refute log =~ "secret-ish"
+      refute log =~ "9999999"
+      refute log =~ "deleted_days="
+    end
+
+    test "the completion sweep still finishes a row that is ALREADY :hard_deleted (it deletes nothing new) when the config is unreadable or invalid" do
+      for loader <- [fn -> raise "db down" end, fn -> %{"deleted_days" => -1} end, fn -> %{"infected_days" => "abc"} end] do
+        Application.put_env(:nebu_http, :media_config_loader, loader)
+        id = "h-crashed-#{System.unique_integer([:positive])}"
+        seed_hard_deleted_intermediate(id, %{storage_key: "storage-key-#{id}"})
+        seed_deleted("d-ancient-#{id}", now_ms() - days_ms(3000))
+
+        capture_log(fn -> assert :ok = perform_job(MediaCleanupWorker, %{}) end)
+
+        assert "storage-key-#{id}" in storage_calls()
+        assert bucket_row(id).storage_key == nil
+        refute hard_deleted?("d-ancient-#{id}")
+      end
+    end
+
+    test "the effective windows are logged at INFO on a normal run (operators can see what a run used)" do
+      stored_config(%{"deleted_days" => 21, "infected_days" => 6})
+      previous_level = Logger.level()
+      Logger.configure(level: :info)
+      on_exit(fn -> Logger.configure(level: previous_level) end)
+
+      log = capture_log([level: :info], fn -> perform_job(MediaCleanupWorker, %{}) end)
+
+      assert log =~ "deleted_days=21"
+      assert log =~ "infected_days=6"
+    end
   end
 end

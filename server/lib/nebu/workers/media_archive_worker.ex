@@ -19,8 +19,8 @@ defmodule Nebu.Workers.MediaArchiveWorker do
   `released_archive_after_days` (`nil` disables the worker — a pure no-op,
   never raises) and `archive_delete_from_primary` gate the worker, read via
   `Application.get_env(:nebu, :media_archive, ...)` — a config seam, not a
-  hardcoded literal, mirroring Story 8a's own `:media_cleanup` config
-  pattern (both pre-date Story 9a's `Nebu.Media.Config` DB-backed source and
+  hardcoded literal, mirroring the config pattern Story 8a used until
+  story media-cleanup-reads-media-config moved it to `media_config` (both pre-date Story 9a's `Nebu.Media.Config` DB-backed source and
   are deliberately not yet rewired to it, same posture 8a/8b's own
   config.exs entries already document).
 

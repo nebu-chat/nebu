@@ -12,6 +12,7 @@ import type { Page } from '@playwright/test';
 import { DEX_TEST_PASSWORD } from '../../fixtures/users';
 import * as fs from 'fs';
 import * as path from 'path';
+import { dismissVerificationPrompts } from '../../fixtures/dismiss-prompts';
 
 const ELEMENT_URL     = process.env.NEBU_ELEMENT_URL ?? 'http://localhost:7070';
 const AUTH_STATE_DIR  = path.join(__dirname, '../../auth-state');
@@ -109,10 +110,7 @@ When(
     // is absent BEFORE dismissing, and fail loudly if present.
     await assertNoKeySetupError(page);
 
-    const cancelBtn = page.getByRole('button', { name: dismissPattern });
-    if (await cancelBtn.first().isVisible({ timeout: 3_000 }).catch(() => false)) {
-      await cancelBtn.first().click({ timeout: 5_000 }).catch(() => { /* dialog self-closed */ });
-    }
+    await dismissVerificationPrompts(page, dismissPattern);
 
     // Re-check after dismissing: dismissing the verification screen must not surface a
     // key-setup error either.
@@ -341,10 +339,7 @@ When(
     // AC4: a key-setup error after re-login is a genuine failure — do not dismiss it silently.
     await assertNoKeySetupError(page);
 
-    const cancelBtn = page.getByRole('button', { name: reloginDismissPattern });
-    if (await cancelBtn.first().isVisible({ timeout: 3_000 }).catch(() => false)) {
-      await cancelBtn.first().click({ timeout: 5_000 }).catch(() => { /* dialog self-closed */ });
-    }
+    await dismissVerificationPrompts(page, reloginDismissPattern);
   }
 );
 

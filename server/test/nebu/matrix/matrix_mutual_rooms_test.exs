@@ -115,6 +115,8 @@ defmodule Nebu.Web.MatrixMutualRoomsTest do
     priv_jwk = Map.put(priv_map, "kid", @kid)
 
     Application.put_env(:nebu_http, :server_name, @server_name)
+    # story create-room-invites-direct (DATA adaptation): POST /invite refuses foreign-domain invitees, the domain is :event_dispatcher's server_name
+    Nebu.Test.ServerName.pin!(@server_name)
     Nebu.Web.OidcTestSupport.configure(@issuer, @audience)
 
     Application.put_env(:nebu_http, :oidc_jwks, [pub_jwk])

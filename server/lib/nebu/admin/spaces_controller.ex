@@ -15,6 +15,10 @@ defmodule Nebu.Admin.SpacesController do
 
   plug Nebu.Admin.Auth, :require_admin
 
+  # story admin-forms-gate-sweep: the strict fetch metadata of a user-clicked form submit (Safari: the click proof) before anything is read or changed
+  import Nebu.Admin.OAuthAdminHelpers, only: [click_gate: 2]
+  plug :click_gate when action in [:create, :save, :toggle_auto_join, :add_child, :remove_child, :add_member]
+
   # ── GET /admin/spaces ─────────────────────────────────────────────────────────
 
   def index(conn, _params) do

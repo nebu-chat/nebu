@@ -39,7 +39,10 @@ security-relevant value indefinitely. See Story 9a's acceptance criteria for the
 mechanism.
 
 Every configuration change writes a `media_config_updated` audit-log entry with
-`%{key, old_value, new_value}`.
+`%{key, old_value, new_value}`. For the three retention values (`released_delete_after_days`,
+`deleted_days`, `infected_days`) the entry is written in the same transaction as the value
+(story media-retention-audit-atomic: a shortening is refused when the entry cannot be written);
+for every other key it stays best-effort, after the write.
 
 A direct consequence: the Story 7 first-draft decision "`webhook_url` is ops-only,
 configured via `config.exs`" is revised — `webhook_url` becomes admin-configurable via

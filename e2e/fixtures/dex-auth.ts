@@ -22,6 +22,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { type Page, type Browser, type APIRequestContext, type APIResponse } from '@playwright/test';
 import { type NebUser, DEX_TEST_PASSWORD } from './users';
+import { dismissVerificationPrompts } from './dismiss-prompts';
 
 const AUTH_STATE_DIR = path.join(__dirname, '..', 'auth-state');
 
@@ -236,15 +237,7 @@ export async function loginViaOidcBrowser(
     // Dismiss any visible setup dialog.
     // Non-fatal click: Element may auto-close the dialog before Playwright can click,
     // causing a detached-DOM error. Use a short timeout and swallow errors.
-    for (const label of [dismissPattern]) {
-      const btn = page.getByRole('button', { name: label });
-      if (await btn.first().isVisible({ timeout: 2_000 }).catch(() => false)) {
-        await btn.first().click({ timeout: 5_000 }).catch(() => {
-          // Dialog closed itself before click could land — acceptable, continue.
-        });
-        break;
-      }
-    }
+    await dismissVerificationPrompts(page, dismissPattern);
 
     // Wait for .mx_LeftPanel — but only if token not yet captured (if we have the token,
     // Element is loaded enough; skip the hard UI wait to avoid flakiness with setup dialogs).

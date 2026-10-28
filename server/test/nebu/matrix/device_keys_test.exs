@@ -393,15 +393,25 @@ defmodule Nebu.Web.DeviceKeysTest do
       room_id = json(create)["room_id"]
 
       # The forbidden initial_state entry must have been skipped — no encryption state event.
-      state =
-        call(
-          :get,
-          "/_matrix/client/v3/rooms/#{URI.encode_www_form(room_id)}/state/m.room.encryption",
-          nil,
-          auth(token)
-        )
+      # story oauth-room-summary-unrecognized (af): changed deliberately. This used to probe
+      # `GET /rooms/{id}/state/m.room.encryption`, which is NOT a routed endpoint (only the PUT state routes
+      # exist): its former 404 was the router fall-through, so the check was vacuous (and RU11a keeps that
+      # 404 M_NOT_FOUND until follow-up bf implements the GET). The assertion reads the persisted events
+      # instead, with a positive control: the SAME query finds the room's m.room.create row.
+      count_events = fn type ->
+        %{rows: [[n]]} =
+          Ecto.Adapters.SQL.query!(
+            Nebu.Repo,
+            "SELECT count(*) FROM events WHERE room_id = $1 AND event_type = $2",
+            [room_id, type]
+          )
 
-      assert state.status == 404, "room must not carry m.room.encryption (got #{state.status})"
+        n
+      end
+
+      assert count_events.("m.room.create") >= 1, "positive control: the query must see the room's create event"
+      encryption_events = count_events.("m.room.encryption")
+      assert encryption_events == 0, "room must not carry m.room.encryption (got #{encryption_events} events)"
     end
   end
 

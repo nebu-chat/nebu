@@ -20,7 +20,17 @@ defmodule Nebu.Matrix.Room.PowerLevelsTest do
       assert levels["events_default"] == 0
       assert levels["users_default"] == 0
       assert levels["users"] == %{}
-      assert levels["events"] == %{}
+      # story power-levels-enforcement (D12, AC16 re-pin): new rooms get the default `events` map (non-spec, Synapse-derived)
+      assert levels["events"] == %{
+               "m.room.power_levels" => 100,
+               "m.room.history_visibility" => 100,
+               "m.room.tombstone" => 100,
+               "m.room.server_acl" => 100,
+               "m.room.encryption" => 100,
+               "m.room.name" => 50,
+               "m.room.avatar" => 50,
+               "m.room.canonical_alias" => 50
+             }
     end
 
     test "returned map has exactly nine top-level keys" do

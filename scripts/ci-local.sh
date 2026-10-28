@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # ci-local.sh
-# Run CI jobs locally via Docker — mirrors GitHub Actions / GitLab CI exactly.
+# Run CI jobs locally via Docker — mirrors GitLab CI exactly.
 #
 # Uses the same Docker images as .gitlab-ci.yml (single source of truth).
 # Calling any job here produces the same result as the pipeline.

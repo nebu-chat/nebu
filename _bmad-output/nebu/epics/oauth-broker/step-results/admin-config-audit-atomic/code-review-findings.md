@@ -1,0 +1,3 @@
+# code-review admin-config-audit-atomic (nebu-code-reviewer, 2026-10-15, cycle 0)
+0 MAJOR, 4 MINOR, 7 INFO. Transaction, retry, after-commit side effects, D2 policy per form, subset? edge cases, D3 branches per controller, peek_confirm direct read, dead code and docs verified.
+MINOR (all applied in dev cycle 1): M1 the unaudited log named neither form nor keys -> ERROR with form and changed keys; M2 no DB test with a database error INSIDE the audit -> added (rollback, and the retry applies); M3 stale prose (SsoStore moduledoc, claim controller doc, config controller comment); M4 the subset decision read the stored value outside the transaction -> the retry re-checks the narrowing under a row lock (`:narrowing` option, same as Kassandra L-3).

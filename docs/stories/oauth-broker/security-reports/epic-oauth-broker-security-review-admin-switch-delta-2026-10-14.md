@@ -1,0 +1,19 @@
+# Epic oauth-broker: SEC delta gate "admin-switch" (cross-story), 2026-10-14
+
+Reviewer: Kassandra (nebu-kassandra), read-only; report stored by the orchestrator (condensed from the hand-back). Scope: `git diff 4a8c3715..HEAD` = 03a81df2 admin-oauth-switch, 62ecc6b2 admin-config-privileged-forms-sweep (incl. migration 000049),
+14873739 sso-confirm-bucket-order. Previous gate: `epic-oauth-broker-security-review-gate3-delta-2026-10-14.md`. Each story was CLEAN on its own; this review looks at the interaction.
+
+**Classification: CLEAN (0 CRITICAL, 0 HIGH, 1 MEDIUM, 5 LOW, 6 INFO). Merge: PASS. No chain arises from the combination that a single story does not already allow.**
+
+| # | Sev | Finding | Resolution |
+|---|---|---|---|
+| X2-1 | MEDIUM | The role mapping became effective for the first time with migration 000049 (before, the save failed closed with an RLS error). It accepted any non-empty value: a value that occurs in EVERY token (issuer URL, client id, `offline_access`, `default-roles-<realm>`, protocol scopes) makes every user an instance administrator, above all on an instance without `admin_group_claim_path` (any-key claim scan). The warning only named the lock-out direction. | FIXED: the page refuses the universal values (static list, `default-roles-*`, the configured `oidc_issuer` / `oidc_client_id` / `oidc_audience`), warns about the too-broad direction and the fallback scan; docs (07-deployment, ADR SO10, follow-ups). The self-lock-out guard stays follow-up `dg`. |
+| X2-2 | LOW | SO10 "scopes grant no authority" is not true on instances without a claim path (an extra scope feeds the any-key scan; one click, no fresh sign-in). | Docs corrected (accepted scanner risk). |
+| X2-3 | LOW | The kill switch does not remove the issuer origin's trust in the legacy SSO login; the ack label / rollback text said "unchecking rolls this back". | FIXED: ack label, 07-deployment rollback step ("clear the issuer too"). |
+| X2-4 | LOW | Audit asymmetry: an issuer change is atomic, the origin / scheme list saves are best-effort; a SIEM filter must watch `oauth_switch_changed` too. | Recorded in follow-up `dh` (extended). |
+| X2-5 | LOW | Story 3 removed the per-address cap on `SsoStore` calls; the store is ONE process shared with the loginToken mint / redemption of every legacy SSO user. | Documented honestly (follow-up `di`: direct ETS read or a dedicated process); accepted. |
+| X2-6 | LOW | The SQL emergency paths are useless for the instances without a database console that story 1 was built for (role mapping lock-out, broken scopes, kill switch with the IdP down). | FIXED: `Nebu.Release.disable_oauth/0`, `reset_admin_group_claim/1`, `reset_oidc_scopes/0` (`bin/nebu rpc`, audited, tests); the checklist requires proving an emergency path on the instance before the UI flip. |
+| X2-7..X2-12 | INFO | one marker for three `/admin/config` forms (same bar as before, SO7 residual); a compromised `nebu_app` gets a deterministic admin path (it already controlled the identity mapping and could INSERT any key); the issuer is not an easier trust source than before; writers without audit (Trace Map / War Room log flags: follow-up `de` extended; `dd` seams); Story 3 flows OK; logging / scopes / ADR-020 laws fine. | accepted / recorded |
+
+Activation (`oauth_enabled`): **easier to justify, not released.** The switch is better protected than the SQL path (marker, acknowledgement, atomic audit, status list), the sweep shrinks the SO7 surface of the privileged forms, story 3 takes the confirmation page out of the G3-2 collapse.
+Remaining blockers (unchanged): the POSITIVE client-IP test (G3-2), the manual verification groups A-F (D now includes the switch and the forms per browser), the SO7 / SO8 decision and the written acceptance of the residuals; recommended before the UI flip: an emergency path proven on the instance (X2-6) and the corrected rollback text (X2-3).

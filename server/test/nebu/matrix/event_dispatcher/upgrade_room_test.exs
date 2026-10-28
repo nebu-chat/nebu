@@ -123,9 +123,27 @@ defmodule Nebu.Matrix.EventDispatcher.UpgradeRoomTest do
       :ok
     end
 
+    # story power-levels-enforcement (D10): the room process writes a power-level change through ONE call; the fake models the
+    # transaction with its own column write AND event insert (a failure of either is the change's failure)
+    def apply_power_levels_change(room_id, json, event) do
+      with :ok <- set_power_levels(room_id, json), do: insert_event(event)
+    end
+
+    # story state-writer-redaction (D8, D9, D11): the room process writes a state change (the upgrade's tombstone) through ONE call and reads the slot's latest event first
+    def apply_state_change(_room_id, event, _opts), do: insert_event(event)
+    def latest_state_identity(_room_id, _type, _state_key), do: {:ok, nil}
+
     def set_power_levels(room_id, power_levels_json) do
       :ets.insert(:upgrade_room_test_db, {{:power_levels, room_id}, power_levels_json})
       :ok
+    end
+
+    # story power-levels-enforcement (D8): the authoritative read of an upgrade after the freeze (the stored column; nil = never set)
+    def get_power_levels_json(room_id) do
+      case :ets.lookup(:upgrade_room_test_db, {:power_levels, room_id}) do
+        [{_, json}] -> {:ok, json}
+        [] -> {:ok, nil}
+      end
     end
 
     # FB-E5-03: create_room/2 persists name/room_type via rooms_db_module()
@@ -297,13 +315,13 @@ defmodule Nebu.Matrix.EventDispatcher.UpgradeRoomTest do
     on_exit(fn ->
       case Nebu.Matrix.Room.RoomSupervisor.lookup_room(room_id) do
         {:ok, pid} ->
-          if Process.alive?(pid), do: GenServer.stop(pid, :normal, 5_000)
+          if Process.alive?(pid), do: (try do GenServer.stop(pid, :normal, 5_000) catch :exit, _ -> :ok end)
         _ -> :ok
       end
     end)
   end
 
-  # ─── MAJOR-2: Happy path — upgrade succeeds for owner (power_level >= 100) ───
+  # ─── MAJOR-2: Happy path — upgrade succeeds for owner (the upgrade level, PowerLevels.upgrade_level/1) ───
   #
   # Given: upgrader has power_level 100 in old room
   # When:  Server.upgrade_room/2 is called
@@ -774,9 +792,27 @@ defmodule Nebu.Matrix.EventDispatcher.UpgradeRoomTest do
           :ok
         end
 
+        # story power-levels-enforcement (D10): the room process writes a power-level change through ONE call; the fake models the
+        # transaction with its own column write AND event insert (a failure of either is the change's failure)
+        def apply_power_levels_change(room_id, json, event) do
+          with :ok <- set_power_levels(room_id, json), do: insert_event(event)
+        end
+
+        # story state-writer-redaction (D8, D9, D11): the room process writes a state change (the upgrade's tombstone) through ONE call and reads the slot's latest event first
+        def apply_state_change(_room_id, event, _opts), do: insert_event(event)
+        def latest_state_identity(_room_id, _type, _state_key), do: {:ok, nil}
+
         def set_power_levels(room_id, power_levels_json) do
           :ets.insert(:upgrade_room_test_db, {{:power_levels, room_id}, power_levels_json})
           :ok
+        end
+
+        # story power-levels-enforcement (D8): the authoritative read of an upgrade after the freeze (the stored column; nil = never set)
+        def get_power_levels_json(room_id) do
+          case :ets.lookup(:upgrade_room_test_db, {:power_levels, room_id}) do
+            [{_, json}] -> {:ok, json}
+            [] -> {:ok, nil}
+          end
         end
 
         def load_room_settings(_room_id), do: {:ok, 0}
@@ -1185,6 +1221,89 @@ defmodule Nebu.Matrix.EventDispatcher.UpgradeRoomTest do
       state_after = Nebu.Matrix.Room.Server.get_state(new_room_id)
       assert MapSet.member?(state_after.members, upgrader_id),
              "expected upgrader #{upgrader_id} to be present after GenServer restart"
+    end
+  end
+
+  # ═══ Story create-room-input-validation (epic oauth-broker, follow-up ee), AC3 core part ═════════════════════════
+  #
+  # `new_version` is REQUIRED (Matrix CS v1.18) and Nebu supports exactly "10": anything else is 400 M_UNSUPPORTED_ROOM_VERSION,
+  # decided BEFORE the room lookup / the power check / any write; the core no longer falls back from "" to "10". Errors are asserted
+  # through Nebu.Matrix.Http.call_core/1 (the public `{:error, {http_status, errcode, message}}` mapping of D6).
+
+  describe "AC3 core - new_version validation" do
+    defp tombstones do
+      case :ets.lookup(:upgrade_room_test_db, :event_insertion_order) do
+        [{_, events}] -> Enum.filter(events, &(&1["type"] == "m.room.tombstone"))
+        [] -> []
+      end
+    end
+
+    defp room_ids, do: :ets.match(:upgrade_room_test_db, {{:room, :"$1"}, :_}) |> List.flatten() |> Enum.sort()
+
+    defp upgrade(old_room_id, requester_id, new_version) do
+      request = %Core.UpgradeRoomRequest{old_room_id: old_room_id, requester_id: requester_id, new_version: new_version}
+      result = Nebu.Matrix.Http.call_core(fn -> Server.upgrade_room(request, build_stream(requester_id)) end)
+
+      case result do
+        {:ok, response} -> track_room(response.new_room_id)
+        _ -> :ok
+      end
+
+      result
+    end
+
+    test "unsupported versions are 400 M_UNSUPPORTED_ROOM_VERSION: no tombstone, no new room, no fallback to 10" do
+      owner = "@kai:test.local"
+      {old_room_id, _} = setup_old_room(owner)
+      track_room(old_room_id)
+      rooms_before = room_ids()
+
+      marker = "zzver" <> Base.encode16(:crypto.strong_rand_bytes(4), case: :lower)
+
+      for version <- ["", "11", "9", marker] do
+        assert {:error, {400, "M_UNSUPPORTED_ROOM_VERSION", message}} = upgrade(old_room_id, owner, version),
+               "new_version #{inspect(version)}"
+
+        assert is_binary(message) and message != ""
+        refute message =~ marker, "the message is fixed text: the requested version is never echoed"
+        assert tombstones() == [], "new_version #{inspect(version)}: the old room must not be tombstoned"
+        assert room_ids() == rooms_before, "new_version #{inspect(version)}: no new room"
+      end
+    end
+
+    test "the version is checked before the room lookup and the power check (400, not 404 / 403)" do
+      owner = "@kai:test.local"
+      stranger = "@alex:test.local"
+      {old_room_id, _} = setup_old_room(owner, [stranger])
+      track_room(old_room_id)
+
+      assert {:error, {400, "M_UNSUPPORTED_ROOM_VERSION", _}} = upgrade("!never-existed:test.local", owner, "11")
+      assert {:error, {400, "M_UNSUPPORTED_ROOM_VERSION", _}} = upgrade(old_room_id, stranger, "11")
+      assert {:error, {400, "M_UNSUPPORTED_ROOM_VERSION", _}} = upgrade(old_room_id, stranger, "")
+      assert tombstones() == []
+    end
+
+    test "a valid version without the power to tombstone is still 403, an unknown room 404" do
+      owner = "@kai:test.local"
+      stranger = "@alex:test.local"
+      {old_room_id, _} = setup_old_room(owner, [stranger])
+      track_room(old_room_id)
+
+      assert {:error, {403, "M_FORBIDDEN", _}} = upgrade(old_room_id, stranger, "10")
+      assert {:error, {404, "M_NOT_FOUND", _}} = upgrade("!never-existed:test.local", owner, "10")
+      assert tombstones() == []
+    end
+
+    test "a same-version upgrade with 10 still works: v10 room, tombstone in the old room" do
+      owner = "@kai:test.local"
+      {old_room_id, _} = setup_old_room(owner)
+      track_room(old_room_id)
+
+      assert {:ok, %Core.UpgradeRoomResponse{new_room_id: new_room_id}} = upgrade(old_room_id, owner, "10")
+      assert [_] = tombstones()
+
+      assert {:ok, create_content} = FakeDB.get_room_create_event(new_room_id)
+      assert create_content["room_version"] == "10"
     end
   end
 end

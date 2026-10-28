@@ -94,6 +94,21 @@ defmodule Nebu.Matrix.EventDispatcher.ServerModerationMetadataTest do
 
     # Story 6.9: get_room_status/1 — returns {:ok, "active"} so normal rooms start correctly.
     def get_room_status(_room_id), do: {:ok, "active"}
+
+    # Story moderation-routes-atomic-ban (AC16 (b), DATA adaptation of the fake): kick / ban / unban are written by the room process in
+    # the ONE transaction of Room.DB.apply_member_change/4: the member row is closed (`remove_member`), the event stored. This fake keeps
+    # no invitations, so `reject_invitation` has nothing to reject; `:apply_fail` makes the whole change fail (nothing is applied).
+    def apply_member_change(room_id, user_id, event, opts) do
+      case :ets.lookup(:moderation_metadata_test_db, :apply_fail) do
+        [{_, reason}] ->
+          {:error, reason}
+
+        [] ->
+          if Keyword.get(opts, :remove_member, false), do: delete_member(room_id, user_id)
+          if is_map(event), do: insert_event(event)
+          :ok
+      end
+    end
   end
 
   # ─── Setup / Teardown ────────────────────────────────────────────────────────

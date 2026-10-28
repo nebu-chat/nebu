@@ -89,6 +89,12 @@ defmodule Nebu.Matrix.EventDispatcher.AuditRoomOpsTest do
       :ok
     end
 
+    # story power-levels-enforcement (D10): the room process writes a power-level change through ONE call; the fake models the
+    # transaction with its own column write AND event insert (a failure of either is the change's failure)
+    def apply_power_levels_change(room_id, json, event) do
+      with :ok <- set_power_levels(room_id, json), do: insert_event(event)
+    end
+
     def set_power_levels(room_id, power_levels_json) do
       :ets.insert(:audit_room_ops_test_db, {{:power_levels, room_id}, power_levels_json})
       :ok
@@ -111,6 +117,15 @@ defmodule Nebu.Matrix.EventDispatcher.AuditRoomOpsTest do
 
     # Story 6.9: get_room_status/1 — returns {:ok, "active"} so normal rooms start correctly.
     def get_room_status(_room_id), do: {:ok, "active"}
+
+    # Story create-room-presets-power-levels-topic (AC16, DATA adaptation of the fake): join_room/2 decides on the join rule and the
+    # latest membership of the user (D1) through the injected modules. The AC9 tests join a STRANGER (no invitation) and are about the
+    # audit rows, so the fake serves the join rule of a public room (what the `public_chat` preset writes) and "never a member before".
+    def get_generic_state_events(_room_id) do
+      {:ok, [%{type: "m.room.join_rules", state_key: "", content_json: ~s({"join_rule":"public"}), sender: "@alice:test.local", event_id: "$jr:test.local", origin_server_ts: 1}]}
+    end
+
+    def get_member_membership(_room_id, _user_id), do: {:ok, nil}
   end
 
   # ─── FakeInviteDB ────────────────────────────────────────────────────────────
@@ -177,7 +192,7 @@ defmodule Nebu.Matrix.EventDispatcher.AuditRoomOpsTest do
 
   defp stop_room(room_id) do
     case Nebu.Matrix.Room.RoomSupervisor.lookup_room(room_id) do
-      {:ok, pid} -> if Process.alive?(pid), do: GenServer.stop(pid, :normal, 5_000)
+      {:ok, pid} -> if Process.alive?(pid), do: (try do GenServer.stop(pid, :normal, 5_000) catch :exit, _ -> :ok end)
       _ -> :ok
     end
   end

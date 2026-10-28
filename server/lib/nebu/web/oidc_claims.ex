@@ -24,6 +24,10 @@ defmodule Nebu.Web.OidcClaims do
     present anywhere in `value` at any nesting depth.
   - `flatten_discovered_claims/2` — flattens a claims map into `{dot_path_key,
     value}` pairs, used to render the Bootstrap Wizard's claim-picker options.
+  - `string_values_at/2` — the distinct string values at a path (or of the whole tree): the ONE
+    definition of "which values the admin check can match" (story `role-mapping-self-lockout-guard`;
+    `target in string_values_at(claims, path)` is equivalent to `claim_at_path_matches?/3` /
+    `claim_value_matches?/2`, a test pins it).
   - `claim_at_path_matches?/3` — PATH-scoped value matcher (story
     `scope-admin-claim-to-path`): true only when `target` is present at the
     exact dot-path in `claims`, not anywhere in the tree.
@@ -125,6 +129,25 @@ defmodule Nebu.Web.OidcClaims do
   end
 
   def claim_at_path_matches?(_claims, _path, _target), do: false
+
+  @doc """
+  The distinct, non-empty string values the admin check can match: those at (and below) `path` when it is a non-empty dot-path, those of the
+  whole claims tree when `path` is `nil` or `""` (the any-key scan of a deployment without a stored path). Nothing for a path that does not
+  resolve, a path that is no string, or claims that are no map (fail closed). Story `role-mapping-self-lockout-guard`.
+  """
+  @spec string_values_at(term(), term()) :: [String.t()]
+  def string_values_at(claims, path) when is_map(claims) and (is_nil(path) or path == "") do
+    claims |> flatten_discovered_claims(nil) |> Enum.map(&elem(&1, 1)) |> Enum.uniq()
+  end
+
+  def string_values_at(claims, path) when is_map(claims) and is_binary(path) do
+    case resolve_path(claims, String.split(path, ".")) do
+      {:ok, value} -> value |> flatten_discovered_claims(path) |> Enum.map(&elem(&1, 1)) |> Enum.uniq()
+      :error -> []
+    end
+  end
+
+  def string_values_at(_claims, _path), do: []
 
   defp resolve_path(value, []), do: {:ok, value}
 

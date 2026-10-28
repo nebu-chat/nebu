@@ -18,9 +18,9 @@ defmodule Nebu.Web.MediaUploadVerbTest do
     1. `POST /_matrix/media/v3/upload` → 200, reaches `Media.upload/1`.
        RED now (falls through to 404 catch-all); GREEN once the router verb
        is `post`.
-    2. `PUT /_matrix/media/v3/upload` → generic 404 catch-all.
-       RED now (PUT still matches the not-yet-fixed route → 200); GREEN once
-       PUT no longer matches.
+    2. `PUT /_matrix/media/v3/upload` → 405 `M_UNRECOGNIZED` + `Allow: POST, OPTIONS`
+       (story oauth-room-summary-unrecognized (af): the router fall-through answers a known
+       path with the wrong method as 405; it was the generic 404 `M_NOT_FOUND` catch-all).
     3. `PUT /_matrix/media/v3/upload/:server_name/:media_id` → unaffected.
        CORRECTED (fix-media-download-gzip-decompression, cycle 1): this route
        DOES exist — `put "/v3/upload/:server_name/:media_id"` in
@@ -120,21 +120,31 @@ defmodule Nebu.Web.MediaUploadVerbTest do
     assert_received {:stored, _key, _stored_bytes}
   end
 
-  # ── AC2 — PUT /_matrix/media/v3/upload no longer matches (generic 404) ────
+  # ── AC2 — PUT /_matrix/media/v3/upload no longer matches (405 M_UNRECOGNIZED) ──
 
-  test "AC2: PUT /_matrix/media/v3/upload -> generic 404 M_NOT_FOUND catch-all, no longer an alias",
+  # story oauth-room-summary-unrecognized (af): changed deliberately. The route is `post`-only, so PUT on
+  # the same path is "known endpoint, wrong method": 405 M_UNRECOGNIZED + Allow (was 404 M_NOT_FOUND).
+  test "AC2: PUT /_matrix/media/v3/upload -> 405 M_UNRECOGNIZED + Allow: POST, OPTIONS, no longer an alias",
        %{token: token} do
     conn =
       request(:put, @upload_path, "data", [
         {"content-type", "image/jpeg"} | S.auth(token)
       ])
 
-    assert conn.status == 404,
-           "PUT #{@upload_path} must fall through to the generic 404 catch-all once the " <>
+    assert conn.status == 405,
+           "PUT #{@upload_path} must fall through to the 405 M_UNRECOGNIZED catch-all once the " <>
              "route is `post`-only, got #{conn.status} — the old PUT verb must not keep working " <>
              "as an undocumented alias"
 
-    assert S.json(conn)["errcode"] == "M_NOT_FOUND"
+    assert S.json(conn) == %{"errcode" => "M_UNRECOGNIZED", "error" => "Unsupported method"}
+
+    assert conn
+           |> Plug.Conn.get_resp_header("allow")
+           |> List.first()
+           |> String.split(",")
+           |> Enum.map(&String.trim/1)
+           |> Enum.sort() == ["OPTIONS", "POST"]
+
     refute_received {:stored, _key, _bytes}
   end
 

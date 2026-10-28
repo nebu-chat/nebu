@@ -64,9 +64,13 @@ The spec behaviors that most frequently trip up Matrix server implementors. Surf
 - 401: `M_MISSING_TOKEN`, `M_UNKNOWN_TOKEN`.
 - 403: `M_FORBIDDEN`.
 - 404: `M_NOT_FOUND`.
-- 400: `M_BAD_JSON`, `M_UNRECOGNIZED`, `M_MISSING_PARAM`, `M_INVALID_PARAM`.
+- 404 / 405: `M_UNRECOGNIZED` for an unimplemented endpoint / unsupported method (Nebu: router fall-throughs only, no auth check, `Allow` on 405; handler-level 404 stays `M_NOT_FOUND`).
+- 400: `M_BAD_JSON`, `M_MISSING_PARAM`, `M_INVALID_PARAM`; 400: `M_UNRECOGNIZED` only where an endpoint defines it (e.g. unknown receipt type).
 - 429: `M_LIMIT_EXCEEDED` with `retry_after_ms`.
 - 500: `M_UNKNOWN`.
+
+**Room summary** (`GET /_matrix/client/v1/room_summary/{roomIdOrAlias}`, v1.15 core)
+- Nebu: local-only (no federation, `via` ignored), auth required; visible when joined / invited / join_rule public, knock, knock_restricted / world_readable (RU4); unknown, archived and hidden rooms all answer the same 404 `M_NOT_FOUND` (anti-enumeration, existence is checked before the room state is read, so no `rooms` row is created for an unknown id); `membership` always present; per-user rate limit (deviation from "Rate-limited: No").
 
 **Event IDs (room version 4+)**
 - SHA-256 hash of canonical JSON, base64url-encoded (no padding), prefixed `$`.

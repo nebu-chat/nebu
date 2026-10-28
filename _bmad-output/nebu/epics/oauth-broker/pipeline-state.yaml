@@ -1,0 +1,321 @@
+# Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents.
+# Do not edit manually during an active pipeline run.
+# last_updated: 2026-10-28
+# [cross-signing-upload-races] 2026-10-28T09:28Z ci-gate → 11372 tests, 35 known flaky (green alone or red on HEAD), e2e 35 passed; done
+# [cross-signing-upload-races] 2026-10-28T08:54Z dev-story → done (cycle 2), 72 new tests, unit_nodb 6703 green → CI gate
+# [cross-signing-upload-races] 2026-10-28T08:44Z delta reviews of cycle 1 approved (1 LOW D-1 stored-side crash, 1 MINOR wording) → fix cycle 2
+# [cross-signing-upload-races] 2026-10-28T08:22Z code-review → 0 MAJOR 4 MINOR; kassandra APPROVED (2 LOW) → fix cycle 1
+# [cross-signing-upload-races] 2026-10-28T08:17Z dev-story → done (cycle 0), 52/52 new tests, unit_nodb 6703 green
+# [cross-signing-upload-races] 2026-10-28T07:49Z test-review → 0 MAJOR 9 MINOR; ATDD fix pass → 52 tests (29 red, 23 pins), 45 mutants killed
+# [cross-signing-upload-races] 2026-10-28T07:32Z atdd → 49 tests (27 red, 22 pins), 42/42 mutants killed
+# [cross-signing-upload-races] 2026-10-28T07:01Z create-story → cross-signing-upload-races.md (cq (g), REQ-2026-007); OQ1-3 decided as recommended
+# [pending] 2026-10-28T06:58Z pipeline started (cq (g) cross-signing upload races)
+# [sync-rejoin-range-scan-bound] 2026-10-27T21:05Z ci-gate → 11300 tests, 32 flaky failures (green alone), e2e 34 passed + hover flake green on rerun; done
+# [sync-rejoin-range-scan-bound] 2026-10-27T20:28Z delta reviews approved, fix cycle 2 (fenced fallback range) → CI gate
+# [sync-rejoin-range-scan-bound] 2026-10-27T19:25Z code-review → 0 MAJOR 6 MINOR; kassandra APPROVED (2 LOW) → fix cycle 1
+# [sync-rejoin-range-scan-bound] 2026-10-27T19:17Z dev-story → done (cycle 0), 82/82 new tests, lookback 64 sufficed
+# [sync-rejoin-range-scan-bound] 2026-10-27T18:15Z atdd fix pass → 82 tests (60 red), 69 mutants
+# [sync-rejoin-range-scan-bound] 2026-10-27T17:31Z test-review → 3 MAJOR 11 MINOR, ATDD fix pass
+# [sync-rejoin-range-scan-bound] 2026-10-27T17:23Z atdd → 71 tests (49 red, 22 pins), 61 mutants killed
+# [sync-rejoin-range-scan-bound] 2026-10-27T20:00Z create-story → sync-rejoin-range-scan-bound.md (cq (f), REQ-2026-006)
+# [gdpr-erasure-global-data] 2026-10-27T19:30Z ci-gate → ci_run 30 known flaky, e2e 34 passed + hover flake green on rerun; done
+# [gdpr-erasure-global-data] 2026-10-27T18:00Z delta reviews: kassandra APPROVED (4 LOW), code review 0 MAJOR 2 MINOR → cycle 2 small fixes done
+# [gdpr-erasure-global-data] 2026-10-27T17:00Z dev-story → cycle 1 done (D16-D19, 25 mutants killed, full suite 23 known flaky)
+# [gdpr-erasure-global-data] 2026-10-27T15:00Z code-review → 0 MAJOR 8 MINOR; kassandra NOT APPROVED (2 HIGH users PII not shredded, erasure not terminal for auth; 1 MEDIUM) → cycle 1
+# [gdpr-erasure-global-data] 2026-10-27T14:00Z dev-story → done (cycle 0; real deadlock found+fixed: pre-lock uia/cross-signing rows before advisory lock)
+# [gdpr-erasure-global-data] 2026-10-27T13:00Z test-review → 3 MAJOR 11 MINOR fixed in ATDD fix pass (113 new tests, 86 mutants/84 killed)
+# [gdpr-erasure-global-data] 2026-10-27T12:00Z atdd → 98 new tests (84 red of 99), 68 mutants/66 killed; gaps G1-G11 decided D11-D15 (migration 000055)
+# [gdpr-erasure-global-data] 2026-10-27T10:26Z create-story → gdpr-erasure-global-data.md (REQ-2026-005, closes ck; D1-D10; matrix false, security required)
+# [sync-stream-position] 2026-10-27T09:55Z ci-gate → ✓ redeploy+integration+unit+e2e element-web (known flaky only)
+# [sync-stream-position] 2026-10-27T09:06Z fix cycle 2 (docs/test) done → CI gate
+# [sync-stream-position] 2026-10-27T08:59Z delta review cycle 1 → 0 MAJOR, 2 MINOR (docs/test, fix cycle 2); Kassandra delta APPROVED (MEDIUM residual cq (f) tracked)
+# [sync-stream-position] 2026-10-27T08:24Z code-review → 1 MAJOR (same-base concurrent loss → CAS on generation) + 5 MINOR; Kassandra APPROVED (1 MEDIUM range scan, 1 LOW) → fix cycle 1
+# [sync-stream-position] 2026-10-27T08:12Z dev-story → done (cycle 0; 150 new + amended suites green, unit job 6623/0, full suite only known flaky + fj)
+# [sync-stream-position] 2026-10-27T07:16Z test-review → 3 MAJOR + 10 MINOR fixed in ATDD fix pass (150 new tests, D21 contract added)
+# [sync-stream-position] 2026-10-27T00:55Z atdd → 144 new tests (128 red, 16 guards), 13 existing suites amended deliberately, 40+ mutants killed
+# [sync-stream-position] 2026-10-26T22:43Z oracle-gate → spec context captured
+# [sync-stream-position] 2026-10-26T22:41Z pipeline started (story 2 of fc; events-room-position committed 87e48177)
+# [events-room-position] 2026-10-26T22:41Z ci-gate → 10888/22 known flaky, e2e 34+1 flaky(rerun green); done
+# [events-room-position] 2026-10-26T22:01Z code-review → 0 MAJOR, 4 MINOR + 6 INFO fixed in cycle 1 (docs/comments/test tag only, SQL unchanged; no delta review)
+# [events-room-position] 2026-10-26T21:48Z dev-story → done (cycle 0), 49 story tests green, 1 existing fixture timeout re-pinned
+# [events-room-position] 2026-10-26T21:22Z test-review → 1 MAJOR (follow-ups pins) + 8 MINOR fixed in ATDD fix pass, 49 tests
+# [events-room-position] 2026-10-26T21:06Z atdd → 50 tests (45 red, 5 guards), ref impl green, 26 mutants killed, no existing test amended
+# [events-room-position] 2026-10-26T22:00Z create-story → events-room-position.md (story 1 of 2 for fc) + sync-stream-position.md (story 2, REQ-2026-003); OQs answered
+# [pending] 2026-10-26T21:30Z pipeline started (fc: stream position instead of timestamp anchor)
+# [sync-token-per-device] 2026-10-26T21:20Z ci-gate → ✓ e2e element-web 35 passed; story done
+# [sync-token-per-device] 2026-10-26T20:50Z ci-gate integration → 10839 tests, 21 failures (all known families + SetRoomStateTest on_exit ETS race, green alone 45/45)
+# [sync-token-per-device] 2026-10-26T20:15Z code-review delta cycle 1 → 0 MAJOR, 0 MINOR (6 INFO), approve; dev cycle 1 done (333 targeted, unit 1.19 6576/0, full 25 failed known families)
+# [sync-token-per-device] 2026-10-26T19:45Z code-review → 0 MAJOR, 6 MINOR (failed-read initial-shaped miss, migration note, logging, untested error branches, docs drift, stale headers); kassandra CLEAN (4 INFO) → cycle 1
+# [sync-token-per-device] 2026-10-26T19:15Z dev-story → done (cycle 0): 284 targeted green, full 21 failed (20 known flaky + parked load test, 1 fixture 401 flake)
+# [sync-token-per-device] 2026-10-26T18:35Z test-review fix pass → 152 tests, 123 red (incl. amended), M1/M2 fixed, 28 mutants killed
+# [sync-token-per-device] 2026-10-26T18:20Z test-review → 2 MAJOR (vacuous 503 test, AC10 timing margin) + 9 MINOR → fix pass
+# [sync-token-per-device] 2026-10-26T18:00Z atdd → 145 tests (120 red), 25 mutants killed, story contract amended
+# [sync-token-per-device] 2026-10-26T16:41Z create-story → sync-token-per-device.md (fd + D9 per-device global account data/cross-signing positions, migration 000052; matrix true, security required); oracle-gate → no MUST violated; F3 two position columns, F4 own user on fallback, F5 wake-up in scope
+# [sync-wakeups-cluster-wide] 2026-10-26T16:30Z committed ✓ (fe closed; D5 registry-lag/dead-room handling; code-review 3 cycles 0 MAJOR; CI 10680/22 known families; e2e element-web 35 passed)
+# [sync-wakeups-cluster-wide] 2026-10-26T15:51Z code-review cycle 2 → 0 MAJOR, 3 MINOR closed (docs/follow-up bp, warning wording), M1 closed; going to CI gate
+# [sync-wakeups-cluster-wide] 2026-10-26T15:06Z dev cycle 1 (D5) done; code-review cycle 1 → 1 MAJOR (dead/archived room pins anchor, 1 s loop) + 4 MINOR → D5 revised (classify archived + start_room after bound), cycle 2
+# [sync-wakeups-cluster-wide] 2026-10-26T13:59Z dev-story cycle 0 done (9 sites); code-review → 1 MAJOR (M1 Horde registry lag on woken remote rebuild) + 4 MINOR → D5, cycle 1
+# [sync-wakeups-cluster-wide] 2026-10-26T13:02Z test-review → 0 MAJOR AC, 2 MAJOR test_helper (global distribution) → reverted; :peer tests opt-in, trace proof added; fix pass running
+# [sync-wakeups-cluster-wide] 2026-10-26T12:55Z atdd → 21 tests (9 red guard/peer/docs, 12 characterization), reference 9 one-line changes green 1.19+1.20, 9 mutants killed; test_helper starts distribution
+# [sync-wakeups-cluster-wide] 2026-10-26T12:31Z create-story → sync-wakeups-cluster-wide.md (fe; 9 node-local sites; matrix false (frontmatter, classifier regex false positive), security not-needed, oracle skipped)
+# [history-visibility-enforcement] 2026-10-26T10:51Z commit → done
+# [history-visibility-enforcement] 2026-10-26T10:51Z ci-gate+e2e → CI 10634/26 known families, e2e 35 passed; security cycles 1-2 CLEAN
+# [history-visibility-enforcement] 2026-10-26T09:12Z security-cycle-1 → HIGH#1 fixed (cap+tier+linear SQL+timeout), MEDIUM#2, MINOR1-3, LOW#4/#5; delta reviews next
+# [history-visibility-enforcement] 2026-10-26T08:11Z dev-story → done (cycle 0), lib +624/-134, 595 targeted green, fresh-DB 28 failures (known/pre-existing + 1 regression fixed)
+# [history-visibility-enforcement] 2026-10-20T23:00Z test-review → 0 MAJOR, 21 MINOR applied, story decisions closed; 479 tests (131 red) / all green on reference (1.19+1.20), 16 mutants killed, reference ~517 lines lib
+# [history-visibility-enforcement] 2026-10-20T22:29Z atdd → 127 new tests + 11 docs re-pins; 126 red in worktree / 470 green on reference (1.19+1.20), mutation-checked; reference ~506 lines lib
+# [history-visibility-enforcement] 2026-10-20T21:20Z oracle-gate → no WRONG decision; S11 search MUST fixed, labels, 14 missing tests (AC22)
+# [history-visibility-enforcement] 2026-10-20T21:13Z create-story → history-visibility-enforcement.md (matrix, security required, ui false)
+# [history-visibility-enforcement] 2026-10-20T21:13Z pipeline started
+# [membership-state-model] 2026-10-20T20:59Z ci-gate → 10474 tests/29 known flaky; e2e API guard + element-web 33 passed; UI scenario @known-failure K13; log grep 0 → committing
+# [membership-state-model] 2026-10-20T20:23Z gate review: M-3 closed; L-1 (cancel cast) + L-3' (shared wait budget) + docs fixed; lib 1221 lines
+# [membership-state-model] 2026-10-20T19:52Z dev security cycle 3 done (GenServer gate, aggregated warning, docs); lib 1173 lines; fresh-DB 22 failures known
+# [membership-state-model] 2026-10-20T19:18Z dev security cycle 2 done (D18 degradation, D19 MemberSliceGate, predecessor timeout); lib 1064 lines; fresh-DB 30 failures known/flaky
+# [membership-state-model] 2026-10-20T18:22Z delta reviews: kassandra 2 MEDIUM (sync bypass of tier, one slow room fails whole sync), code 7 MINOR → story D18-D20 + tests (539, 15 red) ready, dev security cycle 2
+# [membership-state-model] 2026-10-20T17:52Z dev security cycle 1 done (members_read tier, statement_timeout, L-1, NUL, loop stop); lib 818 lines; fresh-DB 21 failures known
+# [membership-state-model] 2026-10-20T17:28Z code-review 0 MAJOR/8 MINOR; kassandra 1 MEDIUM (read amplification) + 1 LOW → story + tests updated (members_read tier, statement_timeout, L-1), dev security cycle 1
+# [membership-state-model] 2026-10-20T16:27Z dev-story → done (cycle 0), lib 641 lines, 22 failures HEAD-identical/flaky
+# [membership-state-model] 2026-10-20T15:53Z test-review → 5 MAJOR + 17 MINOR applied, story gaps closed, S-5 true non-goal; 468 tests (146 red) / all green on reference (1.19+1.20), reference +317/-147 lib
+# [membership-state-model] 2026-10-20T15:20Z atdd → 144 new tests + 10 docs re-pins; 136 red in worktree / 434 green on reference (1.19+1.20); reference +357/-161 lib
+# [membership-state-model] 2026-10-20T14:24Z oracle-gate → no WRONG decision; labels, D7/D9 decisions, 13 missing tests added (AC16)
+# [membership-state-model] 2026-10-20T14:18Z create-story → membership-state-model.md (matrix, security required, ui false)
+# [membership-state-model] 2026-10-20T14:18Z pipeline started
+# [state-writer-redaction] 2026-10-20T14:02Z ci-gate → 10268 tests/20 known flaky; e2e redaction 2/2 + element-web 32 passed; log grep 0 → committing
+# [state-writer-redaction] 2026-10-20T10:50Z dev fix cycle 1 (HIGH idempotent redaction + one row per target, review MINORs) done; lib 1046 lines; fresh-DB run 22 failures known/flaky
+# [state-writer-redaction] 2026-10-20T10:24Z code-review 0 MAJOR/6 MINOR; kassandra HIGH (unbounded redaction rows per target) → story + tests updated, dev fix cycle 1
+# [state-writer-redaction] 2026-10-20T09:52Z dev-story → done (cycle 0), lib +920 lines, 25 failures all HEAD-identical/flaky
+# [state-writer-redaction] 2026-10-20T09:03Z test-review → 2 MAJOR + 17 MINOR applied, story gaps closed; 292 new tests (257 red) / 786 green on reference (1.19+1.20)
+# [state-writer-redaction] 2026-10-20T08:42Z atdd → 279 new tests + 9 docs re-pins; 251 red in worktree / 666 green on reference (1.19+1.20); reference +756 lines lib
+# [state-writer-redaction] 2026-10-20T07:26Z oracle-gate → no WRONG; labels, Q9 decision, 18 missing tests added (AC17)
+# [state-writer-redaction] 2026-10-20T07:20Z create-story → state-writer-redaction.md (matrix, security required, ui false)
+# [state-writer-redaction] 2026-10-20T07:20Z pipeline started
+# [power-levels-enforcement] 2026-10-20T07:03Z ci-gate → 9940 tests/25 known flaky; e2e power levels 2/2 + element-web 30 passed; log grep 0 → committing
+# [power-levels-enforcement] 2026-10-20T06:21Z fix cycle 3 (strict JSON comparison C2-L1, refresh-worker 401 test flake) applied
+# [power-levels-enforcement] 2026-10-20T05:17Z delta reviews: 0 MAJOR (code) / CLEAN (kassandra, 1 LOW) → fix cycle 2 applied; CI gate 9933/21 known flaky
+# [power-levels-enforcement] 2026-10-20T04:45Z code-review 0 MAJOR/5 MINOR + kassandra CLEAN (1 MEDIUM, 3 LOW) → fix cycle 1 applied
+# [power-levels-enforcement] 2026-10-20T04:09Z dev-story → done (cycle 0), 26 known-flaky only (verified on HEAD copy)
+# [power-levels-enforcement] 2026-10-20T02:13Z test-review → 0 MAJOR, 16 MINOR applied; 514 tests, 292 red / all green on reference
+# [power-levels-enforcement] 2026-10-20T01:53Z atdd → 304 new tests + 8 docs re-pins; 285 red in worktree / 504 green on reference (1.19+1.20)
+# [power-levels-enforcement] 2026-10-20T00:24Z oracle-gate → no WRONG; D7 gap, labels, 16 missing tests added (AC17)
+# [power-levels-enforcement] 2026-10-20T00:17Z create-story → power-levels-enforcement.md (matrix, security required, ui false)
+# [power-levels-enforcement] 2026-10-20T00:17Z pipeline started
+# [moderation-routes-atomic-ban] 2026-10-20T00:02Z ci-gate → 9605 tests/24 failures all known flaky families; e2e moderation 2/2 + element-web 28 passed; reason-grep 0 → committing
+# [moderation-routes-atomic-ban] 2026-10-19T23:22Z fix cycle 3 (requester membership check, terminate seam, 1.19 test-name fix) applied; reviews: no MAJOR
+# [moderation-routes-atomic-ban] 2026-10-19T22:37Z fix cycle 2 (L-5 freeze-first upgrade, archived check) applied
+# [moderation-routes-atomic-ban] 2026-10-19T21:39Z code-review 0 MAJOR/7 MINOR + kassandra CLEAN (1 MEDIUM, 4 LOW) → fix cycle 1 applied
+# [moderation-routes-atomic-ban] 2026-10-19T21:02Z dev-story → done (cycle 0), 25 known-flaky only
+# [moderation-routes-atomic-ban] 2026-10-19T20:04Z test-review → 0 AC MAJOR, 2 hygiene MAJOR + 15 MINOR applied; 248 red / 426 green on ref
+# [moderation-routes-atomic-ban] 2026-10-19T19:43Z atdd → 421 tests, 255 red in worktree, 272 green on reference impl
+# [moderation-routes-atomic-ban] 2026-10-19T19:06Z oracle-gate → no WRONG, 12 tests + labels added to story
+# [moderation-routes-atomic-ban] 2026-10-19T18:42Z pipeline started (follow-ups ex, ew, fb + kick/ban/unban routes: the ban route gate story; eq/er/et follow as power-levels story)
+# [event-size-limit] 2026-10-19T18:42Z committed (ep: EventSize accounting, 413 M_TOO_LARGE on PUT state/send/createRoom with backstops, JSON 413 for >1 MB with Connection: close, upgrade reduced copy, D12 UserId length-disjoint hash form (<= 254 natural, >= 255 hashed to exactly 255; boot refuses > 235-byte server names), invalid UTF-8 path 400; Oracle found user ids unbounded; test-review 0 MAJOR 13 MINOR; code-review 0 MAJOR 5 MINOR; Kassandra CLEAN (MEDIUM D12 domain separation fixed); CI 9314 tests 25 known-flaky failures; e2e run A 25 passed (+1 browser flake re-run green), 0 x 413, Q-size 0 rows; remaining: ex, eq, er, es, et, ew, em, en, eo, fa, fb, fc, fd, fe, fg, fh, fi, fk-fp)
+# [event-size-limit] 2026-10-19T17:55Z dev-story done (EventSize, 413 M_TOO_LARGE on PUT state/send/createRoom, JsonBody JSON 413, upgrade reduced copy, D12 UserId 255-byte cap); code-review + Kassandra + CI started
+# [event-size-limit] 2026-10-19T17:24Z test-review 0 MAJOR 13 MINOR + 10 story amendments applied; 122 red on real code, 369 green on the reference
+# [event-size-limit] 2026-10-19T17:02Z atdd 114 red on real code, green on a throwaway reference
+# [event-size-limit] 2026-10-19T16:00Z create-story + oracle-gate (user ids unbounded: D12 from_claims 255-byte cap; upgrade reduced copy no more open; tests added); story amended
+# [event-size-limit] 2026-10-19T15:34Z pipeline started (follow-up ep: 413 M_TOO_LARGE for events over 65536 canonical bytes on PUT state, initial_state, creation_content, send; closes the byte bounds left open by ey / ff reviews)
+# [member-event-prev-content] 2026-10-19T15:34Z committed (ff: prev_content/prev_sender/replaces_state together on state events in /sync, /messages, /event, /relations; stamps max(now, latest+1); K10 fixed: Element writes m.direct on DM accept; test-review 3 MAJOR 9 MINOR; code-review 0 MAJOR 3 MINOR; Kassandra CLEAN 2 LOW (ex gate: kick/ban/unban stamps; ep amplification); fj root cause fixed in room_summary_integration_test; CI 9160 tests 31 known-flaky failures; e2e run A element-web 26 passed 0 failed; remaining: ex, ep, eq, er, es, et, ew, em, en, eo, fa, fb, fc, fd, fe, fg, fh, fi, fk, fl, fm)
+# [member-event-prev-content] 2026-10-19T14:52Z dev-story done (fetch_state_predecessors, prev_content/prev_sender/replaces_state together, stamps max(now, latest+1)); fj root cause fixed in room_summary_integration_test; code-review + Kassandra + CI gate started
+# [member-event-prev-content] 2026-10-19T14:01Z atdd 147 red on real code, green on a throwaway reference + test-review 3 MAJOR 9 MINOR applied
+# [member-event-prev-content] 2026-10-19T12:10Z create-story (hypothesis verified in the Element 1.12.15 bundle: RoomMember.getDMInviter reads join event unsigned.prev_content + prev_sender) + oracle-gate (D8 documented deviation es, tests added); story amended
+# [member-event-prev-content] 2026-10-19T11:49Z pipeline started (follow-up ff: m.room.member events lack unsigned.prev_content / prev_sender: Element does not write m.direct when accepting a DM; e2e K10; then the rest: ep, ex, fh, fi, fj, eq, er, es, et, ew, em, en, eo, fa, fb, fc-fg)
+# [rate-limits-join-invite-create-room] 2026-10-19T11:49Z committed (ey: per-user tiers create_room/invite/join (+upgrade), take_all CAS, pending caps 500/100/10 under advisory locks, ignored/deactivated inviters excluded (count parsed once per invitee after Kassandra delta gate HIGH H-1 DB-OOM), invite_state byte budget, migration 000050; Oracle no WRONG; test-review 0 MAJOR 9 MINOR; code-review 0 MAJOR 6 MINOR; CI 9007 tests 23 known-flaky failures; e2e runs A+B 25 passed each, 0 x 429 in the run B server log; ey RELEASE GATE lifted; remaining: ex (ban route), fh, fi, fj, ep next)
+# [rate-limits-join-invite-create-room] 2026-10-19T10:21Z dev-story + review cycle 1 (code-review 0 MAJOR 6 MINOR; Kassandra CLEAN 2 MEDIUM 2 LOW: slot-fill DoS: ignored/deactivated excluded + advisory locks, invite_state byte budget, upgrade charge, take_all CAS); ci gate + Kassandra delta gate started
+# [rate-limits-join-invite-create-room] 2026-10-19T09:05Z atdd 130 red on real code, green on a throwaway reference + test-review 0 MAJOR 9 MINOR applied
+# [rate-limits-join-invite-create-room] 2026-10-19T07:50Z create-story + oracle-gate (no WRONG; wording, D6 rationale, 7 tests added); story amended
+# [rate-limits-join-invite-create-room] 2026-10-19T07:29Z pipeline started (follow-up ey: rate limits for /join, /invite, /createRoom + invite spam caps; last gate before Element deployments; then ff, then the rest)
+# [sync-membership-partition] 2026-10-17T21:14Z committed (ev + ez: /sync partition rooms.join/invite/leave, D13 join decision, full_state, 503 fail closed; ATDD validated against a throwaway reference implementation; test-review 1 MAJOR 14 MINOR; code-review 0 MAJOR 8 MINOR; Kassandra CLEAN + 2 delta gates (M-1 left_at window bound, L-1 re-read, L-2 anchor failure, N-1 lost leave); CI 8819 tests 23 known-flaky failures; e2e element-web 25 passed 1 known failure K10 (m.direct = ff); remaining gates: ey (rate limits / invite spam), ex (ban route))
+# [sync-membership-partition] 2026-10-17T19:56Z dev-story + review cycle 1 (code-review 0 MAJOR 8 MINOR; Kassandra CLEAN: M-1 left_at window bound, L-1 re-read after fetch, L-2 anchor failure => 503/fallback fixed); ci gate + Kassandra delta gate started
+# [sync-membership-partition] 2026-10-17T17:32Z create-story + oracle-gate (rule 4 taken-back invitation, D13 join decision, prev_batch omitted, use_state_after pinned, full_state D14); story amended
+# [sync-membership-partition] 2026-10-17T17:05Z pipeline started (follow-ups ev + ez: /sync partitioned by membership: rooms.join / rooms.invite / rooms.leave; release gate of the ea-ej batch)
+# [create-room-invites-direct] 2026-10-16T17:01Z committed (eb: createRoom invite/is_direct/invite_3pid + shared invite path + trusted_private_chat levels + D11 sync guard; Oracle D6 corrected; test-review 3 MAJOR 11 MINOR; code-review 0 MAJOR 5 MINOR fixed; Kassandra CLEAN 2 MEDIUM (ex/ey gates) 4 LOW; CI 8629 tests 21 known-flaky failures; e2e element-web 24 passed, UI DM scenario K9 known failure; new HIGH finding ez, release gate ev + ez + ey)
+# [create-room-invites-direct] 2026-10-16T16:35Z dev-story + review cycle 1 done (code-review 0 MAJOR 5 MINOR fixed, Kassandra CLEAN 2 MEDIUM (ban-writer ex amended, ey gating) 4 LOW); ci gate started (load test moved aside)
+# [create-room-invites-direct] 2026-10-16T15:19Z atdd ~130 red (unit/http/docs/e2e) + test-review 3 MAJOR 11 MINOR + A1-A6 applied
+# [create-room-invites-direct] 2026-10-16T14:33Z create-story (ev out: next story; new HIGH finding ez: incremental /sync delivers events of left/kicked/banned/declined rooms in rooms.join) + oracle-gate (D6 malformed 3pid => 400, labels, tests); story amended
+# [create-room-invites-direct] 2026-10-16T14:07Z pipeline started (follow-up eb: invite / invite_3pid / is_direct DM preset + trusted_private_chat invitee power level; story 4 of the ea-ej batch; presets story committed 1af141f4)
+# [create-room-presets-power-levels-topic] 2026-10-16T14:06Z committed (ec+ef+ea + join enforcement; Kassandra HIGH F-1 self-unban fixed, 2 delta gates, residual MEDIUM ban event-order race latent (no ban route) = ex gate; code-review 3 MAJOR fixed; CI 8461 tests 25 failures known families; e2e element-web 23 passed; release gate ev: /sync rooms.invite + eb before any Element deployment)
+# [create-room-presets-power-levels-topic] 2026-10-16T13:11Z dev-story + review cycle 1 (Kassandra HIGH F-1 self-unban via leave, MEDIUM F-2 join/ban race F-3 kick/ban level compare; code-review 3 MAJOR 8 MINOR) fixed; follow-ups ev-ey; CI gate + Kassandra delta gate started
+# [create-room-presets-power-levels-topic] 2026-10-16T12:08Z atdd ~165 red (+10 adapted existing tests) + test-review 6 MAJOR (InviteDB re-arm, flaky ordering, vacuous 403 text, null topic, auto-join guard, missed adaptations) applied; follow-up eu (ban-preferred tie-break)
+# [create-room-presets-power-levels-topic] 2026-10-16T11:17Z create-story (severity high: join enforcement missing — any local user can join any non-restricted room by id, bans not enforced) + oracle-gate (private/unknown join rules deny, topic "" writes event, override nulls 400); story amended
+# [create-room-presets-power-levels-topic] 2026-10-16T10:52Z pipeline started (follow-ups ec + ef + ea; story 3 of the ea-ej batch; create-room-input-validation committed)
+# [create-room-input-validation] 2026-10-16T10:52Z committed (ei+eg+ee+ed; oracle 2 WRONG corrected; atdd 93 red, test-review 1 MAJOR 10 MINOR, code-review 0 MAJOR 6 MINOR fixed, Kassandra CLEAN 4 LOW; CI 8193 tests 19 failures = known families + 2 timing flakes pass alone; follow-ups em en eo ep)
+# [create-room-input-validation] 2026-10-16T10:43Z dev-story + review cycle 1 done (code-review 0 MAJOR 6 MINOR fixed, Kassandra CLEAN 4 LOW fixed/recorded); ci gate started (isolated nebu-oauth, load test moved aside)
+# [create-room-input-validation] 2026-10-16T10:07Z atdd 93 red (+ adaptations of 3 existing tests) + test-review 1 MAJOR (flaky helper) 10 MINOR applied
+# [create-room-input-validation] 2026-10-16T09:36Z oracle-gate -> 2 WRONG corrected (upgrade new_version required M_MISSING_PARAM; canonical_alias alias:"" = none), missing tests added, follow-up ep (413 event size); story amended
+# [create-room-input-validation] 2026-10-16T09:29Z create-story -> create-room-input-validation.md (14 AC, matrix:true, sec required, ui:false; premises ee/ed/eg/ei all true; side findings em/en/eo)
+# [create-room-input-validation] 2026-10-16T09:15Z pipeline started (follow-ups ei + eg + ee + ed; story 2 of the ea-ej batch; ej committed 0aaca9a8)
+# [media-config-tolerant-loader] 2026-10-16T09:14Z committed (ej: per-row tolerant media_config decode, damaged_keys/0, Admin status warning, plain Save repairs; atdd 42 red, test-review 3 MAJOR 9 MINOR applied, code-review 0 MAJOR 6 MINOR fixed, Kassandra CLEAN (L-1 copy fixed, M-1 -> follow-up ek), UX 0 blocking; CI 8063 tests 25 failures = known families, 2 flakes pass alone; load test moved aside once for Docker VM memory)
+# [media-config-tolerant-loader] 2026-10-16T08:41Z dev-story done (config.ex per-row decode + damaged_keys/0, controller/template warning, docs); 106/106 targeted, 5023/5041 wider (18 known flaky)
+# [media-config-tolerant-loader] 2026-10-16T08:34Z test-review 3 MAJOR 9 MINOR applied (init/restart test, discriminating naming, e2e scenario; m4 decision: failed whole-table read keeps damaged set); 42 red (27+4+11) + stale eh docs test fixed
+# [media-config-tolerant-loader] 2026-10-16T08:24Z atdd -> 39 tests (38 red, 1 deliberate guard green); stale pre-existing docs test (eh row 'open, owner') noted
+# [media-config-tolerant-loader] 2026-10-16T08:17Z create-story -> media-config-tolerant-loader.md (10 AC, ui:true, sec required, matrix:false -> oracle skipped)
+# [media-config-tolerant-loader] 2026-10-16T08:11Z pipeline started (follow-up ej; batch ea-ej planned: ej, ei+eg+ee+ed, ec+ef+ea, eb)
+# [media-cleanup-reads-media-config] 2026-10-16T15:30Z create-story (D1-D6, default 30/7 effective, infected catalogue default 90 -> 7, owner question eh) + atdd (config_retention_days, worker unit + real-DB) + test-review 3 MAJOR 7 MINOR applied + dev (Config.retention_days/0 strict read, fail-safe worker, writer range) + code-review 0 MAJOR 5 MINOR applied + Kassandra CLEAN (3 LOW fixed) + UX 0 blocking; 900 targeted tests green
+# [create-room-initial-state-conformance] 2026-10-16T13:00Z code-review 0 MAJOR 4 MINOR applied + Kassandra CLEAN (1 LOW NUL fixed, 8 INFO) + e2e K8 green (10/10 element/spaces+room on the isolated stack); docs; commit next
+# [create-room-initial-state-conformance] 2026-10-16T10:20Z test-review -> 2 MAJOR (empty/non-object body, M_NOT_JSON) + 5 MINOR, 6 applied; dev done in same pass (34 tests green: validate_initial_state/1, forbidden types, rooms.name sync, failing entry raises, HTTP 400s)
+# [create-room-initial-state-conformance] 2026-10-16T09:30Z atdd -> 15 red ExUnit (unit validate/forbidden/rooms.name/failing-entry, HTTP 400s) + e2e step alias fix; 18 guards green
+# [create-room-initial-state-conformance] 2026-10-16T08:30Z create-story + oracle-gate (initial_state already implemented; gaps A1-A5 in scope, B1-B7 follow-ups)
+# [create-room-initial-state-conformance] 2026-10-16T08:00Z pipeline started (bug flow, follow-up dx: premise checked first: the server already honours initial_state, K8 UI scenario fails on an e2e step defect)
+# [epic-oauth-broker] 2026-10-15T24:00Z SEC delta gate over room-keys-version-post-stub, space-edit-audit, media-retention-audit-atomic, storage-test-pinned-target (493fba66..HEAD server): CLEAN, 0 MEDIUM, 1 LOW (resolver seam not compile-guarded: fixed) + 6 INFO; dormant merge PASS; activation stays blocked. CI replica: unit (no DB, --warnings-as-errors) Elixir 1.20 5126 passed / 1.19 0 failures, isolated integration 7944 tests 22 failures = 20 known families + 2 flakes (pass alone), secret-scan, verify-docs, verify-ci-config 20/20, tofu fmt + validate x4, helm lint/template
+# [storage-test-pinned-target] 2026-10-15T23:30Z committed (do part a: the storage test connection connects to the checked IP, Host / SNI keep the name, fail closed, no redirect, http/1.1; the production test connection raised a CaseClauseError against any server (hackney 4.x HEAD 3-tuple): fixed; atdd 29 red, test-review 2 MAJOR 7 MINOR applied, code-review 1 MAJOR (ClientIP contract test) 5 MINOR applied, Kassandra CLEAN 1 LOW fixed; do part b split out: own feature (owner idea); follow-ups ds dt dv dw)
+# [media-retention-audit-atomic] 2026-10-15T23:00Z committed (dn reduced scope: deleted_days / infected_days / released_delete_after_days value + media_config_updated row in ONE transaction, shortening needs the audit, lengthening / disabling applies unaudited with a value-free ERROR; released 0 = off like nil (Kassandra MEDIUM-1); atdd 120 tests, test-review 1 MAJOR 9 MINOR applied, code-review 0 MAJOR 4 MINOR applied, Kassandra CLEAN 1 MEDIUM fixed; follow-ups du / dn rest not implemented)
+# [space-edit-audit] 2026-10-15T22:00Z committed (dj: audit rows space_name_changed / space_topic_changed / space_child_added / space_child_removed after the state write in Nebu.Matrix.set_space_state/5, not atomic by design, decided: no audit for dk / dl / dm; atdd 25 red, test-review 0 MAJOR 7 MINOR applied, code-review 0 MAJOR 4 MINOR applied, Kassandra CLEAN 2 LOW fixed)
+# [room-keys-version-post-stub] 2026-10-15T21:10Z create-story (root cause of the 34 Element-login e2e failures: POST /room_keys/version missing since the Go -> Elixir migration, present on main too) + atdd 6 red + test-review 1 MAJOR 4 MINOR applied + dev (one stub route) + code-review 0 MAJOR + Kassandra CLEAN (1 LOW doc applied)
+# [epic-oauth-broker] 2026-10-15T20:30Z SEC delta gate forms-sweep over dg / dh / de (b91676a8..HEAD): CLEAN 0 MEDIUM, 2 LOW (X3-1 cookie budget role mapping reauth, X3-2 = do) + 5 INFO recorded in dp; dormant merge PASS; unit job replica (no DB, 1.20) exit 0 after warning + on_exit fixes; full isolated e2e 133 passed / 76 failed = OAuth-needs-HTTPS (42) + Matrix users via Element key setup (34, identical on baseline b91676a8); 2 step-definition regressions fixed
+# [admin-forms-gate-sweep] 2026-10-15T19:00Z committed (de: every admin form post behind the strict gate, media policy + storage target behind a fresh sign-in, test connection never sends stored credentials to another endpoint, L1 / R2 audit; Kassandra design review first, test-review 3 MAJOR fixed, code-review 0 MAJOR, Kassandra CLEAN, UX 1 blocking fixed, 1 fix cycle, CI known families + flakes; e2e media policy scenario static; browser check MANUAL)
+# [admin-forms-gate-sweep] 2026-10-15T17:00Z test-review 3 MAJOR + 9 MINOR applied pre-dev; dev c0 done (click_gate plug on users/rooms/spaces/logs/media, marker forms M1/M2, D4 fix, L1/R2 audit, 19 forms with click proof); code-review + Kassandra + UX next
+# [admin-forms-gate-sweep] 2026-10-15T15:30Z create-story (Kassandra design review: M1/M2 marker, everything else click, M3 logic fix, L1/R2 audit; owner decisions recorded) + atdd -> forms gate sweep (route enumeration), media gate, audit L1/R2, storage D4, reauth, docs; existing builders adapted; ~75 red
+# [admin-config-audit-atomic] 2026-10-15T14:00Z committed (dh + X2-4 / X2-5: atomic audit of the six privileged config saves, per-form policy, narrowing re-check under a row lock, SsoStore.peek_confirm direct ETS read; test-review 3 MAJOR fixed, code-review 0 MAJOR, Kassandra CLEAN L-1..L-4 fixed, UX 0 blocking, 1 fix cycle, CI known families + 2 flakes; manual check with an unwritable audit table)
+# [admin-config-audit-atomic] 2026-10-15T12:50Z dev c0 done: unit suite without DB (GitLab job replica) 4845/1 fixed (AC14.2 audit stub); code-review + Kassandra + UX next
+# [admin-config-audit-atomic] 2026-10-15T12:30Z test-review -> 3 MAJOR (AC8 real-DB per form, e2e waiver, unadapted existing tests) + 10 MINOR applied; dev c0 done (new suites green, atomic db tests + D6)
+# [admin-config-audit-atomic] 2026-10-15T10:55Z atdd -> admin_db_config_audited_test (unit + integration), config_audit_atomic_test, sso_store_confirm D6 tests, docs pins; 3 existing tests adapted; ~44 red
+# [admin-config-audit-atomic] 2026-10-15T10:30Z pipeline started + create-story -> admin-config-audit-atomic.md (D1-D7, AC1-8); classified ui:true matrix:false (oracle skipped) security_review:required
+# [role-mapping-self-lockout-guard] 2026-10-15T10:10Z committed (dg: self-lock-out guard; test-review 3 MAJOR fixed, code-review 0 MAJOR, Kassandra CLEAN M-1/L-2 fixed, UX 0 blocking, 1 fix cycle, CI 7551 tests / known families + 6 flakes; browser check MANUAL)
+# [role-mapping-self-lockout-guard] 2026-10-15T09:40Z test-review -> 3 MAJOR (test-name compile error, gate-first and universal-first orderings vacuous) + 9 MINOR + 5 INFO, all applied pre-dev
+# [role-mapping-self-lockout-guard] 2026-10-15T09:10Z atdd -> role_mapping_self_lockout_test (33 red) + admin_reauth fingerprint tests + docs pins + e2e @role-mapping (static bddgen+tsc green); sweep test marker helper adapted
+# [role-mapping-self-lockout-guard] 2026-10-15T08:20Z create-story -> role-mapping-self-lockout-guard.md (D1-D7, AC1-9); classified ui:true matrix:false (oracle skipped) security_review:required
+# [role-mapping-self-lockout-guard] 2026-10-15T08:00Z pipeline started (follow-up dg: refuse a role mapping value the saving admin would not satisfy)
+# [epic-oauth-broker] 2026-10-14T18:07Z delta-gate fixes committed bfff9713 (X2-1 universal-value guard, X2-3 wording, X2-6 rpc emergency functions); final CI 7503 tests (RegressionSyncLoad excluded: OOM in the 8 GB Docker VM) / known families + 3 flakes
+# [epic-oauth-broker] 2026-10-14T17:14Z SEC delta gate admin-switch over the three stories (4a8c3715..HEAD): CLEAN 1 MEDIUM (X2-1 too broad role mapping value) + 5 LOW; X2-1 / X2-3 / X2-6 fixed (universal-value guard, rollback wording, rpc emergency functions), X2-4 / X2-5 recorded (dh, di); activation still blocked on G3-2 + manual groups A-F
+# [sso-confirm-bucket-order] 2026-10-14T17:02Z committed (14873739: cv; test-review 1 MAJOR fixed, code-review 0 MAJOR, Kassandra CLEAN L-1 fixed, CI 7498 tests / known families + 2 flakes)
+# [sso-confirm-bucket-order] 2026-10-14T16:33Z create-story + atdd + dev c0; test-review 1 MAJOR (exact budgets) + 8 MINOR, code-review 0 MAJOR 3 MINOR, Kassandra CLEAN (L-1 cookie clear on cross-site POST fixed, L-2 doc) -> cycle 1 done; isolated CI next
+# [admin-config-privileged-forms-sweep] 2026-10-14T16:09Z committed (62ecc6b2: cw sweep; test-review 0 MAJOR, code-review 1 MAJOR pre-existing RLS gap -> migration 000049, Kassandra CLEAN 1 MEDIUM docs + LOW fixed, UX 1 blocking fixed, CI 7477 tests / known families + 1 timing flake; browser check MANUAL)
+# [admin-config-privileged-forms-sweep] 2026-10-14T15:55Z security-review -> Kassandra CLEAN (M-1 docs cache-invalidation recovery, L-1 role mapping labels, L-3 audit for scopes/refresh fixed; L-2 -> dh, self-lockout guard -> dg); docs done; isolated CI next
+# [admin-config-privileged-forms-sweep] 2026-10-14T15:44Z test-review 0 MAJOR 7 MINOR; code-review c0 1 MAJOR (pre-existing RLS gap admin_group_claim -> migration 000049) + 7 MINOR; UX 1 blocking (flash roles) -> dev cycle 1 done; Kassandra next
+# [admin-config-privileged-forms-sweep] 2026-10-14T15:30Z create-story + atdd(config_privileged_forms_sweep 63 tests, docs pins, existing tests adapted) + dev c0 done (admin+oauth+web 4582/22 = known families + stale quick-DB artifacts); test-review / UX / code-review next
+# [admin-oauth-switch] 2026-10-14T15:17Z committed (03a81df2: Admin UI OAuth switch; test-review 4 MAJOR fixed, code-review 0 MAJOR, Kassandra CLEAN 1 MEDIUM + 2 LOW fixed, UX 0 blocking, 2 dev cycles, CI 7390 tests / 24 known families; real-browser + running-instance check MANUAL)
+# [admin-oauth-switch] 2026-10-14T15:06Z security-review -> Kassandra CLEAN (1 MEDIUM M-1 issuer-change-while-off trust widening, 2 LOW L-1 query params, L-2 docs: all fixed in dev cycle 2); arc42 docs done; isolated CI next
+# [admin-oauth-switch] 2026-10-14T14:54Z code-review c0 -> 0 MAJOR 6 MINOR; UX 0 blocking 10 advisories -> dev cycle 1 done (all applied except page-wide contrast); Kassandra next
+# [admin-oauth-switch] 2026-10-14T14:44Z dev-story c0 done (new suites 203 + docs 109 green; admin+oauth+web+compliance 4437/4460, 23 failures = 21 known families + 2 adapted pins fixed); UX + code-review + Kassandra next
+# [admin-oauth-switch] 2026-10-14T14:38Z test-review -> 4 MAJOR (atomicity proof, kill-switch cache, audit asymmetry OFF->OFF, AC8) + 19 MINOR, all fixed pre-dev (203 tests green after dev c0)
+# [admin-oauth-switch] 2026-10-14T14:31Z atdd -> 6 new test files (~170 red: oauth_switch unit, config_oauth_switch controller, safari shapes, switch store unit + DB, docs pins) + e2e feature @oauth-switch (static bddgen+tsc green)
+# [admin-oauth-switch] 2026-10-14T11:00Z create-story -> admin-oauth-switch.md (D1-D12, AC1-10); classified ui:true matrix:false (oracle skipped) security_review:required
+# [safari-fetch-metadata-compat] 2026-10-14T10:17Z committed (Safari click proof for WebKit instead of Sec-Fetch-User, notice instead of 403; code-review 0 MAJOR, Kassandra CLEAN 2 LOW fixed, UX 0 blocking, 1 dev cycle, CI 7167 tests / 24 known families; real-browser check MANUAL)
+# [safari-fetch-metadata-compat] 2026-10-14T10:17Z ci-gate PASS 7167 tests / 24 failures = known families only (RoomsFallbackName 12, AdminOidcLogin 3, TraceMapNodeControls 3, TemporaryCapture 2, WarRoom, SsoLogin, MatrixSso, RegressionSyncLoad); arc42 / ADR / 07-deployment / 11-risks / follow-ups cx-cz done
+# [safari-fetch-metadata-compat] 2026-10-14T10:04Z code-review c0 -> 0 MAJOR 6 MINOR; Kassandra CLEAN (2 LOW K-1 doc, K-2 body-only proof; 4 INFO); UX 0 blocking 7 non-blocking (applied) -> dev cycle 1 done; isolated CI next
+# [safari-fetch-metadata-compat] 2026-10-14T09:50Z dev-story c0 done (new suites 344 + docs green; oauth+admin+web 4194/20 known families; node harness green on host; docs + follow-ups cx-cz written); code-review + Kassandra + UX next
+# [safari-fetch-metadata-compat] 2026-10-14T09:43Z test-review -> 3 MAJOR (2 existing tests / docs test) + 12 MINOR fixed pre-dev; dev next
+# [safari-fetch-metadata-compat] 2026-10-14T09:32Z atdd -> 5 new test files + 3 adapted (browser_post_click_proof 42 unit, safari_admin_actions, config_safari_fetch_metadata, safari_account_reset, click_proof_script incl. node harness) ~80 red; e2e scenario @ac4-reject-click-proof (static)
+# [safari-fetch-metadata-compat] 2026-10-14T09:25Z create-story -> safari-fetch-metadata-compat.md (D1-D6, AC1-9); classified ui:true matrix:false (oracle skipped) security_review:required
+# [safari-fetch-metadata-compat] 2026-10-14T09:24Z pipeline started (bugfix: Safari sends no Sec-Fetch-User; strict admin / account actions unusable)
+# [epic-oauth-broker] 2026-10-14T08:04Z SEC delta gate over G3 stories (b99d93e3..HEAD): CLEAN 1 MEDIUM (X-1) + 3 LOW; X-1/X-4 -> story sso-origins-admin-hardening; X-2/X-3/X-6 docs; G3-4/G3-6 verified done in b99d93e3; oracle catch-up client-ip PASS (classifier matrix:true was a regex false positive); G3 stories' CI 6804/6884/6902 tests verified = known families only
+# [sso-origins-admin-hardening] 2026-10-14T08:04Z committed (SEC delta gate X-1 MEDIUM + X-4 LOW: admin SSO trust saves behind strict fetch metadata + fresh re-auth, /admin/config unframed on path_info, ;/%25 path climbs refused; code-review 1 MAJOR fixed, UX 1 blocking fixed, Kassandra CLEAN 1 LOW fixed, 1 dev cycle, CI 6947 tests / 22 known families)
+# [consent-arming-hardening] 2026-10-13T17:00Z committed (G3-5: consent page on the shared ArmScript, aria-disabled Allow, travel / focus rules; code-review 0 MAJOR, Kassandra CLEAN 1 LOW doc fixed, UX 0 blocking (N2-N8 applied), CI 6902 tests / 22 known families)
+# [client-ip-misconfiguration-warnings] 2026-10-13T14:30Z committed (G3-2: W1 throttled untrusted-XFF warning, W2 collapsed-address cron check, W3 tofu check blocks, docs; code-review 0 MAJOR, Kassandra CLEAN 1 MEDIUM + 1 LOW fixed, CI 6884 tests / 23 known families; positive client-IP test stays MANUAL gating)
+# [legacy-sso-redirect-confirmation] 2026-10-13T12:30Z committed c72db5d0 (G3-3: oracle PASS 1 MAJOR applied, test review 5 MAJOR fixed, code review 0 MAJOR, Kassandra CLEAN 2 MEDIUM + 2 delta LOW fixed over 2 dev cycles, UX 2 blocking fixed, CI 6804 tests / 20 known families)
+# [revoke-lock-bounds] 2026-10-13T02:59Z committed (bugfix ATDD+Dev 1 fix cycle, code-review 0 MAJOR, Kassandra CLEAN (MEDIUM + 3 LOW fixed), CI 6226/20 known families)
+# [revoke-lock-bounds] 2026-10-14T03:00Z dev c1 done; ci-gate PASS 6226 tests / 20 failures known families
+# [revoke-lock-bounds] 2026-10-14T01:00Z dev c0 done (6180/36 known); code-review 0 MAJOR 3 MINOR; Kassandra CLEAN (1 MEDIUM: revoke/logout waiters unbounded + 3 LOW) -> dev cycle 1
+# [revoke-lock-bounds] 2026-10-13T23:00Z epic SEC gate 3 done (CLEAN, 3 MEDIUM: G3-1 -> this bugfix, G3-2/G3-3 docs/owner decision); docs committed 18f7da41; bugfix story written; atdd next
+# [oauth-hardening-hygiene] 2026-10-13T01:03Z committed (ATDD+Dev 1 fix cycle, code-review 0 MAJOR, Kassandra CLEAN (2 LOW documented), CI 6197/22 known families)
+# [oauth-hardening-hygiene] 2026-10-13T21:00Z dev c1 done; ci-gate PASS 6197 tests / 22 failures known families
+# [oauth-hardening-hygiene] 2026-10-13T19:00Z dev c0 done (6167/25 known); code-review 0 MAJOR 5 MINOR; Kassandra CLEAN 2 LOW -> dev cycle 1
+# [oauth-hardening-hygiene] 2026-10-13T17:00Z P6b committed 4ffdb54f; P7 (device lists) deferred; P8 atdd(127 red)+test-review(0 MAJOR 12 MINOR) done; dev next
+# [oauth-room-summary-unrecognized] 2026-10-12T23:18Z committed (ATDD+Dev 1 fix cycle, oracle MAJOR applied, code-review 0 MAJOR, Kassandra CLEAN (banned-invitee MEDIUM fixed), CI 6033/26 known families)
+# [oauth-room-summary-unrecognized] 2026-10-13T15:00Z dev c1 done; ci-gate PASS 6033 tests / 26 failures known families (+MatrixClientCompat replaces_state flake)
+# [oauth-room-summary-unrecognized] 2026-10-13T13:30Z dev c0 done (5999/27 known); code-review 0 MAJOR 4 MINOR; Kassandra CLEAN (1 MEDIUM banned invitee) -> dev cycle 1
+# [oauth-room-summary-unrecognized] 2026-10-13T11:00Z legacy-logout committed 671ea2e8; atdd(91 red)+test-review(1 MAJOR: GET state carve-out decided, 9 MINOR) done; dev next
+# [legacy-logout-per-device] 2026-10-12T21:23Z committed (ATDD+Dev 1 fix cycle, code-review 0 MAJOR, Kassandra CLEAN (3 LOW fixed), CI 5908/28 known families+flakes)
+# [legacy-logout-per-device] 2026-10-13T09:30Z dev c1 done; ci-gate PASS 5908 tests / 28 failures: known families + MatrixClientCompat N+1 flake (also failed alone intermittently, same as P1 CI) + 1 RoomAccountData /sync 429 rate-limit flake (green alone)
+# [legacy-logout-per-device] 2026-10-13T08:00Z dev c0 done (5872/28 known); code-review 0 MAJOR 3 MINOR; Kassandra CLEAN 3 LOW -> dev cycle 1
+# [legacy-logout-per-device] 2026-10-13T06:30Z P4 committed c7369154; atdd(39 red)+test-review(3 MAJOR 9 MINOR) done; dev next
+# [oauth-client-revocation] 2026-10-12T19:48Z committed (ATDD+Dev 1 fix cycle, code-review ADR-020 MAJOR fixed, Kassandra CLEAN (marker binding MEDIUM + lock timeout MEDIUM fixed), UX blocking fixed, CI 5856/24 known families)
+# [oauth-client-revocation] 2026-10-13T05:30Z dev c1 done; ci-gate PASS 5856 tests / 24 failures known families (first CI run aborted on a 255-char generated test name under elixir 1.19: fixed)
+# [oauth-client-revocation] 2026-10-13T01:00Z atdd(190 red)+test-review(0 MAJOR 10 MINOR) done; dev next
+# [oauth-client-revocation] 2026-10-12T23:10Z P3 committed (f98e15d7 after rebase); REBASED onto origin/main 586fe58e (backup branch backup/oauth-pre-rebase-2026-10-12b, 23 commits replayed, no conflicts; oauth+migration+media tests 2865 green); P4 atdd next
+# [oauth-authorize-freshness] 2026-10-12T17:31Z committed (ATDD+Dev 1 fix cycle, oracle 5 MAJOR applied, code-review 0 MAJOR, Kassandra CLEAN (double-clickjacking MEDIUM fixed), UX clean, CI 5606/22 known families)
+# [oauth-authorize-freshness] 2026-10-12T22:40Z dev c1 done; ci-gate PASS 5606 tests / 22 failures known families (+1 MatrixClientCompat flake, green alone)
+# [oauth-authorize-freshness] 2026-10-12T20:20Z P2 committed 07d74d09; P3 create-story+oracle(5 MAJOR applied)+atdd(555 red)+test-review(3 MAJOR 8 MINOR) done; dev next
+# [oauth-dcr-abuse-hardening] 2026-10-12T15:07Z committed (ATDD+Dev 1 fix cycle, code-review 0 MAJOR, Kassandra CLEAN (MEDIUM login-cap fixed), UX blocking fixed, CI 5353/23 known families)
+# [oauth-dcr-abuse-hardening] 2026-10-12T19:05Z dev c1 done; ci-gate PASS 5353 tests / 23 failures all known families
+# [oauth-dcr-abuse-hardening] 2026-10-12T17:30Z create-story+atdd(188 red)+test-review(0 MAJOR 10 MINOR) done; P1 committed cb5cfa24, P5 deploy 235b9911; dev next
+# [oauth-trusted-proxy-client-ip] 2026-10-12T13:20Z committed (ATDD+Dev 1 fix cycle, code-review CLEAN, Kassandra CLEAN (2 MEDIUM fixed), CI 5151/28 known families)
+# [oauth-trusted-proxy-client-ip] 2026-10-12T16:20Z dev c1 done; ci-gate PASS 5151 tests / 28 failures all known families
+# [oauth-trusted-proxy-client-ip] 2026-10-12T15:40Z dev c0 done (5093/26 known); code-review 0 MAJOR 3 MINOR; Kassandra CLEAN (2 MEDIUM: docs spoof wording, IPv6 /128 buckets) -> dev cycle 1
+# [oauth-trusted-proxy-client-ip] 2026-10-12T14:20Z create-story+atdd(158 red)+test-review(0 MAJOR 7 MINOR) done; stories P2/P3/P4 also created; dev next
+# [oauth-versions-switch] 2026-10-12T10:02Z committed ✓ (ATDD+Dev 1 fix cycle, code-review CLEAN, Kassandra CLEAN, CI pass 4937/26 known families)
+# [oauth-versions-switch] 2026-10-12T09:54Z dev-story cycle 1 -> done; ci-gate running
+# [oauth-versions-switch] 2026-10-12T09:34Z code-review c0 -> 0 MAJOR 5 MINOR; Kassandra CLEAN (2 MEDIUM + 2 LOW: LB health-check coupling, rollback text) -> dev cycle 1
+# [oauth-versions-switch] 2026-10-12T09:24Z dev-story -> done (cycle 0): 28 story-9 tests green; full run 4930/34 known families; matrix_compat replay passed; prod compile clean; reviews+Kassandra running
+# [oauth-versions-switch] 2026-10-12T09:05Z test-review -> 3 MAJOR + MINORs fixed pre-dev (28 red story-9 tests / 3444); register stays on enabled? (option A)
+# [oauth-versions-switch] 2026-10-12T08:35Z atdd -> 25 red story-9 tests / 3439; ALSO rebased feature/migrate-to-oauth2 onto origin/main 567dfe57 (--onto, base 5a06e54c, 17 commits, no conflicts; stash used for staged story-9 tests; backup branch backup/oauth-pre-rebase-2026-10-12); post-rebase check 4127/4172, only story-9 red + known families
+# [oauth-versions-switch] 2026-10-12T08:09Z create-story+oracle done; atdd next
+# [oauth-account-management] 2026-10-12T08:09Z committed ✓ (ATDD+Dev 1 fix cycle, code-review CLEAN, UX fixed, Kassandra CLEAN, CI pass 4947/38 known families+flakes)
+# [oauth-account-management] 2026-10-12T08:09Z delta review cycle 1 -> 0 MAJOR 3 MINOR (null-keys/stale read recorded as follow-up ai, prose fixed); arc42 done; CI running
+# [oauth-account-management] 2026-10-12T07:59Z dev-story cycle 1 -> done (oauth+migration 1620 green; broad 4179/44 known + 1 flaky MatrixClientCompat); ci-gate running
+# [oauth-account-management] 2026-10-12T07:29Z code-review c0 -> 1 MAJOR (Referrer-Policy vs Origin null) + 7 MINOR; Kassandra CLEAN (F-1 gate ag; F-2,F-3 fixed); UX 3 blocking -> dev cycle 1
+# [oauth-account-management] 2026-10-12T07:19Z dev-story -> done (cycle 0): 184 story-6 tests green; full run 4931/43 known families; prod compile clean; reviews+Kassandra+UX gate running
+# [oauth-versions-switch] 2026-10-12T06:41Z story 9 create-story done (V1-V19, gaps G1-G3 -> follow-ups ac-af); oracle gate running
+# [oauth-account-management] 2026-10-10T20:59Z test-review -> 9 MAJOR + MINORs fixed pre-dev (184 red story-6 tests / 3365, Gherkin 11 scenarios)
+# [oauth-account-management] 2026-10-10T20:30Z atdd -> 151 red story-6 tests / 3330 + Gherkin 10 scenarios (bddgen/tsc ok)
+# [oauth-account-management] 2026-10-10T20:01Z create-story+oracle done; atdd next (ui:true)
+# [oauth-legacy-coexistence] 2026-10-10T20:01Z committed ✓ d2d4f0ed (ATDD+Dev 1 fix cycle, code-review CLEAN, Kassandra CLEAN, CI pass 4744/34 known)
+# [oauth-legacy-coexistence] 2026-10-10T20:01Z ci-gate -> PASS: 4744 tests / 34 failures all known families; delta: dev cycle 1 covered review+Kassandra; arc42 done
+# [oauth-legacy-coexistence] 2026-10-10T19:43Z dev-story cycle 1 -> done; ci-gate running
+# [oauth-legacy-coexistence] 2026-10-10T18:58Z code-review c0 -> 0 MAJOR 6 MINOR; Kassandra CLEAN (L-1, L-2 LOW fixed in cycle) -> dev cycle 1
+# [oauth-legacy-coexistence] 2026-10-10T18:50Z dev-story -> done (cycle 0): 51 story-5 tests green, quick full 4735/44 known families; prod compile clean; review+Kassandra running
+# [oauth-legacy-coexistence] 2026-10-10T17:31Z test-review -> 0 MAJOR, MINORs fixed pre-dev (51 red story-5 tests / 3187)
+# [oauth-account-management] 2026-10-10T17:13Z story 6 amended after oracle gate (A1-A27; gate y blocking); waits for story 5 commit before ATDD
+# [oauth-legacy-coexistence] 2026-10-10T17:03Z atdd -> 45 red story-5 tests / 3181 (+4 known-family unrelated), stories 1-4 green; story 6 create-story + oracle done in parallel (A1-A27)
+# [oauth-legacy-coexistence] 2026-10-10T16:33Z create-story+oracle-gate done (C1-C20 after dropping legacy logout/login changes); atdd next
+# [oauth-token-revocation-logout] 2026-10-10T16:33Z committed ✓ (ATDD+Dev 1 fix cycle, code-review CLEAN, Kassandra CLEAN, CI pass: 4658 tests / 33 known-family failures + 1 MediaCleanupWorker teardown flake green alone)
+# [oauth-token-revocation-logout] 2026-10-10T16:11Z dev-story cycle 1 -> done (2063 green incl. matrix_router/event_dispatcher/compliance); ci-gate running
+# [oauth-token-revocation-logout] 2026-10-10T15:51Z code-review c0 -> 0 MAJOR 4 MINOR; Kassandra CLEAN (F-1,F-2 LOW fixed in cycle) -> dev cycle 1
+# [oauth-token-revocation-logout] 2026-10-10T15:41Z dev-story -> done (cycle 0): 1654/1654 green; quick full 4647/37 known only; prod compile clean
+# [oauth-token-revocation-logout] 2026-10-10T15:11Z test-review -> 0 MAJOR 12 MINOR fixed pre-dev (158 red / 1654)
+# [oauth-token-revocation-logout] 2026-10-10T14:41Z atdd -> 150 red / 1638 (oauth+migration+session+plugs), story 1-3 green
+# [oauth-token-revocation-logout] 2026-10-10T14:17Z oracle-gate -> /logout/all deletes all devices, 200 {} json, revoke live while disabled; story amended
+# [oauth-token-revocation-logout] 2026-10-10T14:10Z create-story -> R1-R24; oracle gate next
+# [oauth-token-revocation-logout] 2026-10-10T14:09Z pipeline started (story 4)
+# [oauth-token-endpoint] 2026-10-10T14:09Z committed ✓ (ATDD+Dev 1 fix cycle, code-review CLEAN, Kassandra CLEAN, CI pass)
+# [oauth-token-endpoint] 2026-10-10T14:09Z ci-gate -> PASS (fresh volumes): 4478 tests / 28 failures = known families only (TraceMap/WarRoom/RoomsFallback/capture/retention/sync load); 0 oauth/migration/session failures; delta review CLEAN, arc42 done
+# [oauth-token-endpoint] 2026-10-10T13:51Z dev-story cycle 1 -> done (1482 green; prod compile clean); ci-gate running on fresh volumes
+# [oauth-token-endpoint] 2026-10-10T13:43Z code-review c0 -> 0 MAJOR 6 MINOR; Kassandra CLEAN (F-1 MEDIUM fixed in cycle, F-2/F-3/I-x -> follow-ups n,o,p,q) -> dev cycle 1
+# [oauth-token-endpoint] 2026-10-10T13:26Z dev-story -> done (cycle 0): 1400/1400 oauth+migration+session green, quick full 4467/43 fails (known families + 12 RoomsFallback + 4 WarRoomTest flaky); matrix_compat node fixture 16/16; prod-build warnings unchecked (CI gate redeploy will tell)
+# [oauth-token-endpoint] 2026-10-10T12:45Z test-review -> 0 MAJOR 7 MINOR + 6 story edits fixed pre-dev (448 red / 1400)
+# [oauth-token-endpoint] 2026-10-10T12:34Z atdd -> 446 red / 1175 (oauth+migration+session), 24 test files + matrix_compat node test (not runnable against Nebu)
+# [oauth-token-endpoint] 2026-10-10T12:06Z create-story+oracle-gate -> T1-T33; oracle blockers C1 (5xx body without error member), C7 (/.well-known/openid-configuration), C6 jwks_uri folded into story
+# [oauth-token-endpoint] 2026-10-10T11:56Z pipeline started (story 3)
+# [oauth-authorize-idp-delegation-code] 2026-10-10T11:55Z committed ✓ (ATDD+Dev 2 fix cycles, code-review CLEAN, Kassandra CLEAN, CI pass)
+# [oauth-authorize-idp-delegation-code] 2026-10-10T11:55Z ci-gate -> PASS (fresh volumes): 4009 tests / 37 failures = all known families (WarRoom/TraceMap/RoomsFallback/sync load/capture manager); 0 oauth/migration/discovery failures
+# [oauth-token-endpoint] 2026-10-10T11:41Z story 3 create-story started while story 2 CI gate runs (docs only)
+# [oauth-authorize-idp-delegation-code] 2026-10-10T11:38Z security-review -> Kassandra CLEAN (0C/0H/2M/1L/6I); F-2 max_age=0 fixed in cycle 2; F-1/F-2 remainder/F-3 -> follow-ups h,i,j,k; final CI gate running
+# [oauth-authorize-idp-delegation-code] 2026-10-10T11:25Z dev-story cycle 1 -> done (853 green oauth/migration/web plugs/sso); ci-gate running on fresh volumes
+# [oauth-authorize-idp-delegation-code] 2026-10-10T11:21Z code-review c0 -> 0 MAJOR 2 MINOR + ux-gate 0 blocking/advisories -> dev cycle 1 (CI run aborted before fixes)
+# [oauth-authorize-idp-delegation-code] 2026-10-10T11:17Z dev-story -> done (cycle 0): 712/712 oauth+migration green, quick full 4002/49 fails (37 known + 11 RoomsFallback + 1 Oidc denylist)
+# [oauth-authorize-idp-delegation-code] 2026-10-10T10:35Z test-review -> 1 MAJOR (UIA untested) + 9 MINOR fixed in tests before dev (278 red / 712; story-1 418 green)
+# [oauth-authorize-idp-delegation-code] 2026-10-10T10:25Z atdd -> 287 new tests, 272 red + 15 guards; story 1 tests 418 green
+# [oauth-authorize-idp-delegation-code] 2026-10-10T09:56Z oracle-gate -> D10 corrected (Element sends query+https), nonce/openid persisted for story-3 id_token; story amended (D23); baseline skipped (known.txt, same code as story 1 head)
+# [oauth-authorize-idp-delegation-code] 2026-10-10T09:50Z create-story -> oauth-authorize-idp-delegation-code.md (D1-D22, shared IdP callback)
+# [oauth-authorize-idp-delegation-code] 2026-10-10T08:00Z pipeline started (epic oauth-broker, story 2)
+# [oauth-metadata-dcr-admin-approval] 2026-10-09T18:41Z committed ✓ (ATDD+Dev 5 fix cycles, code-review CLEAN, Kassandra CLEAN, CI pass)
+# [oauth-metadata-dcr-admin-approval] 2026-10-09T18:37Z ci-gate → PASS (fresh volumes): 3711 tests / 37 failures = known flaky + 11 RoomsFallbackName + WarRoom family (pre-existing on clean HEAD); 0 oauth/migration/discovery failures. Kassandra re-review CLEAN (N-1 deferred gate item)
+# [oauth-metadata-dcr-admin-approval] 2026-10-09T18:19Z ci-gate runs 5/6 aborted: Docker VM disk full (postgres initdb ENOSPC), freed 5.4 GB old build cache; rerun
+# [oauth-metadata-dcr-admin-approval] 2026-10-09T18:13Z dev-story cycle 5 → done (589 oauth/migration/router/etc tests green; N-1 deferred as gate item); final CI gate on fresh volumes running
+# [oauth-metadata-dcr-admin-approval] 2026-10-09T17:56Z code-review c4 → 1 MAJOR (auth_issuer disabled passthrough: user confirmed passthrough, spec #7 amended) + 9 MINOR; Kassandra re-review → CLEAN (1M N-1 deferred, 3L N-2..N-4) → cycle 5 (CI run aborted, stale)
+# [oauth-metadata-dcr-admin-approval] 2026-10-09T17:41Z dev-story cycle 4 → F-2..F-7 + F-1 partial done (450 oauth/migration/router tests green); decision (Phil 2026-10-09): auth_issuer + unstable msc2965 keep the IdP passthrough while OAuth is disabled; re-running CI gate + delta reviews
+# [oauth-metadata-dcr-admin-approval] 2026-10-09T17:15Z security-review → Kassandra CLEAN (0C/0H/1M/6L/8I); fixing F-2..F-7 + F-1 partial (dedup-before-throttle, per-host pending cap) in cycle 4; trusted-proxy IP, bulk reject, public-suffix deferred as gate items
+# [oauth-metadata-dcr-admin-approval] 2026-10-09T17:05Z dev-story cycle 3 → M1-M5 fixed (381 oauth/migration/layout tests green); code-review → CLEAN (0 MAJOR)
+# [oauth-metadata-dcr-admin-approval] 2026-10-09T17:02Z code-review cycle 2 → 0 MAJOR, 5 MINOR (ADR-020 facade page_size, stale RED prose x2, test cleanup leak, path-pin) → cycle 3
+# [oauth-metadata-dcr-admin-approval] 2026-10-09T16:58Z ci-gate → PASS (fresh DB): 3630 tests, 38 failures = 37 known/pre-existing (incl. 11 RoomsFallbackName on clean HEAD) + 1 LogStore.WriterTest flake (5/5 green alone x2); 0 oauth/migration failures
+# [oauth-metadata-dcr-admin-approval] 2026-10-09T16:43Z ci-gate run 2: 9 oauth/migration failures = stale postgres volume (000040 edited in place; old shape applied in run 1) -> volumes removed, rerun on fresh DB
+# [oauth-metadata-dcr-admin-approval] 2026-10-09T16:26Z dev-story cycle 2 → TTL purge (Oban cron) + pagination + cap + RLS-pending-delete + logos on click done; oauth 335 green; re-running full isolated CI gate
+# [oauth-metadata-dcr-admin-approval] 2026-10-09T15:42Z dev-story cycle 1 → all MINOR+UX fixed (289 oauth tests green); user decided MAJOR 1 = TTL purge+pagination+cap, CSP = logos on click → cycle 2
+# [oauth-metadata-dcr-admin-approval] 2026-10-09T11:22Z code-review → 0 CRITICAL, 1 MAJOR (unbounded pending rows / truncating list; USER DECISION) + 10 MINOR → dev cycle 1 for MINOR+UX, MAJOR + CSP pending user
+# [oauth-metadata-dcr-admin-approval] 2026-10-09T11:17Z ux-gate → 1 blocking (V1 overflow, trivial) + 10 advisories; fixing together with code-review findings in one dev cycle (A1 CSP img-src = security decision -> Kassandra)
+# [oauth-metadata-dcr-admin-approval] 2026-10-09T11:15Z ci-gate → PASS: 3510 tests / 35 failures = 24 known flaky + 11 RoomsFallbackNameTest (deterministic, PRE-EXISTING on clean HEAD of bugfix/fixing-mutual-bugs, verified); 0 oauth failures; e2e playwright not runnable in isolated env
+# [oauth-metadata-dcr-admin-approval] 2026-10-09T10:55Z dev-story → done (cycle 0): oauth tests 196+21 green, full quick run 36 fails (baseline HEAD 38, same flaky families)
+# [oauth-metadata-dcr-admin-approval] 2026-10-09T09:58Z test-review → MAJOR+MINORs fixed (204 red / 217 ExUnit, e2e tsc+bddgen clean)
+# [oauth-metadata-dcr-admin-approval] 2026-10-09T09:49Z test-review → 1 MAJOR (E2E isVisible timeout flaky) + 6 MINOR → fixing tests before dev
+# [oauth-metadata-dcr-admin-approval] 2026-10-09T09:45Z atdd → 197 failing / 209 ExUnit + 6 Gherkin scenarios (12 guards green); story contradictions resolved
+# [oauth-metadata-dcr-admin-approval] 2026-10-09T09:25Z create-story amended with oracle findings
+# [oauth-metadata-dcr-admin-approval] 2026-10-09T09:22Z oracle-gate → spec context captured (9 story deviations to fix)
+# [oauth-metadata-dcr-admin-approval] 2026-10-09T09:21Z baseline-integration → skipped: code identical to bugfix/fixing-mutual-bugs (known gate 3164 tests / 26 known flakes); isolated env scripts ready (compose project nebu-oauth)
+# [oauth-metadata-dcr-admin-approval] 2026-10-09T09:21Z create-story → oauth-metadata-dcr-admin-approval.md (auto_approve/dcr_policy removed per decision, migration 000040, ADR-033)
+# [oauth-metadata-dcr-admin-approval] 2026-10-09T09:18Z pipeline started (epic oauth-broker, story 1, stacked on bugfix/fixing-mutual-bugs)
+story: null
+current_step: null
+completed: []
+cycle_count: 0
+blocked_reason: null
+last_updated: "2026-10-28T09:28Z"

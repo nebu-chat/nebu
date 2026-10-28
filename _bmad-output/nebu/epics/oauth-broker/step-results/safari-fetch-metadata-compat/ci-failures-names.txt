@@ -1,0 +1,24 @@
+Nebu.Admin.LogsLive.TraceMapNodeControlsTest: AC1/AC2: configure_logging persists per-endpoint config via upsert_server_config a non-numeric retention_days is rejected — no config is persisted
+Nebu.Admin.LogsLive.TraceMapNodeControlsTest: AC1/AC2: configure_logging persists per-endpoint config via upsert_server_config an out-of-allowlist min_level is rejected — no config is persisted
+Nebu.Admin.LogsLive.TraceMapNodeControlsTest: AC1/AC2: configure_logging persists per-endpoint config via upsert_server_config an out-of-range retention_days is rejected — no config is persisted
+Nebu.Admin.LogsLive.WarRoomTest: AC1/AC2: the list displays all sessions, active first, then most-recent-first 3 sessions (1 active, 2 ended) render with the active session first
+Nebu.Admin.RoomsFallbackNameTest: AC1 — two members, both with displaynames index page shows both display names instead of the raw room_id
+Nebu.Admin.RoomsFallbackNameTest: AC1 — two members, both with displaynames show page shows both display names instead of the raw room_id
+Nebu.Admin.RoomsFallbackNameTest: AC2 — a member with no profiles.displayname falls back to their localpart index page falls back to the localpart (not nil/blank) and does not crash
+Nebu.Admin.RoomsFallbackNameTest: AC2 — a member with no profiles.displayname falls back to their localpart show page falls back to the localpart (not nil/blank) and does not crash
+Nebu.Admin.RoomsFallbackNameTest: AC3 — more than the name-listing threshold (4) members index page shows a member-count fallback, not every member's name
+Nebu.Admin.RoomsFallbackNameTest: AC3 — more than the name-listing threshold (4) members show page shows a member-count fallback, not every member's name
+Nebu.Admin.RoomsFallbackNameTest: AC4 — a room with an explicit name is unaffected (regression) index page shows the explicit name verbatim
+Nebu.Admin.RoomsFallbackNameTest: AC5 — exactly one member, no name index page does not crash and does not just repeat the raw room_id
+Nebu.Admin.RoomsFallbackNameTest: AC5 — exactly one member, no name show page does not crash and does not just repeat the raw room_id
+Nebu.Admin.RoomsFallbackNameTest: AC5 — zero members, no name index page does not crash and does not just repeat the raw room_id
+Nebu.Admin.RoomsFallbackNameTest: AC5 — zero members, no name show page does not crash and does not just repeat the raw room_id
+Nebu.Admin.RoomsFallbackNameTest: AC6 — index and detail pages share identical fallback logic both pages render the identical name-based fallback for the same room
+Nebu.Admin.TemporaryCaptureManagerTest: AC12 (Option B): enable/disable write compliance audit entries disable/1 records a disable_temporary_capture audit row
+Nebu.Admin.TemporaryCaptureManagerTest: AC12 (Option B): enable/disable write compliance audit entries enable/2 records an enable_temporary_capture audit row naming actor and endpoint
+Nebu.Matrix.MatrixSsoTest: callback mints loginToken; POST /login completes (AC3, AC4) valid callback 302s back with loginToken; POST /login → 200; single-use
+Nebu.Matrix.SsoLoginTest: AC12.2: extra_redirect_schemes/0 cache + seam behaviour test_extra_redirect_schemes_empty_when_not_set
+Nebu.Web.AdminOidcLoginTest: AC3/AC5: admin-only-provisioned operator appears in GET /admin/users (integration) AC3: an operator provisioned ONLY via admin login appears in Nebu.Admin.DB.list_users/3
+Nebu.Web.AdminOidcLoginTest: AC3/AC5: admin-only-provisioned operator appears in GET /admin/users (integration) AC4: a real Matrix login after admin-only provisioning does not error, does not duplicate, and does not clobber profile data the user set themselves
+Nebu.Web.AdminOidcLoginTest: AC3/AC5: admin-only-provisioned operator appears in GET /admin/users (integration) AC5: admin-only login without a prior Matrix login makes the operator visible in GET /admin/users
+Nebu.Web.RegressionSyncLoadTest: 200 concurrent /sync clients receive all 50 broadcast events with median latency <= 150ms (AC7)

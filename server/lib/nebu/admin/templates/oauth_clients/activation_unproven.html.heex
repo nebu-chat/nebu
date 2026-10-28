@@ -1,0 +1,19 @@
+<div class="admin-oauth-clients" data-page="oauth-activation-unproven">
+  <h1 class="text-2xl font-bold mb-2">Action not carried out</h1>
+  <p class="alert alert-info my-4 max-w-3xl" role="status" data-role="activation-notice">
+    Nothing was changed. Your browser did not confirm that you pressed the button yourself. Safari does not report that
+    by itself, so the page checks it with a small script. Use the link below to open the page again, then press the
+    same button once more. Do not reload this page: that would send the same request again.
+  </p>
+  <p class="text-sm text-base-content/70 mb-4 max-w-3xl">
+    What you typed is not kept by the link: use your browser's Back button to keep it, or type it again.
+    If this happens again, check that JavaScript is not blocked for this site (a content blocker or a privacy extension
+    can block the script <code class="break-all">/admin/static/assets/app.js</code>), or use a current Chrome or Firefox.
+    <span :if={String.starts_with?(@back_path, "/admin/oauth")}>
+      The operator command line can revoke a client without a browser (see the deployment guide).
+    </span>
+  </p>
+  <p>
+    <a href={@back_path} class="link link-primary" data-role="back-to-list">{back_label(@back_path)}</a>
+  </p>
+</div>

@@ -1,0 +1,2 @@
+# test-review role-mapping-self-lockout-guard (nebu-test-reviewer, 2026-10-15)
+3 MAJOR (ART test name 278 chars broke the compile of the file; gate-first and universal-first orderings were vacuous because the token held the value), 9 MINOR (cookie size, marker survives a refusal, trim, other-administrators text, override control too narrow, brittle static order, kind flow, nondeterministic claim path in setup, loose docs pins), 5 INFO. All applied before dev.

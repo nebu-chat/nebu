@@ -1,0 +1,4 @@
+# UX gate: consent-arming-hardening (static, 2026-10-13)
+0 BLOCKING, 9 NON-BLOCKING. The five blocking findings of the SSO UX report are applied (aria-disabled, aria-describedby, live region, focusin arming, hint visible by default).
+N1 assistive-technology activation may be blocked (manual pre-activation gate, VoiceOver iOS/macOS, TalkBack, NVDA, JAWS; an AT path needs Kassandra review); N2 announcement vs keyboard rule when focus already sits on the button; N3 aria-describedby keeps reading the hidden, now false hint; N4 destination description has no label; N5 layout shift when the hint hides (follow-up cu); N6 noscript vs hint contradiction; N7 ambiguous hint wording per input mode; N8 stale / repeated status text; N9 smaller points (mouse message stricter than needed, title).
+Applied in cycle 1: N2, N3, N4, N6, N7, N8; N1 = manual gate, N5 = follow-up `cu`, N9 left.

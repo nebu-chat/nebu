@@ -215,8 +215,8 @@ export class ElementSpacePage {
     await expect(
       item.first(),
       `Expected room "${roomName}" to appear under the Space in Element Web's Space ` +
-      `landing view. RED while createRoom drops initial_state: the room created inside ` +
-      `the Space lands only in the home/personal list, never under the Space.`,
+      `landing view. The room created inside the Space must not land only in the ` +
+      `home/personal list.`,
     ).toBeVisible({ timeout: 20_000 });
   }
 

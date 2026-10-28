@@ -1,4 +1,13 @@
+# CI image of the Elixir jobs (test-unit-elixir, secret-scan, verify-docs, integration-test-k8s), built by `build-ci-elixir` in .gitlab-ci.yml.
+#
+# The registry TAG (CI_ELIXIR_IMAGE in .gitlab-ci.yml, ci-elixir:1.20) names the Elixir minor of the FROM line below, and that FROM is the
+# same base as the production image (server/Dockerfile: elixir:1.20-alpine). It used to be tagged 1.19 while it contained 1.20. Bumping the
+# Elixir minor means changing this FROM and CI_ELIXIR_IMAGE together; the changed file makes the pipeline build the image before the unit stage.
+# The 1.19 compatibility (server/mix.exs: elixir "~> 1.19") is checked by the job test-unit-elixir-1-19 on the public elixir:1.19-alpine image.
 FROM elixir:1.20-alpine
+
+LABEL org.opencontainers.image.title="nebu ci-elixir" \
+      org.opencontainers.image.description="Elixir 1.20 CI image with Hex and rebar3 pre-installed"
 
 # Pre-install hex package manager and rebar3 build tool.
 # Eliminates the ~15s `mix local.hex --force && mix local.rebar --force` overhead

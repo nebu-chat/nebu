@@ -229,7 +229,7 @@ defmodule Nebu.Workers.MediaScanWorkerTest do
       for name <- [@sm_calls, @sm_overrides, @clamav_calls, @db_update_calls, @call_order] do
         case Process.whereis(name) do
           nil -> :ok
-          pid -> if Process.alive?(pid), do: Agent.stop(pid)
+          pid -> if Process.alive?(pid), do: (try do Agent.stop(pid) catch :exit, _ -> :ok end)
         end
       end
 

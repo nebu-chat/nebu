@@ -1,3 +1,13 @@
+// story safari-fetch-metadata-compat: the shared click-proof script (Nebu.Web.ClickProofScript.script/0, byte for byte; a test pins the equality).
+// Safari never sends Sec-Fetch-User; the strict admin forms carry a hidden input[data-click-proof] that this fills on a TRUSTED click.
+(function(){var q="input[data-click-proof]";
+function mark(f){var p=f&&f.querySelector?f.querySelector(q):null;if(!p){return}p.value="1";setTimeout(function(){p.value=""},2000)}
+function clear(){var l=document.querySelectorAll(q),i;for(i=0;i<l.length;i++){l[i].value=""}}
+document.addEventListener("click",function(e){if(e.isTrusted!==true){return}var t=e.target;if(!t||typeof t.closest!=="function"){return}
+var b=t.closest("button,input");if(b&&b.type==="submit"){mark(b.form)}},true);
+document.addEventListener("keydown",function(e){if(e.isTrusted!==true||e.key!=="Enter"){return}var t=e.target;if(t&&t.tagName==="INPUT"&&t.type!=="checkbox"&&t.type!=="radio"){mark(t.form)}},true);
+window.addEventListener("pageshow",clear)})();
+
 // admin-ui-migration: LiveView client bootstrap for the Nebu Admin UI.
 //
 // No npm/esbuild build step. We load the vendored UMD builds of phoenix and

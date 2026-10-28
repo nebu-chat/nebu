@@ -115,6 +115,8 @@ defmodule Nebu.Admin.LogsControllerTest do
       "sub" => "admin-logs-retention-1",
       "matrix_user_id" => "@admin:test.local"
     })
+    # story admin-forms-gate-sweep: strict fetch metadata of a user-clicked submit
+    |> Nebu.OAuth.TestSupport.put_strict_fetch_headers()
   end
 
   defp build_non_admin_conn(method, path) do

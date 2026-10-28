@@ -24,6 +24,11 @@ import Config
 # in `config/runtime.exs`, in both places that call is made conditional on
 # `NEBU_DB_URL` being present — see there.
 
+# oauth-client-revocation (AC11): Phoenix.Logger prints the request parameters of every controller action at :debug.
+# The OAuth admin forms carry a CSRF token and free-text fields (a revocation reason, the typed host): never logged.
+config :phoenix,
+  filter_parameters: ["password", "reason", "confirm_host", "_csrf_token", "csrf_token"]
+
 # ── admin-ui-migration: Phoenix LiveView Admin UI endpoint (compile-time base) ──
 # server: false — the AdminEndpoint never opens its own port. The umbrella's single
 # Bandit listener (Nebu.Web.Router) forwards the /admin subtree into this endpoint, so
@@ -176,7 +181,23 @@ config :nebu, Oban,
        # cadence would materially delay detection. Runs on the shared
        # :media_cleanup queue (a periodic housekeeping/monitoring job, not a
        # per-upload scan job).
-       {"* * * * *", Nebu.Workers.MediaAlertsCheckerWorker}
+       {"* * * * *", Nebu.Workers.MediaAlertsCheckerWorker},
+       # oauth-broker/oauth-metadata-dcr-admin-approval (ADR-033): hourly purge of
+       # `pending` OAuth client registrations older than oauth_pending_ttl_days
+       # (default 30). Only status = 'pending' rows can match; approved/rejected
+       # registrations are never purged. Own queue (limit 1): a periodic
+       # housekeeping job that must not compete with media jobs.
+       {"23 * * * *", Nebu.Workers.OAuthPendingPurgeWorker},
+       # epic oauth-broker, story oauth-authorize-idp-delegation-code (AC11): every 10
+       # minutes, purge expired authorization requests and authorization codes expired more
+       # than 24 h ago. Housekeeping only (consumption checks expires_at itself).
+       {"*/10 * * * *", Nebu.Workers.OAuthFlowPurgeWorker},
+       # epic oauth-broker, story client-ip-misconfiguration-warnings (SEC gate 3, G3-2): every 6 hours at
+       # minute 37 (clear of the :00 / :05 / :10 / :23 jobs), read-only check of `devices` for a collapsed
+       # client address; logs ONE warning with counts only. The signal needs 24 h of traffic anyway, and a
+       # real single-NAT deployment would get 24 unsilenceable lines a day at an hourly cadence (4 a day is
+       # loud enough). Existing limit-1 `oauth_cleanup` housekeeping queue, no new queue.
+       {"37 */6 * * *", Nebu.Workers.ClientIPCheckWorker}
      ]}
   ],
   # media-security-admin-control/4b-media-scan-worker (AC2): media_scan is
@@ -188,19 +209,11 @@ config :nebu, Oban,
   # Nebu.Media.AlertNotifier on :infected/:scan_failed — separate from
   # media_scan so a slow/backed-up webhook delivery can never starve or delay
   # scan-job processing. No crontab entry either (event-driven, not scheduled).
-  queues: [media_cleanup: [limit: 10], media_scan: [limit: 10], media_alerts: [limit: 5]]
+  queues: [media_cleanup: [limit: 10], media_scan: [limit: 10], media_alerts: [limit: 5], oauth_cleanup: [limit: 1]]
 
-# media-security-admin-control/8a-media-cleanup-worker (AC1): retention
-# windows for Nebu.Workers.MediaCleanupWorker's daily hard-delete cron.
-# deleted_days applies to :deleted rows (Story 6a's admin_delete/2),
-# infected_days applies to :infected rows (Story 4b's scan worker). Read via
-# Application.get_env(:nebu, :media_cleanup, []) with the same defaults as a
-# fallback so the worker degrades safely even if this block is ever omitted.
-# Not yet one of Story 9a's admin-configurable media_config keys (AC1) — a
-# forward-compat note only, not a dependency of this story.
-config :nebu, :media_cleanup,
-  deleted_days: 30,
-  infected_days: 7
+# The retention windows of Nebu.Workers.MediaCleanupWorker (deleted_days 30, infected_days 7 without a stored
+# value) come from the media_config table (Admin media settings) via Nebu.Media.Config.retention_days/0 since story
+# media-cleanup-reads-media-config (follow-up du); the former `config :nebu, :media_cleanup` block is gone.
 
 # media-security-admin-control/8b-orphan-detection-gdpr (AC4): the
 # unreferenced-quarantined-file detection threshold for
@@ -223,7 +236,7 @@ config :nebu, :media_orphan_detection,
 # never raises). archive_delete_from_primary: false (default) leaves the
 # primary-bucket object in place after a successful archive copy. Read via
 # Application.get_env(:nebu, :media_archive, []) with the same defaults as a
-# fallback, mirroring Story 8a's own :media_cleanup config pattern. Not yet
+# fallback, the pattern Story 8a used before story media-cleanup-reads-media-config moved it to media_config. Not yet
 # one of Story 9a's admin-configurable media_config keys — a forward-compat
 # note only, not a dependency of this story.
 config :nebu, :media_archive,

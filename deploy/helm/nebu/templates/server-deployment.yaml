@@ -76,10 +76,11 @@ spec:
           resources:
             {{- toYaml .Values.server.resources | nindent 12 }}
           # go-removal-cleanup (full-elixir-stack): server now serves the public Matrix CS API
-          # directly, so probe the Matrix versions endpoint (previously the gateway's probe).
+          # directly. Liveness probes the cheap, dependency-free /health (a DB or OIDC hiccup must
+          # not restart the pod); readiness probes the Matrix versions endpoint (traffic-ready).
           livenessProbe:
             httpGet:
-              path: /_matrix/client/v3/versions
+              path: /health
               port: 4000
             initialDelaySeconds: 15
             periodSeconds: 30
@@ -87,7 +88,7 @@ spec:
             failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /_matrix/client/v3/versions
+              path: /_matrix/client/versions
               port: 4000
             initialDelaySeconds: 10
             periodSeconds: 10

@@ -128,6 +128,8 @@ defmodule Nebu.Admin.DeviceManagementTest do
       "sub" => "admin-1",
       "matrix_user_id" => @admin
     })
+    # story admin-forms-gate-sweep: every admin form post needs the strict fetch metadata of a user-clicked submit
+    |> Nebu.OAuth.TestSupport.put_strict_fetch_headers()
   end
 
   defp build_anon_conn(method, path) do
@@ -305,6 +307,36 @@ defmodule Nebu.Admin.DeviceManagementTest do
     assert_receive {:audit_log, @admin, "device_deleted", "device", @device_id, _meta, "success", _},
                    500,
                    "expected a device_deleted audit row with the admin as actor and target_id = device_id"
+  end
+
+  # ── story 5 (oauth-legacy-coexistence, C12 / AC7): a failed atomic teardown ───────
+  # `Nebu.Matrix.delete_user_device/2` returns `{:error, :unavailable}` when the atomic teardown
+  # fails; the controller maps it to a flash error and a FAILURE audit row (`delete_failed`) instead
+  # of crashing on `:ok = do_delete_device(...)`. RED today: MatchError.
+
+  test "story 5 C12 — a failed delete => redirect with a flash error + device_deleted audit row with outcome failure" do
+    Application.put_env(:nebu_http, :admin_device_deleter, fn _u, _d -> {:error, :unavailable} end)
+
+    conn =
+      try do
+        build_admin_conn(:post, "/admin/users/#{enc(@target_user)}/devices/#{enc(@device_id)}")
+        |> put_req_header("content-type", "application/x-www-form-urlencoded")
+        |> Map.put(:body_params, %{"_method" => "DELETE"})
+        |> endpoint_call()
+      rescue
+        e -> flunk("a failed device deletion must not crash the admin controller: #{inspect(e.__struct__)}")
+      end
+
+    assert conn.status == 302
+    assert [location] = get_resp_header(conn, "location")
+    assert location =~ "/admin/users/"
+    assert is_binary(Phoenix.Flash.get(conn.assigns[:flash] || %{}, :error)), "a flash ERROR is shown"
+
+    assert_receive {:audit_log, @admin, "device_deleted", "device", @device_id, _meta, "failure", "delete_failed"},
+                   500,
+                   "expected a device_deleted audit row with outcome failure and error_detail delete_failed"
+
+    refute_received {:audit_log, @admin, "device_deleted", "device", @device_id, _meta, "success", _}
   end
 
   # ── AC4 / SECURITY-2: authz — non-admin is redirected, not served ────────────

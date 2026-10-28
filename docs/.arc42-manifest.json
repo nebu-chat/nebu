@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-10-07T16:45:00Z",
-  "generator": "bmad-maintain-arc42 skill (delta update for bugfix: unsigned-replaces-state — Matrix CS API v1.19 unsigned.replaces_state field on state events; new Core.Event.is_state_event proto field; SECURITY FIX: pre-existing HIGH state-event-forgery privilege escalation in Room.Server.do_send_event/7 (any joined member could forge state events via PUT /send/{eventType}), now closed by nil-ness discrimination + state_key NULL backfill migration 000036; batched fetch_replaces_state/1 query design (UNNEST+LATERAL, O(1) per sync response), extended to /messages /event /relations endpoints; known handoff items F-1/F-2/F-3/F-4/F-6 tracked non-blocking per security review)",
+  "generated_at": "2026-10-13T12:06:34Z",
+  "generator": "bmad-maintain-arc42 skill (delta update for the phase-2 gate-closing stories of epic oauth-broker: Nebu.Web.ClientIP / trusted proxy CIDRs, consent step, refresh lease, revoke_client cascade, admin re-auth + BrowserPost, per-device legacy logout, Nebu.Web.Unrecognized, config cache (ADR-020 exception), signing key rotation; 05 building blocks, 06 runtime views, 07 deployment (preconditions table, manual verification before activation, topology), 08 concepts, 11 risks (accepted / deferred, gate (s) re-scoped); ADR-033 Phase 2 summary; docs only, oauth_enabled stays false)",
   "source_artifacts": [
     "_bmad-output/planning-artifacts/architecture.md",
     "_bmad-output/planning-artifacts/prd.md",
@@ -61,7 +61,29 @@
     "docs/stories/media-security-admin-control/security-reports/10e-trace-map-war-room-integration-security-review-2026-07-20.md",
     "docs/stories/bugfix/fix-matrix-client-v1-media-download-thumbnail-routes/fix-matrix-client-v1-media-download-thumbnail-routes.md",
     "server/lib/nebu/web/router.ex",
-    "server/lib/nebu/web/router/client_v1_media.ex"
+    "server/lib/nebu/web/router/client_v1_media.ex",
+    "docs/stories/oauth-broker/oauth-authorize-idp-delegation-code.md",
+    "docs/stories/oauth-broker/oauth-token-endpoint.md",
+    "docs/stories/oauth-broker/oauth-token-revocation-logout.md",
+    "docs/stories/oauth-broker/security-reports/oauth-token-revocation-logout-security-review-2026-10-10.md",
+    "docs/stories/oauth-broker/oauth-legacy-coexistence.md",
+    "docs/stories/oauth-broker/security-reports/oauth-legacy-coexistence-security-review-2026-10-10.md",
+    "docs/stories/oauth-broker/oauth-account-management.md",
+    "docs/stories/oauth-broker/security-reports/oauth-account-management-security-review-2026-10-12.md",
+    "docs/stories/oauth-broker/oauth-versions-switch.md",
+    "docs/stories/oauth-broker/oauth-trusted-proxy-client-ip.md",
+    "docs/stories/oauth-broker/oauth-dcr-abuse-hardening.md",
+    "docs/stories/oauth-broker/oauth-authorize-freshness.md",
+    "docs/stories/oauth-broker/oauth-client-revocation.md",
+    "docs/stories/oauth-broker/legacy-logout-per-device.md",
+    "docs/stories/oauth-broker/oauth-room-summary-unrecognized.md",
+    "docs/stories/oauth-broker/oauth-hardening-hygiene.md",
+    "docs/stories/oauth-broker/device-lists-changed-on-deletion.md",
+    "docs/stories/oauth-broker/follow-ups.md",
+    "docs/architecture/adr/ADR-033-authorization-server-broker-model.md",
+    "docs/stories/oauth-broker/security-reports/epic-oauth-broker-security-review-gate3-2026-10-13.md",
+    "docs/stories/oauth-broker/legacy-sso-redirect-confirmation.md",
+    "docs/stories/oauth-broker/client-ip-misconfiguration-warnings.md"
   ],
   "files": {
     "docs/architecture/README.md": {
@@ -78,7 +100,7 @@
     },
     "docs/architecture/03-context.md": {
       "editable": false,
-      "generated_at": "2026-09-01T07:13:16Z",
+      "generated_at": "2026-10-12T08:02:44Z",
       "source": "_bmad-output/planning-artifacts/architecture.md",
       "arc42_section": "03 Context and Scope"
     },
@@ -90,31 +112,31 @@
     },
     "docs/architecture/05-building-blocks.md": {
       "editable": false,
-      "generated_at": "2026-10-08T15:08:13Z",
-      "source": "docs/stories/matrix-spec-gaps/room-tags.md (prior delta: docs/stories/matrix-spec-gaps/room-account-data-and-read-markers.md (prior delta: docs/stories/bugfix/fix-matrix-client-v1-media-download-thumbnail-routes/fix-matrix-client-v1-media-download-thumbnail-routes.md (prior delta: docs/stories/media-securi)",
+      "generated_at": "2026-10-13T12:06:34Z",
+      "source": "docs/stories/oauth-broker/client-ip-misconfiguration-warnings.md (prior delta: docs/stories/oauth-broker/legacy-sso-redirect-confirmation.md (prior delta: docs/stories/matrix-spec-gaps/room-tags.md (prior delta: docs/stories/matrix-spec-gaps/room-account-data-and-read-markers.md (prior delta: docs/stories/bugfix/fix-matrix-client-v1-media-download-thumbnail-routes/fix-matrix-client-v1-media-download-thumbnail-routes.md (prior delta: docs/stories/media-securi)))",
       "arc42_section": "05 Building Block View"
     },
     "docs/architecture/06-runtime.md": {
       "editable": false,
-      "generated_at": "2026-09-01T07:13:16Z",
+      "generated_at": "2026-10-13T12:06:34Z",
       "source": "_bmad-output/planning-artifacts/architecture.md",
       "arc42_section": "06 Runtime View"
     },
     "docs/architecture/07-deployment.md": {
       "editable": false,
-      "generated_at": "2026-09-01T07:13:16Z",
+      "generated_at": "2026-10-13T12:06:34Z",
       "source": "_bmad-output/planning-artifacts/architecture.md",
       "arc42_section": "07 Deployment View"
     },
     "docs/architecture/08-concepts.md": {
       "editable": false,
-      "generated_at": "2026-10-08T15:08:13Z",
-      "source": "docs/stories/matrix-spec-gaps/room-tags.md (prior delta: docs/stories/matrix-spec-gaps/room-account-data-and-read-markers.md (prior delta: docs/stories/enhanced-logging/war-room-dedicated-page.md))",
+      "generated_at": "2026-10-13T12:06:34Z",
+      "source": "docs/stories/oauth-broker/client-ip-misconfiguration-warnings.md (prior delta: docs/stories/oauth-broker/legacy-sso-redirect-confirmation.md (prior delta: docs/stories/matrix-spec-gaps/room-tags.md (prior delta: docs/stories/matrix-spec-gaps/room-account-data-and-read-markers.md (prior delta: docs/stories/enhanced-logging/war-room-dedicated-page.md))))",
       "arc42_section": "08 Cross-cutting Concepts"
     },
     "docs/architecture/09-decisions.md": {
       "editable": false,
-      "generated_at": "2026-10-04T07:52:31Z",
+      "generated_at": "2026-10-13T10:34:06Z",
       "source": "CLAUDE.md",
       "arc42_section": "09 Architecture Decisions"
     },
@@ -126,13 +148,13 @@
     },
     "docs/architecture/11-risks.md": {
       "editable": false,
-      "generated_at": "2026-10-07T16:45:00Z",
+      "generated_at": "2026-10-13T12:06:34Z",
       "source": "_bmad-output/implementation-artifacts/sprint-status.yaml",
       "arc42_section": "11 Risks and Technical Debt"
     },
     "docs/architecture/12-glossary.md": {
       "editable": false,
-      "generated_at": "2026-09-08T09:42:56Z",
+      "generated_at": "2026-10-13T12:06:34Z",
       "source": "CLAUDE.md, _bmad-output/planning-artifacts/architecture.md",
       "arc42_section": "12 Glossary"
     },
@@ -216,7 +238,7 @@
     },
     "docs/matrix-api-scope.md": {
       "editable": false,
-      "generated_at": "2026-10-08T15:08:13Z",
+      "generated_at": "2026-10-13T10:34:06Z",
       "source": "docs/stories/matrix-spec-gaps/room-tags.md (prior delta: docs/stories/matrix-spec-gaps/room-account-data-and-read-markers.md (prior delta: server/lib/nebu/web/router.ex, server/lib/nebu/web/router/client_v1_media.ex (docs/stories/bugfix/fix-matrix-client-v1-media-download-thumbnail-routes/fix-matrix-client)",
       "arc42_section": "Matrix API Scope"
     },

@@ -25,6 +25,7 @@
 import { Given, When, Then } from '../../fixtures/nebu-fixtures';
 import { expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
+import { saveConfigFormWithAdminReauth } from '../../fixtures/oauth-admin';
 
 const SSO_SCHEMES_INPUT = 'input[name="sso_extra_redirect_schemes"]';
 
@@ -59,9 +60,12 @@ When(
     // Scope to #sso-schemes-form specifically — the /admin/config page has
     // multiple independent POST forms (scopes, sso-schemes, refresh-mode) each
     // with their own "Save ..." submit button.
-    const form = page.locator('#sso-schemes-form');
-    await form.getByRole('button', { name: /save sso schemes/i }).click();
-    await page.waitForURL(/\/admin\/config$/, { timeout: 10_000 });
+    // Story sso-origins-admin-hardening (X-1): saving needs a fresh admin sign-in, driven by the shared helper.
+    await saveConfigFormWithAdminReauth(page, {
+      form: '#sso-schemes-form',
+      field: SSO_SCHEMES_INPUT,
+      button: /save sso schemes/i,
+    });
   }
 );
 
@@ -71,7 +75,8 @@ When(
 Then(
   'the page shows an error flash message containing {string}',
   async ({ page }: { page: Page }, expectedSubstring: string) => {
-    const flash = page.locator('[role="alert"]');
+    // story sso-origins-admin-hardening (UX N10) added an inline field error with role=alert next to the flash: the first alert is the flash
+    const flash = page.locator('[role="alert"]').first();
     await expect(flash).toBeVisible({ timeout: 10_000 });
     await expect(flash).toContainText(new RegExp(expectedSubstring, 'i'));
   }

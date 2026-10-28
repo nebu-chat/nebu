@@ -64,6 +64,7 @@
             data-form="auto-join-toggle"
           >
             <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+            <input type="hidden" name="_click_proof" value="" data-click-proof />
             <label class="cursor-pointer label gap-2">
               <span class="sr-only">
                 Toggle auto-join for {room_display_name(room)}

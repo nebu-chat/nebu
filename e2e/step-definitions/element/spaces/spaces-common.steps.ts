@@ -107,10 +107,9 @@ export async function createPublicRoomViaApi(
   token: string,
   roomName: string,
 ): Promise<string> {
-  // IMPORTANT: Nebu's createRoom has NO `preset` field (it is dropped), and
-  // top-level `visibility` only sets room-DIRECTORY listing — NOT the join rule.
-  // The join_rule must be set explicitly via `initial_state` (which createRoom
-  // honours since commit 652d9c00). We set BOTH join_rule=public AND
+  // NOTE: since story create-room-presets-power-levels-topic createRoom reads `preset` / `visibility`
+  // (public_chat -> join rule public); the explicit `initial_state` join_rule below stays, it wins over the preset
+  // and keeps this helper independent of the preset (createRoom honours initial_state since commit 652d9c00). We set BOTH join_rule=public AND
   // history_visibility=world_readable so the room satisfies Nebu's hierarchy
   // `room_visible?` predicate (member OR public OR world_readable) for a caller
   // who is not a member of the room.

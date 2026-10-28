@@ -1,0 +1,9 @@
+CI gate cross-signing-upload-races (cq (g)), 2026-10-28, worktree open-chat-oauth, after fix cycle 2.
+Server image rebuilt (.oauth-ci/redeploy.sh), full suite .oauth-ci/ci_run.sh (log .oauth-ci/ci-cross-signing.log):
+  11372 tests, 35 failures, 8 skipped. All failures are known flaky families:
+  RoomsFallbackName 12, TraceMapNodeControls 2, WarRoom 1, TemporaryCaptureManager 2, LogStore.Retention 1, AdminOidcLogin 3, AdminStaleRooms 1, SsoLogin 1,
+  and 9 `tick/0 :timeout` in test setup (SyncMembershipPartitionHttpTest), 3 row-probe assertions of SyncRejoinRangeScanBoundHttpTest (planner/ANALYZE state in the full run).
+  Rerun on a fresh DB: the rejoin-range-scan suites, sync_membership_partition_http, admin_stale_rooms, admin_oidc_login, sso_login, log_store/retention all green;
+  RoomsFallbackName, TemporaryCapture, TraceMap, WarRoom still red alone (known, red on unmodified HEAD).
+Dev runs (fresh DB each): new suites 72 passed, 36 related files 803 passed + matrix_client_compat 66 passed. Unit job no DB (unit_nodb.sh, --warnings-as-errors): 6703 passed, 0 failures.
+E2E element-web: 35 passed (16.1m).

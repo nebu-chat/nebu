@@ -1,0 +1,200 @@
+<div class="admin-oauth-registrations" data-page="oauth-registrations">
+  <h1 class="text-2xl font-bold mb-2">Pending OAuth Clients</h1>
+  <p class="text-base-content/70 mb-4">
+    Applications that registered themselves (Dynamic Client Registration) and wait for approval.
+    A pending client cannot be used to sign in; approve only applications you recognise.
+  </p>
+  <%!-- F-5: everything a registrant states about itself is an unverified claim. --%>
+  <p class="alert alert-warning mb-4 text-sm" role="note" data-role="unverified-claims-note">
+    Name, client URI and logo are claims made by the registering application and are NOT verified.
+    A redirect URI badged "host matches client_uri" matches the client URI host (a URI match, not a
+    verification of the client); for "NOT tied to the client_uri host" redirect URIs (loopback, private-use
+    scheme) anyone can claim any name.
+  </p>
+
+  <p :if={Phoenix.Flash.get(@flash, :info)} class="alert alert-success my-4" role="status" data-role="toast" data-toast-kind="success">
+    {Phoenix.Flash.get(@flash, :info)}
+  </p>
+  <p :if={Phoenix.Flash.get(@flash, :error)} class="alert alert-error my-4" role="alert" data-role="toast" data-toast-kind="error">
+    {Phoenix.Flash.get(@flash, :error)}
+  </p>
+
+  <p :if={not @oauth_enabled} class="alert alert-warning my-4" role="status" data-role="oauth-disabled-notice">
+    OAuth is currently disabled on this server: new registrations are not accepted until it is enabled.
+  </p>
+
+  <p :if={@registrations == [] and not @load_error} class="text-base-content/70" data-role="no-pending-clients">
+    No pending client registrations.
+  </p>
+
+  <%!-- Totals: the list is paginated (never truncated), so always say how many are pending and how
+       many are not on this page. --%>
+  <div :if={@registrations != []} class="mb-3 flex flex-wrap items-center gap-3" data-role="pending-summary" data-total={@total} data-page={@page} data-total-pages={@total_pages}>
+    <p data-role="pending-count">
+      {@total} pending registration{if @total == 1, do: "", else: "s"} &mdash; page {@page} of {@total_pages}
+    </p>
+    <p :if={@total > @page * @page_size} class="font-semibold" data-role="more-pending" data-more={@total - @page * @page_size}>
+      {@total - @page * @page_size} more pending on later pages
+    </p>
+    <%!-- Logos are client-hosted images: loading them makes THIS browser contact the registrant's
+         host. They are therefore only loaded on request, per page (GET ?logos=1) — see ADR-033. --%>
+    <a :if={not @show_logos and Enum.any?(@registrations, &loadable_logo?/1)} href={list_href(@page, true)} class="btn btn-sm btn-outline" data-role="load-logos">
+      Load logos
+    </a>
+    <p :if={not @show_logos and Enum.any?(@registrations, &loadable_logo?/1)} class="text-xs text-base-content/70" data-role="load-logos-note">
+      Logos are hosted by the clients themselves. Loading them makes your browser contact the hosts shown in the Logo column.
+    </p>
+    <a :if={@show_logos} href={list_href(@page, false)} class="btn btn-sm btn-outline" data-role="hide-logos">
+      Hide logos
+    </a>
+  </div>
+
+  <div :if={@registrations != []} class="overflow-x-auto">
+    <table class="table table-zebra w-full" role="table">
+      <caption class="sr-only">Pending OAuth client registrations</caption>
+      <thead>
+        <tr>
+          <th scope="col">Logo</th>
+          <th scope="col">Client (unverified)</th>
+          <th scope="col">Type</th>
+          <th scope="col">Client URI</th>
+          <th scope="col">Redirect URIs</th>
+          <th scope="col">Created</th>
+          <th scope="col">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr
+          :for={client <- @registrations}
+          data-role="oauth-client-row"
+          data-client-id={client.client_id}
+        >
+          <td data-field="logo" class="max-w-xs">
+            <%!-- No <img> unless logos were requested (?logos=1). The URL is always shown as text:
+                 host prominent, full (attacker-chosen) URL small and breakable. --%>
+            <img
+              :if={safe_logo(client, @show_logos)}
+              src={safe_logo(client, @show_logos)}
+              alt={"Logo of " <> display_name(client)}
+              width="40"
+              height="40"
+              class="h-10 w-10 object-contain overflow-hidden"
+              referrerpolicy="no-referrer"
+              loading="lazy"
+            />
+            <div :if={client.logo_uri} data-role="logo-url">
+              <div :if={uri_host(client.logo_uri)} class="font-semibold break-all" data-role="logo-host">{uri_host(client.logo_uri)}</div>
+              <div class="text-xs text-base-content/70 break-all">{client.logo_uri}</div>
+            </div>
+            <span :if={!client.logo_uri} class="sr-only">No logo</span>
+          </td>
+          <%!-- Client-supplied strings (name up to 255, URIs up to 2048 chars) are unbounded text:
+               every cell that shows one is width-capped and breaks anywhere, so the Approve/Reject
+               buttons can never be pushed out of view. --%>
+          <th scope="row" data-field="client-name" class="max-w-xs break-all text-left">{display_name(client)}</th>
+          <td data-field="application-type" class="whitespace-nowrap">
+            <span data-role="application-type" data-application-type={client.application_type}>{application_type_label(client.application_type)}</span>
+            <span :if={any_unbound?(client)} class="block text-xs font-semibold" data-role="identity-unverified">identity unverified</span>
+          </td>
+          <td data-field="client-uri" class="max-w-xs break-all">
+            <div :if={client_host(client)} class="font-semibold" data-role="client-host">{client_host(client)}</div>
+            <%!-- Warning badges (AH4/AH7): derived from the host at render time through the OAuth facade.
+                 Text carries the meaning, colour only reinforces it. --%>
+            <div :if={client_domain_note(client)} class="text-xs text-base-content/70">registrable domain: <span data-role="client-domain">{client_domain_note(client)}</span></div>
+            <div :if={host_info(client) && (host_info(client).shared_hosting? || host_info(client).public_suffix?)} class="flex flex-wrap items-center gap-1 my-1">
+              <span :if={host_info(client).shared_hosting?} class="text-xs font-semibold">Warning:</span>
+              <span :if={host_info(client).shared_hosting?} class="badge badge-warning badge-sm h-auto whitespace-normal" data-role="shared-hosting-warning">shared hosting domain ({host_info(client).suffix}): anyone can create sites here</span>
+              <span :if={host_info(client).public_suffix?} class="text-xs font-semibold">Error:</span>
+              <span :if={host_info(client).public_suffix?} class="badge badge-error badge-sm h-auto whitespace-normal" data-role="public-suffix-error">client URI host is a public suffix</span>
+            </div>
+            <a :if={safe_link(client.client_uri)} href={safe_link(client.client_uri)} class="text-primary break-all" rel="noopener noreferrer" target="_blank">{client.client_uri}<span class="sr-only"> (opens in new tab)</span></a>
+            <span :if={client.client_uri && !safe_link(client.client_uri)} class="break-all">{client.client_uri}</span>
+          </td>
+          <td data-field="redirect-uris" class="max-w-xs">
+            <ul class="flex flex-col gap-1">
+              <li :for={uri <- client.redirect_uris} class="flex flex-col" data-role="redirect-uri" data-binding={redirect_binding(uri)}>
+                <span class="font-mono text-sm break-all">{uri}</span>
+                <span :if={redirect_binding(uri) == :host_bound} class="badge badge-success badge-outline badge-sm" data-role="redirect-host-bound">host matches client_uri</span>
+                <span :if={redirect_binding(uri) == :not_host_bound} class="badge badge-warning badge-sm" data-role="redirect-not-host-bound">NOT tied to the client_uri host: client identity unverified</span>
+                <span :if={other_host?(client, uri)} class="text-xs font-semibold" data-role="redirect-other-host">different host than the client URI: {uri_host(uri)}</span>
+              </li>
+            </ul>
+          </td>
+          <td data-field="created">{format_created(client.created_at)}</td>
+          <td>
+            <div class="flex flex-col gap-2">
+              <a
+                :if={bulk_link(client)}
+                href={elem(bulk_link(client), 0)}
+                class="link link-primary text-sm"
+                data-role="bulk-remove-domain"
+                aria-label={"Remove all pending registrations of " <> elem(bulk_link(client), 1)}
+              >Remove all pending registrations of {elem(bulk_link(client), 1)}</a>
+              <%!-- Approve: a LINK to the confirm page (story oauth-client-revocation, SO3). Approving needs a plain
+                   user-clicked form submit (the server requires Sec-Fetch-User) and a fresh sign-in, so the form with
+                   its button lives on that page, never in this list and never behind a JavaScript confirm(). --%>
+              <a
+                href={approve_href(client, @page, @show_logos)}
+                class="btn btn-sm btn-primary"
+                data-role="review-approve"
+                data-client-id={client.client_id}
+                aria-label={"Review and approve " <> display_name(client) <> (if client_host(client), do: " (" <> client_host(client) <> ")", else: "")}
+              >
+                Review and approve
+              </a>
+
+              <%!-- Reject: a native confirm() cannot collect text, so the optional rejection reason
+                   is an always-visible input, filled BEFORE clicking Reject. --%>
+              <form
+                method="post"
+                action={"/admin/oauth/registrations/" <> URI.encode(client.client_id, &URI.char_unreserved?(&1)) <> "/reject"}
+                data-form="reject-client"
+                data-client-id={client.client_id}
+                data-confirm={confirm_text(client, "Reject", "The registration is kept but can never be used.")}
+                class="flex flex-col gap-1"
+              >
+                <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+                <input type="hidden" name="_click_proof" value="" data-click-proof />
+                <input :if={@page > 1} type="hidden" name="page" value={@page} />
+                <input :if={@show_logos} type="hidden" name="logos" value="1" />
+                <label class="text-xs text-base-content/70" for={"reason-" <> client.client_id}>
+                  Reason (optional, max 500)
+                </label>
+                <div class="flex items-center gap-2">
+                  <input
+                    type="text"
+                    id={"reason-" <> client.client_id}
+                    name="reason"
+                    placeholder="Reason (optional)"
+                    maxlength="500"
+                    autocomplete="off"
+                    class="input input-bordered input-sm w-48"
+                  />
+                  <button
+                    type="submit"
+                    class="btn btn-sm btn-error"
+                    data-role="reject-client"
+                    aria-label={"Reject " <> display_name(client)}
+                  >
+                    Reject
+                  </button>
+                </div>
+              </form>
+            </div>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <nav :if={@total_pages > 1} class="mt-4 flex items-center gap-3" aria-label="Pagination" data-role="pagination">
+    <a :if={@page > 1} href={list_href(@page - 1, @show_logos)} class="btn btn-sm" data-role="page-prev" rel="prev">Previous page</a>
+    <span data-role="page-indicator">Page {@page} of {@total_pages}</span>
+    <a :if={@page < @total_pages} href={list_href(@page + 1, @show_logos)} class="btn btn-sm" data-role="page-next" rel="next">Next page</a>
+  </nav>
+
+  <%!-- Bulk removal of PENDING registrations (story oauth-dcr-abuse-hardening, AH8/AH9): a GET form
+       to the read-only preview; nothing is removed from this page. Placed AFTER the list and its
+       pagination so it adds no tab stops before the Approve/Reject controls (UX gate A1). --%>
+  <.bulk_form :if={@registrations != []} form={%{host: "", match: "domain", older_than_days: ""}} error={nil} heading="Remove pending registrations" />
+</div>

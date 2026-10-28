@@ -117,9 +117,8 @@ defmodule Nebu.Matrix.Room.DBBehaviour do
   @doc """
   Returns all room IDs where user_id has left (left_at IS NOT NULL).
 
-  Used by do_incremental_sync to include recently-left rooms in the initial
-  fetch_delta_rooms check. Closes the race window where the {new_leave} broadcast
-  fires before the sync task subscribes, causing a 30 s long-poll delay.
+  NOT used by the sync since story sync-membership-partition: the sync classifies rooms with
+  `Room.DB.membership_candidates/1` and `latest_member_events/2` (not callbacks of this behaviour). Kept so the behaviour and every fake stay unchanged.
 
   Returns `{:ok, [room_id]}` — empty list if user has no left rooms.
   Returns `{:error, reason}` on DB error.
@@ -448,7 +447,36 @@ defmodule Nebu.Matrix.Room.DBBehaviour do
   @callback opted_out?(room_id :: String.t(), user_id :: String.t()) ::
               {:ok, boolean()} | {:error, term()}
 
-  @optional_callbacks delete_room: 1,
+  @doc """
+  Story history-visibility-enforcement (D6, D7, D8): the viewer-aware twins of `fetch_events/4`, `fetch_events_since/3`,
+  `fetch_event/2` and `fetch_events_by_relation/5`: the same answers, restricted to the events `viewer` may see under the
+  room's `m.room.history_visibility` (an invisible event is absent; `fetch_visible_event/3` answers `{:error, :not_found}`
+  for it). Optional: the dispatcher falls back to the unfiltered function for a TEST module that does not export them, never
+  for `Nebu.Matrix.Room.DB`.
+  """
+  @callback fetch_visible_events(room_id :: String.t(), viewer :: String.t(), direction :: String.t(), limit :: integer(), from_token :: String.t()) ::
+              {:ok, [map()], String.t(), String.t()} | {:error, term()}
+
+  @callback fetch_visible_events_since(room_id :: String.t(), viewer :: String.t(), last_event_id :: String.t() | nil, limit :: pos_integer()) ::
+              {:ok, [map()]} | {:error, term()}
+
+  @callback fetch_visible_event(event_id :: String.t(), room_id :: String.t(), viewer :: String.t()) ::
+              {:ok, map()} | {:error, :not_found | term()}
+
+  @callback fetch_visible_events_by_relation(
+              room_id :: String.t(),
+              viewer :: String.t(),
+              event_id :: String.t(),
+              rel_type :: String.t(),
+              limit :: pos_integer(),
+              opts :: map()
+            ) :: {:ok, [map()]} | {:error, term()}
+
+  @optional_callbacks fetch_visible_events: 5,
+                      fetch_visible_events_since: 4,
+                      fetch_visible_event: 3,
+                      fetch_visible_events_by_relation: 6,
+                      delete_room: 1,
                       list_auto_join_spaces: 0,
                       auto_join_room?: 1,
                       insert_auto_join_opt_out: 3,

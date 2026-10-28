@@ -1,0 +1,2 @@
+# UX gate (media-config-tolerant-loader): 0 blocking violations
+Advisories applied in review cycle 1: role="status" (not alert) for a persistent notice, keys as <code> list, reason text without value, paused sentence only for retention keys with explicit "saving resumes cleanup", separate list for keys not on the form. Open (non-blocking): contrast of alert-warning unverified (same DaisyUI pattern as other warnings), optional warning prefix consistency.

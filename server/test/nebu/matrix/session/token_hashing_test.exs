@@ -1130,7 +1130,10 @@ defmodule Nebu.Matrix.Session.TokenHashingTest do
       offenders =
         for f <- lib_files(),
             rel = Path.relative_to(f, @lib),
-            rel not in ["nebu/matrix/session/matrix_session_store.ex", "nebu/matrix/session/refresh_worker.ex"],
+            # story oauth-token-endpoint: the OAuth session store (T2, auth_api = 'oauth' rows) and the
+            # T25 OAuth-device guard of the JWT binding (an EXISTS sub-query) are sanctioned too.
+            rel not in ["nebu/matrix/session/matrix_session_store.ex", "nebu/matrix/session/refresh_worker.ex",
+                        "nebu/matrix/session/oauth_session_store.ex", "nebu/matrix/session/device_binding.ex"],
             Regex.match?(~r/\b(?:FROM|INTO|UPDATE|JOIN)\s+matrix_sessions\b/i, code_of(f)),
             do: rel
 
@@ -1142,6 +1145,9 @@ defmodule Nebu.Matrix.Session.TokenHashingTest do
         for f <- lib_files(),
             rel = Path.relative_to(f, @lib),
             rel != "nebu/matrix/session/matrix_session_store.ex",
+            # story oauth-token-endpoint (T25): DeviceBinding now reads matrix_sessions (OAuth-device
+            # guard); its own SHA-256 is the raw-JWT binding key, not an opaque session token hash.
+            rel != "nebu/matrix/session/device_binding.ex",
             code = code_of(f),
             # only modules that deal with Matrix opaque sessions (PKCE/state hashing etc. is unrelated)
             String.contains?(code, "MatrixSessionStore") or String.contains?(code, "matrix_sessions"),

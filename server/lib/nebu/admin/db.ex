@@ -17,17 +17,20 @@ defmodule Nebu.Admin.DB do
   decryption and masking happen in the gRPC server handler.
   """
 
+  require Logger
+
   # Story centralize-scope-resolution (AC2): the server_config keys whose write
   # must trigger a Nebu.Web.OidcConfig cache refresh (see upsert_server_config/1
   # below) — declared here (before first use) since Elixir module attributes are
   # order-dependent. Story fix-and-configure-sso-redirect-schemes (AC6) extends
   # this SAME list with `sso_extra_redirect_schemes` — it lives in the SAME
   # OidcConfig ETS table/GenServer, so the existing conditional refresh below picks
-  # it up automatically without a second cache-invalidation code path.
+  # it up automatically without a second cache-invalidation code path. Story
+  # legacy-sso-redirect-confirmation (D5) adds `sso_redirect_allowed_origins` the same way.
   @scope_cache_keys ~w(
     matrix_oidc_extra_scopes matrix_oidc_refresh_mode
     admin_oidc_extra_scopes admin_oidc_refresh_mode
-    sso_extra_redirect_schemes
+    sso_extra_redirect_schemes sso_redirect_allowed_origins
   )
 
   # enhanced-logging/operational-log-store (AC3/AC7): the 5 log-policy keys
@@ -220,7 +223,9 @@ defmodule Nebu.Admin.DB do
     * ILIKE wildcard metacharacters (`%`, `_`, and the escape char `\\`) in the term are
       escaped with `ESCAPE '\\'`, so a `%`/`_` in the term matches literally and cannot
       broaden the match to every row (enumeration guard).
-    * `is_active = true` so disabled accounts are not suggested.
+    * `is_active = true` so disabled accounts are not suggested, and `deletion_status IS NULL`
+      so an erased user (even one an admin reactivated before the guard of `set_is_active/2`)
+      is never offered (story gdpr-erasure-global-data).
     * `LIMIT` caps the result (enumeration / DoS guard).
 
   A blank/whitespace-only term, or one shorter than the minimum length enforced by the
@@ -243,6 +248,7 @@ defmodule Nebu.Admin.DB do
           SELECT user_id
           FROM users
           WHERE is_active = true
+            AND deletion_status IS NULL
             AND user_id ILIKE $1 ESCAPE '\\'
           ORDER BY user_id
           LIMIT $2
@@ -265,20 +271,32 @@ defmodule Nebu.Admin.DB do
   end
 
   @doc """
-  Sets is_active for user_id. Returns :ok or {:error, :not_found}.
+  Sets is_active for user_id. Returns :ok, {:error, :not_found}, or `{:error, :erased}` when
+  `is_active = true` is asked for a user whose erasure is under way or done
+  (`deletion_status IS NOT NULL`, story gdpr-erasure-global-data): nothing is written. The
+  erasure is terminal, an erased user is never reactivated (every authentication gate refuses
+  it anyway; this keeps the admin surface truthful). Deactivation is always allowed.
   """
-  @spec set_is_active(String.t(), boolean()) :: :ok | {:error, :not_found | term()}
+  @spec set_is_active(String.t(), boolean()) :: :ok | {:error, :not_found | :erased | term()}
   def set_is_active(user_id, is_active) do
     result =
       Ecto.Adapters.SQL.query!(
         Nebu.Repo,
-        "UPDATE users SET is_active = $1 WHERE user_id = $2",
+        "UPDATE users SET is_active = $1 WHERE user_id = $2 AND ($1 = false OR deletion_status IS NULL)",
         [is_active, user_id]
       )
 
     case result.num_rows do
-      0 -> {:error, :not_found}
+      0 -> not_updated(user_id)
       _ -> :ok
+    end
+  end
+
+  # nothing was updated: the user does not exist, or the reactivation of an erased user was refused
+  defp not_updated(user_id) do
+    case Ecto.Adapters.SQL.query!(Nebu.Repo, "SELECT deletion_status FROM users WHERE user_id = $1", [user_id]).rows do
+      [[status]] when not is_nil(status) -> {:error, :erased}
+      _ -> {:error, :not_found}
     end
   end
 
@@ -726,6 +744,12 @@ defmodule Nebu.Admin.DB do
     {:ok, config}
   end
 
+  @sql_upsert_config """
+  INSERT INTO server_config (key, value, set_at)
+  VALUES ($1, $2, $3)
+  ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, set_at = EXCLUDED.set_at
+  """
+
   @doc """
   Upserts one or more server_config key-value pairs.
   Returns :ok.
@@ -735,17 +759,15 @@ defmodule Nebu.Admin.DB do
     now = System.system_time(:millisecond)
 
     Enum.each(changes, fn {key, value} ->
-      Ecto.Adapters.SQL.query!(
-        Nebu.Repo,
-        """
-        INSERT INTO server_config (key, value, set_at)
-        VALUES ($1, $2, $3)
-        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, set_at = EXCLUDED.set_at
-        """,
-        [key, to_string(value), now]
-      )
+      Ecto.Adapters.SQL.query!(Nebu.Repo, @sql_upsert_config, [key, to_string(value), now])
     end)
 
+    after_config_write(changes)
+  end
+
+  # What follows a committed write of server_config keys (shared by `upsert_server_config/1` and the audited save below): the node-local /
+  # cluster caches of the keys that have one are refreshed.
+  defp after_config_write(changes) do
     # story oidc-claim-boot-cache: this is the SINGLE central write point for
     # server_config.oidc_user_id_claim (claim_mapping_live, bootstrap save, and the
     # gRPC SetServerConfig path all route through here). When the change touches
@@ -781,6 +803,164 @@ defmodule Nebu.Admin.DB do
     end
 
     :ok
+  end
+
+  @doc """
+  Saves `server_config` keys and their audit row in ONE transaction (story `admin-config-audit-atomic`, follow-up `dh`): the counterpart of
+  `Nebu.OAuth.save_switch/2` for the privileged admin forms. The upserts and the audit function run in one `Repo.transaction/1` (the audit writer's own
+  transaction nests: the carve-out pattern of the OAuth client decisions): a change is never unaudited and an audit row never describes a change that
+  did not happen. The caches of `upsert_server_config/1` are refreshed AFTER the commit, once, for the changed keys.
+
+  Options: `:audit` (0-arity, `:ok | {:error, reason}`; a raise counts as failed; required), `:unaudited_ok` (default false) and `:form` (an atom naming the
+  admin form, used only by the test seams): after a failed audit the
+  transaction is retried ONCE without the audit function (the roll-back / recovery paths must never depend on an unwritable audit table), one
+  value-free ERROR is logged and the answer is `{:ok, %{audited: false}}`.
+
+  `{:ok, %{audited: boolean}}`, `{:error, {:audit, reason}}` (nothing persisted), `{:error, :audit_required}`, `{:error, :invalid_changes}` or
+  `{:error, reason}` (nothing persisted, no retry).
+  """
+  @spec save_config_audited(map(), keyword()) :: {:ok, %{audited: boolean()}} | {:error, term()}
+  def save_config_audited(changes, opts) when is_list(opts) do
+    audit = Keyword.get(opts, :audit)
+    unaudited_ok? = Keyword.get(opts, :unaudited_ok, false) == true
+
+    with :ok <- check_config_changes(changes),
+         :ok <- check_config_audit(audit) do
+      persist_config(changes, safe_config_audit(audit), unaudited_ok?, opts)
+    end
+  end
+
+  def save_config_audited(_changes, _opts), do: {:error, :invalid_changes}
+
+  defp check_config_changes(changes) when is_map(changes) and map_size(changes) > 0 do
+    if Enum.all?(changes, fn {k, v} -> is_binary(k) and is_binary(v) end), do: :ok, else: {:error, :invalid_changes}
+  end
+
+  defp check_config_changes(_other), do: {:error, :invalid_changes}
+
+  defp check_config_audit(fun) when is_function(fun, 0), do: :ok
+  defp check_config_audit(_other), do: {:error, :audit_required}
+
+  # a raise of the audit function counts as a failed audit (the transaction rolls back), never as a crash of the caller
+  defp safe_config_audit(audit) do
+    fn ->
+      try do
+        case audit.() do
+          :ok -> :ok
+          {:error, reason} -> {:error, reason}
+          other -> {:error, other}
+        end
+      rescue
+        _ -> {:error, :audit_raised}
+      end
+    end
+  end
+
+  defp persist_config(changes, audit, unaudited_ok?, opts) do
+    case run_config_tx(changes, audit, opts) do
+      :ok ->
+        after_config_write(changes)
+        {:ok, %{audited: true}}
+
+      {:error, {:audit, _reason}} when unaudited_ok? ->
+        # value-free: neither a value, the actor nor the writer's reason
+        Logger.error(
+          "Admin.DB: the audit row of a server_config change could not be written; the change is applied without it form=#{inspect(Keyword.get(opts, :form))} keys=#{changes |> Map.keys() |> Enum.sort() |> Enum.join(",")}"
+        )
+
+        case run_config_tx(changes, nil, opts) do
+          :ok ->
+            after_config_write(changes)
+            {:ok, %{audited: false}}
+
+          {:error, _reason} = error ->
+            error
+        end
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  # the transaction: all upserts, then the audit function; any failure rolls everything back. Test seams (test builds only, compile-guarded):
+  # `:admin_config_tx` (2-arity, replaces the transaction) and the per-form writer of the `:form` option (1-arity, run instead of the
+  # upserts inside a simulated transaction: it cannot roll back, the atomicity itself is proven against the database).
+  if Mix.env() == :test do
+    defp run_config_tx(changes, audit, opts) do
+      case Application.get_env(:nebu_http, :admin_config_tx) do
+        fun when is_function(fun, 2) ->
+          fun.(changes, audit)
+
+        _ ->
+          case Application.get_env(:nebu_http, test_writer_key(Keyword.get(opts, :form))) do
+            writer when is_function(writer, 1) -> run_config_tx_writer(writer, changes, audit)
+            _ -> run_config_tx_db(changes, audit, Keyword.get(opts, :narrowing))
+          end
+      end
+    end
+
+    # the per-form writer fakes of the controller tests (a fake cannot roll back)
+    defp test_writer_key(:sso_origins), do: :admin_config_sso_origins_writer
+    defp test_writer_key(:sso_schemes), do: :admin_config_sso_schemes_writer
+    defp test_writer_key(:claim_mapping), do: :admin_config_claim_mapping_writer
+    defp test_writer_key(:role_mapping), do: :admin_config_role_mapping_writer
+    defp test_writer_key(:scopes), do: :admin_config_scopes_writer
+    defp test_writer_key(:refresh_mode), do: :admin_config_refresh_mode_writer
+    defp test_writer_key(:logs_retention), do: :admin_logs_retention_writer
+    defp test_writer_key(_other), do: :admin_config_no_writer
+
+    defp run_config_tx_writer(writer, changes, audit) do
+      with ok when ok in [:ok, true] <- writer.(changes) do
+        case audit && audit.() do
+          nil -> :ok
+          :ok -> :ok
+          {:error, reason} -> {:error, {:audit, reason}}
+        end
+      else
+        {:error, _} = error -> error
+        other -> {:error, other}
+      end
+    end
+  else
+    defp run_config_tx(changes, audit, opts), do: run_config_tx_db(changes, audit, Keyword.get(opts, :narrowing))
+  end
+
+  # `narrowing`: a 1-arity function of the stored values (map key => value) of the changed keys; checked in the transaction WITHOUT an audit function (the
+  # retry of an unaudited way back) after the rows are locked, so a concurrent save cannot turn a checked narrowing into a widening (SEC review L-3)
+  defp run_config_tx_db(changes, audit, narrowing) do
+    repo = Nebu.Repo
+    now = System.system_time(:millisecond)
+
+    result =
+      repo.transaction(fn ->
+        if audit == nil and is_function(narrowing, 1) do
+          %{rows: rows} = Ecto.Adapters.SQL.query!(repo, "SELECT key, value FROM server_config WHERE key = ANY($1) FOR UPDATE", [Map.keys(changes)])
+          if narrowing.(Map.new(rows, fn [k, v] -> {k, v} end)) != true, do: repo.rollback({:audit, :not_narrowing})
+        end
+
+        for {key, value} <- changes do
+          case Ecto.Adapters.SQL.query(repo, @sql_upsert_config, [key, value, now]) do
+            {:ok, _} -> :ok
+            {:error, reason} -> repo.rollback(reason)
+          end
+        end
+
+        case audit && audit.() do
+          nil -> :ok
+          :ok -> :ok
+          {:error, reason} -> repo.rollback({:audit, reason})
+        end
+      end)
+
+    case result do
+      {:ok, :ok} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  rescue
+    # repo down / not started
+    e in [RuntimeError, DBConnection.ConnectionError, UndefinedFunctionError] -> {:error, e}
+  catch
+    :exit, _ -> {:error, :unavailable}
   end
 
   # Nebu.Web.OidcConfig is gated off under plain `mix test` (config/test.exs:

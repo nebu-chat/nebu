@@ -200,6 +200,62 @@ variable "tls_private_key_pem" {
   default     = ""
 }
 
+# ── Client-IP trust (ADR-033 TP1-TP14, follow-ups ap1) ────────────────────────
+# Nebu keys every per-IP rate limit on the resolved client address. It honours
+# X-Forwarded-For ONLY from peers listed in NEBU_TRUSTED_PROXY_CIDRS. The templates make the VM
+# nginx the single trusted hop: nginx overwrites X-Forwarded-For with exactly one address
+# ($remote_addr), so a client-written header can never choose its bucket.
+
+variable "compose_subnet" {
+  description = "Subnet of the Docker Compose default network on the VM (tls_mode = 'acme' or 'alb'). Pinned so the trusted proxy address is known at render time: the gateway (.1) is the peer address of host nginx (acme), .10 is the fixed address of the nginx proxy container (alb). The upper half is Docker's dynamic address pool (ip_range), so the static addresses can never be handed out. Must not overlap network_cidr (checked by a precondition) or any other route on the VM."
+  type        = string
+  default     = "172.30.0.0/24"
+
+  validation {
+    # <= /27 keeps the static addresses (.1 gateway, .10 proxy) in the lower half; the dynamic pool
+    # (ip_range) is the upper half of the subnet.
+    condition     = can(cidrnetmask(var.compose_subnet)) && try(tonumber(split("/", var.compose_subnet)[1]) >= 16 && tonumber(split("/", var.compose_subnet)[1]) <= 27, false)
+    error_message = "compose_subnet must be an IPv4 CIDR with a prefix between /16 and /27 (e.g. '172.30.0.0/24')."
+  }
+}
+
+variable "trusted_proxy_cidrs" {
+  description = "Override for NEBU_TRUSTED_PROXY_CIDRS (comma-separated CIDRs, no spaces). Empty (default) = derived: acme -> <compose gateway>/32, alb / dynamic -> <proxy container address>/32, none -> unset (no trusted proxy; every client is its own peer). A non-empty value REPLACES the derived value and applies to every tls_mode. ONLY list a hop that APPENDS or overwrites the client address; never an LB that merely forwards a client-written X-Forwarded-For (a client could then choose its own rate-limit bucket), and never a network from which untrusted clients can open connections to the server."
+  type        = string
+  default     = ""
+
+  validation {
+    # Comma-separated list of valid CIDRs, no whitespace. Broad ranges are refused: IPv4 prefix >= /16,
+    # IPv6 >= /48 (so 0.0.0.0/0, ::/0 and whole /8s can never be trusted). try() turns a malformed
+    # entry (no '/', non-numeric prefix) into false instead of an error.
+    condition = var.trusted_proxy_cidrs == "" || alltrue([
+      for c in split(",", var.trusted_proxy_cidrs) : try(
+        can(cidrhost(c, 0)) && tonumber(split("/", c)[1]) >= (strcontains(c, ":") ? 48 : 16),
+        false
+      )
+    ])
+    error_message = "trusted_proxy_cidrs must be a comma-separated list of valid CIDRs without whitespace, each narrow: IPv4 prefix /16 or longer, IPv6 /48 or longer (0.0.0.0/0, ::/0 and broad ranges are refused). Use /32 for single proxies."
+  }
+}
+
+variable "lb_real_ip_cidrs" {
+  description = "Exact (/32) address(es) of the UpCloud load balancer hop(s) in front of the VM nginx (tls_mode = 'alb' or 'dynamic' only; must lie inside network_cidr, see output lb_private_addresses). When non-empty, the :8081 nginx listener (the ONLY one reachable from the HTTP-mode 443 frontend) renders set_real_ip_from for each entry plus real_ip_header X-Forwarded-For / real_ip_recursive on, so NGINX resolves the real client (right-most address that is not a listed hop) and forwards exactly that one address to Nebu. Empty (default) = nginx sees only the LB address, all clients share one rate-limit bucket (safe against spoofing, NOT safe for availability: one source can lock all users out of login; do NOT enable oauth_enabled in this state, `tofu plan` warns). ONLY list hops that APPEND the client address to X-Forwarded-For; an LB that merely forwards a client-written header lets a client choose its own address. Not applicable to TCP-mode LBs (acme / none): they cannot carry X-Forwarded-For (PROXY protocol is follow-up ap3)."
+  type        = list(string)
+  default     = []
+
+  validation {
+    # Valid CIDR, never a default route or a broad range: IPv4 prefix >= /16, IPv6 >= /48. That a
+    # hop lies inside network_cidr is a cross-variable check (precondition in server.tf).
+    condition = alltrue([
+      for c in var.lb_real_ip_cidrs : try(
+        can(cidrhost(c, 0)) && tonumber(split("/", c)[1]) >= (strcontains(c, ":") ? 48 : 16),
+        false
+      )
+    ])
+    error_message = "Every lb_real_ip_cidrs entry must be a valid, narrow CIDR (IPv4 prefix /16 or longer, IPv6 /48 or longer; 0.0.0.0/0 and ::/0 are refused). List the exact LB address(es) as /32."
+  }
+}
+
 # ── Bootstrap secrets ─────────────────────────────────────────────────────────
 
 variable "internal_secret" {

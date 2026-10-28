@@ -638,4 +638,125 @@ defmodule Nebu.Compliance.UserDeletionTest do
     assert has_reason2, "attempted audit metadata must have :reason, got #{inspect(meta2)}"
     assert has_error2, "attempted audit metadata must have :error, got #{inspect(meta2)}"
   end
+
+  # ═══ story gdpr-erasure-global-data (follow-up ck, REQ-2026-005): the statement sequence of the erasure, RE-PINNED DELIBERATELY ═══
+  #
+  # The erasure transaction gained steps: the per-user writer lock, one DELETE per table of the story's inventory (D2), the profile anonymisation (D9).
+  # The tests above deliberately pin only the old steps; the pins below are the NEW sequence. They pin the statements the story's D-points name and
+  # their order where it matters (the lock before the account data / cross-signing deletes, the status flip last), NOT the exact SQL text (a table is "deleted" by
+  # any statement containing `DELETE FROM <table>`, also inside a CTE or with `user_id = ANY($1)`, keyed by the target user id among its parameters); the observable
+  # result (rows gone / present) is pinned by the real-database suites `user_deletion_global_data_test.exs` and friends. The FakeRepo seam stays as it is:
+  # the erasure must keep working through `repo().transaction/1` and `repo().query/2` (no `repo().rollback/1`: the fakes have none).
+
+  defmodule FailOnStatementFakeRepo do
+    @moduledoc "FakeRepo that fails the statement matching the regex in :__test_fail_statement__ (everything else as FakeRepo)."
+    def transaction(fun), do: FakeRepo.transaction(fun)
+
+    def query(sql, args, opts \\ []) do
+      pattern = Application.get_env(:compliance, :__test_fail_statement__)
+
+      if pattern && Regex.match?(pattern, String.trim(sql)) do
+        bucket = Application.get_env(:compliance, :__test_fake_repo_bucket__)
+        if bucket, do: Agent.update(bucket, fn rows -> [{sql, args} | rows] end)
+        {:error, :simulated_db_error}
+      else
+        FakeRepo.query(sql, args, opts)
+      end
+    end
+
+    def insert(struct, opts \\ []), do: FakeRepo.insert(struct, opts)
+    def insert!(_struct, _opts \\ []), do: raise("FailOnStatementFakeRepo.insert! called")
+  end
+
+  # the SQL strings in execution order, whitespace squashed
+  defp sequence(sql_bucket) do
+    sql_bucket
+    |> Agent.get(& &1)
+    |> Enum.reverse()
+    |> Enum.flat_map(fn
+      {sql, args} -> [{sql |> String.replace(~r/\s+/, " ") |> String.trim(), args}]
+      _other -> []
+    end)
+  end
+
+  defp index_of(seq, fun), do: Enum.find_index(seq, fn {sql, args} -> fun.(sql, args) end)
+  defp deleting?(sql, table), do: Regex.match?(~r/\bDELETE\s+FROM\s+(ONLY\s+)?#{table}\b/i, sql)
+  # the target user id is a parameter of the statement, directly or inside a list parameter (`user_id = ANY($1)`)
+  defp keyed?(args, uid), do: uid in args or Enum.any?(args, &(is_list(&1) and uid in &1))
+  defp delete_idx(seq, table), do: index_of(seq, fn sql, _ -> deleting?(sql, table) end)
+
+  @inventory_deletes ~w(user_room_account_data account_data cross_signing_keys device_keys device_one_time_keys device_fallback_keys
+                        forgotten_rooms auto_join_opt_outs read_receipts uia_sessions oauth_account_sessions oauth_consent_requests oauth_codes)
+
+  test "ck: statement sequence: guard, in-progress mark, writer lock BEFORE the account data / cross-signing deletes, a DELETE per inventory table, status flip last",
+       %{sql_bucket: sql_bucket} do
+    assert {:ok, _} = Nebu.Compliance.UserDeletion.delete_user_keys("admin-sub-1", "target-user-ck", "DSGVO ck")
+    seq = sequence(sql_bucket)
+
+    assert {guard, _} = hd(seq)
+    assert guard =~ "FROM users WHERE" and guard =~ "deletion_status", "the guard SELECT stays the first statement"
+    mark = index_of(seq, fn sql, _ -> sql =~ "UPDATE users" and sql =~ "deletion_in_progress" end)
+    assert is_integer(mark) and mark >= 1, "the atomic in-progress mark stays (the lock may come before or after it, that is free)"
+
+    lock = index_of(seq, fn sql, args -> sql =~ "pg_advisory_xact_lock" and sql =~ "sync_global|" and keyed?(args, "target-user-ck") end)
+    assert is_integer(lock), "the per-user writer lock (the SAME key as AccountDataStore.put/3 and CrossSigningKeyStore.put_keys/2) is taken in the transaction"
+
+    for table <- ~w(account_data cross_signing_keys) do
+      idx = delete_idx(seq, table)
+      assert is_integer(idx), "no DELETE FROM #{table}"
+      assert lock < idx, "the lock is taken BEFORE the DELETE FROM #{table}"
+    end
+
+    for table <- @inventory_deletes do
+      matches = Enum.filter(seq, fn {sql, _} -> deleting?(sql, table) end)
+      assert matches != [], "no statement deletes from #{table}"
+      assert Enum.all?(matches, fn {_sql, args} -> keyed?(args, "target-user-ck") end), "every DELETE FROM #{table} is parameterised by the target user id, got #{inspect(matches)}"
+    end
+
+    flip = index_of(seq, fn sql, _ -> sql =~ "UPDATE users" and sql =~ "keys_deleted" end)
+    assert is_integer(flip)
+    for table <- @inventory_deletes, do: assert(delete_idx(seq, table) < flip, "DELETE FROM #{table} runs before the status flip")
+    assert lock < flip, "the lock is taken before the status flip"
+    for table <- @inventory_deletes, do: assert(mark < delete_idx(seq, table), "DELETE FROM #{table} runs after the in-progress mark")
+
+    assert Enum.any?(seq, fn {sql, args} -> Regex.match?(~r/\bUPDATE\s+profiles\b/i, sql) and sql =~ "avatar_url" and (sql =~ "Deleted User" or "Deleted User" in args) end),
+           "D9: the profile is anonymised (display name 'Deleted User', avatar NULL)"
+
+    assert Enum.any?(seq, fn {sql, _} -> sql =~ "anonymized_at" end), "D9: users.anonymized_at is set"
+  end
+
+  test "ck: nothing outside the inventory is deleted: no DELETE FROM users, user_keys, profiles, events, room_members, rooms or audit_log", %{sql_bucket: sql_bucket} do
+    assert {:ok, _} = Nebu.Compliance.UserDeletion.delete_user_keys("admin-sub-1", "target-user-ck2", "DSGVO ck")
+
+    for {sql, _} <- sequence(sql_bucket), table <- ~w(users user_keys profiles events room_members room_invitations rooms audit_log media_files) do
+      refute deleting?(sql, table), "the erasure must not delete from #{table}: #{sql}"
+    end
+  end
+
+  test "ck: the conflict and user-not-found guards run no new statement (no lock, no delete)", %{sql_bucket: sql_bucket} do
+    Application.put_env(:compliance, :__test_user_row__, %{exists: true, deletion_status: "keys_deleted"})
+    assert {:error, :conflict} = Nebu.Compliance.UserDeletion.delete_user_keys("admin-sub-1", "target-user-ck3", "DSGVO ck")
+    Application.put_env(:compliance, :__test_user_row__, %{exists: false})
+    assert {:error, :user_not_found} = Nebu.Compliance.UserDeletion.delete_user_keys("admin-sub-1", "target-user-ck4", "DSGVO ck")
+
+    assert length(sequence(sql_bucket)) == 2, "one guard SELECT per call, nothing else: #{inspect(sequence(sql_bucket))}"
+  end
+
+  for {label, pattern} <- [{"the writer lock", ~S"pg_advisory_xact_lock"}, {"the profile anonymisation", ~S"\bUPDATE\s+profiles\b"}] ++ Enum.map(@inventory_deletes, &{"DELETE FROM " <> &1, "\\bDELETE\\s+FROM\\s+(ONLY\\s+)?" <> &1 <> "\\b"}) do
+    test "ck: a failing statement (#{label}) is {:error, _}, writes ONE attempted audit, no success audit and runs nothing after it", %{sql_bucket: sql_bucket, audit_bucket: audit_bucket} do
+      Application.put_env(:compliance, :repo, FailOnStatementFakeRepo)
+      Application.put_env(:compliance, :__test_fail_statement__, Regex.compile!(unquote(pattern), "i"))
+      on_exit(fn -> Application.delete_env(:compliance, :__test_fail_statement__) end)
+
+      assert {:error, :simulated_db_error} = Nebu.Compliance.UserDeletion.delete_user_keys("admin-sub-1", "target-user-ckf", "DSGVO ck failure")
+
+      assert [%{action: "user_keys_deletion_attempted", outcome: "attempted", metadata: meta}] = Agent.get(audit_bucket, & &1)
+      assert Map.has_key?(meta, :reason) and Map.has_key?(meta, :error)
+
+      seq = sequence(sql_bucket)
+      {last_sql, _} = List.last(seq)
+      assert Regex.match?(Regex.compile!(unquote(pattern), "i"), last_sql), "the failing statement is the LAST one run: nothing runs after it, got #{inspect(last_sql)}"
+      refute Enum.any?(seq, fn {sql, _} -> sql =~ "UPDATE users" and sql =~ "keys_deleted" end), "the status flip must not run after a failed step"
+    end
+  end
 end

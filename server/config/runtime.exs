@@ -4,6 +4,28 @@ if config_env() != :test do
   config :nebu_http, port: String.to_integer(System.get_env("NEBU_HTTP_PORT", "4000"))
 end
 
+# ─── oauth-trusted-proxy-client-ip: trusted reverse-proxy CIDRs (raw string, parsed at boot) ──
+# Unset / empty = no trusted proxy (the direct peer is the client). Parsing, validation and the
+# fail-closed rules live in Nebu.Web.ClientIP (loaded from Nebu.Application at boot).
+config :nebu_http, trusted_proxy_cidrs: System.get_env("NEBU_TRUSTED_PROXY_CIDRS")
+
+# ─── oauth-hardening-hygiene (HY1): per-node TTL cache of the OAuth switch state ─────────────────
+# NEBU_OAUTH_CONFIG_CACHE_MS: integer 0..5000 (milliseconds, 0 = cache off); unset / junk / out of range => 2000.
+# An operator write of `oauth_enabled` / `oauth_issuer_url` takes effect on every node within this time.
+# NEVER applied in the :test env: config/test.exs pins 0 (ExUnit stays read-through) and runtime.exs would
+# otherwise override it with the default.
+if config_env() != :test do
+  config :nebu_http,
+    oauth_config_cache_ms: Nebu.OAuth.Config.parse_cache_ms(System.get_env("NEBU_OAUTH_CONFIG_CACHE_MS"))
+end
+
+# ─── oauth-client-revocation (SO5): admin re-authentication without `auth_time` ──────────────────
+# Approving / revoking an OAuth client needs a FRESH admin sign-in (`/admin/login/start?mode=reauth`). An IdP
+# that reports no `auth_time` cannot prove it, so the default is fail closed. Set the variable to exactly `true`
+# ONLY where the IdP has no SSO session, so a completed login flow IS an interactive login (the dev Dex of
+# docker-compose.yml). It is an accepted risk, never set in the deploy templates (docs/architecture/07-deployment.md).
+config :nebu_http, [{:admin_reauth_allow_missing_auth_time, System.get_env("NEBU_ADMIN_REAUTH_ALLOW_MISSING_AUTH_TIME") == "true"}]
+
 # ─── e2e-session-refresh-suites: configurable Nebu session TTL ceilings ───────
 # Defaults (8h) live in Nebu.Web.SessionConfig. NEBU_MATRIX_SESSION_TTL_SECONDS /
 # NEBU_ADMIN_SESSION_TTL_SECONDS let the e2e stack shorten the opaque-AT (login +
@@ -87,6 +109,38 @@ if config_env() in [:prod, :dev] do
       ] do
     case Integer.parse(System.get_env(env, "")) do
       {n, ""} when n > 0 and n <= 9_223_372_036_854_775_807 -> config :nebu, [{key, n}]
+      _ -> :ok
+    end
+  end
+
+  # ── rate-limits-join-invite-create-room: per-user tiers and pending-invitation caps ──
+  # The per-user rate-limit tiers of POST /createRoom, POST /rooms/{roomId}/invite, POST /join and (story
+  # moderation-routes-atomic-ban) POST /rooms/{roomId}/kick | ban | unban, (story membership-state-model) GET
+  # /rooms/{roomId}/members | initialSync (rate per minute and burst each) and the three caps on
+  # PENDING invitations (per inviter, per invitee, per inviter-invitee pair). Same rule as above: only a strictly positive int64
+  # integer applies, anything else keeps the default (never crashes). Nebu.Web.RateLimitTiers
+  # additionally rejects a pair whose burst / rate exceeds 60 (the sweeper's one-hour argument) or an invite burst below 50, falls
+  # back to the default pair and warns at boot (variable names only). The tiers are per node (ETS); the caps are cluster-wide.
+  for {env, app, key} <- [
+        {"NEBU_RATE_LIMIT_CREATE_ROOM_PER_MIN", :nebu_http, :rate_limit_create_room_per_min},
+        {"NEBU_RATE_LIMIT_CREATE_ROOM_BURST", :nebu_http, :rate_limit_create_room_burst},
+        {"NEBU_RATE_LIMIT_INVITE_PER_MIN", :nebu_http, :rate_limit_invite_per_min},
+        {"NEBU_RATE_LIMIT_INVITE_BURST", :nebu_http, :rate_limit_invite_burst},
+        {"NEBU_RATE_LIMIT_JOIN_PER_MIN", :nebu_http, :rate_limit_join_per_min},
+        {"NEBU_RATE_LIMIT_JOIN_BURST", :nebu_http, :rate_limit_join_burst},
+        {"NEBU_RATE_LIMIT_MODERATION_PER_MIN", :nebu_http, :rate_limit_moderation_per_min},
+        {"NEBU_RATE_LIMIT_MODERATION_BURST", :nebu_http, :rate_limit_moderation_burst},
+        {"NEBU_RATE_LIMIT_MEMBERS_READ_PER_MIN", :nebu_http, :rate_limit_members_read_per_min},
+        {"NEBU_RATE_LIMIT_MEMBERS_READ_BURST", :nebu_http, :rate_limit_members_read_burst},
+        {"NEBU_INVITE_MAX_PENDING_PER_INVITER", :nebu, :invite_max_pending_per_inviter},
+        {"NEBU_INVITE_MAX_PENDING_PER_INVITEE", :nebu, :invite_max_pending_per_invitee},
+        {"NEBU_INVITE_MAX_PENDING_PER_PAIR", :nebu, :invite_max_pending_per_pair},
+        # story membership-state-model (D19): the node-wide limit of concurrent member-state reads (default 3, Nebu.Matrix.MemberSliceGate;
+        # an invalid value is ignored and warned at boot, the variable name only)
+        {"NEBU_MEMBER_SLICE_MAX_CONCURRENCY", :nebu, :member_slice_max_concurrency}
+      ] do
+    case Integer.parse(System.get_env(env, "")) do
+      {n, ""} when n > 0 and n <= 9_223_372_036_854_775_807 -> config app, [{key, n}]
       _ -> :ok
     end
   end

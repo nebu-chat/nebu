@@ -149,18 +149,19 @@ When(
 );
 
 // ---------------------------------------------------------------------------
-// Step: page shows a success flash message (shared — may already exist)
+// Step: page shows a success flash message (shared by every Admin config form)
+//
+// Story legacy-sso-redirect-confirmation (G3-3, AC14/AC15 e2e): this step used to be a RED-phase stub that always
+// threw (story 14-2a), so no scenario could use it. It is now the real assertion: the config page renders the
+// :info flash as `<p class="alert alert-success" role="status">` (templates/config/index.html.heex), e.g.
+// "SSO schemes saved", "SSO origins saved", "Scopes saved", "Configuration saved". Every Admin page that uses this
+// step (config, logs config, spaces, OAuth clients) renders its :info flash with the same `role="status"` + `alert-success`.
 // ---------------------------------------------------------------------------
 Then(
   'the page shows a success flash message',
   async ({ page }: { page: Page }) => {
-    // RED PHASE: fails until flash message is rendered after POST
-    throw new Error(
-      'RED PHASE — Story 14-2a AC4: success flash message not yet shown after config save.'
-    );
-    // Green phase implementation:
-    // const flash = page.locator('[role="alert"]').filter({ hasText: /success|updated/i });
-    // await expect(flash).toBeVisible({ timeout: 10_000 });
+    const flash = page.locator('[role="status"].alert-success').filter({ hasText: /saved|success|updated/i });
+    await expect(flash.first()).toBeVisible({ timeout: 10_000 });
   }
 );
 

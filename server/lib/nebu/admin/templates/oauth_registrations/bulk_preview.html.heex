@@ -1,0 +1,90 @@
+<div class="admin-oauth-registrations-bulk" data-page="oauth-registrations-bulk-remove">
+  <h1 class="text-2xl font-bold mb-2">Remove pending registrations</h1>
+  <p class="mb-4">
+    <a href="/admin/oauth/registrations" class="link link-primary" data-role="back-to-list">Back to pending OAuth clients</a>
+  </p>
+
+  <p
+    :if={@error}
+    id="bulk-error"
+    role="alert"
+    class="alert alert-error my-4 max-w-3xl"
+    data-role="bulk-error"
+  >
+    {bulk_error_text(@error)}
+  </p>
+
+  <.bulk_form form={@form} error={@error} heading="Criteria" />
+
+  <div :if={@preview} data-role="bulk-preview">
+    <h2 class="text-lg font-semibold mb-2">Matching registrations</h2>
+    <p
+      role="status"
+      class="font-semibold mb-2"
+      data-role="bulk-match-count"
+      data-count={@preview.count}
+    >
+      {plural(@preview.count, "pending registration matches", "pending registrations match")}
+    </p>
+    <p class="text-sm mb-4" data-role="bulk-criteria">
+      Criteria: {bulk_words(@form)}. Only pending registrations are removed; registrations approved or rejected earlier are never touched.
+    </p>
+
+    <p :if={@preview.count == 0} class="alert alert-info max-w-3xl" data-role="bulk-no-match">
+      No pending registration matches these criteria. Nothing can be removed.
+    </p>
+
+    <div :if={@preview.count > 0}>
+      <div class="overflow-x-auto mb-3">
+        <table class="table table-zebra w-full">
+          <caption class="sr-only">
+            Pending registrations that would be removed (first {length(@preview.rows)} of {@preview.count}, newest first)
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Client (unverified)</th>
+              <th scope="col">Client URI host</th>
+              <th scope="col">Created</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr :for={client <- @preview.rows} data-role="bulk-row">
+              <th scope="row" class="max-w-xs break-all text-left">{display_name(client)}</th>
+              <td class="break-all">{client_host(client) || "(none)"}</td>
+              <td>{format_created(client.created_at)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p :if={@preview.count > length(@preview.rows)} class="text-sm mb-3" data-role="bulk-more">
+        {@preview.count - length(@preview.rows)} more matching registrations are not listed.
+      </p>
+
+      <p class="text-sm mb-3 max-w-3xl" data-role="bulk-note">
+        At most 500 are removed per run. Removed registrations are deleted; a legitimate client that registers again appears as a new pending registration.
+      </p>
+
+      <%!-- The confirmation is a NATIVE confirm() wired from `data-confirm` by the external
+           /admin/static/assets/app.js (CSP script-src 'self'; same pattern as approve/reject). --%>
+      <form
+        method="post"
+        action={bulk_path()}
+        data-form="bulk-remove-confirm"
+        data-confirm={bulk_confirm_text(@preview.count, @form)}
+      >
+        <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+        <input type="hidden" name="_click_proof" value="" data-click-proof />
+        <input type="hidden" name="host" value={String.trim(@form.host)} />
+        <input type="hidden" name="match" value={@form.match} />
+        <input :if={String.trim(@form.older_than_days) != ""} type="hidden" name="older_than_days" value={String.trim(@form.older_than_days)} />
+        <input type="hidden" name="as_of" value={@as_of} />
+        <div class="flex flex-wrap items-center gap-3">
+          <button type="submit" class="btn btn-error" data-role="bulk-remove-confirm">
+            Remove {plural(@preview.count, "pending registration", "pending registrations")}
+          </button>
+          <a href="/admin/oauth/registrations" class="btn btn-ghost" data-role="bulk-cancel">Cancel</a>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>

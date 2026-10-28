@@ -6,12 +6,13 @@ defmodule Nebu.Matrix.EventDispatcher.GetRoomStateLazyRestartTest do
   # AC2 — GetRoomState lazy-restarts the Room GenServer after Core restart:
   #   When get_room_state is called for a room whose GenServer is not running
   #   (:noproc exit), the handler calls RoomSupervisor.start_room/1. If the room
-  #   is in the DB, it loads successfully and the state is returned. Only if
-  #   start_room fails (room not in DB) does the handler return NOT_FOUND.
+  #   is in the DB, it loads successfully and the state is returned. (Story membership-state-model: the room status is read first, through
+  #   rooms_db_module().get_room_status/1; a user caller is started only when his latest member event is `join`, the system role always.)
   #
-  # AC3 — GetRoomState returns not_found for truly non-existent rooms:
+  # AC3 — GetRoomState answers 403 for truly non-existent rooms (story membership-state-model, D6 (a); was NOT_FOUND):
   #   When get_room_state is called for a room that genuinely does not exist in
-  #   the DB, the handler returns gRPC NOT_FOUND (not an internal server error).
+  #   the DB, the handler raises permission_denied / M_FORBIDDEN "You are not a member of this room" (also for the system caller): no `rooms` row, no room
+  #   process, never an internal server error.
   #
   # These tests are written FIRST (ATDD red-phase gate), before the fix is applied.
   #
@@ -19,8 +20,7 @@ defmodule Nebu.Matrix.EventDispatcher.GetRoomStateLazyRestartTest do
   #   - AC2 (lazy-restart) FAILS before fix: pre-fix code calls lookup_room and
   #     raises NOT_FOUND immediately on :noproc without attempting start_room.
   #     The test expects get_room_state to succeed after the kill.
-  #   - AC3 (not_found) PASSES before and after the fix with the correct fix:
-  #     if start_room fails (room absent from DB), NOT_FOUND must be raised.
+  #   - AC3 (ghost room): was "NOT_FOUND must be raised"; now the fixed 403 (see above).
   #
   # async: false — Horde.Registry, Horde.DynamicSupervisor, Application.put_env,
   # and ETS tables are all process-global resources.
@@ -60,7 +60,7 @@ defmodule Nebu.Matrix.EventDispatcher.GetRoomStateLazyRestartTest do
   #       → Room.init returns {:stop, :not_found}
   #       → Horde.start_child returns {:error, _}
   #       → start_room returns {:error, _}
-  #       → get_room_state raises NOT_FOUND
+  #       → (membership-state-model) get_room_state raises the fixed 403 instead
   #
   # This mirrors the pre_seed_room pattern established in server_receipts_test.exs.
 
@@ -167,6 +167,18 @@ defmodule Nebu.Matrix.EventDispatcher.GetRoomStateLazyRestartTest do
     def get_room_heroes(_room_id, _exclude_user_id), do: {:ok, %{heroes: [], joined: 0, invited: 0}}
   end
 
+  # story membership-state-model (DELIBERATE re-pin, AC15 (f); old -> new): a room whose process is not running is resolved by
+  # `ensure_room_without_lazy_create!/2`, which reads the room status through `rooms_db_module()`: a pre-seeded room is "active" (it is started from the
+  # database: AC2 unchanged), every other id is unknown and answers 403 M_FORBIDDEN "You are not a member of this room" (AC3: was NOT_FOUND), no row, no process.
+  defmodule FakeRoomsDB do
+    def get_room_status(room_id) do
+      case :ets.lookup(:grs_lazy_test_db, {:room, room_id}) do
+        [] -> {:error, :not_found}
+        [_row] -> {:ok, "active"}
+      end
+    end
+  end
+
   # ─── Setup / Teardown ────────────────────────────────────────────────────────
 
   setup do
@@ -186,6 +198,7 @@ defmodule Nebu.Matrix.EventDispatcher.GetRoomStateLazyRestartTest do
 
     # Inject fake messages DB so build_state_events/2 does not hit Ecto.
     Application.put_env(:event_dispatcher, :messages_db_module, FakeMessagesDB)
+    Application.put_env(:event_dispatcher, :rooms_db_module, FakeRoomsDB)
 
     Application.put_env(:event_dispatcher, :server_name, "test.local")
 
@@ -202,6 +215,7 @@ defmodule Nebu.Matrix.EventDispatcher.GetRoomStateLazyRestartTest do
       Application.delete_env(:room_manager, :db_module)
       Application.delete_env(:event_dispatcher, :room_registry_module)
       Application.delete_env(:event_dispatcher, :messages_db_module)
+      Application.delete_env(:event_dispatcher, :rooms_db_module)
       Application.delete_env(:event_dispatcher, :server_name)
 
       if :ets.info(:grs_lazy_test_db) != :undefined do
@@ -249,11 +263,8 @@ defmodule Nebu.Matrix.EventDispatcher.GetRoomStateLazyRestartTest do
 
   # ─── AC2 — Lazy restart: room in DB but GenServer not running ─────────────────
   #
-  # RED PHASE:
-  #   Before the fix, get_room_state calls mod.get_state/1 (real Room.Server) and
-  #   the :noproc exit is NOT caught. The call crashes with an unhandled exit, or
-  #   (in an earlier version) the handler only calls lookup_room and returns NOT_FOUND
-  #   without attempting start_room. Either way, the test fails before the fix.
+  # (The original red-phase note is gone: the lazy restart has been in place for a long time. Story membership-state-model: the room status is read first
+  #  and a user caller is started only when his latest member event is `join`; the system caller of this suite always is.)
   #
   # SCENARIO:
   #   1. Pre-seed room + member in FakeRoomDB (simulates DB row from before restart).
@@ -320,25 +331,22 @@ defmodule Nebu.Matrix.EventDispatcher.GetRoomStateLazyRestartTest do
     end
   end
 
-  # ─── AC3 — NOT_FOUND for rooms that genuinely do not exist in the DB ──────────
+  # ─── AC3 — 403 M_FORBIDDEN for rooms that genuinely do not exist in the DB ────
   #
-  # PASSES before and after the fix (as long as NOT_FOUND is the result, not an
-  # unhandled crash). Verifies that the lazy-restart path does not introduce a
-  # regression where non-existent rooms return an internal server error.
+  # Verifies that the lazy-restart path does not introduce a regression where non-existent
+  # rooms return an internal server error or create a room (story membership-state-model: 403).
   #
   # SCENARIO:
   #   1. Room NOT pre-seeded in FakeRoomDB (simulates room_id not in DB at all).
   #   2. Room GenServer NOT started (no `:noproc` shortcut needed — Room.Server
   #      get_state/1 will raise :noproc immediately for unknown rooms).
   #   3. Call get_room_state.
-  #   4. Handler catches :noproc, calls start_room.
-  #   5. Room.init calls load_members → {:error, :not_found} → insert_room →
-  #      {:error, :not_found} → {:stop, :not_found}.
-  #   6. Horde returns {:error, _} → start_room returns {:error, _}.
-  #   7. Handler raises Nebu.Matrix.Error with NOT_FOUND status.
+  #   4. The handler catches :noproc and reads the room status (rooms_db_module().get_room_status/1): the id is unknown.
+  #   5. It raises Nebu.Matrix.Error permission_denied / M_FORBIDDEN "You are not a member of this room"; start_room is never called.
+  #   6. No room process exists afterwards.
 
-  describe "get_room_state/2 — AC3: not_found for non-existent rooms" do
-    test "raises Nebu.Matrix.Error with NOT_FOUND status for a room not in DB" do
+  describe "get_room_state/2 — AC3: 403 M_FORBIDDEN for non-existent rooms" do
+    test "raises Nebu.Matrix.Error with permission_denied / M_FORBIDDEN for a room not in DB (also for the system caller)" do
       room_id = "!ghost-room-ac3:test.local"
 
       # Room is NOT pre-seeded — FakeRoomDB.insert_room will return {:error, :not_found}.
@@ -362,22 +370,23 @@ defmodule Nebu.Matrix.EventDispatcher.GetRoomStateLazyRestartTest do
             # Pre-fix: unhandled :noproc exit may escape — test catches it and fails.
             flunk(
               "Unhandled :exit escaped from get_room_state for non-existent room #{room_id}. " <>
-                "The handler must catch :noproc and return NOT_FOUND, not let exits propagate."
+                "The handler must catch :noproc and raise the fixed 403, not let exits propagate."
             )
         end
 
       refute is_nil(error),
              "expected Nebu.Matrix.Error to be raised for ghost room #{room_id}, " <>
                "but the handler returned nil (no exception raised). " <>
-               "This may indicate the fix is missing the NOT_FOUND path for failed start_room."
+               "The handler must raise the fixed 403 for an unknown room."
 
-      assert error.status == Nebu.Matrix.Status.not_found(),
-             "expected NOT_FOUND status (#{Nebu.Matrix.Status.not_found()}) for ghost room, " <>
-               "got status #{error.status} (message: #{error.message}). " <>
-               "start_room failure must map to NOT_FOUND, not INTERNAL."
+      assert error.status == Nebu.Matrix.Status.permission_denied(),
+             "expected permission_denied for a ghost room, got status #{error.status} (message: #{error.message})"
+
+      assert error.errcode == "M_FORBIDDEN"
+      assert {:error, :not_found} = Nebu.Matrix.Room.RoomSupervisor.lookup_room(room_id), "no room process was started"
     end
 
-    test "not_found error message references the room_id" do
+    test "the refusal text is fixed: it names neither the room id nor a caller" do
       room_id = "!ghost-room-msg:test.local"
 
       # We use try/rescue/catch instead of assert_raise for the same reason as the test above:
@@ -395,14 +404,13 @@ defmodule Nebu.Matrix.EventDispatcher.GetRoomStateLazyRestartTest do
           e in Nebu.Matrix.Error -> e
         catch
           :exit, _ ->
-            flunk("Unhandled :exit escaped — handler must catch :noproc and return NOT_FOUND.")
+            flunk("Unhandled :exit escaped — handler must catch :noproc and raise the fixed 403.")
         end
 
       refute is_nil(error)
 
-      assert String.contains?(error.message, room_id),
-             "expected error message to contain room_id #{room_id}, " <>
-               "got: #{inspect(error.message)}"
+      assert error.message == "You are not a member of this room"
+      refute String.contains?(error.message, room_id)
     end
   end
 

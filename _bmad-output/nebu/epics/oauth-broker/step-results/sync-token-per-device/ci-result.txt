@@ -1,0 +1,6 @@
+sync-token-per-device CI gate, 2026-10-26 (isolated project nebu-oauth, Elixir 1.19 CI replica, regression_sync_load_test parked as always)
+integration + unit: 10839 tests, 21 failures, 8 skipped (89 excluded)
+  12 RoomsFallbackName, 3 AdminOidcLogin, 2 TemporaryCapture, 2 TraceMapNodeControls, 1 WarRoom  -> known flaky families
+  1 SetRoomStateTest AC9 (on_exit :ets.delete race on the named table :set_room_state_db; file untouched by this story; green alone 45/45)
+e2e element-web: 35 passed (16.0m)
+Security review (Kassandra): CLEAN (0 CRITICAL/HIGH/MEDIUM/LOW, 4 INFO). Code review: cycle 0 = 0 MAJOR 6 MINOR, delta cycle 1 = approve (0/0/6 INFO).

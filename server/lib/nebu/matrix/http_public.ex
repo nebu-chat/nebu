@@ -7,6 +7,9 @@ defmodule Nebu.Matrix.HttpPublic do
     * `POST /_matrix/client/v3/login`            — authentication attempt itself
     * `GET  /_matrix/client/v3/profile/{userId}` — public profile read (+ subfields)
     * `GET  .../auth_issuer` / `.../auth_metadata` (MSC2965) — OIDC discovery
+    * `GET  /_matrix/client/versions` — `versions/1` (story oauth-versions-switch, V1-V7): v1.1-v1.15
+      exactly while the OAuth 2.0 API is offered (`Nebu.OAuth.oauth_aware?/0`), else v1.1-v1.11. Unlike the
+      routes above it is NOT forwarded here: `Nebu.Web.Router` calls `versions/1` directly from an exact `get`.
 
   The top-level `Nebu.Web.Router` forwards each public path to this module with
   an `init_opts: [action: ...]` tag, BEFORE the catch-all `/_matrix` forward to
@@ -37,24 +40,41 @@ defmodule Nebu.Matrix.HttpPublic do
   # several distinct endpoints (auth_issuer, auth_metadata, and GET /login —
   # MAJOR-1) all arrive as GET "/". Plug.Router allows only ONE `get "/"`
   # clause, so we disambiguate on the original request path.
+  @login_flows_per_min 300
+  @login_flows_burst 300
+
   get "/" do
-    cond do
-      String.ends_with?(conn.request_path, "auth_issuer") ->
+    # Dispatch on the forward prefix (`conn.script_name`, RU13), the same key `post "/"` uses: a trailing slash
+    # (`GET /v3/login/`) must not turn into a 405 that lists GET (review cycle 1, MINOR 1).
+    case root_prefix(conn) do
+      "auth_issuer" ->
         auth_issuer(conn)
 
-      String.ends_with?(conn.request_path, "auth_metadata") ->
+      "auth_metadata" ->
         auth_metadata(conn)
 
       # GET /_matrix/client/v3/login — advertise the supported login flows
       # (MAJOR-1). The Go gateway registers BOTH GET and POST on /login; GetLogin
       # (login.go) returns the flow list so Element Web 1.12+ can discover SSO
       # and the m.login.token flow. Without it a GET falls through to 404
-      # M_NOT_FOUND, breaking SSO discovery. Unauthenticated, static (no DB).
-      String.ends_with?(conn.request_path, "/login") ->
-        login_flows(conn)
+      # M_NOT_FOUND, breaking SSO discovery. Unauthenticated. Not DB-free any more: while OAuth
+      # could be offered it reads the switch state through the per-node `Nebu.OAuth.Config` cache (C2; a toggle flips the
+      # OAuth-aware flags within NEBU_OAUTH_CONFIG_CACHE_MS, HY1); a read failure only omits them.
+      #
+      # story oauth-hardening-hygiene (HY3): the spec marks this endpoint "Rate-limited: Yes": own per-source
+      # bucket (`{"login_flows", ClientIP.bucket/1}`, 300/min, burst 300; NOT the bare-IP bucket shared by
+      # `POST /login` and `/refresh`), Matrix `429 M_LIMIT_EXCEEDED`. `auth_metadata` / `auth_issuer` are
+      # "Rate-limited: No" and stay unlimited (they rely on the Nebu.OAuth.Config cache).
+      "login" ->
+        case Nebu.Web.Plugs.RateLimit.take({"login_flows", Nebu.Web.ClientIP.bucket(conn)}, @login_flows_per_min, @login_flows_burst) do
+          :ok -> login_flows(conn)
+          {:deny, retry_after_s} -> Nebu.Web.Plugs.RateLimit.respond_limited(conn, retry_after_s)
+        end
 
-      true ->
-        error(conn, 404, "M_NOT_FOUND", "Not found")
+      # Any other forward landing on "/" (`/v3/auth`, `/v3/profile`, `/refresh`, ...): the root table of
+      # story oauth-room-summary-unrecognized (RU13), `M_UNRECOGNIZED` 404 / 405.
+      _other ->
+        root_fallback(conn)
     end
   end
 
@@ -90,6 +110,18 @@ defmodule Nebu.Matrix.HttpPublic do
     conn |> Plug.Conn.fetch_query_params() |> Nebu.Matrix.SsoLogin.redirect()
   end
 
+  # GET|POST /sso/confirm — the confirmation step for an UNLISTED https redirectUrl (story
+  # legacy-sso-redirect-confirmation, G3-3, D11): a Nebu-specific browser page in the spec's `/login` namespace.
+  # GET renders the page from the pending entry (peek), POST decides. UNAUTHENTICATED (it is part of the login,
+  # bound to the browser by its cookie). `/sso/confirm` cannot collide with `/sso/redirect/:_idp`.
+  get "/sso/confirm" do
+    Nebu.Matrix.SsoConfirm.handle(conn)
+  end
+
+  post "/sso/confirm" do
+    Nebu.Matrix.SsoConfirm.handle(conn)
+  end
+
   # ── POST /_matrix/client/v3/login ─────────────────────────────────────────
   # Parent forwards "/_matrix/client/v3/login" → path_info here is [].
 
@@ -106,13 +138,22 @@ defmodule Nebu.Matrix.HttpPublic do
   # /refresh is UNAUTHENTICATED (spec MUST) and rate-limited like /login.
   @refresh_rate_limit Nebu.Web.Plugs.RateLimit.init(rate_per_min: 30, burst: 10, tier: "refresh")
 
+  # RU13: the forward prefix (`conn.script_name`, also set when `Nebu.Web.Plugs.OAuthDiscovery` calls this
+  # module) decides what a root request is; only `login` and `refresh` run a handler, the rest of the
+  # table answers `M_UNRECOGNIZED` (a POST on `/v3/auth`, `/v3/profile` or the legacy discovery paths used to
+  # attempt a login).
   post "/" do
-    if String.ends_with?(conn.request_path, "/refresh") do
-      conn = Nebu.Web.Plugs.RateLimit.call(conn, @refresh_rate_limit)
-      if conn.halted, do: conn, else: do_refresh(conn)
-    else
-      conn = Nebu.Web.Plugs.RateLimit.call(conn, @login_rate_limit)
-      if conn.halted, do: conn, else: do_login(conn)
+    case root_prefix(conn) do
+      "refresh" ->
+        conn = Nebu.Web.Plugs.RateLimit.call(conn, @refresh_rate_limit)
+        if conn.halted, do: conn, else: do_refresh(conn)
+
+      "login" ->
+        conn = Nebu.Web.Plugs.RateLimit.call(conn, @login_rate_limit)
+        if conn.halted, do: conn, else: do_login(conn)
+
+      _other ->
+        root_fallback(conn)
     end
   end
 
@@ -144,8 +185,40 @@ defmodule Nebu.Matrix.HttpPublic do
     end
   end
 
-  match _ do
-    error(conn, 404, "M_NOT_FOUND", "Not found")
+  # Fall-through (story oauth-room-summary-unrecognized, RU9 - RU13): unknown path => 404, known path with
+  # another method => 405 + Allow, non-preflight OPTIONS => 204. No authentication requirement (the marker
+  # keeps the probe from counting this clause as a real route); the PUT profile routes authenticate inline.
+  match _, private: %{nebu_unrecognized: true} do
+    case conn.path_info do
+      [] -> root_fallback(conn)
+      _ -> Nebu.Web.Unrecognized.respond(conn, probe_methods(conn))
+    end
+  end
+
+  # Allowed methods per forward prefix for a request that lands on the root ("/") of this router (RU13).
+  @root_methods %{
+    "login" => ["GET", "POST"],
+    "refresh" => ["POST"],
+    "auth_issuer" => ["GET"],
+    "auth_metadata" => ["GET"]
+    # "auth" (UIA fallback) and "profile" have no handler at their root: 404
+  }
+
+  defp root_prefix(conn), do: List.last(conn.script_name)
+
+  defp root_fallback(conn) do
+    Nebu.Web.Unrecognized.respond(conn, Map.get(@root_methods, root_prefix(conn), []))
+  end
+
+  # Methods with a real clause at a NON-root path of this router (RU11); a probe selects a `do_match/4`
+  # clause and never dispatches, the marker is removed first.
+  defp probe_methods(conn) do
+    path = Plug.Router.Utils.decode_path_info!(conn)
+    conn = %{conn | private: Map.delete(conn.private, :nebu_unrecognized)}
+
+    Nebu.Web.Unrecognized.probe(conn, fn c ->
+      do_match(c, c.method, path, c.host).private[:nebu_unrecognized] !== true
+    end)
   end
 
   # ── Discovery handlers ────────────────────────────────────────────────────
@@ -202,20 +275,81 @@ defmodule Nebu.Matrix.HttpPublic do
   # m.login.token. Element Web 1.12+ requires m.login.token alongside
   # m.login.sso so it uses the loginToken from the SSO redirect instead of
   # re-initiating a fresh SSO flow.
+  #
+  # story oauth-legacy-coexistence (C1-C3): while OAuth is OFFERED (`Nebu.OAuth.oauth_aware?/0`, the same
+  # predicate as `auth_metadata` answering 200) the `m.login.sso` flow object additionally carries
+  # `oauth_aware_preferred: true` (Matrix v1.18) and its unstable twin
+  # `org.matrix.msc3824.delegated_oidc_compatibility: true` (read by matrix-js-sdk 41.3.0). Otherwise
+  # neither key exists and the response is byte-identical to the pre-broker one; the config can never
+  # fail this endpoint (an unreadable config or an exception just omits the keys). The `m.login.token`
+  # flow never carries them; `m.login.sso` is ALWAYS offered.
   defp login_flows(conn) do
     display_name = Application.get_env(:nebu_http, :oidc_display_name, "SSO")
 
-    send_json(conn, 200, %{
-      "flows" => [
-        %{
-          "type" => "m.login.sso",
-          "identity_providers" => [
-            %{"id" => "oidc", "name" => display_name, "icon" => nil}
-          ]
-        },
-        %{"type" => "m.login.token"}
+    sso_flow = %{
+      "type" => "m.login.sso",
+      "identity_providers" => [
+        %{"id" => "oidc", "name" => display_name, "icon" => nil}
       ]
-    })
+    }
+
+    sso_flow =
+      if oauth_aware?() do
+        Map.merge(sso_flow, %{
+          "oauth_aware_preferred" => true,
+          "org.matrix.msc3824.delegated_oidc_compatibility" => true
+        })
+      else
+        sso_flow
+      end
+
+    send_json(conn, 200, %{"flows" => [sso_flow, %{"type" => "m.login.token"}]})
+  end
+
+  # ── GET /_matrix/client/versions (story oauth-versions-switch, V1-V7) ─────────────────────────
+  #
+  # The route itself lives in `Nebu.Web.Router` (an exact `get`, before `forward "/_matrix"`, no
+  # `OidcPlug`) and only calls `versions/1`. The version lists are TWO literal attributes (never computed
+  # from a range: `v1.10` sorts before `v1.2` as a string); this is the only place they exist.
+  @versions_not_offered ~w(v1.1 v1.2 v1.3 v1.4 v1.5 v1.6 v1.7 v1.8 v1.9 v1.10 v1.11)
+  @versions_offered @versions_not_offered ++ ~w(v1.12 v1.13 v1.14 v1.15)
+
+  @doc """
+  The `/versions` answer (spec 3a rule): v1.1 .. v1.15 IF AND ONLY IF the OAuth 2.0 API is offered, i.e.
+  while `GET /_matrix/client/v1/auth_metadata` answers 200 (`Nebu.OAuth.oauth_aware?/0`, evaluated once
+  per request on top of the per-node OAuth config cache, at most NEBU_OAUTH_CONFIG_CACHE_MS stale, HY1); otherwise today's v1.1 .. v1.11 body byte for byte. Fail closed: any config
+  problem (disabled, invalid issuer, unreadable `server_config`, no repo, a raise or an exit) is the v1.11
+  answer with status 200, never a 5xx (the load balancers health-check this path). The answer is
+  independent of the `Authorization` header (matrix-js-sdk sends it, MSC4026) and carries
+  `Cache-Control: no-store` in both states so a flip is visible on the next fetch.
+  """
+  @spec versions(Plug.Conn.t()) :: Plug.Conn.t()
+  def versions(conn) do
+    conn
+    |> put_resp_header("cache-control", "no-store")
+    # bounded read (500 ms, throttled warning): this path is the load-balancer health check
+    |> send_json(200, versions_body(oauth_aware?(bounded: true)))
+  end
+
+  @doc """
+  The `/versions` body for `oauth_offered?` (pure, no I/O). `unstable_features` is the same in both
+  states: only `uk.half-shot.msc2666.query_mutual_rooms` (the OAuth MSCs are stable since v1.15 and
+  never listed).
+  """
+  @spec versions_body(boolean()) :: map()
+  def versions_body(oauth_offered?) when is_boolean(oauth_offered?) do
+    %{
+      "versions" => if(oauth_offered?, do: @versions_offered, else: @versions_not_offered),
+      "unstable_features" => %{"uk.half-shot.msc2666.query_mutual_rooms" => true}
+    }
+  end
+
+  defp oauth_aware?(opts \\ []) do
+    Nebu.OAuth.oauth_aware?(opts)
+  rescue
+    _ -> false
+  catch
+    :exit, _ -> false
   end
 
   # ── Login (POST /_matrix/client/v3/login) ─────────────────────────────────
@@ -299,10 +433,17 @@ defmodule Nebu.Matrix.HttpPublic do
             error(conn, 403, "M_FORBIDDEN", "Invalid or expired token")
 
           {:ok, claims} ->
-            provision_and_respond(conn, claims, id_token, refresh_requested, oidc_refresh_token,
-              client_device_id: client_device_id,
-              initial_display_name: initial_display_name
-            )
+            # story oauth-legacy-coexistence (Kassandra L-1): a RAW JWT that is on the denylist (a device
+            # deletion / logout killed it) must not log in again — the login would register a device and
+            # could revive a binding the kill-switch kept to keep that JWT refused.
+            if Nebu.Web.TokenDenylist.revoked?(claims["jti"], id_token) do
+              error(conn, 403, "M_FORBIDDEN", "Invalid or expired token")
+            else
+              provision_and_respond(conn, claims, id_token, refresh_requested, oidc_refresh_token,
+                client_device_id: client_device_id,
+                initial_display_name: initial_display_name
+              )
+            end
         end
     end
   end
@@ -360,7 +501,16 @@ defmodule Nebu.Matrix.HttpPublic do
         # generate a fresh one. S2 AC1: login OWNS device creation — register the device
         # in `devices` now (created_at on first sight via S1's COALESCE upsert).
         device_id = opts[:client_device_id] || generate_device_id()
-        register_device(user.user_id, device_id, opts[:initial_display_name], conn)
+
+        # story oauth-token-endpoint (T26): a legacy login with the device_id of an OAuth device
+        # takes the device over — its OAuth session is revoked first (Matrix /login invalidates
+        # the tokens previously associated with the device), so a device is never served by both
+        # APIs. Legacy-to-legacy reuse is unchanged.
+        if opts[:client_device_id] do
+          _ = Nebu.Matrix.Session.OAuthSessionStore.delete_device_oauth(user.user_id, device_id)
+        end
+
+        registered = register_device(user.user_id, device_id, opts[:initial_display_name], conn)
 
         respond_login(
           conn,
@@ -369,7 +519,8 @@ defmodule Nebu.Matrix.HttpPublic do
           token,
           claims,
           refresh_requested,
-          oidc_refresh_token
+          oidc_refresh_token,
+          registered
         )
 
       {:error, :deactivated} ->
@@ -383,7 +534,7 @@ defmodule Nebu.Matrix.HttpPublic do
   # AC1: refresh_token: true AND an OIDC refresh token is available → mint an opaque
   # Nebu session (opaque AT+RT, encrypted OIDC RT at rest) and return the v1.3
   # fields. Otherwise (AC7) fall back to the unchanged raw-JWT response.
-  defp respond_login(conn, user_id, device_id, _jwt, claims, true, oidc_refresh_token)
+  defp respond_login(conn, user_id, device_id, _jwt, claims, true, oidc_refresh_token, _registered)
        when is_binary(oidc_refresh_token) and oidc_refresh_token != "" do
     access_token = Nebu.Matrix.Session.MatrixSessionStore.generate_opaque_token()
     refresh_token = Nebu.Matrix.Session.MatrixSessionStore.generate_opaque_token()
@@ -416,7 +567,7 @@ defmodule Nebu.Matrix.HttpPublic do
     })
   end
 
-  defp respond_login(conn, user_id, device_id, jwt, claims, refresh_requested, _oidc_refresh_token) do
+  defp respond_login(conn, user_id, device_id, jwt, claims, refresh_requested, _oidc_refresh_token, registered) do
     # AC7 fallback: no refresh requested, or refresh requested but no OIDC RT
     # available (e.g. the IdP did not grant offline_access). Return the verified
     # OIDC JWT verbatim, exactly as before — no opaque session row.
@@ -436,16 +587,27 @@ defmodule Nebu.Matrix.HttpPublic do
     # never taken from attacker-controllable request input.
     # S3 F-1: persist the verified token's exp so the device-delete kill-switch can
     # denylist exactly this token until its own expiry.
-    _ = Nebu.Matrix.Session.DeviceBinding.put(jwt, user_id, device_id, claims["exp"])
-
-    send_json(conn, 200, %{
-      "user_id" => user_id,
-      # No opaque session: return the verified OIDC token as the access_token (the
-      # existing JWT verification path in OidcPlug continues to accept it).
-      "access_token" => jwt,
-      "device_id" => device_id,
-      "token_type" => "Bearer"
-    })
+    #
+    # story oauth-legacy-coexistence (C11, oracle O4): this branch returns the JWT as the access token, so
+    # it is only usable when (a) the device row exists (a JWT bound to a missing device is refused, C13) and
+    # (b) the binding was accepted (a concurrent OAuth issuance may have won the device right after the T26
+    # take-over: `{:error, :oauth_device}`). Either failure is a 500 — returning an unusable JWT would
+    # be a hard-logout loop for the client. The opaque branch above is unchanged (it ignores both).
+    with :ok <- registered,
+         :ok <- Nebu.Matrix.Session.DeviceBinding.put(jwt, user_id, device_id, claims["exp"]) do
+      send_json(conn, 200, %{
+        "user_id" => user_id,
+        # No opaque session: return the verified OIDC token as the access_token (the
+        # existing JWT verification path in OidcPlug continues to accept it).
+        "access_token" => jwt,
+        "device_id" => device_id,
+        "token_type" => "Bearer"
+      })
+    else
+      _failed ->
+        Logger.warning("matrix login: raw-JWT login could not register its device, answering 500", user_id: user_id)
+        error(conn, 500, "M_UNKNOWN", "Login failed, please try again.")
+    end
   end
 
   # S2 AC1: login registers the device in `devices` (S1 device-registry-model).
@@ -457,20 +619,19 @@ defmodule Nebu.Matrix.HttpPublic do
     existing = Nebu.Matrix.DeviceKeyStore.get_device(user_id, device_id)
     display_name = if is_nil(existing), do: initial_display_name, else: nil
 
-    _ =
+    # story oauth-legacy-coexistence (C11 / oracle O4): the result is returned (`:ok | {:error, term}`) so
+    # the raw-JWT branch can refuse to hand out a JWT bound to a device that was not registered; the
+    # opaque branch keeps ignoring it.
+    try do
       Nebu.Matrix.DeviceKeyStore.upsert_device(user_id, device_id,
         display_name: display_name,
         last_seen_ts: System.system_time(:millisecond),
-        last_seen_ip: client_ip(conn)
+        last_seen_ip: Nebu.Web.ClientIP.get(conn)
       )
-
-    :ok
-  end
-
-  defp client_ip(conn) do
-    case conn.remote_ip do
-      ip when is_tuple(ip) -> ip |> :inet.ntoa() |> to_string()
-      _ -> nil
+    rescue
+      e -> {:error, e.__struct__}
+    catch
+      :exit, reason -> {:error, {:exit, reason}}
     end
   end
 

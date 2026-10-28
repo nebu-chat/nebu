@@ -38,6 +38,7 @@
 | **nebu-media** | The MinIO bucket (created by the `createbuckets` init container) where all media uploads are stored |
 | **Storer** | Go interface (`Put / Get / Delete`) in `media/internal/storage` that abstracts file-system and S3 backends. `LocalStorer` implements it for the local filesystem; `MinIOStorer` for MinIO. Both handlers depend on `Storer` via injection (Story 12.2). |
 | **ClamAV** | Self-hosted, open-source malware scanner daemon (`clamd`). `Nebu.Media.ClamAV` (a GenServer) speaks its INSTREAM protocol over `:gen_tcp`; chosen (ADR-024) over commercial/cloud alternatives because no file content or hash ever leaves the deployment — a DSGVO hard requirement (epic `media-security-admin-control`) |
+| **Collapsed client address** | Every client behind a load balancer / reverse proxy resolves to the proxy's address (empty or wrong `NEBU_TRUSTED_PROXY_CIDRS` / `lb_real_ip_cidrs`): all per-IP buckets and per-source caps become global. Safe against spoofing, NOT safe for availability (one source can lock all users out of login). Warned about (never blocked) by W1 / W2 / W3; the manual POSITIVE client-IP test is the gate (story client-ip-misconfiguration-warnings, G3-2) |
 | **Media State Machine** | The `media_files.media_state` lifecycle every upload passes through: `quarantined → scanning → released` \| `infected` \| `scan_failed`. No file is served to a Matrix client before reaching `released` (epic `media-security-admin-control`, ADR-031) |
 | **Scan Kill-Switch** | Admin-configurable `fail_open` / `fail_closed` policy for what happens to in-flight uploads when ClamAV is unreachable. Nebu defaults to `fail_closed` — uploads queue/retry rather than being released unscanned (Story `10d-scan-kill-switch`) |
 | **oapi-codegen** | (Historical, removed ADR-021) A Go code generator that produced types and a `ServerInterface` from an OpenAPI 3.1 YAML spec. Removed with the Go gateway. |
@@ -58,6 +59,7 @@
 | **War Room Mode** | A bounded, tagged, self-terminating diagnostic logging session (max entries / max duration), distinct from the persistent global DEBUG-collection toggle |
 | **Temporary Capture** | A fine-grained, one-click, fixed 5-minute per-endpoint DEBUG/INFO logging override, for endpoints normally off by default (e.g. `/sync`) |
 | **OIDC Scopes Law** | The base OIDC scope is always `openid`; extra scopes (`profile`/`email`/`groups`/etc.) are requested ONLY when an operator explicitly configures them — never a hardcoded default (`bugfix-remove-default-scopes`, centralized in `Nebu.Web.OidcScopes`) |
+| **SSO redirect confirmation** | Page of the legacy `m.login.sso` flow (`GET/POST /_matrix/client/v3/login/sso/confirm`) shown after the IdP login when the client's https `redirectUrl` origin is not trusted; only Continue mints the `loginToken`. Trusted origins: `https://<server_name>`, the OAuth issuer, approved OAuth clients' registered redirect URIs and the Admin list `sso_redirect_allowed_origins` |
 
 ## Roles
 

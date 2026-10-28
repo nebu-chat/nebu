@@ -419,7 +419,7 @@ defmodule Nebu.Matrix.EventDispatcher.ArchiveRoomTest do
 
       # Cleanup: stop the started GenServer
       on_exit(fn ->
-        if Process.alive?(pid), do: GenServer.stop(pid, :normal, 5_000)
+        if Process.alive?(pid), do: (try do GenServer.stop(pid, :normal, 5_000) catch :exit, _ -> :ok end)
       end)
     end
   end
@@ -511,7 +511,7 @@ defmodule Nebu.Matrix.EventDispatcher.ArchiveRoomTest do
       assert {:ok, _} = Nebu.Matrix.Room.RoomSupervisor.lookup_room(room_id)
 
       on_exit(fn ->
-        if Process.alive?(pid), do: GenServer.stop(pid, :normal, 5_000)
+        if Process.alive?(pid), do: (try do GenServer.stop(pid, :normal, 5_000) catch :exit, _ -> :ok end)
       end)
     end
   end

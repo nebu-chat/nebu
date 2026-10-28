@@ -14,11 +14,12 @@ import type { Page } from '@playwright/test';
 import { ElementAppPage } from '../../fixtures/element-app';
 import { getActualRoomName, roomIdByScenario } from '../common/room-setup.steps';
 import { dismissKeySetupDialog } from '../common/navigation.steps';
-import { getApiSession, createRoom } from '../../fixtures/dex-auth';
+import { getApiSession, createRoom, inviteUser, joinRoom } from '../../fixtures/dex-auth';
 import { NEBU_USERS } from '../../fixtures/users';
 import type { APIRequestContext, Browser } from '@playwright/test';
 
 const ELEMENT_URL_ROOM = process.env.NEBU_ELEMENT_URL ?? 'http://localhost:7070';
+const MATRIX_BASE = process.env.NEBU_MATRIX_BASE ?? 'http://localhost:8008';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AC7: Room Creation Steps
@@ -81,9 +82,16 @@ When(
   async ({ page }: { page: Page }, _userName: string, buttonText: string) => {
     // For invite acceptance: "Accept" may appear as "Join the discussion" in Element 1.12+
     const isAccept = /^accept$/i.test(buttonText.trim());
+    // Story sync-membership-partition (@ac8-decline-invite): the decline button of the invite preview. The label is UNVERIFIED against
+    // Element Web 1.12.15 (the chunk with the preview bar was not part of the bundle copy that was inspected): Element's i18n has both
+    // "Decline" (action|decline) and "Reject" (action|reject); the anchored pattern also keeps "Decline and ignore user" out. Record the
+    // verified label after the first real run (fix the SELECTOR, never the assertions of the scenario).
+    const isDecline = /^decline$/i.test(buttonText.trim());
     const pattern = isAccept
       ? /^Accept$|Join the discussion/i
-      : new RegExp(buttonText, 'i');
+      : isDecline
+        ? /^Decline$|^Reject$/i
+        : new RegExp(buttonText, 'i');
     await page.getByRole('button', { name: pattern }).click({ timeout: 20_000 });
   }
 );
@@ -116,34 +124,213 @@ Then(
 /**
  * "When the invite for {string} appears in {word}'s sidebar"
  *
- * M-1: resolves the actual (suffixed) room name from the template name.
+ * Story sync-membership-partition: the invitation now arrives through `/sync` (`rooms.invite` with a stripped invite_state), so this step
+ * WAITS for the real invitation tile of Element's room list instead of navigating to the room-id URL (the workaround of the time before
+ * `ev`, when the invitation never arrived). Element Web 1.12.15 shows invitations in the flat room list as [role="option"] buttons with
+ * aria-label="Open room {name} invitation." (no separate Invites group).
  *
- * Element Web 1.12.15 change: Invitations are shown in the flat room list as
- * [role="option"] buttons with aria-label="Open room {name} invitation." (with "invitation."
- * suffix). There is no separate [role="group" name="Invites"] section.
- *
- * This step ONLY asserts the invite preview (with its Accept affordance) is visible.
- * The explicit `alex clicks "Accept"` step that follows in join.feature performs the
- * accept — clicking here too would double-accept and make that step time out.
+ * The step opens the tile (the invite preview with its Accept / Decline buttons) and asserts that the preview is shown. The explicit
+ * `alex clicks "Accept"` / `alex clicks "Decline"` step that follows performs the choice - clicking here too would double-accept.
  */
 When(
   'the invite for {string} appears in {word}\'s sidebar',
   async ({ page }: { page: Page }, roomName: string, _userName: string) => {
-    // Navigate to the invited room by roomId direct-URL (known from the "kai has invited"
-    // setup) rather than waiting for the invite tile to arrive via the invitee's long-poll
-    // /sync, which is racy for a freshly-logged-in session. The direct URL renders the
-    // invite preview (with Accept) even before the sidebar tile syncs.
-    const known = roomIdByScenario.get(roomName);
-    if (!known) {
-      throw new Error(`Room "${roomName}" not in roomIdByScenario — "kai has invited" setup must run first`);
-    }
-    await page.goto(`${ELEMENT_URL_ROOM}/#/room/${encodeURIComponent(known.roomId)}`);
+    const tile = inviteTile(page, roomName);
+    await expect(tile.first(), `the invitation tile of "${getActualRoomName(roomName)}" appears in the room list without any navigation`).toBeVisible({ timeout: 60_000 });
+    await tile.first().click();
     await dismissKeySetupDialog(page);
 
-    // Assert the invite preview is present (Accept affordance visible) — do NOT click it.
+    // The invite preview is open: its Accept affordance is visible (do NOT click it).
     const acceptBtn = page.getByRole('button', { name: /^accept$|^join the discussion$|^join$/i });
     await expect(acceptBtn.first()).toBeVisible({ timeout: 30_000 });
     await dismissKeySetupDialog(page);
+  }
+);
+
+/** The room-list tile of an invitation to the room (Element Web 1.12.15: aria-label "Open room {name} invitation."). */
+function inviteTile(page: Page, roomName: string) {
+  const actualName = getActualRoomName(roomName).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return page.locator('[aria-label^="Open room"][aria-label*="invitation"]').filter({ hasText: new RegExp(actualName, 'i') });
+}
+
+/**
+ * "Then the invite for {string} disappears from {word}'s sidebar"
+ * After the decline the invitation tile leaves the room list (Element moves a room that `rooms.leave` ended out of the list).
+ */
+Then(
+  'the invite for {string} disappears from {word}\'s sidebar',
+  async ({ page }: { page: Page }, roomName: string, _userName: string) => {
+    await expect(inviteTile(page, roomName), 'the invitation tile is gone after the decline').toHaveCount(0, { timeout: 30_000 });
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AC8 (decline): server-side evidence of the decline (story sync-membership-partition, @ac8-decline-invite)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Element's own `/sync` responses of the current scenario. A leave is delivered ONCE (in the sync whose window contains it) and the sync token
+ * of a user is stored per USER (follow-up `fd`), so an API session of alex cannot replay "an incremental sync from before the decline": the
+ * response Element itself received IS the evidence. Recorded from the moment the step runs (module-level state: workers: 1).
+ */
+type RecordedSync = {
+  nextBatch: string;
+  rooms: {
+    join?: Record<string, unknown>;
+    invite?: Record<string, unknown>;
+    leave?: Record<string, { timeline?: { events?: Array<{ type?: string; state_key?: string; sender?: string; content?: { membership?: string } }> } }>;
+  };
+};
+const recordedSyncs: RecordedSync[] = [];
+
+/** The control room of the decline scenario: joined by the invitee BEFORE the decline and never written to afterwards (test review m6). */
+let controlRoomId = '';
+
+/**
+ * "And alex's Element sync responses are recorded"
+ * Attaches a response listener to alex's Element page (the page of "alex is logged in via Element Web") and provisions a CONTROL room that
+ * alex joins through the API. The control room makes the later incremental-sync check discriminating: an incremental sync after Element
+ * delivered the room has NO entry for it (nothing new), while an initial-sync FALLBACK (a stale token) would list it in `rooms.join`.
+ */
+Given(
+  '{word}\'s Element sync responses are recorded',
+  async (
+    { page, request, browser }: { page: Page; request: APIRequestContext; browser: Browser },
+    userName: string,
+  ) => {
+    const user = NEBU_USERS[userName as keyof typeof NEBU_USERS];
+    if (!user) throw new Error(`Unknown user "${userName}".`);
+    recordedSyncs.length = 0;
+    page.on('response', async (response) => {
+      if (!/\/_matrix\/client\/v3\/sync(\?|$)/.test(response.url())) return;
+      try {
+        const body = (await response.json()) as { next_batch?: string; rooms?: RecordedSync['rooms'] };
+        if (typeof body.next_batch === 'string') recordedSyncs.push({ nextBatch: body.next_batch, rooms: body.rooms ?? {} });
+      } catch {
+        // an aborted long-poll (navigation, close) has no body: nothing to record
+      }
+    });
+
+    const kaiSession = await getApiSession(request, NEBU_USERS.kai, browser);
+    const { room_id } = await createRoom(request, kaiSession.token, `decline-control-${Date.now()}`);
+    await inviteUser(request, kaiSession.token, room_id, user.matrixId);
+    const userSession = await getApiSession(request, user, browser);
+    await joinRoom(request, userSession.token, room_id);
+    controlRoomId = room_id;
+  }
+);
+
+/**
+ * "Then alex's Element received the decline of {string} as a leave"
+ * Some recorded /sync response has `rooms.leave.<room>` whose LAST timeline event is alex's own `leave` member event (a decline: sender ==
+ * state_key == alex), and the room is not in `rooms.invite` / `rooms.join` of that response.
+ */
+Then(
+  '{word}\'s Element received the decline of {string} as a leave',
+  async ({}, userName: string, roomName: string) => {
+    const user = NEBU_USERS[userName as keyof typeof NEBU_USERS];
+    if (!user) throw new Error(`Unknown user "${userName}".`);
+    const entry = roomIdByScenario.get(roomName);
+    if (!entry) throw new Error(`Room "${roomName}" not in roomIdByScenario — the invite setup must run first`);
+
+    await expect
+      .poll(
+        () => {
+          const hit = recordedSyncs.find((sync) => sync.rooms.leave?.[entry.roomId] !== undefined);
+          if (!hit) return 'no recorded /sync response carries rooms.leave for the room yet';
+          const events = hit.rooms.leave?.[entry.roomId]?.timeline?.events ?? [];
+          const last = events[events.length - 1];
+          const ok =
+            last?.type === 'm.room.member' &&
+            last.state_key === user.matrixId &&
+            last.sender === user.matrixId &&
+            last.content?.membership === 'leave' &&
+            hit.rooms.invite?.[entry.roomId] === undefined &&
+            hit.rooms.join?.[entry.roomId] === undefined;
+          return ok ? 'leave delivered' : `rooms.leave of the room ends with ${JSON.stringify(last)}`;
+        },
+        { message: 'the decline arrives as rooms.leave ending with the invitee\'s own leave event', timeout: 30_000 },
+      )
+      .toBe('leave delivered');
+  }
+);
+
+/**
+ * "Then after kai posts a message in {string} alex's next incremental sync has the room in no section"
+ * kai posts (a unique body); alex's API session then does an incremental /sync with the NEWEST token Element received (the stored token
+ * of alex): the room is in none of join / invite / leave (a left room is neither listed nor woken by the room's new events) and the
+ * message text appears nowhere in the response body.
+ */
+Then(
+  'after {word} posts a message in {string} {word}\'s next incremental sync has the room in no section',
+  async (
+    { request, browser }: { request: APIRequestContext; browser: Browser },
+    posterName: string,
+    roomName: string,
+    userName: string,
+  ) => {
+    const poster = NEBU_USERS[posterName as keyof typeof NEBU_USERS];
+    const user = NEBU_USERS[userName as keyof typeof NEBU_USERS];
+    if (!poster || !user) throw new Error(`Unknown user "${posterName}" / "${userName}".`);
+    const entry = roomIdByScenario.get(roomName);
+    if (!entry) throw new Error(`Room "${roomName}" not in roomIdByScenario — the invite setup must run first`);
+    expect(controlRoomId, 'the control room was provisioned by the recording step').not.toBe('');
+    // Element delivered the control room before (its sync responses list it in rooms.join): from then on an INCREMENTAL sync has nothing for it
+    await expect
+      .poll(() => recordedSyncs.some((sync) => sync.rooms.join?.[controlRoomId] !== undefined), {
+        message: 'Element received the control room (the token Element holds is current)',
+        timeout: 60_000,
+      })
+      .toBe(true);
+    const since = recordedSyncs[recordedSyncs.length - 1]?.nextBatch;
+    expect(since, 'Element received at least one /sync response (the recording step ran)').toBeTruthy();
+
+    const marker = `after-decline-${Date.now()}`;
+    const posterSession = await getApiSession(request, poster, browser);
+    const sent = await request.put(
+      `${MATRIX_BASE}/_matrix/client/v3/rooms/${encodeURIComponent(entry.roomId)}/send/m.room.message/${marker}`,
+      {
+        headers: { Authorization: `Bearer ${posterSession.token}`, 'Content-Type': 'application/json' },
+        data: { msgtype: 'm.text', body: marker },
+      },
+    );
+    expect(sent.status(), `${posterName} can post in the room (control)`).toBe(200);
+
+    const session = await getApiSession(request, user, browser);
+    const resp = await request.get(`${MATRIX_BASE}/_matrix/client/v3/sync?since=${encodeURIComponent(since as string)}&timeout=0`, {
+      headers: { Authorization: `Bearer ${session.token}` },
+    });
+    expect(resp.status()).toBe(200);
+    const raw = await resp.text();
+    const body = JSON.parse(raw) as RecordedSync;
+    for (const section of ['join', 'invite', 'leave'] as const) {
+      expect(Object.keys(body.rooms?.[section] ?? {}), `the room is not in rooms.${section}`).not.toContain(entry.roomId);
+    }
+    expect(raw, 'the message of the room appears nowhere in the response').not.toContain(marker);
+    // discriminating: a stale token would make the server fall back to an INITIAL sync, which lists every joined room (the control room)
+    expect(Object.keys(body.rooms?.join ?? {}), 'the response is an incremental sync (the control room has nothing new)').not.toContain(controlRoomId);
+  }
+);
+
+/**
+ * "Then alex is not a member of {string} on the server"
+ * `GET /joined_rooms` is a stub on Nebu: the joined rooms are read from a full /sync (as the DM steps do). Run LAST: a full sync replaces
+ * the stored token of the user.
+ */
+Then(
+  '{word} is not a member of {string} on the server',
+  async ({ request, browser }: { request: APIRequestContext; browser: Browser }, userName: string, roomName: string) => {
+    const user = NEBU_USERS[userName as keyof typeof NEBU_USERS];
+    if (!user) throw new Error(`Unknown user "${userName}".`);
+    const entry = roomIdByScenario.get(roomName);
+    if (!entry) throw new Error(`Room "${roomName}" not in roomIdByScenario — the invite setup must run first`);
+
+    const session = await getApiSession(request, user, browser);
+    const resp = await request.get(`${MATRIX_BASE}/_matrix/client/v3/sync?timeout=0`, { headers: { Authorization: `Bearer ${session.token}` } });
+    expect(resp.status()).toBe(200);
+    const body = (await resp.json()) as RecordedSync;
+    expect(Object.keys(body.rooms?.join ?? {}), 'the declined room is not a joined room').not.toContain(entry.roomId);
+    expect(Object.keys(body.rooms?.invite ?? {}), 'the declined invitation is not pending any more').not.toContain(entry.roomId);
   }
 );
 

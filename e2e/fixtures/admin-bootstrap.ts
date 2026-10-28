@@ -125,6 +125,10 @@ async function runBootstrapWizard(page: Page): Promise<void> {
   // Claim" always submits with no claim path selected.
   await page.waitForURL(/\/admin\/bootstrap/, { timeout: 10_000 });
   await page.getByLabel(/admin client scopes/i).fill('profile email groups');
+  // The Matrix client (Element SSO) scopes: without `profile` the IdP token carries no `name` / `preferred_username`
+  // and Nebu derives the Matrix localpart from the opaque `sub` (@ciqw...:localhost) instead of @alex:localhost,
+  // so every scenario that names alex / marie / kai finds no such user (OIDC Scopes Law: nothing is requested unless configured).
+  await page.getByLabel(/matrix client scopes/i).fill('profile email');
   // "Connect with OIDC" POST → redirect to /admin/login/start?mode=bootstrap → Dex
   await page.getByRole('button', { name: /connect with oidc/i }).click();
 

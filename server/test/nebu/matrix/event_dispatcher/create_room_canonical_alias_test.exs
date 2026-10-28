@@ -72,6 +72,12 @@ defmodule Nebu.Matrix.EventDispatcher.CreateRoomCanonicalAliasTest do
       :ok
     end
 
+    # story power-levels-enforcement (D10): the room process writes a power-level change through ONE call; the fake models the
+    # transaction with its own column write AND event insert (a failure of either is the change's failure)
+    def apply_power_levels_change(room_id, json, event) do
+      with :ok <- set_power_levels(room_id, json), do: insert_event(event)
+    end
+
     def set_power_levels(room_id, power_levels_json) do
       :ets.insert(@ets, {{:power_levels, room_id}, power_levels_json})
       :ok
@@ -185,7 +191,7 @@ defmodule Nebu.Matrix.EventDispatcher.CreateRoomCanonicalAliasTest do
   defp track_room(room_id) do
     case Nebu.Matrix.Room.RoomSupervisor.lookup_room(room_id) do
       {:ok, pid} ->
-        on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid, :normal, 5_000) end)
+        on_exit(fn -> if Process.alive?(pid), do: (try do GenServer.stop(pid, :normal, 5_000) catch :exit, _ -> :ok end) end)
         :ok
 
       _ ->
@@ -239,6 +245,16 @@ defmodule Nebu.Matrix.EventDispatcher.CreateRoomCanonicalAliasTest do
       assert hd(canonical_alias_events(response.room_id))["content"]["alias"] == "#team-rocket:localhost"
     end
 
+    # Story create-room-input-validation (D5c): the cap counts code points, not bytes (255 x 3-byte characters = 765 bytes is fine)
+    test "a 255 code point name of 3-byte characters is accepted; it has no usable alias localpart" do
+      name = String.duplicate("日", 255)
+      response = Server.create_room(%Core.CreateRoomRequest{creator_id: "@a:localhost", name: name}, build_stream())
+      track_room(response.room_id)
+
+      assert [{_, ^name}] = :ets.lookup(@ets, {:room_name, response.room_id})
+      assert canonical_alias_events(response.room_id) == []
+    end
+
     test "all-invalid name (emoji-only) → no alias, room still created" do
       response = Server.create_room(%Core.CreateRoomRequest{creator_id: "@a:localhost", name: "🎉🎉🎉"}, build_stream())
       track_room(response.room_id)
@@ -252,8 +268,10 @@ defmodule Nebu.Matrix.EventDispatcher.CreateRoomCanonicalAliasTest do
       assert registered_aliases() == []
     end
 
+    # Story create-room-input-validation (D5c): a name is capped at 255 code points (400 M_INVALID_PARAM above), so the longest
+    # name that can reach the alias derivation is 255 characters; it still exceeds the 240-byte localpart budget of "localhost".
     test "an over-long name is bounded so the full alias is <= 255 bytes" do
-      long = String.duplicate("a", 400)
+      long = String.duplicate("a", 255)
       response = Server.create_room(%Core.CreateRoomRequest{creator_id: "@a:localhost", name: long}, build_stream())
       track_room(response.room_id)
 

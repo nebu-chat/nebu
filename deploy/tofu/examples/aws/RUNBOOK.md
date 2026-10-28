@@ -62,7 +62,7 @@ on container port 4000.
 After deploy, verify the server service is reachable via HTTPS:
 
 ```bash
-curl https://<alb_dns_name>/_matrix/client/v3/versions
+curl https://<alb_dns_name>/_matrix/client/versions
 ```
 
 Expected response — a valid Matrix versions JSON, for example:

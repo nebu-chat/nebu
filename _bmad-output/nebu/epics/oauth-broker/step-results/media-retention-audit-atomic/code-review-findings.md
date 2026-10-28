@@ -1,0 +1,4 @@
+# code-review media-retention-audit-atomic (nebu-code-reviewer, 2026-10-15, cycle 1)
+0 MAJOR, 4 MINOR, 10 INFO. Transaction (advisory lock -> FOR UPDATE -> guard -> upsert -> audit, no savepoint), retry semantics, poisoned-transaction handling (audit function rescues Postgrex errors, rollback, retry in a NEW transaction), direction policy, RLS (UPDATE
+policy covers the three keys), value-free logs, compile-guarded seam, sorted controller keys, @spec verified. Applied: M1 11-risks.md, M2 05-building-blocks.md, M3 @doc of Config.upsert/3 + comment, M4 stale "RED phase" test docs; INFO I1 set_at after the lock, I2 corrupt stored value ->
+unknown old value (guard false, no 500), I8 race tests assert the blocked state. I3 (writer seam not compile-guarded) / I6 (spec narrower than real returns) / I7 (no lock_timeout) accepted.

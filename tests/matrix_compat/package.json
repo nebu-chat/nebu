@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "test": "node smoke_test.js"
+    "test": "node smoke_test.js",
+    "test:oauth": "node oauth_metadata_test.js"
   },
   "dependencies": {
     "matrix-js-sdk": "41.3.0"

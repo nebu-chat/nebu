@@ -26,6 +26,7 @@
       data-form="edit-space"
     >
       <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+      <input type="hidden" name="_click_proof" value="" data-click-proof />
       <label class="form-control w-full mb-3">
         <span class="label-text">Name</span>
         <input type="text" name="name" value={@space.name} class="input input-bordered w-full" />
@@ -44,6 +45,7 @@
         action={"/admin/spaces/" <> URI.encode(@space.room_id, &URI.char_unreserved?(&1)) <> "/auto-join"}
       >
         <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+        <input type="hidden" name="_click_proof" value="" data-click-proof />
         <label class="cursor-pointer label gap-2 justify-start">
           <span>Auto-join this space for new users</span>
           <button
@@ -73,6 +75,7 @@
         data-form="add-child"
       >
         <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+        <input type="hidden" name="_click_proof" value="" data-click-proof />
         <div class="form-control grow">
           <label class="label-text">Child room id</label>
           <input
@@ -100,6 +103,7 @@
             action={"/admin/spaces/" <> URI.encode(@space.room_id, &URI.char_unreserved?(&1)) <> "/children/" <> URI.encode(child_id, &URI.char_unreserved?(&1))}
           >
             <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+            <input type="hidden" name="_click_proof" value="" data-click-proof />
             <input type="hidden" name="_method" value="DELETE" />
             <button type="submit" class="btn btn-sm btn-error">Remove</button>
           </form>
@@ -123,6 +127,7 @@
         data-form="add-member"
       >
         <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+        <input type="hidden" name="_click_proof" value="" data-click-proof />
         <%!-- Free-text input progressively enhanced by the CSP-safe fetch typeahead in
              app.js (admin-add-user-autocomplete); shares the rooms widget. --%>
         <div class="form-control grow relative" data-role="user-autocomplete">

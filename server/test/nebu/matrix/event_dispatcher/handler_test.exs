@@ -48,6 +48,12 @@ defmodule Nebu.Matrix.EventDispatcher.HandlerTest do
     def get_room_create_event(_room_id), do: {:error, :not_found}
   end
 
+  # story membership-state-model (DELIBERATE re-pin, AC15 (f); old -> new): the room resolution of get_room_state/2 for a room whose process is not running is
+  # `ensure_room_without_lazy_create!/2`, which reads the room status through `rooms_db_module()`: this fake answers "no such room" for every id.
+  defmodule FakeRoomsDB do
+    def get_room_status(_room_id), do: {:error, :not_found}
+  end
+
   # ─── Build a minimal fake stream (request-context map) ──────────────────────
   # Carries x-user-id in http_request_headers so Nebu.Matrix.RequestMetadata.trusted_identity/1
   # returns the correct caller identity. x-system-role is omitted — defaults to "user".
@@ -74,10 +80,12 @@ defmodule Nebu.Matrix.EventDispatcher.HandlerTest do
 
     # Inject fake messages DB so build_state_events/2 does not hit Ecto (Story 7-33)
     Application.put_env(:event_dispatcher, :messages_db_module, FakeMessagesDB)
+    Application.put_env(:event_dispatcher, :rooms_db_module, FakeRoomsDB)
 
     on_exit(fn ->
       Application.delete_env(:event_dispatcher, :room_registry_module)
       Application.delete_env(:event_dispatcher, :messages_db_module)
+      Application.delete_env(:event_dispatcher, :rooms_db_module)
     end)
 
     :ok
@@ -112,8 +120,10 @@ defmodule Nebu.Matrix.EventDispatcher.HandlerTest do
 
   # ─── AC #3 — get_room_state/2: NOT_FOUND for non-existent room ───────────────
 
-  describe "Server.get_room_state/2 — NOT_FOUND error" do
-    test "raises Nebu.Matrix.Error with NOT_FOUND status when room does not exist" do
+  # story membership-state-model (DELIBERATE re-pin, AC15 (f); old -> new): an UNKNOWN room id answers 403 M_FORBIDDEN "You are not a member of this room"
+  # (was: NOT_FOUND "room not found: <id>"), with no `rooms` row and no room process (D6 (a)); the system-role caller gets the same answer.
+  describe "Server.get_room_state/2 — unknown room: 403 M_FORBIDDEN" do
+    test "raises Nebu.Matrix.Error when room does not exist" do
       # Given: FakeRoomRegistry raises for !ghost:nebu.local
       request = %Core.GetRoomStateRequest{room_id: "!ghost:nebu.local"}
       stream = build_fake_stream(self())
@@ -123,7 +133,7 @@ defmodule Nebu.Matrix.EventDispatcher.HandlerTest do
       end
     end
 
-    test "raised Nebu.Matrix.Error has NOT_FOUND status code" do
+    test "the raised Nebu.Matrix.Error is permission_denied with the explicit M_FORBIDDEN and the fixed text (no room id)" do
       request = %Core.GetRoomStateRequest{room_id: "!ghost:nebu.local"}
       stream = build_fake_stream(self())
 
@@ -136,7 +146,19 @@ defmodule Nebu.Matrix.EventDispatcher.HandlerTest do
         end
 
       refute is_nil(error), "expected Nebu.Matrix.Error to be raised but got nil"
-      assert error.status == Nebu.Matrix.Status.not_found()
+      assert error.status == Nebu.Matrix.Status.permission_denied()
+      assert error.errcode == "M_FORBIDDEN"
+      assert Exception.message(error) == "You are not a member of this room"
+    end
+
+    test "the system-role caller of an unknown room gets the same 403 (the internal fanout never lazily creates a room)" do
+      request = %Core.GetRoomStateRequest{room_id: "!ghost:nebu.local"}
+      stream = %{http_request_headers: %{"x-system-role" => "system"}}
+
+      error = assert_raise Nebu.Matrix.Error, fn -> Server.get_room_state(request, stream) end
+
+      assert error.status == Nebu.Matrix.Status.permission_denied() and error.errcode == "M_FORBIDDEN"
+      assert Exception.message(error) == "You are not a member of this room"
     end
   end
 
@@ -191,6 +213,12 @@ defmodule Nebu.Matrix.EventDispatcher.HandlerTest do
       def insert_event(event) do
         :ets.insert(:grpc_handler_state_key_db, {{:event, event["event_id"]}, event})
         :ok
+      end
+
+      # story power-levels-enforcement (D10): the room process writes a power-level change through ONE call; the fake models the
+      # transaction with its own column write AND event insert (a failure of either is the change's failure)
+      def apply_power_levels_change(room_id, json, event) do
+        with :ok <- set_power_levels(room_id, json), do: insert_event(event)
       end
 
       def set_power_levels(room_id, json) do

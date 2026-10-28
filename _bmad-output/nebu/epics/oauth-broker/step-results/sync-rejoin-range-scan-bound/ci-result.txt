@@ -1,0 +1,8 @@
+CI gate sync-rejoin-range-scan-bound (cq (f)), 2026-10-27, worktree open-chat-oauth, after fix cycle 2.
+Server image rebuilt (.oauth-ci/redeploy.sh), full suite .oauth-ci/ci_run.sh (log .oauth-ci/ci-rejoin-range-scan.log):
+  11300 tests, 32 failures, 8 skipped. All failures are known flaky families:
+  RoomsFallbackName 12, TraceMapNodeControls 3, TemporaryCaptureManager 2, LogStore.Retention 1, WarRoom 1, AlertNotifier 1, MembershipStateModelDocs 1 (query_canceled),
+  and 11 `tick/0 :timeout` in test setup (SyncStreamPositionConcurrencyTest 8, SyncRejoinRangeScanBoundHttpTest 3).
+  The two files plus membership_state_model_docs_test and alert_notifier_test rerun alone on a fresh DB: 78 passed, 0 failures.
+Unit job no DB (dev runs): 1.19 6697 tests 0 failures; 1.20 6690 passed 0 failures.
+E2E element-web: 34 passed, 1 failed (thread_messages @ac3-relations-200 hover flake), rerun alone: 1 passed.

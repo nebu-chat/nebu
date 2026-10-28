@@ -76,6 +76,12 @@ defmodule Nebu.RoomTest do
     end
 
     @doc "Persists power levels JSON for a room."
+    # story power-levels-enforcement (D10): the room process writes a power-level change through ONE call; the fake models the
+    # transaction with its own column write AND event insert (a failure of either is the change's failure)
+    def apply_power_levels_change(room_id, json, event) do
+      with :ok <- set_power_levels(room_id, json), do: insert_event(event)
+    end
+
     def set_power_levels(room_id, power_levels_json) do
       :ets.insert(:fake_room_db, {{:power_levels, room_id}, power_levels_json})
       :ok
@@ -109,6 +115,14 @@ defmodule Nebu.RoomTest do
     def insert_member(_room_id, _user_id), do: {:error, :db_connection_lost}
     def delete_member(_room_id, _user_id), do: {:error, :db_connection_lost}
     def insert_event(_event), do: {:error, :db_connection_lost}
+    # story power-levels-enforcement (D10): the room process writes a power-level change through ONE call; the fake models the
+    # transaction with its own column write AND event insert (a failure of either is the change's failure)
+    def apply_power_levels_change(room_id, json, event) do
+      # the column write of this fake always fails (a dynamic call: the type checker would flag the never-matching `:ok`), so the
+      # event is never inserted, as in the real transaction
+      with :ok <- apply(__MODULE__, :set_power_levels, [room_id, json]), do: insert_event(event)
+    end
+
     def set_power_levels(_room_id, _json), do: {:error, :db_connection_lost}
     # Story 6.8: fail-open — if load_room_settings fails, GenServer defaults to 0.
     def load_room_settings(_room_id), do: {:error, :db_connection_lost}
@@ -139,6 +153,18 @@ defmodule Nebu.RoomTest do
     # Story direct-room-heroes + admin-auto-join-rooms: required stubs.
     def get_room_heroes(_room_id, _exclude_user_id), do: {:ok, %{heroes: [], joined: 0, invited: 0}}
     def list_auto_join_rooms(), do: {:ok, []}
+  end
+
+  # story power-levels-enforcement (D5 (d), AC16 re-pin): FailingWriteDB with @alice:nebu.local already a member (the join
+  # cannot be written through a failing db), so the send-failure tests still reach the failing event write instead of the
+  # membership refusal that the room process now checks first
+  defmodule FailingWriteDBWithMember do
+    for {name, arity} <- FailingWriteDB.__info__(:functions), name != :load_members do
+      args = Macro.generate_arguments(arity, __MODULE__)
+      def unquote(name)(unquote_splicing(args)), do: apply(FailingWriteDB, unquote(name), unquote(args))
+    end
+
+    def load_members(_room_id), do: {:ok, ["@alice:nebu.local"], System.system_time(:millisecond), "{}"}
   end
 
   # ─── Setup ──────────────────────────────────────────────────────────────────
@@ -181,7 +207,7 @@ defmodule Nebu.RoomTest do
     {:ok, pid} = Nebu.Matrix.Room.RoomSupervisor.start_room(room_id)
 
     on_exit(fn ->
-      if Process.alive?(pid), do: GenServer.stop(pid, :normal, 5_000)
+      if Process.alive?(pid), do: (try do GenServer.stop(pid, :normal, 5_000) catch :exit, _ -> :ok end)
     end)
 
     {:ok, pid}
@@ -385,6 +411,8 @@ defmodule Nebu.RoomTest do
     test "happy path: returns {:ok, event_id} with event_id starting with '$'" do
       room_id = unique_room_id("send-event-happy")
       {:ok, _pid} = start_and_track(room_id)
+      # story power-levels-enforcement (D5 (d), AC16 re-pin): the room process re-checks the membership first, so the sender joins
+      :ok = Nebu.Matrix.Room.Server.join(room_id, "@alice:nebu.local")
 
       result =
         Nebu.Matrix.Room.Server.send_event(
@@ -402,6 +430,8 @@ defmodule Nebu.RoomTest do
     test "determinism: Nebu.Matrix.EventId.generate/1 on the same event map yields the same event_id" do
       room_id = unique_room_id("send-event-determinism")
       {:ok, _pid} = start_and_track(room_id)
+      # story power-levels-enforcement (D5 (d), AC16 re-pin): the room process re-checks the membership first, so the sender joins
+      :ok = Nebu.Matrix.Room.Server.join(room_id, "@alice:nebu.local")
 
       content = %{"msgtype" => "m.text", "body" => "Deterministic"}
 
@@ -429,6 +459,8 @@ defmodule Nebu.RoomTest do
     test "idempotency: duplicate txn_id returns the same event_id without re-processing" do
       room_id = unique_room_id("send-event-idempotent")
       {:ok, _pid} = start_and_track(room_id)
+      # story power-levels-enforcement (D5 (d), AC16 re-pin): the room process re-checks the membership first, so the sender joins
+      :ok = Nebu.Matrix.Room.Server.join(room_id, "@alice:nebu.local")
 
       user_id = "@alice:nebu.local"
       txn_id = "txn-idem-001"
@@ -450,6 +482,8 @@ defmodule Nebu.RoomTest do
       room_id_b = unique_room_id("send-event-idem-room-b")
       {:ok, _pid_a} = start_and_track(room_id_a)
       {:ok, _pid_b} = start_and_track(room_id_b)
+      # story power-levels-enforcement (D5 (d), AC16 re-pin): the room process re-checks the membership first, so the sender joins both rooms
+      for room <- [room_id_a, room_id_b], do: :ok = Nebu.Matrix.Room.Server.join(room, "@alice:nebu.local")
 
       user_id = "@alice:nebu.local"
       txn_id = "txn-shared-001"
@@ -466,7 +500,7 @@ defmodule Nebu.RoomTest do
     end
 
     test "DB failure: returns {:error, reason} and ETS NebuTxnDedup is NOT updated" do
-      Application.put_env(:room_manager, :db_module, FailingWriteDB)
+      Application.put_env(:room_manager, :db_module, FailingWriteDBWithMember)
       room_id = unique_room_id("send-event-db-fail")
       {:ok, _pid} = start_and_track(room_id)
 
@@ -482,15 +516,17 @@ defmodule Nebu.RoomTest do
           txn_id
         )
 
-      # Must return error
-      assert {:error, _reason} = result
+      # Must return error (the failing write, not the membership refusal: AC16 re-pin)
+      assert {:error, reason} = result
+      assert reason != :sender_not_joined
 
       # AC #3: ETS must NOT contain the txn key after a failed DB write
-      assert :ets.lookup(:NebuTxnDedup, {room_id, user_id, txn_id}) == []
+      # story state-writer-redaction (DELIBERATE re-pin, Kassandra #5; old -> new): the /send txn key is {room, user, {:send, event_type, txn}} (a txn id is scoped to its path incl. the event type); was {room, user, txn}
+      assert :ets.lookup(:NebuTxnDedup, {room_id, user_id, {:send, "m.room.message", txn_id}}) == []
     end
 
     test "DB failure: no :new_event broadcast is sent (AC #3)" do
-      Application.put_env(:room_manager, :db_module, FailingWriteDB)
+      Application.put_env(:room_manager, :db_module, FailingWriteDBWithMember)
       room_id = unique_room_id("send-event-no-bcast")
       {:ok, _pid} = start_and_track(room_id)
 
@@ -521,6 +557,8 @@ defmodule Nebu.RoomTest do
       # because an explicit state_key signals this is a state event.
       room_id = unique_room_id("9-7-state-key-6arg")
       {:ok, _pid} = start_and_track(room_id)
+      # story power-levels-enforcement (D5 (d), AC16 re-pin): the room process re-checks the membership first, so the sender joins
+      :ok = Nebu.Matrix.Room.Server.join(room_id, "@alice:nebu.local")
 
       # Grant alice admin power (100 >= state_default 50) for the :change_state check.
       admin_power_levels = Nebu.Matrix.Room.PowerLevels.default_levels()
@@ -558,6 +596,8 @@ defmodule Nebu.RoomTest do
       # This verifies the 5-arg backward-compat clause in handle_call delegates correctly.
       room_id = unique_room_id("9-7-state-key-5arg")
       {:ok, _pid} = start_and_track(room_id)
+      # story power-levels-enforcement (D5 (d), AC16 re-pin): the room process re-checks the membership first, so the sender joins
+      :ok = Nebu.Matrix.Room.Server.join(room_id, "@alice:nebu.local")
 
       {:ok, event_id} =
         Nebu.Matrix.Room.Server.send_event(
@@ -586,6 +626,8 @@ defmodule Nebu.RoomTest do
       # admin is level 100. state_default = 50.
       room_id = unique_room_id("9-7-sec-state-forbidden")
       {:ok, _pid} = start_and_track(room_id)
+      # story power-levels-enforcement (D5 (d), AC16 re-pin): the room process re-checks the membership first, so the sender joins
+      :ok = Nebu.Matrix.Room.Server.join(room_id, "@alice:nebu.local")
 
       # Bootstrap power levels: alice has default (0), state_default = 50.
       power_levels = Nebu.Matrix.Room.PowerLevels.default_levels()
@@ -616,6 +658,8 @@ defmodule Nebu.RoomTest do
       # send_event/5 passes state_key=nil → :send_event check → events_default = 0.
       room_id = unique_room_id("9-7-sec-regular-allowed")
       {:ok, _pid} = start_and_track(room_id)
+      # story power-levels-enforcement (D5 (d), AC16 re-pin): the room process re-checks the membership first, so the sender joins
+      :ok = Nebu.Matrix.Room.Server.join(room_id, "@alice:nebu.local")
 
       # Bootstrap power levels — alice stays at default (0).
       power_levels = Nebu.Matrix.Room.PowerLevels.default_levels()
@@ -642,6 +686,8 @@ defmodule Nebu.RoomTest do
       # Admin must still be able to change state events after the fix.
       room_id = unique_room_id("9-7-sec-state-admin-allowed")
       {:ok, _pid} = start_and_track(room_id)
+      # story power-levels-enforcement (D5 (d), AC16 re-pin): the room process re-checks the membership first, so the sender joins
+      :ok = Nebu.Matrix.Room.Server.join(room_id, "@admin:nebu.local")
 
       # Bootstrap power levels — admin gets level 100.
       power_levels = Nebu.Matrix.Room.PowerLevels.default_levels()
@@ -669,6 +715,8 @@ defmodule Nebu.RoomTest do
       # Edge case: a user with exactly state_default level must be allowed.
       room_id = unique_room_id("9-7-sec-state-moderator-allowed")
       {:ok, _pid} = start_and_track(room_id)
+      # story power-levels-enforcement (D5 (d), AC16 re-pin): the room process re-checks the membership first, so the sender joins
+      :ok = Nebu.Matrix.Room.Server.join(room_id, "@mod:nebu.local")
 
       # Bootstrap power levels — moderator gets exactly level 50 = state_default.
       power_levels = Nebu.Matrix.Room.PowerLevels.default_levels()
@@ -886,6 +934,12 @@ defmodule Nebu.RoomTest do
         def insert_event(event) do
           :ets.insert(:fake_room_db, {{:event, event["event_id"]}, event})
           :ok
+        end
+
+        # story power-levels-enforcement (D10): the room process writes a power-level change through ONE call; the fake models the
+        # transaction with its own column write AND event insert (a failure of either is the change's failure)
+        def apply_power_levels_change(room_id, json, event) do
+          with :ok <- set_power_levels(room_id, json), do: insert_event(event)
         end
 
         def set_power_levels(room_id, json) do

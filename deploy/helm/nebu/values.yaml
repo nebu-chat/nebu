@@ -68,6 +68,8 @@ autoscaling:
     targetCPUUtilizationPercentage: 70
 
 postgres:
+  # The server needs PostgreSQL 16 or newer (the /sync membership reads use pg_input_is_valid/2, new in 16): this applies to an
+  # external database as much as to the bundled one.
   # Set external: true to use an external database (default: true).
   # Set to false in local/dev environments to include a bundled PostgreSQL.
   external: true

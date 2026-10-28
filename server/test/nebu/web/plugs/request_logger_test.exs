@@ -138,7 +138,8 @@ defmodule Nebu.Web.Plugs.RequestLoggerTest do
         with_log_level(:debug, fn ->
           capture_log(fn ->
             # /_matrix/client/versions is unauthenticated and deterministically
-            # returns a 200 JSON body without touching the DB — sufficient to
+            # returns a 200 JSON body (story 9: one server_config read; unit runs have no repo =>
+            # OAuth :disabled => the v1.11 body), so the DB is not needed — sufficient to
             # prove response-body capture at the logger level.
             call(:get, "/_matrix/client/versions")
           end)
@@ -367,6 +368,46 @@ defmodule Nebu.Web.Plugs.RequestLoggerTest do
 
       assert String.contains?(log_output, "***MESSAGE_CONTENT***"),
              "the message-content redaction marker must appear in place of the custom state field"
+    end
+  end
+
+  describe "story state-writer-redaction (cycle 2, review M5): the content-body paths are matched on the normalised path" do
+    # a trailing slash and a `//` still reach the route; before cycle 2 they missed the `$`-anchored path regexes (generic redaction only)
+    for {kind, path} <- [
+          {"redact", "/_matrix/client/v3/rooms/!room:localhost/redact/$event:localhost/txn-n"},
+          {"send", "/_matrix/client/v3/rooms/!room:localhost/send/com.example.custom/txn-n"},
+          {"state", "/_matrix/client/v3/rooms/!room:localhost/state/com.example.custom_state"}
+        ],
+        {variant, variant_path} <- [{"a trailing slash", path <> "/"}, {"a double slash", String.replace(path, "/rooms/", "/rooms//")}] do
+      @variant_path variant_path
+      test "#{kind} with #{variant}: a custom body key never reaches the DEBUG log" do
+        log_output =
+          with_log_level(:debug, fn ->
+            capture_log(fn -> call(:put, @variant_path, %{"x_custom" => "distinctive-normalised-path-text"}) end)
+          end)
+
+        refute String.contains?(log_output, "distinctive-normalised-path-text"), "the body is a content body on the normalised path"
+        assert String.contains?(log_output, "***MESSAGE_CONTENT***")
+      end
+    end
+  end
+
+  describe "story state-writer-redaction (code review M4): the /redact body is a content body" do
+    test "PUT .../redact/{eventId}/{txnId}: a custom body key never reaches the DEBUG log (the reason is masked, the marker is shown)" do
+      log_output =
+        with_log_level(:debug, fn ->
+          capture_log(fn ->
+            call(
+              :put,
+              "/_matrix/client/v3/rooms/!room:localhost/redact/$event:localhost/txn-redact",
+              %{"reason" => "distinctive-redaction-reason-text", "x_custom" => "distinctive-redaction-custom-text"}
+            )
+          end)
+        end)
+
+      refute String.contains?(log_output, "distinctive-redaction-custom-text"), "a custom key of a redaction body is content and must never reach the DEBUG log"
+      refute String.contains?(log_output, "distinctive-redaction-reason-text"), "the reason of a redaction must never reach the DEBUG log"
+      assert String.contains?(log_output, "***MESSAGE_CONTENT***"), "the message-content marker must appear in place of the redaction body"
     end
   end
 

@@ -94,10 +94,38 @@ services:
       # not returned on the OIDC callback in stricter browsers → "Invalid login state").
       # Production serves over TLS and leaves this unset (defaults to secure:true).
       NEBU_ADMIN_SESSION_SECURE: "false"
+      # DEV-ONLY (story oauth-client-revocation, SO5): dev Dex omits auth_time and has no SSO session with its
+      # local connectors, so a completed admin login flow IS an interactive login. Approving / revoking an OAuth
+      # client needs a fresh admin sign-in; without auth_time it fails closed unless this is exactly "true".
+      # DEV ONLY, NEVER PRODUCTION: do not copy this variable into a production compose file, Helm values or
+      # tofu template (epic SEC gate 3, G3-6). Production: leave it unset (see docs/architecture/07-deployment.md).
+      NEBU_ADMIN_REAUTH_ALLOW_MISSING_AUTH_TIME: "true"
       # Integration-test escape hatch: set NEBU_RATE_LIMIT_DISABLED=true in the host
       # environment before `docker compose up` to disable the IP rate limiter.
       # make test-integration sets this automatically; never set in production.
       NEBU_RATE_LIMIT_DISABLED: "${NEBU_RATE_LIMIT_DISABLED:-false}"
+      # Per-user limits of the room membership writes (story rate-limits-join-invite-create-room; defaults in
+      # Nebu.Web.RateLimitTiers / Nebu.Matrix.EventDispatcher.Server). Empty = the built-in default; a value that is not a strictly
+      # positive integer is ignored. NEBU_RATE_LIMIT_DISABLED turns off the five tiers (create_room, invite, join, story
+      # moderation-routes-atomic-ban: moderation (kick / ban / unban), story membership-state-model: members_read (GET /members,
+      # GET /initialSync)), NOT the pending-invitation caps.
+      NEBU_RATE_LIMIT_CREATE_ROOM_PER_MIN: "${NEBU_RATE_LIMIT_CREATE_ROOM_PER_MIN:-}"
+      NEBU_RATE_LIMIT_CREATE_ROOM_BURST: "${NEBU_RATE_LIMIT_CREATE_ROOM_BURST:-}"
+      NEBU_RATE_LIMIT_INVITE_PER_MIN: "${NEBU_RATE_LIMIT_INVITE_PER_MIN:-}"
+      NEBU_RATE_LIMIT_INVITE_BURST: "${NEBU_RATE_LIMIT_INVITE_BURST:-}"
+      NEBU_RATE_LIMIT_JOIN_PER_MIN: "${NEBU_RATE_LIMIT_JOIN_PER_MIN:-}"
+      NEBU_RATE_LIMIT_JOIN_BURST: "${NEBU_RATE_LIMIT_JOIN_BURST:-}"
+      NEBU_RATE_LIMIT_MODERATION_PER_MIN: "${NEBU_RATE_LIMIT_MODERATION_PER_MIN:-}"
+      NEBU_RATE_LIMIT_MODERATION_BURST: "${NEBU_RATE_LIMIT_MODERATION_BURST:-}"
+      NEBU_RATE_LIMIT_MEMBERS_READ_PER_MIN: "${NEBU_RATE_LIMIT_MEMBERS_READ_PER_MIN:-}"
+      NEBU_RATE_LIMIT_MEMBERS_READ_BURST: "${NEBU_RATE_LIMIT_MEMBERS_READ_BURST:-}"
+      NEBU_INVITE_MAX_PENDING_PER_INVITER: "${NEBU_INVITE_MAX_PENDING_PER_INVITER:-}"
+      NEBU_INVITE_MAX_PENDING_PER_INVITEE: "${NEBU_INVITE_MAX_PENDING_PER_INVITEE:-}"
+      NEBU_INVITE_MAX_PENDING_PER_PAIR: "${NEBU_INVITE_MAX_PENDING_PER_PAIR:-}"
+      # story membership-state-model (D19): at most N concurrent member-state reads (/sync, /members, /initialSync) per node;
+      # empty = the default 3; a value that is not a strictly positive integer is ignored (boot warning). Not turned off by
+      # NEBU_RATE_LIMIT_DISABLED. Keep it well below the database pool size (10): the member reads must never take the whole pool.
+      NEBU_MEMBER_SLICE_MAX_CONCURRENCY: "${NEBU_MEMBER_SLICE_MAX_CONCURRENCY:-}"
       # e2e-session-refresh-suites: Nebu session ceilings (default 8h, set in
       # Nebu.Web.SessionConfig). Leave empty for normal dev/prod (→ 8h). The
       # `make test-e2e-refresh` target sets these short on the host so the silent

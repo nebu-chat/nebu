@@ -12,3 +12,4 @@
 
 ## My Files
 _This section grows as I create organic files. Update it when adding new files._
+- `references/oauth2-api.md` — Matrix OAuth 2.0 API (v1.15–v1.19) + RFC rules + Nebu broker review checklist. Load for any auth_metadata/DCR/authorize/token/revoke/refresh review. Design: `_bmad-output/planning-artifacts/oauth-broker-spec.md`

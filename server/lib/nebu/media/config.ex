@@ -13,18 +13,26 @@ defmodule Nebu.Media.Config do
   This module is the sole public-API module (ADR-020) for `media_config`; no
   other module reads or writes it directly.
 
-  This story only builds the table + module. It does NOT rewire any existing
+  This story only builds the table + module. It did not rewire any existing
   consumer (`Nebu.Media.max_upload_bytes/0`, `Nebu.Media.ClamAV`'s
   `max_file_size_bytes`, the Story 8a/8b/8d retention workers, Story 7's
-  webhook sender) — each of those keeps reading its own `config.exs`/app-env
-  key for now; rewiring is each citing story's own follow-up work.
+  webhook sender); rewiring is each citing story's own follow-up work. Wired so
+  far: 8d (`released_delete_after_days`, via `get/0`) and 8a (`deleted_days` /
+  `infected_days`, story media-cleanup-reads-media-config, via the strict
+  `retention_days/0`); the others still read their own `config.exs`/app-env key.
 
   ## Interface
 
+  - `retention_days/0` — the two windows of the `MediaCleanupWorker`, read strictly and fresh from the table
+    (`{:ok, %{deleted_days: n, infected_days: n}}` or `{:error, :unavailable | :invalid}`, never the defaults on an error; seam
+    `:media_config_loader`).
   - `get/0` — returns the full 15-key catalog map (atom keys) — 9a's original
     10 keys plus 10c's 4 alert-threshold keys plus 10d's `scan_kill_switch` —
     DB override merged over the `config.exs`-matching defaults below. Every
     key is always present, whether or not a row has ever been written.
+  - `damaged_keys/0` — the sorted string keys of the stored rows that could not be decoded (story `media-config-tolerant-loader`, follow-up `ej`).
+    A damaged row is skipped (that key alone uses its default in `get/0`), its key is logged (never its value) and shown on the Admin media settings
+    page. Empty when every stored row is readable.
   - `upsert/2` — `upsert(key, value)`. The ONLY write path to `media_config`.
     Validates before touching the DB (AC4); on success writes a
     `media_config_updated` audit-log entry (`Nebu.Compliance.AuditWriter`) and
@@ -66,17 +74,50 @@ defmodule Nebu.Media.Config do
   ## Read/write seams (ADR-018 / test isolation)
 
   - `Application.get_env(:nebu_http, :media_config_source)` — 0-arity fun.
-    When set, `get/0` calls it directly (bypassing ETS/GenServer/DB entirely)
-    and merges the returned STRING-keyed override map over the config.exs
-    defaults. Test-only fast path.
+    When set, `get/0` and `damaged_keys/0` call it directly (bypassing
+    ETS/GenServer/DB entirely) and merge the returned STRING-keyed override map
+    over the config.exs defaults. Test-only fast path.
   - `Application.get_env(:nebu_http, :media_config_loader)` — 0-arity fun
     returning a STRING-keyed map of ALL currently persisted `media_config`
-    overrides (typed Elixir terms). Consulted by the GenServer's DB-refresh
-    step (populates ETS) and by `upsert/2`'s old-value lookup. Defaults to a
-    real `SELECT key, value FROM media_config` when unset.
+    overrides (the stored TEXT form or already typed Elixir terms: the per-row
+    decode is idempotent on valid typed values). Consulted by the GenServer's
+    DB-refresh step (populates ETS) and by `upsert/2`'s old-value lookup.
+    Defaults to a real `SELECT key, value FROM media_config` (the RAW rows) when
+    unset. A failing read (the loader raises or answers no map) is no empty
+    table: the refresh keeps the previous damaged set.
+
   - `Application.get_env(:nebu_http, :media_config_writer)` — arity-3 fun
     `fn key, value, set_at -> :ok | {:error, term()} end`. Defaults to a real
     `INSERT ... ON CONFLICT (key) DO UPDATE` when unset.
+
+  ## Tolerant per-row decode (story `media-config-tolerant-loader`, follow-up `ej`)
+
+  Every map a loader / source returns goes through ONE per-row decode (`decode_rows/1`). A row that cannot be decoded is left out (its key uses the
+  default; the other rows keep their values) and its key goes into `damaged_keys/0`. Damaged: a plain integer key whose value is not an integer >= 0 or
+  a string of 1-18 decimal digits (`deleted_days` / `infected_days` additionally > 3650: exactly the range of `retention_days/0`);
+  `released_delete_after_days` likewise, but `nil` / `""` mean off. Unknown keys are ignored (rolling deploys), never reported. The refresh logs only
+  a CHANGE of the damaged set (a warning with the key, an info line when a key is readable again), never a stored value. Nothing is repaired on
+  read: the admin repairs a row by saving the form (`upsert/3`). The writer accepts at most 999_999_999_999_999_999 (18 digits) for a plain integer key
+  and `released_delete_after_days`, exactly what the decode reads back, so a saved value is never read as damaged. The audit `old_value` of a damaged
+  row, and of every key while the table cannot be read at all, is `:unknown` (never the default that masks it).
+
+  ## Atomic audit of the three retention values (story `media-retention-audit-atomic`, follow-up `dn`)
+
+  `released_delete_after_days`, `deleted_days` and `infected_days` decide WHEN stored media is deleted. For these three keys `upsert/3` writes the
+  value and its `media_config_updated` row (`Nebu.Compliance.AuditWriter.log/6`, whose own transaction nests) in ONE `Repo.transaction/1`: a change is
+  never unaudited and an audit row never describes a change that did not happen. The old value is read INSIDE the transaction under a per-key advisory
+  lock (`pg_advisory_xact_lock`, which also covers a key without a row), so a concurrent save cannot turn a checked lengthening into a shortening. The
+  cache refresh and the `:pg` broadcast happen once AFTER the commit, never after a rollback. Policy when the audit row cannot be written, per direction:
+
+    * SHORTENING the retention (`deleted_days` / `infected_days`: new < old; `released_delete_after_days`: "off" -> a number or a number -> a smaller
+      number; for this key `nil` and `0` both mean "off", as the released auto-delete worker treats 0 like nil) is refused: nothing is persisted,
+      `{:error, {:audit, reason}}`, one value-free ERROR (`shortening refused`, key only).
+    * LENGTHENING, disabling or an unchanged value never depends on a broken audit table: the transaction is retried ONCE without the audit function (the
+      direction is re-checked under the lock), one value-free ERROR (`applied without audit`, key only), `:ok`.
+
+  Every other key keeps the sequential behaviour (value, then a best-effort audit row). Test seam of the transaction:
+  `Application.get_env(:nebu_http, :media_config_tx)`, a 4-arity `fn key, value, audit, guard -> :ok | {:error, term()}` replacing the database
+  transaction (compile-guarded to `Mix.env() == :test`); precedence for the three keys: `:media_config_tx` > `:media_config_writer` > the real transaction.
 
   Read/write is inline SQL per ADR-018 (no repository/service layer) — this
   module is the coherent single owner of the `media_config` capability.
@@ -93,13 +134,34 @@ defmodule Nebu.Media.Config do
   @ttl_ms 60_000
   @audit_actor "system:media_config"
 
+  # the longest retention window (days) the admin form allows and `retention_days/0` accepts
+  @retention_days_max 3650
+
+  # the largest value the writer accepts for a plain integer key / `released_delete_after_days`: exactly what the tolerant decode (parse_nonneg/1,
+  # 1-18 digits) reads back, so a value that was saved successfully is never read as damaged
+  @int_max 999_999_999_999_999_999
+
+  # the retention values: their audit row is written in the same transaction as the value (story media-retention-audit-atomic)
+  @retention_keys ~w(deleted_days infected_days released_delete_after_days)
+
+  @sql_lock_media_config_key "SELECT pg_advisory_xact_lock(hashtext('media_config:' || $1::text))"
+  @sql_select_media_config_for_update "SELECT value FROM media_config WHERE key = $1 FOR UPDATE"
+
+  @sql_upsert_media_config """
+  INSERT INTO media_config (key, value, set_at) VALUES ($1, $2, $3)
+  ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, set_at = EXCLUDED.set_at
+  """
+
   @defaults %{
     "max_upload_size_bytes" => 52_428_800,
     "max_file_size_bytes" => 104_857_600,
     "max_pending_per_user" => 20,
     "max_stall_ms" => 20_000,
     "deleted_days" => 30,
-    "infected_days" => 90,
+    # 7 = the effective retention of the MediaCleanupWorker since story 8a (story media-cleanup-reads-media-config,
+    # follow-up du: the worker now reads this key; 9a's earlier 90 was never in effect and would have kept
+    # infected files 83 days longer on an instance nobody configured)
+    "infected_days" => 7,
     "orphaned_hours" => 24,
     "webhook_url" => nil,
     "released_delete_after_days" => nil,
@@ -169,13 +231,109 @@ defmodule Nebu.Media.Config do
   def get do
     case Application.get_env(:nebu_http, :media_config_source) do
       fun when is_function(fun, 0) ->
-        build_catalog(fun.())
+        {decoded, _damaged} = decode_rows(fun.())
+        build_catalog(decoded)
 
       _ ->
         case :ets.whereis(@table) do
-          :undefined -> build_catalog(safe_load())
-          _ -> read_from_ets()
+          :undefined ->
+            {decoded, _damaged} = load_decoded()
+            build_catalog(decoded)
+
+          _ ->
+            read_from_ets()
         end
+    end
+  end
+
+  @doc """
+  The sorted string keys of the stored `media_config` rows that cannot be decoded (story `media-config-tolerant-loader`, follow-up `ej`); `[]` when
+  every stored row is readable. Such a key uses its default in `get/0` (the other keys keep their stored values); for `deleted_days` / `infected_days`
+  the strict `retention_days/0` refuses it, so the automatic media cleanup is paused. A key is never accompanied by its stored value. The cache
+  refresh stores the list next to the catalog; without a running cache it is computed from a fresh load, with the `:media_config_source` seam from
+  the source map.
+  """
+  @spec damaged_keys() :: [String.t()]
+  def damaged_keys do
+    case Application.get_env(:nebu_http, :media_config_source) do
+      fun when is_function(fun, 0) ->
+        {_decoded, damaged} = decode_rows(fun.())
+        damaged
+
+      _ ->
+        case :ets.whereis(@table) do
+          :undefined ->
+            {_decoded, damaged} = load_decoded()
+            damaged
+
+          _ ->
+            read_damaged_from_ets()
+        end
+    end
+  end
+
+  @doc """
+  The two retention windows `Nebu.Workers.MediaCleanupWorker` hard-deletes by (story `media-cleanup-reads-media-config`, follow-up `du`):
+  `{:ok, %{deleted_days: n, infected_days: n}}` (integers 0..3650; a key without a stored row has its default 30 / 7), or `{:error, :unavailable}` (the
+  table cannot be read) / `{:error, :invalid}` (a stored value is not an integer in 0..3650).
+
+  Deliberately NOT `get/0`: `get/0` turns an unreadable table into the DEFAULT values (and the refresh replaces a good cache by the defaults when one
+  read fails), so a destructive caller would delete by 30 days while the admin chose 365. This reads the table fresh on every call (the worker is a daily
+  cron; no cache, no restart, other nodes included) and never guesses: the caller deletes nothing on an error. Test seam: the `:media_config_loader` fun
+  of `get/0` (a map of stored values); anything that is not a map, a raise, an exit or a throw is `{:error, :unavailable}`.
+  """
+  @spec retention_days() ::
+          {:ok, %{deleted_days: non_neg_integer(), infected_days: non_neg_integer()}} | {:error, :unavailable | :invalid}
+  def retention_days do
+    with {:ok, stored} <- load_retention_rows(),
+         {:ok, deleted} <- retention_value(stored, "deleted_days"),
+         {:ok, infected} <- retention_value(stored, "infected_days") do
+      {:ok, %{deleted_days: deleted, infected_days: infected}}
+    end
+  end
+
+  @sql_load_retention_rows "SELECT key, value FROM media_config WHERE key IN ('deleted_days', 'infected_days')"
+
+  defp load_retention_rows do
+    case Application.get_env(:nebu_http, :media_config_loader) do
+      fun when is_function(fun, 0) ->
+        case fun.() do
+          map when is_map(map) -> {:ok, map}
+          _ -> {:error, :unavailable}
+        end
+
+      _ ->
+        load_retention_rows_from_db()
+    end
+  rescue
+    _ -> {:error, :unavailable}
+  catch
+    _kind, _reason -> {:error, :unavailable}
+  end
+
+  defp load_retention_rows_from_db do
+    if Process.whereis(Nebu.Repo) == nil do
+      {:error, :unavailable}
+    else
+      case Ecto.Adapters.SQL.query(Nebu.Repo, @sql_load_retention_rows, []) do
+        {:ok, %{rows: rows}} -> {:ok, Map.new(rows, fn [k, v] -> {k, v} end)}
+        {:error, _reason} -> {:error, :unavailable}
+      end
+    end
+  end
+
+  defp retention_value(stored, key) do
+    case Map.fetch(stored, key) do
+      :error -> {:ok, Map.fetch!(@defaults, key)}
+      {:ok, value} -> parse_retention_days(value)
+    end
+  end
+
+  # the strict reader and the tolerant decode (decode_row/2) agree on what a retention value is: plain digits / a non-negative integer, 0..3650
+  defp parse_retention_days(v) do
+    case parse_nonneg(v) do
+      {:ok, n} when n <= @retention_days_max -> {:ok, n}
+      _ -> {:error, :invalid}
     end
   end
 
@@ -186,12 +344,20 @@ defmodule Nebu.Media.Config do
   `media_config_updated` audit-log entry (AC6) and refreshes this node's own
   cache synchronously before broadcasting the invalidation to `:pg` peers.
 
+  For the three retention keys (`released_delete_after_days`, `deleted_days`,
+  `infected_days`; story media-retention-audit-atomic) the value and its audit
+  row are written in ONE transaction. When the audit row cannot be written a
+  SHORTENING is refused (`{:error, {:audit, reason}}`, nothing persisted) and a
+  lengthening / disabling is persisted without the row (`:ok`, one value-free
+  ERROR); see the moduledoc. For `released_delete_after_days` both `nil` and `0`
+  mean "off". Every other key is written first, its audit row best-effort after.
+
   `actor` (code review m4) attributes the `media_config_updated` audit entry
   to the caller performing the change — Story 9b's admin settings UI passes
   the real admin's identity. Defaults to `@audit_actor` ("system:media_config")
   so every existing arity-2 call site keeps its current behavior unchanged.
   """
-  @spec upsert(String.t(), term(), String.t()) :: :ok | {:error, atom()}
+  @spec upsert(String.t(), term(), String.t()) :: :ok | {:error, atom() | {:audit, term()}}
   def upsert(key, value, actor \\ @audit_actor) do
     with :ok <- validate_known_key(key),
          :ok <- validate_value(key, value) do
@@ -333,13 +499,19 @@ defmodule Nebu.Media.Config do
   defp validate_value("released_delete_after_days", nil), do: :ok
 
   defp validate_value("released_delete_after_days", value)
-       when is_integer(value) and value >= 0,
+       when is_integer(value) and value >= 0 and value <= @int_max,
        do: :ok
 
   defp validate_value("released_delete_after_days", _), do: {:error, :invalid_value}
 
+  # the two retention windows the MediaCleanupWorker reads (retention_days/0): the writer accepts exactly what the reader accepts (a stored
+  # value the reader refuses would stop ALL cleanup, Kassandra L-1 of story media-cleanup-reads-media-config)
+  defp validate_value(key, value) when key in ["deleted_days", "infected_days"] do
+    if is_integer(value) and value >= 0 and value <= @retention_days_max, do: :ok, else: {:error, :invalid_value}
+  end
+
   defp validate_value(key, value) when key in @nonneg_int_keys do
-    if is_integer(value) and value >= 0, do: :ok, else: {:error, :invalid_value}
+    if is_integer(value) and value >= 0 and value <= @int_max, do: :ok, else: {:error, :invalid_value}
   end
 
   # Unreachable for a known key (validate_known_key/1 already rejected any
@@ -365,14 +537,185 @@ defmodule Nebu.Media.Config do
       String.contains?(token, "/")
   end
 
-  defp do_upsert(key, value, actor) do
+  # The three retention keys: value + audit row in ONE transaction (see the moduledoc); the existing sequential fake path (`:media_config_writer`, which
+  # cannot roll back) stays for them when no transaction seam is set.
+  defp do_upsert(key, value, actor) when key in @retention_keys do
+    case retention_tx_fun() do
+      nil -> do_upsert_sequential(key, value, actor)
+      tx -> run_retention_tx(tx, key, value, actor)
+    end
+  end
+
+  defp do_upsert(key, value, actor), do: do_upsert_sequential(key, value, actor)
+
+  # The test seam of the transaction (test builds only, compile-guarded): a 4-arity function REPLACING the database transaction.
+  if Mix.env() == :test do
+    defp retention_tx_fun do
+      case Application.get_env(:nebu_http, :media_config_tx) do
+        fun when is_function(fun, 4) -> fun
+        _ -> retention_tx_fun_default()
+      end
+    end
+  else
+    defp retention_tx_fun, do: retention_tx_fun_default()
+  end
+
+  # nil = the sequential fake path (a `:media_config_writer` fake is set), else the real transaction
+  defp retention_tx_fun_default do
+    case Application.get_env(:nebu_http, :media_config_writer) do
+      nil -> &retention_tx_db/4
+      _fake -> nil
+    end
+  end
+
+  # First attempt WITH the audit function. Only a failed audit (`{:error, {:audit, _}}`) is retried, ONCE, without it and under the direction guard
+  # (re-read of the old value under the lock): a lengthening is applied, a shortening is refused. Any other error is passed through (no retry, no
+  # refresh). The cache refresh + :pg broadcast run once after a commit, never after a rollback.
+  defp run_retention_tx(tx, key, value, actor) do
+    case tx.(key, value, retention_audit_fun(key, value, actor), nil) do
+      :ok ->
+        trigger_refresh()
+        :ok
+
+      {:error, {:audit, _reason}} ->
+        case tx.(key, value, nil, retention_guard(key, value)) do
+          :ok ->
+            # value-free: the key only (no value, no actor, not the writer's reason)
+            Logger.error(
+              "Nebu.Media.Config: the media_config_updated row of a retention change could not be written; " <>
+                "lengthening applied without audit key=#{inspect(key)}"
+            )
+
+            trigger_refresh()
+            :ok
+
+          {:error, {:audit, _reason}} = refused ->
+            Logger.error(
+              "Nebu.Media.Config: the media_config_updated row of a retention change could not be written; " <>
+                "shortening refused key=#{inspect(key)}"
+            )
+
+            refused
+
+          {:error, _reason} = error ->
+            error
+        end
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  # `fn old -> :ok | {:error, reason}`: writes the audit row. NEVER raises (AuditWriter only rescues RuntimeError): a raise, an exit, an error tuple or any
+  # other answer counts as a failed audit.
+  defp retention_audit_fun(key, value, actor) do
+    fn old ->
+      try do
+        case AuditWriter.log(
+               actor,
+               "media_config_updated",
+               "media_config",
+               key,
+               %{key: key, old_value: old, new_value: value},
+               "success"
+             ) do
+          :ok -> :ok
+          {:error, reason} -> {:error, reason}
+        end
+      rescue
+        _ -> {:error, :audit_raised}
+      catch
+        _kind, _reason -> {:error, :audit_raised}
+      end
+    end
+  end
+
+  # `fn old -> boolean`: true = no data is deleted sooner (lengthening, disabling, unchanged). For released_delete_after_days nil AND 0 both mean "off"
+  # (the worker MediaReleasedAutoDeleteWorker treats 0 as invalid = off, like nil): a new nil / 0 is a deactivation; from an old "off" every positive
+  # number is a SHORTENING (0 -> 5 too); positive -> positive: lengthening iff new >= old. For deleted_days / infected_days 0 is the shortest retention.
+  # An unknown old value (:unknown, see read_old_value_locked/2) is never a lengthening (fail-safe).
+  defp retention_guard("released_delete_after_days", new) do
+    fn old ->
+      cond do
+        new in [nil, 0] -> true
+        is_integer(old) and old > 0 and is_integer(new) -> new >= old
+        true -> false
+      end
+    end
+  end
+
+  defp retention_guard(_key, new) do
+    fn old -> is_integer(old) and is_integer(new) and new >= old end
+  end
+
+  # The real transaction: advisory lock of the key (also serializes a key without a row), the old value read under it, the direction guard (retry only),
+  # the value upsert, the audit function. Any failure rolls everything back. `{:error, {:audit, reason}}` = rolled back by the audit / the guard.
+  defp retention_tx_db(key, value, audit, guard) do
+    repo = Nebu.Repo
+
+    result =
+      repo.transaction(fn ->
+        Ecto.Adapters.SQL.query!(repo, @sql_lock_media_config_key, [key])
+        # taken after the lock: set_at orders the writes of two saves like the commits
+        set_at = System.system_time(:millisecond)
+        old = read_old_value_locked(repo, key)
+
+        if guard != nil and guard.(old) != true, do: repo.rollback({:audit, :not_lengthening})
+
+        case Ecto.Adapters.SQL.query(repo, @sql_upsert_media_config, [key, encode_value(key, value), set_at]) do
+          {:ok, _result} -> :ok
+          {:error, reason} -> repo.rollback(reason)
+        end
+
+        case audit && audit.(old) do
+          nil -> :ok
+          :ok -> :ok
+          {:error, reason} -> repo.rollback({:audit, reason})
+        end
+      end)
+
+    case result do
+      {:ok, :ok} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  rescue
+    # repo down / not started, a failed statement
+    e in [RuntimeError, DBConnection.ConnectionError, UndefinedFunctionError, Postgrex.Error] -> {:error, e}
+  catch
+    :exit, _ -> {:error, :unavailable}
+  end
+
+  # the effective old value: the stored decoded value, or the default of the key when no row exists. A damaged stored value (not a number) is `:unknown`:
+  # the guard never accepts it as a lengthening (a refused shortening, no crash of the caller) and the audit row records "unknown".
+  defp read_old_value_locked(repo, key) do
+    case Ecto.Adapters.SQL.query!(repo, @sql_select_media_config_for_update, [key]) do
+      %{rows: [[stored]]} ->
+        case decode_row(key, stored) do
+          {:ok, decoded} -> decoded
+          :error -> :unknown
+        end
+
+      _ ->
+        Map.get(@defaults, key)
+    end
+  end
+
+  # Every NON-retention key (and the writer-seam path of the retention keys, a fake that cannot roll back): value first, then the best-effort audit row
+  # (unchanged behaviour: a failed audit is only logged).
+  defp do_upsert_sequential(key, value, actor) do
     loader = Application.get_env(:nebu_http, :media_config_loader, &default_loader/0)
     writer = Application.get_env(:nebu_http, :media_config_writer, &default_writer/3)
 
+    # a damaged stored value is `:unknown` (never the default it is masked by, never the stored text)
     old_value =
       case loader.() do
-        map when is_map(map) -> Map.get(map, key, Map.get(@defaults, key))
-        _ -> Map.get(@defaults, key)
+        map when is_map(map) ->
+          {decoded, damaged} = decode_rows(map)
+          if key in damaged, do: :unknown, else: Map.get(decoded, key, Map.get(@defaults, key))
+
+        # the table could not be read (no map): the old value is not known either
+        _ ->
+          :unknown
       end
 
     set_at = System.system_time(:millisecond)
@@ -433,22 +776,58 @@ defmodule Nebu.Media.Config do
   # ── Read path internals ─────────────────────────────────────────────────
 
   defp do_refresh do
-    catalog = build_catalog(safe_load())
-    :ets.insert(@table, {:catalog, catalog})
+    previous = read_damaged_from_ets()
+
+    {catalog, damaged} =
+      case safe_load() do
+        {:ok, raw} ->
+          {decoded, damaged} = decode_rows(raw)
+          log_damaged_change(previous, damaged)
+          {build_catalog(decoded), damaged}
+
+        # the whole-table read failed (DB down, loader raised / answered no map): the defaults as before, but an unreadable table is no recovery of a
+        # row, so the previous damaged set is kept (and no "readable again" line is logged)
+        :error ->
+          {build_catalog(%{}), previous}
+      end
+
+    :ets.insert(@table, [{:catalog, catalog}, {:damaged_keys, damaged}])
     catalog
   end
 
+  # `{:ok, raw_rows_map}` or `:error` (the loader raised or answered no map)
   defp safe_load do
     loader = Application.get_env(:nebu_http, :media_config_loader, &default_loader/0)
 
     case loader.() do
-      map when is_map(map) -> map
-      _ -> %{}
+      map when is_map(map) -> {:ok, map}
+      _ -> :error
     end
   rescue
     e ->
       Logger.warning("Nebu.Media.Config: loader raised: #{inspect(e)}")
-      %{}
+      :error
+  end
+
+  # fresh (uncached) load, decoded: `{decoded_map, damaged_keys}`; an unreadable table is `{%{}, []}`
+  defp load_decoded do
+    case safe_load() do
+      {:ok, raw} -> decode_rows(raw)
+      :error -> {%{}, []}
+    end
+  end
+
+  # D3: one warning per newly damaged key, one info line per key that is readable again. The KEY only: never the stored value, never an exception.
+  defp log_damaged_change(previous, damaged) do
+    for key <- damaged -- previous do
+      Logger.warning("Nebu.Media.Config: stored media_config value is invalid, using the default key=#{inspect(key)}")
+    end
+
+    for key <- previous -- damaged do
+      Logger.info("Nebu.Media.Config: stored media_config value readable again key=#{inspect(key)}")
+    end
+
+    :ok
   end
 
   defp read_from_ets do
@@ -461,6 +840,32 @@ defmodule Nebu.Media.Config do
       Logger.warning("Nebu.Media.Config: unexpected error reading ETS table: #{inspect(e)}")
       build_catalog(%{})
   end
+
+  defp read_damaged_from_ets do
+    case :ets.lookup(@table, :damaged_keys) do
+      [{:damaged_keys, keys}] when is_list(keys) -> keys
+      _ -> []
+    end
+  rescue
+    _ -> []
+  end
+
+  # D1/D2: decodes a STRING-keyed map of stored values row by row: `{decoded_map, sorted_damaged_keys}`. A row that cannot be decoded is left OUT (its
+  # key uses the default in build_catalog/1). Idempotent on already-typed values. Anything that is no map is an empty table. Unknown keys pass through
+  # untouched (build_catalog/1 ignores them: rolling-deploy rule of story 9a) and are never reported.
+  defp decode_rows(rows) when is_map(rows) do
+    {decoded, damaged} =
+      Enum.reduce(rows, {%{}, []}, fn {key, value}, {acc, bad} ->
+        case decode_row(key, value) do
+          {:ok, decoded_value} -> {Map.put(acc, key, decoded_value), bad}
+          :error -> {acc, [key | bad]}
+        end
+      end)
+
+    {decoded, Enum.sort(damaged)}
+  end
+
+  defp decode_rows(_other), do: {%{}, []}
 
   defp build_catalog(override) when is_map(override) do
     # Code review (Cycle 0, M1): `override` is whatever the loader seam
@@ -480,14 +885,13 @@ defmodule Nebu.Media.Config do
 
   defp build_catalog(_), do: build_catalog(%{})
 
-  defp coerce_value("released_delete_after_days", nil), do: nil
-  defp coerce_value("released_delete_after_days", v) when is_integer(v), do: v
-  defp coerce_value("released_delete_after_days", v) when is_binary(v), do: String.to_integer(v)
-
-  defp coerce_value(key, v) when key in @nonneg_int_keys and is_integer(v), do: v
-  defp coerce_value(key, v) when key in @nonneg_int_keys and is_binary(v), do: String.to_integer(v)
-
-  defp coerce_value(_key, v), do: v
+  # Total: never raises. A value that is not decodable (the callers decode first, so this is only a safety net) is the key's default.
+  defp coerce_value(key, v) do
+    case decode_row(key, v) do
+      {:ok, decoded} -> decoded
+      :error -> Map.fetch!(@defaults, key)
+    end
+  end
 
   defp ensure_table do
     case :ets.whereis(@table) do
@@ -528,26 +932,22 @@ defmodule Nebu.Media.Config do
   defp default_loader do
     if Process.whereis(Nebu.Repo) != nil do
       case Ecto.Adapters.SQL.query(Nebu.Repo, @sql_load_media_config, []) do
+        # the RAW rows (TEXT): the per-row decode (decode_rows/1) belongs to the callers, so ONE damaged row can no longer raise here
         {:ok, %{rows: rows}} ->
-          Map.new(rows, fn [k, v] -> {k, decode_value(k, v)} end)
+          Map.new(rows, fn [k, v] -> {k, v} end)
 
         {:error, reason} ->
           Logger.warning("Nebu.Media.Config: failed to load media_config: #{inspect(reason)}")
-          %{}
+          :error
       end
     else
-      %{}
+      :error
     end
   rescue
     e ->
       Logger.warning("Nebu.Media.Config: unexpected error loading media_config: #{inspect(e)}")
-      %{}
+      :error
   end
-
-  @sql_upsert_media_config """
-  INSERT INTO media_config (key, value, set_at) VALUES ($1, $2, $3)
-  ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, set_at = EXCLUDED.set_at
-  """
 
   defp default_writer(key, value, set_at) do
     case Ecto.Adapters.SQL.query(Nebu.Repo, @sql_upsert_media_config, [
@@ -570,9 +970,29 @@ defmodule Nebu.Media.Config do
   defp encode_value("released_delete_after_days", nil), do: ""
   defp encode_value(_key, value), do: to_string(value)
 
-  defp decode_value("webhook_url", ""), do: nil
-  defp decode_value("released_delete_after_days", ""), do: nil
-  defp decode_value("released_delete_after_days", v), do: String.to_integer(v)
-  defp decode_value(key, v) when key in @nonneg_int_keys, do: String.to_integer(v)
-  defp decode_value(_key, v), do: v
+  # Per-row decode of a stored value: `{:ok, decoded}` or `:error` (damaged). Total: never raises. Idempotent on valid typed values.
+  defp decode_row("webhook_url", ""), do: {:ok, nil}
+
+  defp decode_row("released_delete_after_days", v) when v in [nil, ""], do: {:ok, nil}
+  defp decode_row("released_delete_after_days", v), do: parse_nonneg(v)
+
+  defp decode_row(key, v) when key in ["deleted_days", "infected_days"], do: parse_retention_days_value(v)
+  defp decode_row(key, v) when key in @nonneg_int_keys, do: parse_nonneg(v)
+  defp decode_row(_key, v), do: {:ok, v}
+
+  defp parse_retention_days_value(v) do
+    case parse_retention_days(v) do
+      {:ok, n} -> {:ok, n}
+      {:error, _} -> :error
+    end
+  end
+
+  # an integer >= 0 or a string of plain decimal digits (no sign, no space, no fraction, no exponent; leading zeros allowed; 1-18 digits)
+  defp parse_nonneg(n) when is_integer(n) and n >= 0, do: {:ok, n}
+
+  defp parse_nonneg(s) when is_binary(s) do
+    if Regex.match?(~r/\A[0-9]{1,18}\z/, s), do: {:ok, String.to_integer(s)}, else: :error
+  end
+
+  defp parse_nonneg(_other), do: :error
 end

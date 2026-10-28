@@ -51,6 +51,7 @@
                   data-device-id={device["device_id"]}
                 >
                   <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+                  <input type="hidden" name="_click_proof" value="" data-click-proof />
                   <label class="sr-only" for={"rename-" <> device["device_id"]}>
                     New display name for device {device["device_id"]}
                   </label>
@@ -88,6 +89,7 @@
                   data-confirm={"Revoke device " <> device["device_id"] <> "? This logs out its session and removes its keys."}
                 >
                   <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+                  <input type="hidden" name="_click_proof" value="" data-click-proof />
                   <input type="hidden" name="_method" value="DELETE" />
                   <button
                     type="submit"

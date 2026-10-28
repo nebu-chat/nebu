@@ -17,6 +17,7 @@
 import { Given, When, Then } from '../../fixtures/nebu-fixtures';
 import { expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
+import { saveMappingFormWithAdminReauth } from '../../fixtures/oauth-admin';
 
 const ADMIN_BASE_URL = process.env.NEBU_ADMIN_URL ?? 'http://localhost:8008';
 
@@ -90,3 +91,12 @@ export async function navigateToClaimMappingSettings(page: Page): Promise<void> 
   await page.goto(`${ADMIN_BASE_URL}/admin/config/claim-mapping`);
   await page.waitForLoadState('domcontentloaded', { timeout: 15_000 });
 }
+
+// ---------------------------------------------------------------------------
+// Step: save the claim mapping form (story admin-config-privileged-forms-sweep: saving needs a fresh sign-in at the IdP)
+// ---------------------------------------------------------------------------
+When('the operator saves the claim mapping form', async ({ page }: { page: Page }) => {
+  const outcome = await saveMappingFormWithAdminReauth(page, { page: '/admin/config/claim-mapping', button: /^save$/i });
+  // Every save needs its OWN fresh sign-in (the marker is single use): a save that went through without the IdP login would mean the gate is gone.
+  expect(outcome.reauthenticated, 'saving the claim mapping goes through the fresh sign-in at the IdP').toBe(true);
+});

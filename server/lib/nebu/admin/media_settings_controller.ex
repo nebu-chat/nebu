@@ -18,7 +18,8 @@ defmodule Nebu.Admin.MediaSettingsController do
   ## Persistence seam (ADR-020)
 
   The ONLY calls this controller makes into the `Nebu.Media` namespace are
-  `Nebu.Media.Config.get/0` (read, to pre-fill the form) and
+  `Nebu.Media.Config.get/0` (read, to pre-fill the form), `Nebu.Media.Config.damaged_keys/0`
+  (the stored rows that cannot be read: a warning above the form, and a plain save rewrites them) and
   `Nebu.Media.Config.upsert/3` (write, on save — one call per key, the real
   Story 9a public API; NOT the story text's stale `upsert/1` map-based
   phrasing). No `Postgrex`/`Ecto.Adapters.SQL` call against `media_config`
@@ -102,7 +103,7 @@ defmodule Nebu.Admin.MediaSettingsController do
       `Nebu.Media.StorageConfig.validate_iam_sts_fields/1` so the guard holds
       regardless of caller.
     * `test_connection/2` — resolves the submitted candidate (blank secrets
-      resolved server-side against the stored secret) via
+      resolved server-side against the stored secret, ONLY when the submitted endpoint and scheme are the stored ones, else the form must carry the keys) via
       `Nebu.Media.StorageConfig.test_connection/1` and renders a fixed,
       non-leaking success/failure message — never persists, never touches
       `upsert/2`. A raw `ExAws`/`:hackney` error reason is logged
@@ -119,6 +120,10 @@ defmodule Nebu.Admin.MediaSettingsController do
   alias Nebu.Media.StorageConfig
 
   plug Nebu.Admin.Auth, :require_admin
+
+  # story admin-forms-gate-sweep: the strict fetch metadata of a user-clicked form submit (Safari: the click proof) before anything is read or changed
+  import Nebu.Admin.OAuthAdminHelpers, only: [click_gate: 2]
+  plug :click_gate when action in [:test_connection]
 
   @storage_generic_failure_message "Connection failed. Check the endpoint, bucket, region, and " <>
                                       "credentials, then try again."
@@ -137,6 +142,9 @@ defmodule Nebu.Admin.MediaSettingsController do
   )
 
   @all_fields @numeric_fields ++ ~w(webhook_url released_delete_after_days)
+
+  # the writer's own cap (Nebu.Media.Config: what its tolerant decode reads back), so a saved value is never read as damaged
+  @released_delete_after_days_max 999_999_999_999_999_999
 
   # {min, max} bounds per numeric field — see moduledoc for rationale.
   @bounds %{
@@ -180,7 +188,20 @@ defmodule Nebu.Admin.MediaSettingsController do
 
   # ── Storage-target config + Test Connection (story 11b) ─────────────────
 
+  # story admin-forms-gate-sweep (D1 / D2): the media policy and the storage target are `:marker` forms: strict fetch metadata, then a fresh admin sign-in bound
+  # to /admin/media/settings (one marker for both forms: the page holds ONE object, the instance configuration), before anything is validated or written;
+  # the marker is consumed after a SUCCESSFUL save only
+  @page "/admin/media/settings"
+
   def save_storage(conn, params) do
+    with {:ok, conn, _kind} <- Nebu.Admin.OAuthAdminHelpers.gate(conn, :marker, @page) do
+      do_save_storage(conn, params)
+    else
+      {:halt, conn} -> conn
+    end
+  end
+
+  defp do_save_storage(conn, params) do
     case validate_storage_params(params) do
       {:ok, changes} ->
         handle_storage_save(conn, params, changes)
@@ -212,6 +233,16 @@ defmodule Nebu.Admin.MediaSettingsController do
           storage_config: storage_config_from_params(params),
           test_connection_result:
             {:error, StorageConfig.describe_invalid_endpoint(candidate.endpoint)}
+        )
+
+      # story admin-forms-gate-sweep D4: the stored credentials belong to the stored endpoint and scheme only
+      {:error, :secret_required} ->
+        conn
+        |> put_status(200)
+        |> render_settings(state_from_config(Config.get()),
+          storage_config: storage_config_from_params(params),
+          test_connection_result:
+            {:error, "Enter the access key and secret key to test a different endpoint or a changed Use SSL setting: the stored credentials are only used for the stored endpoint and scheme. Nothing was saved."}
         )
 
       {:error, reason} ->
@@ -286,6 +317,7 @@ defmodule Nebu.Admin.MediaSettingsController do
     case StorageConfig.upsert(changes, actor_id(conn)) do
       :ok ->
         conn
+        |> Nebu.Admin.Auth.consume_reauth()
         |> put_flash(:info, "Storage settings saved")
         |> redirect(to: "/admin/media/settings")
 
@@ -641,15 +673,24 @@ defmodule Nebu.Admin.MediaSettingsController do
   end
 
   def save(conn, params) do
+    with {:ok, conn, _kind} <- Nebu.Admin.OAuthAdminHelpers.gate(conn, :marker, @page) do
+      do_save(conn, params)
+    else
+      {:halt, conn} -> conn
+    end
+  end
+
+  defp do_save(conn, params) do
     case validate_and_normalize(params) do
       {:ok, changes} ->
         previous = Config.get()
         actor = actor_id(conn)
-        changed = changed_keys(changes, previous)
+        changed = changed_keys(changes, previous, Config.damaged_keys())
 
         case persist(changed, actor) do
           :ok ->
             conn
+            |> Nebu.Admin.Auth.consume_reauth()
             |> put_flash(:info, "Media settings saved")
             |> maybe_warn_released_delete_change(previous, changes)
             |> redirect(to: "/admin/media/settings")
@@ -750,12 +791,12 @@ defmodule Nebu.Admin.MediaSettingsController do
       {:ok, nil}
     else
       case Integer.parse(trimmed) do
-        {n, ""} when n >= 0 ->
+        {n, ""} when n >= 0 and n <= @released_delete_after_days_max ->
           {:ok, n}
 
         _ ->
           {:error,
-           "released_delete_after_days must be a non-negative whole number, or left blank to disable."}
+           "released_delete_after_days must be a non-negative whole number (at most #{@released_delete_after_days_max}), or left blank to disable."}
       end
     end
   end
@@ -776,9 +817,13 @@ defmodule Nebu.Admin.MediaSettingsController do
   # controller's validated params) is string-keyed — @key_to_atom bridges
   # the two, mirroring Nebu.Media.Config's own internal convention for the
   # same key-space translation.
-  defp changed_keys(changes, previous) do
+  #
+  # story media-config-tolerant-loader (D6): a key whose stored row is damaged (`Config.damaged_keys/0`) shows its default in `previous`, so a plain
+  # "Save" of that shown default would be filtered out as "unchanged" and the damaged row would stay. A damaged key that is part of the submitted form is
+  # therefore always written (normal gate, validation and audit of `Config.upsert/3`); a damaged key the form does not carry is not in `changes`.
+  defp changed_keys(changes, previous, damaged) do
     Map.filter(changes, fn {key, value} ->
-      Map.get(previous, Map.fetch!(@key_to_atom, key)) != value
+      key in damaged or Map.get(previous, Map.fetch!(@key_to_atom, key)) != value
     end)
   end
 
@@ -796,8 +841,14 @@ defmodule Nebu.Admin.MediaSettingsController do
   # shrinks the blast radius to just the fields that actually changed,
   # rather than always all 9, so the residual risk here is now much smaller
   # than a full-catalog write on every save.
+  # One `Config.upsert/3` per changed key, in SORTED key order (deterministic: which keys are already committed when a later one fails does not depend on
+  # map iteration). There is no cross-key atomicity (the known per-key limitation of this controller): the earlier keys stay committed when a later one
+  # fails. A refused shortening of a retention value (`{:error, {:audit, _}}`, story media-retention-audit-atomic: its audit row cannot be written) takes
+  # the same generic failure path as any other error: the flash never names the reason.
   defp persist(changes, actor) do
-    Enum.reduce_while(changes, :ok, fn {key, value}, :ok ->
+    changes
+    |> Enum.sort()
+    |> Enum.reduce_while(:ok, fn {key, value}, :ok ->
       case Config.upsert(key, value, actor) do
         :ok -> {:cont, :ok}
         {:error, _reason} = err -> {:halt, err}
@@ -812,7 +863,7 @@ defmodule Nebu.Admin.MediaSettingsController do
   defp actor_id(conn) do
     case conn.assigns[:current_user] do
       %{"matrix_user_id" => uid} when is_binary(uid) and uid != "" -> uid
-      %{"sub" => sub} when is_binary(sub) -> sub
+      %{"sub" => sub} when is_binary(sub) and sub != "" -> sub
       _ -> "system:media_config"
     end
   end
@@ -853,6 +904,20 @@ defmodule Nebu.Admin.MediaSettingsController do
     Map.new(@all_fields, fn field -> {field, params[field] || ""} end)
   end
 
+  # story media-config-tolerant-loader (D5): the damaged keys split by what the admin can do about them on THIS page. A key of the form is rewritten by a
+  # save (with the value shown in its field); a key the form does not carry (alert thresholds, scan_kill_switch, mime_denylist) can only be repaired in
+  # the database. `:damaged_retention_keys` = the keys whose damage pauses the automatic cleanup.
+  defp assign_damaged_media_keys(conn) do
+    damaged = Config.damaged_keys()
+    {on_form, off_form} = Enum.split_with(damaged, &(&1 in @all_fields))
+
+    conn
+    |> assign(:damaged_media_keys, damaged)
+    |> assign(:damaged_form_keys, on_form)
+    |> assign(:damaged_other_keys, off_form)
+    |> assign(:damaged_retention_keys, Enum.filter(damaged, &(&1 in ["deleted_days", "infected_days"])))
+  end
+
   defp nilable_to_string(nil), do: ""
   defp nilable_to_string(n) when is_integer(n), do: to_string(n)
 
@@ -862,6 +927,7 @@ defmodule Nebu.Admin.MediaSettingsController do
 
     conn
     |> assign(:state, state)
+    |> assign_damaged_media_keys()
     |> assign(:storage_config, storage_config)
     |> assign(:access_key_configured, not is_nil(current_storage_cfg.access_key))
     |> assign(:secret_key_configured, not is_nil(current_storage_cfg.secret_key))

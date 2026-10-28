@@ -1,9 +1,14 @@
 defmodule Nebu.Matrix.Profile.DB do
   @moduledoc "PostgreSQL persistence for user profiles."
 
+  # story gdpr-erasure-global-data (D17): nothing is written for a user whose erasure is under way or done, so a login or a profile
+  # PUT can never revert the "Deleted User" anonymisation. Like the initial-sync persist (D5) the guard locks the `users` row FOR SHARE
+  # in the same statement: it conflicts with the erasure's status UPDATE, so an upsert that races the erasure waits for its commit and
+  # then sees the status. `profiles.user_id` references `users`, so a row without a `users` row could not be written anyway.
   @sql_upsert """
   INSERT INTO profiles (user_id, displayname, avatar_url, updated_at)
-  VALUES ($1, $2, $3, $4)
+  SELECT $1::text, $2::text, $3::text, $4::bigint
+  WHERE EXISTS (SELECT 1 FROM users WHERE user_id = $1::text AND deletion_status IS NULL FOR SHARE)
   ON CONFLICT (user_id)
   DO UPDATE SET
     displayname = COALESCE(EXCLUDED.displayname, profiles.displayname),
@@ -17,7 +22,8 @@ defmodule Nebu.Matrix.Profile.DB do
   Pass `nil` for a field to leave the existing value unchanged (COALESCE logic ensures
   nil values do not overwrite existing data — only non-nil values are written).
 
-  Returns `:ok` on success or `{:error, reason}` on DB failure.
+  Returns `:ok` on success or `{:error, reason}` on DB failure. For an erased user (`users.deletion_status` set) nothing is
+  written and the answer is still `:ok`.
   """
   @spec upsert_profile(String.t(), String.t() | nil, String.t() | nil) :: :ok | {:error, term()}
   def upsert_profile(user_id, displayname, avatar_url) do

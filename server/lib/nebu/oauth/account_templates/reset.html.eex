@@ -1,0 +1,53 @@
+<p>When an app asks to reset your encryption identity (your cross-signing keys), you approve or decline the request here. Approve only if you started that reset yourself, just now.</p>
+<%= if @requests == [] do %>
+<p>There is no pending request. Start "Reset identity" in your app first, then come back.</p>
+<% else %>
+<%= if !@fresh and !@no_auth_time do %>
+<p>For your safety, confirm that it is you again with your company sign-in before you approve or decline a request.</p>
+<p><a data-role="reauth" class="button" href="<%= @reauth_href %>">Confirm it's you</a></p>
+<% end %>
+<%= if @several do %>
+<p class="notice problem" role="alert" data-role="reset-several"><strong>Problem:</strong> <%= length(@requests) %> reset requests are waiting. You started at most one of them. Decline every request you do not recognize; you can approve once only one is left.</p>
+<% end %>
+<%= for r <- @requests do %>
+<section class="request" data-role="reset-request" aria-labelledby="request-<%= r.session_id %>">
+<h2 id="request-<%= r.session_id %>">Request from <%= request_device(r) %></h2>
+<dl>
+<dt>App (name chosen by the app)</dt>
+<dd><%= request_app(r) %></dd>
+<dt>Device last active</dt>
+<dd><%= time_tag(r.device_last_seen_ts, "Never") %></dd>
+<dt>Requested</dt>
+<dd><%= time_tag(r.requested_at * 1000, "just now") %> (<%= relative_time(r.requested_at) %>)</dd>
+<dt>Expires</dt>
+<dd><%= time_tag(r.expires_at * 1000, "soon") %> (<%= relative_time(r.expires_at) %>)</dd>
+<%= if r.keys_fingerprint do %>
+<dt>Request reference</dt>
+<dd><%= r.keys_fingerprint %></dd>
+<% end %>
+</dl>
+<p>Only approve if you started resetting your identity in that app just now. Your other devices and your contacts will have to verify you again.</p>
+<p>If you decline, your current identity stays as it is and the app has to ask again.</p>
+<%= if @fresh do %>
+<div class="actions">
+<form method="post" action="/account/cross_signing_reset/decline">
+<input type="hidden" name="session_id" value="<%= r.session_id %>">
+<input type="hidden" name="csrf_token" value="<%= @csrf_token %>">
+<button type="submit" data-role="decline-reset" aria-label="Decline reset requested by <%= request_device(r) %>">Decline</button>
+</form>
+<%= if !@several do %>
+<form method="post" action="/account/cross_signing_reset/approve">
+<input type="hidden" name="session_id" value="<%= r.session_id %>">
+<input type="hidden" name="csrf_token" value="<%= @csrf_token %>">
+<input type="hidden" name="_click_proof" value="" data-click-proof>
+<button type="submit" class="danger" data-role="approve-reset" aria-label="Approve reset requested by <%= request_device(r) %>">Approve reset</button>
+</form>
+<% end %>
+</div>
+<% end %>
+</section>
+<% end %>
+<%= if @script? do %>
+<script><%= @script %></script>
+<% end %>
+<% end %>

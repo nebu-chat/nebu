@@ -16,6 +16,9 @@ defmodule Nebu.Matrix.DeviceKeyStore do
   client sends an `m.room.encryption` state event, which Nebu rejects.
   """
 
+  # Deletion order of `delete_device/2` / `delete_device!/2` (children before `devices`).
+  @device_tables ["device_one_time_keys", "device_fallback_keys", "device_keys", "devices"]
+
   @doc """
   Upserts a device's IDENTITY row in `devices` (S1 device-registry-model).
 
@@ -266,6 +269,45 @@ defmodule Nebu.Matrix.DeviceKeyStore do
     end
   end
 
+  @doc """
+  Counts of the devices seen since `since_ms` that have a non-empty `last_seen_ip`:
+  `{:ok, %{devices: n, users: u, addresses: a}}` (distinct users, distinct addresses). The statement never
+  SELECTs an address, so none can reach a caller or a log. Story client-ip-misconfiguration-warnings (W2):
+  one sequential scan every 6 hours, no index (it would cost the throttled `touch_last_seen` its HOT updates),
+  bounded by `SET LOCAL statement_timeout = '5s'` inside a short transaction. Read-only (MVCC snapshot, never
+  waits on row locks). NEVER raises: `{:error, :repo_not_started}` when the repo is down, `{:error, reason}`
+  otherwise (a timeout is `%Postgrex.Error{postgres: %{code: :query_canceled}}`).
+  """
+  @spec address_spread(integer()) ::
+          {:ok, %{devices: non_neg_integer(), users: non_neg_integer(), addresses: non_neg_integer()}} | {:error, term()}
+  def address_spread(since_ms) when is_integer(since_ms) do
+    if Process.whereis(Nebu.Repo) do
+      Nebu.Repo.transaction(fn ->
+        with {:ok, _} <- query("SET LOCAL statement_timeout = '5s'", []),
+             {:ok, %{rows: [[devices, users, addresses]]}} <-
+               query(
+                 """
+                 SELECT count(*), count(DISTINCT user_id), count(DISTINCT last_seen_ip)
+                   FROM devices
+                  WHERE last_seen_ts >= $1 AND last_seen_ip IS NOT NULL AND last_seen_ip <> ''
+                 """,
+                 [since_ms]
+               ) do
+          %{devices: devices, users: users, addresses: addresses}
+        else
+          {:error, reason} -> Nebu.Repo.rollback(reason)
+          other -> Nebu.Repo.rollback({:unexpected_result, other})
+        end
+      end)
+    else
+      {:error, :repo_not_started}
+    end
+  rescue
+    e -> {:error, e}
+  catch
+    :exit, reason -> {:error, reason}
+  end
+
   # S2 AC5: how stale a device's last_seen_ts must be before an authenticated request
   # rewrites it. Spec-sanctioned throttle ("may be a few minutes out of date") so /sync
   # does not hammer the DB on every long-poll. 60s comfortably exceeds the test's
@@ -278,6 +320,10 @@ defmodule Nebu.Matrix.DeviceKeyStore do
   than the throttle window (or absent), so a burst of requests does not re-write on every
   call. NEVER raises — a registry write must not fail the /sync request it rides on. A
   no-op when the device row is unknown.
+
+  A row that is LOCKED by another transaction (a long `Nebu.OAuth.revoke_client/3` holds the client's
+  devices rows until commit, G3-1) is SKIPPED (`FOR NO KEY UPDATE SKIP LOCKED`, the same strength as the UPDATE itself, so it does not conflict with the KEY SHARE of a lease claim): the update is best effort, once
+  a minute, and must never park a pool connection behind a lock.
   """
   @spec touch_last_seen(String.t(), String.t(), String.t() | nil) :: :ok
   def touch_last_seen(user_id, device_id, last_seen_ip)
@@ -292,8 +338,11 @@ defmodule Nebu.Matrix.DeviceKeyStore do
            SET last_seen_ts = $3,
                last_seen_ip = COALESCE($4, last_seen_ip),
                updated_at   = $3
-         WHERE user_id = $1 AND device_id = $2
-           AND (last_seen_ts IS NULL OR last_seen_ts < $5)
+         WHERE (user_id, device_id) IN (
+                 SELECT user_id, device_id FROM devices
+                  WHERE user_id = $1 AND device_id = $2
+                    AND (last_seen_ts IS NULL OR last_seen_ts < $5)
+                    FOR NO KEY UPDATE SKIP LOCKED)
         """,
         [user_id, device_id, now, last_seen_ip, cutoff]
       )
@@ -352,12 +401,33 @@ defmodule Nebu.Matrix.DeviceKeyStore do
   @spec delete_device(String.t(), String.t()) :: :ok
   def delete_device(user_id, device_id)
       when is_binary(user_id) and is_binary(device_id) do
-    for table <- ["device_one_time_keys", "device_fallback_keys", "device_keys", "devices"] do
+    for table <- @device_tables do
       _ =
         safe_query(
           "DELETE FROM #{table} WHERE user_id = $1 AND device_id = $2",
           [user_id, device_id]
         )
+    end
+
+    :ok
+  end
+
+  @doc """
+  The raising variant of `delete_device/2` for use INSIDE a database transaction (story
+  oauth-token-revocation-logout, R2 / Trap 3): same tables, same order (`@device_tables`), but a
+  database error raises (so the surrounding transaction rolls back) instead of being swallowed —
+  a swallowed failure inside a transaction would abort it silently. Idempotent. `repo` defaults to
+  `Nebu.Repo`; the OAuth session store passes its own (test-seamed) repo so every statement runs on
+  the transaction's connection.
+  """
+  @spec delete_device!(String.t(), String.t(), module()) :: :ok
+  def delete_device!(user_id, device_id, repo \\ Nebu.Repo)
+      when is_binary(user_id) and is_binary(device_id) do
+    for table <- @device_tables do
+      case Ecto.Adapters.SQL.query(repo, "DELETE FROM #{table} WHERE user_id = $1 AND device_id = $2", [user_id, device_id]) do
+        {:ok, _} -> :ok
+        {:error, error} -> raise error
+      end
     end
 
     :ok

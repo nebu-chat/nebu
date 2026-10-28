@@ -1,0 +1,2 @@
+# UX gate role-mapping-self-lockout-guard (nebu-ux-reviewer, 2026-10-15)
+0 blocking, 9 advisories, all applied: A1/A2 autofocus + aria-describedby (claim path line + error) + aria-invalid on the input, ids on the path line and the error; A3 link text "Sign in again, then enter the value once more"; A4 every long refusal starts with "Not saved."; A5-A7 plain-language messages naming the claim, no implementation detail; A8 the lock-out hint now mentions bin/nebu rpc and that the save checks the saver's token; A9 intro says "fresh sign-in this save asks for". Not applied: none.
