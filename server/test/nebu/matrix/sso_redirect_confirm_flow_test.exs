@@ -412,7 +412,11 @@ defmodule Nebu.Matrix.SsoRedirectConfirmFlowTest do
     end
   end
 
+  # Filling a store to its 10 000 cap is quadratic (every put counts the whole table), about 45-60 s on the shared CI runner: the 60 s
+  # default test timeout is not enough there, and the TTL of the filler entries must outlive the fill, or the first ones expire
+  # before the store is full (D10 then got 303 instead of 503).
   describe "AC4.4 — the confirm store is full" do
+    @tag timeout: 300_000
     test "10 000 live :confirm entries => the next unlisted callback answers the 503 unavailable page; no token, no cookie, WARNING", %{priv: priv} do
       fill = T.confirm_entry_fixture()
       for i <- 1..10_000, do: :ok = apply(SsoStore, :put_confirm, ["fill-key-#{i}", fill, 300])
@@ -433,6 +437,7 @@ defmodule Nebu.Matrix.SsoRedirectConfirmFlowTest do
   end
 
   describe "D10 — Continue when the loginToken store is full" do
+    @tag timeout: 300_000
     test "10 000 live loginTokens => the 503 unavailable page; the entry is CONSUMED, the cookie cleared, nothing is sent to the target", %{priv: priv} do
       cb = callback(priv, @unlisted)
       T.assert_confirm_redirect(cb)
@@ -440,7 +445,7 @@ defmodule Nebu.Matrix.SsoRedirectConfirmFlowTest do
 
       post =
         try do
-          for i <- 1..10_000, do: :ok = SsoStore.put_login_token("full-token-#{i}", "id", 30)
+          for i <- 1..10_000, do: :ok = SsoStore.put_login_token("full-token-#{i}", "id", 300)
           T.confirm!(cb, :continue)
         after
           T.drop_token_entries!()
