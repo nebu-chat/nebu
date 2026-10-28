@@ -44,3 +44,5 @@ ADR-023-deployment-postures-compliance-vs-normal:
   title: "ADR-023 - Deployment Postures: Compliance vs. Normal (DRAFT)"
 ADR-031-media-state-transitions-db-immutability:
   title: "ADR-031 - Media State Transitions DB Immutability"
+ADR-033-authorization-server-broker-model:
+  title: "ADR-033 - Nebu is Authorization Server (Broker, Model O2)"

@@ -9,8 +9,10 @@ evaluated by the coordinator: if the variable is null/empty, the entire block is
 
 ## create-story
 
-Read and follow .claude/skills/bmad-create-story/SKILL.md.
-Feature/Story: [USER_INPUT]
+Read and follow .claude/skills/nebu-lean-story/SKILL.md.
+Epic: [EPIC_NAME]
+Story directory: [STORY_DIR]
+User input: [USER_INPUT]
 Work through this completely, then finish.
 
 ---
@@ -76,25 +78,15 @@ Output the full report and finish.
 
 ## dev-story
 
-Read and follow .claude/skills/bmad-dev-story/SKILL.md.
-Implement the story at [STORY_FILE] completely.
-The failing acceptance tests from ATDD are already staged —
-implement until they are green.
+The agent definition `.claude/agents/nebu-dev-story.md` carries the full prompt
+(conventions, workflow, non-negotiable rules). Do NOT load `bmad-dev-story`.
 
-Test quality notes (from pre-dev review):
-[TEST_REVIEW_FINDINGS]
-
-[IF ORACLE_CONTEXT — omit this block if null:]
-Matrix spec requirements (from Oracle):
-[ORACLE_CONTEXT]
-The implementation must satisfy ALL MUST requirements above.
-
-[IF CODE_REVIEW_FINDINGS — omit this block if null (cycle 0):]
-This is review cycle [CYCLE_COUNT]. Issues to fix from the previous code-review:
-[CODE_REVIEW_FINDINGS]
-Fix all listed issues. Then finish.
-
-Finish after completing the implementation.
+Launch `@nebu-dev-story` with placeholders substituted:
+- `[STORY_FILE]` → path
+- `[TEST_REVIEW_FINDINGS]` → value or drop block if empty
+- `[ORACLE_CONTEXT]` → value or drop block if empty
+- `[CODE_REVIEW_FINDINGS]` → value or drop block if empty (cycle 0)
+- `[CYCLE_COUNT]` → current cycle number
 
 ---
 
@@ -158,15 +150,18 @@ Output the full report. Classify every finding as MAJOR, MINOR, or INFO. Finish.
 
 ## security-review
 
-Read and follow skills/nebu-agent-kassandra/SKILL.md.
-Load references/security-review.md and execute a full security review.
+Launch `@nebu-kassandra` — the full review scope (per-story + epic) lives in the
+agent definition `.claude/agents/nebu-kassandra.md`. Do NOT load
+`skills/nebu-agent-kassandra/SKILL.md` or its `references/*.md` files —
+the scope is inlined in the agent body.
 
-Scope: staged diff (git diff --staged)
-Story context:
-[SEC_CONTEXT]
+Substitute:
+- `[SEC_CONTEXT]` → story sections (Story + Acceptance Criteria)
+
+Scope: staged diff (`git diff --staged`)
 
 Write the report to:
-docs/stories/mvp/epic-{N}/security-reports/[STORY_ID]-security-review-[DATE].md
+`docs/stories/[EPIC]/security-reports/[STORY_ID]-security-review-[DATE].md`
 Always write the report, even if zero findings (audit trail).
 
 Return: Classification (CRITICAL | HIGH | CLEAN) + report path + severity count.
@@ -175,19 +170,16 @@ Return: Classification (CRITICAL | HIGH | CLEAN) + report path + severity count.
 
 ## epic-security-review
 
-Read and follow skills/nebu-agent-kassandra/SKILL.md.
-Load references/epic-review.md.
+Launch `@nebu-kassandra` — same agent as `security-review`, epic scope is in the
+agent definition. Do NOT load `skills/nebu-agent-kassandra/SKILL.md` or its
+`references/*.md` files.
 
-Diff range: git diff [EPIC_BASE]..HEAD
-Report path: _bmad-output/implementation-artifacts/epic-{N}-security-review-[DATE].md
+Substitute:
+- `[EPIC_BASE]` → base commit SHA for `git diff [EPIC_BASE]..HEAD`
+- `[SEC_CONTEXT]` → epic context (stories covered, scope description)
+
+Report path: `_bmad-output/implementation-artifacts/epic-[N]-security-review-[DATE].md`
 Always write the report — this is a mandatory audit artifact.
-
-Focus beyond per-story findings:
-- Attack surfaces that emerge across multiple stories combined
-- New endpoints + partial auth that together enable bypass
-- Migrations that break RLS or existing policies
-- gRPC handlers that bypass middleware
-- Cumulative crypto or secrets drift
 
 Return: Classification (CRITICAL | HIGH | CLEAN) + report path.
 

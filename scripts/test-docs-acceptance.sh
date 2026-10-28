@@ -265,7 +265,7 @@ test_readme_coming_soon_links_removed() {
 # When:   each ADR-001..ADR-009 file is read
 # Then:   each contains "## Status", "## Context", "## Decision", "## Consequences"
 #
-# ADR-010 and ADR-011 are placeholders — checked for existence + "Proposed" only.
+# ADR-010 and ADR-011: checked for existence + a "Proposed" / "Accepted" status line only.
 # =============================================================================
 test_adr_files_have_required_sections() {
     local adr_dir="${REPO_ROOT}/docs/architecture/adr"
@@ -304,7 +304,8 @@ test_adr_files_have_required_sections() {
         done
     done
 
-    # ADR-010 and ADR-011: placeholders — must exist and contain "Proposed"
+    # ADR-010 and ADR-011: started as placeholders ("Proposed"), now decided — must exist and carry a status
+    # section with a decided or proposed status
     local placeholder_adrs=(
         "ADR-010-fts-strategy.md"
         "ADR-011-managed-e2ee-key-escrow.md"
@@ -315,8 +316,8 @@ test_adr_files_have_required_sections() {
         if [[ ! -f "${ph_path}" ]]; then
             echo "  FAIL: placeholder ADR missing: docs/architecture/adr/${ph}" >&2
             failed=1
-        elif ! grep -qi "Proposed" "${ph_path}"; then
-            echo "  FAIL: ${ph}: does not contain 'Proposed' status" >&2
+        elif ! grep -qiE "^(Proposed|Accepted)" "${ph_path}"; then
+            echo "  FAIL: ${ph}: no 'Proposed' / 'Accepted' status line" >&2
             failed=1
         fi
     done
@@ -329,21 +330,13 @@ test_adr_files_have_required_sections() {
 # TEST 5 — test_verify_docs_ci_job_registered  (AC7)
 #
 # Given:  story is complete
-# When:   .github/workflows/ci.yml and .gitlab-ci.yml are inspected
-# Then:   both contain "verify-docs" (referencing the CI docs job)
+# When:   .gitlab-ci.yml is inspected
+# Then:   it contains "verify-docs" (referencing the CI docs job). GitLab CI is the only pipeline: GitHub is
+#         a read-only mirror (scripts/mirror-to-github.sh) and has no .github/workflows.
 # =============================================================================
 test_verify_docs_ci_job_registered() {
-    local github_ci="${REPO_ROOT}/.github/workflows/ci.yml"
     local gitlab_ci="${REPO_ROOT}/.gitlab-ci.yml"
     local failed=0
-
-    if [[ ! -f "${github_ci}" ]]; then
-        echo "  FAIL: .github/workflows/ci.yml does not exist" >&2
-        failed=1
-    elif ! grep -q "verify-docs" "${github_ci}"; then
-        echo "  FAIL: 'verify-docs' not found in .github/workflows/ci.yml" >&2
-        failed=1
-    fi
 
     if [[ ! -f "${gitlab_ci}" ]]; then
         echo "  FAIL: .gitlab-ci.yml does not exist" >&2

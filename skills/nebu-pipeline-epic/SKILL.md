@@ -33,6 +33,7 @@ Resolve before Step 0 based on whether the epic is named or numbered.
 - `STATE_FILE` = `_bmad-output/nebu/epics/<name>/pipeline-state.yaml`
 - `SPRINT_STATUS` = `_bmad-output/nebu/epics/<name>/sprint-status.yaml`
 - `STEP_RESULTS_DIR` = `_bmad-output/nebu/epics/<name>/step-results/`
+- `TRACEABILITY_MATRIX` = `_bmad-output/nebu/epics/<name>/traceability-matrix.yaml`
 
 **Legacy numbered epic (`--epic N`):**
 - `EPIC_ID` = `N`
@@ -40,6 +41,7 @@ Resolve before Step 0 based on whether the epic is named or numbered.
 - `STATE_FILE` = `_bmad-output/nebu/pipeline-state.yaml`
 - `SPRINT_STATUS` = `_bmad-output/implementation-artifacts/sprint-status.yaml`
 - `STEP_RESULTS_DIR` = `_bmad-output/nebu/step-results/`
+- `TRACEABILITY_MATRIX` = `_bmad-output/nebu/traceability-matrix.yaml`
 
 Pass `--epic <name>` to all `nebu-pipeline` sub-agent invocations so they resolve paths consistently.
 
@@ -94,10 +96,11 @@ The story file already exists. Start from Step 1c (classify).
 Skip Step 1 (create-story) — the story is already written.
 
 [IF NAMED EPIC: Path configuration — use these values throughout all steps:]
-[  STATE_FILE       = _bmad-output/nebu/epics/[EPIC_ID]/pipeline-state.yaml]
-[  STEP_RESULTS_DIR = _bmad-output/nebu/epics/[EPIC_ID]/step-results/]
-[  SPRINT_STATUS    = _bmad-output/nebu/epics/[EPIC_ID]/sprint-status.yaml]
-[  STORY_DIR        = docs/stories/[EPIC_ID]/]
+[  STATE_FILE          = _bmad-output/nebu/epics/[EPIC_ID]/pipeline-state.yaml]
+[  STEP_RESULTS_DIR    = _bmad-output/nebu/epics/[EPIC_ID]/step-results/]
+[  SPRINT_STATUS       = _bmad-output/nebu/epics/[EPIC_ID]/sprint-status.yaml]
+[  STORY_DIR           = docs/stories/[EPIC_ID]/]
+[  TRACEABILITY_MATRIX = _bmad-output/nebu/epics/[EPIC_ID]/traceability-matrix.yaml]
 [IF LEGACY EPIC: omit the path configuration block — use legacy default paths]
 
 Run all pipeline steps: 1c → 1b → 2 → 3 → 4 → 5 → 5b → 6 → 7 → 8 → 9.
@@ -167,15 +170,12 @@ Determine the epic base commit:
   rtk git log --grep="epic-[N-1]-retrospective\|retrospektive\|epic-[N-1]" --oneline | head -3
   ```
 
-```bash
-STEP_DESC=$(python3 skills/nebu-pipeline/scripts/select_pipeline_step.py --step epic-security-review)
-```
+Spawn `@nebu-kassandra` sub-agent (model: opus, fresh context) — the epic-review
+scope is inlined in the agent definition `.claude/agents/nebu-kassandra.md`.
+Do NOT load `skills/nebu-agent-kassandra/SKILL.md` or its `references/*.md` files.
 
-Spawn Kassandra sub-agent (model: opus, fresh context):
-```
-[STEP_DESC]
-```
-Substituting `[EPIC_BASE]` → base commit SHA, `[DATE]` → today, `{EPIC_ID}` → epic name or number.
+Substitute `[EPIC_BASE]` → base commit SHA, `[SEC_CONTEXT]` → epic context
+(stories covered, scope description), `{N}` → epic number.
 
 **If CRITICAL or HIGH:**
 ```
@@ -190,17 +190,36 @@ Stop and wait.
 **If CLEAN:**
 Print: `✓ Epic [N] SEC Gate 2 — Kassandra clean.`
 
+### Traceability Matrix — Bulk Backfill (one-time per epic)
+
+After all stories are done, backfill the traceability matrix for any legacy
+stories that don't have a `traceability_id` yet:
+
+```bash
+python3 skills/nebu-pipeline/scripts/generate_traceability.py \
+  --bulk $STORY_DIR \
+  --matrix $TRACEABILITY_MATRIX
+```
+
+This is a no-op for stories that already have entries. Use `--dry-run` first
+to preview. Only `status: done` stories are migrated.
+
+Then stage the results:
+```bash
+rtk git add $STORY_DIR $TRACEABILITY_MATRIX
+```
+
 ### Epic Wrap-Up
 
 ```
 🏁 Epic [EPIC_ID] complete!
 
 Next steps (run these yourself):
-  /bmad-testarch-trace           — requirements-to-tests traceability matrix
   /bmad-retrospective            — epic retrospective
   /nebu-release close            — if this epic completes a release, close and tag
 
 Security review artifact: _bmad-output/implementation-artifacts/epic-[EPIC_ID]-security-review-[DATE].md
+Traceability matrix: $TRACEABILITY_MATRIX
 ```
 
 Stop and wait for user.

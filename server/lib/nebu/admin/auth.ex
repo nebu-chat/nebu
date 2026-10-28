@@ -411,11 +411,49 @@ defmodule Nebu.Admin.Auth do
       |> Phoenix.Controller.redirect(to: "/admin/login")
       |> halt()
     else
-      do_login_start(conn, mode)
+      do_login_start(conn, reauth_mode(conn, mode, params))
     end
   end
 
-  defp do_login_start(conn, mode) do
+  # story oauth-client-revocation SO4: `mode=reauth` is honoured ONLY with an existing ADMIN session (the fresh
+  # re-authentication of an admin who is already in); without one it is a NORMAL login (mode and return_to are
+  # dropped). The mode is carried as `{"reauth", return_to}` into do_login_start/2.
+  defp reauth_mode(conn, "reauth", params) do
+    case get_session(conn, "current_user") do
+      %{"admin" => true} -> {"reauth", reauth_return_to(params["return_to"])}
+      _ -> nil
+    end
+  end
+
+  defp reauth_mode(_conn, mode, _params), do: mode
+
+  @reauth_default_return "/admin/oauth/registrations"
+  # the configuration pages whose forms need a fresh sign-in (the regex below allows exactly these besides the OAuth client pages)
+  @reauth_config_pages ["/admin/config", "/admin/config/claim-mapping", "/admin/config/role-mapping"]
+  # story role-mapping-self-lockout-guard: the page whose marker also carries the fingerprint of the fresh claims
+  @role_mapping_page "/admin/config/role-mapping"
+  @reauth_return_re ~r/\A(\/admin\/oauth\/(registrations|clients(\/revoked)?)(\/[A-Za-z0-9_-]{1,128}\/(approve|revoke))?|\/admin\/config(\/(claim-mapping|role-mapping))?|\/admin\/media\/settings)\z/
+
+  @doc """
+  The re-authentication return target (SO4): a path of the approval / client pages or the configuration page only (the
+  allowlist `/admin/oauth/(registrations|clients[/revoked])[/:id/(approve|revoke)]`, `/admin/config` (the SSO trust forms and the OAuth switch need a
+  fresh sign-in, stories sso-origins-admin-hardening / admin-oauth-switch) and the two pages `/admin/config/claim-mapping` and
+  `/admin/config/role-mapping`, whose forms need one too, story admin-config-privileged-forms-sweep, and the literal `/admin/media/settings`, the media policy and the
+  storage target, story admin-forms-gate-sweep), anything else (absolute URLs,
+  `//host`, other admin pages, encoded dots or slashes, query strings, control characters) becomes
+  `#{@reauth_default_return}`. Never redirects off site.
+  """
+  @spec reauth_return_to(term()) :: String.t()
+  def reauth_return_to(path) when is_binary(path) do
+    if Regex.match?(@reauth_return_re, path), do: path, else: @reauth_default_return
+  end
+
+  def reauth_return_to(_other), do: @reauth_default_return
+
+  defp do_login_start(conn, {"reauth", return_to}), do: do_login_start(conn, "reauth", return_to)
+  defp do_login_start(conn, mode), do: do_login_start(conn, mode, nil)
+
+  defp do_login_start(conn, mode, return_to) do
     with {:ok, cfg} <- oidc_config(mode),
          {:ok, authorization_endpoint} <- discover(cfg.issuer, "authorization_endpoint") do
       verifier = pkce_verifier()
@@ -434,8 +472,15 @@ defmodule Nebu.Admin.Auth do
         "exp" => System.system_time(:second) + @login_ttl_seconds
       }
 
+      # SO4: the re-authentication binds its (allowlisted) return target and its start time into the signed state;
+      # the callback compares the IdP's `auth_time` with `started_at`
+      login_state =
+        if mode == "reauth",
+          do: Map.merge(login_state, %{"return_to" => return_to, "started_at" => System.system_time(:second)}),
+          else: login_state
+
       query =
-        URI.encode_query(%{
+        %{
           "response_type" => "code",
           "client_id" => cfg.client_id,
           "redirect_uri" => redirect_uri(),
@@ -445,7 +490,10 @@ defmodule Nebu.Admin.Auth do
           "code_challenge" => challenge,
           "code_challenge_method" => "S256",
           "prompt" => "login"
-        })
+        }
+        # `max_age=0`: the IdP must authenticate the user again (`prompt=login` alone is not honoured by every IdP)
+        |> then(fn q -> if mode == "reauth", do: Map.put(q, "max_age", "0"), else: q end)
+        |> URI.encode_query()
 
       authorize_url = authorization_endpoint <> "?" <> query
 
@@ -506,7 +554,7 @@ defmodule Nebu.Admin.Auth do
       if mode == "bootstrap" do
         bootstrap_callback(conn, claims)
       else
-        normal_callback(conn, claims, refresh_token)
+        normal_callback(conn, claims, refresh_token, login_state)
       end
     else
       {:error, reason} ->
@@ -576,16 +624,23 @@ defmodule Nebu.Admin.Auth do
   # Normal admin login: enforce the admin-group gate, mint the session, land on the
   # dashboard (consistent with the bootstrap-completion landing; the AC "reaches
   # dashboard" expects this). The sidebar lets the operator reach rooms/users from there.
-  defp normal_callback(conn, claims, refresh_token) do
+  defp normal_callback(conn, claims, refresh_token, login_state) do
     case check_admin(claims) do
       :ok ->
         provision_matrix_identity(claims)
 
-        conn
-        |> put_current_user(claims)
-        |> store_refresh_token(refresh_token)
-        |> Phoenix.Controller.redirect(to: "/admin/dashboard")
-        |> halt()
+        conn =
+          conn
+          |> put_current_user(claims)
+          |> store_refresh_token(refresh_token)
+
+        if login_state["mode"] == "reauth" do
+          reauth_complete(conn, claims, login_state)
+        else
+          conn
+          |> Phoenix.Controller.redirect(to: "/admin/dashboard")
+          |> halt()
+        end
 
       {:error, :not_admin} ->
         Logger.warning("admin callback denied: admin group claim absent")
@@ -596,6 +651,211 @@ defmodule Nebu.Admin.Auth do
         |> halt()
     end
   end
+
+  # ── fresh admin re-authentication (story oauth-client-revocation, SO4 / SO5) ─────────────────
+
+  @reauth_session_key "admin_reauth"
+  # the marker is reusable for this long (batch approvals); a small tolerance for the clock of the node that wrote it
+  @reauth_ttl_seconds 300
+  @reauth_future_skew 5
+  # IdP and node clocks: the IdP's auth_time may be this much before `started_at` / after now
+  @reauth_auth_time_skew 30
+
+  # Runs AFTER put_current_user/2 (it renews the session): the marker lives OUTSIDE `current_user`, which the
+  # silent refresh rebuilds. A NOT fresh result keeps the (valid) admin session but writes no marker.
+  defp reauth_complete(conn, claims, login_state) do
+    return_to = reauth_return_to(login_state["return_to"])
+
+    case reauth_freshness(claims, login_state["started_at"]) do
+      {:fresh, kind} ->
+        # bound to the ONE confirm page it was started for (Kassandra M-1): it authorizes a decision on that page only
+        marker = %{"sub" => claims["sub"], "at" => System.system_time(:second), "kind" => kind, "path" => return_to}
+        marker = if return_to == @role_mapping_page, do: Map.merge(marker, role_claim_fingerprint(claims)), else: marker
+
+        conn
+        |> put_session(@reauth_session_key, marker)
+        |> reauth_notice(return_to)
+        |> Phoenix.Controller.redirect(to: return_to)
+        |> halt()
+
+      :stale ->
+        Logger.warning("admin re-authentication not confirmed: the identity provider did not report a fresh login")
+
+        conn
+        |> delete_session(@reauth_session_key)
+        |> Phoenix.Controller.put_flash(
+          :error,
+          "Your identity provider did not ask you to sign in again, so this action could not be confirmed. " <>
+            "Nothing was changed. If this keeps happening, see the deployment guide (admin re-authentication)."
+        )
+        |> Phoenix.Controller.redirect(to: return_to)
+        |> halt()
+    end
+  end
+
+  # story admin-forms-gate-sweep: the media settings page comes back with an EMPTY form too (the refused POST is never replayed) and the secret key is never
+  # filled in again; the marker covers ONE save of the page (policy or storage target)
+  defp reauth_notice(conn, "/admin/media/settings") do
+    Phoenix.Controller.put_flash(
+      conn,
+      :info,
+      "Signed in again. Your change was not saved yet: enter it again (for the storage target also the access key and the secret key) and press Save. Your sign-in is valid for #{div(@reauth_ttl_seconds, 60)} minutes and for one save."
+    )
+  end
+
+  # story sso-origins-admin-hardening (UX): the config page comes back with an EMPTY form (the refused POST is never
+  # replayed): say so, and how long the fresh sign-in lasts (@reauth_ttl_seconds = 5 minutes).
+  defp reauth_notice(conn, return_to) when return_to in @reauth_config_pages do
+    Phoenix.Controller.put_flash(
+      conn,
+      :info,
+      "Signed in again. Your change was not saved yet: enter it again and press Save. Your sign-in stays valid for #{div(@reauth_ttl_seconds, 60)} minutes."
+    )
+  end
+
+  defp reauth_notice(conn, _return_to), do: conn
+
+  defp reauth_freshness(claims, started_at) do
+    now = System.system_time(:second)
+
+    case Map.fetch(claims, "auth_time") do
+      {:ok, auth_time} when is_integer(auth_time) and is_integer(started_at) ->
+        if auth_time >= started_at - @reauth_auth_time_skew and auth_time <= now + @reauth_auth_time_skew,
+          do: {:fresh, "auth_time"},
+          else: :stale
+
+      # present but of another type (or no usable start time): never rescued by the opt-out
+      {:ok, _invalid} ->
+        :stale
+
+      # SO5: an IdP without `auth_time` cannot prove a new sign-in => fail closed; the explicit, documented
+      # opt-out (the dev Dex, whose connectors have no SSO session) accepts the completed flow as the login
+      :error ->
+        if reauth_allow_missing_auth_time?() and is_integer(started_at) do
+          Logger.warning(
+            "admin re-authentication accepted WITHOUT an auth_time claim (admin_reauth_allow_missing_auth_time is on): " <>
+              "the identity provider cannot prove a new sign-in"
+          )
+
+          {:fresh, "flow"}
+        else
+          :stale
+        end
+    end
+  end
+
+  # exactly `true`, nothing else (config/runtime.exs maps NEBU_ADMIN_REAUTH_ALLOW_MISSING_AUTH_TIME=true to it)
+  defp reauth_allow_missing_auth_time?, do: Application.get_env(:nebu_http, :admin_reauth_allow_missing_auth_time, false) == true
+
+  @doc """
+  The fresh re-authentication marker of the admin session (SO4): `{:ok, kind}` (`"auth_time"` | `"flow"`) when the
+  session holds an `admin_reauth` marker of the SAME `sub` as the signed-in admin, bound to exactly `path` (the
+  confirm page of ONE client and action, Kassandra M-1), at most 300 s old and not from the future (5 s skew),
+  else `:stale`. Read only; `consume_reauth/1` drops it after a successful decision (single use).
+  """
+  @spec reauth_fresh(Plug.Conn.t(), String.t()) :: {:ok, String.t()} | :stale
+  def reauth_fresh(conn, path) when is_binary(path) do
+    now = System.system_time(:second)
+
+    with %{"sub" => sub} when is_binary(sub) and sub != "" <- get_session(conn, "current_user"),
+         %{"sub" => ^sub, "at" => at, "kind" => kind, "path" => ^path} when is_integer(at) and kind in ["auth_time", "flow"] <-
+           get_session(conn, @reauth_session_key),
+         true <- now - at <= @reauth_ttl_seconds and at <= now + @reauth_future_skew do
+      {:ok, kind}
+    else
+      _ -> :stale
+    end
+  end
+
+  # ── self-lock-out guard of the role mapping (story role-mapping-self-lockout-guard, follow-up dg) ─────────────────────────────
+
+  @role_fp_hash_bytes 6
+  @role_fp_max_values 32
+  @role_fp_identity_claims ~w(iss aud azp sub sid nonce at_hash c_hash typ acr amr auth_time exp iat nbf jti session_state locale
+                              email email_verified name preferred_username given_name family_name nickname picture profile
+                              federated_claims)
+
+  @doc """
+  The hash the fingerprint of the fresh sign-in claims is made of: the first 6 bytes of `SHA-256("nebu-role-fp:" <> value)`. The admin session is a
+  SIGNED, not encrypted, cookie of at most 4 KB: it never holds a claim value, only these prefixes.
+  """
+  @spec role_claim_hash(String.t()) :: binary()
+  def role_claim_hash(value) when is_binary(value), do: binary_part(:crypto.hash(:sha256, "nebu-role-fp:" <> value), 0, @role_fp_hash_bytes)
+
+  @doc """
+  The fingerprint of the verified claims of a fresh sign-in for the marker of the role mapping page: `claims_fp` = the concatenated hashes of the
+  distinct string values the admin check can match (`Nebu.Web.OidcClaims.string_values_at/2` at the configured admin claim path, or of the whole
+  tree without a path, minus the protocol / identity claims), sorted, at most #{@role_fp_max_values}; `claims_fp_complete` = false when values were cut off;
+  `claims_fp_path` = the claim path they were taken from.
+  """
+  @spec role_claim_fingerprint(term()) :: %{String.t() => binary() | boolean()}
+  def role_claim_fingerprint(claims) do
+    path = admin_group_claim_path()
+    path = if is_binary(path) and path != "", do: path, else: nil
+
+    # without a stored claim path the admin check scans every claim (the any-key scan): the protocol and identity claims are left out of the
+    # fingerprint, their values occur in (nearly) every token of the instance (`typ`, `acr`, the issuer) or identify only the saver (`sub`,
+    # `email`, `name`), a role mapping value must never be taken from them (SEC review M-1 / L-1)
+    scanned = if path == nil and is_map(claims), do: Map.drop(claims, @role_fp_identity_claims), else: claims
+
+    {kept, rest} = scanned |> Nebu.Web.OidcClaims.string_values_at(path) |> Enum.sort() |> Enum.split(@role_fp_max_values)
+
+    %{
+      "claims_fp" => kept |> Enum.map(&role_claim_hash/1) |> IO.iodata_to_binary(),
+      "claims_fp_complete" => rest == [],
+      # the path the values were taken from: a marker made under another path is not trusted (:unknown)
+      "claims_fp_path" => path || ""
+    }
+  end
+
+  @doc """
+  Would the signed-in admin still be an administrator with `value` as the admin group value? Answered from the fingerprint that the fresh sign-in
+  of the role mapping page left in the marker: `:ok` (the value is among the values of the fresh token), `:not_in_token` (complete fingerprint,
+  value absent), `:undecidable` (the fingerprint was cut off at #{@role_fp_max_values} values and the value is not in the kept part) or `:unknown`
+  (no fresh marker of that page and subject, a marker without a well-formed fingerprint, e.g. written by a build without this guard, or one made under
+  another claim path).
+  """
+  @spec reauth_role_check(Plug.Conn.t(), term()) :: :ok | :not_in_token | :undecidable | :unknown
+  def reauth_role_check(conn, value) do
+    with {:ok, _kind} <- reauth_fresh(conn, @role_mapping_page),
+         %{"claims_fp" => fp, "claims_fp_complete" => complete, "claims_fp_path" => fp_path} when is_binary(fp) and is_boolean(complete) and is_binary(fp_path) <-
+           get_session(conn, @reauth_session_key),
+         true <- fp_path == (configured_admin_claim_path() || ""),
+         0 <- rem(byte_size(fp), @role_fp_hash_bytes) do
+      cond do
+        not is_binary(value) -> :not_in_token
+        role_claim_hash(value) in role_fp_chunks(fp) -> :ok
+        complete -> :not_in_token
+        true -> :undecidable
+      end
+    else
+      _ -> :unknown
+    end
+  end
+
+  defp role_fp_chunks(<<>>), do: []
+  defp role_fp_chunks(<<h::binary-size(@role_fp_hash_bytes), rest::binary>>), do: [h | role_fp_chunks(rest)]
+
+  @doc "The stored admin group claim path (bootstrap-only, read-only in the UI), or nil when the instance has none (the any-key scan applies)."
+  @spec configured_admin_claim_path() :: String.t() | nil
+  def configured_admin_claim_path do
+    case admin_group_claim_path() do
+      path when is_binary(path) and path != "" -> path
+      _ -> nil
+    end
+  end
+
+  @doc "Drops the fresh re-authentication marker (after a successful approve / revoke: one marker, one decision)."
+  @spec consume_reauth(Plug.Conn.t()) :: Plug.Conn.t()
+  def consume_reauth(conn), do: delete_session(conn, @reauth_session_key)
+
+  @doc """
+  The path the admin is sent to for a fresh sign-in: `/admin/login/start?mode=reauth&return_to=<path>` (the
+  `return_to` is the confirm page; the POST that was refused is never replayed).
+  """
+  @spec reauth_start_path(String.t()) :: String.t()
+  def reauth_start_path(return_to) when is_binary(return_to),
+    do: "/admin/login/start?" <> URI.encode_query(%{"mode" => "reauth", "return_to" => return_to})
 
   # Bootstrap-mode callback (Go parity: CallbackHandler sc.Mode == "bootstrap"). The ID
   # token is verified but the admin-group gate is SKIPPED — no admin exists yet. The

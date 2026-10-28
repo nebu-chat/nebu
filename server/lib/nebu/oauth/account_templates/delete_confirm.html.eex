@@ -1,0 +1,22 @@
+<dl>
+<dt>Name</dt>
+<dd><%= device_name(@device) %></dd>
+<dt>Device ID</dt>
+<dd><%= @device.device_id %></dd>
+<dt>App (name claimed by the app)</dt>
+<dd><%= app_label(@device) %></dd>
+</dl>
+<p>The app on this device will be signed out and the encryption keys stored for this device will be deleted. You can sign in again from the app at any time.</p>
+<%= if @fresh do %>
+<form method="post" action="/account/devices/delete">
+<input type="hidden" name="device_id" value="<%= @device.device_id %>">
+<input type="hidden" name="csrf_token" value="<%= @csrf_token %>">
+<button type="submit" class="danger" data-role="delete-device-confirm">Sign out <%= device_name(@device) %></button>
+</form>
+<% else %>
+<%= if !@no_auth_time do %>
+<p>For your safety, confirm that it is you again with your company sign-in before you sign out a device.</p>
+<p><a data-role="reauth" class="button" href="<%= @reauth_href %>">Confirm it's you</a></p>
+<% end %>
+<% end %>
+<p><a data-role="cancel" href="/account?action=org.matrix.devices_list">Cancel - keep this device signed in</a></p>

@@ -23,12 +23,14 @@ Resolved at pipeline start from the `--epic` flag. All step commands use these v
 - `STEP_RESULTS_DIR` = `_bmad-output/nebu/epics/<name>/step-results/`
 - `SPRINT_STATUS` = `_bmad-output/nebu/epics/<name>/sprint-status.yaml`
 - `STORY_DIR` = `docs/stories/<name>/`
+- `TRACEABILITY_MATRIX` = `_bmad-output/nebu/epics/<name>/traceability-matrix.yaml`
 
 **Legacy numbered epic (no `--epic` flag, story ID like `"14-4"`):**
 - `STATE_FILE` = `_bmad-output/nebu/pipeline-state.yaml`
 - `STEP_RESULTS_DIR` = `_bmad-output/nebu/step-results/`
 - `SPRINT_STATUS` = `_bmad-output/implementation-artifacts/sprint-status.yaml`
 - `STORY_DIR` = `docs/stories/mvp/epic-{N}/` or `docs/stories/phase2/` (derived from story ID prefix)
+- `TRACEABILITY_MATRIX` = `_bmad-output/nebu/traceability-matrix.yaml`
 
 Ensure the configured directories exist before writing state:
 ```bash
@@ -91,12 +93,13 @@ The log is **permanent and additive** — every step adds one line. Lines are ne
 
 **`nebu-pipeline --epic <name>`** — New story in named epic. Resolves paths to `_bmad-output/nebu/epics/<name>/`. Ask for story description.
 
-Then initialize state:
+Then initialize state (the story ID is only known after Step 1 creates the file — use `pending`):
+
 ```bash
 python3 skills/nebu-pipeline/scripts/pipeline_state.py \
   --file $STATE_FILE \
-  --story STORY_ID --step create-story \
-  --log "[STORY_ID] TIMESTAMP pipeline started"
+  --story pending --step create-story \
+  --log "[pending] TIMESTAMP pipeline started"
 ```
 
 **`nebu-pipeline --resume`** — Read `$STATE_FILE` (from `--epic` flag or legacy location). Print current state (story, step, cycle count). Ask user to confirm. Skip completed steps and continue from `current_step`.
@@ -136,6 +139,28 @@ Story slug is lowercase, hyphen-separated, describes the behavior: `typing-indic
 
 ---
 
+## Architecture: Native Subagents (Coordinator Pattern)
+
+This SKILL is a **thin coordinator**. Domain intelligence lives in named subagents under `.claude/agents/nebu-*.md`.
+Each subagent loads only the skills it needs (via `skills:` frontmatter) and only the MCP tools it uses.
+
+| Step | Native Subagent | Skills loaded |
+|---|---|---|
+| create-story | `@nebu-lean-story` | (none — haiku, lean) |
+| atdd | `/bmad-testarch-atdd` skill | code-review-checklist |
+| test-review | `@nebu-test-reviewer` | code-review-checklist |
+| dev-story | `@nebu-dev-story` | cluster-safety, no-domain-model, sql-placement |
+| ci-gate | Direct bash (no LLM) | — |
+| code-review | `@nebu-code-reviewer` | code-review-checklist, cluster-safety, no-domain-model, sql-placement |
+| security-review | `@nebu-kassandra` | security-rules |
+| arc42-update | Direct file edit | — |
+| oracle-check | `@nebu-oracle` (conditional) | matrix-spec-rules |
+| ux-review | `@nebu-ux-reviewer` (conditional) | ux-conventions |
+
+**Automatic invariant check:** After `@nebu-dev-story` stops, the `SubagentStop` hook fires
+`skills/nebu-pipeline/scripts/invariant_check.py` automatically — no explicit pipeline step needed.
+If the script exits 2 (violations found), the pipeline receives an error and must not proceed to code-review.
+
 ## How Steps Are Invoked
 
 Each step follows the same pattern:
@@ -143,7 +168,7 @@ Each step follows the same pattern:
 1. Extract story context with `extract_story_section.py`
 2. Fetch the agent prompt with `select_pipeline_step.py --step <name>`
 3. Inject runtime values into the prompt (substitute `[PLACEHOLDERS]`; drop `[IF X — omit if null]` blocks when the variable is null/empty)
-4. Launch the subagent with the assembled prompt
+4. Launch the named subagent (see table above) with the assembled prompt
 5. Save the output as a named variable (carries to subsequent steps)
 6. Update `pipeline-state.yaml`
 
@@ -151,22 +176,32 @@ Each step follows the same pattern:
 
 ## Pipeline Steps
 
-### Step 1: create-story
+### Step 1: create-story (lean)
 
-**Skill:** `bmad-create-story` | **Model:** sonnet | **Fresh context**
+**Agent:** `@nebu-lean-story` | **Model:** haiku | **Fresh context**
+
+Lean story creation: the user provides a raw 1–3 sentence description. The agent
+writes one story file with Gherkin acceptance criteria and an ISO traceability ID
+(`REQ-<YYYY>-<NNN>`). No artifact loading, no web research, no git analysis.
 
 ```bash
 STEP_DESC=$(python3 skills/nebu-pipeline/scripts/select_pipeline_step.py --step create-story)
 ```
 
-Inject `[STEP_DESC]` into subagent, substituting `[USER_INPUT]`.
+Inject `[STEP_DESC]` into the `@nebu-lean-story` subagent, substituting:
+- `[EPIC_NAME]` → the epic name (from `--epic` flag; for legacy numbered epics use `epic-<N>`)
+- `[STORY_DIR]` → the story directory (`$STORY_DIR`)
+- `[USER_INPUT]` → the raw story description from the user
 
 After completion:
 ```bash
 rtk git status
 ```
 
-Note the created story file as `STORY_FILE`.
+Note the created story file as `STORY_FILE`. Derive `STORY_ID` from the file basename
+without the `.md` extension (e.g. `typing-indicators.md` → `typing-indicators`).
+
+Update the pipeline state with the real story ID:
 
 ```bash
 # Create step-results directory for this story — all step outputs persist here
@@ -174,11 +209,11 @@ mkdir -p $STEP_RESULTS_DIR/[STORY_ID]/
 
 python3 skills/nebu-pipeline/scripts/pipeline_state.py \
   --file $STATE_FILE \
-  --step atdd --done create-story \
+  --story [STORY_ID] --step atdd --done create-story \
   --log "[STORY_ID] TIMESTAMP create-story → [STORY_FILE basename]"
 ```
 
-Show: `✓ Step 1: Story created → [STORY_FILE]`
+Show: `✓ Step 1: Story created → [STORY_FILE] ([TRACEABILITY_ID])`
 
 ---
 
@@ -339,18 +374,21 @@ Show: `✓ Step 3: Pre-dev test quality verified.`
 
 ### Step 4: dev-story — Implementation
 
-**Skill:** `bmad-dev-story` | **Model:** sonnet | **Fresh context**
+**Agent:** `@nebu-dev-story` | **Model:** inherit (sonnet) | **Fresh context**
+
+The full prompt lives in the agent definition `.claude/agents/nebu-dev-story.md`
+(conventions, workflow, non-negotiable rules). Do NOT load `bmad-dev-story` —
+the 485-line skill is replaced by the lean agent body + convention skills
+(`elixir-otp`, `cluster-safety`, `no-domain-model`, `sql-placement`).
 
 ```bash
 # Read step results from disk — authoritative, survives context compression
 TEST_REVIEW_FINDINGS=$(cat $STEP_RESULTS_DIR/[STORY_ID]/test-review-findings.md 2>/dev/null || echo "")
 ORACLE_CONTEXT=$(cat $STEP_RESULTS_DIR/[STORY_ID]/oracle-context.md 2>/dev/null || echo "")
 CODE_REVIEW_FINDINGS=$(cat $STEP_RESULTS_DIR/[STORY_ID]/code-review-findings.md 2>/dev/null || echo "")
-
-STEP_DESC=$(python3 skills/nebu-pipeline/scripts/select_pipeline_step.py --step dev-story)
 ```
 
-Inject `[STEP_DESC]` into subagent, substituting:
+Launch `@nebu-dev-story`, substituting:
 - `[STORY_FILE]` → path
 - `[TEST_REVIEW_FINDINGS]` → value or drop block if empty
 - `[ORACLE_CONTEXT]` → value or drop block if empty
@@ -550,7 +588,12 @@ python3 skills/nebu-pipeline/scripts/pipeline_state.py \
 
 ### Step 7: security-review (SEC Gate 1 — conditional)
 
-**Agent:** `nebu-agent-kassandra` | **Model:** opus | **Fresh context** | **Conditional**
+**Agent:** `@nebu-kassandra` | **Model:** opus | **Fresh context** | **Conditional**
+
+The full review scope (per-story output format, severity definitions, epic-review
+extension) lives in the agent definition `.claude/agents/nebu-kassandra.md`.
+Do NOT load `skills/nebu-agent-kassandra/SKILL.md` or its `references/*.md` files —
+the scope is inlined in the agent body (saves ~180 lines of reference loading per run).
 
 **Decision:** Use `SEC_REVIEW` flag from Step 1c.
 - `required` → run
@@ -562,11 +605,9 @@ python3 skills/nebu-pipeline/scripts/pipeline_state.py \
 ```bash
 SEC_CONTEXT=$(python3 skills/nebu-pipeline/scripts/extract_story_section.py \
   --story [STORY_FILE] --sections "Story" "Acceptance Criteria")
-
-STEP_DESC=$(python3 skills/nebu-pipeline/scripts/select_pipeline_step.py --step security-review)
 ```
 
-Inject `[STEP_DESC]` into subagent, substituting `[SEC_CONTEXT]`, `[STORY_ID]`, `[DATE]`.
+Launch `@nebu-kassandra`, substituting `[SEC_CONTEXT]`, `[STORY_ID]`, `[DATE]`.
 
 **If CRITICAL:**
 ```
@@ -674,6 +715,24 @@ EOF
 
 No `Co-Authored-By` line.
 
+**Post-commit: generate ISO traceability entry (no LLM — pure script):**
+
+```bash
+# TRACEABILITY_MATRIX resolves to _bmad-output/nebu/epics/<name>/traceability-matrix.yaml
+# (named epic) or _bmad-output/nebu/traceability-matrix.yaml (legacy).
+python3 skills/nebu-pipeline/scripts/generate_traceability.py \
+  --story [STORY_FILE] \
+  --commit HEAD \
+  --matrix $TRACEABILITY_MATRIX
+```
+
+Skips silently for legacy stories without a `traceability_id` frontmatter field.
+Idempotent — re-running for the same REQ-ID does nothing.
+
+```bash
+rtk git add $TRACEABILITY_MATRIX 2>/dev/null || true
+```
+
 **Write final log entry and clear YAML fields:**
 
 ```bash
@@ -712,11 +771,12 @@ rtk git log --grep="epic-{N-1}-retrospective\|retrospektive" --oneline
 
 If unclear, ask: "Epic diff base? (commit SHA or tag)"
 
-```bash
-STEP_DESC=$(python3 skills/nebu-pipeline/scripts/select_pipeline_step.py --step epic-security-review)
-```
+Launch `@nebu-kassandra` — the epic-review scope is inlined in the agent definition
+`.claude/agents/nebu-kassandra.md`. Do NOT load `skills/nebu-agent-kassandra/SKILL.md`
+or its `references/*.md` files.
 
-Inject `[STEP_DESC]` into subagent, substituting `[EPIC_BASE]`, `[DATE]`, `{N}`.
+Substitute `[EPIC_BASE]` (base commit SHA), `[SEC_CONTEXT]` (epic context: stories
+covered, scope description), and `{N}` (epic number).
 
 - **CRITICAL or HIGH:** Stop. User chooses: create follow-up stories in next epic, or accept as risk with written justification.
 - **CLEAN:** Continue to retrospective.
@@ -783,16 +843,16 @@ Pass `[FULL_STORY]` in place of the narrower variable. The `--all` flag extracts
 
 | Step | Skill / Agent | Model |
 |---|---|---|
-| create-story | bmad-create-story | sonnet |
+| create-story | nebu-lean-story | haiku |
 | Oracle Gate (1b, conditional) | nebu-agent-oracle | sonnet |
 | atdd | bmad-testarch-atdd | sonnet |
 | test-review (pre-dev) | bmad-testarch-test-review | sonnet |
-| dev-story | bmad-dev-story | sonnet |
+| dev-story | @nebu-dev-story (lean prompt + elixir-otp/cluster-safety/no-domain-model/sql-placement skills) | inherit |
 | ci-gate | nebu-agent-testing | haiku |
 | UX Gate (5b, conditional) | nebu-agent-ux | sonnet |
 | code-review | bmad-code-review | opus |
-| security-review (conditional) | nebu-agent-kassandra | opus |
-| epic-review (SEC Gate 2) | nebu-agent-kassandra | opus |
+| security-review (conditional) | @nebu-kassandra (scope inlined in agent body + security-rules skill) | opus |
+| epic-review (SEC Gate 2) | @nebu-kassandra (scope inlined in agent body + security-rules skill) | opus |
 | arc42-update | nebu-agent-arc42 / bmad-maintain-arc42 | haiku |
 
 ---

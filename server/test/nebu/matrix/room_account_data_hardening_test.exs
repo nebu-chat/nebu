@@ -167,20 +167,19 @@ defmodule Nebu.Web.RoomAccountDataHardeningTest do
     end
   end
 
-  # Plug's default for an oversized body is to RAISE RequestTooLargeError (Plug.Exception
-  # status 413) — under Plug.Test the exception propagates instead of being rendered.
-  defp assert_generic_413(method, path, token) do
-    result =
-      try do
-        {:conn, call(method, path, {:raw, big_json(1_200_000)}, token)}
-      rescue
-        e in Plug.Parsers.RequestTooLargeError -> {:raised, Plug.Exception.status(e)}
-      end
+  # story event-size-limit (DELIBERATE re-pin, AC7 (d); old -> new): a body over 1 MB on a /_matrix route that is NOT an exact account-data / room-tag
+  # shape used to RAISE Plug.Parsers.RequestTooLargeError (Plug's default; Bandit renders an EMPTY 413: no body, no errcode, no CORS headers). It is now answered
+  # by `JsonBody` with the rendered Matrix envelope `413 {"errcode": "M_TOO_LARGE", "error": "Request body is too large"}` (D7); the intent of the two tests stays:
+  # the oversized body never becomes an (empty) event, nothing is written.
+  defp assert_matrix_413(method, path, token) do
+    c = call(method, path, {:raw, big_json(1_200_000)}, token)
+    assert c.status == 413, "expected 413, got #{c.status}: #{String.slice(c.resp_body, 0, 200)}"
+    assert json(c) == %{"errcode" => "M_TOO_LARGE", "error" => "Request body is too large"}
+    c
+  end
 
-    case result do
-      {:raised, status} -> assert status == 413
-      {:conn, c} -> flunk("expected 413, got #{c.status}: #{String.slice(c.resp_body, 0, 200)}")
-    end
+  defp events_in(room, type) do
+    Ecto.Adapters.SQL.query!(Nebu.Repo, "SELECT count(*) FROM events WHERE room_id = $1 AND event_type = $2", [room, type]).rows |> hd() |> hd()
   end
 
   defp big_json(bytes), do: Jason.encode!(%{"blob" => String.duplicate("a", bytes)})
@@ -213,13 +212,17 @@ defmodule Nebu.Web.RoomAccountDataHardeningTest do
       assert json(c)["errcode"] == "M_TOO_LARGE"
     end
 
-    test "send/{type}/account_data with > 1 MB keeps the generic 413 (never an empty event)",
+    test "send/{type}/account_data with > 1 MB is the Matrix M_TOO_LARGE envelope (never an empty event)",
          %{token: t, room: room} do
-      assert_generic_413(:put, "/_matrix/client/v3/rooms/#{enc(room)}/send/m.room.message/account_data", t)
+      before = events_in(room, "m.room.message")
+      assert_matrix_413(:put, "/_matrix/client/v3/rooms/#{enc(room)}/send/m.room.message/account_data", t)
+      assert events_in(room, "m.room.message") == before, "no event was written"
     end
 
-    test "state event with state_key account_data and > 1 MB keeps the generic 413", %{token: t, room: room} do
-      assert_generic_413(:put, "/_matrix/client/v3/rooms/#{enc(room)}/state/m.room.topic/account_data", t)
+    test "state event with state_key account_data and > 1 MB is the Matrix M_TOO_LARGE envelope (never an empty event)", %{token: t, room: room} do
+      before = events_in(room, "m.room.topic")
+      assert_matrix_413(:put, "/_matrix/client/v3/rooms/#{enc(room)}/state/m.room.topic/account_data", t)
+      assert events_in(room, "m.room.topic") == before, "no event was written"
     end
 
     test "shape helper matches only PUT on the exact account-data shapes" do

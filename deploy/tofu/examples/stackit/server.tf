@@ -15,6 +15,49 @@ locals {
   gateway_scheme = local.tls_enabled ? "https" : "http"
   gateway_port   = local.tls_enabled ? "" : ":8008"
 
+  # ── Client-IP trust (ADR-033 TP1-TP14, follow-ups ap1) ──────────────────────
+  # Compose bridge gateway = peer address of host nginx (acme, reaches the server through the
+  # loopback-published port); .10 = fixed address of the nginx proxy container (alb).
+  compose_gateway  = cidrhost(var.compose_subnet, 1)
+  compose_proxy_ip = cidrhost(var.compose_subnet, 10)
+  # Docker's dynamic pool = upper half of the subnet, so .1 (gateway) and .10 (proxy) stay static.
+  compose_ip_range = cidrsubnet(var.compose_subnet, 1, 1)
+  nginx_tls_mode   = var.tls_mode
+  # tls_mode = "none" keeps the public 8008 port (the LB targets it) and trusts NO proxy.
+  derived_trusted_proxy_cidrs = (
+    local.nginx_tls_mode == "acme" ? "${local.compose_gateway}/32" : (
+      local.nginx_tls_mode == "alb" ? "${local.compose_proxy_ip}/32" : ""
+    )
+  )
+  # An explicit operator value replaces the derived one.
+  trusted_proxy_cidrs = var.trusted_proxy_cidrs != "" ? var.trusted_proxy_cidrs : local.derived_trusted_proxy_cidrs
+
+  # IPv4 address ranges as integers (start/end) for the overlap / containment checks in the
+  # lifecycle preconditions below (no cidrcontains() in OpenTofu; this works on any version).
+  _cidr_inputs = {
+    compose = var.compose_subnet
+    network = var.network_cidr
+  }
+  _cidr_bounds = {
+    for k, c in local._cidr_inputs : k => {
+      start = sum([for i, o in split(".", cidrhost(c, 0)) : tonumber(o) * pow(256, 3 - i)])
+      end   = sum([for i, o in split(".", cidrhost(c, -1)) : tonumber(o) * pow(256, 3 - i)])
+    }
+  }
+  compose_overlaps_network = (
+    local._cidr_bounds.compose.start <= local._cidr_bounds.network.end &&
+    local._cidr_bounds.network.start <= local._cidr_bounds.compose.end
+  )
+  # Every lb_real_ip_cidrs entry must lie completely inside network_cidr (the LB hop is a member
+  # of the private network). IPv6 / unparsable entries evaluate to false.
+  lb_real_ip_cidrs_in_network = alltrue([
+    for c in var.lb_real_ip_cidrs : try(
+      sum([for i, o in split(".", cidrhost(c, 0)) : tonumber(o) * pow(256, 3 - i)]) >= local._cidr_bounds.network.start &&
+      sum([for i, o in split(".", cidrhost(c, -1)) : tonumber(o) * pow(256, 3 - i)]) <= local._cidr_bounds.network.end,
+      false
+    )
+  ])
+
   # Logs — hostname extracted from Stackit Logs ingest_url (empty when enable_logs = false).
   logs_ingest_host = try(regex("https://([^/]+)", stackit_logs_instance.nebu[0].ingest_url)[0], "")
 }
@@ -115,6 +158,13 @@ resource "stackit_server" "nebu" {
     acme_staging   = var.acme_staging
     gateway_scheme = local.gateway_scheme
     gateway_port   = local.gateway_port
+    # Client-IP trust: pinned compose network, trusted peer(s) for Nebu, LB hops nginx resolves itself.
+    compose_subnet      = var.compose_subnet
+    compose_gateway     = local.compose_gateway
+    compose_ip_range    = local.compose_ip_range
+    compose_proxy_ip    = local.compose_proxy_ip
+    trusted_proxy_cidrs = local.trusted_proxy_cidrs
+    lb_real_ip_cidrs    = var.lb_real_ip_cidrs
     # Logging — Fluent Bit ships nebu.service journal logs to Stackit Logs (Loki)
     pii_encryption_key = var.pii_encryption_key
     enable_logs        = var.enable_logs
@@ -172,6 +222,26 @@ resource "stackit_server" "nebu" {
         length(var.s3_endpoint) > 0
       )
       error_message = "s3_access_key, s3_secret_key, s3_bucket, and s3_endpoint are required when enable_media_gateway = true."
+    }
+
+    precondition {
+      condition     = !local.compose_overlaps_network
+      error_message = "compose_subnet (${var.compose_subnet}) overlaps network_cidr (${var.network_cidr}). Pick a disjoint compose_subnet (default 172.30.0.0/24): an overlap makes the VM route private-network traffic (the LB) into the docker bridge."
+    }
+
+    precondition {
+      condition     = var.tls_mode != "none" || var.trusted_proxy_cidrs == ""
+      error_message = "trusted_proxy_cidrs must be empty when tls_mode = 'none': port 8008 is published on all interfaces there, so trusting any proxy address would let a client claim it."
+    }
+
+    precondition {
+      condition     = length(var.lb_real_ip_cidrs) == 0 || var.tls_mode == "alb"
+      error_message = "lb_real_ip_cidrs is only supported with tls_mode = 'alb': the realip listener must only be reachable through an HTTP/HTTPS ALB listener that adds the client address. The NLB used by 'acme' / 'none' is TCP and cannot carry X-Forwarded-For."
+    }
+
+    precondition {
+      condition     = local.lb_real_ip_cidrs_in_network
+      error_message = "Every lb_real_ip_cidrs entry must lie inside network_cidr (${var.network_cidr}); list the exact ALB address(es) in the network as /32."
     }
   }
 }

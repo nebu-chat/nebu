@@ -16,6 +16,10 @@ defmodule Nebu.Admin.RoomsController do
 
   plug Nebu.Admin.Auth, :require_admin
 
+  # story admin-forms-gate-sweep: the strict fetch metadata of a user-clicked form submit (Safari: the click proof) before anything is read or changed
+  import Nebu.Admin.OAuthAdminHelpers, only: [click_gate: 2]
+  plug :click_gate when action in [:create, :toggle_auto_join, :save_settings, :archive, :unarchive, :add_member, :remove_member]
+
   @sql_list_rooms_template """
   SELECT room_id, COALESCE(name, '') AS name, is_auto_join, status,
          (SELECT COUNT(*) FROM room_members m WHERE m.room_id = r.room_id AND m.left_at IS NULL) AS member_count
@@ -23,10 +27,6 @@ defmodule Nebu.Admin.RoomsController do
   __WHERE__
   ORDER BY COALESCE(name, ''), room_id
   LIMIT 500
-  """
-
-  @sql_update_auto_join """
-  UPDATE rooms SET is_auto_join = $1 WHERE room_id = $2
   """
 
   @valid_filters ~w(all active archived stale)
@@ -450,11 +450,9 @@ defmodule Nebu.Admin.RoomsController do
       fun when is_function(fun, 3) -> fun.(actor, room_id, value)
       fun when is_function(fun, 2) -> fun.(room_id, value)
 
+      # story admin-forms-gate-sweep D6: the audited writer (row `room_auto_join_changed`), as the space toggle; no raw SQL in the controller
       _ ->
-        case Ecto.Adapters.SQL.query(Nebu.Repo, @sql_update_auto_join, [value, room_id]) do
-          {:ok, _} -> :ok
-          {:error, _} = err -> err
-        end
+        Nebu.Matrix.set_room_auto_join(actor, room_id, value)
     end
   end
 

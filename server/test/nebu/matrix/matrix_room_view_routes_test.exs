@@ -14,7 +14,7 @@ defmodule Nebu.Web.MatrixRoomViewRoutesTest do
 
   Before the fix none of the three routes exist in `Nebu.Web.Router.Protected`,
   so a request that passes OidcPlug (valid Bearer) falls through to the
-  `match _` catch-all and returns `404 M_NOT_FOUND "Unrecognized request"`.
+  `match _` catch-all and returns `404 M_UNRECOGNIZED "Unrecognized request"` (was M_NOT_FOUND before story oauth-room-summary-unrecognized).
 
   The pure-unit auth-gate tests prove every route sits on the authenticated
   Protected pipeline (no Bearer → 401 before any handler). The `:integration`
@@ -55,6 +55,8 @@ defmodule Nebu.Web.MatrixRoomViewRoutesTest do
     priv_jwk = Map.put(priv_map, "kid", @kid)
 
     Application.put_env(:nebu_http, :server_name, @server_name)
+    # story create-room-invites-direct (DATA adaptation): POST /invite refuses foreign-domain invitees, the domain is :event_dispatcher's server_name
+    Nebu.Test.ServerName.pin!(@server_name)
     Nebu.Web.OidcTestSupport.configure(@issuer, @audience)
 
     Application.put_env(:nebu_http, :oidc_jwks, [pub_jwk])
@@ -144,18 +146,40 @@ defmodule Nebu.Web.MatrixRoomViewRoutesTest do
     @room URI.encode_www_form("!unknown:test.local")
     @event URI.encode_www_form("$unknown:test.local")
 
-    # The catch-all returns exactly {"errcode":"M_NOT_FOUND","error":"Unrecognized request"}.
-    # A wired route, even when it fails (unknown room), never returns that exact body.
+    # The catch-all returns exactly {"errcode":"M_UNRECOGNIZED","error":"Unrecognized request"}
+    # (story oauth-room-summary-unrecognized (af): was M_NOT_FOUND; the literal must follow, otherwise
+    # the refute below is vacuous). A wired route, even when it fails (unknown room), never returns it.
     defp refute_catch_all(conn) do
       body = json(conn)
 
-      refute body == %{"errcode" => "M_NOT_FOUND", "error" => "Unrecognized request"},
+      refute body == %{"errcode" => "M_UNRECOGNIZED", "error" => "Unrecognized request"},
              "route is missing — request fell through to the 404 catch-all (status #{conn.status})"
+
+      # story oauth-room-summary-unrecognized (review m4): a sibling-method 405 body must fail this too.
+      refute conn.status in [404, 405] and body["errcode"] == "M_UNRECOGNIZED",
+             "route is missing or has the wrong method — fell through to M_UNRECOGNIZED (status #{conn.status})"
+    end
+
+    # story membership-state-model (DELIBERATE re-pin, AC15 (f); old -> new): the route now reaches the room resolution (`ensure_room_without_lazy_create!/2`) of
+    # an unknown room, which reads the room status through `rooms_db_module()`: a fake answers "no such room" (403 M_FORBIDDEN) so that no Repo is needed.
+    defmodule NoSuchRoomDB do
+      def get_room_status(_room_id), do: {:error, :not_found}
     end
 
     test "GET .../members is routed", %{token: token} do
+      prior = Application.fetch_env(:event_dispatcher, :rooms_db_module)
+      Application.put_env(:event_dispatcher, :rooms_db_module, NoSuchRoomDB)
+
+      on_exit(fn ->
+        case prior do
+          {:ok, value} -> Application.put_env(:event_dispatcher, :rooms_db_module, value)
+          :error -> Application.delete_env(:event_dispatcher, :rooms_db_module)
+        end
+      end)
+
       conn = call(:get, "/_matrix/client/v3/rooms/#{@room}/members", nil, auth(token))
       refute_catch_all(conn)
+      assert conn.status == 403 and json(conn)["errcode"] == "M_FORBIDDEN"
     end
 
     test "GET .../event/{eventId} is routed", %{token: token} do

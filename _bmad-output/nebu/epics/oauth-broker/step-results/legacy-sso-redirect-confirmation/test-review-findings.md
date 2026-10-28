@@ -1,0 +1,13 @@
+# Pre-dev test review: legacy-sso-redirect-confirmation (nebu-test-reviewer, 2026-10-13)
+
+Verdict: not handed to dev unchanged: 5 MAJOR (all cheap), 14 MINOR, 7 INFO. AC coverage complete (AC1-AC18; AC19 docs). Mutation list (listed/unlisted swap, Host trusted, token minted early, cookie/CSRF skipped, COOP present, userinfo/backslash/IPv4 lookalike accepted, `@` in fragment rejected, old loginToken not stripped, secrets in logs, DB error = listed, revoked client = listed, second save failing) killed by at least one test each.
+
+MAJOR
+- M1 000048 test: `refute sql =~ ~r/\b(UPDATE|DELETE)\s+/i` matches `FOR UPDATE USING`; use `~r/^\s*(UPDATE\s+\w+\s+SET|DELETE\s+FROM)\b/im`.
+- M2 preflight CORS test contradicts D11: `Unrecognized.options/2` adds `access-control-allow-origin: *`. Resolution: keep shared module; assert 204 + Allow GET,POST and NO allow-methods/-headers/-credentials/-max-age/-expose-headers; 405s keep `no_cors?`; amend D9/AC6/AC12 wording.
+- M3 config_controller_sso_origins_test leaks `:server_name` (delete_env): use `T.put_env_scoped`.
+- M4 cap tests (10_000 puts) order dependent: drop confirm/token entries in setup of every module counting entries; no `token_count() == before + 1` on a shared store.
+- M5 crash/restart rule: after one forced crash assert the old entry is gone, put/peek/pop work, the new pid is in the pg group, GET with the pre-crash cookie = 400 invalid_state.
+MINOR (m1-m14): 1 s TTL sleep tests flaky (delete, use ttl -1); vacuous log refutes (m2); cache-getter wiring positive case (m3); AC3.2 text vs D3 for listed http (m4); D8 vs D10 (m5 -> resolution (d)); AC13 scope (m6 -> callback onward); ArmScript static tests brittle (comments, `>= 4`, `continue`) (m7); static scans scan comments/heredocs (m8); more classify/normalizer rows (m9); release_test hard-codes 48 (m10); e2e keyboard scenario + race-free "stays on page" (m11); crash test: one crash only, no handle_cast contract, format_status drops every payload (m12); env leak in leg test (m13); title vs assertion (m14).
+Resolutions: (a) see M2; (b) AC13 scoped to callback onward, the redirect leg's DEBUG line keeps redirectUrl (L-2), follow-up i5 = mask redirectUrl; (c) AC17: matrix/** names no Nebu.OAuth.<Sub>, web/** names only the existing Nebu.OAuth.Http forwards; (d) Continue 503 on a full token store: entry consumed, cookie cleared, never re-inserted, a follow-up Continue gives 400 invalid_state; D8 "stays on" list = forbidden, invalid_request, rate_limited; (e) keep the crash test with one crash.
+Contract for dev (seams, modules, HTML/log strings): see the staged tests; the story D-sections are authoritative.

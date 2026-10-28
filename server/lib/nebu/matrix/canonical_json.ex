@@ -32,6 +32,14 @@ defmodule Nebu.Matrix.CanonicalJson do
     |> Jason.encode!()
   end
 
+  @doc """
+  Lowercase hex SHA-256 of the canonical JSON encoding of `value` (story oauth-account-management, A14:
+  the `m.oauth` approval is bound to the hash of ALL supplied cross-signing keys, whatever their key
+  order). Pure.
+  """
+  @spec sha256_hex(term()) :: String.t()
+  def sha256_hex(value), do: :crypto.hash(:sha256, encode!(value)) |> Base.encode16(case: :lower)
+
   # Recursively converts all map keys to strings and sorts them alphabetically.
   # Returns a Jason.OrderedObject to preserve sort order during JSON encoding.
   @spec normalize(term()) :: term()

@@ -67,17 +67,23 @@ defmodule Nebu.Matrix.HttpStateKeyTest do
   # ── Bugfix unsigned-replaces-state, code-review cycle 1 (MAJOR-2 + MINOR-8) ──
 
   test "a genuine state event with an EMPTY state_key (e.g. m.room.topic) still serialises WITH state_key, plus replaces_state (MAJOR-2)" do
-    event = %Core.Event{
-      event_id: "$topic2:test.local",
-      room_id: "!room:test.local",
-      sender_id: "@kai:test.local",
-      event_type: "m.room.topic",
-      state_key: "",
-      is_state_event: true,
-      content: Jason.encode!(%{"topic" => "v2"}),
-      origin_ts: 1_700_000_000_000,
-      replaces_state: "$topic1:test.local"
-    }
+    # story member-event-prev-content (DELIBERATE re-pin; old -> new): `unsigned.replaces_state` is rendered together with `prev_content` and
+    # `prev_sender` (one consistent triple, D10: a struct with `replaces_state` alone yields none of the three). `struct!/2` so that the
+    # not-yet-existing fields fail THIS test instead of aborting the compile of the whole run.
+    event =
+      struct!(Core.Event,
+        event_id: "$topic2:test.local",
+        room_id: "!room:test.local",
+        sender_id: "@kai:test.local",
+        event_type: "m.room.topic",
+        state_key: "",
+        is_state_event: true,
+        content: Jason.encode!(%{"topic" => "v2"}),
+        origin_ts: 1_700_000_000_000,
+        replaces_state: "$topic1:test.local",
+        prev_content: Jason.encode!(%{"topic" => "v1"}),
+        prev_sender: "@kai:test.local"
+      )
 
     map = Http.message_event(event)
 

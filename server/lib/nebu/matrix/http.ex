@@ -39,6 +39,13 @@ defmodule Nebu.Matrix.Http do
     %{http_request_headers: %{"x-user-id" => user_id, "x-system-role" => system_role}}
   end
 
+  # story power-levels-enforcement (D10): the ONE 500 text that map_error/1 passes through
+  @power_levels_not_changed "The power levels could not be changed"
+
+  @doc "The fixed text of a failed power-level write (`500 M_UNKNOWN`, the only internal error whose text reaches the client)."
+  @spec power_levels_not_changed_text() :: String.t()
+  def power_levels_not_changed_text, do: @power_levels_not_changed
+
   @doc """
   Invokes a `Nebu.Matrix.EventDispatcher.Server` function, mapping a raised
   `Nebu.Matrix.Error` to a Matrix HTTP error tuple.
@@ -53,8 +60,33 @@ defmodule Nebu.Matrix.Http do
   end
 
   # status atom → {http_status, matrix_errcode, message}.
-  defp map_error(%Nebu.Matrix.Error{status: status, message: message}) do
+  defp map_error(%Nebu.Matrix.Error{status: status, message: message, errcode: errcode}) do
     cond do
+      # a specific errcode (story create-room-input-validation, D6) is only honoured for invalid_argument
+      is_binary(errcode) and status == Nebu.Matrix.Status.invalid_argument() ->
+        {400, errcode, message || "Invalid parameter"}
+
+      # story create-room-presets-power-levels-topic (D1): the join refusals carry their own fixed errcode / text
+      # ("You are banned from this room" / "You are not invited to this room"); opt-in only, every
+      # permission_denied without an errcode keeps the generic text below.
+      is_binary(errcode) and status == Nebu.Matrix.Status.permission_denied() ->
+        {403, errcode, message || "You are not a member of this room"}
+
+      # story create-room-invites-direct (D13): an unknown / deactivated invitee carries its own errcode / fixed text;
+      # opt-in only, every not_found without an errcode keeps "Room not found".
+      is_binary(errcode) and status == Nebu.Matrix.Status.not_found() ->
+        {404, errcode, message || "Room not found"}
+
+      # story power-levels-enforcement (D10): a power-level write that failed is a 500 M_UNKNOWN with its own FIXED text; opt-in only
+      # and only for exactly that text (review cycle 0 I2 / Kassandra I-4): every other internal error keeps "Internal server error"
+      # (its message may carry an internal detail and is never sent)
+      errcode == "M_UNKNOWN" and message == @power_levels_not_changed and status == Nebu.Matrix.Status.internal() ->
+        {500, "M_UNKNOWN", @power_levels_not_changed}
+
+      # story event-size-limit (D2 (e)): 413 M_TOO_LARGE with a FIXED message (never a client value); an errcode on the error is ignored.
+      status == Nebu.Matrix.Status.too_large() ->
+        {413, "M_TOO_LARGE", message || Nebu.Matrix.EventSize.message(:event_too_large)}
+
       status == Nebu.Matrix.Status.not_found() ->
         {404, "M_NOT_FOUND", "Room not found"}
 
@@ -64,11 +96,21 @@ defmodule Nebu.Matrix.Http do
       status == Nebu.Matrix.Status.invalid_argument() ->
         {400, "M_INVALID_PARAM", message || "Invalid parameter"}
 
+      # story history-visibility-enforcement (security cycle 1): a per-room cap of the room process (the history-visibility
+      # events) is 429 M_LIMIT_EXCEEDED with its own fixed text; opt-in only
+      errcode == "M_LIMIT_EXCEEDED" and status == Nebu.Matrix.Status.resource_exhausted() ->
+        {429, "M_LIMIT_EXCEEDED", message || "Too many requests"}
+
       status == Nebu.Matrix.Status.resource_exhausted() ->
         {403, "M_ROOM_FULL", "Room is full"}
 
       status == Nebu.Matrix.Status.failed_precondition() ->
         {400, "M_BAD_STATE", message || "Bad state"}
+
+      # story rate-limits-join-invite-create-room (delta gate L-2): the busy invitation locks carry their own errcode / fixed text
+      # (`M_LIMIT_EXCEEDED`: time-based, a client may retry); opt-in only, every other unavailable keeps the generic answer.
+      is_binary(errcode) and status == Nebu.Matrix.Status.unavailable() ->
+        {503, errcode, message || "Core is temporarily unavailable"}
 
       status == Nebu.Matrix.Status.unavailable() ->
         {503, "M_UNAVAILABLE", "Core is temporarily unavailable"}
@@ -105,29 +147,23 @@ defmodule Nebu.Matrix.Http do
   Builds the full Matrix `/sync` JSON response from a list of `Core.SyncRoom`
   structs and the `next_batch` token.
 
-  ## invite / leave sections — deferred (MINOR-2, cycle 1)
+  ## The three room sections (story sync-membership-partition)
 
-  The `invite` and `leave` sections are emitted as empty maps. This is a known,
-  tracked gap (see the matrix-api-migration Dev Agent Record): the proto
-  `SyncRoom` (proto/core.proto) carries NO membership field, and
-  `GetSyncDelta`/`GetInitialSync` only return joined-room snapshots in
-  `rooms`. The Go gateway builds invite/leave from SEPARATE DB queries
-  (`buildInviteRooms` / `buildLeaveRooms` in sync.go) that the migrated
-  no-gRPC-hop path does not yet call. Splitting them out of `delta.rooms` is
-  not possible because the data simply is not present there. Wiring the extra
-  invite/leave queries (or adding a membership field to `SyncRoom`) is genuine
-  new work beyond this story's scope and is tracked as a follow-up. `join`
-  carries the fan-out events that AC2 asserts on.
+  `rooms.join` renders `rooms` (the joined rooms with something to deliver, plus
+  the account-data-only entries the route adds); `rooms.invite` renders
+  `invite_rooms` (`Core.SyncInviteRoom`: only the stripped `invite_state`
+  events); `rooms.leave` renders `leave_rooms` (`Core.SyncRoom`: the leave
+  window, `state` and `account_data` empty, a `prev_batch` ONLY for a limited
+  timeline). A room id appears in at most one section: the core classifies, this
+  module only renders. `knock` is not produced (Nebu has no knock API).
   """
-  def sync_response(next_batch, rooms, room_account_data \\ %{}) when is_list(rooms) do
+  def sync_response(next_batch, rooms, room_account_data \\ %{}, invite_rooms \\ [], leave_rooms \\ []) when is_list(rooms) do
     %{
       "next_batch" => next_batch,
       "rooms" => %{
         "join" => build_joined_rooms(rooms, room_account_data),
-        # invite/leave deferred — see moduledoc above (MINOR-2): no membership
-        # data in proto SyncRoom; tracked as a follow-up.
-        "invite" => %{},
-        "leave" => %{}
+        "invite" => build_invite_rooms(invite_rooms),
+        "leave" => build_leave_rooms(leave_rooms)
       },
       "presence" => %{"events" => []},
       "account_data" => %{"events" => []},
@@ -137,112 +173,63 @@ defmodule Nebu.Matrix.Http do
     }
   end
 
+  # rooms.invite.<id>: ONLY `invite_state.events`, each a stripped state event with exactly the four spec properties
+  # (`type`, `state_key`, `sender`, `content`): no event_id, origin_server_ts, unsigned or signatures (D4).
+  defp build_invite_rooms(invite_rooms) do
+    Map.new(invite_rooms, fn room ->
+      events =
+        Enum.map(room.invite_state, fn ev ->
+          %{"type" => ev.type, "state_key" => ev.state_key, "sender" => ev.sender, "content" => decode_content(ev.content)}
+        end)
+
+      {room.room_id, %{"invite_state" => %{"events" => events}}}
+    end)
+  end
+
+  # rooms.leave.<id>: `state` and `account_data` are empty by design (D6: no current state after the leave, room account
+  # data is joined-only); the timeline has the shape of a join timeline; a non-limited window has NO `prev_batch` key.
+  defp build_leave_rooms(leave_rooms) do
+    now_ms = System.system_time(:millisecond)
+
+    Map.new(leave_rooms, fn room ->
+      timeline = %{"events" => Enum.map(room.timeline_events, &timeline_event_json(&1, now_ms)), "limited" => room.limited}
+
+      timeline =
+        if room.limited and room.prev_batch != "", do: Map.put(timeline, "prev_batch", room.prev_batch), else: timeline
+
+      {room.room_id, %{"state" => %{"events" => []}, "timeline" => timeline, "account_data" => %{"events" => []}}}
+    end)
+  end
+
+  # One timeline event (shared by rooms.join and rooms.leave).
+  defp timeline_event_json(te, now_ms) do
+    # Story member-event-prev-content (D1, D10): replaces_state / prev_content / prev_sender are set upstream (the batched
+    # predecessor lookup in EventDispatcher.Server) only for a genuine state event with a predecessor; the shared helper
+    # `put_predecessor_keys/2` renders the three together or none.
+    unsigned = %{"age" => max(1, now_ms - te.origin_ts)} |> put_predecessor_keys(te) |> put_redacted_because(te)
+
+    %{
+      "event_id" => te.event_id,
+      "type" => te.event_type,
+      "sender" => te.sender_id,
+      "room_id" => te.room_id,
+      "content" => decode_content(te.content),
+      "origin_server_ts" => te.origin_ts,
+      "unsigned" => unsigned
+    }
+    |> put_state_key(te)
+    |> put_redacts(te)
+  end
+
   defp build_joined_rooms(rooms, room_account_data) do
     Map.new(rooms, fn room ->
       now_ms = System.system_time(:millisecond)
 
-      # Bugfix sync-state-events-missing-fields: rooms.join.*.state.events entries
-      # are ClientEventWithoutRoomID, exactly like timeline.events — event_id/
-      # origin_server_ts are required, non-nullable fields regardless of whether an
-      # event is surfaced in state or timeline (Oracle-confirmed spec rule). unsigned
-      # is optional but added for parity (AC3), mirroring the timeline block below.
-      # se.event_id/se.origin_server_ts are the REAL persisted values threaded
-      # through by build_state_events/2 — never synthesized/fake.
-      #
-      # Code-review cycle 1 (MINOR-1): when identity is unavailable (event_id ==
-      # "" — a pre-existing legacy room not yet covered by the
-      # 000035_backfill_power_levels_events migration, or a failed event write,
-      # see room/server.ex's fail-open moduledoc section), omit `unsigned`
-      # entirely instead of shipping a ~56-year fake age computed from
-      # origin_server_ts == 0 (Oracle-confirmed: unsigned is optional per
-      # ClientEventWithoutRoomID) — and log so this condition is observable
-      # rather than silently shipped to clients.
-      #
-      # Code-review cycle 2 (MINOR, Logger rate-limiting): this branch sits on
-      # the `/sync` hot path — a room lacking identity would otherwise log
-      # once per sync per connected client, forever, if this were
-      # `Logger.warning`. Downgraded to `Logger.debug`: per this project's
-      # logger level convention (server/config/prod.exs sets `level: :info`),
-      # debug-level logs are compiled in but not emitted in production, so this
-      # is effectively unbounded-safe there while staying fully visible in
-      # dev (`level: :debug`) for local debugging. No separate dedup/counter
-      # mechanism exists elsewhere in the codebase for a single log call, so
-      # one isn't introduced here either (migration 000035 also makes this
-      # branch far less reachable in practice going forward).
-      state_events =
-        Enum.map(room.state_events, fn se ->
-          base = %{
-            "event_id" => se.event_id,
-            "type" => se.type,
-            "state_key" => se.state_key,
-            "content" => decode_content(se.content),
-            "sender" => se.sender,
-            "origin_server_ts" => se.origin_server_ts
-          }
+      # rooms.join.*.state.events are ClientEventWithoutRoomID (no room_id): the ONE state-event renderer (story
+      # membership-state-model, D10) without a room id.
+      state_events = Enum.map(room.state_events, &state_event_json(&1, now_ms, nil))
 
-          if se.event_id == "" do
-            Logger.debug(
-              "build_joined_rooms: state event #{se.type}/#{inspect(se.state_key)} in room " <>
-                "#{room.room_id} has no real event identity (event_id/origin_server_ts " <>
-                "unavailable) — omitting unsigned rather than shipping a fake age"
-            )
-
-            base
-          else
-            unsigned = %{"age" => max(1, now_ms - se.origin_server_ts)}
-            # Bugfix unsigned-replaces-state (Matrix CS API v1.19, AC1/AC3/AC4):
-            # se.replaces_state is "" (absent, never a sentinel null) when no
-            # predecessor exists at this (room_id, type, state_key) slot —
-            # NOT gated by history_visibility anywhere in this path (AC4).
-            #
-            # Code-review cycle 1 (MINOR): `is_binary/1` guards against a nil
-            # replaces_state value slipping past `!= ""` (nil != "" is also
-            # true) and getting Map.put'd in as a literal JSON null — the
-            # exact anti-pattern AC3 forbids. se.replaces_state is always a
-            # binary in practice (proto3 string zero value), but this makes
-            # the check correct even if that assumption is ever violated.
-            unsigned =
-              if is_binary(se.replaces_state) and se.replaces_state != "" do
-                Map.put(unsigned, "replaces_state", se.replaces_state)
-              else
-                unsigned
-              end
-
-            Map.put(base, "unsigned", unsigned)
-          end
-        end)
-
-      timeline_events =
-        Enum.map(room.timeline_events, fn te ->
-          unsigned = %{"age" => max(1, now_ms - te.origin_ts)}
-          # Bugfix unsigned-replaces-state (AC2): only ever non-"" for an entry
-          # that is itself a genuine state event (set upstream in
-          # EventDispatcher.Server.event_map_to_core_event/1, which alone has
-          # the DB signal needed to tell a state event with a real empty-string
-          # state_key apart from a plain message — te.state_key itself is
-          # ambiguous for that; te.is_state_event is the authoritative signal,
-          # see that function's own comment).
-          #
-          # Code-review cycle 1 (MINOR): is_binary/1 guard — see the matching
-          # comment on the state_events block above for why.
-          unsigned =
-            if is_binary(te.replaces_state) and te.replaces_state != "" do
-              Map.put(unsigned, "replaces_state", te.replaces_state)
-            else
-              unsigned
-            end
-
-          %{
-            "event_id" => te.event_id,
-            "type" => te.event_type,
-            "sender" => te.sender_id,
-            "room_id" => te.room_id,
-            "content" => decode_content(te.content),
-            "origin_server_ts" => te.origin_ts,
-            "unsigned" => unsigned
-          }
-          |> put_state_key(te)
-        end)
+      timeline_events = Enum.map(room.timeline_events, &timeline_event_json(&1, now_ms))
 
       joined = %{
         "state" => %{"events" => state_events},
@@ -256,6 +243,41 @@ defmodule Nebu.Matrix.Http do
 
       {room.room_id, joined}
     end)
+  end
+
+  @doc """
+  The ONE renderer of a `Core.SyncRoomStateEvent` (story membership-state-model, D10): `/sync` state (`room_id` `nil`: a
+  ClientEventWithoutRoomID), `/members` and the `/initialSync` state (a `room_id`: a ClientEvent). `unsigned` = `age` plus the
+  predecessor keys (together or not at all). An entry WITHOUT a real event identity (`event_id` `""`: the legacy fallback D8 (a))
+  carries no `unsigned`: in `/sync` it keeps `""` / 0, with a `room_id` it gets the deterministic `$synth_` id and `now` (the ONLY
+  place that synthesizes an id).
+  """
+  @spec state_event_json(%Core.SyncRoomStateEvent{}, integer(), String.t() | nil) :: map()
+  def state_event_json(%Core.SyncRoomStateEvent{} = se, now_ms, room_id) do
+    legacy? = se.event_id == ""
+
+    {event_id, ts} =
+      if legacy? and room_id != nil,
+        do: {"$synth_" <> Base.url_encode64(se.type <> "|" <> se.state_key, padding: false), now_ms},
+        else: {se.event_id, se.origin_server_ts}
+
+    base =
+      %{
+        "event_id" => event_id,
+        "type" => se.type,
+        "state_key" => se.state_key,
+        "content" => decode_content(se.content),
+        "sender" => se.sender,
+        "origin_server_ts" => ts
+      }
+      |> then(fn ev -> if room_id, do: Map.put(ev, "room_id", room_id), else: ev end)
+
+    if legacy? do
+      Logger.debug("state_event_json: a #{se.type} state slot has no real event identity, unsigned omitted")
+      base
+    else
+      Map.put(base, "unsigned", put_predecessor_keys(%{"age" => max(1, now_ms - se.origin_server_ts)}, se))
+    end
   end
 
   # Event/state content is a JSON-encoded `bytes` field in the proto. Decode it
@@ -275,18 +297,14 @@ defmodule Nebu.Matrix.Http do
   @doc """
   Maps a `Core.Event` to the Matrix `/messages` chunk event shape.
 
-  Pure, side-effect-free, no DB access — `e.replaces_state` (bugfix
-  unsigned-replaces-state, AC2) is already populated upstream by
-  `Nebu.Matrix.EventDispatcher.Server.event_maps_to_core_events/1`'s single
-  batched query per response (AC5); by the time an event reaches this
-  function, "" simply means "absent" (AC3 — never a sentinel null), exactly
-  like every other optional field here. `e.replaces_state` is ONLY ever
-  non-"" for an event that is itself a genuine state event (the upstream
-  batch only ever populates it for slots it looked up, which are themselves
-  filtered to real state events) — so checking it alone, with no separate
-  state_key check, correctly adds `unsigned` ONLY for state entries and ONLY
-  the `replaces_state` key (no `age` — a separate, out-of-scope gap for this
-  endpoint, AC2).
+  Pure, side-effect-free, no DB access — `e.replaces_state` / `e.prev_content` / `e.prev_sender` (bugfix
+  unsigned-replaces-state, story member-event-prev-content) are already populated upstream by
+  `Nebu.Matrix.EventDispatcher.Server.event_maps_to_core_events/1`'s single batched query per
+  response; by the time an event reaches this function, "" simply means "absent" (never a
+  sentinel null). `unsigned` is added ONLY for a state event with a predecessor and then carries
+  exactly the three keys `replaces_state`, `prev_content` (the decoded object) and `prev_sender`
+  together (no `age` — a separate, out-of-scope gap for this endpoint, follow-up fl); see
+  `put_predecessor_keys/2`.
   """
   def message_event(%Core.Event{} = e) do
     base =
@@ -299,13 +317,43 @@ defmodule Nebu.Matrix.Http do
         "origin_server_ts" => e.origin_ts
       }
       |> put_state_key(e)
+      |> put_redacts(e)
 
-    # Code-review cycle 1 (MINOR): is_binary/1 guard — see the matching
-    # comment in build_joined_rooms/1 above for why.
-    if is_binary(e.replaces_state) and e.replaces_state != "" do
-      Map.put(base, "unsigned", %{"replaces_state" => e.replaces_state})
+    case %{} |> put_predecessor_keys(e) |> put_redacted_because(e) do
+      unsigned when map_size(unsigned) > 0 -> Map.put(base, "unsigned", unsigned)
+      _ -> base
+    end
+  end
+
+  # story state-writer-redaction (D5, D6): the top-level `redacts` of a redaction event and `unsigned.redacted_because` of a redacted
+  # event (the full served redaction event, a JSON object); both absent (never null) when empty
+  defp put_redacts(map, %{redacts: target}) when is_binary(target) and target != "", do: Map.put(map, "redacts", target)
+  defp put_redacts(map, _event), do: map
+
+  defp put_redacted_because(unsigned, %{redacted_because: json}) when is_binary(json) and json != "" do
+    case Jason.decode(json) do
+      {:ok, because} when is_map(because) -> Map.put(unsigned, "redacted_because", because)
+      _ -> unsigned
+    end
+  end
+
+  defp put_redacted_because(unsigned, _event), do: unsigned
+
+  # Story member-event-prev-content (D10): the ONE rule for the three predecessor keys of a state event, shared by the
+  # /sync timeline (join + leave), the /sync join state block and message_event/1. The keys are added TOGETHER or not at
+  # all: only when the event is a state event (a Core.SyncRoomStateEvent has no flag and is always one; a Core.Event needs
+  # `is_state_event: true`), `replaces_state` and `prev_sender` are non-empty binaries and `prev_content` is a non-empty
+  # binary that decodes to a JSON object. Anything else (an inconsistent struct, a `nil` field, a non-object body) yields
+  # NONE of the three keys: never a `null`, never a partial triple, never `"prev_sender" => ""`.
+  defp put_predecessor_keys(unsigned, ev) do
+    with true <- Map.get(ev, :is_state_event, true) == true,
+         replaces when is_binary(replaces) and replaces != "" <- Map.get(ev, :replaces_state),
+         prev_content when is_binary(prev_content) and prev_content != "" <- Map.get(ev, :prev_content),
+         prev_sender when is_binary(prev_sender) and prev_sender != "" <- Map.get(ev, :prev_sender),
+         {:ok, content} when is_map(content) <- Jason.decode(prev_content) do
+      Map.merge(unsigned, %{"replaces_state" => replaces, "prev_content" => content, "prev_sender" => prev_sender})
     else
-      base
+      _ -> unsigned
     end
   end
 

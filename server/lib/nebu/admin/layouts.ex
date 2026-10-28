@@ -87,6 +87,17 @@ defmodule Nebu.Admin.Layouts do
     %{navigate: "/admin/media/health", key: "media-health", label: "Health"}
   ]
 
+  # epic oauth-broker / oauth-metadata-dcr-admin-approval (AC4): the OAuth group. Parent
+  # "OAuth" (data-navkey="oauth", expanded by default like every parent) with the child "Pending
+  # Clients" -> /admin/oauth/registrations. Placed AFTER Configuration so the pinned
+  # Spaces -> Media -> Configuration order of the media nav grouping stays intact.
+  @oauth_nav_children [
+    %{navigate: "/admin/oauth/registrations", key: "oauth-pending-clients", label: "Pending Clients"},
+    # story oauth-client-revocation (CR7): approved clients (with the Revoke action) and the revoked ones
+    %{navigate: "/admin/oauth/clients", key: "oauth-approved-clients", label: "Approved Clients"},
+    %{navigate: "/admin/oauth/clients/revoked", key: "oauth-revoked-clients", label: "Revoked Clients"}
+  ]
+
   # The shared admin shell: topbar + sidebar + content. Nav items mirror the Go admin.
   # Works for both LiveView sockets (assign_new/3 with change tracking) and dead
   # controller renders (plain map — use Map.put_new/3 for compatibility).
@@ -205,6 +216,7 @@ defmodule Nebu.Admin.Layouts do
                   children-rendering clause below. --%>
             <.nav_item :if={@bootstrap_completed} key="media" active={@active_nav} children={@media_children}>Media</.nav_item>
             <.nav_item :if={@bootstrap_completed} key="config" active={@active_nav} children={config_nav_children()}>Configuration</.nav_item>
+            <.nav_item :if={@bootstrap_completed} key="oauth" active={@active_nav} children={oauth_nav_children()}>OAuth</.nav_item>
           </ul>
           <div :if={@bootstrap_completed} class="p-2 border-t border-base-300">
             <a
@@ -228,6 +240,7 @@ defmodule Nebu.Admin.Layouts do
   defp logs_nav_children, do: @logs_nav_children
   defp config_nav_children, do: @config_nav_children
   defp media_nav_children, do: @media_nav_children
+  defp oauth_nav_children, do: @oauth_nav_children
 
   # bugfix/admin-media-nav-grouping (AC3): additively marks the "media-explorer"
   # child with the badge fields `nav_item/1`'s children-rendering clause reads —

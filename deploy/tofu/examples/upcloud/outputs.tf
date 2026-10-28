@@ -28,6 +28,16 @@ output "load_balancer_dns" {
   value       = [for n in upcloud_loadbalancer.nebu.networks : n.dns_name if n.name == "public"][0]
 }
 
+output "lb_private_addresses" {
+  description = "Private-network address(es) of the UpCloud load balancer node(s). Candidates for lb_real_ip_cidrs (list each as /32, e.g. [\"10.0.0.4/32\"]) once the negative test in the README proves the LB appends the client address. Confirm against the peer address nginx logs on :8081 for a request through the LB."
+  value = flatten([
+    for n in upcloud_loadbalancer.nebu.nodes : [
+      for net in n.networks : [for ip in net.ip_addresses : ip.address]
+      if net.type == "private"
+    ]
+  ])
+}
+
 output "dns_name" {
   description = "LB DNS name to register in your external DNS provider. Create a CNAME pointing your domain here (if your DNS provider supports CNAME flattening at apex), or resolve it to an IP address and create an A-record."
   value       = [for n in upcloud_loadbalancer.nebu.networks : n.dns_name if n.name == "public"][0]

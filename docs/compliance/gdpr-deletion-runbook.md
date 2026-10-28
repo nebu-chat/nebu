@@ -24,7 +24,7 @@ requester's perspective. Each step is described with its failure behavior.
 | 2 | Path param validation (`userId` ≤ 255 chars) | 400 M_BAD_JSON - request rejected |
 | 3 | Self-delete guard (callerSub ≠ userId) | 403 M_FORBIDDEN - four-eyes approval required |
 | 4 | gRPC `DeactivateUser` - `is_active=false`, all sessions destroyed | 404 on unknown user, 500 on internal error |
-| 5 | gRPC `DeleteUserKeys` - private signing + encryption key material set to NULL | Best-effort: warns on failure, continues |
+| 5 | gRPC `DeleteUserKeys` - private signing + encryption key material set to NULL, and (story gdpr-erasure-global-data) the user's global account data, cross-signing keys, device keys and the other per-user rows deleted, the `users` PII columns set to NULL and `is_active=false` (the erasure is terminal), in one transaction. The scan of `read_receipts` by `user_id` has no index: erase off-peak on a large instance | Best-effort: warns on failure, continues |
 | 6 | DB anonymization - `profiles.displayname='Deleted User'`, `profiles.avatar_url=NULL`, `users.anonymized_at=<unix_ms>` | 500 - PII erasure MUST NOT be silently skipped |
 | 7 | Audit log - emits `gdpr_deletion` event with actor + target | Never-raise: audit failure does not block 200 response |
 | 8 | 200 `{"user_id": "...", "status": "gdpr_deleted"}` | - |
@@ -89,6 +89,38 @@ FROM sessions
 WHERE user_id = '@alice:example.com' AND revoked_at IS NULL AND expires_at > NOW();
 -- Expected: 0
 
+-- Confirm the per-user rows are gone (story gdpr-erasure-global-data); every count must be 0
+SELECT COUNT(*) FROM user_room_account_data WHERE user_id = '@alice:example.com';
+SELECT COUNT(*) FROM account_data WHERE user_id = '@alice:example.com';
+SELECT COUNT(*) FROM cross_signing_keys WHERE user_id = '@alice:example.com';
+SELECT COUNT(*) FROM device_keys WHERE user_id = '@alice:example.com';
+SELECT COUNT(*) FROM device_one_time_keys WHERE user_id = '@alice:example.com';
+SELECT COUNT(*) FROM device_fallback_keys WHERE user_id = '@alice:example.com';
+SELECT COUNT(*) FROM forgotten_rooms WHERE user_id = '@alice:example.com';
+SELECT COUNT(*) FROM auto_join_opt_outs WHERE user_id = '@alice:example.com';
+SELECT COUNT(*) FROM read_receipts WHERE user_id = '@alice:example.com';
+SELECT COUNT(*) FROM uia_sessions WHERE user_id = '@alice:example.com';
+SELECT COUNT(*) FROM oauth_account_sessions WHERE user_id = '@alice:example.com';
+SELECT COUNT(*) FROM oauth_consent_requests WHERE user_id = '@alice:example.com';
+SELECT COUNT(*) FROM oauth_codes WHERE user_id = '@alice:example.com';
+-- Expected: 0 for each table above
+
+-- Confirm the session teardown tables are empty (it is best effort after the commit; if a count is not 0 run the sweep below for this user)
+SELECT COUNT(*) FROM devices WHERE user_id = '@alice:example.com';
+SELECT COUNT(*) FROM matrix_sessions WHERE user_id = '@alice:example.com';
+SELECT COUNT(*) FROM sessions WHERE user_id = '@alice:example.com';
+SELECT COUNT(*) FROM jwt_device_bindings WHERE user_id = '@alice:example.com';
+SELECT COUNT(*) FROM sync_tokens WHERE user_id = '@alice:example.com';
+-- Expected: 0 for each table above
+
+-- Confirm the users row holds no PII and is terminal for authentication
+SELECT is_active, deletion_status,
+       display_name_encrypted IS NULL AND avatar_url_encrypted IS NULL AND email_encrypted IS NULL
+       AND last_seen_at IS NULL AND deactivation_reason IS NULL AS pii_gone
+FROM users
+WHERE user_id = '@alice:example.com';
+-- Expected: is_active = false, deletion_status = 'keys_deleted', pii_gone = true
+
 -- Confirm audit record
 SELECT actor_user_id, action, target_id, outcome, inserted_at
 FROM audit_log
@@ -115,3 +147,53 @@ For bulk erasure operations, contact the system operator to temporarily raise th
 The endpoint is idempotent with respect to deactivation (step 4 accepts `codes.AlreadyExists`
 and continues). Re-running against an already-deleted user will re-apply anonymization and emit
 a second audit record. Duplicate audit records are acceptable for traceability.
+
+## After the erasure: remaining windows and the administrator group
+
+* **Up to 60 s.** A raw IdP JWT (and any bearer a node already confirmed) is accepted on that node for up to 60 s after the erasure commit: the node-local provisioning cache is not evicted, the same bound as for a deactivation. In that window a still-running client can write the tables the erasure does not guard (device keys, receipts, room account data, the device row with its IP); profile, account data, cross-signing and the sync token are refused. Re-run the sweep below after that minute (follow-up `gn`: a cache eviction broadcast).
+* **Remove an erased administrator from the IdP admin group.** The admin UI is governed by the group claim of the IdP, not by the erasure: an erased administrator who is still in the group can sign in to the admin UI (no personal data is re-created, the provisioning refuses). Remove the person from the group when you erase the account.
+* An erased user cannot be reactivated: the admin reactivation is refused for a user with a `deletion_status`.
+
+## Backups and retention
+
+Erasure deletes rows in the live database. The deleted rows, the private keys that were set to NULL and the PII ciphertexts persist in the places PostgreSQL keeps old row versions until their retention expires: the table heap until `VACUUM`, the WAL / point-in-time-recovery archive, replicas and every database backup within its retention period. The erasure is therefore complete for the live system immediately and for the stored copies when the oldest backup that predates it has expired. State the retention period (N days) in the privacy notice. A restore of a backup taken before an erasure brings back the key and the ciphertext together with every row the erasure deleted: after any restore, re-run the erasure (or, for users already at `deletion_status = 'keys_deleted'`, the sweep below) before the restored system serves users. Long term, per-user private keys should be wrapped with a key encryption key held outside the database.
+
+## Users erased before the gdpr-erasure-global-data release
+
+Users erased by an older release keep rows the old erasure did not delete (global account data, cross-signing keys, device keys, ...), keep their `users` PII ciphertexts and stay active. The same one-off, idempotent sweep is the retry path of an erasure whose best-effort session teardown failed (a warning "ending ... failed" in the log; the response was `keys_deleted`), and the step after a database restore. Run it once as the operator role, after migration 000055 (it touches only `deletion_status = 'keys_deleted'`):
+
+```sql
+-- gdpr-erasure-global-data: one-off sweep for users erased BEFORE this release (deletion_status = 'keys_deleted'). Run once after the deploy (after migration 000055)
+-- as the operator (owner) role; idempotent (a second run changes nothing); it is also the RETRY path of a failed post-commit session teardown of an erasure.
+-- Built from the same table list as the erasure (UserDeletion.erased_tables/0), plus the teardown tables, the profile and the users row.
+-- In psql run it with `\set ON_ERROR_STOP on` first, so that a failing statement stops the run instead of leaving an aborted transaction.
+BEGIN;
+DELETE FROM uia_sessions WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
+DELETE FROM user_room_account_data WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
+DELETE FROM account_data WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
+DELETE FROM cross_signing_keys WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
+DELETE FROM device_keys WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
+DELETE FROM device_one_time_keys WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
+DELETE FROM device_fallback_keys WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
+DELETE FROM forgotten_rooms WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
+DELETE FROM auto_join_opt_outs WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
+DELETE FROM read_receipts WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
+DELETE FROM oauth_account_sessions WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
+DELETE FROM oauth_consent_requests WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
+DELETE FROM oauth_codes WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
+-- the post-commit session teardown tables (a teardown that failed after the commit left them; the tokens are dead, the rows are not)
+DELETE FROM sync_room_cursors WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
+DELETE FROM oauth_idp_refresh_leases WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
+DELETE FROM jwt_device_bindings WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
+DELETE FROM matrix_sessions WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
+DELETE FROM sessions WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
+DELETE FROM sync_tokens WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
+DELETE FROM devices WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
+UPDATE profiles SET displayname = 'Deleted User', avatar_url = NULL WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
+UPDATE users SET anonymized_at = COALESCE(anonymized_at, keys_deleted_at), is_active = false, deactivated_at = COALESCE(deactivated_at, keys_deleted_at),
+  display_name_encrypted = NULL, display_name_nonce = NULL, avatar_url_encrypted = NULL, avatar_url_nonce = NULL,
+  email_encrypted = NULL, email_nonce = NULL, email_ephemeral_pub = NULL,
+  last_seen_at = NULL, deactivation_reason = NULL
+  WHERE deletion_status = 'keys_deleted';
+COMMIT;
+```

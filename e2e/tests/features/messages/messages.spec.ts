@@ -114,6 +114,18 @@ test.describe('Messages — send and receive (AC 4, Story 4-29)', () => {
     expect(createResp.status()).toBe(200);
     const { room_id: roomId } = await createResp.json();
 
+    // createRoom processes `invite` since story create-room-invites-direct (follow-up eb), and a private_chat room is invite-only since
+    // story create-room-presets-power-levels-topic (join rule enforced): the explicit invite below is kept (it answers 200 when marie is
+    // already invited) so this spec does not depend on the createRoom invite list.
+    const inviteResp = await page.request.post(
+      `${ELEMENT_URL}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/invite`,
+      {
+        headers: { Authorization: `Bearer ${alexSession.accessToken}`, 'Content-Type': 'application/json' },
+        data: { user_id: marieSession.userId },
+      },
+    );
+    expect(inviteResp.status()).toBe(200);
+
     // marie joins the room
     const joinResp = await page.request.post(
       `${ELEMENT_URL}/_matrix/client/v3/join/${encodeURIComponent(roomId)}`,

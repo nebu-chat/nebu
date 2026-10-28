@@ -108,8 +108,10 @@ defmodule Nebu.Web.SyncConcurrentTest do
     owner_token = bearer("owner", priv_jwk)
 
     # 1. Owner creates the shared room.
+    # Story create-room-presets-power-levels-topic (AC16, DATA adaptation): 50 users join the shared room WITHOUT an invite, so it is a
+    # PUBLIC room (preset public_chat -> join rule public); the default room is invite-only now.
     create =
-      call(:post, "/_matrix/client/v3/createRoom", %{"name" => "fanout-room"}, owner_token)
+      call(:post, "/_matrix/client/v3/createRoom", %{"name" => "fanout-room", "preset" => "public_chat"}, owner_token)
 
     assert create.status == 200, "createRoom must succeed to set up the fan-out scenario"
     room_id = Jason.decode!(create.resp_body)["room_id"]

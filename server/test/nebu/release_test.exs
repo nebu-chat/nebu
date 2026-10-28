@@ -171,8 +171,19 @@ defmodule Nebu.ReleaseTest do
       assert versions == Enum.to_list(1..length(versions)),
              "migration version numbers must be contiguous (no gaps) starting at 1"
 
-      assert length(versions) > 37,
-             "the bugfix batch adds two migrations after 000037 (token hashing, user_room_account_data)"
+      # 000040 (oauth_clients_and_auth_metadata, epic oauth-broker story
+      # oauth-metadata-dcr-admin-approval) creates the oauth_clients table + its GRANT and re-creates
+      # the server_config config_update_mutable policy with oauth_enabled/oauth_issuer_url added.
+      assert length(versions) > 39,
+             "the bugfix batch adds two migrations after 000037 (token hashing, user_room_account_data) " <>
+               "and the oauth-broker epic adds 000040 (oauth_clients)"
+
+      # 000048 (config_sso_redirect_keys_mutable, epic oauth-broker story legacy-sso-redirect-confirmation, G3-3)
+      # re-creates the server_config config_update_mutable policy with 000042's allowlist plus the pre-existing
+      # gap `sso_extra_redirect_schemes` and the new `sso_redirect_allowed_origins` (the second save of the SSO
+      # schemes form raised an RLS error before). The list is contiguous (asserted above) and is listed (asserted by file name, the number itself is not hard-coded).
+      assert Enum.any?(result, fn {_v, path} -> Path.basename(path) == "000048_config_sso_redirect_keys_mutable.up.sql" end),
+             "migration 000048_config_sso_redirect_keys_mutable.up.sql must be listed"
 
       # Only *.up.sql files are returned — *.down.sql are excluded.
       assert Enum.all?(result, fn {_v, path} -> String.ends_with?(path, ".up.sql") end)

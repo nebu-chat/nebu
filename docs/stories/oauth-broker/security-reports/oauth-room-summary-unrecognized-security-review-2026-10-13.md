@@ -1,0 +1,14 @@
+# Security review (SEC Gate 1): oauth-room-summary-unrecognized, 2026-10-13
+
+Reviewer: Kassandra (nebu-kassandra), read-only; report stored by the orchestrator. Scope: staged diff of story `docs/stories/oauth-broker/oauth-room-summary-unrecognized.md` (gates ac + af; ADR-033 RU1-RU18, RU11a).
+Classification cycle 0: **CLEAN** (0 CRITICAL, 0 HIGH, 1 MEDIUM, 2 LOW, 5 INFO).
+
+(1) Auth bypass of match-before-authenticate: none found. Probe and dispatch share the compiled `do_match` (slashes, %2F, dot segments, case handled identically); the marker `nebu_unrecognized: true` is set only on the last (catch-all) clause of the 4 routers, no inner `forward`, `authenticate/2` is strict `=== true`, a 401 halt stops the pipeline before `:dispatch`; HEAD (no Plug.Head mapping) -> 405, OPTIONS -> 204, neither reaches a handler; probe has no side effects; route enumeration reveals only public Matrix CS routes; `/admin`, `/oauth2`, `/account`, health, `.well-known` untouched; HttpPublic got stricter (POST root keyed on script_name).
+(3) POST /v3/register is a static 403 (no DB/auth/token); OPTIONS 204 sets allow-origin `*` only if unset, no credentials, no reflection; 405 `Allow` lists only methods with a real clause. (4) Logging law holds (static literal + error class). (5) RU11a carve-out exact and v3-only.
+
+| # | Sev | Finding | Disposition |
+|---|-----|---------|-------------|
+| M-1 | MEDIUM | A user invited and then banned from an invite-only, non-world_readable room keeps live read access to name/topic/avatar/num_joined_members/encryption/allowed_room_ids via room_summary (server.ex ~2315/2363: any `room_invitations` row with accepted_at/rejected_at NULL counts; `ban_user` never rejects the invitation); in public rooms the invite is checked before the member event so a banned user is told `invite` instead of `ban` | cycle 1: count an invite only while the latest member event is still `invite`; check ban/leave before invite in `summary_membership`; `ban_user` also rejects the invitation; test invite -> ban -> 404 (or `ban` in a public room) |
+| L-1 | LOW | timing differs between unknown alias (1 query) and a real alias for a hidden room (status + state fetch + builder + invite query) | accepted risk recorded in ADR RU3 / follow-up bg (visibility from DB before state fetch as the fix) |
+| L-2 | LOW | wrong-method on auth_metadata/auth_issuer does an unthrottled `Config.live_state()` DB read (GET does the same) | accepted; covered by the P8 config cache |
+INFO: `allowed_room_ids` discloses other (opaque) room ids (spec-mandated); summary of an existing non-running room lazily starts its Room process (bounded by room count, rate-limited); GET trailing slash on discovery paths -> 405 (code review MINOR 1); error-shape changes 401 -> 404/405 spec-aligned; raw path_info for the RU11a carve-out cosmetic.

@@ -1,0 +1,17 @@
+# Epic oauth-broker: SEC delta gate "forms-sweep" (cross-story), 2026-10-15
+
+Reviewer: Kassandra (nebu-kassandra), read-only; report stored by the orchestrator (condensed from the hand-back). Scope: `git diff b91676a8..HEAD` = 2907d817 role-mapping-self-lockout-guard (dg), bc802197 admin-config-audit-atomic (dh, X2-4, X2-5), ce0a27fe admin-forms-gate-sweep (de), two test-hygiene commits. Previous gate: `epic-oauth-broker-security-review-admin-switch-delta-2026-10-14.md`. Each story was CLEAN on its own; this review looks at the interaction.
+
+**Classification: CLEAN (0 CRITICAL, 0 HIGH, 0 MEDIUM, 2 LOW, 5 INFO). Dormant merge: PASS. Activation: neither easier nor harder with respect to the OAuth blockers (it lowers the admin-side risk).**
+
+| # | Sev | Finding | Resolution |
+|---|---|---|---|
+| X3-1 | LOW | The 4 KB signed admin cookie leaves ~225 bytes after the role mapping fingerprint; the test used a base64 blob (2000 chars = a ~970-byte refresh token, the real store is hex, 2 x (n + 28)): a refresh token above ~1.05 KB makes the re-authentication of THAT page fail with a server error (fail closed, nothing saved). | test comment corrected, size limit documented (07-deployment), shrinking the fingerprint recorded in `dp`. |
+| X3-2 | LOW | Stored credentials on the storage SAVE path with a changed endpoint and blank keys (behind the marker and the orphan-risk confirm); DNS rebinding through the discarded pinned SSRF target (pre-existing). The media exfiltration is the dominant harm with or without the credentials. | recorded as `do` (same `same_target?` rule on the save path, pass the pinned target to ExAws). |
+| X3-3 | INFO | The new gated controllers read the merged `params`, the gate reads `conn.body_params` (not exploitable: fixed form actions, fetch() fails the gate). | `dp`. |
+| X3-4 | INFO | Narrowing re-check holds (inside the retry transaction, stored lists as the runtime reads them, fail-safe when the repo is down; chained unaudited narrowings always end at a subset of the last audited value); `FOR UPDATE` does not lock absent keys (harmless); `:narrowing` should be mandatory with `unaudited_ok`. | `dp`. |
+| X3-5 | INFO | Trace Map `enable_capture` (5-minute payload capture) can be re-armed over the websocket and is unaudited; `dk` names `configure_logging` only. | named in `dp`. |
+| X3-6 | INFO | `peek_confirm` direct ETS read keeps single use (pop through the process, tombstone broadcast); two concurrent POSTs give one hit and one `invalid_state`. | none |
+| X3-7 | INFO | No test seam is reachable in a release build (all behind `Mix.env() == :test`, built with `MIX_ENV=prod`); unguarded pre-existing seams of other controllers sit behind the gate (`dd`). | none |
+
+Interaction answers: markers are bound to path and subject (a media marker cannot be spent on `/admin/config` or a mapping page and vice versa), the fingerprint exists only in the role mapping marker and is checked only with a fresh marker of that page and the same claim path; no sequence of unaudited narrowings ends in an unaudited widening and nothing fails open; the route enumeration is not vacuous; remaining ungated paths are all documented (bootstrap, `GET /admin/logout`, LiveView events); `oauth_enabled` is not touched (default false), the activation blockers are unchanged: G3-2 (positive client-IP test), the manual groups A-F, a proven emergency path (rpc or psql) on the target instance.

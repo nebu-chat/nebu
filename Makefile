@@ -14,7 +14,7 @@ CI_REGISTRY_IMAGE ?= registry.gitlab.com/philippb/open-chat
 # Strip the leading 'v' from TAG (e.g. v1.0.0 → 1.0.0) for image tagging.
 IMAGE_VERSION = $(patsubst v%,%,$(TAG))
 
-.PHONY: ci build-gateway build-media build-server redeploy dev dev-reset-db setup test-unit-go test-unit-elixir test-integration test-integration-elixir test-integration-ci test-e2e test-matrix-compat test-load-silber build-element-e2e test-e2e-element build-fluffychat-e2e test-e2e-fluffychat gen-api assets test-compose-ports test-compose-minio test-iac-validate test-load-syntax release release-push
+.PHONY: ci build-gateway build-media build-server redeploy dev dev-tls dev-tls-certs dev-tls-oauth-on dev-tls-oauth-off dev-reset-db setup test-unit-go test-unit-elixir test-integration test-integration-elixir test-integration-ci test-e2e test-matrix-compat test-load-silber build-element-e2e test-e2e-element test-e2e-element-ci test-e2e-admin-ci test-e2e-oauth-ci build-fluffychat-e2e test-e2e-fluffychat gen-api assets test-compose-ports test-compose-minio test-iac-validate test-load-syntax release release-push
 
 ## ci: Aggregate CI gate — Elixir unit tests + the no-go-files smoke gate (AT#2).
 ## go-removal-cleanup (full-elixir-stack): the canonical local CI entrypoint after
@@ -82,6 +82,24 @@ endif
 ## dev: Start the full local development stack (server, postgres, dex, minio)
 dev:
 	docker compose up
+
+## dev-tls-certs: Create the local CA + server certificate for the HTTPS dev front door (dev/tls/README.md).
+dev-tls-certs:
+	dev/tls/gen-certs.sh
+
+## dev-tls: Start the dev stack with Element Web, the Matrix API, OAuth and the admin UI on ONE origin,
+## https://nebu.localtest.me:7443 (needs `make dev-tls-certs`, `127.0.0.1 nebu.localtest.me` in /etc/hosts
+## and the CA trusted by the browser; see dev/tls/README.md).
+dev-tls:
+	@test -f dev/tls/certs/localhost.crt || { echo "run 'make dev-tls-certs' first"; exit 1; }
+	docker compose -f docker-compose.yml -f dev/tls/docker-compose.tls.yml --profile e2e up -d postgres dex minio server element
+
+## dev-tls-oauth-on / dev-tls-oauth-off: Switch the OAuth authorization server on/off for the dev-tls stack.
+dev-tls-oauth-on:
+	dev/tls/oauth.sh on
+
+dev-tls-oauth-off:
+	dev/tls/oauth.sh off
 
 ## dev-reset-db: Drop and recreate the nebu database, then restart the server so migrations re-run.
 ## go-removal-cleanup (full-elixir-stack): the server now runs migrations on startup and serves health.
@@ -263,34 +281,25 @@ test-e2e-element:
 	npx bddgen && \
 	npx playwright test --project=element-web --reporter=list
 
-## test-e2e-element-ci: Run the Element Web browser-first BDD project in CI (amd64).
-## Story e2e-browser-ci-and-dex-reliability (epic e2e-test-rehab) — AC3.
+## test-e2e-element-ci: Run the Element Web browser-first BDD project in CI (amd64) -- scripts/e2e-ci.sh element.
+## Story e2e-browser-ci-and-dex-reliability (epic e2e-test-rehab) -- AC3; reworked with the oauth-broker CI run (see the header of scripts/e2e-ci.sh).
 ##
-## Why a dedicated target:
-##   The Element SPA (docker/element-config.json) and the Dex redirect URIs
-##   (dev/dex/config.yaml) are pinned to localhost:7070 / localhost:8008. The
-##   browser MUST therefore reach those exact origins. We bring up the full stack
-##   incl. Dex + the element sidecar (--profile e2e), then run Playwright in a
-##   host-networked node container so `localhost:7070`/`localhost:8008` resolve to
-##   the published compose ports — preserving the registered redirect URIs.
-##
-## On amd64 CI Dex runs natively (not emulated), so the default timeouts are fine;
-## NEBU_E2E_NAV_TIMEOUT_MS can still be tuned. The preflight (npm run preflight)
-## fails fast with "Dex unreachable" if Dex did not come up.
-##
+## The Element SPA (docker/element-config.json) and the Dex redirect URIs (dev/dex/config.yaml) are pinned to localhost:7070 / localhost:8008:
+## the browser MUST reach those exact origins, so Playwright runs in a HOST-networked container next to the published compose ports.
+## The Playwright image follows @playwright/test of e2e/package-lock.json (it used to be pinned to 1.44 next to a 1.59 lockfile).
+## On amd64 CI Dex runs natively; NEBU_E2E_NAV_TIMEOUT_MS can still be tuned. `npm run preflight` fails fast with "Dex unreachable".
 ## Runs on a docker-tagged (amd64) runner via DinD. See .gitlab-ci.yml e2e-element-web.
-test-e2e-element-ci: setup
-	NEBU_RATE_LIMIT_DISABLED=true docker compose --profile e2e up -d --wait && \
-	docker run --rm --network=host --add-host=dex.localtest.me:127.0.0.1 -v $(PWD):/workspace -w /workspace/e2e \
-		-e NEBU_BASE_URL=http://localhost:8008 \
-		-e NEBU_MATRIX_BASE=http://localhost:8008 \
-		-e NEBU_ELEMENT_URL=http://localhost:7070 \
-		-e NEBU_OIDC_ISSUER=http://dex.localtest.me:5556/dex \
-		mcr.microsoft.com/playwright:v1.44.0-jammy \
-		sh -c "npm install --silent && npm run preflight && npx bddgen && npx playwright test --project=element-web --reporter=list"; \
-	EXIT=$$?; \
-	docker compose --profile e2e down; \
-	exit $$EXIT
+test-e2e-element-ci:
+	bash scripts/e2e-ci.sh element
+
+## test-e2e-admin-ci: The Admin UI e2e scenarios (project admin-ui, without the OAuth groups) in CI -- scripts/e2e-ci.sh admin (.gitlab-ci.yml e2e-admin-ui).
+test-e2e-admin-ci:
+	bash scripts/e2e-ci.sh admin
+
+## test-e2e-oauth-ci: The OAuth 2.0 authorization server e2e scenarios against the HTTPS front door of dev/tls (local CA generated on the fly,
+## issuer https://nebu.localtest.me:7443) -- scripts/e2e-ci.sh oauth. See .gitlab-ci.yml e2e-oauth-https and dev/tls/README.md.
+test-e2e-oauth-ci:
+	bash scripts/e2e-ci.sh oauth
 
 ## test-e2e-element-legacy: Run old Element Web E2E tests (non-BDD, pre-story-9-26).
 ## Requires: stack running + element sidecar via --profile e2e.

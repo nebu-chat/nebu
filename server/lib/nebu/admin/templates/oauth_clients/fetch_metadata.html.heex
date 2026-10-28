@@ -1,0 +1,17 @@
+<div class="admin-oauth-clients" data-page="oauth-request-refused" data-error="fetch_metadata">
+  <h1 class="text-2xl font-bold mb-2">Request refused</h1>
+  <p class="alert alert-error my-4 max-w-3xl" role="alert">
+    This action must be submitted with its button in the same browser window. Your browser did not send the information
+    that proves it, so nothing was changed.
+  </p>
+  <p class="text-sm text-base-content/70 mb-4 max-w-3xl">
+    If you used a script or an embedded page, open the page and press the button yourself.
+    Use a current Chrome, Firefox or Safari: an old browser, or a proxy that removes the Sec-Fetch headers, cannot be used for this action.
+    <span :if={String.starts_with?(@back_path, "/admin/oauth")}>
+      The operator command line can revoke a client without a browser (see the deployment guide).
+    </span>
+  </p>
+  <p>
+    <a href={@back_path} class="link link-primary" data-role="back-to-list">{back_label(@back_path)}</a>
+  </p>
+</div>

@@ -229,6 +229,7 @@ defmodule Nebu.Matrix.Session.RefreshWorker do
   # on `(user_id, device_id) WHERE revoked_at IS NULL`). If that convention is
   # ever violated by a future code path, this filter would silently select
   # more than one "active" row per device.
+  # story oauth-token-endpoint (T27): only `auth_api = 'legacy'` rows are candidates.
   # N-3: rows at/over the absolute cap (created_at + session TTL) are NOT candidates:
   # they can never be extended again, so redeeming the IdP RT would be a no-op that
   # only keeps resetting the IdP idle timer. The client's own /refresh re-validates.
@@ -238,6 +239,7 @@ defmodule Nebu.Matrix.Session.RefreshWorker do
            SELECT access_token_hash
              FROM matrix_sessions
             WHERE revoked_at IS NULL
+              AND auth_api = 'legacy'
               AND expires_at <= NOW() + ($1 * INTERVAL '1 second')
               AND created_at + ($2::bigint * INTERVAL '1 second') > NOW()
            """,
@@ -254,6 +256,11 @@ defmodule Nebu.Matrix.Session.RefreshWorker do
   # candidate list was built, skip it silently (fail-closed, no resurrection).
   defp refresh_row(access_token_hash) do
     case Store.get_by_access_token_hash(access_token_hash) do
+      # story oauth-token-endpoint (T27): OAuth sessions are never extended/deleted by this worker
+      # (spec 6: no background worker for OAuth sessions; their clients refresh at /oauth2/token).
+      {:ok, %{auth_api: api}} when api != "legacy" ->
+        :ok
+
       {:ok, %{revoked_at: nil} = sess} ->
         redeem(sess)
 

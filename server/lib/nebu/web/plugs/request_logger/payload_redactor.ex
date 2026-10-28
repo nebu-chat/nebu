@@ -56,6 +56,27 @@ defmodule Nebu.Web.Plugs.RequestLogger.PayloadRedactor do
   redacted at ANY depth, same as `password`/`access_token`/`refresh_token`
   (CI-gate cycle-1 bug 1).
 
+  ## OAuth extension point (epic oauth-broker, ADR-033)
+
+  Nebu is an OAuth 2.0 authorization server (broker). The secrets of its authorize/token/
+  revocation endpoints — `code` (authorization code), `code_verifier` (PKCE), `device_code`,
+  `refresh_token`, `client_secret` — are Category-1 credentials: they are redacted by KEY NAME at
+  any depth in map payloads AND in form-urlencoded / query-string fragments
+  (`code=...&code_verifier=...`, e.g. the authorize callback `?code=&state=` or a token request
+  body). To protect a new OAuth secret field, add its name to `@credential_keys` AND
+  `@credential_string_keys` below. Story oauth-token-endpoint (AC19): `id_token` (the Nebu-signed
+  OpenID Connect id_token of the token response) joined both lists.
+
+  Story oauth-authorize-idp-delegation-code (AC15 / D20): the query strings of
+  `GET /oauth2/authorize` and of the shared IdP callback `/_matrix/client/v3/login/sso/redirect/oidc`
+  never reach this module at all — `RequestLogger` masks EVERY value on those two paths and keeps
+  only the parameter names (route-aware). `state`, `nonce` and `code_challenge` are therefore
+  deliberately NOT added to the generic credential key lists (they are not secrets elsewhere).
+
+  Dynamic-Client-Registration metadata (`client_name`, `client_uri`, `logo_uri`, `redirect_uris`,
+  `tos_uri`, `policy_uri`, ...) are public application identifiers and are deliberately NOT
+  redacted; only secrets nested in such a payload (e.g. a submitted `client_secret`) are.
+
   This module is a pure function (`redact_payload/1`) with no side effects —
   it does not touch the network, the DB, or any other Nebu domain (ADR-020:
   this stays inside `Nebu.Web`, no cross-domain calls).
@@ -105,9 +126,18 @@ defmodule Nebu.Web.Plugs.RequestLogger.PayloadRedactor do
   # defensively even though the specific 3PID/identity-server request flow
   # is not fully implemented in Nebu's router today, since the field names
   # could still appear in a request body this plug receives and logs.
+  #
+  # OAuth 2.0 broker extension point (epic oauth-broker, ADR-033 — see the moduledoc
+  # "OAuth extension point" section): `code` (authorization code), `code_verifier` (PKCE) and
+  # `device_code` (RFC 8628) are one-time credentials of the OAuth authorize/token endpoints
+  # (stories 2-4). They are redacted from day one, together with the already listed
+  # `refresh_token`/`client_secret`, so those endpoints can never leak them into a DEBUG
+  # payload line.
   @credential_keys ~w(
     password new_password access_token refresh_token token
     client_secret id_access_token
+    code code_verifier device_code id_token
+    csrf_token
   )
 
   # Field names that are ALWAYS message content (user-generated text), at
@@ -211,9 +241,15 @@ defmodule Nebu.Web.Plugs.RequestLogger.PayloadRedactor do
   # credential-shaped only in that context) get redacted without over-
   # redacting unrelated `session`/`token`-named fields elsewhere.
   defp redact_map(map, in_content?, in_auth? \\ false) when is_map(map) do
+    # story oauth-account-management (A21/A22): the UIA CHALLENGE response (`flows` + `session`) carries
+    # the server-issued UIA session id, which approves a cross-signing reset once approved on the account
+    # page: it never reaches a log line (the request-side `auth.session` is handled by `in_auth?`).
+    uia_challenge? = is_list(Map.get(map, "flows")) and is_binary(Map.get(map, "session"))
+
     Map.new(map, fn {key, value} ->
       cond do
-        credential_key?(key) or (in_auth? and uiaa_credential_key?(key)) ->
+        credential_key?(key) or (in_auth? and uiaa_credential_key?(key)) or
+            (uia_challenge? and normalize_key(key) == "session") ->
           {key, @redacted}
 
         # F2: `m.relates_to` is checked at ANY depth, BEFORE the in_content?
@@ -338,6 +374,8 @@ defmodule Nebu.Web.Plugs.RequestLogger.PayloadRedactor do
   @credential_string_keys ~w(
     password new_password access_token refresh_token token
     client_secret id_access_token
+    code code_verifier device_code id_token
+    csrf_token
   )
 
   # Keys treated as message-content-shaped when found the same way. `body`

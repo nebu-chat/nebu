@@ -82,6 +82,12 @@ defmodule Nebu.Matrix.Room.PowerLevelEnforcementTest do
     Stores under {:power_levels, room_id} in :fake_room_db ETS table.
     Survives Room GenServer crash/restart because ETS is owned by the test process.
     """
+    # story power-levels-enforcement (D10): the room process writes a power-level change through ONE call; the fake models the
+    # transaction with its own column write AND event insert (a failure of either is the change's failure)
+    def apply_power_levels_change(room_id, json, event) do
+      with :ok <- set_power_levels(room_id, json), do: insert_event(event)
+    end
+
     def set_power_levels(room_id, power_levels_json) do
       :ets.insert(:fake_room_db, {{:power_levels, room_id}, power_levels_json})
       :ok
@@ -103,6 +109,14 @@ defmodule Nebu.Matrix.Room.PowerLevelEnforcementTest do
     def insert_member(_room_id, _user_id), do: {:error, :db_connection_lost}
     def delete_member(_room_id, _user_id), do: {:error, :db_connection_lost}
     def insert_event(_event), do: {:error, :db_connection_lost}
+    # story power-levels-enforcement (D10): the room process writes a power-level change through ONE call; the fake models the
+    # transaction with its own column write AND event insert (a failure of either is the change's failure)
+    def apply_power_levels_change(room_id, json, event) do
+      # the column write of this fake always fails (a dynamic call: the type checker would flag the never-matching `:ok`), so the
+      # event is never inserted, as in the real transaction
+      with :ok <- apply(__MODULE__, :set_power_levels, [room_id, json]), do: insert_event(event)
+    end
+
     def set_power_levels(_room_id, _json), do: {:error, :db_connection_lost}
     # Story 6.8: fail-open — if load_room_settings fails, GenServer defaults to 0.
     def load_room_settings(_room_id), do: {:error, :db_connection_lost}
@@ -297,7 +311,8 @@ defmodule Nebu.Matrix.Room.PowerLevelEnforcementTest do
                )
 
       # ETS must contain no entry for this txn
-      assert :ets.lookup(:NebuTxnDedup, {room_id, alice_id, txn_id}) == []
+      # story state-writer-redaction (DELIBERATE re-pin, Kassandra #5; old -> new): the /send txn key is {room, user, {:send, event_type, txn}} (a txn id is scoped to its path incl. the event type); was {room, user, txn}
+      assert :ets.lookup(:NebuTxnDedup, {room_id, alice_id, {:send, "m.room.message", txn_id}}) == []
     end
   end
 
@@ -540,7 +555,17 @@ defmodule Nebu.Matrix.Room.PowerLevelEnforcementTest do
       assert levels["events_default"] == 0
       assert levels["users_default"] == 0
       assert levels["users"] == %{}
-      assert levels["events"] == %{}
+      # story power-levels-enforcement (D12, AC16 re-pin): new rooms get the default `events` map (non-spec, Synapse-derived)
+      assert levels["events"] == %{
+               "m.room.power_levels" => 100,
+               "m.room.history_visibility" => 100,
+               "m.room.tombstone" => 100,
+               "m.room.server_acl" => 100,
+               "m.room.encryption" => 100,
+               "m.room.name" => 50,
+               "m.room.avatar" => 50,
+               "m.room.canonical_alias" => 50
+             }
     end
   end
 end

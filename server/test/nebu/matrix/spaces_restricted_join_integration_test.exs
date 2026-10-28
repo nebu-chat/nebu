@@ -47,6 +47,8 @@ defmodule Nebu.Matrix.SpacesRestrictedJoinIntegrationTest do
     priv_jwk = Map.put(priv_map, "kid", @kid)
 
     Application.put_env(:nebu_http, :server_name, @server_name)
+    # story create-room-invites-direct (DATA adaptation): POST /invite refuses foreign-domain invitees, the domain is :event_dispatcher's server_name
+    Nebu.Test.ServerName.pin!(@server_name)
     Nebu.Web.OidcTestSupport.configure(@issuer, @audience)
 
     Application.put_env(:nebu_http, :oidc_jwks, [pub_jwk])
@@ -95,7 +97,18 @@ defmodule Nebu.Matrix.SpacesRestrictedJoinIntegrationTest do
     json(conn)["room_id"]
   end
 
+  # Story create-room-presets-power-levels-topic (AC16, DATA adaptation): createRoom now writes a preset `m.room.join_rules` (`invite`) into
+  # the same (type, state_key) slot, and the latest value per slot is read by origin_server_ts (millisecond): a PUT in the SAME
+  # millisecond as the create would tie with it. Wait for the next millisecond before the PUT.
+  defp wait_next_ms do
+    start = System.system_time(:millisecond)
+    Stream.repeatedly(fn -> Process.sleep(1) end) |> Enum.take_while(fn _ -> System.system_time(:millisecond) <= start end)
+    :ok
+  end
+
   defp set_restricted(token, room, allow_room) do
+    wait_next_ms()
+
     conn =
       call(
         :put,

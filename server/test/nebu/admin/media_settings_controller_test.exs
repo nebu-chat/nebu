@@ -138,7 +138,7 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
     "max_pending_per_user" => "20",
     "max_stall_ms" => "20000",
     "deleted_days" => "30",
-    "infected_days" => "90",
+    "infected_days" => "7",
     "orphaned_hours" => "24",
     "webhook_url" => "",
     "released_delete_after_days" => ""
@@ -186,6 +186,10 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
       "sub" => "admin-media-settings-1",
       "matrix_user_id" => "@admin:test.local"
     })
+    # story admin-forms-gate-sweep: the strict fetch metadata of a user-clicked submit; the media policy and the storage target saves also need the fresh sign-in
+    # marker bound to this page (the test connection ignores it)
+    |> Nebu.OAuth.TestSupport.put_strict_fetch_headers()
+    |> put_session("admin_reauth", Nebu.OAuth.TestSupport.fresh_marker("admin-media-settings-1", 0, "auth_time", "/admin/media/settings"))
   end
 
   defp build_non_admin_conn(method, path) do
@@ -386,7 +390,7 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
             {"max_pending_per_user", 20},
             {"max_stall_ms", 20_000},
             {"deleted_days", 30},
-            {"infected_days", 90},
+            {"infected_days", 7},
             {"orphaned_hours", 24}
           ] do
         assert field_rendered_with_value?(body, field, default_value),
@@ -439,6 +443,25 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
                         "a negative value for #{field} must be rejected before ANY key reaches " <>
                           "Nebu.Media.Config.upsert"
       end
+    end
+
+    test "released_delete_after_days above the writer's 18-digit cap is rejected before any write (code review M2); the cap itself is accepted" do
+      test_pid = self()
+
+      Application.put_env(:nebu_http, :media_config_writer, fn key, value, _set_at ->
+        send(test_pid, {:media_config_written, key, value})
+        :ok
+      end)
+
+      conn = post_settings(valid_params(%{"released_delete_after_days" => "1000000000000000000"}))
+
+      assert conn.status == 200
+      refute_received {:media_config_written, _key, _value}
+
+      conn = post_settings(valid_params(%{"released_delete_after_days" => "999999999999999999"}))
+
+      assert conn.status in [302, 303], "got #{conn.status}"
+      assert_received {:media_config_written, "released_delete_after_days", 999_999_999_999_999_999}
     end
 
     test "non-numeric input for a numeric field is rejected with a specific error message" do
@@ -841,6 +864,9 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
 
   defp storage_params(overrides \\ %{}), do: Map.merge(@baseline_storage_params, overrides)
 
+  # story admin-forms-gate-sweep D4: a test connection to an endpoint other than the stored one needs the keys typed in (the stored credentials never go there)
+  defp typed_keys(overrides \\ %{}), do: storage_params(Map.merge(%{"access_key" => "typed-access-key", "secret_key" => "typed-secret-key"}, overrides))
+
   defp post_storage(params, conn_builder \\ &build_admin_conn/2) do
     conn_builder.(:post, @storage_path)
     |> Map.put(:body_params, params)
@@ -1099,7 +1125,7 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
       end)
 
       conn =
-        post_test_connection(storage_params(%{"endpoint" => "93.184.216.34:9000"}))
+        post_test_connection(typed_keys(%{"endpoint" => "93.184.216.34:9000"}))
 
       assert conn.status == 200,
              "expected a Test Connection POST to re-render the page (200), not redirect or " <>
@@ -1152,7 +1178,7 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
       Application.put_env(
         :nebu_http,
         :media_storage_config_loader,
-        fn -> storage_config_loader_row(%{"secret_key_encrypted" => encrypted}) end
+        fn -> storage_config_loader_row(%{"secret_key_encrypted" => encrypted, "endpoint" => "93.184.216.34:9000", "use_ssl" => true}) end
       )
 
       Application.put_env(:nebu_http, :media_storage_test_connection_fun, fn candidate ->
@@ -1628,7 +1654,7 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
     test "the test-connection result carries role=\"status\" on success and role=\"alert\" on failure" do
       Application.put_env(:nebu_http, :media_storage_test_connection_fun, fn _candidate -> :ok end)
 
-      success_conn = post_test_connection(storage_params())
+      success_conn = post_test_connection(typed_keys())
 
       assert success_conn.status == 200,
              "expected a successful Test Connection to re-render at 200; got " <>
@@ -1642,7 +1668,7 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
         {:error, :connection_refused}
       end)
 
-      failure_conn = post_test_connection(storage_params())
+      failure_conn = post_test_connection(typed_keys())
 
       assert failure_conn.status == 200,
              "expected a failed Test Connection to re-render at 200; got #{failure_conn.status}"
@@ -2163,7 +2189,7 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
 
       conn =
         post_test_connection(
-          storage_params(%{"iam_endpoint" => iam_url, "sts_endpoint" => sts_url})
+          typed_keys(%{"iam_endpoint" => iam_url, "sts_endpoint" => sts_url})
         )
 
       assert conn.status == 200,
@@ -2633,6 +2659,244 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
 
       refute field_rendered_with_value?(body, "sts_endpoint", "https://should-be-ignored.example.com/sts"),
              "the env-var sts_endpoint must NOT override a persisted media_storage_config row"
+    end
+  end
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # story media-config-tolerant-loader (follow-up `ej`), AC7 / AC8 (D5, D6): a damaged stored row is visible on the page and a plain save repairs it
+  # ══════════════════════════════════════════════════════════════════════════
+
+  describe "damaged media_config row (story media-config-tolerant-loader)" do
+    @damaged_testid "media-config-damaged"
+    @damaged_secret "stored-garbage-4711"
+
+    setup do
+      test_pid = self()
+      # the stored rows of this test: a term of the test, erased in on_exit (no process that could be gone while the seam is still set; a late reader
+      # of the seam gets an empty map)
+      store = {__MODULE__, :damaged_store, make_ref()}
+      :persistent_term.put(store, %{"deleted_days" => @damaged_secret, "max_pending_per_user" => 33, "infected_days" => 3})
+      on_exit(fn -> :persistent_term.erase(store) end)
+
+      Application.put_env(:nebu_http, :media_config_source, fn -> :persistent_term.get(store, %{}) end)
+
+      # the writer seam of every key: records the write and makes the stored row readable (what the real writer does to the table)
+      Application.put_env(:nebu_http, :media_config_writer, fn key, value, _set_at ->
+        send(test_pid, {:damaged_written, key, value})
+        store_put(store, &Map.put(&1, key, value))
+        :ok
+      end)
+
+      on_exit(fn -> Application.delete_env(:nebu_http, :media_config_tx) end)
+
+      {:ok, store: store}
+    end
+
+    defp store_put(store, fun), do: :persistent_term.put(store, fun.(:persistent_term.get(store, %{})))
+    defp store_get(store, key), do: :persistent_term.get(store, %{})[key]
+
+    defp damaged_nodes(body), do: body |> Floki.parse_document!() |> Floki.find("[data-testid='#{@damaged_testid}']")
+    defp damaged_text(node), do: node |> Floki.text() |> String.replace(~r/\s+/, " ") |> String.trim()
+
+    defp damaged_drain(acc \\ []) do
+      receive do
+        {:damaged_written, key, value} -> damaged_drain([{key, value} | acc])
+      after
+        0 -> acc |> Enum.reverse() |> Enum.sort()
+      end
+    end
+
+    # the form as the admin sees it (the effective values) submitted unchanged: the baseline of the page, with the stored values of the damaged page
+    defp unchanged_post_params(overrides \\ %{}), do: valid_params(Map.merge(%{"max_pending_per_user" => "33", "infected_days" => "3"}, overrides))
+
+    test "AC7 GET: one role=status element names the damaged key, says the default is in effect and the cleanup is paused, never the stored value" do
+      conn = get_settings_page()
+      assert conn.status == 200
+
+      assert [node] = damaged_nodes(conn.resp_body), "exactly one element with data-testid=#{@damaged_testid}"
+      assert Floki.attribute(node, "role") == ["status"], "a persistent notice, not an interrupting alert"
+
+      text = damaged_text(node)
+      assert text =~ ~r/default/i, "the text says that the default value is in effect"
+      assert text =~ ~r/cleanup/i
+      assert text =~ ~r/paused/i, "the text says that the media cleanup is paused"
+      refute text =~ @damaged_secret
+
+      refute conn.resp_body =~ @damaged_secret, "the stored value is nowhere on the page (not in the warning, not in a field)"
+    end
+
+    test "AC7 GET: the form fields still show the effective values (30 for the damaged deleted_days, the stored values of the other keys)" do
+      body = get_settings_page().resp_body
+
+      assert field_rendered_with_value?(body, "deleted_days", 30)
+      assert field_rendered_with_value?(body, "max_pending_per_user", 33)
+      assert field_rendered_with_value?(body, "infected_days", 3)
+    end
+
+    test "AC7 GET: the warning is above the form, so that it is read before the fields" do
+      body = get_settings_page().resp_body
+
+      assert {warning_at, _} = :binary.match(body, @damaged_testid)
+      assert {form_at, _} = :binary.match(body, ~s(id="media-settings-form"))
+      assert warning_at < form_at
+    end
+
+    test "AC7 GET: with no damaged key the element is absent", %{store: store} do
+      store_put(store, fn _ -> %{"deleted_days" => 12} end)
+
+      conn = get_settings_page()
+
+      assert conn.status == 200
+      assert damaged_nodes(conn.resp_body) == []
+      refute conn.resp_body =~ @damaged_testid
+    end
+
+    test "AC7 GET: a damaged key is named in plain text, whichever it is: a form key that is not a retention key, and one the form does not carry", %{store: store} do
+      store_put(store, fn _ -> %{"orphaned_hours" => "x", "scan_failed_rate_alert_pct" => "z", "max_pending_per_user" => 33} end)
+
+      assert [node] = damaged_nodes(get_settings_page().resp_body)
+      text = damaged_text(node)
+
+      assert text =~ "orphaned_hours", "a form key that is not a retention key"
+      assert text =~ "scan_failed_rate_alert_pct", "a key the form does not carry"
+      refute text =~ "max_pending_per_user", "a readable key is not named"
+      refute text =~ "stored-garbage", "no stored value"
+    end
+
+    test "code review M4: a damaged retention key states the reason, that the cleanup is paused and that saving writes the shown value and resumes it" do
+      assert [node] = damaged_nodes(get_settings_page().resp_body)
+      text = damaged_text(node)
+
+      assert text =~ "not a whole number in the allowed range"
+      assert text =~ ~r/cleanup of deleted and infected media is paused while deleted_days is unreadable/
+      assert text =~ ~r/saving this form writes the value shown in the field of deleted_days and resumes the automatic cleanup with it/i
+      assert text =~ ~r/set the intended value first/i
+      refute text =~ "infected_days", "only the damaged retention key is named in the paused sentence"
+      refute text =~ ~r/not editable/i, "a damaged key of the form needs no database repair note"
+      assert [_ul] = Floki.find(node, "ul"), "the keys are listed in a <ul>"
+      assert Floki.find(node, "ul li code") |> Enum.map(&Floki.text/1) == ["deleted_days"], "each key is a <code> item"
+    end
+
+    test "code review M4: both retention keys damaged are named in the paused sentence", %{store: store} do
+      store_put(store, fn _ -> %{"deleted_days" => "abc", "infected_days" => "3651"} end)
+
+      assert [node] = damaged_nodes(get_settings_page().resp_body)
+      text = damaged_text(node)
+
+      assert text =~ "paused while deleted_days and infected_days is unreadable"
+      assert Floki.find(node, "ul li code") |> Enum.map(&Floki.text/1) == ["deleted_days", "infected_days"]
+    end
+
+    test "code review M4: only a non-retention form key damaged: no cleanup-paused sentence (the cleanup is not paused), no database note", %{store: store} do
+      store_put(store, fn _ -> %{"orphaned_hours" => "x", "max_pending_per_user" => 33} end)
+
+      assert [node] = damaged_nodes(get_settings_page().resp_body)
+      text = damaged_text(node)
+
+      assert text =~ "orphaned_hours"
+      refute text =~ ~r/paused/i
+      refute text =~ ~r/cleanup/i
+      refute text =~ ~r/resumes/i
+      refute text =~ ~r/not editable/i
+    end
+
+    test "code review M4: a damaged key the form does not carry is listed separately as not editable here, with the database as the way to repair it", %{store: store} do
+      store_put(store, fn _ -> %{"scan_failed_rate_alert_pct" => "z", "orphaned_hours" => "x", "max_pending_per_user" => 33} end)
+
+      assert [node] = damaged_nodes(get_settings_page().resp_body)
+      text = damaged_text(node)
+
+      assert text =~ ~r/not editable on this form/i
+      assert text =~ ~r/repair in the database/i
+      assert text =~ ~r/break-glass/i
+      refute text =~ ~r/paused/i, "no retention key damaged"
+
+      lists = Floki.find(node, "ul")
+      assert length(lists) == 2, "one list for the keys of the form, one for the keys that need the database"
+
+      assert Enum.map(lists, fn ul -> ul |> Floki.find("li code") |> Enum.map(&Floki.text/1) end) ==
+               [["orphaned_hours"], ["scan_failed_rate_alert_pct"]]
+    end
+
+    test "AC7 a failed save (validation error) re-renders the warning too: every render carries it" do
+      conn = post_settings(unchanged_post_params(%{"max_stall_ms" => "-500"}))
+
+      assert conn.status == 200
+      assert [_node] = damaged_nodes(conn.resp_body)
+      refute conn.resp_body =~ @damaged_secret
+    end
+
+    test "AC7 the storage actions render the warning too (the test connection re-renders the same page)" do
+      Application.put_env(:nebu_http, :media_storage_test_connection_fun, fn _candidate -> :ok end)
+
+      conn = post_test_connection(typed_keys(%{"endpoint" => "93.184.216.34:9000"}))
+
+      assert conn.status == 200
+      assert [_node] = damaged_nodes(conn.resp_body)
+    end
+
+    test "AC8 POST of the unchanged form writes the shown default of the damaged key (no longer filtered out as unchanged), nothing else; the next GET has no warning" do
+      conn = post_settings(unchanged_post_params())
+
+      assert conn.status in [302, 303], "got #{conn.status}: #{conn.resp_body}"
+      assert flash_get(conn, :info) =~ ~r/media settings saved/i
+      assert damaged_drain() == [{"deleted_days", 30}], "only the damaged key is written; the other unchanged keys are not"
+
+      after_save = get_settings_page()
+      assert damaged_nodes(after_save.resp_body) == []
+      assert field_rendered_with_value?(after_save.resp_body, "deleted_days", 30)
+    end
+
+    test "AC8 a damaged NON-retention key is repaired by a plain save of the shown default, the same way", %{store: store} do
+      store_put(store, fn _ -> %{"max_stall_ms" => "abc", "max_pending_per_user" => 33, "infected_days" => 3} end)
+
+      assert [node] = damaged_nodes(get_settings_page().resp_body)
+      assert damaged_text(node) =~ "max_stall_ms"
+
+      conn = post_settings(unchanged_post_params())
+
+      assert conn.status in [302, 303]
+      assert flash_get(conn, :info) =~ ~r/media settings saved/i
+      assert damaged_drain() == [{"max_stall_ms", 20_000}]
+      assert damaged_nodes(get_settings_page().resp_body) == []
+    end
+
+    test "AC8 a changed key and the damaged key are written together; a changed value of the damaged key itself is written once" do
+      post_settings(unchanged_post_params(%{"max_pending_per_user" => "40", "deleted_days" => "90"}))
+
+      assert damaged_drain() == [{"deleted_days", 90}, {"max_pending_per_user", 40}]
+    end
+
+    test "AC8 a damaged key that the form does not carry (an alert threshold) is not written by a save", %{store: store} do
+      store_put(store, fn _ -> %{"scan_failed_rate_alert_pct" => "z", "max_pending_per_user" => 33, "infected_days" => 3} end)
+
+      conn = post_settings(unchanged_post_params())
+
+      assert conn.status in [302, 303]
+      assert damaged_drain() == [], "no repair control for a key this form does not expose: nothing is written"
+      assert [node] = damaged_nodes(get_settings_page().resp_body)
+      assert damaged_text(node) =~ "scan_failed_rate_alert_pct"
+    end
+
+    test "AC8 when the atomic path refuses (audit unavailable) the generic failure flash appears and the warning stays", %{store: store} do
+      test_pid = self()
+
+      Application.put_env(:nebu_http, :media_config_tx, fn key, value, _audit, _guard ->
+        send(test_pid, {:damaged_tx, key, value})
+        {:error, {:audit, :audit_table_down}}
+      end)
+
+      conn = post_settings(unchanged_post_params())
+
+      assert_received {:damaged_tx, "deleted_days", 30}, "the unchanged damaged key reached Config.upsert/3 (the atomic transaction)"
+      assert conn.status == 200
+      assert flash_get(conn, :error) == "Failed to save media settings"
+      assert [_node] = damaged_nodes(conn.resp_body), "the warning stays on the re-rendered page"
+      assert store_get(store, "deleted_days") == @damaged_secret, "nothing was persisted"
+      refute conn.resp_body =~ @damaged_secret
+      refute conn.resp_body =~ "audit_table_down"
+
+      assert [_node_after] = damaged_nodes(get_settings_page().resp_body), "the next GET still warns"
     end
   end
 end

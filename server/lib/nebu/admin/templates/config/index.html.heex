@@ -1,7 +1,8 @@
 <h1 class="text-heading font-semibold mb-4">Configuration</h1>
 <p class="text-text-secondary mb-4">
   Instance settings (<code>server_config</code>). Edit OIDC claim and role mapping via
-  their dedicated pages.
+  their dedicated pages. To offer the OAuth 2.0 API, see
+  <a href="#oauth-switch" class="link link-primary">OAuth 2.0 authorization server</a> below.
 </p>
 
 <p :if={Phoenix.Flash.get(@flash, :info)} class="alert alert-success mb-4" role="status">
@@ -16,6 +17,7 @@
       openid is always included by scope_list/0 and admin_oidc_scope/0. --%>
 <form id="oidc-scopes-form" method="post" action="/admin/config/scopes" class="mb-6">
   <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+  <input type="hidden" name="_click_proof" value="" data-click-proof />
   <h2 class="text-heading font-semibold mb-2">OIDC scopes</h2>
 
   <label class="form-control mt-2">
@@ -57,6 +59,7 @@
       (element, schildichat, im.fluffychat.auth). No redeploy needed. --%>
 <form id="sso-schemes-form" method="post" action="/admin/config/sso-schemes" class="mb-6">
   <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+  <input type="hidden" name="_click_proof" value="" data-click-proof />
   <h2 class="text-heading font-semibold mb-2">SSO redirect schemes</h2>
 
   <label class="form-control mt-2">
@@ -76,7 +79,63 @@
     </span>
   </label>
 
-  <button type="submit" class="btn btn-primary mt-3">Save SSO schemes</button>
+  <p id="sso-schemes-reauth-hint" class="mt-2 text-sm text-base-content/70">
+    Saving this setting needs a fresh sign-in. If you are asked to sign in again, you return to this page and must enter your change again.
+  </p>
+  <button type="submit" class="btn btn-primary mt-3" aria-describedby="sso-schemes-reauth-hint">Save SSO schemes</button>
+</form>
+
+<%!-- SSO redirect origins: POST form (story legacy-sso-redirect-confirmation, G3-3, D14). The https origins whose
+      legacy SSO logins skip the confirmation page. Validated by Nebu.Matrix.normalize_sso_redirect_origins/1. --%>
+<form id="sso-origins-form" method="post" action="/admin/config/sso-origins" class="mb-6">
+  <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+  <input type="hidden" name="_click_proof" value="" data-click-proof />
+  <h2 class="text-heading font-semibold mb-2">SSO redirect origins</h2>
+
+  <div class="form-control mt-2">
+    <label for="sso-origins-input" class="label-text">Allowed SSO redirect origins</label>
+    <input
+      type="text"
+      id="sso-origins-input"
+      name="sso_redirect_allowed_origins"
+      value={sso_origins_input_value(assigns, @config)}
+      placeholder="https://element.example.com, https://app.element.io"
+      aria-describedby={sso_origins_describedby(assigns)}
+      aria-invalid={if assigns[:sso_origins_error], do: "true"}
+      class="input input-bordered"
+    />
+    <p :if={assigns[:sso_origins_error]} id="sso-origins-error" role="alert" class="mt-1 text-error">
+      {assigns[:sso_origins_error]}
+    </p>
+    <div id="sso-origins-help" class="label-text-alt mt-1 text-base-content/70">
+      <p>Comma-separated https origins (scheme, host and optional port; no path or wildcard).</p>
+      <p>
+        <strong>Only list origins you control.</strong>
+        Listed origins skip the confirmation page and receive a sign-in token with full access to the account.
+      </p>
+      <p>Always allowed without listing:</p>
+      <ul class="list-disc pl-5">
+        <li>
+          the server origin <code>{sso_server_origin()}</code>. It must be an origin you control, which matters when
+          the server name is delegated via .well-known to another host;
+        </li>
+        <li>the OAuth issuer origin, when configured;</li>
+        <li>
+          the registered redirect URIs of approved OAuth clients, and every path below them (not the rest of their
+          origin). Their legacy logins get a full, unscoped session.
+        </li>
+      </ul>
+      <p>
+        Other https origins see a confirmation page on every login. App schemes such as element:// are
+        configured in the SSO redirect schemes form above.
+      </p>
+    </div>
+  </div>
+
+  <p id="sso-origins-reauth-hint" class="mt-2 text-sm text-base-content/70">
+    Saving this setting needs a fresh sign-in. If you are asked to sign in again, you return to this page and must enter your change again.
+  </p>
+  <button type="submit" class="btn btn-primary mt-3" aria-describedby="sso-origins-reauth-hint">Save SSO origins</button>
 </form>
 
 <%!-- OIDC refresh mode: POST form. Two native <select>s (Matrix + admin),
@@ -84,6 +143,7 @@
       AC5/AC6). Operators change either client's mode at runtime — no redeploy. --%>
 <form id="oidc-refresh-mode-form" method="post" action="/admin/config/refresh-mode" class="mb-6">
   <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+  <input type="hidden" name="_click_proof" value="" data-click-proof />
   <h2 class="text-heading font-semibold mb-2">OIDC refresh mode</h2>
 
   <label class="form-control mt-2">
@@ -119,6 +179,125 @@
 
   <button type="submit" class="btn btn-primary mt-3">Save refresh mode</button>
 </form>
+
+<%!-- OAuth 2.0 authorization server: the Admin UI writer of `oauth_enabled` / `oauth_issuer_url` (story admin-oauth-switch,
+      AS1-AS12). The same protection as the SSO trust forms (strict fetch metadata + the Safari click proof, a fresh admin
+      sign-in, no framing); switching on needs the acknowledgement; one audit row per change. The status list is derived by the
+      server (Nebu.Admin.OAuthSwitch.status/2): every item starts with a word, never colour only. --%>
+<section id="oauth-switch" aria-labelledby="oauth-switch-heading" class="mb-6">
+  <h2 id="oauth-switch-heading" class="text-heading font-semibold mb-2">OAuth 2.0 authorization server</h2>
+  <p class="text-text-secondary mb-2">
+    Nebu can act as an OAuth 2.0 authorization server in front of your identity provider (Matrix 1.15 clients such as
+    current Element Web and Element X sign in through it). It is off by default; the stored setting is shown under Status. Read the
+    activation checklist first: <code>docs/architecture/07-deployment.md</code>, section "Activating OAuth".
+  </p>
+
+  <h3 id="oauth-status-heading" class="font-semibold mt-3 mb-1">Status</h3>
+  <ul id="oauth-status" aria-labelledby="oauth-status-heading" class="list-disc pl-5 mb-2">
+    <li :for={item <- @oauth_status} data-status-id={item.id} data-level={item.level} class="break-words">
+      <strong>{status_word(item.level)}:</strong> {item.text}
+    </li>
+  </ul>
+  <p id="oauth-not-checked" class="mb-3 text-sm text-base-content/70">
+    The server cannot see or check everything: it cannot see your load balancer, whether the client IP addresses it forwards
+    are the real ones (the positive client-IP test), what your identity provider puts into <code>auth_time</code>, or how the
+    clients behave. Those, and the manual verification groups A to F of the checklist, stay your job; this list never says that
+    OAuth is ready to be switched on.
+  </p>
+
+  <form id="oauth-switch-form" method="post" action="/admin/config/oauth-switch">
+    <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+    <input type="hidden" name="_click_proof" value="" data-click-proof />
+    <input type="hidden" name="oauth_enabled" value="false" />
+
+    <div class="form-control mt-2">
+      <label for="oauth-enabled-input" class="label cursor-pointer justify-start gap-2 w-fit max-w-full">
+        <input
+          type="checkbox"
+          id="oauth-enabled-input"
+          name="oauth_enabled"
+          value="true"
+          checked={@oauth_form.enabled}
+          aria-describedby={oauth_describedby("oauth-enabled-help", "oauth-enabled-error", @oauth_errors, :enabled)}
+          aria-invalid={if Map.has_key?(@oauth_errors, :enabled), do: "true"}
+          class="checkbox"
+        />
+        <span class="label-text">Offer the OAuth 2.0 API</span>
+      </label>
+      <p :if={@oauth_errors[:enabled]} id="oauth-enabled-error" role="alert" class="mt-1 text-error">
+        {@oauth_errors[:enabled]}
+      </p>
+      <p id="oauth-enabled-help" class="label-text-alt mt-1 text-base-content/70">
+        Checked = on. Unchecked = off, the kill switch.
+      </p>
+      <p class="mt-1 text-sm text-base-content/70">
+        To roll back, uncheck it and save: all nodes follow {oauth_propagation_text(@oauth_cache_ms)} (<code>NEBU_OAUTH_CONFIG_CACHE_MS</code>).
+        Running OAuth sessions stay valid after you switch OAuth off until their access token expires (at most one hour); to end them
+        at once run <code>revoke_all_oauth_sessions</code> as described in the checklist.
+      </p>
+    </div>
+
+    <div class="form-control mt-2">
+      <label for="oauth-issuer-input" class="label-text">Issuer URL</label>
+      <input
+        type="text"
+        id="oauth-issuer-input"
+        name="oauth_issuer_url"
+        value={@oauth_form.issuer}
+        placeholder="https://chat.example.com"
+        autocomplete="off"
+        spellcheck="false"
+        inputmode="url"
+        aria-describedby={oauth_describedby("oauth-issuer-help", "oauth-issuer-error", @oauth_errors, :issuer)}
+        aria-invalid={if Map.has_key?(@oauth_errors, :issuer), do: "true"}
+        class="input input-bordered w-full max-w-xl"
+      />
+      <p :if={@oauth_errors[:issuer]} id="oauth-issuer-error" role="alert" class="mt-1 text-error">
+        {@oauth_errors[:issuer]}
+      </p>
+      <div id="oauth-issuer-help" class="label-text-alt mt-1 text-base-content/70">
+        <p>
+          The public https address of this server as your users reach it: no path, query, fragment or user name. Without a
+          valid issuer OAuth stays off, whatever the checkbox says.
+        </p>
+        <p>
+          The origin of the issuer is also trusted by the legacy SSO login (<code>m.login.sso</code>) without a confirmation page, even while OAuth is off:
+          only enter an origin you control.
+        </p>
+        <p :if={@oauth_form.suggested?}>
+          The value is suggested, not saved yet: it is derived from <code>NEBU_SERVER_NAME</code>. Check it before you save.
+        </p>
+      </div>
+    </div>
+
+    <div class="form-control mt-2">
+      <label for="oauth-ack-input" class="label cursor-pointer justify-start gap-2 w-fit max-w-full">
+        <input
+          type="checkbox"
+          id="oauth-ack-input"
+          name="oauth_activation_ack"
+          value="true"
+          checked={@oauth_form.ack}
+          aria-describedby={oauth_describedby("oauth-ack-help", "oauth-ack-error", @oauth_errors, :ack)}
+          aria-invalid={if Map.has_key?(@oauth_errors, :ack), do: "true"}
+          class="checkbox"
+        />
+        <span class="label-text">I have read the activation checklist and know that unchecking the switch turns OAuth off, while the issuer origin stays trusted by the legacy SSO login until I clear the issuer</span>
+      </label>
+      <p :if={@oauth_errors[:ack]} id="oauth-ack-error" role="alert" class="mt-1 text-error">
+        {@oauth_errors[:ack]}
+      </p>
+      <p id="oauth-ack-help" class="label-text-alt mt-1 text-base-content/70">
+        Required when you switch OAuth on, or set or change the issuer (also while OAuth is off).
+      </p>
+    </div>
+
+    <p id="oauth-switch-reauth-hint" class="mt-2 text-sm text-base-content/70">
+      Saving this setting needs a fresh sign-in. If you are asked to sign in again, you return to this page and must enter your change again.
+    </p>
+    <button type="submit" class="btn btn-primary mt-3" aria-describedby="oauth-switch-reauth-hint">Save OAuth settings</button>
+  </form>
+</section>
 
 <div class="overflow-x-auto">
   <table class="table table-zebra">

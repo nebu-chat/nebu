@@ -1,0 +1,20 @@
+# Security Review: oauth-broker / oauth-legacy-coexistence (SEC Gate 1)
+
+Date: 2026-10-10. Reviewer: Kassandra (nebu-kassandra). Scope: staged diff limited to `server/lib` plus ADR-033, `docs/matrix-api-scope.md` and follow-ups text: `oauth_aware_preferred` flags on GET /login, SSO `action` handling, 403 for OAuth sessions on DELETE /devices and /delete_devices, locked teardown for legacy/admin device deletion, raw-JWT hardening (`DeviceBinding.put/lookup`, `kill_device_jwts/3`, `TokenDenylist.revoke_by_hash/2`), UIA `refresh_auth_time` legacy-only, RequestLogger masking of `action`. Baseline: reports of stories 1-4 and follow-ups.md (known items (d), (f), (i), (r), (u), (w), (x), I-12 not re-raised).
+
+**Classification: CLEAN (0 CRITICAL, 0 HIGH, 0 MEDIUM, 2 LOW, 8 INFO).**
+
+| # | Severity | Location | Finding | Remediation | Disposition |
+|---|----------|----------|---------|-------------|-------------|
+| L-1 | LOW | device_binding.ex:75 (`ON CONFLICT (token_hash) DO UPDATE ... device_id = EXCLUDED.device_id`), :138 (refusal = `NOT EXISTS devices`), http_public.ex:317-319 (login runs `verify_token/1` without `check_denylist`) | A kept refusal binding (C13) can be revived: after a failed denylist write the binding is kept so `lookup/1` refuses the JWT, but the JWT holder can re-point it via `POST /login` with `m.login.token` = the raw JWT (no denylist check, new device registered, upsert re-points the row) or by recreating the deleted device id. Precondition: a transient DB fault right after the teardown commit; strictly better than before. | (1) `POST /login`: check the denylist of the resolved id_token (403 if revoked); (2) upsert must not re-point an existing binding (`WHERE jwt_device_bindings.device_id = EXCLUDED.device_id`, refusal => 500 under C11); (3) optional: `lookup/1` also refuses when the binding is older than the current devices row. | Fixed in this story (review cycle 1: (1) and (2)) |
+| L-2 | LOW | request_logger.ex:74-90; ADR-033 C6 | ADR and code disagree on SSO-redirect log masking; variants (`action[]=`, `Action=`, `org.matrix.msc3824.action[]=`) are logged raw. | Mask the values of every key starting with `action` / `org.matrix.msc3824.action` (case-insensitive) on the SSO redirect paths and align the ADR text. | Fixed in this story (review cycle 1) |
+| I-1 | INFO | protected.ex:2165-2172 | After a fresh-UIA self-delete of a raw-JWT caller's own device the preserved binding is kept but the device row is gone: `lookup/1` refuses the caller's JWT on the next request (hard logout); contradicts the "SYMMETRIC" comment; the preserve path takes no devices lock. | Fix comment or behaviour. | Documented (cycle 1) |
+| I-2 | INFO | device_binding.ex cache (60 s) | After a failed denylist write other nodes with a cached `{device,false}` accept the token for up to 60 s. | Bounded; accept. | Accepted |
+| I-3 | INFO | device_binding.ex insert_binding | A DB error in `put/4` is still `:ok` (unbound JWT no device deletion can kill). | Follow-up (u). | Covered |
+| I-4 | INFO | protected.ex:649,688; oidc_plug.ex:122,162 | `:auth_api` comes only from OidcPlug (DB row NOT NULL + CHECK, or literal "legacy"); 403 before IDOR guard, body parse and UIA gate. | None | Verified |
+| I-5 | INFO | sso_login.ex `sso_action`, `legacy_prompt/2` | `action` parsed after redirectUrl checks, exact values only, prompt from fixed literals, never forwarded raw, no injection/open redirect. | None | Verified |
+| I-6 | INFO | http_public.ex:213; config.ex `live_state/0` | Flags share the `live_state` predicate with auth_metadata 200, fail closed; GET /login now does one uncached server_config read per request. | I-12 (cache Config.get/0). | Covered |
+| I-7 | INFO | oauth_session_store.ex:439-476; matrix.ex:660 | One transaction per device, lock order devices -> matrix_sessions consistent, failure paths 500/flash+audit `delete_failed`. | None | Verified |
+| I-8 | INFO | seams | Test seams compile-time guarded (Mix.env() == :test). | None | Verified |
+
+Verdict: APPROVED (CLEAN). L-1 and L-2 fixed in this story.

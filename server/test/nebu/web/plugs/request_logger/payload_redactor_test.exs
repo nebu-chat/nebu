@@ -383,6 +383,49 @@ defmodule Nebu.Web.Plugs.RequestLogger.PayloadRedactorTest do
       refute String.contains?(encoded, "New confidential topic")
     end
 
+    test "a /sync-shaped body: unsigned.prev_content in state, join and leave timelines is redacted; replaces_state, prev_sender, age survive (AC8)" do
+      topic_event = fn new_text, old_text ->
+        %{
+          "type" => "m.room.topic",
+          "state_key" => "",
+          "event_id" => "$new",
+          "content" => %{"topic" => new_text},
+          "unsigned" => %{
+            "age" => 77,
+            "replaces_state" => "$old",
+            "prev_sender" => "@a:test.local",
+            "prev_content" => %{"topic" => old_text}
+          }
+        }
+      end
+
+      payload = %{
+        "next_batch" => "s1.2",
+        "rooms" => %{
+          "join" => %{
+            "!r:test.local" => %{
+              "state" => %{"events" => [topic_event.("state new secret", "state old secret")]},
+              "timeline" => %{"events" => [topic_event.("timeline new secret", "timeline old secret")]}
+            }
+          },
+          "leave" => %{
+            "!l:test.local" => %{"timeline" => %{"events" => [topic_event.("leave new secret", "leave old secret")]}}
+          }
+        }
+      }
+
+      redacted = PayloadRedactor.redact_payload(payload)
+      encoded = Jason.encode!(redacted)
+
+      for secret <- ["state new secret", "state old secret", "timeline new secret", "timeline old secret", "leave new secret", "leave old secret"] do
+        refute String.contains?(encoded, secret), "#{secret} must not survive the redaction"
+      end
+
+      unsigned = get_in(redacted, ["rooms", "join", "!r:test.local", "timeline", "events"]) |> hd() |> Map.fetch!("unsigned")
+      assert unsigned["prev_content"]["topic"] == @msg
+      assert unsigned["age"] == 77 and unsigned["replaces_state"] == "$old" and unsigned["prev_sender"] == "@a:test.local"
+    end
+
     test "nested arrays of events (/messages chunk) — every element is redacted" do
       make_event = fn text ->
         %{"type" => "m.room.message", "content" => %{"body" => text, "msgtype" => "m.text"}}

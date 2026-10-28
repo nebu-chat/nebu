@@ -1,0 +1,19 @@
+# Local HTTPS override (see dev/tls/README.md): serves Element Web, the Matrix API, the OAuth endpoints and
+# the admin UI on ONE origin, https://nebu.localtest.me:7443. Use it as a second -f file:
+#   docker compose -f docker-compose.yml -f dev/tls/docker-compose.tls.yml --profile e2e up -d
+# (`make dev-tls` does exactly that). Needs dev/tls/certs (`make dev-tls-certs`).
+services:
+  element:
+    ports: !override
+      - "7443:443"
+    volumes:
+      - ./dev/tls/element-config.json:/usr/share/nginx/html/config.json:ro
+      - ./dev/tls/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./dev/tls/certs:/etc/nginx/certs:ro
+  server:
+    environment:
+      # The admin login's redirect_uri is a FIXED value built from these two (never from the Host header), so
+      # they must name the public origin. NOTE: this also makes the Matrix server name
+      # `nebu.localtest.me:7443`, i.e. user IDs look like @alice:nebu.localtest.me:7443.
+      NEBU_SERVER_NAME: "nebu.localtest.me:7443"
+      NEBU_ADMIN_SESSION_SECURE: "true"

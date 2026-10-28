@@ -26,6 +26,10 @@ defmodule Nebu.Admin.UsersController do
 
   plug Nebu.Admin.Auth, :require_admin
 
+  # story admin-forms-gate-sweep: the strict fetch metadata of a user-clicked form submit (Safari: the click proof) before anything is read or changed
+  import Nebu.Admin.OAuthAdminHelpers, only: [click_gate: 2]
+  plug :click_gate when action in [:rename_device, :delete_device]
+
   @sql_list_users """
   SELECT user_id, system_role, is_active, created_at
   FROM users
@@ -130,14 +134,25 @@ defmodule Nebu.Admin.UsersController do
     actor = actor_id(conn)
     redirect_path = "/admin/users/#{enc(user_id)}"
 
-    # Revokes the bound session(s) + removes all key material (S3 kill-switch),
-    # always scoped to the ROUTE user_id (no IDOR — SECURITY-2). Idempotent.
-    :ok = do_delete_device(user_id, device_id)
-    write_audit(actor, "device_deleted", device_id, user_id, "success", nil)
+    # Revokes the bound session(s) + removes all key material (S3 kill-switch) in one atomic teardown,
+    # always scoped to the ROUTE user_id (no IDOR — SECURITY-2). Idempotent. story
+    # oauth-legacy-coexistence (C12): a failed teardown is shown as an error and audited as a
+    # failure instead of crashing the controller.
+    case do_delete_device(user_id, device_id) do
+      :ok ->
+        write_audit(actor, "device_deleted", device_id, user_id, "success", nil)
 
-    conn
-    |> put_flash(:info, "Device revoked")
-    |> redirect(to: redirect_path)
+        conn
+        |> put_flash(:info, "Device revoked")
+        |> redirect(to: redirect_path)
+
+      _error ->
+        write_audit(actor, "device_deleted", device_id, user_id, "failure", "delete_failed")
+
+        conn
+        |> put_flash(:error, "Device could not be revoked, please try again")
+        |> redirect(to: redirect_path)
+    end
   end
 
   # ── Device seams (ADR-020 facade by default, app-env injectable for tests) ────

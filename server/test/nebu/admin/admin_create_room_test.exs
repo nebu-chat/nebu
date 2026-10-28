@@ -94,6 +94,12 @@ defmodule Nebu.Admin.AdminCreateRoomTest do
       :ok
     end
 
+    # story power-levels-enforcement (D10): the room process writes a power-level change through ONE call; the fake models the
+    # transaction with its own column write AND event insert (a failure of either is the change's failure)
+    def apply_power_levels_change(room_id, json, event) do
+      with :ok <- set_power_levels(room_id, json), do: insert_event(event)
+    end
+
     def set_power_levels(room_id, json) do
       :ets.insert(:admin_create_room_test_db, {{:power_levels, room_id}, json})
       :ok
@@ -302,6 +308,8 @@ defmodule Nebu.Admin.AdminCreateRoomTest do
       conn =
         bootstrap_session_conn(:post, "/admin/rooms", claims)
         |> put_req_header("content-type", "application/x-www-form-urlencoded")
+        # story admin-forms-gate-sweep: the strict fetch metadata of a user-clicked submit
+        |> Nebu.OAuth.TestSupport.put_strict_fetch_headers()
         |> Map.put(:body_params, %{"name" => "Ops Room", "visibility" => "private"})
         |> Map.put(:params, %{"name" => "Ops Room", "visibility" => "private"})
         |> endpoint_call()
@@ -341,6 +349,8 @@ defmodule Nebu.Admin.AdminCreateRoomTest do
           "refresh_grace_exp" => now + 8 * 3600 + 180
         })
         |> put_req_header("content-type", "application/x-www-form-urlencoded")
+        # story admin-forms-gate-sweep: the strict fetch metadata of a user-clicked submit
+        |> Nebu.OAuth.TestSupport.put_strict_fetch_headers()
         |> Map.put(:body_params, %{"name" => "Ops Room", "visibility" => "private"})
         |> Map.put(:params, %{"name" => "Ops Room", "visibility" => "private"})
         |> endpoint_call()

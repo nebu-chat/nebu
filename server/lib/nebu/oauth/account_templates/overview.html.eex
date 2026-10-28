@@ -1,0 +1,13 @@
+<section aria-labelledby="profile-heading">
+<h2 id="profile-heading">Profile</h2>
+<dl>
+<dt>Matrix ID</dt>
+<dd><%= @user_id %></dd>
+<dt>Display name</dt>
+<dd><%= @display_name || "Not set" %></dd>
+</dl>
+</section>
+<section aria-labelledby="devices-heading">
+<h2 id="devices-heading">Your devices</h2>
+<%= @table %>
+</section>

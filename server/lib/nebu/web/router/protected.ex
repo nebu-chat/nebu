@@ -23,6 +23,8 @@ defmodule Nebu.Web.Router.Protected do
 
   import Nebu.Matrix.Http
 
+  require Logger
+
   alias Nebu.Matrix.DeviceKeyStore
   alias Nebu.Matrix.CrossSigningKeyStore
 
@@ -40,10 +42,23 @@ defmodule Nebu.Web.Router.Protected do
                                    key: :user
                                  )
 
-  plug Nebu.Web.Plugs.OidcPlug
+  # Pipeline (story oauth-room-summary-unrecognized, RU10): :match runs BEFORE authentication so the
+  # catch-all (`match _`, marked `nebu_unrecognized: true`) can answer an unimplemented endpoint with a
+  # spec `M_UNRECOGNIZED` without any credential check. Every real route still runs the OidcPlug in
+  # :authenticate; a halted conn (401) never dispatches.
   plug :fetch_query_params
   plug :match
+  plug :authenticate
   plug :dispatch
+
+  @doc """
+  Pipeline step after `:match`: runs `Nebu.Web.Plugs.OidcPlug` for every matched route and skips it ONLY
+  when the catch-all marked the conn (`conn.private[:nebu_unrecognized] === true`, strict boolean:
+  `false`, `"true"`, `1`, `nil` or an absent key all authenticate). Fail closed by construction.
+  """
+  @spec authenticate(Plug.Conn.t(), term()) :: Plug.Conn.t()
+  def authenticate(%Plug.Conn{private: %{nebu_unrecognized: true}} = conn, _opts), do: conn
+  def authenticate(conn, _opts), do: Nebu.Web.Plugs.OidcPlug.call(conn, Nebu.Web.Plugs.OidcPlug.init([]))
 
   # ── GET /_matrix/client/v3/sync ───────────────────────────────────────────
   # BEAM-native long-poll: get_sync_delta / get_initial_sync subscribe to :pg
@@ -73,9 +88,15 @@ defmodule Nebu.Web.Router.Protected do
     since = q["since"]
     timeout_ms = parse_timeout(q["timeout"])
 
+    # story sync-token-per-device (D1 / D2): the since token is stored under (user, AUTHENTICATED device): the device of the
+    # opaque session or of the server-side binding of a raw IdP JWT, never a request parameter. A request without a device
+    # (an unbound raw IdP JWT) is "" = the per-user row and the consume-once flags, as before.
+    device_id = authenticated_device_id(conn)
+
     # room-account-data-and-read-markers: Nebu's `next_batch`/`since` token is
-    # `<core token>[.<room account data position>]`. The core token (opaque base64, no
-    # '.') keeps its existing per-user stored-token semantics; the suffix is the
+    # `<core token>[.<room account data position>]`. The core token (opaque, `s2_` + base64url since story
+    # sync-stream-position: no '.') is only compared with the token stored in the caller's own sync_tokens row
+    # (per device since story sync-token-per-device); the suffix is the
     # `stream_pos` up to which this client has received ROOM account data (per DEVICE,
     # because it lives in the client's own token). A token without a suffix (issued
     # before this feature) means position 0 = "all room account data" (delivered once).
@@ -87,52 +108,98 @@ defmodule Nebu.Web.Router.Protected do
     # Best-effort: must never fail the /sync it rides on.
     touch_device_last_seen(conn)
 
-    # Room account data already waiting for this token → do not long-poll.
+    # story sync-token-per-device (D9): a device-bound request reads the two delivery positions of ITS row once, BEFORE the
+    # core call (the core's token write does not advance them). A failed read is {0, 0}: everything is delivered again. Story
+    # sync-stream-position (D8): the positions of the generation the client's core token names (a retry with the previous
+    # next_batch gets the previous generation's).
+    positions =
+      if device_id != "",
+        do: Nebu.Matrix.Session.PgStore.get_positions(user, device_id, if(has_since?, do: core_since)),
+        else: nil
+
+    # Room account data already waiting for this token → do not long-poll. Story sync-token-per-device (D11): the same for
+    # GLOBAL account data this device has not been sent yet (a PUT committed between two requests; a PUT during the wait
+    # wakes the core through `{:account_data_changed, nil}`). A device-less request has no position and no pre-check.
     timeout_ms =
-      if has_since? and Nebu.Matrix.RoomAccountDataStore.pending?(user, since_pos),
-        do: 0,
-        else: timeout_ms
+      if has_since? and
+           (Nebu.Matrix.RoomAccountDataStore.pending?(user, since_pos) or global_account_data_pending?(user, positions)),
+         do: 0,
+         else: timeout_ms
 
-    {next_batch, rooms, fallback?} =
-      if has_since? do
-        delta =
-          Nebu.Matrix.EventDispatcher.Server.get_sync_delta(
-            %Core.GetSyncDeltaRequest{
-              user_id: user,
-              since_token: core_since,
-              timeout_ms: timeout_ms,
-              device_id: ""
-            },
-            stream(user)
-          )
+    # Story sync-membership-partition (D14): only the literal "true" asks for the full state; with a `since` the core then
+    # returns at once (the spec ignores `timeout`) with every joined room's full state. Without a `since` it changes nothing.
+    full_state? = q["full_state"] == "true"
 
-        # get_sync_delta already returns the fully-resolved checkpoint: on an
-        # unknown/stale since_token it transparently falls back to an initial
-        # sync and sets delta.fallback_to_initial: true while putting the full
-        # snapshot in delta.rooms and a fresh delta.since_token. The HTTP /sync
-        # response shape is identical in both cases (next_batch + joined rooms).
-        {delta.since_token, delta.rooms, delta.fallback_to_initial}
-      else
-        initial =
-          Nebu.Matrix.EventDispatcher.Server.get_initial_sync(
-            %Core.GetInitialSyncRequest{user_id: user},
-            stream(user)
-          )
+    # A failed membership read is a 503 M_UNAVAILABLE (D10, fail closed) with no token saved: the client retries.
+    case Nebu.Matrix.Http.call_core(fn -> core_sync(user, device_id, has_since?, core_since, timeout_ms, full_state?) end) do
+      {:ok, sync} -> finish_sync(conn, user, {device_id, positions}, since_pos, has_since?, sync)
+      {:error, err} -> send_error(conn, err)
+    end
+  end
 
-        {initial.since_token, initial.rooms, true}
-      end
+  defp authenticated_device_id(conn) do
+    case conn.assigns[:device_id] do
+      device_id when is_binary(device_id) -> device_id
+      _ -> ""
+    end
+  end
+
+  defp global_account_data_pending?(_user, nil), do: false
+  defp global_account_data_pending?(user, {ad_pos, _cs_pos}), do: Nebu.Matrix.AccountDataStore.pending_since?(user, ad_pos)
+
+  # `get_sync_delta` already returns the fully-resolved checkpoint: on an unknown/stale since_token it transparently falls back
+  # to an initial sync and sets `fallback_to_initial: true` while putting the full snapshot in `rooms` and a fresh `since_token`.
+  # The HTTP /sync response shape is identical in both cases. Without a `since` the initial sync is the (fallback) snapshot.
+  # Both persist the new token under the request's key (`device_id`, "" = the per-user row).
+  defp core_sync(user, device_id, true, core_since, timeout_ms, full_state?) do
+    Nebu.Matrix.EventDispatcher.Server.get_sync_delta(
+      %Core.GetSyncDeltaRequest{
+        user_id: user,
+        since_token: core_since,
+        timeout_ms: timeout_ms,
+        device_id: device_id,
+        full_state: full_state?
+      },
+      stream(user)
+    )
+  end
+
+  defp core_sync(user, device_id, false, _core_since, _timeout_ms, _full_state?) do
+    initial =
+      Nebu.Matrix.EventDispatcher.Server.get_initial_sync(
+        %Core.GetInitialSyncRequest{user_id: user, device_id: device_id},
+        stream(user)
+      )
+
+    %Core.GetSyncDeltaResponse{
+      since_token: initial.since_token,
+      rooms: initial.rooms,
+      fallback_to_initial: true,
+      join_room_ids: initial.join_room_ids,
+      invite_rooms: initial.invite_rooms,
+      leave_rooms: initial.leave_rooms
+    }
+  end
+
+  defp finish_sync(conn, user, key, since_pos, has_since?, sync) do
+    rooms = sync.rooms
+    fallback? = sync.fallback_to_initial
 
     # Rooms the user newly joined in this delta: the client has never seen their
     # account data, so deliver ALL of it (not only changes after the position).
-    full_rooms = if has_since? and not fallback?, do: newly_joined_room_ids(rooms, user), else: []
+    # Story sync-stream-position (D11): the core reports them from the device's cursors (a newest-20 timeline can omit the join event).
+    full_rooms = if has_since? and not fallback?, do: sync.newly_joined_room_ids, else: []
 
     {latest_pos, ad_entries} =
       Nebu.Matrix.RoomAccountDataStore.list_for_sync(user, since_pos, full_rooms)
 
     # A room whose ONLY change is account data must still appear in rooms.join
     # (empty timeline/state). Only for true deltas — initial/fallback already carry
-    # every joined room.
+    # every joined room. Story sync-membership-partition (D11): only for rooms of the
+    # JOIN class: a room the user was banned from / left / is only invited to has an
+    # account data row but must never come back as an (empty) joined room.
     present = MapSet.new(rooms, & &1.room_id)
+    join_class = MapSet.new(sync.join_room_ids)
 
     extra_rooms =
       if has_since? and not fallback? do
@@ -140,6 +207,7 @@ defmodule Nebu.Web.Router.Protected do
         |> Enum.map(&elem(&1, 0))
         |> Enum.uniq()
         |> Enum.reject(&MapSet.member?(present, &1))
+        |> Enum.filter(&MapSet.member?(join_class, &1))
         |> Enum.map(fn rid ->
           %Core.SyncRoom{room_id: rid, state_events: [], timeline_events: [], limited: false, prev_batch: ""}
         end)
@@ -155,10 +223,15 @@ defmodule Nebu.Web.Router.Protected do
       )
 
     response =
-      sync_response(next_batch <> "." <> Integer.to_string(latest_pos), rooms ++ extra_rooms, room_ad)
+      sync_response(
+        sync.since_token <> "." <> Integer.to_string(latest_pos),
+        rooms ++ extra_rooms,
+        room_ad,
+        sync.invite_rooms,
+        sync.leave_rooms
+      )
       |> put_device_e2e_counts(conn)
-      |> put_cross_signing_device_lists(conn, core_since)
-      |> put_global_account_data(conn, core_since)
+      |> put_global_deliveries(user, key, has_since?, fallback?, sync.since_token)
 
     send_json(conn, 200, response)
   end
@@ -188,56 +261,80 @@ defmodule Nebu.Web.Router.Protected do
 
   defp split_since_token(_), do: {nil, 0}
 
-  defp newly_joined_room_ids(rooms, user) do
-    for room <- rooms,
-        Enum.any?(room.timeline_events, fn ev ->
-          ev.event_type == "m.room.member" and ev.state_key == user and
-            match?({:ok, %{"membership" => "join"}}, Jason.decode(ev.content))
-        end),
-        do: room.room_id
-  end
+  # Top-level `account_data.events` (Matrix CS §GET /sync) and the user's OWN id in `device_lists.changed` after a
+  # cross-signing key change (CS §Cross-signing). Global account data is durable (PostgreSQL, story account-data-durability)
+  # so Element's secret-storage / recovery material survives restarts and is delivered to the client. Each entry is
+  # `{type, content}`; content is opaque (ADR-011 — never parsed/decrypted here). An initial-shaped answer (no `since`, or a
+  # fallback) delivers ALL of the user's global account data, a true delta only what changed since the client's last response.
+  #
+  # story sync-token-per-device (D9): a DEVICE-bound request delivers both by the two POSITIONS of its own sync_tokens row
+  # (read once before the core call): the account data rows with `stream_pos > account_data_pos` (every row when the answer
+  # is initial-shaped) and the own user when `changed_pos > cross_signing_pos` on a true delta. Nothing is consumed, so every
+  # device (the writer included) gets every change once. Then BOTH columns advance, each ONLY to the maximum read from ITS
+  # OWN source (two sources read at different moments: one shared column could skip a row committed in between), with
+  # GREATEST and only while the row still holds the token of THIS response (a superseded response never advances them).
+  # A failed read / advance leads to delivering again, never to missing: a failed account data read in a true delta keeps
+  # `account_data_pos` (the rows come with the next sync); a failed read in an INITIAL-SHAPED answer (which delivered none,
+  # and whose client may have reset its state) sets `account_data_pos` back to 0 (plain SET under the same token guard,
+  # review m1), so the next delta delivers every row. `full_state=true` only widens the ROOM state.
+  #
+  # D10: a fallback to a request that carried a `since` ALWAYS lists the own user (the client cannot know it got an
+  # initial-shaped answer and would miss a cross-signing change); a real initial sync (no `since`) lists nobody. The own user
+  # is never put in `device_lists.left`.
+  #
+  # D2: a DEVICE-LESS request (an unbound raw IdP JWT) keeps the per-user consume-once flags exactly as before (read and
+  # cleared atomically, only with a `since` for the cross-signing flag); only D10 also applies to it.
+  defp put_global_deliveries(response, user, {device_id, {ad_pos, cs_pos}}, has_since?, fallback?, core_token)
+       when device_id != "" do
+    initial_shaped? = fallback? or not has_since?
 
-  # Top-level `account_data.events` (Matrix CS §GET /sync). Global account data is
-  # durable (PostgreSQL, story account-data-durability) so Element's secret-storage /
-  # recovery material survives restarts and is delivered to the client. Initial sync
-  # (no `since`) delivers ALL of the user's global account data; incremental sync
-  # (`since` present) delivers ONLY entries changed since the prior sync — the store
-  # uses a consume-once `changed` flag, read-and-cleared atomically. Each entry is
-  # `{type, content}`; content is opaque (ADR-011 — never parsed/decrypted here).
-  defp put_global_account_data(response, conn, since) do
-    user = conn.assigns[:current_user]
+    ad_read = Nebu.Matrix.AccountDataStore.list_since_checked(user, if(initial_shaped?, do: 0, else: ad_pos))
+    {cs_latest, cs_changed?} = CrossSigningKeyStore.changed_since?(user, cs_pos)
+    cs_target = max(cs_latest, cs_pos)
 
     entries =
-      if is_binary(since) and since != "" do
-        Nebu.Matrix.AccountDataStore.list_changed_and_clear(user)
-      else
-        Nebu.Matrix.AccountDataStore.list_all_and_clear(user)
+      case ad_read do
+        {:ok, ad_latest, entries} ->
+          _ = Nebu.Matrix.Session.PgStore.advance_positions(user, device_id, core_token, max(ad_latest, ad_pos), cs_target)
+          entries
+
+        :error when initial_shaped? ->
+          _ = Nebu.Matrix.Session.PgStore.rewind_account_data_position(user, device_id, core_token, cs_target)
+          []
+
+        :error ->
+          _ = Nebu.Matrix.Session.PgStore.advance_positions(user, device_id, core_token, ad_pos, cs_target)
+          []
       end
 
+    response
+    |> put_global_account_data_events(entries)
+    |> put_own_user_changed(user, (has_since? and fallback?) or (not initial_shaped? and cs_changed?))
+  end
+
+  defp put_global_deliveries(response, user, _device_less, has_since?, fallback?, _core_token) do
+    entries =
+      if has_since?,
+        do: Nebu.Matrix.AccountDataStore.list_changed_and_clear(user),
+        else: Nebu.Matrix.AccountDataStore.list_all_and_clear(user)
+
+    # the flag is consumed by every request that carries a since (a fallback too), as before
+    consumed? = has_since? and CrossSigningKeyStore.consume_changed_flag(user)
+
+    response
+    |> put_global_account_data_events(entries)
+    |> put_own_user_changed(user, consumed? or (has_since? and fallback?))
+  end
+
+  defp put_global_account_data_events(response, entries) do
     events = Enum.map(entries, fn {type, content} -> %{"type" => type, "content" => content} end)
     Map.put(response, "account_data", %{"events" => events})
   end
 
-  # AC5: after a cross-signing key change, the uploading user's OWN id must appear in
-  # device_lists.changed of their next INCREMENTAL /sync (CS §Cross-signing). The store
-  # carries a consume-once `cross_signing_changed` flag per user; an incremental sync
-  # reads-and-clears it (atomic UPDATE ... RETURNING, cluster-correct) and surfaces the
-  # user once. Initial sync (no since) does not consume the flag.
-  defp put_cross_signing_device_lists(response, conn, since) do
-    if is_binary(since) and since != "" do
-      user = conn.assigns[:current_user]
+  defp put_own_user_changed(response, user, true),
+    do: update_in(response, ["device_lists", "changed"], fn changed -> Enum.uniq([user | changed || []]) end)
 
-      if CrossSigningKeyStore.consume_changed_flag(user) do
-        update_in(response, ["device_lists", "changed"], fn changed ->
-          Enum.uniq([user | changed || []])
-        end)
-      else
-        response
-      end
-    else
-      response
-    end
-  end
+  defp put_own_user_changed(response, _user, false), do: response
 
   # E2E extension to /sync (Matrix CS §e2e-extensions-to-sync): report the unclaimed
   # one-time-key count + unused fallback-key algorithms so the client's crypto layer
@@ -259,27 +356,172 @@ defmodule Nebu.Web.Router.Protected do
   end
 
   # ── POST /_matrix/client/v3/logout ────────────────────────────────────────
+  #
+  # story oauth-token-revocation-logout (R15): an OAuth access token ends ONLY its own device's
+  # session through the SAME function as POST /oauth2/revoke (`Nebu.Matrix.oauth_revoke_token/1`:
+  # session rows, device, keys); the user's other devices (OAuth and legacy) are untouched. OAuth vs
+  # legacy is decided at AUTHENTICATION time (`:auth_api`, set by OidcPlug), never by a lookup here
+  # (Trap 4: a concurrent revocation would turn a lookup miss into the user-wide legacy wipe).
+  #
+  # bugfix legacy-logout-per-device (LL1-LL8, gate r): a LEGACY caller (opaque Nebu token, raw IdP JWT
+  # bound or unbound) ends ONLY the device its credential is bound to server-side (`:device_id` of the
+  # authentication, never request input) with the same locked teardown (`Nebu.Matrix.legacy_logout_device/1`):
+  # every session row of the device, the device, its keys. A bound JWT is then denylisted CHECKED, also when
+  # the re-check under the lock found the device taken over (`{:ok, :unknown}`); an unbound JWT is only
+  # denylisted. A storage failure is `500 M_UNKNOWN` (never a silent 200 with a live credential). The
+  # request body is ignored. The user-wide wipe is `/logout/all`'s legacy part only (`legacy_user_wipe/2`).
   post "/client/v3/logout" do
+    if conn.assigns[:auth_api] == "oauth" do
+      case Nebu.Matrix.oauth_revoke_token(conn.assigns[:access_token]) do
+        {:ok, _} -> send_json(conn, 200, %{})
+        {:ok, :revoked, _info} -> send_json(conn, 200, %{})
+        {:error, :unavailable} -> error(conn, 500, "M_UNKNOWN", "Logout failed, please try again.")
+      end
+    else
+      legacy_device_logout(conn)
+    end
+  end
+
+  # ── POST /_matrix/client/v3/logout/all ────────────────────────────────────
+  #
+  # story oauth-token-revocation-logout (R17): invalidates EVERY token of the user (including the
+  # caller's) and deletes ALL devices of the user with their keys (Matrix spec; cross-signing keys are
+  # per user and stay). Both APIs: (1) every OAuth session with its device, (2) the legacy part =
+  # exactly the legacy `/logout` body, (3) every remaining device (legacy too). A failed part answers
+  # `500 M_UNKNOWN` while the other parts still ran (the tokens are dead anyway; the client may retry).
+  post "/client/v3/logout/all" do
     user = conn.assigns[:current_user]
 
+    oauth_result = Nebu.Matrix.oauth_end_user_sessions(user)
+
+    # The legacy part keeps its best-effort contract (LL11) but its failure is no longer invisible here:
+    # an exception counts as a failure, and the caller's raw JWT must be denylisted DURABLY (checked).
+    legacy_result =
+      try do
+        legacy_user_wipe(conn, user)
+        checked_revoke_jwt(conn)
+      rescue
+        _ -> :error
+      catch
+        :exit, _ -> :error
+      end
+
+    # Every device AND every matrix_sessions row of the user, atomically per device (review cycle 1,
+    # Kassandra F-1/F-2): a legacy session that survives is a failure, never a silent 200.
+    devices_result = Nebu.Matrix.end_all_user_devices(user)
+
+    case {oauth_result, legacy_result, devices_result} do
+      {{:ok, _}, :ok, :ok} -> send_json(conn, 200, %{})
+      _ -> error(conn, 500, "M_UNKNOWN", "Logout failed, please try again.")
+    end
+  end
+
+  # The presented raw JWT must be on the denylist in the DATABASE (cluster wide); a failed insert is a
+  # failure (500). Opaque tokens are covered by the checked matrix_sessions teardown.
+  defp checked_revoke_jwt(conn) do
+    token = conn.assigns[:access_token]
+    claims = conn.assigns[:oidc_claims] || %{}
+
+    with exp when is_integer(exp) <- claims["exp"],
+         true <- Nebu.Web.Plugs.OidcPlug.jwt_token?(token) do
+      case Nebu.Web.TokenDenylist.revoke_checked(claims["jti"], token, exp) do
+        :ok -> :ok
+        {:error, _} -> :error
+      end
+    else
+      _ -> :ok
+    end
+  end
+
+  # The legacy user-wide wipe, used by `/logout/all` ONLY (LL11, unchanged behaviour): revoke the presented
+  # token, then end every session of the user (`device_id: ""`).
+  defp legacy_user_wipe(conn, user) do
     # F-1: revoke the access token so it cannot be reused. OidcPlug returns the
     # verified OIDC token verbatim as the access_token, so destroying the session
     # GenServer alone does NOT stop the token from re-validating on the next
     # request. We add the presented token to the denylist (keyed by jti or token
     # hash) until its own `exp`, mirroring the Go gateway's logout → Invalidate
     # path. OidcPlug then rejects it with 401 M_UNKNOWN_TOKEN. Best-effort: a
-    # missing token/exp just means nothing to revoke (still returns 200 {}).
+    # missing token/exp just means nothing to revoke.
     revoke_access_token(conn)
 
     req = %Core.InvalidateUserSessionsRequest{user_id: user, device_id: ""}
 
-    case call_core(fn ->
-           Nebu.Matrix.EventDispatcher.Server.invalidate_user_sessions(req, stream(user))
-         end) do
-      # Logout is best-effort (mirrors Go: a cleanup failure still returns 200 {}).
-      _ -> send_json(conn, 200, %{})
+    # Best-effort (mirrors Go: a cleanup failure does not block); `/logout/all` reports the other parts.
+    _ =
+      call_core(fn ->
+        Nebu.Matrix.EventDispatcher.Server.invalidate_user_sessions(req, stream(user))
+      end)
+
+    :ok
+  end
+
+  # Legacy `POST /logout` (LL1-LL8): the presented credential's device only. Exactly one INFO line per call, a static
+  # message with Logger METADATA (user, device, kind, outcome; never a token, hash or jti; Kassandra L3).
+  defp legacy_device_logout(conn) do
+    user = conn.assigns[:current_user]
+    token = conn.assigns[:access_token]
+    jwt? = Nebu.Web.Plugs.OidcPlug.jwt_token?(token)
+
+    {kind, log_device, outcome} =
+      cond do
+        is_binary(token) and not jwt? ->
+          device_id = conn.assigns[:device_id]
+          did = if is_binary(device_id), do: device_id, else: ""
+          result = Nebu.Matrix.legacy_logout_device(%{kind: :opaque, token: token, user_id: user, device_id: did})
+          {"opaque", did, logout_outcome(result)}
+
+        jwt? ->
+          jwt_logout(conn, user, token)
+
+        true ->
+          {"jwt_unbound", "-", if(checked_revoke_jwt(conn) == :ok, do: "ended", else: "failed")}
+      end
+
+    Logger.info("legacy logout", user_id: user, device_id: log_device, kind: kind, outcome: outcome)
+
+    if outcome == "failed" do
+      error(conn, 500, "M_UNKNOWN", "Logout failed, please try again.")
+    else
+      send_json(conn, 200, %{})
     end
   end
+
+  # A JWT with a (non-empty) device binding: teardown, then the checked denylist write. A JWT that `OidcPlug` resolved
+  # as UNBOUND is re-checked with an uncached binding read: the auth-time lookup degrades to "unbound" (and used to
+  # cache that) on a database error, which must not turn a bound JWT into the unbound path (Kassandra L2); a failing
+  # re-read fails closed (`failed`, 500) and nothing is denylisted or deleted.
+  defp jwt_logout(conn, user, token) do
+    case conn.assigns[:device_id] do
+      did when is_binary(did) and did != "" ->
+        {"jwt_bound", did, bound_jwt_outcome(conn, user, token, did)}
+
+      _ ->
+        case Nebu.Matrix.Session.DeviceBinding.lookup_fresh(token) do
+          {:ok, did, _refused?} when is_binary(did) and did != "" ->
+            {"jwt_bound", did, bound_jwt_outcome(conn, user, token, did)}
+
+          {:ok, _, _} ->
+            {"jwt_unbound", "-", if(checked_revoke_jwt(conn) == :ok, do: "ended", else: "failed")}
+
+          {:error, _} ->
+            {"jwt_unbound", "-", "failed"}
+        end
+    end
+  end
+
+  defp bound_jwt_outcome(conn, user, token, device_id) do
+    case Nebu.Matrix.legacy_logout_device(%{kind: :jwt, token: token, user_id: user, device_id: device_id}) do
+      {:error, _} -> "failed"
+      {:ok, ended_or_unknown} -> if checked_revoke_jwt(conn) == :ok, do: logout_outcome(ended_or_unknown), else: "failed"
+    end
+  end
+
+  defp logout_outcome({:ok, :ended}), do: "ended"
+  defp logout_outcome({:ok, :unknown}), do: "unknown"
+  defp logout_outcome(:ended), do: "ended"
+  defp logout_outcome(:unknown), do: "unknown"
+  defp logout_outcome(_), do: "failed"
 
   defp revoke_access_token(conn) do
     token = conn.assigns[:access_token]
@@ -289,7 +531,7 @@ defmodule Nebu.Web.Router.Protected do
       # oidc-session-refresh: an opaque Nebu session token (no JWT dots) is hard-
       # revoked by deleting its matrix_sessions row, so neither the AT nor its RT
       # can be reused after logout. JWTs have no row here and take the denylist path.
-      is_binary(token) and not String.contains?(token, ".") ->
+      is_binary(token) and not Nebu.Web.Plugs.OidcPlug.jwt_token?(token) ->
         _ = Nebu.Matrix.Session.MatrixSessionStore.revoke(token)
         :ok
 
@@ -360,6 +602,16 @@ defmodule Nebu.Web.Router.Protected do
     error(conn, 404, "M_NOT_FOUND", "No backup found")
   end
 
+  # POST /room_keys/version — key backup creation ACCEPTANCE STUB (story room-keys-version-post-stub).
+  # Element Web creates a key backup right after the cross-signing bootstrap of a user's first login;
+  # without a 2xx it shows "Unable to set up keys". The Go gateway had exactly this stub (dropped by the
+  # Elixir migration). Nebu has no server-side key backup (ADR-011: no E2EE rooms, nothing to back up):
+  # the body is ignored, NOTHING is stored (no DB access), the GET above keeps answering "no backup".
+  # Every other room_keys/* route stays M_UNRECOGNIZED.
+  post "/client/v3/room_keys/version" do
+    send_json(conn, 200, %{"version" => "1"})
+  end
+
   # GET MSC3814 dehydrated_device — not in CS API v1.18; unstable proposal only.
   # Return 404 M_NOT_FOUND — Element accepts this.
   get "/client/unstable/org.matrix.msc3814.v1/dehydrated_device" do
@@ -385,10 +637,10 @@ defmodule Nebu.Web.Router.Protected do
   get "/client/v3/capabilities" do
     send_json(conn, 200, %{
       "capabilities" => %{
-        "m.room_versions" => %{
-          "default" => "10",
-          "available" => Map.new(~w(1 2 3 4 5 6 7 8 9 10 11), &{&1, "stable"})
-        },
+        # Story create-room-input-validation (D1): exactly the room versions createRoom / upgrade accept
+        # (Nebu.Matrix.RoomVersions), so the capability never promises a version that answers
+        # M_UNSUPPORTED_ROOM_VERSION. `default` MUST be one of `available`.
+        "m.room_versions" => Nebu.Matrix.RoomVersions.capability(),
         "m.change_password" => %{"enabled" => false},
         "m.set_displayname" => %{"enabled" => true},
         "m.set_avatar_url" => %{"enabled" => true},
@@ -509,13 +761,22 @@ defmodule Nebu.Web.Router.Protected do
             # mismatch check fires once a binding exists), and it lets a later OTK-only
             # top-up on the SAME token resolve the device without the removed
             # sole_device_id heuristic.
-            maybe_bind_jwt_device(conn, user, device_id)
+            #
+            # story oauth-legacy-coexistence (C11, Trap 4): the bind runs FIRST and is CHECKED. A raw IdP
+            # JWT may never bind to — and so never write the keys of — a device that has an OAuth session
+            # (T25 b refused the binding silently, but the keys were still written): 403 with the G1 text,
+            # no key write.
+            case maybe_bind_jwt_device(conn, user, device_id) do
+              {:error, :oauth_device} ->
+                error(conn, 403, "M_FORBIDDEN", "device_keys device_id does not match the authenticated device")
 
-            if is_map(device_keys), do: DeviceKeyStore.put_device_keys(user, device_id, device_keys)
-            if is_map(one_time_keys), do: DeviceKeyStore.store_one_time_keys(user, device_id, one_time_keys)
-            if is_map(fallback_keys), do: DeviceKeyStore.store_fallback_keys(user, device_id, fallback_keys)
+              :ok ->
+                if is_map(device_keys), do: DeviceKeyStore.put_device_keys(user, device_id, device_keys)
+                if is_map(one_time_keys), do: DeviceKeyStore.store_one_time_keys(user, device_id, one_time_keys)
+                if is_map(fallback_keys), do: DeviceKeyStore.store_fallback_keys(user, device_id, fallback_keys)
 
-            send_json(conn, 200, %{"one_time_key_counts" => DeviceKeyStore.otk_counts(user, device_id)})
+                send_json(conn, 200, %{"one_time_key_counts" => DeviceKeyStore.otk_counts(user, device_id)})
+            end
         end
     end
   end
@@ -553,26 +814,41 @@ defmodule Nebu.Web.Router.Protected do
   # DELETE /devices/{deviceId} — delete (S3 AC3), UIA-gated (Option B). On success:
   # full per-device teardown (key material, opaque session, bound-JWT kill-switch).
   # Idempotent (deleting an absent device → 200 {}); another user's device → 404.
+  #
+  # story oauth-legacy-coexistence (C7/C8): an OAuth-session caller is refused FIRST — before the IDOR
+  # guard (no existence oracle), before any UIA session is minted: "the User-Interactive Authentication
+  # API is not compatible with the OAuth 2.0 API" (Matrix v1.18); device deletion for OAuth sessions is
+  # the account management page. Decided by the `:auth_api` assign set at AUTHENTICATION time by
+  # `OidcPlug` (never by a lookup here); an expired/superseded OAuth token never reaches this handler
+  # (401 + soft_logout). Matrix v1.17 exempts application-service callers from UIA on device deletion;
+  # Nebu has no appservice API (epic 10), so there is no exception to make.
   delete "/client/v3/devices/:device_id" do
-    user = conn.assigns[:current_user]
-    did = URI.decode_www_form(device_id)
-
-    # IDOR guard (S3 G3): a device_id owned by ANOTHER user → 404, BEFORE any UIA
-    # challenge (no existence oracle, no cross-user delete). An absent-for-everyone
-    # device falls through to an idempotent 200 no-op.
-    if DeviceKeyStore.belongs_to_other_user?(user, did) do
-      error(conn, 404, "M_NOT_FOUND", "Unknown device")
+    if conn.assigns[:auth_api] == "oauth" do
+      refuse_oauth_device_deletion(conn)
     else
-      uia_gate(conn, "delete_devices", [did], fn conn, via_auth ->
-        # If satisfied by the recent-login window (via_auth=false), the presented
-        # token bound to this device must stop authenticating (AC3 → revoke it). If
-        # the user just completed a fresh m.login.sso re-auth (via_auth=true), the
-        # request token is preserved (they re-proved themselves this request) so it
-        # can finish the request — for BOTH opaque sessions AND raw JWTs.
-        preserve = if via_auth, do: caller_credential(conn), else: nil
-        delete_one_device(user, did, preserve)
-        send_json(conn, 200, %{})
-      end)
+      user = conn.assigns[:current_user]
+      did = URI.decode_www_form(device_id)
+
+      # IDOR guard (S3 G3): a device_id owned by ANOTHER user → 404, BEFORE any UIA
+      # challenge (no existence oracle, no cross-user delete). An absent-for-everyone
+      # device falls through to an idempotent 200 no-op.
+      if DeviceKeyStore.belongs_to_other_user?(user, did) do
+        error(conn, 404, "M_NOT_FOUND", "Unknown device")
+      else
+        uia_gate(conn, "delete_devices", [did], fn conn, via_auth ->
+          # If satisfied by the recent-login window (via_auth=false), the presented
+          # token bound to this device must stop authenticating (AC3 → revoke it). If
+          # the user just completed a fresh m.login.sso re-auth (via_auth=true), the
+          # request token is preserved (they re-proved themselves this request) so it
+          # can finish the request — for BOTH opaque sessions AND raw JWTs.
+          preserve = if via_auth, do: caller_credential(conn), else: nil
+
+          case delete_one_device(user, did, preserve) do
+            :ok -> send_json(conn, 200, %{})
+            {:error, _} -> error(conn, 500, "M_UNKNOWN", "Device deletion failed, please try again.")
+          end
+        end)
+      end
     end
   end
 
@@ -581,47 +857,71 @@ defmodule Nebu.Web.Router.Protected do
   # is scoped to the caller: a foreign device_id in the array is silently skipped (no
   # cross-user delete — G3). Empty array → 200 {} no-op (still gated, but a fresh
   # session satisfies it). Idempotent → 200 {}.
+  #
+  # story oauth-legacy-coexistence (C7): OAuth-session callers are refused FIRST (before the body
+  # validation and the UIA gate), exactly like DELETE /devices/{deviceId}, also for an empty or
+  # non-JSON body; see there for the rationale (and the appservice note).
   post "/client/v3/delete_devices" do
-    user = conn.assigns[:current_user]
-    params = body_params(conn)
-    devices = params["devices"]
+    if conn.assigns[:auth_api] == "oauth" do
+      refuse_oauth_device_deletion(conn)
+    else
+      user = conn.assigns[:current_user]
+      params = body_params(conn)
+      devices = params["devices"]
 
-    cond do
-      not Map.has_key?(params, "devices") ->
-        error(conn, 400, "M_MISSING_PARAM", "devices is required")
+      cond do
+        not Map.has_key?(params, "devices") ->
+          error(conn, 400, "M_MISSING_PARAM", "devices is required")
 
-      not is_list(devices) ->
-        error(conn, 400, "M_INVALID_PARAM", "devices must be an array")
+        not is_list(devices) ->
+          error(conn, 400, "M_INVALID_PARAM", "devices must be an array")
 
-      # Bound the work + canonicalisation: a single request must not enumerate/delete an
-      # unbounded device set. Cap at <=100 device_ids; reject larger with 400. The cap is
-      # checked on the raw array length BEFORE filtering so a padded array cannot smuggle
-      # more than 100 real ids through.
-      length(devices) > 100 ->
-        error(conn, 400, "M_INVALID_PARAM", "devices must contain at most 100 entries")
+        # Bound the work + canonicalisation: a single request must not enumerate/delete an
+        # unbounded device set. Cap at <=100 device_ids; reject larger with 400. The cap is
+        # checked on the raw array length BEFORE filtering so a padded array cannot smuggle
+        # more than 100 real ids through.
+        length(devices) > 100 ->
+          error(conn, 400, "M_INVALID_PARAM", "devices must contain at most 100 entries")
 
-      true ->
-        # Filter to binaries and dedupe so the UIA params canonicalisation and the
-        # per-device loop are stable (a repeated id is processed once).
-        ids = devices |> Enum.filter(&is_binary/1) |> Enum.uniq()
+        true ->
+          # Filter to binaries and dedupe so the UIA params canonicalisation and the
+          # per-device loop are stable (a repeated id is processed once).
+          ids = devices |> Enum.filter(&is_binary/1) |> Enum.uniq()
 
-        uia_gate(conn, "delete_devices", ids, fn conn, _via_auth ->
-          # Scope to the caller: only delete device_ids actually owned by this user.
-          # Preserve the credential MAKING this batch request (its device may be in the
-          # list) so the caller can finish the batch and keep managing devices after a
-          # bulk delete — all OTHER targeted sessions are still revoked. The preserve is
-          # symmetric: for an opaque caller it spares the matrix_sessions row, and for a
-          # raw-JWT caller it spares the kill-switch denylist of THIS token's hash.
-          preserve = caller_credential(conn)
+          uia_gate(conn, "delete_devices", ids, fn conn, _via_auth ->
+            # Scope to the caller: only delete device_ids actually owned by this user.
+            # Preserve the credential MAKING this batch request (its device may be in the
+            # list) so the caller can finish the batch and keep managing devices after a
+            # bulk delete — all OTHER targeted sessions are still revoked. The preserve is
+            # symmetric: for an opaque caller it spares the matrix_sessions row, and for a
+            # raw-JWT caller it spares the kill-switch denylist of THIS token's hash.
+            preserve = caller_credential(conn)
 
-          for id <- ids do
-            unless DeviceKeyStore.belongs_to_other_user?(user, id),
-              do: delete_one_device(user, id, preserve)
-          end
+            # Every id is attempted (a failing one stays intact, the others are still deleted); any
+            # failure answers 500 (story oauth-legacy-coexistence C12).
+            results =
+              for id <- ids, not DeviceKeyStore.belongs_to_other_user?(user, id) do
+                delete_one_device(user, id, preserve)
+              end
 
-          send_json(conn, 200, %{})
-        end)
+            if Enum.all?(results, &(&1 == :ok)),
+              do: send_json(conn, 200, %{}),
+              else: error(conn, 500, "M_UNKNOWN", "Device deletion failed, please try again.")
+          end)
+      end
     end
+  end
+
+  # C7 / C8: the same answer for an own, a foreign and an unknown device id and for any body, and
+  # nothing is looked up, minted or deleted. 403 M_FORBIDDEN (not 401 + UIA flows, not
+  # M_UNRECOGNIZED): the endpoint exists and works for legacy sessions on this server.
+  defp refuse_oauth_device_deletion(conn) do
+    error(
+      conn,
+      403,
+      "M_FORBIDDEN",
+      "Device deletion is not available for OAuth sessions; use the account management page."
+    )
   end
 
   # POST /user/{userId}/filter — a client uploads a sync filter and gets an id back BEFORE
@@ -687,6 +987,16 @@ defmodule Nebu.Web.Router.Protected do
 
   @global_account_data_max_bytes 1_000_000
 
+  # story gdpr-erasure-global-data (D18 (c)): the answer to a write of a user whose erasure is under way or done: the same permanent
+  # refusal as the deactivated-account answer of `/login` (the token of such a user dies with the teardown).
+  defp user_erased(conn), do: error(conn, 403, "M_USER_DEACTIVATED", "This account has been deactivated")
+
+  # The kind of a write error for the log: an exception's module or an atom, never its message (a Postgrex error can quote
+  # row values).
+  defp error_kind(%{__struct__: module}), do: inspect(module)
+  defp error_kind(reason) when is_atom(reason), do: Atom.to_string(reason)
+  defp error_kind(_), do: "error"
+
   defp put_global_account_data_body(conn, user_id, type) do
     case conn.assigns[:raw_body] do
       raw when is_binary(raw) ->
@@ -701,8 +1011,20 @@ defmodule Nebu.Web.Router.Protected do
             error(conn, 400, "M_BAD_JSON", "Request body must be a JSON object")
 
           true ->
-            Nebu.Matrix.AccountDataStore.put(user_id, type, Jason.encode!(body_params(conn)))
-            send_json(conn, 200, %{})
+            case Nebu.Matrix.AccountDataStore.put(user_id, type, Jason.encode!(body_params(conn))) do
+              :ok ->
+                send_json(conn, 200, %{})
+
+              {:error, :user_erased} ->
+                # story gdpr-erasure-global-data (D10 / D18 (c)): a permanent condition, not a retryable 500
+                Logger.info("global account data write refused: user_erased")
+                user_erased(conn)
+
+              {:error, reason} ->
+                # never the content or the reason's details (opaque, often client-encrypted secret storage): its kind only
+                Logger.error("global account data write failed: #{error_kind(reason)}")
+                error(conn, 500, "M_UNKNOWN", "Account data could not be stored, please try again.")
+            end
         end
 
       _ ->
@@ -1001,6 +1323,16 @@ defmodule Nebu.Web.Router.Protected do
   post "/client/v3/createRoom" do
     user = conn.assigns[:current_user]
     params = body_params(conn)
+
+    # story rate-limits-join-invite-create-room (D2): the per-user charge comes FIRST, before any body check or DB read: one
+    # all-or-nothing take over the create_room bucket and (with invitees) one invite unit per distinct invitee
+    with_membership_charge(conn, create_room_charge(user, params), fn -> create_room_request(conn, user, params) end)
+  end
+
+  # The createRoom handler proper (everything after the rate-limit charge).
+  defp create_room_request(conn, user, params) do
+    # raw, any JSON type: the core validates it (non-string / NUL -> 400 M_BAD_JSON, > 255 code points -> 400
+    # M_INVALID_PARAM) before a room exists (story create-room-input-validation, D5b/c, D7)
     name = params["name"]
 
     # Matrix Spaces (spaces-elixir s1): creation_content is merged into the
@@ -1023,37 +1355,88 @@ defmodule Nebu.Web.Router.Protected do
     # Matrix CS §createRoom `initial_state`: an array of
     # { "type", "state_key", "content" } objects applied as creator-authored
     # state events on the new room (e.g. m.space.parent linking a child room
-    # back to its Space, restricted m.room.join_rules, m.room.encryption).
-    # Carried as JSON so create_room can replay each entry through the signed,
-    # persisted state-event path.
-    # Bound the per-request sign+insert+pg-fanout cost of replaying initial_state
-    # (createRoom has no rate limit): cap the array length. 64 comfortably exceeds
-    # what real Matrix clients send (Element sends ~5) while preventing a single
-    # ~1 MB body from packing tens of thousands of state events.
+    # back to its Space, restricted m.room.join_rules). Carried as JSON so
+    # create_room can replay each entry through the signed, persisted state-event
+    # path. Story create-room-initial-state-conformance: the structure is validated
+    # BEFORE the room exists (a bad request creates nothing): 400 M_BAD_JSON for a
+    # non-array / non-object entry / missing type / non-string state_key / missing
+    # content, 400 M_INVALID_PARAM above 64 entries (createRoom is charged against the
+    # per-user `create_room` tier since story rate-limits-join-invite-create-room; the cap bounds the per-request
+    # sign+insert+pg-fanout cost; Element sends ~5).
     initial_state = params["initial_state"]
+    validation = Nebu.Matrix.EventDispatcher.Server.validate_initial_state(initial_state)
 
-    if is_list(initial_state) and length(initial_state) > 64 do
-      error(conn, 400, "M_INVALID_PARAM", "initial_state must not exceed 64 events")
-    else
-      initial_state_json =
-        case initial_state do
-          list when is_list(list) and list != [] -> Jason.encode!(list)
-          _ -> ""
+    cond do
+      # story event-size-limit (D2 (d)): the authenticated creator is the `sender` of every event of the new room; a user id
+      # above 255 bytes (a session of before the user ids were bounded at their source) is a 403, nothing is created
+      Nebu.Matrix.EventSize.check_keys("", nil, user) != :ok ->
+        key_error(conn, :sender_too_long)
+
+      conn.assigns[:json_parse_error] == true ->
+        error(conn, 400, "M_NOT_JSON", "Request body is not valid JSON")
+
+      # valid JSON that is not an object (Plug.Parsers wraps it as %{"_json" => value})
+      Map.has_key?(params, "_json") ->
+        error(conn, 400, "M_BAD_JSON", "Request body must be a JSON object")
+
+      # story create-room-presets-power-levels-topic (D5 / D11): in Core.CreateRoomRequest an absent topic and a JSON
+      # null are both nil, so the router (the only place that still sees the key) refuses a PRESENT null. Unlike `name`
+      # (null = absent, previous story) the spec says a `topic` that is included overwrites the initial_state topic.
+      Map.has_key?(params, "topic") and is_nil(params["topic"]) ->
+        error(conn, 400, "M_BAD_JSON", "topic must be a string")
+
+      # story create-room-invites-direct (D7): `is_direct` is a boolean; a PRESENT value of any other type (null is the same
+      # as absent) is refused here, the only place that still sees the raw value (Core.CreateRoomRequest.is_direct stays a
+      # boolean)
+      not is_nil(params["is_direct"]) and not is_boolean(params["is_direct"]) ->
+        error(conn, 400, "M_BAD_JSON", "is_direct must be a boolean")
+
+      validation == {:error, :too_many} ->
+        error(conn, 400, "M_INVALID_PARAM", "initial_state must not exceed 64 events")
+
+      validation == {:error, :malformed} ->
+        error(
+          conn,
+          400,
+          "M_BAD_JSON",
+          "initial_state must be an array of state events with a string type, an optional string state_key and an object content"
+        )
+
+      true ->
+        initial_state_json =
+          case initial_state do
+            list when is_list(list) and list != [] -> Jason.encode!(list)
+            _ -> ""
+          end
+
+        req = %Core.CreateRoomRequest{
+          creator_id: user,
+          name: name,
+          is_direct: params["is_direct"] == true,
+          room_type: room_type,
+          creation_content_json: creation_content_json,
+          initial_state_json: initial_state_json,
+          # raw client values (any JSON type): Server.validate_create_room_request/1 tells a wrong type
+          # (M_BAD_JSON) from a wrong value (story create-room-input-validation, D7)
+          room_version: params["room_version"],
+          room_alias_name: params["room_alias_name"],
+          # story create-room-presets-power-levels-topic (D11): raw client values of any JSON type as well; the core
+          # validates them (wrong type M_BAD_JSON, wrong value M_INVALID_PARAM, lock-out M_INVALID_ROOM_STATE)
+          # before a room exists. A present topic: null was refused above.
+          topic: params["topic"],
+          preset: params["preset"],
+          visibility: params["visibility"],
+          power_level_content_override: params["power_level_content_override"],
+          # story create-room-invites-direct (D14): raw client values as well; the core validates the lists (shape, cap,
+          # eligibility) before a room exists and invites through the same path as POST /rooms/{roomId}/invite
+          invite: params["invite"],
+          invite_3pid: params["invite_3pid"]
+        }
+
+        case call_core(fn -> Nebu.Matrix.EventDispatcher.Server.create_room(req, stream(user)) end) do
+          {:ok, resp} -> send_json(conn, 200, %{"room_id" => resp.room_id})
+          {:error, err} -> send_error(conn, err)
         end
-
-      req = %Core.CreateRoomRequest{
-        creator_id: user,
-        name: name,
-        is_direct: params["is_direct"] == true,
-        room_type: room_type,
-        creation_content_json: creation_content_json,
-        initial_state_json: initial_state_json
-      }
-
-      case call_core(fn -> Nebu.Matrix.EventDispatcher.Server.create_room(req, stream(user)) end) do
-        {:ok, resp} -> send_json(conn, 200, %{"room_id" => resp.room_id})
-        {:error, err} -> send_error(conn, err)
-      end
     end
   end
 
@@ -1062,12 +1445,17 @@ defmodule Nebu.Web.Router.Protected do
     user = conn.assigns[:current_user]
     room = URI.decode_www_form(room_id_or_alias)
 
-    req = %Core.JoinRoomRequest{user_id: user, room_id_or_alias: room}
+    # story rate-limits-join-invite-create-room (D2): ONE `join` token FIRST, before the room lookup (an idempotent re-join of a
+    # joined user is charged too). `POST /rooms/{roomId}/join` and `POST /knock` are unrouted; when either is ever routed it MUST
+    # charge this same bucket, so that no limiter-free join path exists.
+    with_membership_charge(conn, [join_bucket(user)], fn ->
+      req = %Core.JoinRoomRequest{user_id: user, room_id_or_alias: room}
 
-    case call_core(fn -> Nebu.Matrix.EventDispatcher.Server.join_room(req, stream(user)) end) do
-      {:ok, resp} -> send_json(conn, 200, %{"room_id" => resp.room_id})
-      {:error, err} -> send_error(conn, err)
-    end
+      case call_core(fn -> Nebu.Matrix.EventDispatcher.Server.join_room(req, stream(user)) end) do
+        {:ok, resp} -> send_json(conn, 200, %{"room_id" => resp.room_id})
+        {:error, err} -> send_error(conn, err)
+      end
+    end)
   end
 
   # ── POST /_matrix/client/v3/rooms/{roomId}/invite ─────────────────────────
@@ -1079,17 +1467,157 @@ defmodule Nebu.Web.Router.Protected do
     room = URI.decode_www_form(room_id)
     params = body_params(conn)
 
-    req = %Core.InviteUserRequest{
-      room_id: room,
-      inviter_id: user,
-      invitee_id: params["user_id"]
-    }
+    # story rate-limits-join-invite-create-room (D2): ONE `invite` token FIRST, before the body checks, the room lookup and the
+    # already-invited no-op (a throttled user costs no work, and the existence oracle of the invite path is bounded)
+    with_membership_charge(conn, [invite_bucket(user, 1)], fn ->
+      cond do
+        # story create-room-invites-direct (D4): the body checks come BEFORE any room check (they reveal nothing about the room)
+        conn.assigns[:json_parse_error] == true ->
+          error(conn, 400, "M_NOT_JSON", "Request body is not valid JSON")
 
-    case call_core(fn -> Nebu.Matrix.EventDispatcher.Server.invite_user(req, stream(user)) end) do
-      {:ok, _resp} -> send_json(conn, 200, %{})
-      {:error, err} -> send_error(conn, err)
+        # valid JSON that is not an object (Plug.Parsers wraps it as %{"_json" => value})
+        Map.has_key?(params, "_json") ->
+          error(conn, 400, "M_BAD_JSON", "Request body must be a JSON object")
+
+        true ->
+          # a present user_id selects the user-id form (3pid keys are then ignored); `reason` is not read (known deviation, D2)
+          result =
+            call_core(fn ->
+              {:ok, invitee} = Nebu.Matrix.EventDispatcher.Server.invite_body_user_id(params)
+
+              req = %Core.InviteUserRequest{room_id: room, inviter_id: user, invitee_id: invitee}
+              Nebu.Matrix.EventDispatcher.Server.invite_user(req, stream(user))
+            end)
+
+          case result do
+            {:ok, _resp} -> send_json(conn, 200, %{})
+            {:error, err} -> send_error(conn, err)
+          end
+      end
+    end)
+  end
+
+  # ── POST /_matrix/client/v3/rooms/{roomId}/kick | ban | unban (story moderation-routes-atomic-ban) ──
+  # Body {"user_id", "reason"?}, answer 200 {}. D6 order, first failure wins: (1) ONE `moderation` token (a labelled divergence
+  # from the spec's "Rate-limited: No"; 429 with Retry-After), (2) M_NOT_JSON / M_BAD_JSON, (3) user_id and (4) reason
+  # (`EventDispatcher.Server.moderation_body!/1`), (5) the sender guard of story event-size-limit (a session user id above 255
+  # bytes), (6) the core: the room (404), then the decision and the write in the room process (`Room.Server.moderate/6`).
+  # The room id of the path is decoded like /invite. Fixed texts only, no client value is echoed.
+  post "/client/v3/rooms/:room_id/kick" do
+    moderation_request(conn, :kick, room_id)
+  end
+
+  post "/client/v3/rooms/:room_id/ban" do
+    moderation_request(conn, :ban, room_id)
+  end
+
+  post "/client/v3/rooms/:room_id/unban" do
+    moderation_request(conn, :unban, room_id)
+  end
+
+  defp moderation_request(conn, action, raw_room_id) do
+    user = conn.assigns[:current_user]
+    room = URI.decode_www_form(raw_room_id)
+    params = body_params(conn)
+
+    with_membership_charge(conn, [moderation_bucket(user)], fn ->
+      cond do
+        conn.assigns[:json_parse_error] == true ->
+          error(conn, 400, "M_NOT_JSON", "Request body is not valid JSON")
+
+        # valid JSON that is not an object (Plug.Parsers wraps it as %{"_json" => value})
+        Map.has_key?(params, "_json") ->
+          error(conn, 400, "M_BAD_JSON", "Request body must be a JSON object")
+
+        true ->
+          case call_core(fn -> Nebu.Matrix.EventDispatcher.Server.moderation_body!(params) end) do
+            {:error, err} -> send_error(conn, err)
+            {:ok, {target, reason}} -> moderation_call(conn, action, user, room, target, reason)
+          end
+      end
+    end)
+  end
+
+  defp moderation_call(conn, action, user, room, target, reason) do
+    case Nebu.Matrix.EventSize.check_keys("m.room.member", nil, user) do
+      :ok ->
+        server = Nebu.Matrix.EventDispatcher.Server
+        fields = [room_id: room, caller_id: user, target_id: target, reason: reason || ""]
+
+        result =
+          call_core(fn ->
+            case action do
+              :kick -> server.kick_user(struct!(Core.KickUserRequest, fields), stream(user))
+              :ban -> server.ban_user(struct!(Core.BanUserRequest, fields), stream(user))
+              :unban -> server.unban_user(struct!(Core.UnbanUserRequest, fields), stream(user))
+            end
+          end)
+
+        case result do
+          {:ok, _resp} -> send_json(conn, 200, %{})
+          {:error, err} -> send_error(conn, err)
+        end
+
+      key_check ->
+        key_error(conn, key_check)
     end
   end
+
+  # ── per-user charge of the room membership writes (story rate-limits-join-invite-create-room, D1-D3) ──
+  # Buckets are `{{tier, user}, cost, rate_per_min, burst}` (the key shape of the plug's `key: :user`), the values come from
+  # `Nebu.Web.RateLimitTiers`. A denied charge answers the unchanged 429 envelope (`retry_after_ms` + `Retry-After` seconds) with
+  # the larger wait of the buckets that could not pay, and nothing else runs; `NEBU_RATE_LIMIT_DISABLED` turns the charge off.
+  defp with_membership_charge(conn, buckets, fun) do
+    case Nebu.Web.Plugs.RateLimit.take_all(buckets) do
+      :ok -> fun.()
+      {:deny, retry_after_s} -> Nebu.Web.Plugs.RateLimit.respond_limited(conn, retry_after_s)
+    end
+  end
+
+  defp create_room_bucket(user) do
+    {rate, burst} = Nebu.Web.RateLimitTiers.create_room()
+    {{"create_room", user}, 1, rate, burst}
+  end
+
+  defp invite_bucket(user, units) do
+    {rate, burst} = Nebu.Web.RateLimitTiers.invite()
+    {{"invite", user}, units, rate, burst}
+  end
+
+  defp join_bucket(user) do
+    {rate, burst} = Nebu.Web.RateLimitTiers.join()
+    {{"join", user}, 1, rate, burst}
+  end
+
+  # story membership-state-model (D14): GET /members and GET /initialSync draw from ONE bucket (the initial /sync is not charged)
+  defp members_read_bucket(user) do
+    {rate, burst} = Nebu.Web.RateLimitTiers.members_read()
+    {{"members_read", user}, 1, rate, burst}
+  end
+
+  # story moderation-routes-atomic-ban (D5): kick, ban and unban draw from ONE bucket
+  defp moderation_bucket(user) do
+    {rate, burst} = Nebu.Web.RateLimitTiers.moderation()
+    {{"moderation", user}, 1, rate, burst}
+  end
+
+  # createRoom: ONE create_room token plus one invite unit per DISTINCT string entry of an `invite` list of at most 50 raw entries
+  # (the cap of the core). Anything else charges no invite units: a longer list is a 400 anyway and must not drain the bucket, a
+  # non-list is a 400. The count only decides the price; the core still validates the list.
+  defp create_room_charge(user, params) do
+    case invite_units(params["invite"]) do
+      0 -> [create_room_bucket(user)]
+      units -> [create_room_bucket(user), invite_bucket(user, units)]
+    end
+  end
+
+  defp invite_units(list) when is_list(list) do
+    if length(list) <= Nebu.Matrix.EventDispatcher.Server.invite_max_entries(),
+      do: list |> Enum.filter(&is_binary/1) |> Enum.uniq() |> length(),
+      else: 0
+  end
+
+  defp invite_units(_other), do: 0
 
   # ── PUT /_matrix/client/v3/rooms/{roomId}/send/{eventType}/{txnId} ─────────
   put "/client/v3/rooms/:room_id/send/:event_type/:txn_id" do
@@ -1101,24 +1629,108 @@ defmodule Nebu.Web.Router.Protected do
     # the Go gateway. Nebu.Web.Plugs.JsonBody assigns :json_parse_error on a body
     # that fails to parse; without this guard body_params/1 maps it to %{} and we
     # would silently send an empty-content event (200).
-    if conn.assigns[:json_parse_error] == true do
-      error(conn, 400, "M_BAD_JSON", "Request body is not valid JSON")
-    else
-      content = body_params(conn)
+    key_check = Nebu.Matrix.EventSize.check_keys(event_type, nil, user)
 
-      req = %Core.SendEventRequest{
-        room_id: room,
-        sender_id: user,
-        event_type: event_type,
-        txn_id: txn_id,
-        content: Jason.encode!(content),
-        is_state_event: false
-      }
+    cond do
+      conn.assigns[:json_parse_error] == true ->
+        error(conn, 400, "M_BAD_JSON", "Request body is not valid JSON")
 
-      case call_core(fn -> Nebu.Matrix.EventDispatcher.Server.send_event(req, stream(user)) end) do
-        {:ok, resp} -> send_json(conn, 200, %{"event_id" => resp.event_id})
-        {:error, err} -> send_error(conn, err)
-      end
+      # as on PUT state: a path value that is not valid UTF-8 is a 400 before the size pre-check encodes it
+      not path_values_utf8?([room, event_type]) ->
+        error(conn, 400, "M_BAD_JSON", "Path parameters must be valid UTF-8")
+
+      # Story event-size-limit (D5): `type` above 255 bytes (decoded) is a 413, before the room lookup (an oversized request to
+      # an unknown room is a 413, not a 404); the sender above 255 bytes is a 403. A message event has no state key.
+      key_check != :ok ->
+        key_error(conn, key_check)
+
+      true ->
+        # the content is encoded once: the size check and the request both use these bytes
+        content_json = Jason.encode!(body_params(conn))
+
+        # the complete signed event (`"state_key":null` is part of what Nebu signs) above 65 536 canonical bytes is a 413;
+        # Room.Server.do_send_event/7 re-checks the signed bytes before the insert, the txn-dedup entry and the broadcast
+        envelope = Nebu.Matrix.EventSize.envelope(room, user, event_type, nil, Nebu.DB.Helpers.now_ms())
+
+        case Nebu.Matrix.EventSize.check(envelope, byte_size(content_json)) do
+          {:error, :event_too_large} ->
+            error(conn, 413, "M_TOO_LARGE", Nebu.Matrix.EventSize.message(:event_too_large))
+
+          :ok ->
+            req = %Core.SendEventRequest{
+              room_id: room,
+              sender_id: user,
+              event_type: event_type,
+              txn_id: txn_id,
+              content: content_json,
+              is_state_event: false
+            }
+
+            case call_core(fn -> Nebu.Matrix.EventDispatcher.Server.send_event(req, stream(user)) end) do
+              {:ok, resp} -> send_json(conn, 200, %{"event_id" => resp.event_id})
+              {:error, err} -> send_error(conn, err)
+            end
+        end
+    end
+  end
+
+  # ── PUT /_matrix/client/v3/rooms/{roomId}/redact/{eventId}/{txnId} (story state-writer-redaction, D1 - D3, D7, D13) ──
+  # Body `{"reason"?}`, answer 200 {event_id}. NOT rate-limited (spec: Rate-limited: No). D13 order, first failure wins: M_NOT_JSON,
+  # M_BAD_JSON (not an object, path values, depth, NUL, `reason` type), M_INVALID_PARAM (`reason` above 1024 bytes), the sender guard
+  # (403), the envelope size (413), then the core: the room (404), the decision and the write in the room process.
+  put "/client/v3/rooms/:room_id/redact/:event_id/:txn_id" do
+    user = conn.assigns[:current_user]
+    room = URI.decode_www_form(room_id)
+    target = URI.decode_www_form(event_id)
+    params = body_params(conn)
+    reason = params["reason"]
+    key_check = Nebu.Matrix.EventSize.check_keys("m.room.redaction", nil, user)
+
+    cond do
+      conn.assigns[:json_parse_error] == true ->
+        error(conn, 400, "M_NOT_JSON", "Request body is not valid JSON")
+
+      Map.has_key?(params, "_json") ->
+        error(conn, 400, "M_BAD_JSON", "Request body must be a JSON object")
+
+      Nebu.Matrix.EventDispatcher.Server.contains_nul?([room, target, txn_id]) ->
+        error(conn, 400, "M_BAD_JSON", "Path parameters must not contain NUL characters")
+
+      not path_values_utf8?([room, target, txn_id]) ->
+        error(conn, 400, "M_BAD_JSON", "Path parameters must be valid UTF-8")
+
+      Nebu.Matrix.EventDispatcher.Server.content_too_deep?(params) ->
+        error(conn, 400, "M_BAD_JSON", "State event content is nested too deeply")
+
+      Nebu.Matrix.EventDispatcher.Server.contains_nul?(params) ->
+        error(conn, 400, "M_BAD_JSON", "State event content must not contain NUL characters")
+
+      not (is_nil(reason) or is_binary(reason)) ->
+        error(conn, 400, "M_BAD_JSON", "reason must be a string")
+
+      is_binary(reason) and byte_size(reason) > 1024 ->
+        error(conn, 400, "M_INVALID_PARAM", "reason exceeds 1024 bytes")
+
+      key_check != :ok ->
+        key_error(conn, key_check)
+
+      true ->
+        content = params |> Map.delete("redacts") |> then(fn c -> if reason in [nil, ""], do: Map.delete(c, "reason"), else: c end)
+        content_json = Jason.encode!(content)
+        envelope = Nebu.Matrix.EventSize.envelope(room, user, "m.room.redaction", nil, Nebu.DB.Helpers.now_ms())
+
+        case Nebu.Matrix.EventSize.check(Map.put(envelope, "redacts", target), byte_size(content_json)) do
+          {:error, :event_too_large} ->
+            error(conn, 413, "M_TOO_LARGE", Nebu.Matrix.EventSize.message(:event_too_large))
+
+          :ok ->
+            req = %Core.RedactEventRequest{room_id: room, sender_id: user, event_id: target, txn_id: txn_id, content_json: content_json}
+
+            case call_core(fn -> Nebu.Matrix.EventDispatcher.Server.redact_event(req, stream(user)) end) do
+              {:ok, resp} -> send_json(conn, 200, %{"event_id" => resp.event_id})
+              {:error, err} -> send_error(conn, err)
+            end
+        end
     end
   end
 
@@ -1177,73 +1789,43 @@ defmodule Nebu.Web.Router.Protected do
   # blocks on a "Joining…" spinner until it answers. Assemble the response from the
   # existing get_room_state (full state events) + get_messages (recent timeline), so a
   # client can render the room view without waiting for the next /sync cycle.
+  # Story membership-state-model (D7, D10): `state` = the full current state with the EVENT-based member slots, real ids and
+  # `unsigned`; members only (no peeking, `gf`); `visibility` stays the constant `private` (`gf`).
   get "/client/v3/rooms/:room_id/initialSync" do
     user = conn.assigns[:current_user]
     room = URI.decode_www_form(room_id)
 
-    state_req = %Core.GetRoomStateRequest{room_id: room, event_type: "", state_key: ""}
-    msg_req = %Core.GetMessagesRequest{room_id: room, from_token: "", to_token: nil, limit: 20, direction: "b"}
+    # story membership-state-model (D14): ONE `members_read` token FIRST, before the room resolution
+    with_membership_charge(conn, [members_read_bucket(user)], fn ->
+      state_req = %Core.GetRoomStateRequest{room_id: room, event_type: "", state_key: ""}
+      msg_req = %Core.GetMessagesRequest{room_id: room, from_token: "", to_token: nil, limit: 20, direction: "b"}
 
-    with {:ok, state_resp} <-
-           call_core(fn -> Nebu.Matrix.EventDispatcher.Server.get_room_state(state_req, stream(user)) end),
-         {:ok, msg_resp} <-
-           call_core(fn -> Nebu.Matrix.EventDispatcher.Server.get_messages(msg_req, stream(user)) end) do
-      now = System.system_time(:millisecond)
+      with {:ok, state_resp} <-
+             call_core(fn -> Nebu.Matrix.EventDispatcher.Server.get_room_state(state_req, stream(user)) end),
+           {:ok, msg_resp} <-
+             call_core(fn -> Nebu.Matrix.EventDispatcher.Server.get_messages(msg_req, stream(user)) end) do
+        now = System.system_time(:millisecond)
 
-      state = Enum.map(state_resp.state_events, &initial_sync_state_event(&1, room, now))
-      chunk = Enum.map(msg_resp.events, &message_event/1)
+        state = Enum.map(state_resp.state_events, &Nebu.Matrix.Http.state_event_json(&1, now, room))
+        chunk = Enum.map(msg_resp.events, &message_event/1)
 
-      send_json(conn, 200, %{
-        "room_id" => room,
-        "membership" => "join",
-        "state" => state,
-        "messages" => %{
-          "chunk" => chunk,
-          "start" => msg_resp.prev_batch,
-          "end" => msg_resp.next_batch
-        },
-        "presence" => [],
-        "account_data" => [],
-        "visibility" => "private"
-      })
-    else
-      {:error, err} -> send_error(conn, err)
-    end
-  end
-
-  # Flatten a Core.SyncRoomStateEvent into the Matrix state-event JSON shape initialSync
-  # expects. content is JSON bytes. Code-review cycle 1 (MINOR-4): real
-  # event_id/origin_server_ts are now available on `se` (bugfix
-  # sync-state-events-missing-fields widened Core.SyncRoomStateEvent and
-  # threaded real identity through build_state_events/2) — this helper still
-  # synthesizes a fake event_id/`now` timestamp here deliberately, NOT because
-  # the struct omits them. Using the real values here is tracked as a
-  # separate, agreed follow-up (see bug-context.md's Dev Notes:
-  # "/initialSync and /members would still return synthetic values" is flagged
-  # as a loud note, not silently expanded into this bug's scope) — out of scope
-  # for this fix.
-  defp initial_sync_state_event(se, room, now) do
-    content =
-      case se.content do
-        b when is_binary(b) and b != "" ->
-          case Jason.decode(b) do
-            {:ok, m} -> m
-            _ -> %{}
-          end
-
-        _ ->
-          %{}
+        send_json(conn, 200, %{
+          "room_id" => room,
+          "membership" => "join",
+          "state" => state,
+          "messages" => %{
+            "chunk" => chunk,
+            "start" => msg_resp.prev_batch,
+            "end" => msg_resp.next_batch
+          },
+          "presence" => [],
+          "account_data" => [],
+          "visibility" => "private"
+        })
+      else
+        {:error, err} -> send_error(conn, err)
       end
-
-    %{
-      "type" => se.type,
-      "state_key" => se.state_key,
-      "content" => content,
-      "sender" => se.sender,
-      "room_id" => room,
-      "event_id" => "$synth_" <> Base.url_encode64(se.type <> "|" <> se.state_key, padding: false),
-      "origin_server_ts" => now
-    }
+    end)
   end
 
   # ── PUT /_matrix/client/v3/rooms/{roomId}/typing/{userId} ─────────────────
@@ -1544,6 +2126,59 @@ defmodule Nebu.Web.Router.Protected do
     end
   end
 
+  # ── GET /_matrix/client/v1/room_summary/{roomIdOrAlias} ───────────────────
+  # Matrix v1.15 core ("Room Summaries"), story oauth-room-summary-unrecognized (RU1 - RU8): a LOCAL-ONLY
+  # preview of a room by id or alias (no federation, `via` and every other query parameter ignored).
+  # Authentication is required (the OidcPlug of `authenticate/2`). Existence is checked BEFORE the room
+  # state is read (the state read lazy-starts a Room and would insert a `rooms` row for any attacker-chosen
+  # id, RU3); unknown, archived and not-visible rooms all answer the byte-identical
+  # `404 M_NOT_FOUND "Room not found"` (anti-enumeration). Rate limited per user although the spec says
+  # "Rate-limited: No" (RU7, recorded deviation: each call may lazy-start a Room).
+  @room_summary_rate_limit Nebu.Web.Plugs.RateLimit.init(
+                             rate_per_min: 300,
+                             burst: 60,
+                             tier: "room_summary",
+                             key: :user
+                           )
+
+  get "/client/v1/room_summary/:room_id_or_alias" do
+    conn = Nebu.Web.Plugs.RateLimit.call(conn, @room_summary_rate_limit)
+
+    if conn.halted do
+      conn
+    else
+      do_room_summary(conn, room_id_or_alias)
+    end
+  end
+
+  # RU8: the param is used exactly as Plug decoded the path segment (NO second www-form decoding: `+` and
+  # `%25` stay literal). `!` room id or `#` alias, at most 255 bytes; a `:` is required only for an alias
+  # (room version 12 ids may carry no domain). Invalid => 400 before any DB access.
+  defp do_room_summary(conn, raw) do
+    user = conn.assigns[:current_user]
+
+    if valid_room_summary_param?(raw) do
+      req = %{room_id_or_alias: raw, user_id: user}
+
+      case call_core(fn -> Nebu.Matrix.EventDispatcher.Server.get_room_summary(req, stream(user)) end) do
+        {:ok, summary} -> send_json(conn, 200, summary)
+        {:error, err} -> send_error(conn, err)
+      end
+    else
+      error(conn, 400, "M_INVALID_PARAM", "roomIdOrAlias must be a room id (!...) or a room alias (#...:server)")
+    end
+  end
+
+  # Also valid UTF-8 without control characters (review cycle 1, MINOR 2): `!%00x` / `#a%FF:b` would otherwise
+  # reach Postgres, which rejects them (22021) => a 500 plus a warning for attacker input.
+  defp valid_room_summary_param?(raw) do
+    byte_size(raw) <= 255 and String.valid?(raw) and not (raw =~ ~r/\p{Cc}/u) and shape_ok?(raw)
+  end
+
+  defp shape_ok?("!" <> _), do: true
+  defp shape_ok?("#" <> _ = raw), do: String.contains?(raw, ":")
+  defp shape_ok?(_), do: false
+
   # ── GET /_matrix/client/v1/mutual_rooms ───────────────────────────────────
   # MSC2666 (Matrix CS API v1.19): rooms the caller currently shares with
   # `user_id` (both hold membership: join). Pure direct-DB-read — the backend
@@ -1659,31 +2294,41 @@ defmodule Nebu.Web.Router.Protected do
   defp validate_mutual_rooms_user_id(_user_id, _caller), do: {:error, :invalid_param}
 
   # ── GET /_matrix/client/v3/rooms/{roomId}/members ─────────────────────────
-  # Returns the room's m.room.member state events (Element renders the member
-  # list from this). Built from the existing get_room_state/2 backend (which
-  # enforces membership — a non-member is rejected with 403, no cross-room leak)
-  # by filtering its full state-event list down to type == "m.room.member" and
-  # serialising each via the same flattener initialSync uses. Matrix /members
-  # returns full member EVENTS (not just user ids), so we map the whole event.
+  # The latest member EVENT of every user (story membership-state-model, D6; Element's member list), real ids, `unsigned`.
+  # `membership` / `not_membership` are validated BEFORE any room access (first failure wins, fixed texts, the last value of a
+  # repeated parameter) and combine as AND (Synapse parity); `at` is ignored. Joined members only (`get_room_members/2`).
   get "/client/v3/rooms/:room_id/members" do
     user = conn.assigns[:current_user]
     room = URI.decode_www_form(room_id)
 
-    req = %Core.GetRoomStateRequest{room_id: room, event_type: "", state_key: ""}
+    # D14: ONE `members_read` token FIRST, before the query validation and the room resolution
+    with_membership_charge(conn, [members_read_bucket(user)], fn ->
+      q = conn.query_params
 
-    case call_core(fn -> Nebu.Matrix.EventDispatcher.Server.get_room_state(req, stream(user)) end) do
-      {:ok, resp} ->
-        now = System.system_time(:millisecond)
+      with :ok <- validate_membership_filter(q, "membership"),
+           :ok <- validate_membership_filter(q, "not_membership") do
+        req = %{room_id: room, membership: q["membership"], not_membership: q["not_membership"]}
 
-        chunk =
-          resp.state_events
-          |> Enum.filter(&(&1.type == "m.room.member"))
-          |> Enum.map(&initial_sync_state_event(&1, room, now))
+        case call_core(fn -> Nebu.Matrix.EventDispatcher.Server.get_room_members(req, stream(user)) end) do
+          {:ok, resp} ->
+            now = System.system_time(:millisecond)
+            send_json(conn, 200, %{"chunk" => Enum.map(resp.state_events, &Nebu.Matrix.Http.state_event_json(&1, now, room))})
 
-        send_json(conn, 200, %{"chunk" => chunk})
+          {:error, err} ->
+            send_error(conn, err)
+        end
+      else
+        {:invalid, name} -> error(conn, 400, "M_INVALID_PARAM", "#{name} must be one of join, invite, knock, leave, ban")
+      end
+    end)
+  end
 
-      {:error, err} ->
-        send_error(conn, err)
+  # absent or one of the five memberships (case-sensitive); the empty string or a Plug list / map (`name[]=`) is invalid
+  defp validate_membership_filter(query, name) do
+    case Map.fetch(query, name) do
+      :error -> :ok
+      {:ok, value} when value in ["join", "invite", "knock", "leave", "ban"] -> :ok
+      {:ok, _value} -> {:invalid, name}
     end
   end
 
@@ -1733,7 +2378,7 @@ defmodule Nebu.Web.Router.Protected do
       true ->
         with {:ok, _} <-
                call_core(fn -> Nebu.Matrix.EventDispatcher.Server.ensure_room_member!(room_id, user) end),
-             :ok <- check_fully_read_event(room_id, markers["m.fully_read"]),
+             :ok <- check_fully_read_event(room_id, user, markers["m.fully_read"]),
              :ok <- store_fully_read(user, room_id, markers["m.fully_read"]),
              :ok <- send_marker_receipts(user, room_id, markers) do
           send_json(conn, 200, %{})
@@ -1743,10 +2388,12 @@ defmodule Nebu.Web.Router.Protected do
     end
   end
 
-  defp check_fully_read_event(_room_id, nil), do: :ok
+  defp check_fully_read_event(_room_id, _user, nil), do: :ok
 
-  defp check_fully_read_event(room_id, event_id) do
-    if Nebu.Matrix.RoomAccountDataStore.event_in_room?(room_id, event_id),
+  # story history-visibility-enforcement (security cycle 1, LOW #4): the event must be one the user may SEE (a hidden event is
+  # refused exactly like an unknown one: no existence oracle)
+  defp check_fully_read_event(room_id, user, event_id) do
+    if Nebu.Matrix.EventDispatcher.Server.visible_event?(room_id, user, event_id),
       do: :ok,
       else: {:error, {400, "M_INVALID_PARAM", "m.fully_read event does not belong to this room"}}
   end
@@ -1817,22 +2464,53 @@ defmodule Nebu.Web.Router.Protected do
   # ── POST /_matrix/client/v3/rooms/{roomId}/upgrade ────────────────────────
   # Creates a replacement room and tombstones the old one. The backend
   # (EventDispatcher.Server.upgrade_room) takes the requester from the trusted
-  # stream identity (NOT request.requester_id) and requires power_level >= 100,
-  # so a non-owner is rejected with 403. Body: {"new_version": "<v>"}.
+  # stream identity (NOT request.requester_id) and requires the upgrade level
+  # (PowerLevels.upgrade_level/1: the tombstone level, at least 100), so a
+  # requester below it is rejected with 403. Body: {"new_version": "<v>"}.
   post "/client/v3/rooms/:room_id/upgrade" do
     user = conn.assigns[:current_user]
     room = URI.decode_www_form(room_id)
     params = body_params(conn)
 
-    req = %Core.UpgradeRoomRequest{
-      old_room_id: room,
-      requester_id: user,
-      new_version: params["new_version"] || ""
-    }
+    # story rate-limits-join-invite-create-room (review cycle 1, Kassandra L-1): an upgrade creates a NEW room, so it spends one
+    # `create_room` unit of the user, charged FIRST like createRoom (an upgrade chain can no longer mint rooms without limit)
+    with_membership_charge(conn, [create_room_bucket(user)], fn -> upgrade_room_request(conn, user, room, params) end)
+  end
 
-    case call_core(fn -> Nebu.Matrix.EventDispatcher.Server.upgrade_room(req, stream(user)) end) do
-      {:ok, resp} -> send_json(conn, 200, %{"replacement_room" => resp.new_room_id})
-      {:error, err} -> send_error(conn, err)
+  # The upgrade handler proper (everything after the rate-limit charge).
+  defp upgrade_room_request(conn, user, room, params) do
+    # Story create-room-input-validation (D1, Oracle): `new_version` is REQUIRED (Matrix CS v1.18). Absent / null ->
+    # 400 M_MISSING_PARAM, a non-string -> 400 M_BAD_JSON, both decided here before any room is touched; an
+    # empty / unsupported string is 400 M_UNSUPPORTED_ROOM_VERSION from the core (also before the room lookup).
+    # A body that is not JSON (M_NOT_JSON) or not an object (M_BAD_JSON) is told apart first, as in createRoom.
+    case (cond do
+            conn.assigns[:json_parse_error] == true -> :not_json
+            Map.has_key?(params, "_json") -> :not_object
+            true -> params["new_version"]
+          end) do
+      :not_json ->
+        error(conn, 400, "M_NOT_JSON", "Request body is not valid JSON")
+
+      :not_object ->
+        error(conn, 400, "M_BAD_JSON", "Request body must be a JSON object")
+
+      nil ->
+        error(conn, 400, "M_MISSING_PARAM", "new_version is required")
+
+      new_version when not is_binary(new_version) ->
+        error(conn, 400, "M_BAD_JSON", "new_version must be a string")
+
+      new_version ->
+        req = %Core.UpgradeRoomRequest{
+          old_room_id: room,
+          requester_id: user,
+          new_version: new_version
+        }
+
+        case call_core(fn -> Nebu.Matrix.EventDispatcher.Server.upgrade_room(req, stream(user)) end) do
+          {:ok, resp} -> send_json(conn, 200, %{"replacement_room" => resp.new_room_id})
+          {:error, err} -> send_error(conn, err)
+        end
     end
   end
 
@@ -1926,9 +2604,11 @@ defmodule Nebu.Web.Router.Protected do
   # (EventDispatcher.Server.set_room_state) enforces an ALLOWLIST of writable
   # state types (m.space.child/parent, m.room.name/topic/avatar/join_rules/
   # canonical_alias/history_visibility/guest_access) and a power-level check
-  # (sender PL >= state_default; non-member → 403). m.room.member /
-  # m.room.power_levels / m.room.create are rejected (403) — they have dedicated
-  # authorized paths and must NOT be forgeable here. For m.space.parent the parent
+  # (sender PL >= events[type] else state_default; non-member → 403; a state key
+  # starting with `@` must be the sender's id). m.room.power_levels goes to the
+  # room-process power-level writer (story power-levels-enforcement: the v10 change
+  # rules, the `moderation` rate tier). m.room.member / m.room.create are rejected
+  # (403) — they have dedicated authorized paths and must NOT be forgeable here. For m.space.parent the parent
   # space must exist (404) and the sender must be a member of it (403). The acting
   # user is the authenticated token user (no path/body user → no IDOR); the
   # server builds all top-level event fields — the body is the content only.
@@ -1940,8 +2620,34 @@ defmodule Nebu.Web.Router.Protected do
     do_set_room_state(conn, room_id, event_type, "")
   end
 
-  match _ do
-    error(conn, 404, "M_NOT_FOUND", "Unrecognized request")
+  # ── Fall-through (story oauth-room-summary-unrecognized, RU9 - RU12) ──────
+  # Marked `nebu_unrecognized` so `authenticate/2` skips the OidcPlug: an unimplemented endpoint has no
+  # authentication requirement (RU10). Only requests that reach this clause change; every handler-level
+  # error (`M_NOT_FOUND`, `M_BAD_JSON`, ...) is produced inside the route clauses above and untouched.
+  match _, private: %{nebu_unrecognized: true} do
+    if unimplemented_state_read?(conn) do
+      # RU11a carve-out: `GET /rooms/{id}/state[/{type}[/{key}]]` is not implemented (only PUT is).
+      # Clients (matrix-js-sdk getStateEvent, Element, Dart SDK) read `404 M_NOT_FOUND` as "state
+      # absent": keep exactly that answer until the GET endpoints exist (follow-up bf).
+      error(conn, 404, "M_NOT_FOUND", "Unrecognized request")
+    else
+      Nebu.Web.Unrecognized.respond(conn, allowed_methods(conn))
+    end
+  end
+
+  defp unimplemented_state_read?(%Plug.Conn{method: "GET", path_info: ["client", "v3", "rooms", _room, "state" | _]}), do: true
+  defp unimplemented_state_read?(_conn), do: false
+
+  # The methods for which THIS router has a real clause at the request path (RU11): a probe selects a
+  # `do_match/4` clause, it never dispatches. The marker is removed first, a probe is a real match only
+  # when the catch-all (which sets the marker) was not the clause chosen.
+  defp allowed_methods(conn) do
+    path = Plug.Router.Utils.decode_path_info!(conn)
+    conn = %{conn | private: Map.delete(conn.private, :nebu_unrecognized)}
+
+    Nebu.Web.Unrecognized.probe(conn, fn c ->
+      do_match(c, c.method, path, c.host).private[:nebu_unrecognized] !== true
+    end)
   end
 
   # ── helpers ───────────────────────────────────────────────────────────────
@@ -2018,13 +2724,20 @@ defmodule Nebu.Web.Router.Protected do
   # deleting a device revokes that device's session (AC3). The ONLY exception is the
   # live credential MAKING this request: when the device being deleted is the caller's
   # own current device AND `preserve` carries that credential, the request token is
-  # spared so it can finish the batch and the caller keeps managing devices. This
-  # preserve is SYMMETRIC across token kinds:
+  # spared so it can finish the batch. The preserve covers THE REQUEST, not the device:
   #   * opaque caller — its `matrix_sessions` row (matched by current_device) is NOT
-  #     dropped;
+  #     dropped, so the session simply continues (its device row is gone, which opaque
+  #     auth does not consult);
   #   * raw-JWT caller — the kill-switch SKIPS the binding row whose token_hash equals
   #     the SHA-256 of the live request token (so it is not denylisted), even though
-  #     other JWTs bound to the same device ARE revoked.
+  #     other JWTs bound to the same device ARE revoked. The device row IS deleted and
+  #     the kept binding now points at a missing device, so `DeviceBinding.lookup/1`
+  #     REFUSES that JWT on its next request after the node's 60 s lookup-cache TTL
+  #     (`401 M_UNKNOWN_TOKEN` "Access token has been revoked", no soft_logout): the
+  #     JWT of a caller that deleted its own device lives for this request (and the
+  #     cache TTL) only. Deliberate, fail closed (story oauth-legacy-coexistence C13
+  #     c; before story 5 the binding row was deleted and the JWT silently became an
+  #     unbound credential). The kinds are therefore NOT symmetric after the request.
   # `preserve == nil` (e.g. a single DELETE satisfied by the recent-login window, NOT a
   # fresh re-auth) preserves nothing — the presented token bound to the deleted device
   # stops authenticating, which is what the F-1 kill-switch / AC3 require.
@@ -2039,28 +2752,21 @@ defmodule Nebu.Web.Router.Protected do
         nil -> {nil, nil}
       end
 
-    # F-1 kill-switch: denylist every raw-JWT bound to this device (by token hash,
-    # which equals the SHA-256 the live token resolves to in OidcPlug.revoked?) until
-    # its own exp, then drop the binding rows. When this IS the caller's own device,
-    # the caller's CURRENT token hash is SKIPPED so the live request credential survives
-    # to finish the batch (symmetric with the opaque matrix_sessions preserve below).
-    for {token_hash, exp} <- Nebu.Matrix.Session.DeviceBinding.list_for_user_device(user, device_id) do
-      unless device_id == preserve_device and token_hash == preserve_token_hash do
-        Nebu.Web.TokenDenylist.revoke_by_hash(token_hash, exp)
-      end
+    if device_id == preserve_device do
+      # The caller's OWN device after a fresh UIA (legacy only: an OAuth caller never gets here, C7). Its
+      # credential survives by design, so today's per-step code stays: kill the OTHER bound JWTs (the
+      # caller's current token hash is neither denylisted nor its binding row deleted), keep the opaque
+      # matrix_sessions row of the caller, remove the device identity + all key material.
+      _ = Nebu.Matrix.Session.DeviceBinding.kill_device_jwts(user, device_id, except_hash: preserve_token_hash)
+      _ = DeviceKeyStore.delete_device(user, device_id)
+      :ok
+    else
+      # Every other device: the atomic, locked teardown (story oauth-legacy-coexistence C12): devices
+      # row lock, ALL matrix_sessions rows of the device (so a concurrent OAuth rotation cannot leave a
+      # working token behind), device tables, then the confirmed JWT kill-switch (C13) + legacy
+      # sessions/sync_tokens rows.
+      Nebu.Matrix.end_device_session(user, device_id)
     end
-
-    _ = Nebu.Matrix.Session.DeviceBinding.delete_for_user_device(user, device_id)
-
-    # Revoke the opaque session bound to this device (logout-equivalent) UNLESS it is
-    # the live request token's own device (preserve just that one).
-    unless device_id == preserve_device do
-      _ = Nebu.Matrix.Session.MatrixSessionStore.delete_for_user_device(user, device_id)
-    end
-
-    # Remove the device identity + all key material.
-    _ = DeviceKeyStore.delete_device(user, device_id)
-    :ok
   end
 
   # The credential MAKING this request, as `{current_device, current_token_hash}` for
@@ -2080,7 +2786,7 @@ defmodule Nebu.Web.Router.Protected do
   defp touch_device_last_seen(conn) do
     case conn.assigns[:device_id] do
       did when is_binary(did) and did != "" ->
-        _ = DeviceKeyStore.touch_last_seen(conn.assigns[:current_user], did, client_ip(conn))
+        _ = DeviceKeyStore.touch_last_seen(conn.assigns[:current_user], did, Nebu.Web.ClientIP.get(conn))
         :ok
 
       _ ->
@@ -2088,17 +2794,11 @@ defmodule Nebu.Web.Router.Protected do
     end
   end
 
-  defp client_ip(conn) do
-    case conn.remote_ip do
-      ip when is_tuple(ip) -> ip |> :inet.ntoa() |> to_string()
-      _ -> nil
-    end
-  end
-
   # Lazily bind a raw-JWT access token to the device it publishes keys for, the first
   # time, when no server-side binding exists yet (token has a "." → JWT; no
   # conn.assigns[:device_id]). Opaque sessions already carry their device in
-  # matrix_sessions, so they are skipped. Idempotent and best-effort.
+  # matrix_sessions, so they are skipped. Idempotent and best-effort, except that a binding REFUSED because
+  # the device has an OAuth session is reported (`{:error, :oauth_device}`, C11).
   defp maybe_bind_jwt_device(conn, user, device_id) do
     token = conn.assigns[:access_token]
 
@@ -2110,8 +2810,7 @@ defmodule Nebu.Web.Router.Protected do
         # S3 F-1: carry the verified token's exp into the binding so the kill-switch
         # can denylist it on device delete.
         exp = (conn.assigns[:oidc_claims] || %{})["exp"]
-        _ = Nebu.Matrix.Session.DeviceBinding.put(token, user, device_id, exp)
-        :ok
+        Nebu.Matrix.Session.DeviceBinding.put(token, user, device_id, exp)
 
       true ->
         :ok
@@ -2150,54 +2849,262 @@ defmodule Nebu.Web.Router.Protected do
 
   # ── cross-signing (story: cross-signing-readback) ──────────────────────────
 
-  # device_signing/upload: MUST-guard the device/cross-signing ID namespace, then
+  # device_signing/upload: normalize the keys, MUST-guard the device/cross-signing ID namespace, then
   # persist with first-upload / idempotent / overwrite-protection handling.
   defp do_device_signing_upload(conn) do
     user = conn.assigns[:current_user]
-    body = body_params(conn)
 
-    # AC6 MUST-GUARD FIRST, before any write: a cross-signing key whose ID collides
-    # with an existing device ID is rejected (shared ed25519: namespace, CS spec).
-    existing_device_ids = MapSet.new(DeviceKeyStore.device_ids(user))
-    upload_key_ids = CrossSigningKeyStore.key_ids_in_upload(body)
+    # story oauth-authorize-freshness (FR16 (1), gate ak): the supplied keys are normalized FIRST, for EVERY
+    # caller and BEFORE the guard, the digest and the merge: an explicit JSON `null` key is an absent key; a
+    # key that is not a JSON object (a string, a list, a number, a boolean) is `400 M_BAD_JSON`.
+    case normalize_cross_signing_body(body_params(conn)) do
+      {:ok, body} ->
+        # AC6 MUST-GUARD FIRST, before any write: a cross-signing key whose ID collides
+        # with an existing device ID is rejected (shared ed25519: namespace, CS spec).
+        existing_device_ids = MapSet.new(DeviceKeyStore.device_ids(user))
+        upload_key_ids = CrossSigningKeyStore.key_ids_in_upload(body)
 
-    cond do
-      Enum.any?(upload_key_ids, &MapSet.member?(existing_device_ids, &1)) ->
-        error(conn, 400, "M_INVALID_PARAM", "Key ID in use as a device ID")
+        cond do
+          Enum.any?(upload_key_ids, &MapSet.member?(existing_device_ids, &1)) ->
+            error(conn, 400, "M_INVALID_PARAM", "Key ID in use as a device ID")
 
-      true ->
-        do_persist_cross_signing(conn, user, body)
+          true ->
+            do_persist_cross_signing(conn, user, body)
+        end
+
+      :invalid ->
+        error(conn, 400, "M_BAD_JSON", "Invalid cross-signing key")
     end
+  end
+
+  # `{:ok, body}` where each of the three keys is either an object or ABSENT (`null` dropped), `:invalid` when
+  # one is anything else. Every other member of the body (`auth`) is kept.
+  defp normalize_cross_signing_body(body) do
+    Enum.reduce_while(["master_key", "self_signing_key", "user_signing_key"], {:ok, body}, fn key, {:ok, acc} ->
+      case Map.get(acc, key) do
+        nil -> {:cont, {:ok, Map.delete(acc, key)}}
+        %{} -> {:cont, {:ok, acc}}
+        _not_an_object -> {:halt, :invalid}
+      end
+    end)
   end
 
   defp do_persist_cross_signing(conn, user, body) do
-    stored = CrossSigningKeyStore.get_keys(user)
     supplied = Map.take(body, ["master_key", "self_signing_key", "user_signing_key"])
 
-    cond do
-      # AC2: first upload (no existing master key) → persist, plain 200 {} (no UIA).
+    # Review cycle 1 (M2 / Kassandra L-4): the branch decision (first upload = UIA-free!) reads the stored keys
+    # with the ERROR-AWARE locked read inside a transaction; the first upload is written in the same
+    # transaction. A failed read is a `500`, never "no master stored" (the error-blind `get_keys/1` answered an
+    # outage with the UIA-free first-upload branch and a write of the supplied keys).
+    #
+    # story cross-signing-upload-races (`cq` (g), D2): the decision read is `CrossSigningKeyStore.lock_keys/1`: the
+    # cross_signing_keys row lock, then the per-user `sync_global|` advisory lock, then the read (row -> advisory -> read).
+    # The row of a user without keys locks nothing, so the ADVISORY lock serialises two concurrent first uploads: the
+    # second one reads the keys the first one committed and answers like any upload against stored keys (200 for
+    # identical keys, otherwise the replacement answer), never a second UIA-free first upload.
+    outcome =
+      try do
+        Nebu.Repo.transaction(fn ->
+          case CrossSigningKeyStore.lock_keys(user) do
+            {:ok, %{"master_key" => nil}} ->
+              case CrossSigningKeyStore.put_keys(user, supplied) do
+                :ok ->
+                  :first_upload
+
+                {:error, :user_erased} ->
+                  Nebu.Repo.rollback(:user_erased)
+
+                {:error, reason} ->
+                  # the error KIND only, never key material or an error message
+                  Logger.error("cross-signing key write failed: #{error_kind(reason)}")
+                  Nebu.Repo.rollback(:write_failed)
+              end
+
+            {:ok, stored} ->
+              {:stored, stored}
+
+            {:error, _reason} ->
+              Nebu.Repo.rollback(:read_failed)
+          end
+        end)
+      rescue
+        e ->
+          Logger.error("cross-signing key read failed: #{inspect(e.__struct__)}")
+          {:error, :read_failed}
+      end
+
+    case outcome do
+      # AC2: first upload (no existing master key) → persisted, plain 200 {} (no UIA).
       # INFO-1: the first-upload gate is keyed on master_key presence — real clients
       # always upload the master key first, so its absence reliably means "no keys yet".
-      is_nil(stored["master_key"]) ->
-        :ok = CrossSigningKeyStore.put_keys(user, supplied)
+      {:ok, :first_upload} ->
         send_json(conn, 200, %{})
 
-      # AC2: idempotent re-upload of the SAME keys → 200 {} (no UIA).
-      cross_signing_unchanged?(stored, supplied) ->
-        send_json(conn, 200, %{})
+      {:error, :user_erased} ->
+        Logger.info("cross-signing key upload refused: user_erased")
+        user_erased(conn)
 
-      # AC2: overwriting existing DIFFERENT keys without valid auth → 403 M_FORBIDDEN.
-      # (Full UIA is out of scope for this story — minimal 403 contract per CS spec.)
-      true ->
-        error(conn, 403, "M_FORBIDDEN", "Cannot replace existing cross-signing keys")
+      {:error, _} ->
+        error(conn, 500, "M_UNKNOWN", "Cross-signing key upload failed, please try again.")
+
+      {:ok, {:stored, stored}} ->
+        cond do
+          # story oauth-authorize-freshness (FR16 (1), oracle correction 9): a body that supplies NO key (`{}`, or
+          # every key `null`) while a master is stored is `400 M_MISSING_PARAM` for EVERY caller, without UIA and
+          # before any approval is looked at (a Nebu choice: the legacy answer was 403, the OAuth answer a challenge
+          # for nothing).
+          map_size(supplied) == 0 ->
+            error(conn, 400, "M_MISSING_PARAM", "No cross-signing keys supplied")
+
+          # AC2: idempotent re-upload of the SAME keys → 200 {} (no UIA), also with an `auth` block and
+          # BEFORE the approval is looked at (a lost-response retry of an approved request is a 200 that
+          # consumes nothing). Compares the SUPPLIED keys only, after normalization.
+          cross_signing_unchanged?(stored, supplied) ->
+            send_json(conn, 200, %{})
+
+          # REPLACEMENT of existing keys. Decided by the `:auth_api` assign set at AUTHENTICATION time by
+          # OidcPlug (story oauth-token-revocation-logout Trap 4), never by a token lookup here.
+          #
+          # story oauth-account-management (A14): an OAuth caller gets the `m.oauth` UIA stage (approval on
+          # the account page); a LEGACY caller keeps the minimal `403 M_FORBIDDEN` byte for byte (a known,
+          # unchanged deviation: the spec asks for a UIA challenge, docs/matrix-api-scope.md).
+          conn.assigns[:auth_api] == "oauth" ->
+            oauth_cross_signing_replacement(conn, user, body, supplied)
+
+          true ->
+            cannot_replace_cross_signing_keys(conn)
+        end
     end
   end
 
+  defp cannot_replace_cross_signing_keys(conn),
+    do: error(conn, 403, "M_FORBIDDEN", "Cannot replace existing cross-signing keys")
+
+  # Spec v1.18 (`POST /keys/device_signing/upload`): a request whose `master_key` equals the stored one
+  # AND whose additionally SUPPLIED self-/user-signing keys equal the stored ones needs no UIA; keys
+  # that are not supplied are not compared. A request WITHOUT `master_key` while a master is stored
+  # (e.g. SSK-only) is a replacement. (story oauth-account-management A14 step 3: the earlier rule
+  # compared all three keys, so a master-only re-upload was answered 403.)
   defp cross_signing_unchanged?(stored, supplied) do
-    Enum.all?(["master_key", "self_signing_key", "user_signing_key"], fn k ->
-      stored[k] == supplied[k]
-    end)
+    case supplied["master_key"] do
+      nil ->
+        false
+
+      master ->
+        master == stored["master_key"] and
+          Enum.all?(["self_signing_key", "user_signing_key"], fn k ->
+            is_nil(supplied[k]) or supplied[k] == stored[k]
+          end)
+    end
   end
+
+  # ── m.oauth UIA for the replacement of cross-signing keys (story oauth-account-management, A14) ──
+
+  defp oauth_cross_signing_replacement(conn, user, body, supplied) do
+    case Nebu.OAuth.cross_signing_reset_url() do
+      {:ok, url} ->
+        # the approval is bound to the requesting device AND to ALL supplied (normalized) keys (A14)
+        device_id = to_string(conn.assigns[:device_id] || "")
+        params = Nebu.Matrix.Uia.reset_params(device_id, keys_digest(supplied))
+
+        case approved_session(body) do
+          nil -> m_oauth_challenge(conn, user, device_id, url, params)
+          session_id -> replace_with_approval(conn, user, device_id, url, params, session_id, supplied)
+        end
+
+      # OAuth is not live (A3): never a challenge pointing at a dead page — the legacy answer
+      :unavailable ->
+        cannot_replace_cross_signing_keys(conn)
+    end
+  end
+
+  # `auth.session` (a binary) with `auth.type` absent, `m.oauth` or `org.matrix.cross_signing_reset`
+  # (Element sends `{type: "m.oauth", session}`); any other type (e.g. `m.login.sso`) and any malformed
+  # `auth` is a plain re-challenge.
+  defp approved_session(%{"auth" => %{"session" => session} = auth}) when is_binary(session) and session != "" do
+    if Map.get(auth, "type") in [nil, "m.oauth", "org.matrix.cross_signing_reset"], do: session
+  end
+
+  defp approved_session(_body), do: nil
+
+  # ONE transaction: the atomic single-use consume of the approval AND the key write. A failed key
+  # write rolls the consume back (the approval is not burned) => 500.
+  #
+  # story oauth-authorize-freshness (FR16 (2), gate ak): the merge base is read INSIDE the transaction, AFTER
+  # the consume, with the locked read `CrossSigningKeyStore.lock_keys/1` (story cross-signing-upload-races D3, the
+  # order: uia_sessions row (consume) -> cross_signing_keys row -> sync_global| advisory lock -> read), so a concurrent writer
+  # cannot slip a stale base in between (review cycle 1, Kassandra F-2 kept: a PARTIAL replacement keeps the
+  # stored keys that were not supplied, because `put_keys/2` upserts all three columns and an absent one
+  # would wipe it and reopen the UIA-free first-upload branch). A failing locked read is an ERROR (never an
+  # all-nil "no master stored"): the transaction rolls back (the approval is not consumed) => 500.
+  defp replace_with_approval(conn, user, device_id, url, params, session_id, supplied) do
+    result =
+      try do
+        Nebu.Repo.transaction(fn ->
+          case Nebu.Matrix.Uia.consume(session_id, user, "cross_signing_reset", params) do
+            :ok ->
+              case CrossSigningKeyStore.lock_keys(user) do
+                {:ok, current} ->
+                  keys = Map.merge(Map.take(current, ["master_key", "self_signing_key", "user_signing_key"]), supplied)
+                  case CrossSigningKeyStore.put_keys(user, keys) do
+                    :ok ->
+                      :ok
+
+                    {:error, :user_erased} ->
+                      Nebu.Repo.rollback(:user_erased)
+
+                    {:error, reason} ->
+                      # the error KIND only, never key material or an error message
+                      Logger.error("m.oauth cross-signing key write failed: #{error_kind(reason)}")
+                      Nebu.Repo.rollback(:write_failed)
+                  end
+
+                {:error, _reason} ->
+                  Nebu.Repo.rollback(:read_failed)
+              end
+
+            :error ->
+              Nebu.Repo.rollback(:not_approved)
+          end
+        end)
+      rescue
+        e ->
+          Logger.error("m.oauth cross-signing replacement failed: #{inspect(e.__struct__)}")
+          {:error, :write_failed}
+      end
+
+    case result do
+      {:ok, :ok} -> send_json(conn, 200, %{})
+      {:error, :not_approved} -> m_oauth_challenge(conn, user, device_id, url, params)
+
+      {:error, :user_erased} ->
+        Logger.info("m.oauth cross-signing key replacement refused: user_erased")
+        user_erased(conn)
+
+      {:error, _} -> error(conn, 500, "M_UNKNOWN", "Cross-signing key upload failed, please try again.")
+    end
+  end
+
+  # The 401 challenge: the caller's still-PENDING session for the same `(user, params)` is reused
+  # (Element's `makeRequest(null)` + dialog request, and a retry before approval, get the SAME id),
+  # else a new one is minted with a CHECKED insert; one pending request per `(user, device)` and a cap
+  # per user (`Uia.open_reset_request/3`, serialized). No `errcode` / `error` / `completed` (Element
+  # would enter its error state).
+  defp m_oauth_challenge(conn, user, device_id, url, params) do
+    case Nebu.Matrix.Uia.open_reset_request(user, device_id, params) do
+      {:ok, session_id} ->
+        send_json(conn, 401, %{
+          "flows" => [%{"stages" => ["m.oauth"]}],
+          "params" => %{"m.oauth" => %{"url" => url}},
+          "session" => session_id
+        })
+
+      :error ->
+        error(conn, 500, "M_UNKNOWN", "Cross-signing key upload failed, please try again.")
+    end
+  end
+
+  defp keys_digest(supplied), do: Nebu.Matrix.CanonicalJson.sha256_hex(supplied)
 
   # signatures/upload: merge each supplied signature into the targeted stored key
   # object (device key or cross-signing key); build a per-(user,key) failures map.
@@ -2239,22 +3146,34 @@ defmodule Nebu.Web.Router.Protected do
   # `signatures` (which carries the new sigs to merge). Try device key first, then
   # cross-signing key. Both paths are validate-THEN-persist: a mismatch (or no
   # stored key) writes NOTHING.
+  #
+  # story cross-signing-upload-races (code review MINOR-1, Kassandra F-1): the SHAPE of `signatures` is validated first.
+  # `signatures` must be a map (an absent one is an empty map) whose every per-signer value is a map; anything else
+  # (null, a string, a list, a non-map per-signer value) is a failure entry in the 200, never a crash: the stores guard
+  # on maps, and a crash report would carry the call arguments (key id, submitted object) into the error log.
   defp merge_one_signature(user_id, key_id, signed_object) when is_map(signed_object) do
     new_sigs = Map.get(signed_object, "signatures", %{})
 
-    case merge_device_key_signature(user_id, key_id, signed_object, new_sigs) do
-      :ok ->
-        :ok
+    if valid_signatures_shape?(new_sigs) do
+      case merge_device_key_signature(user_id, key_id, signed_object, new_sigs) do
+        :ok ->
+          :ok
 
-      :not_found ->
-        merge_cross_signing_signature(user_id, key_id, signed_object, new_sigs)
+        :not_found ->
+          merge_cross_signing_signature(user_id, key_id, signed_object, new_sigs)
 
-      :mismatch ->
-        :invalid
+        :mismatch ->
+          :invalid
+      end
+    else
+      :invalid
     end
   end
 
   defp merge_one_signature(_user_id, _key_id, _signed_object), do: :invalid
+
+  defp valid_signatures_shape?(sigs) when is_map(sigs), do: Enum.all?(sigs, fn {_signer, per_signer} -> is_map(per_signer) end)
+  defp valid_signatures_shape?(_sigs), do: false
 
   # A device-key signature merge. Returns :ok | :not_found | :mismatch.
   defp merge_device_key_signature(user_id, key_id, signed_object, new_sigs) do
@@ -2290,37 +3209,33 @@ defmodule Nebu.Web.Router.Protected do
     end
   end
 
-  # MAJOR-1: a cross-signing signature merge, mirroring the device-key path exactly —
-  # validate FIRST, persist ONLY on a match. Returns :ok | :invalid. The store's
-  # find_key_object/2 returns the stored cross-signing key object for key_id (or nil).
-  # We compare the non-signatures parts (dropping `signatures` AND `unsigned` on both
-  # sides) BEFORE writing; on a mismatch (or no stored key) NOTHING is persisted.
+  # MAJOR-1: a cross-signing signature merge, mirroring the device-key path: validate FIRST, persist ONLY on a
+  # match (the parts other than `signatures` / `unsigned` of the stored and the submitted object are equal). Returns
+  # :ok | :invalid.
+  #
+  # story cross-signing-upload-races (D4, D5, D-A1): the check and the write run in ONE transaction under the per-user
+  # lock, in the store (`CrossSigningKeyStore.merge_signatures/4`: `lock_keys/1`, the key found by its id in that read,
+  # the object comparison against the LOCKED object, the merge, all three columns written from that read). There is
+  # deliberately no unlocked pre-check here: an error-blind early read would turn a failed read into a failure entry of
+  # a 200, while the locked read lets a failed read crash the request (500), like a failed write. `:not_found` (-> a
+  # failure entry): no such cross-signing key, a different object under the same key id, or an erased user; nothing is
+  # stored then.
   defp merge_cross_signing_signature(user_id, key_id, signed_object, new_sigs) do
-    case CrossSigningKeyStore.find_key_object(user_id, key_id) do
-      nil ->
-        :invalid
-
-      stored ->
-        stored_clean = stored |> Map.delete("signatures") |> Map.delete("unsigned")
-        submitted_clean = signed_object |> Map.delete("signatures") |> Map.delete("unsigned")
-
-        if stored_clean == submitted_clean do
-          :ok = CrossSigningKeyStore.merge_signatures(user_id, key_id, new_sigs)
-          :ok
-        else
-          :invalid
-        end
+    case CrossSigningKeyStore.merge_signatures(user_id, key_id, new_sigs, signed_object) do
+      :ok -> :ok
+      :not_found -> :invalid
     end
   end
 
-  defp deep_merge_sig_map(existing, new) when is_map(existing) and is_map(new) do
-    Map.merge(existing, new, fn _signer, old_map, new_map ->
-      Map.merge(old_map || %{}, new_map || %{})
-    end)
+  # story cross-signing-upload-races (fix cycle 2, Kassandra D-1): the STORED device-key `signatures` may be malformed (the key upload does
+  # not validate their shape). A stored value or a stored per-signer value that is not a map counts as no signatures (dropped), so the
+  # merge never crashes (the crash report would log the submitted signatures) and the result is always a map of maps.
+  defp deep_merge_sig_map(existing, new) do
+    Map.merge(sig_map(existing), sig_map(new), fn _signer, old_map, new_map -> Map.merge(old_map, new_map) end)
   end
 
-  defp deep_merge_sig_map(_existing, new) when is_map(new), do: new
-  defp deep_merge_sig_map(existing, _new), do: existing
+  defp sig_map(sigs) when is_map(sigs), do: for({signer, per_signer} <- sigs, is_map(per_signer), into: %{}, do: {signer, per_signer})
+  defp sig_map(_sigs), do: %{}
 
   defp put_signature_failure(failures, user_id, key_id) do
     entry = %{"errcode" => "M_INVALID_SIGNATURE", "error" => "Signature does not match stored key"}
@@ -2367,11 +3282,31 @@ defmodule Nebu.Web.Router.Protected do
     end)
   end
 
+  # Story history-visibility-enforcement (security cycle 1, HIGH #1 (b)): the PUT of m.room.history_visibility,
+  # m.room.guest_access and m.room.join_rules is charged like the power levels (the access settings of a room; the history
+  # visibility events are the cost input of every member's reads, follow-up `gk`).
+  @moderation_state_types ~w(m.room.power_levels m.room.history_visibility m.room.guest_access m.room.join_rules)
+
+  # Story power-levels-enforcement (D9): a PUT of m.room.power_levels costs ONE `moderation` token, charged FIRST (before the
+  # body checks, like `/kick`): power-level changes and moderation are the same actors and the same abuse class. A labelled
+  # divergence from the spec's "Rate-limited: No"; the three access types below are charged the same way, every other state
+  # type stays uncharged (follow-up `fp`).
   defp do_set_room_state(conn, raw_room, raw_event_type, raw_state_key) do
+    if URI.decode_www_form(raw_event_type) in @moderation_state_types do
+      with_membership_charge(conn, [moderation_bucket(conn.assigns[:current_user])], fn ->
+        set_room_state_request(conn, raw_room, raw_event_type, raw_state_key)
+      end)
+    else
+      set_room_state_request(conn, raw_room, raw_event_type, raw_state_key)
+    end
+  end
+
+  defp set_room_state_request(conn, raw_room, raw_event_type, raw_state_key) do
     user = conn.assigns[:current_user]
     room = URI.decode_www_form(raw_room)
     event_type = URI.decode_www_form(raw_event_type)
     state_key = URI.decode_www_form(raw_state_key)
+    key_check = Nebu.Matrix.EventSize.check_keys(event_type, state_key, user)
 
     cond do
       # E2EE guardrail (ADR-011 managed-decryption model): a room must never flip to
@@ -2385,24 +3320,78 @@ defmodule Nebu.Web.Router.Protected do
       conn.assigns[:json_parse_error] == true ->
         error(conn, 400, "M_BAD_JSON", "Request body is not valid JSON")
 
+      # story power-levels-enforcement (D3): the levels content must be an object (valid JSON that is not one is wrapped by
+      # Plug.Parsers as %{"_json" => value}, the ONLY key; review cycle 0 I1: an object that merely has a "_json" key among
+      # others is a content like any other); the other state types keep their behaviour
+      event_type == "m.room.power_levels" and non_object_body?(body_params(conn)) ->
+        error(conn, 400, "M_BAD_JSON", "Request body must be a JSON object")
+
+      # a NUL in a path-derived identifier (room id, event type, state key) is not storable either: 400, not a 500
+      Nebu.Matrix.EventDispatcher.Server.contains_nul?([room, event_type, state_key]) ->
+        error(conn, 400, "M_BAD_JSON", "Path parameters must not contain NUL characters")
+
+      # a percent-encoded path value that is not UTF-8 (`%FF`) cannot be stored or encoded as JSON: 400, never a 500 from the size pre-check
+      not path_values_utf8?([room, event_type, state_key]) ->
+        error(conn, 400, "M_BAD_JSON", "Path parameters must be valid UTF-8")
+
+      # Story event-size-limit (D4): `type` / `state_key` above 255 BYTES (decoded, the stored value) are a 413, before the depth
+      # check, the room lookup and the type allowlist (nothing about the room is revealed, no statement runs). The authenticated
+      # sender above 255 bytes (a session of before the user ids were bounded) is a 403.
+      key_check != :ok ->
+        key_error(conn, key_check)
+
+      # Story create-room-input-validation (D5a/d): bounded descent BEFORE anything recursive walks the body (the
+      # NUL scan, CanonicalJson), then a NUL anywhere (keys or values) is a 400 here, not a 500 from the failing insert.
+      Nebu.Matrix.EventDispatcher.Server.content_too_deep?(body_params(conn)) ->
+        error(conn, 400, "M_BAD_JSON", "State event content is nested too deeply")
+
+      Nebu.Matrix.EventDispatcher.Server.contains_nul?(body_params(conn)) ->
+        error(conn, 400, "M_BAD_JSON", "State event content must not contain NUL characters")
+
       true ->
-        # body is the raw content object; re-encode to JSON for the request struct.
-        content = body_params(conn)
+        # body is the raw content object; re-encode to JSON for the request struct (once: the size check reuses these bytes).
+        content_json = Jason.encode!(body_params(conn))
 
-        req = %Core.SetRoomStateRequest{
-          room_id: room,
-          sender_id: user,
-          event_type: event_type,
-          state_key: state_key,
-          content_json: Jason.encode!(content)
-        }
+        # Story event-size-limit (D4): the complete signed event above 65 536 canonical bytes is a 413, still before the room lookup
+        # (an unknown room id gets no rooms row). EventDispatcher.Server.emit_state_event_at/6 re-checks the signed bytes.
+        envelope = Nebu.Matrix.EventSize.envelope(room, user, event_type, state_key, Nebu.DB.Helpers.now_ms())
 
-        case call_core(fn -> Nebu.Matrix.EventDispatcher.Server.set_room_state(req, stream(user)) end) do
-          {:ok, resp} -> send_json(conn, 200, %{"event_id" => resp.event_id})
-          {:error, err} -> send_error(conn, err)
+        case Nebu.Matrix.EventSize.check(envelope, byte_size(content_json)) do
+          {:error, :event_too_large} ->
+            error(conn, 413, "M_TOO_LARGE", Nebu.Matrix.EventSize.message(:event_too_large))
+
+          :ok ->
+            req = %Core.SetRoomStateRequest{
+              room_id: room,
+              sender_id: user,
+              event_type: event_type,
+              state_key: state_key,
+              content_json: content_json
+            }
+
+            case call_core(fn -> Nebu.Matrix.EventDispatcher.Server.set_room_state(req, stream(user)) end) do
+              {:ok, resp} -> send_json(conn, 200, %{"event_id" => resp.event_id})
+              {:error, err} -> send_error(conn, err)
+            end
         end
     end
   end
+
+  defp path_values_utf8?(values), do: Enum.all?(values, &String.valid?/1)
+
+  # Plug.Parsers wraps a JSON body that is not an object as %{"_json" => value} (its only key). Known limitation (review cycle 0 I1):
+  # an OBJECT body whose only key is "_json" cannot be told apart and is refused too (no levels content consists of that key alone)
+  defp non_object_body?(params), do: map_size(params) == 1 and Map.has_key?(params, "_json")
+
+  # Story event-size-limit (D2): the refusals of Nebu.Matrix.EventSize.check_keys/3. A `type` / `state_key` above 255 bytes is a
+  # 413 M_TOO_LARGE with a fixed text; a sender above 255 bytes cannot be fixed by changing the request: 403 M_FORBIDDEN.
+  defp key_error(conn, {:error, reason}), do: key_error(conn, reason)
+
+  defp key_error(conn, :sender_too_long),
+    do: error(conn, 403, "M_FORBIDDEN", Nebu.Matrix.EventSize.message(:sender_too_long))
+
+  defp key_error(conn, reason) when reason in [:type_too_long, :state_key_too_long],
+    do: error(conn, 413, "M_TOO_LARGE", Nebu.Matrix.EventSize.message(reason))
 
   defp update_profile_field(conn, raw_user_id, field) do
     user = conn.assigns[:current_user]

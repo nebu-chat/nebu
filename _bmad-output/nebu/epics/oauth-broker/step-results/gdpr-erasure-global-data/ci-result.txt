@@ -1,0 +1,6 @@
+gdpr-erasure-global-data (ck, REQ-2026-005), 2026-10-27, after fix cycle 2
+ci_run (integration, Elixir 1.19, fresh DB): 11210 tests, 30 failures, 8 skipped. All in known flaky families:
+ RoomsFallbackName 12, HistoryVisibilitySecurityCycle1Test 5 (tick/0 family, green alone), AdminOidcLogin 3, TemporaryCaptureManager 3,
+ TraceMapNodeControls 3, LogStore.Retention 1, SsoLogin 1, WarRoom 1, AdminStaleRooms 1 (the last two families green alone 22/22).
+e2e element-web: 34 passed, 1 failed (thread_messages @ac3-relations-200 hover flake), green on rerun (1 passed).
+Unit job (no DB) Elixir 1.19-alpine: 6688 tests, 0 failures.

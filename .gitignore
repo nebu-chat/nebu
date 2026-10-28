@@ -78,3 +78,6 @@ terraform.tfstate.*.backup
 website/dokument/architecture/
 website/dokument/getting-started.md
 *.pem
+
+# Local dev TLS CA + certificate (dev/tls/gen-certs.sh)
+dev/tls/certs/

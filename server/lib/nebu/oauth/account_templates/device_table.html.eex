@@ -1,0 +1,39 @@
+<%= if @devices == [] do %>
+<p>There are no devices on your account yet.</p>
+<% else %>
+<div class="table-wrap" role="region" aria-label="Devices table" tabindex="0">
+<table>
+<caption>Your devices</caption>
+<thead>
+<tr>
+<th scope="col">Device</th>
+<th scope="col">Device ID</th>
+<th scope="col">App (name claimed by the app)</th>
+<th scope="col">Last active</th>
+<th scope="col">Last IP</th>
+<th scope="col">Added</th>
+<th scope="col">Actions</th>
+</tr>
+</thead>
+<tbody>
+<%= for d <- @devices do %>
+<tr data-role="account-device" data-device-id="<%= d.device_id %>">
+<th scope="row" data-label="Device"><%= device_name(d) %></th>
+<td data-label="Device ID"><%= d.device_id %></td>
+<td data-label="App (name claimed by the app)"><%= app_label(d) %></td>
+<td data-label="Last active"><%= time_tag(d.last_seen_ts, "Never") %></td>
+<td data-label="Last IP"><%= d.last_seen_ip || "Unknown" %></td>
+<td data-label="Added"><%= time_tag(d.created_at, "Unknown") %></td>
+<td data-label="Actions">
+<a href="<%= device_href("org.matrix.device_view", d.device_id) %>" aria-label="Details of <%= device_name(d) %> (<%= d.device_id %>)">Details</a>
+<a data-role="device-row-sign-out" href="<%= device_href("org.matrix.device_delete", d.device_id) %>" aria-label="Sign out <%= device_name(d) %> (<%= d.device_id %>)">Sign out</a>
+</td>
+</tr>
+<% end %>
+</tbody>
+</table>
+</div>
+<%= if @hidden > 0 do %>
+<p data-role="devices-truncated"><%= if @hidden_exact, do: "", else: "At least " %><%= @hidden %> more <%= if @hidden == 1, do: "device", else: "devices" %> not shown.</p>
+<% end %>
+<% end %>

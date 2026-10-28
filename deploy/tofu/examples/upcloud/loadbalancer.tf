@@ -82,8 +82,11 @@ resource "upcloud_loadbalancer_static_backend_member" "nebu" {
   ip = [for ni in upcloud_server.nebu.network_interface : ni.ip_address if ni.type == "private"][0]
   # tls_mode = "none":             target port 8008 (server container, direct).
   # tls_mode = "acme":             target port 443  (nginx on VM, TLS termination).
-  # tls_mode = "alb" / "dynamic":  target port 80   (Docker Compose nginx proxy → server:4000).
-  port         = var.tls_mode == "acme" ? 443 : (contains(["alb", "dynamic"], var.tls_mode) ? 80 : 8008)
+  # tls_mode = "alb" / "dynamic":  target port 8081 (Docker Compose nginx proxy → server:4000). 8081 is the
+  #                                nginx listener for the LB's TLS-terminated traffic and the ONLY one that may
+  #                                carry the realip directives (lb_real_ip_cidrs); the :80 listener (plain HTTP,
+  #                                redirect only) trusts no X-Forwarded-For. See cloud-init.tftpl.
+  port         = var.tls_mode == "acme" ? 443 : (contains(["alb", "dynamic"], var.tls_mode) ? 8081 : 8008)
   weight       = 1
   max_sessions = 1000
   enabled      = true
@@ -96,7 +99,7 @@ resource "upcloud_loadbalancer_static_backend_member" "nebu" {
 resource "upcloud_loadbalancer_frontend" "https" {
   loadbalancer         = upcloud_loadbalancer.nebu.id
   name                 = "https-443"
-  mode                 = contains(["alb", "dynamic"], var.tls_mode) ? "http" : "tcp"
+  mode                 = local.lb_https_frontend_mode
   port                 = 443
   default_backend_name = upcloud_loadbalancer_backend.nebu.name
 
@@ -109,6 +112,25 @@ resource "upcloud_loadbalancer_frontend" "https" {
   # headroom, and timeout_client only exists on the frontend resource.
   properties {
     timeout_client = 40
+  }
+}
+
+# UpCloud adds X-Forwarded-For / -Proto / -Port to forwarded requests ONLY through this rule action
+# (provider schema: set_forwarded_headers "Adds 'X-Forwarded-For / -Proto / -Port' headers in your
+# forwarded requests"). nginx realip (lb_real_ip_cidrs) takes the right-most address that is not an
+# LB hop, so it needs the LB to APPEND the client address. Whether the action appends to or replaces
+# a client-written header is not documented: verify with the negative test (README) before setting
+# lb_real_ip_cidrs.
+resource "upcloud_loadbalancer_frontend_rule" "https_forwarded_headers" {
+  count    = local.lb_https_frontend_mode == "http" ? 1 : 0
+  frontend = upcloud_loadbalancer_frontend.https.id
+  name     = "set-forwarded-headers"
+  priority = 100
+
+  actions {
+    set_forwarded_headers {
+      active = true
+    }
   }
 }
 
@@ -151,19 +173,57 @@ resource "upcloud_loadbalancer_static_backend_member" "nebu_http" {
 }
 
 # ── Frontend: HTTP 80 (tls_mode != "none") ───────────────────────────────────
-# tls_mode = "acme":             TCP passthrough → nginx:80 (301 HTTP→HTTPS redirect).
-# tls_mode = "dynamic" / "alb":  TCP passthrough → VM:80 (Docker Compose nginx proxy → server:4000).
-#                                 For "dynamic": UpCloud intercepts .well-known/acme-challenge/* at LB.
+# tls_mode = "acme":             TCP passthrough → nginx:80 (certbot HTTP-01 + 301 HTTP→HTTPS redirect).
+# tls_mode = "dynamic" / "alb":  HTTP mode. The LB answers every request with a redirect to https
+#                                 (rule below); for "dynamic" the ACME HTTP-01 path is excluded so the
+#                                 LB's own certificate issuance keeps working. Should the rule ever be
+#                                 missing, the default backend is the VM nginx :80 listener, which has no
+#                                 realip directives and redirects as well. A raw TCP frontend must never
+#                                 reach the realip listener (:8081): server.tf precondition.
 
 resource "upcloud_loadbalancer_frontend" "http" {
   count                = var.tls_mode != "none" ? 1 : 0
   loadbalancer         = upcloud_loadbalancer.nebu.id
   name                 = "http-80"
-  mode                 = "tcp"
+  mode                 = contains(["alb", "dynamic"], var.tls_mode) ? "http" : "tcp"
   port                 = 80
   default_backend_name = upcloud_loadbalancer_backend.nebu_http[0].name
 
   networks {
     name = "public"
+  }
+}
+
+# HTTP → HTTPS redirect at the LB (alb / dynamic only; acme keeps TCP passthrough for certbot).
+resource "upcloud_loadbalancer_frontend_rule" "http_redirect" {
+  count    = var.tls_mode != "none" && local.lb_https_frontend_mode == "http" ? 1 : 0
+  frontend = upcloud_loadbalancer_frontend.http[0].id
+  name     = "redirect-to-https"
+  priority = 100
+
+  matchers {
+    path {
+      method = "starts"
+      value  = "/"
+    }
+  }
+
+  # "dynamic": leave the ACME HTTP-01 challenge path alone (UpCloud's issuance validates it here).
+  dynamic "matchers" {
+    for_each = var.tls_mode == "dynamic" ? [1] : []
+    content {
+      path {
+        method  = "starts"
+        value   = "/.well-known/acme-challenge/"
+        inverse = true
+      }
+    }
+  }
+
+  actions {
+    http_redirect {
+      scheme = "https"
+      status = 301
+    }
   }
 }

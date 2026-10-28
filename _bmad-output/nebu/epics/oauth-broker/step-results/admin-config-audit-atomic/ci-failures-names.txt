@@ -1,0 +1,12 @@
+KNOWN  12 Nebu.Admin.RoomsFallbackNameTest
+KNOWN  3 Nebu.Admin.TemporaryCaptureManagerTest
+KNOWN  3 Nebu.Admin.LogsLive.TraceMapNodeControlsTest
+KNOWN  3 Nebu.Web.AdminOidcLoginTest
+NEW    1 Nebu.Web.LogStore.RetentionTest
+KNOWN  1 Nebu.Matrix.SsoLoginTest
+NEW    1 Nebu.Admin.AdminStaleRoomsTest
+KNOWN  1 Nebu.Matrix.MatrixSsoTest
+KNOWN  1 Nebu.Admin.LogsLive.WarRoomTest
+---- not in known:
+Nebu.Web.LogStore.RetentionTest | INFO max-count cap (new, symmetric with the existing DEBUG cap) 1000 INFO entries capped to log_retention_info_max_count=500 leaves only the 500 most recent
+Nebu.Admin.AdminStaleRoomsTest | list_rooms stale filter (AC3) returns exactly the active + 0-member room

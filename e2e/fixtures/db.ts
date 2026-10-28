@@ -33,7 +33,7 @@
  * the caller must not proceed until the row is committed.
  */
 
-import { execSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 
 const DB_URL = process.env.NEBU_DB_URL;
 const DB_CONTAINER = process.env.NEBU_DB_CONTAINER ?? 'nebu-postgres-1';
@@ -201,6 +201,106 @@ export function upsertServerConfig(key: string, value: string): void {
       'extract(epoch from now())::bigint) ' +
       'ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, set_at = EXCLUDED.set_at',
   );
+  awaitOAuthConfigApplied(key);
+}
+
+// ─── oauth-hardening-hygiene (HY1/HY16): the server caches the OAuth switch per node ────────────────
+//
+// `Nebu.OAuth.Config` serves `oauth_enabled` / `oauth_issuer_url` from a per-node TTL cache
+// (`NEBU_OAUTH_CONFIG_CACHE_MS`, default 2 s; the e2e stack keeps the production default on purpose, so e2e
+// exercises the cache). A fixture that writes one of these keys therefore waits until the RUNNING server
+// reflects the write: `GET /_matrix/client/v1/auth_metadata` answers 200 when OAuth is enabled with a valid
+// issuer and 404 otherwise (it is not rate limited, Matrix v1.18). 100 ms interval, 5 s timeout, then it
+// fails loudly (a silent timeout would turn into a confusing downstream failure).
+
+const OAUTH_SWITCH_KEYS = new Set(['oauth_enabled', 'oauth_issuer_url']);
+const OAUTH_APPLY_TIMEOUT_MS = 5_000;
+const OAUTH_APPLY_POLL_MS = 100;
+const OAUTH_API_URL = (process.env.NEBU_ADMIN_URL ?? 'http://localhost:8008').replace(/\/+$/, '');
+
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/**
+ * `GET /_matrix/client/v1/auth_metadata` as `{ status, issuer }` (`status` 0 when the request itself failed,
+ * `issuer` the `issuer` member of a 200 body). Synchronous on purpose (fixtures are synchronous).
+ */
+function authMetadata(): { status: number; issuer: string | null } {
+  const script =
+    `fetch(${JSON.stringify(`${OAUTH_API_URL}/_matrix/client/v1/auth_metadata`)})` +
+    '.then(async (r) => { let issuer = null; if (r.status === 200) { try { issuer = (await r.json()).issuer ?? null; } catch {} } ' +
+    'process.stdout.write(JSON.stringify({ status: r.status, issuer })); })' +
+    '.catch(() => process.stdout.write(JSON.stringify({ status: 0, issuer: null })))';
+  try {
+    const parsed = JSON.parse(execFileSync(process.execPath, ['-e', script], { stdio: 'pipe', timeout: 4_000 }).toString().trim());
+    return { status: Number(parsed.status) || 0, issuer: typeof parsed.issuer === 'string' ? parsed.issuer : null };
+  } catch {
+    return { status: 0, issuer: null };
+  }
+}
+
+/**
+ * What the server must answer once it reflects the stored switch. Enabled with an issuer: 200 AND the advertised
+ * `issuer` equals the stored one (both of two valid https issuers answer 200, so the status alone would not notice
+ * an issuer change); the issuer validity itself is the server's business (no regex here that could drift from
+ * `Nebu.OAuth.Metadata.normalize_issuer/1`: an invalid stored issuer makes the wait fail loudly). Otherwise 404.
+ */
+function expectedAuthMetadata(): { status: number; issuer: string | null } {
+  const enabled = queryServerConfigValue('oauth_enabled') === 'true';
+  const issuer = queryServerConfigValue('oauth_issuer_url');
+  const stored = issuer === null ? '' : issuer.trim().replace(/\/+$/, '');
+  return enabled && stored !== '' ? { status: 200, issuer: stored } : { status: 404, issuer: null };
+}
+
+/** Blocks until the server's `auth_metadata` answer reflects the stored `oauth_*` switch; no-op for any other key. */
+export function awaitOAuthConfigApplied(key: string): void {
+  if (!OAUTH_SWITCH_KEYS.has(key)) return;
+  const expected = expectedAuthMetadata();
+  const deadline = Date.now() + OAUTH_APPLY_TIMEOUT_MS;
+  let last = { status: -1, issuer: null as string | null };
+  while (Date.now() < deadline) {
+    last = authMetadata();
+    if (last.status === expected.status && (expected.issuer === null || last.issuer === expected.issuer)) return;
+    sleepSync(OAUTH_APPLY_POLL_MS);
+  }
+  throw new Error(
+    `[fixtures/db] the server did not reflect the ${key} write within ${OAUTH_APPLY_TIMEOUT_MS} ms: ` +
+      `GET ${OAUTH_API_URL}/_matrix/client/v1/auth_metadata answered ${last.status} (issuer ${last.issuer ?? 'none'}), ` +
+      `expected ${expected.status}${expected.issuer ? ` (issuer ${expected.issuer})` : ''} ` +
+      '(per-node config cache NEBU_OAUTH_CONFIG_CACHE_MS, default 2000 ms; is the stack running?)',
+  );
+}
+
+// ─── oauth-broker / media-config-tolerant-loader: a damaged media_config row ────────────────────────
+//
+// The Admin form is not the way to damage a stored media setting (the writer validates), the documented break-glass SQL is. These helpers write / read
+// / restore ONE media_config row directly (psql as the privileged role; values are test-generated literals, no `$`, double quotes or backticks: the
+// SQL goes through a shell). NOTE the server serves media_config from a per-node cache with a 60 s TTL (the direct write sends no invalidation), so a
+// scenario that seeds a row must wait for the page to reflect it (see the steps of features/admin/media-config-damaged.feature).
+
+/** The stored value of one media_config row, or null when the row does not exist. */
+export function queryMediaConfigRow(key: string): string | null {
+  const out = runSqlQuery(`SELECT value FROM media_config WHERE key = ${sqlLiteral(key)}`);
+  return out === '' ? null : out;
+}
+
+/** Upsert one media_config row with a literal value (also a damaged one, the point of the helper). */
+export function setMediaConfigRow(key: string, value: string): void {
+  runSql(
+    `INSERT INTO media_config (key, value, set_at) VALUES (${sqlLiteral(key)}, ${sqlLiteral(value)}, ` +
+      '(extract(epoch from now()) * 1000)::bigint) ' +
+      'ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, set_at = EXCLUDED.set_at',
+  );
+}
+
+/** Put one media_config row back as `queryMediaConfigRow` found it: the original value, or no row when there was none. */
+export function restoreMediaConfigRow(key: string, original: string | null): void {
+  if (original === null) {
+    runSql(`DELETE FROM media_config WHERE key = ${sqlLiteral(key)}`);
+  } else {
+    setMediaConfigRow(key, original);
+  }
 }
 
 /** Read one server_config value ('' -> null) for scenario assertions. */
@@ -514,3 +614,303 @@ export function clearWarRoomSessions(): void {
   runSql('DELETE FROM war_room_sessions');
 }
 
+
+// ─── oauth-broker/oauth-metadata-dcr-admin-approval (AC4/AC5) ───────────────────
+
+export type OAuthClientRow = {
+  clientId: string;
+  status: string;
+  approvedBy: string;
+  approvedAt: string;
+  rejectedBy: string;
+  rejectedAt: string;
+};
+
+/**
+ * Read one `oauth_clients` row by metadata->>'client_name' (migration
+ * 000040_oauth_clients_and_auth_metadata). Read-only: the clients themselves are created
+ * through the REAL `POST /oauth2/register` endpoint and decided through the REAL Admin UI —
+ * this helper only VERIFIES persisted state (Scenario "status in database changes to ...").
+ * client_name values are test-generated (alphanumerics + dash), safe for the shell.
+ */
+export function queryOAuthClientByName(clientName: string): OAuthClientRow | null {
+  const out = runSqlQuery(
+    "SELECT client_id || '|' || status || '|' || coalesce(approved_by,'') || '|' || " +
+      "coalesce(approved_at::text,'') || '|' || coalesce(rejected_by,'') || '|' || " +
+      `coalesce(rejected_at::text,'') FROM oauth_clients WHERE metadata->>'client_name' = ${sqlLiteral(clientName)}`,
+  );
+  if (out === '') return null;
+  const [clientId, status, approvedBy, approvedAt, rejectedBy, rejectedAt] = out.split('|');
+  return { clientId, status, approvedBy, approvedAt, rejectedBy, rejectedAt };
+}
+
+/** Count audit_log rows for an action + target (AC4/AC7 admin audit entries). */
+export function countAuditEntries(action: string, targetId: string): number {
+  return Number(
+    runSqlQuery(
+      `SELECT count(*) FROM audit_log WHERE action = ${sqlLiteral(action)} AND target_id = ${sqlLiteral(targetId)}`,
+    ),
+  );
+}
+
+/** Read the `metadata->>'reason'` of the newest audit entry for an action + target ('' if none). */
+export function queryAuditReason(action: string, targetId: string): string {
+  return runSqlQuery(
+    `SELECT coalesce(metadata->>'reason','') FROM audit_log WHERE action = ${sqlLiteral(action)} ` +
+      `AND target_id = ${sqlLiteral(targetId)} ORDER BY id DESC LIMIT 1`,
+  );
+}
+
+/**
+ * Count pending registrations whose client_name does NOT start with `namePrefix` (i.e. rows this
+ * feature did not create). Read-only; lets a scenario refuse to run on a dirty shared DB instead of
+ * deciding foreign registrations.
+ */
+export function countPendingOAuthClientsOutsideNamePrefix(namePrefix: string): number {
+  return Number(
+    runSqlQuery(
+      "SELECT count(*) FROM oauth_clients WHERE status = 'pending' AND " +
+        `coalesce(metadata->>'client_name','') NOT LIKE ${sqlLiteral(namePrefix + '%')}`,
+    ),
+  );
+}
+
+/**
+ * Scenario cleanup for registrations this feature created (name-prefix scoped).
+ *
+ * Connection role (test-review m4): this module connects as the compose/CI superuser `nebu`
+ * (`docker exec ... psql -U nebu`, or NEBU_DB_URL=postgresql://nebu@postgres in CI) — NOT as the
+ * runtime role `nebu_app`, which may only DELETE `pending` oauth_clients rows (row level security,
+ * migration 000040) — this cleanup also removes the approved/rejected ones the scenarios create,
+ * which only the privileged role can. Any failure (e.g. NEBU_DB_URL pointing at nebu_app) is
+ * deliberately NOT swallowed: runSql throws, so leaked state fails the run loudly instead of
+ * silently polluting the DB.
+ */
+export function clearOAuthClientsByNamePrefix(prefix: string): void {
+  runSql(
+    `DELETE FROM oauth_clients WHERE metadata->>'client_name' LIKE ${sqlLiteral(prefix + '%')}`,
+  );
+}
+
+/**
+ * Seed `count` PENDING registrations named `<namePrefix>-<n>` (client_id = the same string) directly
+ * in the DB and return their client ids. Used ONLY by the pagination scenario: the real
+ * `POST /oauth2/register` is rate limited to 50 requests/hour per IP, so more than one page (50)
+ * of pending registrations cannot be created through the real endpoint. `namePrefix` must be
+ * test-generated (alphanumerics + dash): no `$`, quotes or backticks (the statement goes through a
+ * shell, see runSql).
+ */
+export function insertPendingOAuthClients(namePrefix: string, count: number): string[] {
+  const p = sqlLiteral(namePrefix);
+  runSql(
+    'INSERT INTO oauth_clients (client_id, metadata, metadata_hash, status) ' +
+      `SELECT ${p} || '-' || g, jsonb_build_object('client_name', ${p} || '-' || g, ` +
+      "'client_uri', 'https://example.com', 'logo_uri', 'https://example.com/logo.png', " +
+      `'redirect_uris', jsonb_build_array('https://example.com/callback/' || ${p} || '-' || g)), ` +
+      `'e2e-hash-' || ${p} || '-' || g, 'pending' FROM generate_series(1, ${Math.floor(count)}) g`,
+  );
+  return Array.from({ length: count }, (_, i) => `${namePrefix}-${i + 1}`);
+}
+
+// ─── oauth-broker/oauth-client-revocation (P4, AC10) ───────────────────────────────
+
+export type OAuthClientRevocationRow = {
+  status: string;
+  approvedBy: string;
+  revokedBy: string;
+  revokedAt: string;
+  revokedReason: string;
+};
+
+/**
+ * Read the decision columns of one `oauth_clients` row by client_id (migration 000046: `revoked_by`,
+ * `revoked_at`, `revoked_reason`). Read-only: clients are registered through the REAL DCR endpoint, approved
+ * and revoked through the REAL Admin UI; this only VERIFIES the persisted state. `clientId` is a server-generated
+ * value (base64url: letters, digits, `-` and `_`), always passed through sqlLiteral.
+ */
+export function queryOAuthClientRevocation(clientId: string): OAuthClientRevocationRow | null {
+  const out = runSqlQuery(
+    "SELECT status || '|' || coalesce(approved_by,'') || '|' || coalesce(revoked_by,'') || '|' || " +
+      "coalesce(revoked_at::text,'') || '|' || coalesce(revoked_reason,'') " +
+      `FROM oauth_clients WHERE client_id = ${sqlLiteral(clientId)}`,
+  );
+  if (out === '') return null;
+  const [status, approvedBy, revokedBy, revokedAt, ...reason] = out.split('|');
+  return { status, approvedBy, revokedBy, revokedAt, revokedReason: reason.join('|') };
+}
+
+/** Number of `matrix_sessions` rows of an OAuth client (the revocation must leave none). */
+export function countOAuthClientSessions(clientId: string): number {
+  return Number(runSqlQuery(`SELECT count(*) FROM matrix_sessions WHERE client_id = ${sqlLiteral(clientId)}`));
+}
+
+/** The `metadata` JSON text of the newest audit entry for an action + target ('' if none). */
+export function queryAuditMetadata(action: string, targetId: string): string {
+  return runSqlQuery(
+    `SELECT coalesce(metadata::text,'') FROM audit_log WHERE action = ${sqlLiteral(action)} ` +
+      `AND target_id = ${sqlLiteral(targetId)} ORDER BY id DESC LIMIT 1`,
+  );
+}
+
+// ─── oauth-broker/oauth-dcr-abuse-hardening (P2, AC15) ──────────────────────────
+
+/**
+ * Seed `count` PENDING registrations named `<namePrefix>-<n>` (client_id = the same string) that are
+ * `ageDays` days old, with the stored `client_host` / `client_domain` (migration 000044) set, and
+ * return their client ids. Used ONLY by the "older than N days" bulk-removal scenario: the age of a
+ * registration cannot be produced through the real `POST /oauth2/register` endpoint (same exception
+ * as the pagination scenario, `insertPendingOAuthClients`). Values must be test-generated
+ * (alphanumerics, dash, dot): they go through a shell, see runSql.
+ */
+export function insertAgedPendingOAuthClients(
+  namePrefix: string,
+  count: number,
+  ageDays: number,
+  host: string,
+  domain: string,
+): string[] {
+  const p = sqlLiteral(namePrefix);
+  runSql(
+    'INSERT INTO oauth_clients (client_id, metadata, metadata_hash, status, client_host, client_domain, created_at) ' +
+      `SELECT ${p} || '-' || g, jsonb_build_object('client_name', ${p} || '-' || g, ` +
+      `'client_uri', 'https://' || ${sqlLiteral(host)}, ` +
+      `'redirect_uris', jsonb_build_array('https://' || ${sqlLiteral(host)} || '/callback/' || ${p} || '-' || g)), ` +
+      `'e2e-hash-' || ${p} || '-' || g, 'pending', ${sqlLiteral(host)}, ${sqlLiteral(domain)}, ` +
+      `now() - (${Math.floor(ageDays)} * interval '1 day') FROM generate_series(1, ${Math.floor(count)}) g`,
+  );
+  return Array.from({ length: count }, (_, i) => `${namePrefix}-${i + 1}`);
+}
+
+/**
+ * The `oauth_clients_bulk_removed` audit rows (story oauth-dcr-abuse-hardening, AH9) whose
+ * `metadata.client_ids` contains `clientId`: how many there are and the `removed` count of the newest.
+ * Read-only.
+ */
+export function queryBulkRemovalAudit(clientId: string): { count: number; removed: number } {
+  const where =
+    "action = 'oauth_clients_bulk_removed' AND " +
+    `metadata->'client_ids' @> jsonb_build_array(${sqlLiteral(clientId)}::text)`;
+  const count = Number(runSqlQuery(`SELECT count(*) FROM audit_log WHERE ${where}`));
+  const removed = count === 0 ? 0 : Number(runSqlQuery(`SELECT metadata->>'removed' FROM audit_log WHERE ${where} ORDER BY id DESC LIMIT 1`));
+  return { count, removed };
+}
+
+// ─── oauth-broker story 2 (oauth-authorize-idp-delegation-code) ──────────────────
+
+/** Remove one server_config key (privileged role; used to restore an absent `oauth_issuer_url`). */
+export function deleteServerConfig(key: string): void {
+  runSql(`DELETE FROM server_config WHERE key = ${sqlLiteral(key)}`);
+  awaitOAuthConfigApplied(key);
+}
+
+/**
+ * Create an OAuth client row with a FIXED client_id in the given status, the way the database
+ * allows it (migration 000040: INSERT only `pending`, then UPDATE the decision). Any earlier row
+ * with that id is removed first (privileged role), so a scenario always starts from a known
+ * registration. `client_name` = the client id, so `clearOAuthClientsByNamePrefix` also removes it;
+ * the FK cascade (migration 000041) removes its authorization requests and codes.
+ * Values are test-generated literals (no `$`, double quotes or backticks: the SQL goes through a shell).
+ */
+export function insertOAuthClient(opts: {
+  clientId: string;
+  status: 'pending' | 'approved' | 'rejected';
+  redirectUris: string[];
+  applicationType: 'web' | 'native';
+  clientUri?: string;
+  /** `client_name` of the registration (default: the client id). A test-generated literal. */
+  clientName?: string;
+}): void {
+  const id = sqlLiteral(opts.clientId);
+  const uris = opts.redirectUris.map(sqlLiteral).join(', ');
+  runSql(`DELETE FROM oauth_clients WHERE client_id = ${id}`);
+  runSql(
+    'INSERT INTO oauth_clients (client_id, metadata, metadata_hash, application_type, status) VALUES (' +
+      `${id}, jsonb_build_object('client_name', ${opts.clientName !== undefined ? sqlLiteral(opts.clientName) : id}, 'client_uri', ${sqlLiteral(opts.clientUri ?? 'https://client.e2e.example')}, ` +
+      `'redirect_uris', jsonb_build_array(${uris}), 'application_type', ${sqlLiteral(opts.applicationType)}, ` +
+      "'token_endpoint_auth_method', 'none', 'response_types', jsonb_build_array('code'), " +
+      "'grant_types', jsonb_build_array('authorization_code', 'refresh_token')), " +
+      `'e2e-hash-' || ${id}, ${sqlLiteral(opts.applicationType)}, 'pending')`,
+  );
+  if (opts.status === 'approved') {
+    runSql(
+      "UPDATE oauth_clients SET status = 'approved', approved_by = '@e2e-admin:localhost', approved_at = now() " +
+        `WHERE client_id = ${id}`,
+    );
+  } else if (opts.status === 'rejected') {
+    runSql(
+      "UPDATE oauth_clients SET status = 'rejected', rejected_by = '@e2e-admin:localhost', rejected_at = now() " +
+        `WHERE client_id = ${id}`,
+    );
+  }
+}
+
+/** Scenario cleanup by client_id prefix (privileged role; cascades to oauth_authz_requests / oauth_codes). */
+export function clearOAuthClientsByIdPrefix(prefix: string): void {
+  runSql(`DELETE FROM oauth_clients WHERE client_id LIKE ${sqlLiteral(prefix + '%')}`);
+}
+
+// ─── oauth-broker story 6 (oauth-account-management) ───────────────────────────
+//
+// All helpers below connect as the privileged role (see clearOAuthClientsByNamePrefix) and never
+// swallow a failure: leaked account sessions / OAuth sessions must fail the run loudly. Values are
+// test-generated literals (Matrix user ids, client-id prefixes): no `$`, double quotes or backticks.
+
+/**
+ * story oauth-authorize-freshness (P3): delete the consent rows (`oauth_consent_requests`, migration
+ * 000045) of every client whose id starts with `prefix`. Scenario hygiene next to
+ * clearOAuthClientsByIdPrefix (whose FK cascade would also remove them): a failed scenario must not
+ * leave live consent rows behind (their 10 000-row soft cap is global). Privileged role, never swallowed.
+ */
+export function clearOAuthConsentRequestsByClientPrefix(prefix: string): void {
+  runSql(`DELETE FROM oauth_consent_requests WHERE client_id LIKE ${sqlLiteral(prefix + '%')}`);
+}
+
+/** Delete every account-page browser session (`oauth_account_sessions`, migration 000043) of a user. */
+export function clearAccountSessions(userId: string): void {
+  runSql(`DELETE FROM oauth_account_sessions WHERE user_id = ${sqlLiteral(userId)}`);
+}
+
+/**
+ * Delete every `matrix_sessions` row whose OAuth `client_id` starts with `prefix`, together with the
+ * devices (and their key material) those sessions were on. Must run BEFORE
+ * clearOAuthClientsByIdPrefix: `matrix_sessions.client_id` references `oauth_clients` ON DELETE
+ * RESTRICT (migration 000042).
+ */
+export function clearOAuthSessionsByClientPrefix(prefix: string): void {
+  const p = sqlLiteral(prefix + '%');
+  const owned = `SELECT user_id, device_id FROM matrix_sessions WHERE client_id LIKE ${p}`;
+  for (const table of ['device_one_time_keys', 'device_fallback_keys', 'device_keys', 'devices']) {
+    runSql(`DELETE FROM ${table} WHERE (user_id, device_id) IN (${owned})`);
+  }
+  runSql(`DELETE FROM matrix_sessions WHERE client_id LIKE ${p}`);
+}
+
+/**
+ * Delete one device of a user completely: every `matrix_sessions` row of the device (any auth_api),
+ * its JWT bindings, the device row and its key material (After-hook cleanup of the legacy device).
+ */
+export function clearDeviceOfUser(userId: string, deviceId: string): void {
+  const u = sqlLiteral(userId);
+  const d = sqlLiteral(deviceId);
+  for (const table of ['matrix_sessions', 'jwt_device_bindings', 'device_one_time_keys', 'device_fallback_keys', 'device_keys', 'devices']) {
+    runSql(`DELETE FROM ${table} WHERE user_id = ${u} AND device_id = ${d}`);
+  }
+}
+
+/** Delete every OAuth (`auth_api = 'oauth'`) session row of a user (precondition "no OAuth session"). */
+export function deleteOAuthSessionsOfUser(userId: string): void {
+  runSql(`DELETE FROM matrix_sessions WHERE user_id = ${sqlLiteral(userId)} AND auth_api = 'oauth'`);
+}
+
+/** The newest account session's `auth_time` (unix seconds) of a user, or null when none exists. */
+export function queryAccountSessionAuthTime(userId: string): number | null {
+  const out = runSqlQuery(
+    `SELECT auth_time FROM oauth_account_sessions WHERE user_id = ${sqlLiteral(userId)} ORDER BY created_at DESC LIMIT 1`,
+  );
+  return out === '' ? null : Number(out);
+}
+
+/** The database clock (unix seconds): the reference for auth_time comparisons (no host clock skew). */
+export function queryDbEpochSeconds(): number {
+  return Number(runSqlQuery('SELECT floor(extract(epoch FROM now()))::bigint'));
+}

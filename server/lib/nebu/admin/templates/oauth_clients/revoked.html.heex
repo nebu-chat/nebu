@@ -1,0 +1,66 @@
+<div class="admin-oauth-clients" data-page="oauth-revoked-clients">
+  <h1 class="text-2xl font-bold mb-2">Revoked OAuth Clients</h1>
+  <p class="text-base-content/70 mb-4">
+    Clients an administrator withdrew. They stay listed: a revocation is final for the registration, and the same
+    registration data can never be approved again (the application has to register changed data and be approved anew).
+  </p>
+
+  <p :if={Phoenix.Flash.get(@flash, :info)} class="alert alert-success my-4" role="status" data-role="toast" data-toast-kind="success">
+    {Phoenix.Flash.get(@flash, :info)}
+  </p>
+  <p :if={Phoenix.Flash.get(@flash, :error)} class="alert alert-error my-4" role="alert" data-role="toast" data-toast-kind="error">
+    {Phoenix.Flash.get(@flash, :error)}
+  </p>
+
+  <p class="mb-4">
+    <a href="/admin/oauth/clients" class="link link-primary" data-role="to-approved">Approved clients</a>
+  </p>
+
+  <p :if={@clients == [] and not @load_error} class="text-base-content/70" data-role="no-revoked-clients">
+    No revoked clients.
+  </p>
+
+  <div :if={@clients != []} class="mb-3" data-role="clients-summary" data-total={@total} data-page={@page} data-total-pages={@total_pages}>
+    <p>
+      {plural(@total, "revoked client", "revoked clients")} &mdash; page {@page} of {@total_pages}
+    </p>
+  </div>
+
+  <div :if={@clients != []} class="overflow-x-auto" tabindex="0" role="region" aria-label="Revoked OAuth clients">
+    <table class="table table-zebra w-full">
+      <caption class="sr-only">Revoked OAuth clients, newest revocation first</caption>
+      <thead>
+        <tr>
+          <th scope="col">Client (unverified)</th>
+          <th scope="col">Host</th>
+          <th scope="col">Type</th>
+          <th scope="col">Revoked by</th>
+          <th scope="col">Revoked at</th>
+          <th scope="col">Reason</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr :for={client <- @clients} data-role="oauth-revoked-row" data-client-id={client.client_id}>
+          <th scope="row" data-field="client-name" class="max-w-xs break-all text-left">{display_name(client)}</th>
+          <td data-field="client-host" class="max-w-xs break-all">
+            <span :if={client.client_host} class="font-semibold" data-role="client-host">{client.client_host}</span>
+            <span :if={!client.client_host} class="text-base-content/70">(no host stored)</span>
+          </td>
+          <td data-field="application-type">{application_type_label(client.application_type)}</td>
+          <td data-field="revoked-by" class="break-all">{client.revoked_by}</td>
+          <td data-field="revoked-at">{format_time(client.revoked_at)}</td>
+          <td data-field="revoked-reason" class="max-w-xs break-words">
+            <span :if={client.revoked_reason}>{client.revoked_reason}</span>
+            <span :if={!client.revoked_reason} class="text-base-content/70">(no reason given)</span>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <nav :if={@total_pages > 1} class="mt-4 flex items-center gap-3" aria-label="Pagination" data-role="pagination">
+    <a :if={@page > 1} href={page_href(revoked_path(), @page - 1)} class="btn btn-sm" data-role="page-prev" rel="prev">Previous page</a>
+    <span data-role="page-indicator">Page {@page} of {@total_pages}</span>
+    <a :if={@page < @total_pages} href={page_href(revoked_path(), @page + 1)} class="btn btn-sm" data-role="page-next" rel="next">Next page</a>
+  </nav>
+</div>

@@ -1,0 +1,1 @@
+7498 tests, 27 failures = the 24 known families + LogStore.RetentionTest x2 (shared log-flag timing flake, green alone) + 1 own ETS-snapshot test (table absent in the full run: fixed, green alone). Earlier two CI runs: Elixir 1.19 test name limit (255) fixed.

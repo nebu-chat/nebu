@@ -1,0 +1,6 @@
+events-room-position CI gate, 2026-10-26 (isolated project nebu-oauth, Elixir 1.19 CI replica, regression_sync_load_test parked as always)
+integration + unit: 10888 tests, 22 failures, 8 skipped (89 excluded)
+  12 RoomsFallbackName, 3 TemporaryCapture, 3 TraceMapNodeControls, 1 LogStore.Retention, 1 WarRoom, 1 AdminStaleRooms -> known flaky families
+  1 SyncMembershipPartitionHttpTest (tick/0 timeout: the test waits 300 ms for the clock to pass future-stamped events of other tests; green alone 50/50)
+e2e element-web: 34 passed + 1 failed (thread_messages @ac3-relations-200, locator.hover on a tile still "sending", DOM detached; green on rerun alone 1/1) (16.4 m)
+Security review: not required (security_review: optional). Code review: cycle 0 = 0 MAJOR, 4 MINOR, 10 INFO; cycle 1 fixed docs/comments/test tag only (SQL unchanged).

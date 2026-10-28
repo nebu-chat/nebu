@@ -188,15 +188,13 @@ procedure.
 
 ## CI Integration
 
-`scripts/scan-secrets.sh --ci` is the command invoked by both CI
-pipelines (defined in Story 8.6):
+`scripts/scan-secrets.sh --ci` is the command invoked by the CI pipeline:
 
-- **GitHub Actions** — `.github/workflows/ci.yml`, `secret-scan` job.
-- **GitLab CI** — `.gitlab-ci.yml`, `secret-scan` stage.
+- **GitLab CI** — `.gitlab-ci.yml`, `secret-scan` job (the only pipeline).
 
-Nebu publishes to both `github.com/innoq/nebu` and
-`gitlab.opencode.de/nebu/nebu-server` as a sovereign-OSS dual-host
-setup, so the same scan must succeed on both pipelines.
+The GitHub repository is a read-only mirror of `main` (`scripts/mirror-to-github.sh`, job
+`sync-github-mirror`): nothing is built there and there is no `.github/workflows`. The mirror job runs
+only after the whole `main` pipeline, including this scan, is green.
 
 The `--ci` mode:
 
@@ -222,7 +220,7 @@ scripts/scan-secrets.sh --history
 # Staged-only scan (pre-push hook)
 scripts/scan-secrets.sh --staged
 
-# CI mode (used by GitHub Actions + GitLab CI, writes JSON report)
+# CI mode (used by GitLab CI, writes JSON report)
 scripts/scan-secrets.sh --ci
 
 # Show usage

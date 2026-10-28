@@ -1,5 +1,12 @@
 defmodule Nebu.Workers.MediaReservedUploadCleanupWorkerTest do
   use ExUnit.Case, async: false
+
+  # the agents are linked to the test process: when the on_exit callback runs they may already be shutting down (a race that made the unit job flaky)
+  defp stop_agent(pid) do
+    if Process.alive?(pid), do: Agent.stop(pid)
+  catch
+    :exit, _ -> :ok
+  end
   use Oban.Testing, repo: Nebu.Repo
 
   # media_reserved_upload_cleanup_worker_test.exs — Story
@@ -165,7 +172,7 @@ defmodule Nebu.Workers.MediaReservedUploadCleanupWorkerTest do
       for name <- [@bucket, @overrides, @repo_calls, @transition_calls] do
         case Process.whereis(name) do
           nil -> :ok
-          pid -> if Process.alive?(pid), do: Agent.stop(pid)
+          pid -> stop_agent(pid)
         end
       end
 

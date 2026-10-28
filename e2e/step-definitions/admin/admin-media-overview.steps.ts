@@ -115,7 +115,7 @@ Then('the media table shows {int} rows', async ({ page }: { page: Page }, count:
   await expect(page.locator('[data-role="media-row"]')).toHaveCount(count, { timeout: 15_000 });
 });
 
-When('the operator clicks {string}', async ({ page }: { page: Page }, buttonText: string) => {
+When('the operator clicks the {string} button without a page reload', async ({ page }: { page: Page }, buttonText: string) => {
   // Sentinel for the following "no full page navigation occurred" assertion —
   // a real full-page reload/navigation destroys this window property, while a
   // LiveView phx-click round trip (WebSocket/longpoll patch) never does.

@@ -1,0 +1,2 @@
+# UX gate admin-config-audit-atomic (nebu-ux-reviewer, 2026-10-15)
+0 blocking, 6 advisories. Applied: the refusal names what was not saved ("<form> not saved: ... nothing was changed"), "ask the operator to check the database and the server log", the unaudited flash says it is missing from the Audit Log and keeps the error styling (no :warning slot in the templates). Not applied: re-render of the redirect forms with the typed values (the mapping pages keep them; the list forms did not before either), punctuation consistency across the existing flashes.

@@ -1,0 +1,1 @@
+7503 tests (RegressionSyncLoadTest moved away for this run: it OOM-killed the test container in the 8 GB Docker VM, known failing family anyway), 26 failures = 22 known families + LogStore.RetentionTest x2 (shared log-flag timing flake, green alone) + MatrixClientCompat replaces_state (known flake).

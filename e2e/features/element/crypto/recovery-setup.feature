@@ -32,7 +32,8 @@ Feature: Element cross-signing / recovery setup completes without error
     Given the Nebu stack is running
     And alex has no cached session
 
-  @recovery-setup @ci
+  # @known-failure (e2e/KNOWN-FAILURES.md, K7): the 'Quick settings' context menu of Element 1.12.15 stays open and intercepts the click on 'All settings' (test step vs Element version)
+  @recovery-setup @ci @known-failure
   Scenario: alex sets up recovery to completion without a key-setup error
     Given alex is logged in to Element Web via Dex SSO with "alex@example.com"
     When alex opens Encryption settings and starts "Set up recovery"

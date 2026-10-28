@@ -24,6 +24,21 @@ defmodule Nebu.Media.SSRF do
   the IP in the URL would break TLS SNI/cert-hostname validation, so the fetch
   keeps the hostname in the URL — see the residual https caveat in `HttpFetch`.
 
+  The admin storage test connection (`Nebu.Media.StorageConfig.test_connection/1`,
+  story `storage-test-pinned-target`) carries the target returned here to its `ExAws`
+  request as well: `Nebu.Media.PinnedHttpClient` connects to the pinned IP and keeps
+  the original host name for the `Host` header, the SigV4 signature, the TLS SNI and
+  the certificate hostname verification, for http AND https (no residual window for
+  that request). The operational S3 calls (`Nebu.Media.Storage`) resolve the stored
+  host per request: see ADR-033 SO11 addendum.
+
+  ## Test seam
+
+  `Application.put_env(:nebu_http, :media_ssrf_resolver, fun)` replaces the system
+  resolver for host names (`fun.(host) :: {:ok, [ip]} | {:error, atom}`; never for IP
+  literals), so a test can simulate DNS rebinding. Read at call time; compiled in test
+  builds only (`Mix.env() == :test`), absent from a release.
+
   Returns `:ok` (legacy) / `{:error, reason}` from `check/1`, or a validated
   target from `checked_target/1`.
   """
@@ -111,19 +126,44 @@ defmodule Nebu.Media.SSRF do
     end
   end
 
-  # Literal IP (v4 or v6) — no DNS lookup needed.
+  # Literal IP (v4 or v6) — no DNS lookup needed (and never the test seam).
   defp resolve(host) do
     case :inet.parse_address(String.to_charlist(host)) do
-      {:ok, addr} ->
-        {:ok, [addr]}
+      {:ok, addr} -> {:ok, [addr]}
+      {:error, _} -> resolve_name(host)
+    end
+  end
 
-      {:error, _} ->
-        with {:error, _} <- lookup(host, :inet),
-             {:error, _} = err <- lookup(host, :inet6) do
-          err
-        else
-          {:ok, addrs} -> {:ok, addrs}
-        end
+  # Test seam (story storage-test-pinned-target, D5): `Application.put_env(:nebu_http, :media_ssrf_resolver, fun)`,
+  # `fun.(host) :: {:ok, [ip]} | {:error, atom}`, read at call time, consulted ONLY for host names (never for an IP
+  # literal) INSTEAD of `:inet.getaddrs/2`. It lets a test simulate DNS rebinding (a public answer for the check, a private
+  # one afterwards) without a name server. Unset (production): the system resolver, both families, as before.
+  # Compile-guarded (Kassandra delta gate, LOW): the seam exists in test builds only, so a stray `put_env` in a release can never replace
+  # the DNS truth of the SSRF guard (storage, preview_url, webhooks).
+  if Mix.env() == :test do
+    defp resolve_name(host) do
+      case Application.get_env(:nebu_http, :media_ssrf_resolver) do
+        fun when is_function(fun, 1) ->
+          case fun.(host) do
+            {:ok, [_ | _] = addrs} -> {:ok, addrs}
+            {:ok, []} -> {:error, :no_address}
+            {:error, _} = err -> err
+          end
+
+        _ ->
+          system_resolve(host)
+      end
+    end
+  else
+    defp resolve_name(host), do: system_resolve(host)
+  end
+
+  defp system_resolve(host) do
+    with {:error, _} <- lookup(host, :inet),
+         {:error, _} = err <- lookup(host, :inet6) do
+      err
+    else
+      {:ok, addrs} -> {:ok, addrs}
     end
   end
 

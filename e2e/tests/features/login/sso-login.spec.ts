@@ -151,6 +151,8 @@ test.describe('SSO Login — Element Web via Dex OIDC (Story 4-29)', () => {
       `${ELEMENT_URL}/_matrix/client/v3/createRoom`,
       {
         headers: { Authorization: `Bearer ${alexSession.accessToken}`, 'Content-Type': 'application/json' },
+        // story create-room-invites-direct: createRoom now invites @marie:localhost and refuses an invitee without a `users` row (404
+        // M_NOT_FOUND). marie exists here because global-setup.ts warms the sessions of alex / marie / kai (logs them in once) before any spec.
         data: { name: 'e2e-multiuser', invite: [`@marie:localhost`], visibility: 'private' },
       },
     );
@@ -174,6 +176,17 @@ test.describe('SSO Login — Element Web via Dex OIDC (Story 4-29)', () => {
     await marieContext.close();
 
     if (marieSession) {
+      // createRoom processes `invite` since story create-room-invites-direct (follow-up eb); the room is invite-only since story
+      // create-room-presets-power-levels-topic. The explicit invite below stays (200 when marie is already invited).
+      const inviteResp = await page.request.post(
+        `${ELEMENT_URL}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/invite`,
+        {
+          headers: { Authorization: `Bearer ${alexSession.accessToken}`, 'Content-Type': 'application/json' },
+          data: { user_id: marieSession.userId },
+        },
+      );
+      expect(inviteResp.status()).toBe(200);
+
       const joinResp = await page.request.post(
         `${ELEMENT_URL}/_matrix/client/v3/join/${encodeURIComponent(roomId)}`,
         {

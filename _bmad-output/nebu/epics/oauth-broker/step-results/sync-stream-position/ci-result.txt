@@ -1,0 +1,9 @@
+sync-stream-position CI gate, 2026-10-27 (isolated project nebu-oauth, Elixir 1.19 CI replica, regression_sync_load_test parked as always)
+integration + unit: 11044 tests, 32 failures, 8 skipped (89 excluded)
+  12 RoomsFallbackName, 7 WarRoom (Web.LogStore + Admin.LogsLive), 3 AdminOidcLogin, 3 TraceMapNodeControls, 2 TemporaryCapture, 1 LogStore.Retention, 1 AdminStaleRooms -> known flaky families
+  1 LegacyLogoutPerDeviceTest AC8.8 (lock_timeout) + 1 Session.SweeperTest AC8: green alone (47/47 together)
+  1 SyncMembershipPartitionHttpTest AC6 (join 401 M_UNKNOWN_TOKEN, fixture session vanished): green alone (102/102 with sync_stream_position_http_test)
+  No failure in any position / cursor / history-visibility / membership suite.
+e2e element-web: 34 passed + 1 failed (thread_messages @ac3-relations-200, hover on a detached tile; green on rerun alone 1/1) (16.4 m)
+Security review (Kassandra): cycle 0 APPROVED (0 CRITICAL/HIGH, 1 MEDIUM range scan, 1 LOW); delta cycle 1 APPROVED, MEDIUM-1 closed, residual MEDIUM-1b tracked as follow-up cq (f), LOW-2 accepted residual on cj (a)/ck.
+Code review: cycle 0 = 1 MAJOR (same-base concurrent request loses events -> CAS on generation), 5 MINOR, 8 INFO; delta cycle 1 = 0 MAJOR, 2 MINOR (CHECK test, doc wording) fixed in cycle 2 (docs/tests only).

@@ -6,6 +6,7 @@
 
   <form method="post" action="/admin/rooms" class="max-w-md flex flex-col gap-4">
     <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+    <input type="hidden" name="_click_proof" value="" data-click-proof />
 
     <div>
       <label for="room-name" class="block text-sm mb-1">Room name (1–100 characters)</label>

@@ -85,14 +85,15 @@ defmodule Nebu.Workers.MediaOrphanDetectionWorker do
 
   Read via `Application.get_env(:nebu, :media_orphan_detection, [])` with a
   `orphaned_hours: 48` fallback (`server/config/config.exs`) — the SAME
-  pattern Story 8a's `MediaCleanupWorker` uses for `deleted_days`/
-  `infected_days`. `Nebu.Media.Config` (Story 9a) already exists with its
+  pattern Story 8a's `MediaCleanupWorker` used for `deleted_days`/
+  `infected_days` until story media-cleanup-reads-media-config rewired it
+  to `Nebu.Media.Config.retention_days/0`. `Nebu.Media.Config` (Story 9a) already exists with its
   own DB-backed `orphaned_hours` key (default 24) — per 9a's own moduledoc
   ("This story only builds the table + module. It does NOT rewire any
   existing consumer... rewiring is each citing story's own follow-up work"),
   this worker deliberately does NOT read from `Nebu.Media.Config`, mirroring
-  8a's own precedent of an intentionally-separate, not-yet-rewired
-  `config.exs` value for the same key name.
+  8a's former precedent of an intentionally-separate `config.exs` value
+  (8a is rewired now; this worker is not yet).
 
   ## One audit entry per run, never one per candidate (AC2)
 

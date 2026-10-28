@@ -53,7 +53,7 @@ defmodule Nebu.Web.Plugs.OidcPlug do
     # "." is a JWT and takes the existing verification path unchanged (AC7 / admin).
     case extract_bearer(conn) do
       {:ok, token} ->
-        if String.contains?(token, ".") do
+        if jwt_token?(token) do
           call_jwt(conn, token)
         else
           call_opaque(conn, token)
@@ -63,6 +63,13 @@ defmodule Nebu.Web.Plugs.OidcPlug do
         deny(conn, "M_MISSING_TOKEN", "Missing access token")
     end
   end
+
+  @doc """
+  True for a compact JWT (contains a "."), false for an opaque Nebu session token (64 hex chars). The ONE
+  opaque-vs-JWT decision of the auth layer; the logout handlers use it too (bugfix legacy-logout-per-device).
+  """
+  @spec jwt_token?(term()) :: boolean()
+  def jwt_token?(token), do: is_binary(token) and String.contains?(token, ".")
 
   # ── Opaque Nebu session token path (oidc-session-refresh) ──────────────────
   # Mirrors the Go middleware WithOpaqueSessionCheck:
@@ -117,6 +124,9 @@ defmodule Nebu.Web.Plugs.OidcPlug do
             |> assign(:access_token, token)
             |> assign(:current_user, sess.user_id)
             |> assign(:device_id, sess.device_id)
+            # story oauth-token-revocation-logout (R15): which API issued this session, decided at
+            # AUTHENTICATION time ("legacy" | "oauth"); POST /logout branches on it.
+            |> assign(:auth_api, sess.auth_api)
             |> assign(:oidc_claims, %{})
         end
     end
@@ -142,15 +152,22 @@ defmodule Nebu.Web.Plugs.OidcPlug do
           # from the server-side binding (never from request input). May be nil for a
           # JWT minted before this binding existed, or when the DB is unavailable —
           # downstream then behaves as "no bound device", same as before S2.
-          device_id = Nebu.Matrix.Session.DeviceBinding.get_device(token)
+          case Nebu.Matrix.Session.DeviceBinding.lookup(token) do
+            {:ok, _device_id, true} ->
+              # story oauth-token-endpoint (T25 c): the device this JWT is bound to has an OAuth
+              # session — OAuth devices know only opaque Nebu tokens (spec 2).
+              deny(conn, "M_UNKNOWN_TOKEN", "Access token has been revoked")
 
-          conn
-          # Stash the raw token + verified claims so POST /logout can revoke
-          # exactly the token that authenticated this request (F-1).
-          |> assign(:access_token, token)
-          |> assign(:current_user, user_id)
-          |> assign(:oidc_claims, claims)
-          |> assign(:device_id, device_id)
+            {:ok, device_id, _} ->
+              conn
+              # Stash the raw token + verified claims so POST /logout can revoke
+              # exactly the token that authenticated this request (F-1).
+              |> assign(:access_token, token)
+              |> assign(:current_user, user_id)
+              |> assign(:oidc_claims, claims)
+              |> assign(:device_id, device_id)
+              |> assign(:auth_api, "legacy")
+          end
       end
     else
       {:error, :missing_token} ->

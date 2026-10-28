@@ -7,8 +7,9 @@ defmodule Nebu.Admin.LogsController do
   /admin/logs/config/retention` validates + persists it. Deliberately a
   plain Phoenix Controller, NOT a LiveView (AC13, literal) — follows
   `Nebu.Admin.ConfigController`'s exact pattern (plug-based
-  `:require_admin`, `render_config/1`-style helper, injectable writer seam
-  via `Application.get_env(:nebu_http, ...)`).
+  `:require_admin`, `render_config/1`-style helper). Story admin-forms-gate-sweep: the POST is
+  behind `click_gate/2` (strict fetch metadata) and saves value and audit row `log_settings_changed` in one transaction (`save_config_audited/3`; test-build seam via
+  `Nebu.Admin.DB`).
 
   See:
   `_bmad-output/nebu/epics/enhanced-logging/step-results/admin-logs-retention-settings/design-decisions.md`
@@ -67,6 +68,10 @@ defmodule Nebu.Admin.LogsController do
 
   plug Nebu.Admin.Auth, :require_admin
 
+  # story admin-forms-gate-sweep: the strict fetch metadata of a user-clicked form submit (Safari: the click proof) before anything is read or changed
+  import Nebu.Admin.OAuthAdminHelpers, only: [click_gate: 2]
+  plug :click_gate when action in [:save_retention]
+
   @days_bounds {1, 90}
   @max_entries_bounds {1, 10_000}
   @default_days 7
@@ -79,13 +84,23 @@ defmodule Nebu.Admin.LogsController do
   def save_retention(conn, params) do
     case validate_and_normalize(params) do
       {:ok, changes} ->
-        case persist(changes) do
-          :ok ->
+        case persist(conn, changes) do
+          {:ok, :audited} ->
             conn
             |> put_flash(:info, "Logging settings saved")
             |> redirect(to: "/admin/logs/config")
 
-          _ ->
+          {:ok, :unaudited} ->
+            conn
+            |> put_flash(:error, Nebu.Admin.OAuthAdminHelpers.unaudited_flash("Logging settings"))
+            |> redirect(to: "/admin/logs/config")
+
+          {:error, :audit} ->
+            conn
+            |> put_flash(:error, Nebu.Admin.OAuthAdminHelpers.audit_refused_flash("Logging settings"))
+            |> redirect(to: "/admin/logs/config")
+
+          {:error, :db} ->
             conn
             |> put_flash(:error, "Failed to save logging settings")
             |> redirect(to: "/admin/logs/config")
@@ -224,20 +239,36 @@ defmodule Nebu.Admin.LogsController do
     }
   end
 
-  # ── persistence seam (mirrors ConfigController's persist/1 pattern) ────────
-
-  defp persist(changes) do
-    case Application.get_env(:nebu_http, :admin_logs_retention_writer) do
-      writer when is_function(writer, 1) ->
-        writer.(changes)
-
-      _ ->
-        if Process.whereis(Nebu.Repo) do
-          Nebu.Admin.DB.upsert_server_config(changes)
-        else
-          {:error, :no_repo}
-        end
+  # ── persistence (story admin-forms-gate-sweep D5) ───────────────────────────
+  #
+  # Value and audit row `log_settings_changed` in ONE transaction (`OAuthAdminHelpers.save_config_audited/3`). Shorter retention deletes INFO / DEBUG rows and DEBUG
+  # collects more personal data, so the row is mandatory; the only change applied without it is a pure "collection off" one (every changed key is a `log_collect_*`
+  # key set to `false`: less collection, the way back).
+  defp persist(conn, changes) do
+    way_back? = fn stored ->
+      Enum.all?(changes, fn {key, value} -> (String.starts_with?(key, "log_collect_") and value == "false") or value == stored[key] end)
     end
+
+    # a database that fails here must not become a 500: an unreadable stored state is the empty one (only a pure "collection off" change then passes unaudited)
+    stored =
+      try do
+        case Process.whereis(Nebu.Repo) && Nebu.Admin.DB.get_server_config() do
+          {:ok, cfg} -> cfg
+          _ -> %{}
+        end
+      rescue
+        _ -> %{}
+      end
+
+    Nebu.Admin.OAuthAdminHelpers.save_config_audited(conn, changes,
+      action: "log_settings_changed",
+      target_id: "log_settings",
+      metadata: changes,
+      label: "log retention",
+      form: :logs_retention,
+      unaudited_ok: way_back?.(stored),
+      narrowing: way_back?
+    )
   end
 
   # ── rendering ────────────────────────────────────────────────────────────────

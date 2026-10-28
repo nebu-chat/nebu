@@ -17,7 +17,7 @@ defmodule Nebu.Web.MatrixRoomRoutesTest do
 
   Before the fix, none of the five routes exist in `Nebu.Web.Router.Protected`,
   so a request that passes OidcPlug (valid Bearer) falls through to the
-  `match _` catch-all and returns `404 M_NOT_FOUND "Unrecognized request"`.
+  `match _` catch-all and returns `404 M_UNRECOGNIZED "Unrecognized request"` (was M_NOT_FOUND before story oauth-room-summary-unrecognized).
 
   The pure-unit auth-gate tests below prove the RED state without a DB: with a
   valid Bearer they expect the real Matrix contract status (200 / mapped error),
@@ -164,13 +164,18 @@ defmodule Nebu.Web.MatrixRoomRoutesTest do
     @room URI.encode_www_form("!unknown:test.local")
     @event URI.encode_www_form("$unknown:test.local")
 
-    # The catch-all returns exactly {"errcode":"M_NOT_FOUND","error":"Unrecognized request"}.
-    # A wired route, even when it fails (unknown room), never returns that exact body.
+    # The catch-all returns exactly {"errcode":"M_UNRECOGNIZED","error":"Unrecognized request"}
+    # (story oauth-room-summary-unrecognized (af): was M_NOT_FOUND; the literal must follow, otherwise
+    # the refute below is vacuous). A wired route, even when it fails (unknown room), never returns it.
     defp refute_catch_all(conn) do
       body = json(conn)
 
-      refute body == %{"errcode" => "M_NOT_FOUND", "error" => "Unrecognized request"},
+      refute body == %{"errcode" => "M_UNRECOGNIZED", "error" => "Unrecognized request"},
              "route is missing — request fell through to the 404 catch-all (status #{conn.status})"
+
+      # story oauth-room-summary-unrecognized (review m4): a sibling-method 405 body must fail this too.
+      refute conn.status in [404, 405] and body["errcode"] == "M_UNRECOGNIZED",
+             "route is missing or has the wrong method — fell through to M_UNRECOGNIZED (status #{conn.status})"
     end
 
     test "POST .../leave is routed", %{token: token} do
@@ -240,6 +245,93 @@ defmodule Nebu.Web.MatrixRoomRoutesTest do
       room_events = json(conn)["search_categories"]["room_events"]
       assert is_integer(room_events["count"])
       assert is_list(room_events["results"])
+    end
+  end
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # Story create-room-input-validation (epic oauth-broker, follow-up ee), AC3 router part — NO DB:
+  # `new_version` is REQUIRED (Matrix CS v1.18). The router answers a missing / null value with 400 M_MISSING_PARAM and a
+  # non-string with 400 M_BAD_JSON; an unsupported string is 400 M_UNSUPPORTED_ROOM_VERSION from the core, decided before the
+  # room lookup (so even an unknown room needs no database). All of it before any room is touched.
+  # ══════════════════════════════════════════════════════════════════════════
+
+  describe "POST .../upgrade new_version validation (AC3) — valid Bearer, no DB" do
+    setup do
+      priv = setup_oidc_keys()
+      {_uid, token} = bearer_for("upgrade-validation-probe", priv)
+      {:ok, token: token}
+    end
+
+    @upgrade_room URI.encode_www_form("!unknown:test.local")
+
+    defp upgrade_with(token, body), do: call(:post, "/_matrix/client/v3/rooms/#{@upgrade_room}/upgrade", body, auth(token))
+
+    test "new_version absent and null are 400 M_MISSING_PARAM (the field is required, no fallback to 10)", %{token: token} do
+      for {label, body} <- [absent: %{}, null: %{"new_version" => nil}, only_other_fields: %{"additional_creators" => []}] do
+        conn = upgrade_with(token, body)
+        assert conn.status == 400, "#{label}: #{conn.status} #{conn.resp_body}"
+        assert json(conn)["errcode"] == "M_MISSING_PARAM", "#{label}: #{conn.resp_body}"
+      end
+    end
+
+    test "a non-string new_version (10, true, [\"10\"], {}) is 400 M_BAD_JSON", %{token: token} do
+      for {label, value} <- [number: 10, boolean: true, list: ["10"], object: %{}] do
+        conn = upgrade_with(token, %{"new_version" => value})
+        assert conn.status == 400, "#{label}: #{conn.status} #{conn.resp_body}"
+        assert json(conn)["errcode"] == "M_BAD_JSON", "#{label}: #{conn.resp_body}"
+      end
+    end
+
+    test "an empty or unsupported version string is 400 M_UNSUPPORTED_ROOM_VERSION, decided before the room lookup", %{token: token} do
+      for version <- ["", "11", "9", "12", "foo"] do
+        conn = upgrade_with(token, %{"new_version" => version})
+        assert conn.status == 400, "#{inspect(version)}: #{conn.status} #{conn.resp_body}"
+        assert json(conn)["errcode"] == "M_UNSUPPORTED_ROOM_VERSION", "#{inspect(version)}: #{conn.resp_body}"
+      end
+    end
+  end
+
+  describe "POST .../upgrade body guards and PUT state NUL guard (review cycle 1: M2, M4) — valid Bearer, no DB" do
+    setup do
+      priv = setup_oidc_keys()
+      {_uid, token} = bearer_for("body-guard-probe", priv)
+      {:ok, token: token}
+    end
+
+    defp raw_call(method, path, raw, token) do
+      conn(method, path, raw)
+      |> put_req_header("content-type", "application/json")
+      |> put_req_header("authorization", "Bearer " <> token)
+      |> Nebu.Web.Router.call(@router_opts)
+    end
+
+    test "upgrade: a body that is not JSON is 400 M_NOT_JSON, JSON that is not an object is 400 M_BAD_JSON (not M_MISSING_PARAM)", %{token: token} do
+      path = "/_matrix/client/v3/rooms/#{URI.encode_www_form("!unknown:test.local")}/upgrade"
+
+      conn = raw_call(:post, path, "{not json", token)
+      assert conn.status == 400, conn.resp_body
+      assert json(conn)["errcode"] == "M_NOT_JSON"
+
+      for raw <- ["[1]", "\"10\"", "10"] do
+        conn = raw_call(:post, path, raw, token)
+        assert conn.status == 400, "#{raw}: #{conn.resp_body}"
+        assert json(conn)["errcode"] == "M_BAD_JSON", "#{raw}: #{conn.resp_body}"
+      end
+    end
+
+    test "PUT state: a NUL in the room id, event type or state key (path) is 400 M_BAD_JSON, not a 500", %{token: token} do
+      room = URI.encode_www_form("!unknown:test.local")
+
+      for {label, path} <- [
+            state_key: "/_matrix/client/v3/rooms/#{room}/state/m.room.topic/a%00b",
+            event_type: "/_matrix/client/v3/rooms/#{room}/state/m.room.to%00pic/x",
+            event_type_without_key: "/_matrix/client/v3/rooms/#{room}/state/m.room.to%00pic",
+            room_id: "/_matrix/client/v3/rooms/%21un%00known%3Atest.local/state/m.room.topic/x"
+          ] do
+        conn = raw_call(:put, path, ~s({"topic": "t"}), token)
+        assert conn.status == 400, "#{label}: #{conn.status} #{conn.resp_body}"
+        assert json(conn)["errcode"] == "M_BAD_JSON", "#{label}: #{conn.resp_body}"
+      end
     end
   end
 

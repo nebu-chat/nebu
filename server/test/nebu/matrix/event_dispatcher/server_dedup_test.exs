@@ -155,6 +155,30 @@ defmodule Nebu.Matrix.EventDispatcher.ServerDedupTest do
     # Story direct-room-heroes + admin-auto-join-rooms: required stubs.
     def get_room_heroes(_room_id, _exclude_user_id), do: {:ok, %{heroes: [], joined: 0, invited: 0}}
     def list_auto_join_rooms(), do: {:ok, []}
+
+    # story sync-membership-partition (DATA adaptation of the fake, no assertion change): the partition reads, derived from this fake's
+    # ETS keys. Every room of these tests is an ACTIVE member row of the user; there are no invitations, no member events beyond the
+    # seeded timeline events and no left rooms (the contract is pinned in room/membership_partition_db_test.exs).
+    def membership_candidates(user_id) do
+      {:ok,
+       for [room_id] <- :ets.match(:dedup_test_db, {{:member_for_user, user_id, :"$1"}, :active}) do
+         %{room_id: room_id, kind: :member, active: true, pending: false, inviter_id: nil, invited_at: nil}
+       end}
+    end
+
+    def latest_member_events(_room_ids, _user_id), do: {:ok, %{}}
+    def invite_state_events(_room_ids), do: {:ok, %{}}
+    # story sync-stream-position (DELIBERATE amendment, D4 / D10 / D12): the initial sync reads the heads of the partition rooms (ONE call) and the leave window is read by
+    # positions (`leave_window_events/5`); this fake has no cursors (a device that never synced) and no events with positions of its own (the shared fake ranks them)
+    def room_heads(room_ids, _user_id, _device_id) do
+      events_of = fn room_id ->
+        :ets.match(:dedup_test_db, {{:event, :"$1"}, :"$2"}) |> Enum.map(fn [_id, ev] -> ev end) |> Enum.filter(&(&1["room_id"] == room_id))
+      end
+
+      Nebu.Matrix.SyncPositionsFake.room_heads(events_of, fn _room -> nil end, room_ids)
+    end
+
+    def leave_window_events(_room_id, _after_pos, _before_pos, _after_ts, _before_ts), do: {:ok, []}
   end
 
   # ─── DedupTestFakeInviteDB ────────────────────────────────────────────────────
@@ -170,7 +194,8 @@ defmodule Nebu.Matrix.EventDispatcher.ServerDedupTest do
   # ─── DedupTestFakePgStore ─────────────────────────────────────────────────────
 
   defmodule DedupTestFakePgStore do
-    def persist_since_token(_user_id, _since_token, _last_event_id), do: :ok
+    # story sync-stream-position (DELIBERATE amendment): the ONE write of a response is the guarded persist
+    def persist_sync_position(_user_id, _device_id, _spec), do: :ok
     def get_since_token(_user_id), do: {:error, :not_found}
     def invalidate_session(_user_id), do: :ok
   end

@@ -18,7 +18,14 @@ defmodule Nebu.MixProject do
         &String.ends_with?(&1, "create_room_test_support.exs"),
         &String.ends_with?(&1, "oidc_test_support.exs"),
         &String.ends_with?(&1, "media_mutation_invariant_support.exs"),
-        &String.ends_with?(&1, "clamav_fake_server.exs")
+        &String.ends_with?(&1, "clamav_fake_server.exs"),
+        &String.ends_with?(&1, "oauth_test_support.exs"),
+        &String.ends_with?(&1, "moderation_test_support.exs"),
+        &String.ends_with?(&1, "power_levels_test_support.exs"),
+        &String.ends_with?(&1, "redaction_test_support.exs"),
+        &String.ends_with?(&1, "membership_state_test_support.exs"),
+        &String.ends_with?(&1, "history_visibility_test_support.exs"),
+        &String.ends_with?(&1, "storage_pinned_target_support.exs")
       ],
       deps: deps(),
       releases: [

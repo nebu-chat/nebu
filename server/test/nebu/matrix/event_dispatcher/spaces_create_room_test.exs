@@ -66,6 +66,12 @@ defmodule Nebu.Matrix.EventDispatcher.SpacesCreateRoomTest do
       :ok
     end
 
+    # story power-levels-enforcement (D10): the room process writes a power-level change through ONE call; the fake models the
+    # transaction with its own column write AND event insert (a failure of either is the change's failure)
+    def apply_power_levels_change(room_id, json, event) do
+      with :ok <- set_power_levels(room_id, json), do: insert_event(event)
+    end
+
     def set_power_levels(room_id, power_levels_json) do
       :ets.insert(:spaces_create_room_db, {{:power_levels, room_id}, power_levels_json})
       :ok
@@ -138,7 +144,7 @@ defmodule Nebu.Matrix.EventDispatcher.SpacesCreateRoomTest do
   defp track_room(room_id) do
     case Nebu.Matrix.Room.RoomSupervisor.lookup_room(room_id) do
       {:ok, pid} ->
-        on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid, :normal, 5_000) end)
+        on_exit(fn -> if Process.alive?(pid), do: (try do GenServer.stop(pid, :normal, 5_000) catch :exit, _ -> :ok end) end)
         :ok
 
       _ ->

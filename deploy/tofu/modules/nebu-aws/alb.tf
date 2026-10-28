@@ -29,9 +29,11 @@ resource "aws_lb_target_group" "server" {
   vpc_id      = aws_vpc.this.id
   target_type = "ip"
 
+  # Target-group health = traffic readiness, so it probes the Matrix versions endpoint. The
+  # unauthenticated, dependency-free /health also exists (used for the container/Helm liveness probe).
   health_check {
     enabled             = true
-    path                = "/_matrix/client/v3/versions"
+    path                = "/_matrix/client/versions"
     port                = "traffic-port"
     protocol            = "HTTP"
     healthy_threshold   = 2

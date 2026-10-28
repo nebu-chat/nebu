@@ -12,9 +12,25 @@ defmodule Core.Event do
     unsigned_relations: "",
     # Bugfix unsigned-replaces-state (Matrix CS API v1.19) — see proto/core.proto.
     replaces_state: "",
+    # Story member-event-prev-content (D10) — see proto/core.proto.
+    prev_content: "",
+    prev_sender: "",
     # Code-review cycle 1 (MAJOR-2) — see proto/core.proto.
-    is_state_event: false
+    is_state_event: false,
+    # Story state-writer-redaction (D5, D6) — see proto/core.proto.
+    redacts: "",
+    redacted_because: ""
   ]
+end
+
+defmodule Core.RedactEventRequest do
+  @moduledoc false
+  defstruct [room_id: "", sender_id: "", event_id: "", txn_id: "", content_json: ""]
+end
+
+defmodule Core.RedactEventResponse do
+  @moduledoc false
+  defstruct [event_id: ""]
 end
 
 defmodule Core.SendEventRequest do
@@ -40,6 +56,12 @@ end
 
 defmodule Core.CreateRoomRequest do
   @moduledoc false
+  # HAND-EDITED (stories create-room-input-validation, create-room-presets-power-levels-topic,
+  # create-room-invites-direct): `room_version`, `room_alias_name`, `preset`, `visibility`,
+  # `power_level_content_override`, `invite` and `invite_3pid` are not in the generated protobuf
+  # output (they carry raw client JSON values of ANY type, see proto/core.proto); `topic` is a generated field that
+  # now also carries a raw value (a non-string is a 400). A regeneration of this file MUST keep these keys, or
+  # createRoom silently stops honouring them.
   defstruct [
     creator_id: "",
     name: nil,
@@ -47,7 +69,14 @@ defmodule Core.CreateRoomRequest do
     is_direct: false,
     room_type: "",
     creation_content_json: "",
-    initial_state_json: ""
+    initial_state_json: "",
+    room_version: nil,
+    room_alias_name: nil,
+    preset: nil,
+    visibility: nil,
+    power_level_content_override: nil,
+    invite: nil,
+    invite_3pid: nil
   ]
 end
 
@@ -257,7 +286,9 @@ end
 defmodule Core.GetInitialSyncRequest do
   @moduledoc false
   defstruct [
-    user_id: ""
+    user_id: "",
+    # Story sync-token-per-device (D1, D4) — see proto/core.proto: the key of the persisted since token ("" = the per-user row).
+    device_id: ""
   ]
 end
 
@@ -265,8 +296,25 @@ defmodule Core.GetInitialSyncResponse do
   @moduledoc false
   defstruct [
     since_token: "",
-    rooms: []
+    # Story sync-membership-partition — see proto/core.proto: `rooms` = the DELIVERED joined rooms, `join_room_ids` = the
+    # whole join class, `invite_rooms` = [Core.SyncInviteRoom], `leave_rooms` = [Core.SyncRoom] (empty in an initial sync).
+    rooms: [],
+    join_room_ids: [],
+    invite_rooms: [],
+    leave_rooms: []
   ]
+end
+
+# Story sync-membership-partition — see proto/core.proto. Exactly the four properties of a spec stripped state event;
+# `content` is a JSON string like the other proto-shaped structs.
+defmodule Core.StrippedStateEvent do
+  @moduledoc false
+  defstruct [type: "", state_key: "", sender: "", content: ""]
+end
+
+defmodule Core.SyncInviteRoom do
+  @moduledoc false
+  defstruct [room_id: "", invite_state: []]
 end
 
 defmodule Core.SyncRoomStateEvent do
@@ -279,7 +327,10 @@ defmodule Core.SyncRoomStateEvent do
     event_id: "",
     origin_server_ts: 0,
     # Bugfix unsigned-replaces-state (Matrix CS API v1.19) — see proto/core.proto.
-    replaces_state: ""
+    replaces_state: "",
+    # Story member-event-prev-content (D10) — see proto/core.proto.
+    prev_content: "",
+    prev_sender: ""
   ]
 end
 
@@ -289,7 +340,9 @@ defmodule Core.GetSyncDeltaRequest do
     user_id: "",
     since_token: "",
     timeout_ms: 0,
-    device_id: ""
+    device_id: "",
+    # Story sync-membership-partition (D14) — see proto/core.proto.
+    full_state: false
   ]
 end
 
@@ -298,7 +351,15 @@ defmodule Core.GetSyncDeltaResponse do
   defstruct [
     since_token: "",
     rooms: [],
-    fallback_to_initial: false
+    fallback_to_initial: false,
+    # Story sync-membership-partition — see proto/core.proto (same meaning as in GetInitialSyncResponse; the
+    # invite / leave entries are the NEW ones since the token).
+    join_room_ids: [],
+    invite_rooms: [],
+    leave_rooms: [],
+    # Story sync-stream-position (D11) — see proto/core.proto: the join rooms the device had no joined cursor for (newly joined:
+    # the HTTP layer delivers ALL their room account data; the join event may be outside a newest-20 timeline).
+    newly_joined_room_ids: []
   ]
 end
 
@@ -417,7 +478,8 @@ defmodule Core.UnbanUserRequest do
   defstruct [
     room_id: "",
     caller_id: "",
-    target_id: ""
+    target_id: "",
+    reason: ""
   ]
 end
 

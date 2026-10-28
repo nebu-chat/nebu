@@ -1,15 +1,16 @@
 <h1 class="text-heading font-semibold mb-4">OIDC Claim Mapping</h1>
 <p class="text-text-secondary mb-4">Map IdP token claims to Matrix identity fields.</p>
 
-<p :if={Phoenix.Flash.get(@flash, :info)} class="alert alert-success mb-4">
+<p :if={Phoenix.Flash.get(@flash, :info)} class="alert alert-success mb-4" role="status">
   {Phoenix.Flash.get(@flash, :info)}
 </p>
-<p :if={Phoenix.Flash.get(@flash, :error)} class="alert alert-error mb-4">
+<p :if={Phoenix.Flash.get(@flash, :error)} class="alert alert-error mb-4" role="alert">
   {Phoenix.Flash.get(@flash, :error)}
 </p>
 
 <form method="post" action="/admin/config/claim-mapping" class="max-w-md flex flex-col gap-4">
   <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+  <input type="hidden" name="_click_proof" value="" data-click-proof />
 
   <div>
     <label for="oidc_user_id_claim" class="block text-sm mb-1">User ID claim</label>
@@ -50,5 +51,13 @@
     </p>
   </div>
 
-  <button type="submit" class="btn btn-primary self-start">Save</button>
+  <p id="claim-mapping-lockout-hint" class="alert alert-warning text-sm">
+    A wrong value maps sign-ins onto the wrong or onto other users' Matrix accounts. Keep this session open and test the sign-in in a second
+    browser or a private window before you leave. You can correct a wrong value on this page again after a fresh sign-in; database access
+    is the fallback (deployment guide, "Admin configuration forms and their protection").
+  </p>
+  <p id="claim-mapping-reauth-hint" class="text-sm text-base-content/70">
+    Saving this setting needs a fresh sign-in. If you are asked to sign in again, you return to this page and must enter your change again.
+  </p>
+  <button type="submit" class="btn btn-primary self-start" aria-describedby="claim-mapping-lockout-hint claim-mapping-reauth-hint">Save</button>
 </form>

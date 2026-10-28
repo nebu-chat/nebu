@@ -96,6 +96,7 @@ Die E2EE-Stubs bleiben unverändert in Betrieb. Epic 10 ruht bis zur Wiederaufna
 - Option 3 (Compliance-Bot) wird als nächster Evaluierungsschritt aufgegriffen, wenn die unter
   "Entscheidung" genannten Voraussetzungen erfüllt sind
 - Policy-based Encryption at Rest (unabhängig von E2EE) bleibt als eigenständige Option offen
+- Hinweis (epic oauth-broker, 2026-10-13): Die Ablehnung verschlüsselter Räume (`m.room.encryption`) darf erst aufgehoben werden, wenn die Story `device-lists-changed-on-deletion` (Gate (s): `device_lists.changed` bei jeder Geräte-Löschung, `docs/stories/oauth-broker/follow-ups.md`) umgesetzt ist; sie ist derzeit Backlog, weil ohne verschlüsselte Räume kein Peer an ein Gerät verschlüsselt. Ebenso darf kein Release E2EE bewerben, solange sie offen ist.
 
 _Entscheidungsdatum: 2026-05-08_
 _Source: `README.md`, §Current Limitations (No End-to-End Encryption); `memory/project_e2ee_direction.md` (Server-side decryption model - Managed E2EE); Story 9-11 Dev Notes_

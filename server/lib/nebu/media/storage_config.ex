@@ -65,6 +65,21 @@ defmodule Nebu.Media.StorageConfig do
     review), leaving a blind admin-authenticated SSRF against internal
     infrastructure/cloud metadata endpoints.
 
+    **Pinned target** (story `storage-test-pinned-target`, follow-up `do` part
+    a): the target the SSRF check returned (`%{scheme, host, ip}`, the host
+    resolved ONCE, every answer checked) is handed on to the request under
+    `:pinned_target` in the candidate map, and the real `ExAws` request is made
+    by `Nebu.Media.PinnedHttpClient`, which connects to that checked IP and
+    keeps the ORIGINAL host name for the `Host` header (the SigV4 signature),
+    the TLS SNI and the certificate hostname verification. There is no second
+    DNS resolution between the check and the request (no DNS-rebinding window).
+    `upsert/1` (save) performs no request, so there is nothing to pin there; the
+    operational S3 calls of `Nebu.Media.Storage` resolve the stored host per
+    request (a residual of the admin-trusted endpoint, see ADR-033 SO11
+    addendum). The same client also maps hackney 4.x's `HEAD` answer (a 3-tuple)
+    that `ExAws.Request.Hackney` did not understand: the production test
+    connection used to raise a `CaseClauseError` against any server.
+
   ## ETS table
 
   A named `:protected` set `:nebu_media_storage_config` with
@@ -266,7 +281,13 @@ defmodule Nebu.Media.StorageConfig do
   # real object-store traffic. Reuses `validate_candidate_endpoint/1` (the
   # SAME function `test_connection/1` calls, see its own doc below) so both
   # the test-connection and the persist path enforce an identical contract.
-  defp validate_endpoint_field(%{endpoint: endpoint}), do: validate_candidate_endpoint(endpoint)
+  #
+  # The save path performs no request (storage-test-pinned-target D4), so the checked target returned by
+  # `validate_candidate_endpoint/1` is not kept here: there is no second resolution to pin.
+  defp validate_endpoint_field(%{endpoint: endpoint}) do
+    with {:ok, _target} <- validate_candidate_endpoint(endpoint), do: :ok
+  end
+
   defp validate_endpoint_field(_fields), do: :ok
 
   # F-1 fix (Kassandra security review, SEC Gate 1, 2026-10-08): validates
@@ -385,10 +406,13 @@ defmodule Nebu.Media.StorageConfig do
   """
   @spec test_connection(map()) :: :ok | {:error, term()}
   def test_connection(candidate) when is_map(candidate) do
-    with :ok <- validate_candidate_endpoint(Map.get(candidate, :endpoint)) do
-      resolved = resolve_candidate_secrets(candidate)
+    with {:ok, target} <- validate_candidate_endpoint(Map.get(candidate, :endpoint)),
+         {:ok, resolved} <- resolve_candidate_secrets(candidate) do
       fun = Application.get_env(:nebu_http, :media_storage_test_connection_fun, &default_test_connection/1)
-      fun.(resolved)
+      # D1 (storage-test-pinned-target): the checked target travels with the candidate to the request.
+      # The target's scheme is the SSRF check's synthetic `http` (the contract is a bare `host[:port]`): carry the real transport.
+      scheme = if Map.get(resolved, :use_ssl) == true, do: "https", else: "http"
+      fun.(Map.put(resolved, :pinned_target, %{target | scheme: scheme}))
     end
   end
 
@@ -1067,6 +1091,9 @@ defmodule Nebu.Media.StorageConfig do
   # follows, and the real ExAws request still uses `candidate.use_ssl`/
   # `config_overrides/1` to pick the actual transport scheme, unaffected by
   # this synthetic one.
+  #
+  # storage-test-pinned-target D1: returns `{:ok, %{scheme, host, ip}}`, the checked target (the host resolved ONCE),
+  # instead of discarding it; `test_connection/1` carries it to the request, `upsert/1` ignores it (no request).
   defp validate_candidate_endpoint(endpoint) when is_binary(endpoint) do
     downcased = String.downcase(endpoint)
 
@@ -1074,10 +1101,15 @@ defmodule Nebu.Media.StorageConfig do
       String.starts_with?(downcased, "http://") or String.starts_with?(downcased, "https://") ->
         {:error, :invalid_endpoint}
 
+      # a bare `host[:port]` never carries user info (`user@host`): it would be signed into the Host value and could make the
+      # host the SSRF check resolved differ from the one a reader of the endpoint sees (storage-test-pinned-target, Kassandra INFO-2)
+      String.contains?(endpoint, "@") ->
+        {:error, :invalid_endpoint}
+
       true ->
         case SSRF.checked_target("http://" <> endpoint, allow_private: SSRF.allow_private_storage?()) do
-          {:ok, _target} ->
-            :ok
+          {:ok, target} ->
+            {:ok, target}
 
           {:error, reason} ->
             Logger.warning(
@@ -1104,9 +1136,13 @@ defmodule Nebu.Media.StorageConfig do
     if String.starts_with?(downcased, "http://") or String.starts_with?(downcased, "https://") do
       "Endpoint must be a bare host[:port] value (no http:// or https:// scheme prefix)."
     else
-      case SSRF.checked_target("http://" <> endpoint, allow_private: SSRF.allow_private_storage?()) do
-        {:ok, _target} -> "Endpoint is not valid."
-        {:error, reason} -> "Endpoint rejected: " <> SSRF.describe_error(reason) <> "."
+      if String.contains?(endpoint, "@") do
+        "Endpoint must be a bare host[:port] value (no user info before an @)."
+      else
+        case SSRF.checked_target("http://" <> endpoint, allow_private: SSRF.allow_private_storage?()) do
+          {:ok, _target} -> "Endpoint is not valid."
+          {:error, reason} -> "Endpoint rejected: " <> SSRF.describe_error(reason) <> "."
+        end
       end
     end
   end
@@ -1125,11 +1161,27 @@ defmodule Nebu.Media.StorageConfig do
 
     if is_nil(access_key) or is_nil(secret_key) do
       stored = get_for_connection()
-      %{candidate | access_key: access_key || stored.access_key, secret_key: secret_key || stored.secret_key}
+
+      # story admin-forms-gate-sweep D4 (Kassandra design review): a stored credential signs a request to the STORED target only. Reusing it for an endpoint (or a
+      # scheme) the form supplies would hand the access key id and a signature (an offline guessing oracle for the secret) to a host the credentials were never meant
+      # for. The IAM / STS endpoints are not compared: the test never contacts them (they join the comparison if it ever does).
+      if same_target?(candidate, stored) do
+        {:ok, %{candidate | access_key: access_key || stored.access_key, secret_key: secret_key || stored.secret_key}}
+      else
+        {:error, :secret_required}
+      end
     else
-      %{candidate | access_key: access_key, secret_key: secret_key}
+      {:ok, %{candidate | access_key: access_key, secret_key: secret_key}}
     end
   end
+
+  defp same_target?(candidate, stored) do
+    normalize_endpoint(Map.get(candidate, :endpoint)) == normalize_endpoint(Map.get(stored, :endpoint)) and
+      (Map.get(candidate, :use_ssl) == true) == (Map.get(stored, :use_ssl) == true)
+  end
+
+  defp normalize_endpoint(endpoint) when is_binary(endpoint), do: endpoint |> String.trim() |> String.downcase(:ascii)
+  defp normalize_endpoint(_other), do: nil
 
   defp blank_to_nil(nil), do: nil
   defp blank_to_nil(""), do: nil
@@ -1154,6 +1206,10 @@ defmodule Nebu.Media.StorageConfig do
     e -> {:error, e}
   end
 
+  # storage-test-pinned-target D2: `http_client` / `http_opts` select the pin client for THIS request only (the operational
+  # `Nebu.Media.Storage` calls keep the default hackney client). `http_opts` carries the checked target; the client
+  # fails closed when it is missing (`Map.get/2`: a candidate without `:pinned_target` ends in an error, never in a
+  # normal request).
   defp config_overrides(candidate) do
     {host, port} = split_endpoint(candidate.endpoint, candidate.use_ssl)
 
@@ -1163,7 +1219,12 @@ defmodule Nebu.Media.StorageConfig do
       host: host,
       scheme: if(candidate.use_ssl, do: "https://", else: "http://"),
       port: port,
-      region: candidate.region
+      region: candidate.region,
+      http_client: Nebu.Media.PinnedHttpClient,
+      http_opts: [pinned_target: Map.get(candidate, :pinned_target)],
+      # ONE attempt for the admin test (this override only; the operational calls keep the configured retries): ExAws would
+      # otherwise repeat a refused / failed pinned request up to `max_attempts` times with a growing backoff while the admin waits.
+      retries: [max_attempts: 1, base_backoff_in_ms: 1, max_backoff_in_ms: 1]
     ]
   end
 

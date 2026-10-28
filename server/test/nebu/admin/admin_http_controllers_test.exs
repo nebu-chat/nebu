@@ -95,7 +95,14 @@ defmodule Nebu.Admin.HttpControllersTest do
       "sub" => "admin-1",
       "matrix_user_id" => @admin
     })
+    # story admin-config-privileged-forms-sweep: the config POSTs (refresh mode, claim and role mapping) need the strict fetch metadata of a
+    # user-clicked submit; the two mapping pages additionally a fresh sign-in marker bound to their page
+    |> Nebu.OAuth.TestSupport.put_strict_fetch_headers()
+    |> put_session("admin_reauth", Nebu.OAuth.TestSupport.fresh_marker("admin-1", 0, "auth_time", mapping_marker_path(method, path)))
   end
+
+  defp mapping_marker_path(_method, path) when path in ["/admin/config/claim-mapping", "/admin/config/role-mapping"], do: path
+  defp mapping_marker_path(_method, _path), do: "/admin/config"
 
   defp build_anon_conn(method, path) do
     %{conn(method, path) | secret_key_base: @secret_key_base}

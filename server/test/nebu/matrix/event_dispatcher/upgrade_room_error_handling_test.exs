@@ -118,9 +118,27 @@ defmodule Nebu.Matrix.EventDispatcher.UpgradeRoomErrorHandlingTest do
       :ok
     end
 
+    # story power-levels-enforcement (D10): the room process writes a power-level change through ONE call; the fake models the
+    # transaction with its own column write AND event insert (a failure of either is the change's failure)
+    def apply_power_levels_change(room_id, json, event) do
+      with :ok <- set_power_levels(room_id, json), do: insert_event(event)
+    end
+
+    # story state-writer-redaction (D8, D9, D11): the room process writes a state change (the upgrade's tombstone) through ONE call and reads the slot's latest event first
+    def apply_state_change(_room_id, event, _opts), do: insert_event(event)
+    def latest_state_identity(_room_id, _type, _state_key), do: {:ok, nil}
+
     def set_power_levels(room_id, power_levels_json) do
       :ets.insert(:upgrade_err_test_db, {{:power_levels, room_id}, power_levels_json})
       :ok
+    end
+
+    # story power-levels-enforcement (D8): the authoritative read of an upgrade after the freeze (the stored column; nil = never set)
+    def get_power_levels_json(room_id) do
+      case :ets.lookup(:upgrade_err_test_db, {:power_levels, room_id}) do
+        [{_, json}] -> {:ok, json}
+        [] -> {:ok, nil}
+      end
     end
 
     # FB-E5-03: create_room/2 persists name/room_type via rooms_db_module()
@@ -207,6 +225,16 @@ defmodule Nebu.Matrix.EventDispatcher.UpgradeRoomErrorHandlingTest do
 
     def delete_member(room_id, user_id), do: BaseDB.delete_member(room_id, user_id)
     def insert_event(event), do: BaseDB.insert_event(event)
+    # story power-levels-enforcement (D10): the room process writes a power-level change through ONE call; the fake models the
+    # transaction with its own column write AND event insert (a failure of either is the change's failure)
+    def apply_power_levels_change(room_id, json, event) do
+      with :ok <- set_power_levels(room_id, json), do: insert_event(event)
+    end
+
+    # story state-writer-redaction (D8, D9, D11): the room process writes a state change (the upgrade's tombstone) through ONE call and reads the slot's latest event first
+    def apply_state_change(_room_id, event, _opts), do: insert_event(event)
+    def latest_state_identity(_room_id, _type, _state_key), do: {:ok, nil}
+
     def set_power_levels(room_id, pl_json), do: BaseDB.set_power_levels(room_id, pl_json)
     def load_room_settings(_room_id), do: {:ok, 0}
     def get_room_status(_room_id), do: {:ok, "active"}
@@ -261,6 +289,18 @@ defmodule Nebu.Matrix.EventDispatcher.UpgradeRoomErrorHandlingTest do
     # This is the failing path: set_power_levels returns {:error, :db_error}.
     # Room.Server.set_power_levels/3 calls this, propagating the error upward.
     # With the bug, upgrade_room/2 does `:ok = {:error, :db_error}` → MatchError.
+    # story power-levels-enforcement (D10): the room process writes a power-level change through ONE call; the fake models the
+    # transaction with its own column write AND event insert (a failure of either is the change's failure)
+    def apply_power_levels_change(room_id, json, event) do
+      # the column write of this fake always fails (a dynamic call: the type checker would flag the never-matching `:ok`), so the
+      # event is never inserted, as in the real transaction
+      with :ok <- apply(__MODULE__, :set_power_levels, [room_id, json]), do: insert_event(event)
+    end
+
+    # story state-writer-redaction (D8, D9, D11): the room process writes a state change (the upgrade's tombstone) through ONE call and reads the slot's latest event first
+    def apply_state_change(_room_id, event, _opts), do: insert_event(event)
+    def latest_state_identity(_room_id, _type, _state_key), do: {:ok, nil}
+
     def set_power_levels(_room_id, _power_levels_json) do
       {:error, :db_error}
     end
@@ -321,6 +361,16 @@ defmodule Nebu.Matrix.EventDispatcher.UpgradeRoomErrorHandlingTest do
         BaseDB.insert_event(event)
       end
     end
+
+    # story power-levels-enforcement (D10): the room process writes a power-level change through ONE call; the fake models the
+    # transaction with its own column write AND event insert (a failure of either is the change's failure)
+    def apply_power_levels_change(room_id, json, event) do
+      with :ok <- set_power_levels(room_id, json), do: insert_event(event)
+    end
+
+    # story state-writer-redaction (D8, D9, D11): the room process writes a state change (the upgrade's tombstone) through ONE call and reads the slot's latest event first
+    def apply_state_change(_room_id, event, _opts), do: insert_event(event)
+    def latest_state_identity(_room_id, _type, _state_key), do: {:ok, nil}
 
     def set_power_levels(room_id, pl_json), do: BaseDB.set_power_levels(room_id, pl_json)
     def load_room_settings(_room_id), do: {:ok, 0}
@@ -428,7 +478,7 @@ defmodule Nebu.Matrix.EventDispatcher.UpgradeRoomErrorHandlingTest do
     on_exit(fn ->
       case Nebu.Matrix.Room.RoomSupervisor.lookup_room(old_room_id) do
         {:ok, pid} ->
-          if Process.alive?(pid), do: GenServer.stop(pid, :normal, 5_000)
+          if Process.alive?(pid), do: (try do GenServer.stop(pid, :normal, 5_000) catch :exit, _ -> :ok end)
         _ -> :ok
       end
     end)
@@ -456,7 +506,7 @@ defmodule Nebu.Matrix.EventDispatcher.UpgradeRoomErrorHandlingTest do
 
       on_exit(fn ->
         case Nebu.Matrix.Room.RoomSupervisor.lookup_room(response.new_room_id) do
-          {:ok, pid} -> if Process.alive?(pid), do: GenServer.stop(pid, :normal, 5_000)
+          {:ok, pid} -> if Process.alive?(pid), do: (try do GenServer.stop(pid, :normal, 5_000) catch :exit, _ -> :ok end)
           _ -> :ok
         end
       end)
@@ -579,7 +629,7 @@ defmodule Nebu.Matrix.EventDispatcher.UpgradeRoomErrorHandlingTest do
       on_exit(fn ->
         case Nebu.Matrix.Room.RoomSupervisor.lookup_room(new_room_id) do
           {:ok, pid} ->
-            if Process.alive?(pid), do: GenServer.stop(pid, :normal, 5_000)
+            if Process.alive?(pid), do: (try do GenServer.stop(pid, :normal, 5_000) catch :exit, _ -> :ok end)
           _ -> :ok
         end
       end)
@@ -618,7 +668,7 @@ defmodule Nebu.Matrix.EventDispatcher.UpgradeRoomErrorHandlingTest do
       on_exit(fn ->
         case Nebu.Matrix.Room.RoomSupervisor.lookup_room(new_room_id) do
           {:ok, pid} ->
-            if Process.alive?(pid), do: GenServer.stop(pid, :normal, 5_000)
+            if Process.alive?(pid), do: (try do GenServer.stop(pid, :normal, 5_000) catch :exit, _ -> :ok end)
           _ -> :ok
         end
       end)

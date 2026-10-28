@@ -144,7 +144,7 @@ defmodule Nebu.Media.ConfigTest do
     max_pending_per_user: 20,
     max_stall_ms: 20_000,
     deleted_days: 30,
-    infected_days: 90,
+    infected_days: 7,
     orphaned_hours: 24,
     webhook_url: nil,
     released_delete_after_days: nil,
@@ -249,7 +249,7 @@ defmodule Nebu.Media.ConfigTest do
       Application.delete_env(:nebu_http, :media_config_writer)
 
       if pid = Process.whereis(Nebu.Media.Config) do
-        if Process.alive?(pid), do: GenServer.stop(pid)
+        if Process.alive?(pid), do: (try do GenServer.stop(pid) catch :exit, _ -> :ok end)
       end
     end)
 

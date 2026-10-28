@@ -60,7 +60,20 @@ defmodule Nebu.Matrix.EventDispatcher.CreateRoomInitialStateTest do
       :ok
     end
 
-    def insert_event(event) do
+    # Story create-room-initial-state-conformance (D5): a test can make persisting one event type fail.
+    def insert_event(%{"type" => type} = event) when is_binary(type) do
+      case :ets.lookup(:create_room_initial_state_db, {:fail_insert, type}) do
+        [{_, true}] -> {:error, :simulated_db_failure}
+        _ -> do_insert_event(event)
+      end
+    end
+
+    def delete_room(room_id) do
+      :ets.insert(:create_room_initial_state_db, {{:deleted_room, room_id}, true})
+      :ok
+    end
+
+    defp do_insert_event(event) do
       # Capture a monotonic insertion sequence alongside each event so tests can
       # assert the emit ORDER deterministically — origin_server_ts is only
       # millisecond-granular and ties between rapidly-emitted events.
@@ -88,6 +101,12 @@ defmodule Nebu.Matrix.EventDispatcher.CreateRoomInitialStateTest do
       :ets.match(:create_room_initial_state_db, {{:event, :_}, :"$1"})
       |> Enum.map(fn [ev] -> ev end)
       |> Enum.filter(fn ev -> ev["room_id"] == room_id and ev["type"] == type end)
+    end
+
+    # story power-levels-enforcement (D10): the room process writes a power-level change through ONE call; the fake models the
+    # transaction with its own column write AND event insert (a failure of either is the change's failure)
+    def apply_power_levels_change(room_id, json, event) do
+      with :ok <- set_power_levels(room_id, json), do: insert_event(event)
     end
 
     def set_power_levels(room_id, power_levels_json) do
@@ -158,7 +177,7 @@ defmodule Nebu.Matrix.EventDispatcher.CreateRoomInitialStateTest do
   defp track_room(room_id) do
     case Nebu.Matrix.Room.RoomSupervisor.lookup_room(room_id) do
       {:ok, pid} ->
-        on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid, :normal, 5_000) end)
+        on_exit(fn -> if Process.alive?(pid), do: (try do GenServer.stop(pid, :normal, 5_000) catch :exit, _ -> :ok end) end)
         :ok
 
       _ ->
@@ -302,27 +321,50 @@ defmodule Nebu.Matrix.EventDispatcher.CreateRoomInitialStateTest do
 
   # ─── Security guards — initial_state cannot clobber privileged events ────────
   describe "create_room/2 — initial_state security guards" do
-    test "initial_state cannot forge m.room.member, m.room.create, or m.room.power_levels" do
+    # story power-levels-enforcement (D7, AC16 re-pin of the escalation part of the next test): an m.room.power_levels entry that
+    # grants more than the creator has is refused BEFORE the room exists (400 M_INVALID_ROOM_STATE), nothing is written
+    test "an initial_state m.room.power_levels entry cannot escalate: a user above the creator is 400 M_INVALID_ROOM_STATE, no event" do
       req = %Core.CreateRoomRequest{
         creator_id: "@alice:test.local",
         name: "Guarded Room",
         initial_state_json:
           Jason.encode!([
-            # Attempt to forge another user as a member.
-            %{
-              "type" => "m.room.member",
-              "state_key" => "@evil:test.local",
-              "content" => %{"membership" => "join"}
-            },
+            %{"type" => "m.room.power_levels", "content" => %{"users" => %{"@alice:test.local" => 100, "@evil:test.local" => 101}}}
+          ])
+      }
+
+      error = assert_raise Nebu.Matrix.Error, fn -> Server.create_room(req, build_stream()) end
+      assert error.errcode == "M_INVALID_ROOM_STATE"
+      assert error.message == "The initial power levels cannot grant more than the room creator has"
+    end
+
+    # story power-levels-enforcement (D7, AC16 re-pin): an m.room.power_levels entry is no longer skipped but APPLIED as a v10 change
+    # by the creator, so the escalation guard for it is the change rule (next test); this test keeps the two skipped types and still
+    # pins that no second, forged levels event exists
+    # story state-writer-redaction (D10 (b), AC15 (e) re-pin): an m.room.member entry for another user was SKIPPED, it is refused now (stricter Nebu rule)
+    test "an initial_state m.room.member entry for another user is refused before the room exists" do
+      req = %Core.CreateRoomRequest{
+        creator_id: "@alice:test.local",
+        name: "Guarded Room",
+        initial_state_json: Jason.encode!([%{"type" => "m.room.member", "state_key" => "@evil:test.local", "content" => %{"membership" => "join"}}])
+      }
+
+      error = assert_raise Nebu.Matrix.Error, fn -> Server.create_room(req, build_stream()) end
+      assert error.message == "The initial state contains a state key of another user"
+      assert error.errcode == "M_INVALID_ROOM_STATE"
+    end
+
+    test "initial_state cannot forge m.room.member or m.room.create" do
+      req = %Core.CreateRoomRequest{
+        creator_id: "@alice:test.local",
+        name: "Guarded Room",
+        initial_state_json:
+          Jason.encode!([
+            # (story state-writer-redaction, AC15 (e): a member entry for ANOTHER user is a 400 now, see the next test)
             # Attempt to rewrite the create event.
             %{
               "type" => "m.room.create",
               "content" => %{"creator" => "@evil:test.local", "room_version" => "1"}
-            },
-            # Attempt to escalate power levels.
-            %{
-              "type" => "m.room.power_levels",
-              "content" => %{"users" => %{"@evil:test.local" => 100}}
             },
             # A legitimate entry alongside the malicious ones still applies.
             %{"type" => "m.room.topic", "content" => %{"topic" => "ok"}}
@@ -386,7 +428,10 @@ defmodule Nebu.Matrix.EventDispatcher.CreateRoomInitialStateTest do
       # m.room.create exists; no space.parent / join_rules from a missing array.
       assert length(state_events(resp.room_id, "m.room.create")) == 1
       assert state_events(resp.room_id, "m.space.parent", "!whatever:test.local") == []
-      assert state_events(resp.room_id, "m.room.join_rules") == []
+      # Story create-room-presets-power-levels-topic (AC16, adapted): a request without preset / visibility is a `private_chat`, whose
+      # join rule `invite` is written by createRoom itself now (D2). The assertion changes from "no join_rules event at all" to "no
+      # join_rules event that came from a missing initial_state array": the only one is the preset's, in the state_key "".
+      assert [%{"content" => %{"join_rule" => "invite"}, "state_key" => ""}] = state_events(resp.room_id, "m.room.join_rules")
     end
 
     test "empty initial_state array is a no-op (room still created)" do
@@ -516,6 +561,232 @@ defmodule Nebu.Matrix.EventDispatcher.CreateRoomInitialStateTest do
       [parent] = state_events(resp.room_id, "m.space.parent", member_space)
       assert parent["sender"] == "@alice:test.local"
       assert parent["content"]["canonical"] == true
+    end
+  end
+
+  # ─── Story create-room-initial-state-conformance ─────────────────────────────
+
+  describe "validate_initial_state/1 (D1, run by the HTTP layer before a room exists)" do
+    test "valid shapes are :ok (nil, [], entries with and without state_key)" do
+      assert :ok == Server.validate_initial_state(nil)
+      assert :ok == Server.validate_initial_state([])
+
+      assert :ok ==
+               Server.validate_initial_state([
+                 %{"type" => "m.room.topic", "content" => %{"topic" => "t"}},
+                 %{"type" => "m.space.parent", "state_key" => "!s:x", "content" => %{}}
+               ])
+    end
+
+    test "a non-array, a non-object entry, a bad type, a bad state_key or a bad content are :malformed" do
+      bad = [
+        %{"type" => "m.room.topic"},
+        "x",
+        7,
+        true,
+        [nil],
+        ["x"],
+        [%{"content" => %{}}],
+        [%{"type" => 123, "content" => %{}}],
+        [%{"type" => "", "content" => %{}}],
+        [%{"type" => "m.t", "state_key" => 5, "content" => %{}}],
+        [%{"type" => "m.t", "state_key" => nil, "content" => %{}}],
+        [%{"type" => "m.t"}],
+        [%{"type" => "m.t", "content" => nil}],
+        [%{"type" => "m.t", "content" => "x"}],
+        [%{"type" => "m.t", "content" => [1]}]
+      ]
+
+      for input <- bad do
+        assert {:error, :malformed} == Server.validate_initial_state(input), "expected :malformed for #{inspect(input)}"
+      end
+    end
+
+    test "a NUL character in the type, the state_key or anywhere in the content (key, value, nested, list) is :malformed" do
+      nul = <<0>>
+
+      bad = [
+        [%{"type" => "m.t" <> nul, "content" => %{}}],
+        [%{"type" => "m.t", "state_key" => "k" <> nul, "content" => %{}}],
+        [%{"type" => "m.t", "content" => %{"a" => "x" <> nul}}],
+        [%{"type" => "m.t", "content" => %{("a" <> nul) => 1}}],
+        [%{"type" => "m.t", "content" => %{"a" => %{"b" => ["ok", "y" <> nul]}}}]
+      ]
+
+      for input <- bad, do: assert({:error, :malformed} == Server.validate_initial_state(input), "NUL in #{inspect(input)}")
+      assert :ok == Server.validate_initial_state([%{"type" => "m.t", "content" => %{"a" => "fine", "n" => 1, "l" => [nil, true]}}])
+    end
+
+    test "more than 64 entries are :too_many, exactly 64 are :ok" do
+      entry = fn i -> %{"type" => "m.t", "state_key" => "#{i}", "content" => %{}} end
+      assert :ok == Server.validate_initial_state(Enum.map(1..64, entry))
+      assert {:error, :too_many} == Server.validate_initial_state(Enum.map(1..65, entry))
+    end
+
+    test "the cap is checked before the entry shapes (65 malformed entries are :too_many, not :malformed)" do
+      assert {:error, :too_many} == Server.validate_initial_state(List.duplicate("x", 65))
+    end
+  end
+
+  describe "create_room/2 — forbidden types (D3)" do
+    test "m.room.tombstone and m.room.third_party_invite are not persisted, the other entries and the room are" do
+      req = %Core.CreateRoomRequest{
+        creator_id: "@alice:test.local",
+        name: "No Tombstone",
+        initial_state_json:
+          Jason.encode!([
+            %{"type" => "m.room.tombstone", "content" => %{"body" => "moved", "replacement_room" => "!x:test.local"}},
+            %{"type" => "m.room.third_party_invite", "state_key" => "tok", "content" => %{"display_name" => "x"}},
+            %{"type" => "m.room.topic", "content" => %{"topic" => "kept"}}
+          ])
+      }
+
+      resp = Server.create_room(req, build_stream())
+      track_room(resp.room_id)
+
+      assert state_events(resp.room_id, "m.room.tombstone") == []
+      assert state_events(resp.room_id, "m.room.third_party_invite", "tok") == []
+      assert [_] = state_events(resp.room_id, "m.room.topic")
+    end
+  end
+
+  describe "create_room/2 — m.room.name in initial_state keeps rooms.name in sync (D4)" do
+    test "without a top-level name the entry sets the state event AND the denormalised rooms.name" do
+      req = %Core.CreateRoomRequest{
+        creator_id: "@alice:test.local",
+        name: "",
+        initial_state_json: Jason.encode!([%{"type" => "m.room.name", "content" => %{"name" => "From initial_state"}}])
+      }
+
+      resp = Server.create_room(req, build_stream())
+      track_room(resp.room_id)
+
+      assert [ev] = state_events(resp.room_id, "m.room.name")
+      assert ev["content"]["name"] == "From initial_state"
+      assert [{_, "From initial_state"}] = :ets.lookup(:create_room_initial_state_db, {:room_name, resp.room_id})
+    end
+
+    test "a top-level name is emitted after the entry and wins in the state AND in rooms.name" do
+      req = %Core.CreateRoomRequest{
+        creator_id: "@alice:test.local",
+        name: "Top level B",
+        initial_state_json: Jason.encode!([%{"type" => "m.room.name", "content" => %{"name" => "Entry A"}}])
+      }
+
+      resp = Server.create_room(req, build_stream())
+      track_room(resp.room_id)
+
+      names = state_events(resp.room_id, "m.room.name")
+      assert length(names) == 2
+      assert Enum.min_by(names, & &1["__seq"])["content"]["name"] == "Entry A"
+      assert Enum.max_by(names, & &1["__seq"])["content"]["name"] == "Top level B"
+      assert [{_, "Top level B"}] = :ets.lookup(:create_room_initial_state_db, {:room_name, resp.room_id})
+    end
+
+    # Story create-room-input-validation (D5c): a NON-NULL, non-string `name` (42, true, {}, []) in an m.room.name entry is now
+    # 400 M_BAD_JSON (it used to be persisted as is; see create_room_input_validation_test.exs). The entries that remain valid and
+    # must not touch the denormalised rooms.name are the ones WITHOUT a name: `{}` and `{"name": null}`.
+    test "an m.room.name entry without a name ({} or null) does not touch rooms.name" do
+      for content <- [%{}, %{"name" => nil}] do
+        req = %Core.CreateRoomRequest{
+          creator_id: "@alice:test.local",
+          name: "",
+          initial_state_json: Jason.encode!([%{"type" => "m.room.name", "content" => content}])
+        }
+
+        resp = Server.create_room(req, build_stream())
+        track_room(resp.room_id)
+
+        assert :ets.lookup(:create_room_initial_state_db, {:room_name, resp.room_id}) == [], "content #{inspect(content)}"
+      end
+    end
+  end
+
+  describe "create_room/2 — exact duplicate entries (Kassandra delta gate X5-1)" do
+    test "two byte-identical entries create the room (the second is dropped, no event id collision) and the state event exists once" do
+      entry = %{"type" => "m.room.topic", "state_key" => "", "content" => %{"topic" => "same"}}
+
+      req = %Core.CreateRoomRequest{
+        creator_id: "@alice:test.local",
+        name: "Dupes",
+        initial_state_json: Jason.encode!(List.duplicate(entry, 5))
+      }
+
+      resp = Server.create_room(req, build_stream())
+      track_room(resp.room_id)
+
+      assert [_one] = state_events(resp.room_id, "m.room.topic")
+      assert :ets.match(:create_room_initial_state_db, {{:deleted_room, :"$1"}, true}) == []
+    end
+  end
+
+  describe "create_room/2 — a failing entry fails the creation (D5)" do
+    test "a DB error persisting one entry raises, the half-created room is deleted, no later entry or m.room.name is written" do
+      :ets.insert(:create_room_initial_state_db, {{:fail_insert, "m.room.topic"}, true})
+
+      req = %Core.CreateRoomRequest{
+        creator_id: "@alice:test.local",
+        name: "Doomed Room",
+        initial_state_json:
+          Jason.encode!([
+            %{"type" => "m.room.guest_access", "content" => %{"guest_access" => "forbidden"}},
+            %{"type" => "m.room.topic", "content" => %{"topic" => "fails"}},
+            %{"type" => "m.room.history_visibility", "content" => %{"history_visibility" => "shared"}}
+          ])
+      }
+
+      error = assert_raise Nebu.Matrix.Error, fn -> Server.create_room(req, build_stream()) end
+      assert error.status == Nebu.Matrix.Status.internal(), "a persistence failure is a server error (500), not a client error"
+      assert error.message =~ "m.room.topic"
+
+      assert [[room_id]] = :ets.match(:create_room_initial_state_db, {{:deleted_room, :"$1"}, true}),
+             "the orphan room must be cleaned up"
+
+      assert state_events(room_id, "m.room.history_visibility") == [], "the entries after the failing one are not applied"
+      assert state_events(room_id, "m.room.name") == [], "m.room.name is not written after a failed entry"
+    end
+
+    test "a skipped entry (forbidden type, m.space.parent guard) is NOT a failure: the room is created" do
+      req = %Core.CreateRoomRequest{
+        creator_id: "@alice:test.local",
+        name: "Skips are fine",
+        initial_state_json:
+          Jason.encode!([
+            %{"type" => "m.room.encryption", "content" => %{"algorithm" => "m.megolm.v1.aes-sha2"}},
+            %{"type" => "m.space.parent", "state_key" => "!stranger:test.local", "content" => %{"via" => ["test.local"]}}
+          ])
+      }
+
+      resp = Server.create_room(req, build_stream())
+      track_room(resp.room_id)
+
+      assert resp.room_id =~ ~r/^!/
+      assert :ets.match(:create_room_initial_state_db, {{:deleted_room, :"$1"}, true}) == []
+    end
+  end
+
+  describe "create_room/2 — order with several entries (AC7)" do
+    test "entries are emitted in array order, between the creator's power levels and m.room.name" do
+      req = %Core.CreateRoomRequest{
+        creator_id: "@alice:test.local",
+        name: "Ordered Many",
+        initial_state_json:
+          Jason.encode!([
+            %{"type" => "m.room.guest_access", "content" => %{"guest_access" => "forbidden"}},
+            %{"type" => "m.room.history_visibility", "content" => %{"history_visibility" => "shared"}},
+            %{"type" => "m.room.topic", "content" => %{"topic" => "t"}}
+          ])
+      }
+
+      resp = Server.create_room(req, build_stream())
+      track_room(resp.room_id)
+
+      seqs =
+        Enum.map(["m.room.create", "m.room.power_levels", "m.room.guest_access", "m.room.history_visibility", "m.room.topic", "m.room.name"], fn t ->
+          seq_of(resp.room_id, t)
+        end)
+
+      assert seqs == Enum.sort(seqs), "create < power_levels < initial_state in array order < name, got #{inspect(seqs)}"
     end
   end
 end

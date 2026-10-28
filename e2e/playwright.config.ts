@@ -19,11 +19,14 @@
 
 import { defineConfig, devices } from '@playwright/test';
 import { defineBddConfig, defineBddProject } from 'playwright-bdd';
+import { STUB_CHROMIUM_ARGS } from './fixtures/client-stubs';
 
 // Tag expression applied at bddgen time. Default run excludes @pending-feature scaffolds
 // and the @short-ttl session-refresh scenarios (those need a short-TTL stack and run via
 // `make test-e2e-refresh`, which sets NEBU_E2E_TAGS='@short-ttl' to include ONLY them).
-const DEFAULT_E2E_TAGS = 'not @pending-feature and not @short-ttl';
+// @known-failure: a scenario that fails for a DOCUMENTED reason that is not (yet) a verified defect of the system under test (see e2e/KNOWN-FAILURES.md):
+// excluded from the default run, never silently: `NEBU_E2E_TAGS='@known-failure'` runs exactly those.
+const DEFAULT_E2E_TAGS = 'not @pending-feature and not @short-ttl and not @known-failure';
 const E2E_TAGS = process.env.NEBU_E2E_TAGS ?? DEFAULT_E2E_TAGS;
 
 // Story e2e-browser-ci-and-dex-reliability (AC2): emulation-tolerant, env-configurable
@@ -56,7 +59,9 @@ const elementWebProject = defineBddProject({
 
 const adminUiProject = defineBddProject({
   name: 'admin-ui',
-  features: 'features/admin/**/*.feature',
+  // features/oauth (epic oauth-broker): browser flows against Nebu's own OAuth endpoints
+  // (baseURL = Nebu, like the admin UI) — no separate project needed.
+  features: ['features/admin/**/*.feature', 'features/oauth/**/*.feature'],
   steps:    'step-definitions/**/*.ts',
   importTestFrom: 'fixtures/nebu-fixtures.ts',
   disableWarnings: { importTestFrom: true },
@@ -100,6 +105,10 @@ export default defineConfig({
         baseURL: process.env.NEBU_ADMIN_URL ?? 'http://localhost:8008',
         actionTimeout: ACTION_TIMEOUT_MS,
         navigationTimeout: NAV_TIMEOUT_MS,
+        // The OAuth client redirect targets (*.e2e.example, fixtures/client-stubs.ts) are answered by a local HTTPS stub with a
+        // self-signed certificate; the https oauth stack (dev/tls, local CA) is reached through the same browser.
+        ignoreHTTPSErrors: true,
+        launchOptions: { args: STUB_CHROMIUM_ARGS },
       },
       // 180s ceiling: the @short-ttl admin session-refresh scenarios deliberately wait across
       // several short token lifetimes (~105s for three). Fast admin tests still finish fast —

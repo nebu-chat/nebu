@@ -1,0 +1,14 @@
+# Test review (pre-dev) oauth-hardening-hygiene: 0 MAJOR, 12 MINOR. Fix in the staged tests as part of dev.
+M1 oauth_signing_key_rotation_test.exs:250 Process.sleep(50) in await_new_owner: monitor / bounded receive on Supervisor.which_children.
+M2 rotation_test:209-214 "killing a request process" uses Task.await: monitor the pid and assert_receive :DOWN before the ETS assertion.
+M3 rotation_test:213 pins cache row shape {kid,_enc,_jwk}; :198-206 pin which_children order and Repo/Bandit child ids; :36-37 weak: assert only a row for kid exists / signing works; relax ordering pins to "started after Repo and before Bandit" only if verifiable without over-pinning.
+M4 rotation_test:418-441 (AC11.4): force the overlap (privileged row/advisory lock held until both callers are inside) or add a deterministic loser test (update the next row from under a call).
+M5 add failure-injection tests for HY12/HY13 atomicity (privileged trigger making the promote UPDATE or the new-key INSERT fail: old key stays active, no audit row).
+M6 rotation_test:496,501,571 regex `"d"\s*:` misses Elixir inspect (`"d" => ...`): match `(:|=>)` and refute the decoded d value itself in logs and results.
+M7 oauth_discovery_rate_limit_test.exs:76-81: add a test with :trusted_proxy_cidrs (pattern web/client_ip_test.exs:38-45) so the bucket keys on the XFF client; IPv6 two addresses in one /64 share a bucket; OPTIONS preflight on openid-configuration consumes no token.
+M8 oauth_hygiene_test.exs:63-82 (AC4) static guard partly vacuous: env_read? matches a literal key only: also check every Application.(get|fetch)_env(:nebu_http, <var>...) in config.ex lies inside the Mix.env()==:test guarded block, and that the `if Mix.env()` sits at module-body indent.
+M9 migration/000047 test:68 `refute 000048_* exists` goes red when the next migration lands: assert number > 000046 instead or drop; :89-91,96,112-129 formatting-sensitive SQL regexes duplicate behaviour tests: keep at most one structural check; :249 pin SQLSTATE 42501 for the retired insert.
+M10 migration/000047 test:363 down test runs as a possibly superuser role (FORCE RLS does not bind it): assert rolsuper = false for current_user or use a non-superuser table-owner role.
+M11 oauth_hygiene_test.exs:335-339 "confirm_text never logs" vacuous (pure function): replace with a rendered-page test of a hostile name in data-confirm (escaped) + a test that confirm_text does not raise on odd input (Jason.encode! raises on invalid UTF-8: the implementation must not 500).
+M12 e2e/fixtures/db.ts:238-245 awaitOAuthConfigApplied: for oauth_issuer_url compare the issuer in the response body (both valid https issuers answer 200); avoid a duplicated issuer regex that can drift from server validation (hard failure after 5 s).
+INFO: plain-http clearing attributes for the account cookie untested (:252-269); the 900 s rule does not bind a compromised runtime role (record in security review / follow-up bh).

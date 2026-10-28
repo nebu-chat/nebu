@@ -145,7 +145,6 @@ async function createRoom(
       name,
       topic: isGroup ? 'Acceptance test group' : undefined,
       preset: isGroup ? 'public_chat' : 'trusted_private_chat',
-      room_version: '16',
       creation_content: {
         type: isGroup ? 'm.room.metadata' : undefined,
         'm.federate': isGroup,

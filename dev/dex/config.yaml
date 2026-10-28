@@ -45,6 +45,9 @@ staticClients:
       - "http://localhost:8008/_matrix/client/v3/login/sso/redirect/oidc"
       - "http://localhost:7070/auth.html"
       - "http://localhost:8008/admin/callback"
+      # Local HTTPS front door (dev/tls, `make dev-tls`): everything incl. the admin UI on ONE origin.
+      - "https://nebu.localtest.me:7443/_matrix/client/v3/login/sso/redirect/oidc"
+      - "https://nebu.localtest.me:7443/admin/callback"
       # nebu-app (FluffyChat fork) dev instance, served on :7071 to avoid
       # clashing with the :7070 Element sidecar. Nebu's own SSO redirect
       # endpoint builds this client's redirect_uri from the request's Host

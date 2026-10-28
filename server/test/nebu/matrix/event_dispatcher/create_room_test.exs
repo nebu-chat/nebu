@@ -76,6 +76,12 @@ defmodule Nebu.Matrix.EventDispatcher.CreateRoomTest do
       :ok
     end
 
+    # story power-levels-enforcement (D10): the room process writes a power-level change through ONE call; the fake models the
+    # transaction with its own column write AND event insert (a failure of either is the change's failure)
+    def apply_power_levels_change(room_id, json, event) do
+      with :ok <- set_power_levels(room_id, json), do: insert_event(event)
+    end
+
     def set_power_levels(room_id, power_levels_json) do
       :ets.insert(:create_room_test_db, {{:power_levels, room_id}, power_levels_json})
       :ok
@@ -186,7 +192,7 @@ defmodule Nebu.Matrix.EventDispatcher.CreateRoomTest do
     case Nebu.Matrix.Room.RoomSupervisor.lookup_room(room_id) do
       {:ok, pid} ->
         on_exit(fn ->
-          if Process.alive?(pid), do: GenServer.stop(pid, :normal, 5_000)
+          if Process.alive?(pid), do: (try do GenServer.stop(pid, :normal, 5_000) catch :exit, _ -> :ok end)
         end)
         {:ok, pid}
       error -> error
@@ -378,6 +384,18 @@ defmodule Nebu.Matrix.EventDispatcher.CreateRoomTest do
 
       assert creator_level == 100,
              "expected creator #{creator_id} to have power level 100, got: #{inspect(creator_level)}"
+    end
+
+    # story power-levels-enforcement (fix cycle 1, review M4): the internal writer of step 3 accepts the user-id grammar WITHOUT the
+    # 255-byte bound and with a server-name port, so a creator id that predates the bound or carries a port can still create a room
+    test "a creator id with a server-name port or above 255 bytes still gets power level 100 at step 3" do
+      for creator_id <- ["@bob:test.local:8448", "@" <> String.duplicate("b", 260) <> ":test.local"] do
+        response = Server.create_room(%Core.CreateRoomRequest{creator_id: creator_id, name: "Grammar Room"}, build_stream())
+        start_and_track_room(response.room_id)
+
+        state = Nebu.Matrix.Room.Server.get_state(response.room_id)
+        assert get_in(state.power_levels, ["users", creator_id]) == 100, "creator of #{byte_size(creator_id)} bytes"
+      end
     end
 
     test "all default power level keys are present after create_room" do

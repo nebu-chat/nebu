@@ -1,0 +1,4 @@
+# e2e verification, 2026-10-19 (isolated stack nebu-oauth, plain http, project element-web)
+- Run T (DM feature x3, --repeat-each=3): 5 passed, 1 failed: the failure is `browserType.launch: ... SIGSEGV` of the Chromium headless shell in one repeat of the API scenario (infrastructure flake, not the server). The invitee scenario (invitation tile, UI accept, joined, `m.direct` written) passed 3 of 3 = K10 fixed.
+- Run A (full element-web project, FRESH stack): 26 passed, 0 failed (13.9 min), K9 excluded as @known-failure.
+Server CI replica (final code, regression_sync_load_test moved aside): 9160 tests, 31 failures in known flaky families (RoomsFallbackName 12, LogStore.WarRoomExclusiveScope 6, SpaceHierarchyIntegration 3, TraceMapNodeControls 3, TemporaryCaptureManager 2, WarRoom 2, MediaDownloadStall 1, LogStore.Retention 1, OAuthAdminClients 1); SpaceHierarchyIntegration + OAuthAdminClients + WarRoomExclusiveScope re-run alone on a fresh DB: 74 passed.

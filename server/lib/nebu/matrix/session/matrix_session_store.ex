@@ -39,6 +39,10 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
 
   `POST /refresh` calls `rotate_tokens/1`, which in a SINGLE transaction:
 
+    * takes the `devices`-row lock of the old row's device FIRST (gate x, bugfix
+      legacy-logout-per-device, LL9; lock order devices -> matrix_sessions, the same lock every
+      teardown takes, so a rotation and a device teardown serialise and no working token survives
+      a deleted device),
     * soft-revokes the old row (`revoked_at = NOW()`, `grace_until = NULL`), and
     * inserts the new AT/RT row, carrying over the encrypted OIDC RT.
 
@@ -61,6 +65,22 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
 
   The background `RefreshWorker` never rotates: it extends the active row IN PLACE
   (`extend_in_place/3`), so the tokens the client holds stay valid.
+
+  ## Legacy rows only (story oauth-token-endpoint, T27)
+
+  Since migration 000042 `matrix_sessions` also holds OAuth sessions (`auth_api = 'oauth'`, issued
+  by `POST /oauth2/token`, managed by `Nebu.Matrix.Session.OAuthSessionStore`). The refresh /
+  extension machinery of this module (`resolve_refresh_token/1`, the replay sibling lookup,
+  `rotate_tokens/1`'s sibling updates, `extend_in_place*/3`, `store_rotated_oidc_rt/3`) acts on
+  `auth_api = 'legacy'` rows ONLY: an OAuth refresh token is unknown to `POST /refresh`, and the
+  `RefreshWorker` never extends an OAuth row. `mark_access_token_used/1` / `has_open_grace_window?/1`
+  consume pending siblings of the SAME `auth_api` (so the OidcPlug Refresh-Retry path works for both).
+  Lookups by access token (`get_by_access_token/1`, `get_auth_context/1`) and the delete paths
+  (device deletion, deactivation) cover both kinds. The legacy `POST /logout` no longer uses
+  `revoke/1`: it ends the presented credential's device through `Nebu.Matrix.legacy_logout_device/1`
+  (locked per-device teardown, bugfix legacy-logout-per-device). `cleanup_expired/0` uses
+  `COALESCE(session_expires_at, expires_at)` (an OAuth row's `expires_at` is only the 15-minute
+  access-token expiry).
 
   All token values are opaque secrets; this module never logs them.
   """
@@ -141,7 +161,7 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
 
   The session map exposes `:access_token_hash`, `:refresh_token_hash`, `:oidc_refresh_token`
   (encrypted, may be `nil`), `:user_id`, `:device_id`, `:expires_at`,
-  `:revoked_at`, `:grace_until`. The expiry decision is made by the caller
+  `:revoked_at`, `:grace_until`, `:auth_api` (`"legacy"` | `"oauth"`). The expiry decision is made by the caller
   (`OidcPlug`) so the AC5 `soft_logout` path can distinguish expired from absent.
   """
   @spec get_by_access_token(String.t()) :: {:ok, map()} | :error
@@ -181,15 +201,16 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
     sql =
       """
       SELECT access_token_hash, refresh_token_hash, oidc_refresh_token, user_id, device_id,
-             expires_at, revoked_at, grace_until,
+             expires_at, revoked_at, grace_until, auth_api,
              (grace_until IS NOT NULL),
              (created_at + ($2::bigint * INTERVAL '1 second') > NOW()),
              EXISTS(SELECT 1 FROM matrix_sessions a
                      WHERE a.user_id = matrix_sessions.user_id
                        AND a.device_id = matrix_sessions.device_id
+                       AND a.auth_api = 'legacy'
                        AND a.revoked_at IS NULL)
         FROM matrix_sessions
-       WHERE refresh_token_hash = $1
+       WHERE refresh_token_hash = $1 AND auth_api = 'legacy'
       """
 
     case safe_query(sql, [hash_token(refresh_token), Nebu.Web.SessionConfig.matrix_session_ttl_seconds()]) do
@@ -197,9 +218,11 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
         :error
 
       {:ok, %{rows: [row]}} ->
-        {consumed?, row} = List.pop_at(row, 8)
-        {young?, row} = List.pop_at(row, 8)
-        {has_active?, row} = List.pop_at(row, 8)
+        # Trap 3 (story oauth-token-endpoint): the 9 session columns (incl. auth_api) come first,
+        # the computed columns follow at index 9.
+        {consumed?, row} = List.pop_at(row, 9)
+        {young?, row} = List.pop_at(row, 9)
+        {has_active?, row} = List.pop_at(row, 9)
         sess = row_to_session(row)
 
         cond do
@@ -219,7 +242,7 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
 
   defp active_sibling(%{user_id: user_id, device_id: device_id}) do
     case safe_query(
-           select_sql("user_id = $1 AND device_id = $2 AND revoked_at IS NULL AND expires_at > NOW()"),
+           select_sql("user_id = $1 AND device_id = $2 AND auth_api = 'legacy' AND revoked_at IS NULL AND expires_at > NOW()"),
            [user_id, device_id]
          ) do
       {:ok, %{rows: [row | _]}} -> {:ok, row_to_session(row), :replay}
@@ -272,6 +295,25 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
 
     txn =
       Nebu.Repo.transaction(fn ->
+        # 0. Gate x (bugfix legacy-logout-per-device, LL9): take the devices-row lock of the
+        #    old row's device BEFORE the soft-revoke UPDATE, exactly like the OAuth rotation and
+        #    every teardown (lock order devices -> matrix_sessions). A teardown and a rotation of
+        #    the same device therefore serialise: when the teardown wins, the UPDATE below matches
+        #    0 rows (`:not_found`, the caller re-resolves and answers 401); when the rotation wins,
+        #    the teardown's later DELETE also removes the new row. A missing devices row locks
+        #    nothing. The row is read WITHOUT a lock (no devices-after-matrix_sessions inversion).
+        case query(
+               "SELECT user_id, device_id FROM matrix_sessions WHERE access_token_hash = $1 AND auth_api = 'legacy'",
+               [old_h]
+             ) do
+          {:ok, %{rows: []}} ->
+            Nebu.Repo.rollback(:not_found)
+
+          {:ok, %{rows: [[lock_user_id, lock_device_id] | _]}} ->
+            {:ok, _} =
+              query("SELECT 1 FROM devices WHERE user_id = $1 AND device_id = $2 FOR UPDATE", [lock_user_id, lock_device_id])
+        end
+
         # 1. Soft-revoke the old row (atomic single-row statement; exactly one
         #    concurrent rotation of the same row wins). grace_until stays NULL:
         #    the old RT is PENDING until the new tokens are used.
@@ -279,7 +321,7 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
                """
                UPDATE matrix_sessions
                   SET revoked_at = NOW(), grace_until = NULL
-                WHERE access_token_hash = $1 AND revoked_at IS NULL
+                WHERE access_token_hash = $1 AND revoked_at IS NULL AND auth_api = 'legacy'
                """,
                [old_h]
              ) do
@@ -298,6 +340,7 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
                        """
                        SELECT 1 FROM matrix_sessions
                         WHERE refresh_token_hash = $1
+                          AND auth_api = 'legacy'
                           AND revoked_at IS NOT NULL
                           AND grace_until IS NULL
                           FOR UPDATE
@@ -331,6 +374,7 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
                    WHERE access_token_hash IN (
                            SELECT access_token_hash FROM matrix_sessions
                             WHERE user_id = $1 AND device_id = $2
+                              AND auth_api = 'legacy'
                               AND access_token_hash != $3
                               AND revoked_at IS NOT NULL
                               AND grace_until IS NULL
@@ -383,11 +427,17 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
     at_h = hash_token(access_token)
 
     case query(
-           "SELECT user_id, device_id FROM matrix_sessions WHERE access_token_hash = $1",
+           "SELECT user_id, device_id, auth_api FROM matrix_sessions WHERE access_token_hash = $1",
            [at_h]
          ) do
-      {:ok, %{rows: [[user_id, device_id]]}} ->
-        {:ok, _} =
+      {:ok, %{rows: [[user_id, device_id, auth_api]]}} ->
+        # T27: only siblings of the SAME auth_api (an OAuth AT consumes pending OAuth RTs, a
+        # legacy AT pending legacy RTs).
+        # G3-1 L-2: best effort on a per-request path. `FOR UPDATE SKIP LOCKED` skips sibling rows that another
+        # transaction holds (a client revoke that deleted them keeps them locked until its commit) instead of waiting
+        # on them; a skipped sibling keeps its pending grace window and is handled by the next request. A failing
+        # statement is tolerated (no raise: it must not fail the request it rides on).
+        _ =
           query(
             """
             UPDATE matrix_sessions
@@ -395,13 +445,14 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
              WHERE access_token_hash IN (
                      SELECT access_token_hash FROM matrix_sessions
                       WHERE user_id = $1 AND device_id = $2
+                        AND auth_api = $4
                         AND revoked_at IS NOT NULL
                         AND grace_until IS NULL
                         AND access_token_hash != $3
                       ORDER BY access_token_hash
-                        FOR UPDATE)
+                        FOR UPDATE SKIP LOCKED)
             """,
-            [user_id, device_id, at_h]
+            [user_id, device_id, at_h, auth_api]
           )
 
         :ok
@@ -426,6 +477,7 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
              SELECT 1 FROM matrix_sessions s2
               WHERE s2.user_id = m.user_id
                 AND s2.device_id = m.device_id
+                AND s2.auth_api = m.auth_api
                 AND s2.access_token_hash != m.access_token_hash
                 AND s2.revoked_at IS NOT NULL
                 AND s2.grace_until IS NULL
@@ -472,7 +524,7 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
            UPDATE matrix_sessions
               SET expires_at = GREATEST(expires_at, LEAST($2, created_at + ($4::bigint * INTERVAL '1 second'))),
                   oidc_refresh_token = COALESCE($3, oidc_refresh_token)
-            WHERE access_token_hash = $1 AND revoked_at IS NULL
+            WHERE access_token_hash = $1 AND revoked_at IS NULL AND auth_api = 'legacy'
            """,
            [
              access_token_hash,
@@ -501,7 +553,7 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
            """
            UPDATE matrix_sessions
               SET oidc_refresh_token = $3
-            WHERE user_id = $1 AND device_id = $2 AND revoked_at IS NULL
+            WHERE user_id = $1 AND device_id = $2 AND revoked_at IS NULL AND auth_api = 'legacy'
            """,
            [user_id, device_id, enc_oidc_rt]
          ) do
@@ -562,8 +614,9 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
   end
 
   @doc """
-  Deletes opaque sessions for a single `(user_id, device_id)` (per-device
-  `POST /logout`). Best-effort like `delete_for_user/1` (MINOR-2).
+  Deletes opaque sessions for a single `(user_id, device_id)` WITHOUT the devices-row lock.
+  Best-effort like `delete_for_user/1` (MINOR-2). The Matrix `POST /logout` does NOT use it any more
+  (bugfix legacy-logout-per-device: `Nebu.Matrix.legacy_logout_device/1`, locked teardown).
   """
   @spec delete_for_user_device(String.t(), String.t()) :: :ok
   def delete_for_user_device(user_id, device_id)
@@ -657,7 +710,10 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
   @spec cleanup_expired() :: non_neg_integer()
   def cleanup_expired do
     {:ok, %{num_rows: n}} =
-      query("DELETE FROM matrix_sessions WHERE expires_at < NOW() - INTERVAL '7 days'", [])
+      query(
+        "DELETE FROM matrix_sessions WHERE COALESCE(session_expires_at, expires_at) < NOW() - INTERVAL '7 days'",
+        []
+      )
 
     n
   end
@@ -673,7 +729,9 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
       when is_binary(user_id) and is_integer(auth_time) do
     _ =
       safe_query(
-        "UPDATE matrix_sessions SET auth_time = $2 WHERE user_id = $1 AND revoked_at IS NULL",
+        # story oauth-legacy-coexistence (C9): legacy rows ONLY — a legacy UIA completion must not mark the
+        # user's OAuth sessions as freshly authenticated (their auth_time is the IdP login time).
+        "UPDATE matrix_sessions SET auth_time = $2 WHERE user_id = $1 AND revoked_at IS NULL AND auth_api = 'legacy'",
         [user_id, auth_time]
       )
 
@@ -685,13 +743,13 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
   defp select_sql(where) do
     """
     SELECT access_token_hash, refresh_token_hash, oidc_refresh_token, user_id, device_id,
-           expires_at, revoked_at, grace_until
+           expires_at, revoked_at, grace_until, auth_api
       FROM matrix_sessions
      WHERE #{where}
     """
   end
 
-  defp row_to_session([at_h, rt_h, enc_oidc_rt, user_id, device_id, expires_at, revoked_at, grace_until]) do
+  defp row_to_session([at_h, rt_h, enc_oidc_rt, user_id, device_id, expires_at, revoked_at, grace_until, auth_api]) do
     %{
       access_token_hash: at_h,
       refresh_token_hash: rt_h,
@@ -700,7 +758,8 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
       device_id: device_id,
       expires_at: expires_at,
       revoked_at: revoked_at,
-      grace_until: grace_until
+      grace_until: grace_until,
+      auth_api: auth_api
     }
   end
 

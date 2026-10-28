@@ -171,14 +171,33 @@ defmodule Nebu.Web.MatrixRouterTest do
       assert json(conn)["issuer"] == @issuer
     end
 
-    test "GET /_matrix/client/v1/auth_metadata → 200 OIDC metadata object" do
+    # epic oauth-broker (ADR-033): the STABLE v1 auth_metadata path is now Nebu's OWN RFC 8414
+    # document (Nebu.OAuth.Http), no longer the IdP passthrough. The full contract is covered by
+    # server/test/nebu/oauth/oauth_metadata_test.exs; the two tests below only pin that the router
+    # no longer proxies the IdP document on this path.
+    test "GET /_matrix/client/v1/auth_metadata → 404 M_UNRECOGNIZED while OAuth is disabled (default), NOT the IdP passthrough" do
+      Application.delete_env(:nebu_http, :oauth_config_source)
+
+      conn = call(:get, "/_matrix/client/v1/auth_metadata")
+      assert conn.status == 404
+      body = json(conn)
+      assert body["errcode"] == "M_UNRECOGNIZED"
+      refute Map.has_key?(body, "authorization_endpoint")
+    end
+
+    test "GET /_matrix/client/v1/auth_metadata → 200 Nebu's own document (issuer = Nebu) when OAuth is enabled" do
+      Application.put_env(:nebu_http, :oauth_config_source, fn ->
+        %{enabled: true, issuer_url: "https://nebu.example.com"}
+      end)
+
+      on_exit(fn -> Application.delete_env(:nebu_http, :oauth_config_source) end)
+
       conn = call(:get, "/_matrix/client/v1/auth_metadata")
       assert conn.status == 200
       body = json(conn)
-      assert is_map(body)
-      assert Map.has_key?(body, "issuer")
-      assert Map.has_key?(body, "authorization_endpoint")
-      assert Map.has_key?(body, "token_endpoint")
+      assert body["issuer"] == "https://nebu.example.com"
+      assert body["authorization_endpoint"] == "https://nebu.example.com/oauth2/authorize"
+      refute body["issuer"] == @issuer, "the IdP issuer must not be advertised"
     end
 
     test "GET /_matrix/client/unstable/org.matrix.msc2965/auth_metadata → 200 OIDC metadata object" do
@@ -196,8 +215,8 @@ defmodule Nebu.Web.MatrixRouterTest do
     # unchanged from the rejected cycle 1, just re-verified without any
     # public-base-URL config dependency (the :oidc_metadata_override fixture above
     # deliberately does NOT set them, mirroring Dex's real response shape).
-    test "GET auth_metadata → 200 synthesizes registration_endpoint, response_modes_supported, revocation_endpoint when Dex omits them" do
-      conn = call(:get, "/_matrix/client/v1/auth_metadata")
+    test "GET unstable auth_metadata → 200 synthesizes registration_endpoint, response_modes_supported, revocation_endpoint when Dex omits them" do
+      conn = call(:get, "/_matrix/client/unstable/org.matrix.msc2965/auth_metadata")
       assert conn.status == 200
       body = json(conn)
 
@@ -214,8 +233,8 @@ defmodule Nebu.Web.MatrixRouterTest do
     # internal-Docker-Compose-looking issuer (@issuer resolves to a fake host in
     # this unit test; a real Dex response would already carry the honest public
     # origin by construction, so there is nothing left here to rewrite).
-    test "GET auth_metadata → 200 passes authorization_endpoint/token_endpoint/jwks_uri/issuer through VERBATIM (no origin rewriting)" do
-      conn = call(:get, "/_matrix/client/v1/auth_metadata")
+    test "GET unstable auth_metadata → 200 passes authorization_endpoint/token_endpoint/jwks_uri/issuer through VERBATIM (no origin rewriting)" do
+      conn = call(:get, "/_matrix/client/unstable/org.matrix.msc2965/auth_metadata")
       assert conn.status == 200
       body = json(conn)
 
@@ -225,13 +244,13 @@ defmodule Nebu.Web.MatrixRouterTest do
       assert body["jwks_uri"] == @issuer <> "/jwks"
     end
 
-    test "GET auth_metadata fails CLOSED with 503 M_UNAVAILABLE when the provider is unreachable (MINOR-4)" do
+    test "GET unstable auth_metadata fails CLOSED with 503 M_UNAVAILABLE when the provider is unreachable (MINOR-4)" do
       # Drop the override and point at an unreachable issuer so the live fetch
       # fails. The handler must NOT synthesise wrong endpoint URLs — it returns
       # 503 M_UNAVAILABLE, mirroring the Go authMetadataHandler.
       Application.delete_env(:nebu_http, :oidc_metadata_override)
 
-      conn = call(:get, "/_matrix/client/v1/auth_metadata")
+      conn = call(:get, "/_matrix/client/unstable/org.matrix.msc2965/auth_metadata")
       assert conn.status == 503
       assert json(conn)["errcode"] == "M_UNAVAILABLE"
     end
@@ -240,11 +259,20 @@ defmodule Nebu.Web.MatrixRouterTest do
   # ══════════════════════════════════════════════════════════════════════════
   # GET /_matrix/client/versions advertises the MSC2666 unstable-feature flag
   # so real clients (matrix-js-sdk, Element) discover
-  # GET /_matrix/client/v1/mutual_rooms. Unauthenticated, static route
-  # (no token, no DB) — PURE UNIT.
+  # GET /_matrix/client/v1/mutual_rooms. Unauthenticated route (no token); since story 9
+  # (oauth-versions-switch) it makes ONE server_config read (the OAuth liveness predicate),
+  # driven here through the :oauth_config_source seam — PURE UNIT.
   # ══════════════════════════════════════════════════════════════════════════
 
-  describe "GET /_matrix/client/versions (mutual_rooms unstable-feature flag) — unauthenticated, no DB" do
+  describe "GET /_matrix/client/versions (mutual_rooms unstable-feature flag) — unauthenticated, one config read" do
+    # story 9 (oauth-versions-switch, AC1 / V1): changed deliberately. "does not widen the advertised
+    # versions list (v1.19 is NOT claimed)" became "OAuth not offered => v1.1-v1.11" (with the config
+    # seam pinned to disabled) plus the sibling "OAuth offered => v1.1-v1.15".
+    setup do
+      on_exit(fn -> Application.delete_env(:nebu_http, :oauth_config_source) end)
+      :ok
+    end
+
     test "advertises uk.half-shot.msc2666.query_mutual_rooms in unstable_features" do
       conn = call(:get, "/_matrix/client/versions")
       assert conn.status == 200
@@ -253,12 +281,23 @@ defmodule Nebu.Web.MatrixRouterTest do
       assert body["unstable_features"]["uk.half-shot.msc2666.query_mutual_rooms"] == true
     end
 
-    test "does not widen the advertised versions list (v1.19 is NOT claimed)" do
+    test "OAuth not offered => v1.1-v1.11 (nothing above)" do
+      Application.put_env(:nebu_http, :oauth_config_source, fn -> %{enabled: false, issuer_url: "https://nebu.example.com"} end)
       conn = call(:get, "/_matrix/client/versions")
       body = json(conn)
 
       assert body["versions"] ==
                ~w(v1.1 v1.2 v1.3 v1.4 v1.5 v1.6 v1.7 v1.8 v1.9 v1.10 v1.11)
+    end
+
+    test "OAuth offered => v1.1-v1.15 (story 9)" do
+      Application.put_env(:nebu_http, :oauth_config_source, fn -> %{enabled: true, issuer_url: "https://nebu.example.com"} end)
+      body = json(call(:get, "/_matrix/client/versions"))
+
+      assert body["versions"] ==
+               ~w(v1.1 v1.2 v1.3 v1.4 v1.5 v1.6 v1.7 v1.8 v1.9 v1.10 v1.11 v1.12 v1.13 v1.14 v1.15)
+
+      assert body["unstable_features"] == %{"uk.half-shot.msc2666.query_mutual_rooms" => true}
     end
   end
 
@@ -296,6 +335,11 @@ defmodule Nebu.Web.MatrixRouterTest do
       assert idp["id"] == "oidc"
       assert idp["name"] == "Test SSO"
       assert Map.has_key?(idp, "icon")
+
+      # story 5 (oauth-legacy-coexistence, C2/C3): without an OAuth config offering OAuth the
+      # OAuth-aware keys are absent (green before and after story 5).
+      refute Map.has_key?(sso, "oauth_aware_preferred")
+      refute Map.has_key?(sso, "org.matrix.msc3824.delegated_oidc_compatibility")
     end
   end
 

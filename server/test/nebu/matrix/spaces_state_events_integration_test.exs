@@ -13,8 +13,9 @@ defmodule Nebu.Matrix.SpacesStateEventsIntegrationTest do
     AT1 — PUT m.space.child by an authorized member → 200 + appears in /sync;
           empty content (unlink) → 200.
     AT2 — PUT by a non-member / under-PL sender → 403.
-    AT3 — PUT a non-allowlisted type (m.room.member / m.room.power_levels /
-          m.room.create) → 403 (SECURITY boundary).
+    AT3 — PUT a non-allowlisted type (m.room.member / m.room.create) → 403
+          (SECURITY boundary). m.room.power_levels has its own route since story
+          power-levels-enforcement (power_levels_http_test.exs).
     AT4 — PUT m.space.parent: member of parent → 200; non-member of parent → 403;
           non-existent parent → 404.
     AT5 — PUT m.room.name via the generic PUT → rooms.name updated.
@@ -208,7 +209,9 @@ defmodule Nebu.Matrix.SpacesStateEventsIntegrationTest do
     end
 
     # ─── AT3 — non-allowlisted types → 403 (SECURITY) ─────────────────────────
-    for forbidden <- ["m.room.member", "m.room.power_levels", "m.room.create"] do
+    # story power-levels-enforcement (AC16 re-pin): m.room.power_levels left this list (its PUT is the room-process power-level
+    # writer, pinned by power_levels_http_test.exs: here `/x` would be 400 "requires an empty state key")
+    for forbidden <- ["m.room.member", "m.room.create"] do
       test "PUT #{forbidden} via generic state PUT → 403 (security boundary)", %{admin: admin} do
         room = create_room(admin, %{"name" => "Room"})
 

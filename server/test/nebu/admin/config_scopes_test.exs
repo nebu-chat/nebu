@@ -73,6 +73,8 @@ defmodule Nebu.Admin.ConfigScopesTest do
       "sub" => "admin-1",
       "matrix_user_id" => "@admin:test.local"
     })
+    # story admin-config-privileged-forms-sweep: the scopes form needs the strict fetch metadata of a user-clicked submit
+    |> Nebu.OAuth.TestSupport.put_strict_fetch_headers()
   end
 
   defp endpoint_call(conn), do: @endpoint.call(conn, @endpoint.init([]))

@@ -3,8 +3,11 @@ defmodule Nebu.Matrix.Session.TokenValidator.Postgres do
 
   @behaviour Nebu.Matrix.Session.TokenValidator
 
+  # story gdpr-erasure-global-data (D17): a user whose erasure is under way or done (`deletion_status IS NOT NULL`) is never
+  # active, whatever `is_active` says: an admin reactivation cannot revive an erased user.
   @lookup_sql """
-  SELECT user_id, system_role, display_name_encrypted, display_name_nonce, is_active, signing_key_id
+  SELECT user_id, system_role, display_name_encrypted, display_name_nonce,
+         (is_active AND deletion_status IS NULL), signing_key_id
   FROM users
   WHERE user_id = $1
   """
@@ -96,6 +99,17 @@ defmodule Nebu.Matrix.Session.TokenValidator.Postgres do
       {:ok, user} -> decrypt_and_return(user)
       {:error, reason} -> {:error, reason}
     end
+  end
+
+  # story gdpr-erasure-global-data (D16): the display name columns are NULL for an erased user (such a user is never active, so this
+  # is not reached for one) and for a user whose provisioning left them empty: no decryption of NULL.
+  defp decrypt_and_return(%{
+         user_id: user_id,
+         system_role: system_role,
+         display_name_encrypted: nil,
+         is_active: true
+       }) do
+    {:ok, %{user_id: user_id, system_role: system_role, display_name: "", is_active: true, is_new: false}}
   end
 
   defp decrypt_and_return(%{

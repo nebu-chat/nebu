@@ -11,9 +11,11 @@ at the protocol level.
 
 | Actor | Interface | Protocol |
 |---|---|---|
-| Matrix clients (Element, FluffyChat, Cinny, …) | Matrix Client-Server API | HTTPS / WSS, TLS 1.3 |
-| OIDC identity provider (Keycloak, Azure AD, Dex, Google) | OIDC Authorization Code + PKCE | HTTPS |
-| Operator (admin UI) | Admin web UI + Admin API | HTTPS, session cookie |
+| Matrix clients (Element, FluffyChat, Cinny, …) | Matrix Client-Server API (incl. OAuth-aware `POST /logout` and the newly routed `POST /logout/all`) + OAuth 2.0 metadata/DCR. Story oauth-legacy-coexistence (ADR-033 C1-C20): `GET /login` advertises `oauth_aware_preferred` and `org.matrix.msc3824.delegated_oidc_compatibility` (both `true`, on the `m.login.sso` flow only) while, and only while, OAuth is offered (same predicate as `auth_metadata` answering 200); `GET /login/sso/redirect[/{idpId}]` honours the `action` query parameter (`login` / `register`, stable or `org.matrix.msc3824.action`; `register` becomes `prompt=create` towards the IdP when it supports it); `DELETE /devices/{id}` and `POST /delete_devices` answer `403 M_FORBIDDEN` to OAuth sessions (device deletion for OAuth sessions happens on the account page, see the end-user row below). Story oauth-account-management (ADR-033 A1-A27, A14): `POST /keys/device_signing/upload` answers an OAuth caller that REPLACES existing cross-signing keys with a `401` UIA challenge `flows: [{"stages": ["m.oauth"]}]` whose `params["m.oauth"].url` is `<issuer>/account?action=org.matrix.cross_signing_reset` (the user approves the pending request on the account page, the client retries with `auth: {"session": ...}`); legacy callers keep today's `403`; `auth_metadata` additionally carries `account_management_uri` and `account_management_actions_supported`. Legacy (IdP-JWT / opaque) and OAuth clients are served in parallel, each session only ever uses the API that issued it | HTTPS / WSS, TLS 1.3 |
+| OIDC identity provider (Keycloak, Azure AD, Dex, Google) | OIDC Authorization Code + PKCE (identity auth only; also used for the account page sign-in and re-authentication through the same shared callback, `max_age=0`; `prompt=login`, or `prompt=create` for a client `action=register` when the IdP lists it in `prompt_values_supported`) | HTTPS |
+| Third-party OAuth 2.0 clients (app registration) | Dynamic Client Registration endpoint; authorization endpoint `GET /oauth2/authorize` (browser redirect flow, Nebu delegates the login to the OIDC provider and returns a Nebu authorization code); token endpoint `POST /oauth2/token` (`authorization_code` + `refresh_token` grants, client auth `none`, Nebu-signed ES256 id_token); `GET /oauth2/jwks` (signing keys); `GET /.well-known/openid-configuration` (Nebu's own OIDC discovery document under the issuer, story oauth-token-endpoint). revocation endpoint `POST /oauth2/revoke` (RFC 7009, story oauth-token-revocation-logout: no client authentication, `200 {}` for any well-formed or unknown token, live even while `oauth_enabled=false`). Token, JWKS, openid-configuration and revoke answer CORS `*` without credentials | HTTPS |
+| End users in a browser (account management page) | Story oauth-account-management (ADR-033 A1-A27): `GET /account` (every action, selected by `action` / `device_id`), `GET /account/reauth`, `POST /account/devices/delete`, `POST /account/cross_signing_reset/approve` and `.../decline`, `POST /account/logout`. Server-rendered HTML on the Nebu origin (standalone renderer, strict CSP, no script), live only under the same predicate as `auth_metadata` 200 (`404`/`503` page otherwise). The user signs in with the corporate IdP (shared callback, state tag `o2.acct.`, `prompt=login` + `max_age=0`) and gets a short-lived DB-backed browser session (hashed cookie, NOT a Matrix device); POSTs are CSRF-protected, destructive actions need a fresh IdP re-authentication. Actions: `org.matrix.profile` (read only), `org.matrix.devices_list`, `org.matrix.device_view`, `org.matrix.device_delete`, `org.matrix.cross_signing_reset`. No CORS. The reverse proxy must route `/account` and `/account/*` to the server (follow-up m) | HTTPS (browser navigation), session cookie |
+| Operator (admin UI) | Admin web UI + Admin API + OAuth approvals | HTTPS, session cookie |
 | Monitoring systems (Prometheus, Grafana) | `/metrics` endpoint | HTTP |
 | Compliance officer | Admin UI + Compliance API | HTTPS, JWT + session |
 
@@ -27,16 +29,23 @@ at the protocol level.
   └──────────────────┘          │  │  Elixir/OTP application (:nebu)     │ │
                                 │  │  Bandit/Plug HTTP · Phoenix LiveView│ │
   ┌──────────────────┐          │  │  Nebu.Matrix · Nebu.Media           │ │
-  │  OIDC Provider   │◄────────►│  │  Nebu.Admin  · Nebu.Web             │ │
-  │  Keycloak / Dex  │  OIDC    │  │  Horde · ETS · pg groups            │ │
+  │  OIDC Provider   │◄────────►│  │  Nebu.Admin  · Nebu.OAuth           │ │
+  │  Keycloak / Dex  │  OIDC    │  │  Nebu.Web · Horde · ETS · pg groups │ │
   │  Azure AD        │          │  └───────┬────────────────────┬───────┘ │
                                 │          │ PostgreSQL protocol  │ S3      │
   ┌──────────────────┐          │  ┌───────▼──────────┐  ┌────────▼──────┐ │
   │  Admin / Ops     │◄────────►│  │  PostgreSQL 16+  │  │  MinIO / S3   │ │
   │  Browser UI      │  HTTPS   │  │  event log ·     │  │  media blobs  │ │
-  │  Prometheus      │  HTTP    │  │  audit · schema  │  │  (encrypted)  │ │
+  │  Prometheus      │  HTTP    │  │  oauth_* state · │  │  (encrypted)  │ │
+  │                  │          │  │  audit · schema  │  │  (encrypted)  │ │
   └──────────────────┘          │  └──────────────────┘  └───────────────┘ │
-                                └──────────────────────────────────────────┘
+                                │                                          │
+  ┌──────────────────┐          │  OAuth 2.0 Authorization Server          │
+  │  Third-party     │◄────────►│  (broker model, ADR-033)                 │
+  │  OAuth Clients   │  HTTPS   │  RFC 8414, RFC 7591 DCR, authorize, token│
+  │                  │          │  (ES256 id_token), JWKS, openid-config,  │
+  │  (App Reg.)      │          │  revoke (RFC 7009), /account page        │
+  └──────────────────┘          └──────────────────────────────────────────┘
 ```
 
 The whole HTTP surface (Matrix C-S API, media, Admin UI) and all stateful chat logic run

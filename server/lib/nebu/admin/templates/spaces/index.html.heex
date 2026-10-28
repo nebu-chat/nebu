@@ -10,6 +10,7 @@
   <%!-- Create space form --%>
   <form id="create-space-form" method="post" action="/admin/spaces" class="mb-6 max-w-sm" data-form="create-space">
     <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+    <input type="hidden" name="_click_proof" value="" data-click-proof />
     <label class="form-control w-full mb-3">
       <span class="label-text">Space name</span>
       <input
@@ -49,6 +50,7 @@
             action={"/admin/spaces/" <> URI.encode(space.room_id, &URI.char_unreserved?(&1)) <> "/auto-join"}
           >
             <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+            <input type="hidden" name="_click_proof" value="" data-click-proof />
             <button
               type="submit"
               class="btn btn-xs"

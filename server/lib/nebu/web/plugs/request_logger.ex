@@ -48,6 +48,58 @@ defmodule Nebu.Web.Plugs.RequestLogger do
   # the unchanged default (`in_content?: false`).
   @send_event_path_regex ~r{^/_matrix/client/v\d+/rooms/[^/]+/send/[^/]+/[^/]+$}
   @state_event_path_regex ~r{^/_matrix/client/v\d+/rooms/[^/]+/state/[^/]+(?:/[^/]*)?$}
+  # story state-writer-redaction (code review M4): the /redact body keeps every client key as event content (D13)
+  @redact_event_path_regex ~r{^/_matrix/client/v\d+/rooms/[^/]+/redact/[^/]+/[^/]+$}
+
+  # Story oauth-authorize-idp-delegation-code (AC15): query strings of these paths are logged with
+  # parameter names only (see redacted_query_string/1). Story oauth-account-management (A22) adds
+  # `/account` and every `/account/*` path (see `account_path?/1`).
+  # Story oauth-token-endpoint (AC19 / T23) and oauth-token-revocation-logout (R22): /oauth2/token and
+  # /oauth2/revoke too (credentials never belong in its URL;
+  # a client that wrongly sends a query string is masked).
+  @names_only_query_paths [
+    "/oauth2/authorize",
+    "/oauth2/token",
+    "/oauth2/revoke",
+    # story oauth-authorize-freshness (FR17): the consent page; its POST body is never captured either
+    # (`body_params` stays `Unfetched`, JsonBody skips the path)
+    "/oauth2/consent",
+    "/_matrix/client/v3/login/sso/redirect/oidc",
+    # story legacy-sso-redirect-confirmation (G3-3, D12): the SSO confirmation page; its POST body is never captured
+    # (`body_params` stays `Unfetched`, JsonBody skips the path) and neither are `Location` / `Set-Cookie`
+    "/_matrix/client/v3/login/sso/confirm"
+  ]
+
+  # Story oauth-token-endpoint (T29): the token response carries the tokens (redacted anyway) AND the
+  # granted `scope` value, which must never be logged — its response body is never captured. Its
+  # request body is never captured either (`body_params` stays `Unfetched`, JsonBody skips it).
+  @no_response_body_paths ["/oauth2/token"]
+
+  # Story oauth-legacy-coexistence (C6, Kassandra L-2): the legacy SSO redirect `GET /login/sso/redirect[/{idpId}]`
+  # takes the attacker-controlled `action` / `org.matrix.msc3824.action` parameters. The values of EVERY key
+  # starting with one of those names (case-insensitive, so `action[]`, `Action`, `org.matrix.msc3824.action[]`
+  # too) are masked in the query-string capture; `redirectUrl` etc. keep today's capture, so a raw `action`
+  # value never reaches a log line.
+  @sso_redirect_prefix "/_matrix/client/v3/login/sso/redirect"
+  @sso_masked_prefixes ["action", "org.matrix.msc3824.action"]
+
+  defp sso_redirect_path?(path), do: path == @sso_redirect_prefix or String.starts_with?(path, @sso_redirect_prefix <> "/")
+
+  defp mask_params(qs, prefixes) do
+    qs
+    |> String.split("&", trim: true)
+    |> Enum.map_join("&", fn pair ->
+      [name | _] = String.split(pair, "=", parts: 2)
+      decoded = name |> safe_decode() |> String.downcase()
+      if Enum.any?(prefixes, &String.starts_with?(decoded, &1)), do: name <> "=***", else: pair
+    end)
+  end
+
+  defp safe_decode(name) do
+    URI.decode_www_form(name)
+  rescue
+    ArgumentError -> name
+  end
 
   @impl Plug
   def init(opts), do: opts
@@ -252,9 +304,14 @@ defmodule Nebu.Web.Plugs.RequestLogger do
   # callback runs, whereas `request_path` reflects the original, full
   # request path throughout — the same field `base_fields.path` already
   # relies on above.
+  # (story state-writer-redaction, cycle 2 review M5) matched against the NORMALISED path: a trailing slash or a `//` still reaches
+  # the route but would miss the `$`-anchored regexes, and the body would be logged with the generic redaction only
   defp write_path_content_body?(conn) do
-    Regex.match?(@send_event_path_regex, conn.request_path) or
-      Regex.match?(@state_event_path_regex, conn.request_path)
+    path = normalized_path(conn.request_path)
+
+    Regex.match?(@send_event_path_regex, path) or
+      Regex.match?(@state_event_path_regex, path) or
+      Regex.match?(@redact_event_path_regex, path)
   end
 
   # Response body: `conn.resp_body` is still available on the conn passed
@@ -271,6 +328,7 @@ defmodule Nebu.Web.Plugs.RequestLogger do
   # whole call is already lazy via `Logger.debug(fn -> ... end)`).
   defp redacted_response_body(conn) do
     with false <- account_data_content?(conn),
+         false <- normalized_path(conn.request_path) in @no_response_body_paths,
          true <- json_content_type?(conn),
          body when is_binary(body) <- conn.resp_body,
          {:ok, decoded} <- Jason.decode(body) do
@@ -315,10 +373,43 @@ defmodule Nebu.Web.Plugs.RequestLogger do
   # closes that gap and gives operators visibility into query-string-only
   # requests (e.g. legacy `?access_token=`-authenticated clients) without
   # ever leaking the token itself.
+  #
+  # Epic oauth-broker, story oauth-authorize-idp-delegation-code (AC15 / D20): on the two OAuth
+  # browser-flow paths EVERY value is masked and only the parameter names are kept
+  # (`client_id=***&redirect_uri=***...`) — their query strings carry authorization codes, IdP
+  # and client states, nonces, PKCE challenges and redirect targets. Route-aware like the
+  # send/state body handling above; every other path keeps the generic redaction.
   defp redacted_query_string(conn) do
     case conn.query_string do
-      "" -> nil
-      qs -> PayloadRedactor.redact_payload(qs)
+      "" ->
+        nil
+
+      qs ->
+        path = normalized_path(conn.request_path)
+
+        cond do
+          path in @names_only_query_paths or account_path?(path) -> names_only(qs)
+          sso_redirect_path?(path) -> qs |> mask_params(@sso_masked_prefixes) |> PayloadRedactor.redact_payload()
+          true -> PayloadRedactor.redact_payload(qs)
+        end
     end
+  end
+
+  # A trailing slash (or doubled slashes) still reaches the same route, so it must not bypass the
+  # masking.
+  defp normalized_path(path), do: "/" <> (path |> String.split("/", trim: true) |> Enum.join("/"))
+
+  # Story oauth-account-management (A22): `/account` and every `/account/*` path (`device_id`,
+  # `session_id`, `notice` are identifiers that need not appear in access logs).
+  defp account_path?(path), do: path == "/account" or String.starts_with?(path, "/account/")
+
+  defp names_only(qs) do
+    qs
+    |> String.split("&", trim: true)
+    |> Enum.map_join("&", fn pair ->
+      name = pair |> String.split("=", parts: 2) |> hd()
+      # a parameter NAME is client-chosen too: anything that is not a plain short name is masked
+      if Regex.match?(~r/\A[A-Za-z0-9_.%\[\]-]{1,64}\z/, name), do: name <> "=***", else: "***"
+    end)
   end
 end

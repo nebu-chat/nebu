@@ -1,0 +1,90 @@
+<div class="admin-oauth-registrations" data-page="oauth-approve-confirm">
+  <h1 class="text-2xl font-bold mb-2">Approve OAuth client</h1>
+  <p class="mb-4">
+    <a href={@back_path} class="link link-primary" data-role="back-to-list">Back to pending OAuth clients</a>
+  </p>
+
+  <p :if={Phoenix.Flash.get(@flash, :error)} class="alert alert-error my-4 max-w-3xl" role="alert" data-role="toast" data-toast-kind="error">
+    {Phoenix.Flash.get(@flash, :error)}
+  </p>
+
+  <%!-- L-3: a registration under a host the admin already withdrew a client from can look clean (changed metadata is a new hash). --%>
+  <p :if={is_integer(@revoked_same_host) and @revoked_same_host > 0} class="alert alert-warning mb-4 max-w-3xl text-sm" data-role="revoked-same-host">
+    Warning: {plural(@revoked_same_host, "revoked client shares", "revoked clients share")} this host (see Revoked Clients).
+  </p>
+  <p :if={@revoked_same_host == :unknown} class="text-sm mb-4 max-w-3xl" data-role="revoked-same-host">
+    Could not check whether clients of this host were revoked before.
+  </p>
+
+  <%!-- The verified host comes first; the name is an unverified claim of the registrant and could even fake a host. --%>
+  <dl class="mb-4 max-w-3xl" data-role="client-summary">
+    <div class="mb-2">
+      <dt class="text-sm text-base-content/70">Client URI host (what the registrant stated; a redirect URI badged "host matches client_uri" matches the client URI host)</dt>
+      <dd class="font-semibold break-all" data-role="client-host">{client_host(@client) || "(no client URI host)"}</dd>
+      <dd :if={client_domain_note(@client)} class="text-xs text-base-content/70">registrable domain: <span data-role="client-domain">{client_domain_note(@client)}</span></dd>
+      <dd :if={host_info(@client) && (host_info(@client).shared_hosting? || host_info(@client).public_suffix?)} class="flex flex-wrap items-center gap-1 my-1">
+        <span :if={host_info(@client).shared_hosting?} class="text-xs font-semibold">Warning:</span>
+        <span :if={host_info(@client).shared_hosting?} class="badge badge-warning badge-sm h-auto whitespace-normal" data-role="shared-hosting-warning">shared hosting domain ({host_info(@client).suffix}): anyone can create sites here. Approve is not blocked: check the redirect URIs.</span>
+        <span :if={host_info(@client).public_suffix?} class="text-xs font-semibold">Error:</span>
+        <span :if={host_info(@client).public_suffix?} class="badge badge-error badge-sm h-auto whitespace-normal" data-role="public-suffix-error">client URI host is a public suffix. Approve is not blocked: approve only if you are sure.</span>
+      </dd>
+    </div>
+    <div class="mb-2">
+      <dt class="text-sm text-base-content/70">Name (unverified claim)</dt>
+      <dd class="break-all" data-field="client-name">{display_name(@client)}</dd>
+    </div>
+    <div class="mb-2">
+      <dt class="text-sm text-base-content/70">Type</dt>
+      <dd data-field="application-type">
+        {application_type_label(@client.application_type)}
+        <span :if={any_unbound?(@client)} class="block text-xs font-semibold" data-role="identity-unverified">identity unverified</span>
+      </dd>
+    </div>
+    <div class="mb-2">
+      <dt class="text-sm text-base-content/70">Client URI</dt>
+      <dd class="break-all">
+        <a :if={safe_link(@client.client_uri)} href={safe_link(@client.client_uri)} class="text-primary break-all" rel="noopener noreferrer" target="_blank">{@client.client_uri}<span class="sr-only"> (opens in new tab)</span></a>
+        <span :if={@client.client_uri && !safe_link(@client.client_uri)} class="break-all">{@client.client_uri}</span>
+        <span :if={!@client.client_uri} class="text-base-content/70">(none)</span>
+      </dd>
+    </div>
+    <div class="mb-2">
+      <dt class="text-sm text-base-content/70">Redirect URIs (where authorization codes are delivered)</dt>
+      <dd>
+        <ul class="flex flex-col gap-1">
+          <li :for={uri <- @client.redirect_uris} class="flex flex-col" data-role="redirect-uri" data-binding={redirect_binding(uri)}>
+            <span class="font-mono text-sm break-all">{uri}</span>
+            <span :if={redirect_binding(uri) == :host_bound} class="badge badge-success badge-outline badge-sm" data-role="redirect-host-bound">host matches client_uri</span>
+            <span :if={redirect_binding(uri) == :not_host_bound} class="badge badge-warning badge-sm" data-role="redirect-not-host-bound">NOT tied to the client_uri host: client identity unverified</span>
+            <span :if={other_host?(@client, uri)} class="text-xs font-semibold" data-role="redirect-other-host">different host than the client URI: {uri_host(uri)}</span>
+          </li>
+        </ul>
+      </dd>
+    </div>
+    <div class="mb-2">
+      <dt class="text-sm text-base-content/70">Registered</dt>
+      <dd data-field="created">{format_created(@client.created_at)}</dd>
+    </div>
+  </dl>
+
+  <p class="alert alert-warning mb-4 max-w-3xl" role="note" data-role="approve-consequences">
+    It will be able to sign in your users. Authorization codes are delivered to the redirect URIs shown above.
+    Approve only applications you recognise.
+  </p>
+
+  <p class="text-sm mb-4 max-w-3xl" data-role="reauth-state" data-reauth={if @reauth_fresh, do: "fresh", else: "needed"}>
+    <span :if={@reauth_fresh}>You signed in again a moment ago: you can approve now.</span>
+    <span :if={!@reauth_fresh}>Approving asks you to sign in again with your identity provider first. You return to this page afterwards.</span>
+  </p>
+
+  <%!-- A plain form, no JavaScript confirm: the browser reports a user-activated submit (Sec-Fetch-User), which
+       the server requires for this action. --%>
+  <form method="post" action={@approve_path} data-role="approve-confirm-form" class="flex flex-wrap items-center gap-3">
+    <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+    <input type="hidden" name="_click_proof" value="" data-click-proof />
+    <input :if={@page > 1} type="hidden" name="page" value={@page} />
+    <input :if={@show_logos} type="hidden" name="logos" value="1" />
+    <button type="submit" class="btn btn-primary" data-role="approve-confirm" aria-label={"Approve client " <> display_name(@client)}>Approve client</button>
+    <a href={@back_path} class="btn btn-ghost" data-role="approve-cancel">Cancel</a>
+  </form>
+</div>

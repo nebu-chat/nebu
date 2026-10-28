@@ -1,35 +1,27 @@
 /**
  * Step definitions for features/element/spaces/create-room-in-space.feature
  *
- * Bug regression (confirmed user report): "a room a Space OWNER creates INSIDE their
- * own Space lands in the personal/home area instead of becoming a child of the Space".
+ * Regression guard for: "a room a Space OWNER creates INSIDE their own Space lands in the
+ * personal/home area instead of becoming a child of the Space".
  *
- * ROOT CAUSE — captured from the REAL Element Web create-room-in-space flow:
- *   With the Space active, Element's "Add -> New room" issues ONE
- *   POST /_matrix/client/v3/createRoom whose `initial_state` contains the child's
- *   `m.space.parent` (state_key = spaceId) plus a restricted `m.room.join_rules`
- *   referencing the parent Space (then a separate m.space.child PUT to the Space).
- *   Nebu's POST /createRoom DROPS `initial_state` wholesale — `Core.CreateRoomRequest`
- *   has no `initial_state` field and the handler (server/lib/nebu/web/router/protected.ex)
- *   reads only name / is_direct / creation_content / room_type. The parent→child link the
- *   client supplied is therefore never persisted.
- *
- * Verified via the API: a room created with `initial_state:[{type:"m.space.parent",...}]`
- * ends up with NO m.space.parent in its state (confirmed through /sync). So this step
- * file's Scenario-1 trigger is the exact createRoom body Element sends and the assertion
- * is on the very edge createRoom drops — with NO compensating side-channel write.
+ * With the Space active, Element's "Add -> New room" issues ONE POST /_matrix/client/v3/createRoom
+ * whose `initial_state` contains the child's `m.space.parent` (state_key = spaceId) plus a
+ * restricted `m.room.join_rules` referencing the parent Space (then a separate m.space.child PUT
+ * to the Space). Nebu applies `initial_state` (Nebu.Matrix.EventDispatcher.Server.create_room/2);
+ * these scenarios pin that.
  *
  * Test strategy / integrity:
  *   - Real OIDC login via the shared "{word} is logged in via Element Web" step.
- *   - Scenario 1 (API contract): the trigger is one POST /createRoom with the
- *     `initial_state` Element sends. The test issues NO m.space.child / m.space.parent
- *     state write of its own — only what createRoom is responsible for. The oracle is the
- *     child room's own m.space.parent edge (read via /sync). RED until createRoom honours
- *     initial_state.
- *   - Scenario 2 (real UI): the genuine owner UI path (select Space -> Add -> New room),
- *     asserting the room shows under the Space landing view. No forged server state.
+ *   - Scenario 1 (API contract): one POST /createRoom with the `initial_state` Element sends and
+ *     NO m.space.child / m.space.parent state write of its own; the oracle is the child room's own
+ *     m.space.parent edge (read via /sync).
+ *   - Scenario 2 (real UI): the genuine owner UI path (select Space -> Add -> New room).
  *
- * Expected RED until createRoom honours initial_state.
+ * ROOM IDS vs ALIASES (follow-up dx, the cause of the old "K8" failure): Nebu derives a canonical
+ * alias from the room name, so Element navigates to `#/room/#name-123:localhost` and the id read
+ * from the URL is the ALIAS, not the room id. `/sync` is keyed by room id and `m.space.parent`
+ * carries the Space's room id as state_key, so UI-derived ids are resolved to room ids first
+ * (GET /_matrix/client/v1/room_summary/{roomIdOrAlias}).
  */
 
 import { Given, When, Then } from '../../fixtures/nebu-fixtures';
@@ -151,6 +143,27 @@ async function roomStateEvents(
   ];
 }
 
+/**
+ * A room reference read from the Element URL is a room id (`!x:server`) or, for a room with a
+ * canonical alias, the alias (`#name:server`). Resolve an alias to the room id through the
+ * local-only room preview endpoint; a room id is returned unchanged.
+ */
+async function resolveRoomId(
+  request: APIRequestContext,
+  token: string,
+  idOrAlias: string,
+): Promise<string> {
+  if (!idOrAlias.startsWith('#')) return idOrAlias;
+  const resp = await request.get(
+    `${MATRIX_BASE}/_matrix/client/v1/room_summary/${encodeURIComponent(idOrAlias)}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  if (!resp.ok()) {
+    throw new Error(`[resolveRoomId] ${idOrAlias} -> ${resp.status()} ${await resp.text()}`);
+  }
+  return ((await resp.json()) as { room_id: string }).room_id;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Scenario 1 — pure createRoom contract (no side-channel)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -207,19 +220,21 @@ Then(
     if (!room)  throw new Error(`Room "${roomName}" not created.`);
 
     const session = await getApiSession(request, NEBU_USERS.alex, browser);
-    const events = await roomStateEvents(request, session.token, room.roomId);
+    // UI-derived references may be canonical aliases (see the header): compare room ids.
+    const roomId  = await resolveRoomId(request, session.token, room.roomId);
+    const spaceId = await resolveRoomId(request, session.token, space.spaceId);
+    const events = await roomStateEvents(request, session.token, roomId);
 
     const parentEdge = events.find(
-      (e) => e.type === 'm.space.parent' && e.state_key === space.spaceId,
+      (e) => e.type === 'm.space.parent' && e.state_key === spaceId,
     );
 
     expect(
       parentEdge,
-      `Expected the room ${room.roomId} to carry an m.space.parent state event ` +
-      `(state_key=${space.spaceId}) — the link Element supplies in createRoom's ` +
-      `initial_state. createRoom DROPS initial_state today, so the edge is absent and ` +
-      `the room is never associated with the Space. RED until createRoom honours ` +
-      `initial_state. Got event types: ${JSON.stringify(events.map((e) => e.type))}`,
+      `Expected the room ${roomId} to carry an m.space.parent state event ` +
+      `(state_key=${spaceId}) — the link Element supplies in createRoom's ` +
+      `initial_state. Without it the room is never associated with the Space. ` +
+      `Got events: ${JSON.stringify(events.map((e) => [e.type, e.state_key]))}`,
     ).toBeTruthy();
   },
 );

@@ -215,15 +215,6 @@ defmodule Nebu.Matrix.RoomAccountDataStore do
     end
   end
 
-  @doc "`true` when `event_id` exists in `room_id` (used to validate `m.fully_read` targets)."
-  @spec event_in_room?(String.t(), String.t()) :: boolean()
-  def event_in_room?(room_id, event_id) do
-    case safe_query("SELECT 1 FROM events WHERE event_id = $1 AND room_id = $2", [event_id, room_id]) do
-      {:ok, %{rows: [_ | _]}} -> true
-      _ -> false
-    end
-  end
-
   @doc """
   `true` when the user has at least one row with `stream_pos > since_pos`. Cheap pre-check
   so a long-poll `/sync` returns immediately instead of waiting for a wake-up it missed.

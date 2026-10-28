@@ -19,6 +19,16 @@ defmodule Nebu.Matrix.Uia do
   same authoritative row, and "single-use" is enforced by a conditional UPDATE
   (`consumed = TRUE WHERE consumed = FALSE`) that is atomic in PostgreSQL.
 
+  ## The `cross_signing_reset` op is NOT an `m.login.sso` op (story oauth-account-management, A15)
+
+  The `m.oauth` UIA stage of `POST /keys/device_signing/upload` (OAuth callers replacing their
+  cross-signing keys) reuses this table with `op = "cross_signing_reset"`; `stage_complete = TRUE`
+  means "approved on the account page" (`Nebu.Matrix.approve_cross_signing_reset/2`). Such a row
+  must never be completed by the legacy `m.login.sso` fallback (an IdP login there would approve a
+  reset): `complete/2` and `load/1` exclude the op, and conversely the approval functions touch ONLY
+  that op. `find_pending/3` / `mint_session_checked/3` / `consume/4` (run inside the caller's
+  transaction together with the key write) serve the challenge of the device-signing endpoint.
+
   ## Security invariants (G2)
 
     * The `session` is server-issued (256-bit random) and bound to
@@ -90,6 +100,146 @@ defmodule Nebu.Matrix.Uia do
   end
 
   @doc """
+  Like `mint_session/3`, but CHECKED: `{:ok, session_id}` only when the row was really inserted,
+  `:error` otherwise (story oauth-account-management, A14: never a challenge for a session that does
+  not exist).
+  """
+  @spec mint_session_checked(String.t(), String.t(), String.t()) :: {:ok, String.t()} | :error
+  def mint_session_checked(user_id, op, params)
+      when is_binary(user_id) and is_binary(op) and is_binary(params) do
+    session_id = random_id()
+    now = System.system_time(:second)
+
+    case safe_query(
+           """
+           INSERT INTO uia_sessions
+             (session_id, user_id, op, params, stage_complete, consumed, created_at, expires_at)
+           VALUES ($1, $2, $3, $4, FALSE, FALSE, $5, $6)
+           """,
+           [session_id, user_id, op, params, now, now + @session_ttl_seconds]
+         ) do
+      {:ok, %{num_rows: 1}} -> {:ok, session_id}
+      _ -> :error
+    end
+  end
+
+  @doc """
+  The caller's still PENDING session for `(user_id, op, params)` — not approved, not consumed, not
+  expired (newest first): `{:ok, session_id}`, `:none`, or `:error` when the store cannot be read.
+  Used to make the `m.oauth` challenge idempotent (a retry before approval gets the SAME session).
+  An approved-but-unconsumed session is never returned here.
+  """
+  @spec find_pending(String.t(), String.t(), String.t()) :: {:ok, String.t()} | :none | :error
+  def find_pending(user_id, op, params) when is_binary(user_id) and is_binary(op) and is_binary(params) do
+    case safe_query(
+           """
+           SELECT session_id FROM uia_sessions
+            WHERE user_id = $1 AND op = $2 AND params = $3
+              AND stage_complete = FALSE AND consumed = FALSE AND expires_at > $4
+            ORDER BY created_at DESC, session_id
+            LIMIT 1
+           """,
+           [user_id, op, params, System.system_time(:second)]
+         ) do
+      {:ok, %{rows: [[session_id]]}} -> {:ok, session_id}
+      {:ok, %{rows: []}} -> :none
+      _ -> :error
+    end
+  end
+
+  @reset_op "cross_signing_reset"
+  # At most this many PENDING reset requests per user (review cycle 1, Kassandra F-3).
+  @pending_reset_cap 5
+
+  @doc """
+  The canonical `params` of a `cross_signing_reset` session: the requesting `device_id` first, then the
+  `keys_sha256` of ALL supplied keys (the approval binds both, A14). Stable: a two-key map encodes in key
+  order, so `open_reset_request/3` can find the device of a row by the prefix.
+  """
+  @spec reset_params(String.t(), String.t()) :: String.t()
+  def reset_params(device_id, keys_sha256) when is_binary(device_id) and is_binary(keys_sha256),
+    do: canonical_params(%{"device_id" => device_id, "keys_sha256" => keys_sha256})
+
+  @doc """
+  The session of the `m.oauth` challenge for `(user_id, device_id, params)` (`params` from
+  `reset_params/2`): `{:ok, session_id}` or `:error` (nothing was written). Review cycle 1 (Kassandra F-3,
+  code review m3/m4), ONE transaction serialized per `(user, device)` by `pg_advisory_xact_lock`:
+
+    * the same user's still PENDING session for the same `params` is reused (idempotent challenges: Element
+      asks twice and retries without polling);
+    * otherwise the device's OTHER pending requests are consumed (at most ONE pending request per
+      `(user, device)`, so requests of one device can never be told apart or piled up), the user's pending
+      requests are trimmed to #{@pending_reset_cap - 1} (the newest stay) and a new session is minted
+      with a CHECKED insert.
+
+  An approved-but-unconsumed session is never touched or re-issued.
+  """
+  @spec open_reset_request(String.t(), String.t(), String.t()) :: {:ok, String.t()} | :error
+  def open_reset_request(user_id, device_id, params)
+      when is_binary(user_id) and is_binary(device_id) and is_binary(params) do
+    result =
+      if Process.whereis(Nebu.Repo) do
+        Nebu.Repo.transaction(fn ->
+          with {:ok, _} <- safe_query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [user_id <> "|" <> device_id]),
+               {:ok, session_id} <- reuse_or_mint(user_id, device_id, params) do
+            session_id
+          else
+            _ -> Nebu.Repo.rollback(:reset_request_failed)
+          end
+        end)
+      else
+        {:error, :repo_not_started}
+      end
+
+    case result do
+      {:ok, session_id} -> {:ok, session_id}
+      _ -> :error
+    end
+  rescue
+    _ -> :error
+  end
+
+  defp reuse_or_mint(user_id, device_id, params) do
+    case find_pending(user_id, @reset_op, params) do
+      {:ok, session_id} ->
+        {:ok, session_id}
+
+      :none ->
+        now = System.system_time(:second)
+        device_prefix = ~s({"device_id":#{Jason.encode!(device_id)},)
+
+        with {:ok, _} <-
+               safe_query(
+                 """
+                 UPDATE uia_sessions SET consumed = TRUE
+                  WHERE user_id = $1 AND op = $2 AND consumed = FALSE AND stage_complete = FALSE
+                    AND expires_at > $3 AND starts_with(params, $4)
+                 """,
+                 [user_id, @reset_op, now, device_prefix]
+               ),
+             {:ok, _} <-
+               safe_query(
+                 """
+                 UPDATE uia_sessions SET consumed = TRUE
+                  WHERE session_id IN (
+                    SELECT session_id FROM uia_sessions
+                     WHERE user_id = $1 AND op = $2 AND consumed = FALSE AND stage_complete = FALSE AND expires_at > $3
+                     ORDER BY created_at DESC, session_id
+                     OFFSET $4)
+                 """,
+                 [user_id, @reset_op, now, @pending_reset_cap - 1]
+               ) do
+          mint_session_checked(user_id, @reset_op, params)
+        else
+          _ -> :error
+        end
+
+      :error ->
+        :error
+    end
+  end
+
+  @doc """
   The spec UIA challenge body for the `m.login.sso` stage:
   `%{"flows" => [%{"stages" => ["m.login.sso"]}], "session" => id, "params" => %{}}`.
   """
@@ -138,8 +288,10 @@ defmodule Nebu.Matrix.Uia do
   def load(session_id) when is_binary(session_id) do
     now = System.system_time(:second)
 
+    # A15: a `cross_signing_reset` session (the `m.oauth` approval record) is never offered to the
+    # legacy SSO fallback: an IdP login there must not be able to approve a reset.
     case safe_query(
-           "SELECT user_id FROM uia_sessions WHERE session_id = $1 AND expires_at > $2",
+           "SELECT user_id FROM uia_sessions WHERE session_id = $1 AND expires_at > $2 AND op <> 'cross_signing_reset'",
            [session_id, now]
          ) do
       {:ok, %{rows: [[user_id]]}} -> {:ok, %{user_id: user_id}}
@@ -178,6 +330,7 @@ defmodule Nebu.Matrix.Uia do
               SET stage_complete = TRUE
             WHERE session_id = $1
               AND user_id = $2
+              AND op <> 'cross_signing_reset'
               AND consumed = FALSE
               AND expires_at > $3
            RETURNING user_id

@@ -1,0 +1,2 @@
+<p>These are the devices and apps that are signed in to your account. Sign out the ones you do not recognize or no longer use.</p>
+<%= @table %>

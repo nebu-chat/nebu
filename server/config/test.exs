@@ -3,6 +3,14 @@ import Config
 config :logger, level: :warning
 config :nebu_http, port: 4001
 
+# The idle-bucket sweeper must not fire in the background of tests that freeze the limiter clock;
+# its tests call sweep_idle/0 and send(pid, :sweep) explicitly.
+config :nebu_http, rate_limit_sweep_interval_ms: :infinity
+
+# story oauth-hardening-hygiene (HY1): ExUnit stays read-through (every Nebu.OAuth.Config.get/1 reads
+# server_config). The cache tests set a TTL explicitly and restore it; config/runtime.exs does not touch it in :test.
+config :nebu_http, oauth_config_cache_ms: 0
+
 # enhanced-logging/matrix-payload-debug-logging (CI-gate cycle-2): disable
 # Nebu.Repo.QueryTelemetry's own Logger.debug/1 call in :test — the handler
 # still attaches and runs (unconditionally, everywhere), it just skips

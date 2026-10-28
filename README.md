@@ -170,6 +170,8 @@ prints nothing, that's the cause. This only affects your HOST machine/browser â€
 containers are unaffected (they resolve `dex.localtest.me` via the Docker Compose
 network alias, not public DNS). Fix: `sudo sh -c 'echo "127.0.0.1 dex.localtest.me" >> /etc/hosts'`.
 
+To test OAuth 2.0 (needs an https issuer) with Element Web and the admin UI on one origin, `https://nebu.localtest.me:7443`, see [`dev/tls/README.md`](dev/tls/README.md) (`make dev-tls`).
+
 Open http://localhost:8008/admin and complete the Bootstrap Wizard (OIDC issuer: `http://dex.localtest.me:5556/dex`, client id: `nebu-gateway`, client secret: `nebu-dev-secret`). Log in with one of the dev users:
 
 | Email                      | Password   | Role                 |
@@ -190,6 +192,8 @@ Nebu implements the core of the Matrix Client-Server API. Clients that rely only
 **Implemented:** login, logout, sync, send, messages, createRoom, join, typing, receipts, profile, presence, media upload/download/thumbnail, `keys/upload`, `keys/query`.
 
 **Intentionally excluded:** `/_matrix/federation/*`, `/_matrix/identity/*`, `/_matrix/client/v3/keys/claim` (no E2EE).
+
+**OAuth 2.0 API (opt-in, Matrix v1.15):** Nebu can act as an OAuth 2.0 authorization server in front of the corporate IdP; it is off by default (`oauth_enabled = false`) and `/_matrix/client/versions` lists v1.15 only while it is enabled. An administrator switches it on and off on the Configuration page of the Admin UI (`/admin/config`, "OAuth 2.0 authorization server") or with SQL. Preconditions, activation checklist and rollback: [`docs/architecture/07-deployment.md`](docs/architecture/07-deployment.md) ("Activating OAuth").
 
 <!-- markdownlint-disable-next-line MD013 -->
 Full endpoint list: [`docs/matrix-api-scope.md`](docs/matrix-api-scope.md)

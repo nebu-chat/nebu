@@ -220,7 +220,7 @@ defmodule Nebu.Workers.MediaScanWorkerKillSwitchTest do
       for name <- [@sm_calls, @sm_overrides, @clamav_calls, @audit_calls, @fixtures] do
         case Process.whereis(name) do
           nil -> :ok
-          pid -> if Process.alive?(pid), do: Agent.stop(pid)
+          pid -> if Process.alive?(pid), do: (try do Agent.stop(pid) catch :exit, _ -> :ok end)
         end
       end
 
@@ -240,7 +240,7 @@ defmodule Nebu.Workers.MediaScanWorkerKillSwitchTest do
       Application.delete_env(:compliance, :repo)
 
       if pid = Process.whereis(Nebu.Media.Config) do
-        if Process.alive?(pid), do: GenServer.stop(pid)
+        if Process.alive?(pid), do: (try do GenServer.stop(pid) catch :exit, _ -> :ok end)
       end
     end)
 

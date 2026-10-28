@@ -1,0 +1,40 @@
+# Security Review: cross-signing-upload-races (follow-up `cq` (g), REQ-2026-007)
+
+Date: 2026-10-28. Reviewer: Kassandra (`nebu-kassandra`), read-only. Saved by the orchestrator from the reviewer's hand-back (the reviewer's harness could not write into the worktree). Condensed, all findings kept.
+
+**Diff scope:** uncommitted change in `open-chat-oauth`: `server/lib/nebu/matrix/cross_signing_key_store.ex` (new `lock_keys/1`; `merge_signatures/4` is one transaction; `get_keys_for_update/1`, `find_key_object/2`, `persist_single/3` removed; `put_keys_no_flag/2` runs inside the caller's transaction), `server/lib/nebu/web/router/protected.ex` (first upload, OAuth replacement and signature merge decide on `lock_keys/1`; unlocked pre-check removed), `server/lib/nebu/compliance/user_deletion.ex` (comment only), `docs/architecture/08-concepts.md`, `follow-ups.md`.
+
+**Verdict: APPROVED (cycle 0). CRITICAL 0, HIGH 0, MEDIUM 0, LOW 2, INFO 4.** F-1 contradicts the story's own D5 / AC 5 and is recommended in-story.
+
+## Findings
+
+| # | Severity | Location | Vulnerability | Remediation |
+|---|---|---|---|---|
+| F-1 | LOW | `protected.ex:3149-3157` (`merge_one_signature/3`) -> `cross_signing_key_store.ex:232-234` (guard on `merge_signatures/4`) | CWE-755 / CWE-117 / CWE-532. A non-map `signatures` value now crashes with a 500 (FunctionClauseError; `{"@a": "x"}` per-signer value: BadMapError inside the transaction) and Bandit's ERROR log (`Exception.format`) carries the call arguments: user id, key id, signature value, the whole submitted object (up to about 1 MB). Before the change the removed pre-check answered a failure entry. | Validate the shape in the handler: `signatures` not a map, or any per-signer value not a map -> `:invalid` (failure entry) before the store call. Add a test that checks the 200 failure entry and that no ERROR log contains the key id. |
+| F-2 | LOW | `protected.ex:3134-3141`, `merge_signatures/4` | CWE-770 / CWE-400. Every key id of the body that is not a device key now costs a locked transaction (BEGIN, row lock, advisory lock, SELECT, COMMIT), no cap on key ids, no rate limit on the route; about 100k sequential transactions per 1 MB body. The O(n) amplification pre-existed (about 3x worse now); contention lands only on the caller's own `sync_global|` key (cross-user bodies get M_FORBIDDEN first). | Cap entries per request (e.g. 100 key ids per user, 1000 total, else 400 `M_TOO_LARGE` or failure entries) and/or one `lock_keys/1` per user per request. |
+| I-1 | INFO | `cross_signing_key_store.ex:289-290` | The kept comment says "any authenticated user can sign another user's master key": false, `merge_user_signatures/4` answers M_FORBIDDEN for every other user, so only the caller's own row is ever locked. | Correct the comment. |
+| I-2 | INFO | `cross_signing_key_store.ex:232, 264` | `signed_object \\ nil` turns the validate-then-persist comparison off; only tests use the default. | Make the argument required; tests pass the stored object. |
+| I-3 | INFO | `do_signatures_upload/1` | One request can apply some writes then answer 500; merges are idempotent, a retry is harmless. | Optionally document. |
+| I-4 | INFO | RequestLogger debug bodies (pre-existing) | Redacted debug bodies contain public cross-signing key objects and signatures: public by protocol (served via `/keys/query`), no private part, no token, no message content, debug level only. | Acceptable. |
+
+## Verified clean
+
+- **First-upload race (TOFU overwrite) closed.** `lock_keys/1`: row lock, advisory lock, then a separate SELECT; for an absent row the advisory lock serialises the racers; under Read Committed the read after the lock sees the winner's INSERT; the loser goes to `{:stored, _}` (200 for identical keys without a second `changed_pos`, else the `m.oauth` challenge or legacy 403), also for an attacker with a stolen token. The first upload stays trust-on-first-use by design.
+- **Every writer of the key columns holds the advisory lock when it writes** (`put_keys/2`, `put_keys_no_flag/2` re-entrantly, the erasure DELETE); `consume_changed_flag/1` is a one-statement flag UPDATE without advisory lock, no cycle.
+- **Replacement cannot skip UIA / OAuth approval.** Branch table unchanged (empty body M_MISSING_PARAM, idempotent check before approval, `:auth_api` decides, legacy 403); `replace_with_approval/7` consumes the approval, then `lock_keys/1`; a failed read or write rolls back, the approval is not burned; a lost-response retry gets the idempotent 200 before any consume; the two transactions (D-A3) are safe because the write re-reads under the lock and keeps the unsupplied keys.
+- **Merge base cannot be stale:** lock, find, object comparison against the locked object and the write of all three columns are one transaction; a concurrent reset is never written back with old columns; a merge never creates a row.
+- **Erasure guard unchanged** (`deletion_status` predicate on both INSERTs; a merge after an erasure finds no row, an upload returns `user_erased`).
+- **No deadlock:** erasure uia row -> cs row -> advisory; replacement uia row -> cs row -> advisory; upload/merge cs row -> advisory; AccountData advisory only; nothing holds the advisory lock and waits for a cs or uia row.
+- **Lock target:** only the caller's own row and advisory key. Failed lock/read/undecodable row = `{:error, _}` -> 500, never the first-upload branch; a raise inside `Repo.transaction` rolls back (no partial merge write). No existence oracle (missing key, mismatched object, erased user give the same `M_INVALID_SIGNATURE` entry). All SQL parameterised. Docs/pins match the code (one wording nit: the closure says the object check is "repeated", it moved into the store).
+
+Summary: CRITICAL 0, HIGH 0, MEDIUM 0, LOW 2 (F-1 recommended in-story, F-2 advisory), INFO 4. **APPROVED.**
+
+## Delta review of fix cycle 1 (2026-10-28, Kassandra, read-only)
+
+**Verdict: APPROVED. CLEAN, 1 new LOW (D-1).** Checked clean: the submitted `signatures` shape (null, string, list, per-signer non-map, second signer non-map) is rejected with a failure entry before any store call on both the device and the cross-signing path, the other functions on the merge path (`find_matching_key`, `same_object?`, `key_id_of`, Jason) cannot raise on client data, the device-path change (per-signer `null` was tolerated, now a failure entry) is acceptable, the new tests are not vacuous (mutants MS1-MS3, M09 killed); `signed_object` is required and no unchecked merge path is left in `server/lib`; the lock-order docs match the code, and the absent-then-present deadlock window is not worse than documented (needs the user's own token and only hits the user's own erasure, no cross-user effect, happens at most once because the row exists afterwards, PG resolves it with 40P01: the erasure fails closed or the merge answers 500 and writes nothing).
+
+| # | Severity | Location | Vulnerability | Remediation |
+|---|---|---|---|---|
+| D-1 | LOW | `cross_signing_key_store.ex:383-390` (`deep_merge_signatures/2`), `protected.ex:~3230` (`deep_merge_sig_map/2`) | CWE-755 / CWE-532. Malformed signatures already STORED in the row (a user can store a master key with `"signatures": "x"` or `{"@me": "x"}` without UIA via their own first upload or an approved replacement) still make the merge raise BadMapError; Bandit's crash log prints the submitted signer key ids and signatures. Own row only, nothing written, nothing confidential. The shape tests store well-formed signatures only. | Treat a stored `signatures` / per-signer value that is not a map as `%{}` in both merge helpers; optionally validate every key object at `device_signing/upload`. Add a test that stores such a key and then calls signatures/upload. |
+
+Orchestrator decision: tolerant merge helpers (no new validation at `device_signing/upload`, no API change), fixed in dev cycle 2 together with the code-review MINOR-A (a moduledoc sentence claimed the upload had no second row lock; a first upload onto a NULL-master row upserts after the advisory lock, same accepted window).
