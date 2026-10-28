@@ -150,7 +150,11 @@ defmodule Nebu.Matrix.SsoStoreConfirmTest do
   # AC10.3 — the cap
   # ════════════════════════════════════════════════════════════════════════════
 
+  # Filling a store to its cap is quadratic (every put counts the whole table): 45-60 s and more on the shared CI runner, so the 60 s
+  # default timeout does not hold there, and the filler loginTokens need a TTL that outlives the fill.
   describe "AC10.3 — cap of 10 000 :confirm entries per node" do
+    @describetag timeout: 300_000
+
     test "with 10 000 live entries the next put answers {:error, :store_full}; a pop frees a slot" do
       try do
         for i <- 1..10_000, do: :ok = put("cap-#{i}")
@@ -187,7 +191,7 @@ defmodule Nebu.Matrix.SsoStoreConfirmTest do
 
     test "10 000 live loginTokens do not block put_confirm" do
       try do
-        for i <- 1..10_000, do: :ok = SsoStore.put_login_token("tok-#{i}", "id", 30)
+        for i <- 1..10_000, do: :ok = SsoStore.put_login_token("tok-#{i}", "id", 300)
         assert SsoStore.put_login_token("tok-over", "id", 30) == {:error, :store_full}, "the token cap itself is unchanged"
         assert put("confirm-while-tokens-full") == :ok
       after

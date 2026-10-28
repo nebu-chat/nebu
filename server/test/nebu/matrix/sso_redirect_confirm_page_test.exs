@@ -275,6 +275,8 @@ defmodule Nebu.Matrix.SsoRedirectConfirmPageTest do
       assert title.(limited) == "Too many requests"
     end
 
+    # Filling the confirm store to its 10 000 cap is quadratic (45-60 s and more on the shared CI runner): more than the 60 s default.
+    @tag timeout: 300_000
     test "N5: the unavailable page has the title \"Sign-in unavailable\" (confirm store full)", %{priv: priv} do
       fill = T.confirm_entry_fixture()
 
