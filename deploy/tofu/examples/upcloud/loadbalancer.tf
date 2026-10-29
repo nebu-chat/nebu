@@ -201,22 +201,15 @@ resource "upcloud_loadbalancer_frontend_rule" "http_redirect" {
   name     = "redirect-to-https"
   priority = 100
 
+  # ONE matcher only: the provider (upcloud 5.x) rejects more than one ("matchers list must contain at most 1 elements") at apply.
+  # "alb":     every path ("starts /").
+  # "dynamic": every path EXCEPT the ACME HTTP-01 challenge (UpCloud's issuance validates it here): the inverse of the challenge
+  #            prefix is the same set as "starts /" minus that prefix.
   matchers {
     path {
-      method = "starts"
-      value  = "/"
-    }
-  }
-
-  # "dynamic": leave the ACME HTTP-01 challenge path alone (UpCloud's issuance validates it here).
-  dynamic "matchers" {
-    for_each = var.tls_mode == "dynamic" ? [1] : []
-    content {
-      path {
-        method  = "starts"
-        value   = "/.well-known/acme-challenge/"
-        inverse = true
-      }
+      method  = "starts"
+      value   = var.tls_mode == "dynamic" ? "/.well-known/acme-challenge/" : "/"
+      inverse = var.tls_mode == "dynamic"
     }
   }
 
