@@ -20,20 +20,26 @@ packages:
 write_files:
   # ── /opt/nebu/.secrets/internal_secret ────────────────────────────────────
   # Quoted scalar — no trailing newline added by YAML block scalar.
+  # Bind-mounted into the server container, which runs as the non-root user `nebu` (server/Dockerfile): it must be able to read the
+  # file. /opt/nebu/.secrets itself stays 0700 root, so nothing else on the host can reach it.
   - path: /opt/nebu/.secrets/internal_secret
     owner: root:root
-    permissions: "0600"
+    permissions: "0644"
     content: "${internal_secret}"
 
 %{ if enable_media_gateway ~}
+  # Bind-mounted into the server container, which runs as the non-root user `nebu` (server/Dockerfile): it must be able to read the
+  # file. /opt/nebu/.secrets itself stays 0700 root, so nothing else on the host can reach it.
   - path: /opt/nebu/.secrets/s3_access_key
     owner: root:root
-    permissions: "0600"
+    permissions: "0644"
     content: "${s3_access_key}"
 
+  # Bind-mounted into the server container, which runs as the non-root user `nebu` (server/Dockerfile): it must be able to read the
+  # file. /opt/nebu/.secrets itself stays 0700 root, so nothing else on the host can reach it.
   - path: /opt/nebu/.secrets/s3_secret_key
     owner: root:root
-    permissions: "0600"
+    permissions: "0644"
     content: "${s3_secret_key}"
 
 %{ endif ~}
@@ -273,6 +279,10 @@ write_files:
           proxy_read_timeout    90s;
           proxy_send_timeout    90s;
           proxy_connect_timeout 10s;
+          # The admin sign-in answers with a long redirect plus cookies: the 4k default header buffer ends in 502 (upstream sent too big header).
+          proxy_buffer_size       16k;
+          proxy_buffers           8 16k;
+          proxy_busy_buffers_size 32k;
 %{ if oidc_mode == "dex" ~}
 
           location /dex/ {
@@ -453,6 +463,10 @@ write_files:
           proxy_read_timeout    90s;
           proxy_send_timeout    90s;
           proxy_connect_timeout 10s;
+          # The admin sign-in answers with a long redirect plus cookies: the 4k default header buffer ends in 502 (upstream sent too big header).
+          proxy_buffer_size       16k;
+          proxy_buffers           8 16k;
+          proxy_busy_buffers_size 32k;
 %{ if oidc_mode == "dex" ~}
 
           # Dex OIDC provider — accessible via path prefix (nginx proxies to local port 5556).
