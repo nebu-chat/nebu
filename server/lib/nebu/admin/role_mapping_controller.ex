@@ -26,7 +26,6 @@ defmodule Nebu.Admin.RoleMappingController do
 
   # the page the fresh re-authentication marker of the form is bound to (and where the admin returns)
   @page "/admin/config/role-mapping"
-  @page_reauth Nebu.Admin.Auth.reauth_start_path(@page)
 
   @key "admin_group_claim"
   # the value the admin check looks for when none is stored (`Nebu.Admin.Auth`)
@@ -37,7 +36,8 @@ defmodule Nebu.Admin.RoleMappingController do
     |> assign(:value, current_value())
     |> assign(:error, nil)
     |> assign(:claim_path, Nebu.Admin.Auth.configured_admin_claim_path())
-    |> assign(:reauth_link, nil)
+    |> assign(:inline_reauth_link, false)
+    |> Nebu.Admin.OAuthAdminHelpers.assign_reauth(@page)
     |> assign(:page_title, "Role Mapping")
     |> assign(:active_nav, "role-mapping")
     |> assign(:bootstrap_completed, Nebu.Admin.Auth.bootstrap_completed?())
@@ -57,10 +57,10 @@ defmodule Nebu.Admin.RoleMappingController do
     value = String.trim(if is_binary(params[@key]), do: params[@key], else: "")
 
     case refusal(conn, value) do
-      {message, link} ->
+      {message, sign_in_link?} ->
         # per-field refusal (200, nothing written, the marker kept): empty (mirrors ClaimMappingController), a value that occurs in EVERY token
         # (SEC delta gate X2-1) or a value the saving admin would not satisfy (follow-up dg)
-        render_refusal(conn, value, message, link)
+        render_form(conn, value, message, sign_in_link?)
 
       nil ->
         save(conn, value)
@@ -87,23 +87,24 @@ defmodule Nebu.Admin.RoleMappingController do
       {:error, :audit} ->
         conn
         |> put_flash(:error, Nebu.Admin.OAuthAdminHelpers.audit_refused_flash("Role mapping"))
-        |> render_form(value, nil, nil)
+        |> render_form(value, nil, false)
 
       _ ->
         conn
         |> put_flash(:error, "Could not save (database unavailable).")
-        |> render_form(value, nil, nil)
+        |> render_form(value, nil, false)
     end
   end
 
-  # the refusals in order: empty, universal (SEC delta gate X2-1), not satisfied by the saving admin (follow-up dg); `nil` = go on and save
+  # the refusals in order: empty, universal (SEC delta gate X2-1), not satisfied by the saving admin (follow-up dg); `nil` = go on and save.
+  # `{message, sign_in_link?}`: whether the error also offers the inline "Sign in again" link (a fresh sign-in can change the outcome)
   defp refusal(conn, value) do
     cond do
       value == "" ->
-        {"must not be empty", nil}
+        {"must not be empty", false}
 
       universal_value?(value) ->
-        {"Not saved. This value occurs in every sign-in token, it would make every user an administrator.", nil}
+        {"Not saved. This value occurs in every sign-in token, it would make every user an administrator.", false}
 
       true ->
         case Nebu.Admin.Auth.reauth_role_check(conn, value) do
@@ -125,25 +126,24 @@ defmodule Nebu.Admin.RoleMappingController do
 
         {"Not saved. This value is not in your own sign-in token (claim: #{where}). If it were saved, you could not sign in as an administrator again, and other administrators " <>
            "would lose access unless their tokens hold it too. Join that group at your identity provider and sign in again, or ask the person who runs the server to set it with: #{@rpc_hint}",
-         @page_reauth}
+         true}
 
       :undecidable ->
         {"Not saved. Your sign-in token has more than 32 distinct values under this claim, so this value cannot be checked here, and we cannot tell whether other administrators " <>
-           "would keep access. Ask the person who runs the server to set it with: #{@rpc_hint}", nil}
+           "would keep access. Ask the person who runs the server to set it with: #{@rpc_hint}", false}
 
       :unknown ->
-        {"Not saved. This value could not be verified: your fresh sign-in did not record which values your token holds. Sign in again and enter the value once more.", @page_reauth}
+        {"Not saved. This value could not be verified: your fresh sign-in did not record which values your token holds. Sign in again and enter the value once more.", true}
     end
   end
 
-  defp render_refusal(conn, value, message, link), do: render_form(conn, value, message, link)
-
-  defp render_form(conn, value, error, link) do
+  defp render_form(conn, value, error, sign_in_link?) do
     conn
     |> assign(:value, value)
     |> assign(:error, error)
     |> assign(:claim_path, Nebu.Admin.Auth.configured_admin_claim_path())
-    |> assign(:reauth_link, link)
+    |> assign(:inline_reauth_link, sign_in_link?)
+    |> Nebu.Admin.OAuthAdminHelpers.assign_reauth(@page)
     |> assign(:page_title, "Role Mapping")
     |> assign(:active_nav, "role-mapping")
     |> assign(:bootstrap_completed, Nebu.Admin.Auth.bootstrap_completed?())

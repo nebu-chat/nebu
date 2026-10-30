@@ -17,6 +17,11 @@
  * origins, SSO redirect schemes) need the same fresh sign-in (marker bound to /admin/config, single use: it is
  * consumed by a SUCCESSFUL save, kept after a validation error). `saveConfigFormWithAdminReauth` drives that.
  *
+ * Story admin-reauth-button-flow: the pages decide at render time. Without a fresh sign-in (no marker bound to the page, or an expired one) the form shows
+ * the link "Sign in again to save" / "... to approve" / "... to revoke" INSTEAD of its submit: the helpers below click that link first, sign in at Dex,
+ * come back to the (empty) page, type the form and only then press the submit that has appeared. A marker that expired between page load and submit is
+ * still answered by the redirect to the sign-in (kept as a fallback). Nothing is typed before the sign-in: it would be lost.
+ *
  * Real flows only: the Dex login is driven in the browser, no cookie forging.
  */
 
@@ -52,41 +57,96 @@ export async function signInAtDexAsAdmin(page: Page): Promise<void> {
   if (outcome === 'grant') await grant.click();
 }
 
+/** The link that replaces the submit of a marker-gated form while the session holds no fresh sign-in (story admin-reauth-button-flow). */
+export const signInAgainLink = (scope: Page | Locator, action: 'save' | 'approve' | 'revoke'): Locator =>
+  scope.getByRole('link', { name: `Sign in again to ${action}`, exact: true });
+
 export type SubmitOutcome = {
-  /** The browser went through the IdP login form (the fresh re-authentication of SO4). */
+  /** The browser went through the IdP login form (the fresh re-authentication of SO4), by the link or by the fallback. */
   reauthenticated: boolean;
+  /**
+   * The sign-in started at the link "Sign in again to ..." that replaces the submit (story admin-reauth-button-flow). The FIRST save of a page in a session (no
+   * fresh marker known) must go this way: the helpers fail when the link is missing, the steps assert `viaLink`.
+   */
+  viaLink: boolean;
+};
+
+// Which marker paths are known to hold a fresh sign-in in THIS browser page: set when a sign-in through the link came back, cleared by a save / decision that consumed
+// it (a 200 re-render of a rejected value keeps the marker). Without a known marker the page MUST show the link; the "POST refused, redirect to the sign-in"
+// fallback is only legitimate when a marker was fresh before and expired meanwhile (it must never hide a missing link).
+const knownMarkers = new WeakMap<Page, Set<string>>();
+export const markerKnown = (page: Page, path: string): boolean => knownMarkers.get(page)?.has(path) ?? false;
+export const rememberMarker = (page: Page, path: string): void => {
+  const set = knownMarkers.get(page) ?? new Set<string>();
+  set.add(path);
+  knownMarkers.set(page, set);
+};
+export const forgetMarker = (page: Page, path: string): void => {
+  knownMarkers.get(page)?.delete(path);
 };
 
 /**
- * Click `submit` on a confirm page and drive the decision to its end: when the server asks for a fresh sign-in the
- * browser lands on Dex, the operator signs in, comes back to the confirm page (`confirmPath`) and submits again.
- * Resolves once the browser is on a page matching `donePath` (the list the decision redirects to).
+ * Drive the decision of a confirm page to its end. Without a fresh sign-in the page shows the link `signInLink` ("Sign in again to approve" / "... to
+ * revoke") instead of the submit: click it, sign in at Dex, come back to the confirm page (`confirmPath`), `refill` the form (the page comes back
+ * empty), click `submit`. With a fresh sign-in the submit is there from the start. A marker that expired in between is answered by the redirect to the
+ * sign-in: the same round trip once more. Resolves once the browser is on a page matching `donePath` (the list the decision redirects to).
  */
 export async function submitWithAdminReauth(
   page: Page,
   opts: {
     submit: () => Locator;
+    /** The "Sign in again to ..." link of the confirm page (present while the sign-in is not fresh). */
+    signInLink: () => Locator;
     confirmPath: RegExp;
     confirmPageSelector: string;
     donePath: RegExp;
-    /** Re-type the form after the fresh sign-in (the confirm page is rendered anew and empty). */
+    /** Type the form once the submit is there (the confirm page is rendered anew and empty after the fresh sign-in). */
     refill?: () => Promise<void>;
   },
 ): Promise<SubmitOutcome> {
-  await opts.submit().click();
-  // Either the decision went through (redirect to the list), or the server asks for a fresh sign-in (Dex).
-  await page.waitForURL((u) => opts.donePath.test(u.pathname) || isDexAuth(u), { timeout: NAV_TIMEOUT_MS });
-  if (opts.donePath.test(new URL(page.url()).pathname)) return { reauthenticated: false };
+  const signInAndReturn = async (): Promise<void> => {
+    await signInAtDexAsAdmin(page);
+    await page.waitForURL((u) => opts.confirmPath.test(u.pathname), { timeout: NAV_TIMEOUT_MS });
+    await expect(page.locator(opts.confirmPageSelector), 'back on the confirm page after the fresh sign-in').toBeVisible({
+      timeout: 15_000,
+    });
+  };
 
-  await signInAtDexAsAdmin(page);
-  await page.waitForURL((u) => opts.confirmPath.test(u.pathname), { timeout: NAV_TIMEOUT_MS });
-  await expect(page.locator(opts.confirmPageSelector), 'back on the confirm page after the fresh sign-in').toBeVisible({
-    timeout: 15_000,
-  });
+  await expect(opts.submit().or(opts.signInLink()), 'the confirm page shows its submit or the sign-in link').toBeVisible({ timeout: 15_000 });
+  const markerPath = new URL(page.url()).pathname;
+  const known = markerKnown(page, markerPath);
+  const linkShown = (await opts.signInLink().count()) > 0;
+  if (!known) {
+    expect(linkShown, 'no fresh sign-in is known for this confirm page: it must show the "Sign in again to ..." link instead of the submit').toBe(true);
+  }
+  let reauthenticated = false;
+  let viaLink = false;
+  if (linkShown) {
+    await opts.signInLink().click();
+    await page.waitForURL((u) => isDexAuth(u), { timeout: NAV_TIMEOUT_MS });
+    await signInAndReturn();
+    await expect(opts.submit(), 'the submit appears once the sign-in is fresh').toBeVisible({ timeout: 15_000 });
+    reauthenticated = true;
+    viaLink = true;
+    rememberMarker(page, markerPath);
+  }
+  if (opts.refill) await opts.refill();
+  await opts.submit().click();
+  // Either the decision went through (redirect to the list), or the marker expired meanwhile and the server asks for a fresh sign-in (Dex).
+  await page.waitForURL((u) => opts.donePath.test(u.pathname) || isDexAuth(u), { timeout: NAV_TIMEOUT_MS });
+  if (opts.donePath.test(new URL(page.url()).pathname)) {
+    forgetMarker(page, markerPath);
+    return { reauthenticated, viaLink };
+  }
+
+  // fallback: only when a marker was fresh before and expired meanwhile; right after a sign-in through the link a refusal is a defect
+  expect(known, 'the decision was refused although the sign-in through the link had just been done').toBe(true);
+  await signInAndReturn();
   if (opts.refill) await opts.refill();
   await opts.submit().click();
   await page.waitForURL((u) => opts.donePath.test(u.pathname), { timeout: NAV_TIMEOUT_MS });
-  return { reauthenticated: true };
+  forgetMarker(page, markerPath);
+  return { reauthenticated: true, viaLink };
 }
 
 /** Approve a pending registration through its confirm page (list link -> confirm page -> submit, with re-auth). */
@@ -105,6 +165,7 @@ export async function approveThroughConfirmPage(page: Page, clientId: string): P
 
   const outcome = await submitWithAdminReauth(page, {
     submit: () => page.locator('[data-role="approve-confirm-form"] [data-role="approve-confirm"]'),
+    signInLink: () => signInAgainLink(page.locator('[data-role="approve-confirm-form"]'), 'approve'),
     confirmPath: new RegExp(`${REGISTRATIONS_PATH}/[^/]+/approve$`),
     confirmPageSelector: '[data-page="oauth-approve-confirm"]',
     donePath: new RegExp(`${REGISTRATIONS_PATH}$`),
@@ -122,14 +183,15 @@ export async function revokeThroughConfirmPage(
 ): Promise<SubmitOutcome> {
   await page.goto(`${ADMIN_BASE_URL}${CLIENTS_PATH}/${encodeURIComponent(clientId)}/revoke`);
   await expect(page.locator('[data-page="oauth-revoke-confirm"]')).toBeVisible({ timeout: 15_000 });
+  // typed AFTER the sign-in (the page comes back empty), when the submit is there
   const fill = async (): Promise<void> => {
     await page.locator('[data-role="revoke-confirm-form"] [name="confirm_host"]').fill(typedHost);
     if (reason !== '') await page.locator('[data-role="revoke-confirm-form"] [name="reason"]').fill(reason);
   };
-  await fill();
   return submitWithAdminReauth(page, {
     refill: fill,
     submit: () => page.locator('[data-role="revoke-confirm-form"] [data-role="revoke-confirm"]'),
+    signInLink: () => signInAgainLink(page.locator('[data-role="revoke-confirm-form"]'), 'revoke'),
     confirmPath: new RegExp(`${CLIENTS_PATH}/[^/]+/revoke$`),
     confirmPageSelector: '[data-page="oauth-revoke-confirm"]',
     donePath: new RegExp(`${CLIENTS_PATH}$`),
@@ -138,11 +200,11 @@ export async function revokeThroughConfirmPage(
 
 /**
  * Submit one of the SSO trust forms of /admin/config (`#sso-origins-form`, `#sso-schemes-form`) with the fresh sign-in
- * they need (story sso-origins-admin-hardening, X-1). The POST is refused with a redirect to
- * /admin/login/start?mode=reauth when the session has no fresh marker bound to /admin/config; the browser then goes
- * through the Dex login form, comes back to /admin/config (rendered anew, the form empty, with the info flash "Signed in again. Your change was
- * not saved yet ...") and the typed value is re-entered and submitted once more (the POST is never replayed). The admin may also still hold a marker
- * (a validation error does not consume it): then the first POST answers directly.
+ * they need (story sso-origins-admin-hardening, X-1). Without a fresh marker bound to /admin/config the form shows the link "Sign in again to
+ * save" instead of its submit (story admin-reauth-button-flow): the helper reads the typed value, follows the link, goes through the Dex login form, comes
+ * back to /admin/config (rendered anew, the form empty), re-enters the value and presses the submit that has appeared. The admin may also still hold a
+ * marker (a validation error does not consume it): then the submit is there from the start. A marker that expired between page load and submit is
+ * answered by a redirect to /admin/login/start?mode=reauth: the same round trip once more (the POST is never replayed).
  *
  * Resolves after the final POST answered: a redirect back to /admin/config (saved) or the 200 re-render of a
  * rejected value (at the POST path). `form`: CSS selector of the form, `field`: selector of its text input (inside
@@ -168,9 +230,31 @@ export async function saveConfigFormWithAdminReauth(
   const asksForSignIn = (status: number, location: string): boolean =>
     [302, 303].includes(status) && location.startsWith('/admin/login/start');
 
-  let response = await press();
   let reauthenticated = false;
+  let viaLink = false;
+  // story admin-reauth-button-flow: without a fresh sign-in the form shows the link "Sign in again to save" instead of its submit: sign in FIRST,
+  // then the typed value is entered again and the submit (now there) is pressed
+  const link = signInAgainLink(form, 'save');
+  await expect(form.getByRole('button', { name: opts.button }).or(link), 'the form shows its submit or the sign-in link').toBeVisible({ timeout: 15_000 });
+  const known = markerKnown(page, CONFIG_PATH);
+  const linkShown = (await link.count()) > 0;
+  if (!known) expect(linkShown, 'no fresh sign-in is known for /admin/config: the form must show the "Sign in again to save" link instead of its submit').toBe(true);
+  if (linkShown) {
+    viaLink = true;
+    rememberMarker(page, CONFIG_PATH);
+    await link.click();
+    await page.waitForURL((u) => isDexAuth(u), { timeout: NAV_TIMEOUT_MS });
+    await signInAtDexAsAdmin(page);
+    await page.waitForURL((u) => u.pathname === CONFIG_PATH, { timeout: NAV_TIMEOUT_MS });
+    await expect(page.locator(opts.form), 'back on /admin/config after the fresh sign-in').toBeVisible({ timeout: 15_000 });
+    await page.locator(opts.form).locator(opts.field).fill(typed);
+    reauthenticated = true;
+  }
+
+  let response = await press();
+  // fallback: the marker expired between the page load and the submit: the POST is refused with the redirect to the sign-in (never replayed)
   if (asksForSignIn(response.status(), response.headers()['location'] ?? '')) {
+    expect(known, 'the save was refused although the sign-in through the link had just been done').toBe(true);
     await page.waitForURL((u) => isDexAuth(u), { timeout: NAV_TIMEOUT_MS });
     await signInAtDexAsAdmin(page);
     await page.waitForURL((u) => u.pathname === CONFIG_PATH, { timeout: NAV_TIMEOUT_MS });
@@ -184,8 +268,9 @@ export async function saveConfigFormWithAdminReauth(
     'the save is answered by a redirect back to /admin/config (saved) or the 200 re-render of a rejected value, not by another sign-in request or a refusal',
   ).not.toBe(403);
   if ([302, 303].includes(response.status())) {
+    forgetMarker(page, CONFIG_PATH); // a save consumes the marker (one fresh sign-in, one save)
     // Saved: wait for the redirect target to be loaded AND rendered with the flash of THIS save (the page after the
-    // fresh sign-in carries an info flash "Signed in again. Your change was not saved yet ...": it must not be
+    // fresh sign-in carries an info flash "Signed in again. ...": it must not be
     // mistaken for the result, hence the exact texts of the save flashes).
     await page.waitForURL((u) => u.pathname === CONFIG_PATH, { timeout: NAV_TIMEOUT_MS });
     await expect(
@@ -199,7 +284,7 @@ export async function saveConfigFormWithAdminReauth(
     // a rejected value is re-rendered by the POST itself (200)
     await page.waitForLoadState('load');
   }
-  return { reauthenticated };
+  return { reauthenticated, viaLink };
 }
 
 /**
@@ -224,19 +309,42 @@ export async function saveMappingFormWithAdminReauth(page: Page, opts: { page: s
   };
   const asksForSignIn = (status: number, location: string): boolean => [302, 303].includes(status) && location.startsWith('/admin/login/start');
 
-  let response = await press();
   let reauthenticated = false;
-  if (asksForSignIn(response.status(), response.headers()['location'] ?? '')) {
+  let viaLink = false;
+  const signInAndRetype = async (): Promise<void> => {
     await page.waitForURL((u) => isDexAuth(u), { timeout: NAV_TIMEOUT_MS });
     await signInAtDexAsAdmin(page);
     await page.waitForURL((u) => u.pathname === opts.page, { timeout: NAV_TIMEOUT_MS });
-    await expect(page.locator(`form[action="${opts.page}"]`), 'back on the mapping page after the fresh sign-in').toBeVisible({ timeout: 15_000 });
+    await expect(page.locator(`form[action="${opts.page}"]`), 'back on the page after the fresh sign-in').toBeVisible({ timeout: 15_000 });
     for (const [name, value] of Object.entries(typed)) await page.locator(`form[action="${opts.page}"] input[name="${name}"]`).fill(value);
-    response = await press();
     reauthenticated = true;
+  };
+
+  // story admin-reauth-button-flow: without a fresh sign-in the form shows the link "Sign in again to save" instead of its submit: sign in FIRST,
+  // then the typed values are entered again and the submit (now there) is pressed
+  const link = signInAgainLink(form, 'save');
+  await expect(form.getByRole('button', { name: opts.button }).or(link), 'the form shows its submit or the sign-in link').toBeVisible({ timeout: 15_000 });
+  const known = markerKnown(page, opts.page);
+  const linkShown = (await link.count()) > 0;
+  if (!known) expect(linkShown, `no fresh sign-in is known for ${opts.page}: the form must show the "Sign in again to save" link instead of its submit`).toBe(true);
+  if (linkShown) {
+    viaLink = true;
+    rememberMarker(page, opts.page);
+    await link.click();
+    await signInAndRetype();
+  }
+
+  let response = await press();
+  // fallback: a marker that was fresh expired between the page load and the submit: the POST is refused with the redirect to the sign-in (never replayed)
+  if (asksForSignIn(response.status(), response.headers()['location'] ?? '')) {
+    expect(known, 'the save was refused although the sign-in through the link had just been done').toBe(true);
+    await signInAndRetype();
+    response = await press();
   }
   expect(response.status(), 'the save is answered by a redirect (saved) or the 200 re-render of a rejected value, never a refusal').not.toBe(403);
-  if ([302, 303].includes(response.status())) await page.waitForURL((u) => u.pathname === opts.page, { timeout: NAV_TIMEOUT_MS });
-  else await page.waitForLoadState('load');
-  return { reauthenticated };
+  if ([302, 303].includes(response.status())) {
+    forgetMarker(page, opts.page); // a save consumes the marker
+    await page.waitForURL((u) => u.pathname === opts.page, { timeout: NAV_TIMEOUT_MS });
+  } else await page.waitForLoadState('load');
+  return { reauthenticated, viaLink };
 }

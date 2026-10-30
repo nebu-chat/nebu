@@ -342,14 +342,15 @@ defmodule Nebu.Admin.OAuthRegistrationsController do
     case Nebu.OAuth.registration(client_id) do
       %{status: "pending"} = row ->
         client = present(row)
+        approve_path = @list_path <> "/" <> Helpers.seg(client_id) <> "/approve"
 
         conn
         |> assign(:client, client)
         |> assign(:show_logos, params["logos"] == "1")
         |> assign(:page, parse_page(params["page"]))
-        |> assign(:reauth_fresh, match?({:ok, _}, Nebu.Admin.Auth.reauth_fresh(conn, @list_path <> "/" <> Helpers.seg(client_id) <> "/approve")))
+        |> Nebu.Admin.OAuthAdminHelpers.assign_reauth(approve_path)
         |> assign(:revoked_same_host, revoked_same_host(client))
-        |> assign(:approve_path, @list_path <> "/" <> Helpers.seg(client_id) <> "/approve")
+        |> assign(:approve_path, approve_path)
         |> assign(:back_path, return_path(params))
         |> assign(:oauth_enabled, Nebu.OAuth.config().enabled)
         |> assign(:page_title, "Approve OAuth client")

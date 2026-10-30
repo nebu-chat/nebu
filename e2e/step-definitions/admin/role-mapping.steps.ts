@@ -29,4 +29,5 @@ When('the operator saves the role mapping form', async ({ page }: { page: Page }
   const outcome = await saveMappingFormWithAdminReauth(page, { page: '/admin/config/role-mapping', button: /^save$/i });
   // every save needs its OWN fresh sign-in (the marker is single use): a save that never went through the IdP would mean the gate is gone
   expect(outcome.reauthenticated, 'saving the role mapping goes through the fresh sign-in at the IdP').toBe(true);
+  expect(outcome.viaLink, 'the sign-in started at the "Sign in again to save" link, not at a refused POST').toBe(true);
 });

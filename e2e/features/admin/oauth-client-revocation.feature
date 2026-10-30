@@ -37,6 +37,24 @@ Feature: Admin UI — withdrawing an approved OAuth client and the fresh sign-in
     And OAuth is enabled in the instance config
     And the operator is logged in as admin
 
+  # Story admin-reauth-button-flow: the state is shown on the primary control of the confirm pages. Without a fresh sign-in the form shows the link
+  # "Sign in again to approve" / "... to revoke" INSTEAD of its submit; after the sign-in the page shows the submit and the validity line.
+  @reauth-button
+  Scenario: The approve confirm page shows a Sign in again link, after the sign-in the Approve client button and a validity line
+    Given a client is registered for the revocation scenarios
+    When the operator opens the approve confirm page of the client
+    Then the confirm page shows the "Sign in again to approve" link and no "Approve client" button
+    When the operator follows the "Sign in again to approve" link and signs in again
+    Then the confirm page shows the "Approve client" button, no sign-in link and a validity line
+
+  @reauth-button
+  Scenario: The revoke confirm page shows a Sign in again link, after the sign-in the Revoke client button and a validity line
+    Given an approved client is registered for the revocation scenarios
+    When the operator opens the revoke confirm page of the client
+    Then the confirm page shows the "Sign in again to revoke" link and no "Revoke client" button
+    When the operator follows the "Sign in again to revoke" link and signs in again
+    Then the confirm page shows the "Revoke client" button, no sign-in link and a validity line
+
   @ac10-approve
   Scenario: [AC10.1] Approving goes through a confirm page and a fresh sign-in; the client then appears under Approved Clients
     Given a client is registered for the revocation scenarios

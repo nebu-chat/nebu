@@ -1,6 +1,7 @@
 defmodule Nebu.Admin.OAuthRegistrationsHTML do
   @moduledoc "Template module for OAuthRegistrationsController."
   use Phoenix.Component
+  import Nebu.Admin.ReauthComponents
 
   embed_templates "templates/oauth_registrations/*"
 

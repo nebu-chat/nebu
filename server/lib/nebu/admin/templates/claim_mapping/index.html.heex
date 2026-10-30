@@ -56,8 +56,6 @@
     browser or a private window before you leave. You can correct a wrong value on this page again after a fresh sign-in; database access
     is the fallback (deployment guide, "Admin configuration forms and their protection").
   </p>
-  <p id="claim-mapping-reauth-hint" class="text-sm text-base-content/70">
-    Saving this setting needs a fresh sign-in. If you are asked to sign in again, you return to this page and must enter your change again.
-  </p>
-  <button type="submit" class="btn btn-primary self-start" aria-describedby="claim-mapping-lockout-hint claim-mapping-reauth-hint">Save</button>
+  <.reauth_hint id="claim-mapping-reauth-hint" reauth={@reauth} class="text-sm text-base-content/70" />
+  <.reauth_control reauth={@reauth} class="btn btn-primary self-start" describedby="claim-mapping-lockout-hint claim-mapping-reauth-hint">Save</.reauth_control>
 </form>

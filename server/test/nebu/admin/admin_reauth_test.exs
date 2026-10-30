@@ -259,7 +259,7 @@ defmodule Nebu.Admin.AdminReauthTest do
     end
 
     for page <- ["/admin/config/claim-mapping", "/admin/config/role-mapping"] do
-      test "return_to #{page} (story admin-config-privileged-forms-sweep): the marker is bound to that page, the admin is told that the change was not saved yet" do
+      test "return_to #{page} (story admin-config-privileged-forms-sweep): the marker is bound to that page, the admin is told he signed in again" do
         state = login_state(%{"return_to" => unquote(page)})
         conn = callback(claims(%{"auth_time" => state["started_at"] + 2}), state)
 
@@ -267,12 +267,15 @@ defmodule Nebu.Admin.AdminReauthTest do
         assert location(conn) == unquote(page)
         assert marker(conn)["path"] == unquote(page)
         info = (conn.assigns[:flash] || %{})["info"] || ""
-        assert info =~ "Your change was not saved yet"
-        assert info =~ "5 minutes"
+        # story admin-reauth-button-flow: the admin signs in BEFORE he enters a change: no POST was refused, the notice must not say a change was not saved
+        assert info =~ "Signed in again"
+        refute info =~ ~r/not saved yet/i
+        # the flash names no minutes: it can be read long after the sign-in, the validity line of the form carries the remaining minutes
+        refute info =~ ~r/\d+ minutes?/
       end
     end
 
-    test "return_to /admin/config: the admin is told that the change was not saved yet (info flash); other return targets get no flash" do
+    test "return_to /admin/config: the admin is told he signed in again (info flash); other return targets get no flash" do
       state = login_state(%{"return_to" => "/admin/config"})
       conn = callback(claims(%{"auth_time" => state["started_at"] + 2}), state)
 
@@ -281,9 +284,10 @@ defmodule Nebu.Admin.AdminReauthTest do
       info = (conn.assigns[:flash] || %{})["info"] || get_in(conn.private, [:phoenix_flash, "info"])
       assert is_binary(info)
       assert info =~ "Signed in again"
-      assert info =~ ~r/not saved yet/i
-      assert info =~ ~r/enter it again/i
-      assert info =~ "5 minutes", "the text names the marker lifetime (300 s)"
+      # story admin-reauth-button-flow: no POST was refused (the sign-in came first), so no "not saved yet / enter it again"
+      refute info =~ ~r/not saved yet/i
+      refute info =~ ~r/enter it again/i
+      refute info =~ ~r/\d+ minutes?/, "the flash names no minutes (the form's validity line does)"
 
       other = callback(claims(%{"auth_time" => login_state()["started_at"] + 2}))
       assert location(other) == @return_to
@@ -520,7 +524,7 @@ defmodule Nebu.Admin.AdminReauthTest do
   end
 
   describe "story admin-forms-gate-sweep D2 — the marker of the media settings page" do
-    test "return_to /admin/media/settings: the marker is bound to that page, the notice tells the admin to enter the change again including the secret key" do
+    test "return_to /admin/media/settings: the marker is bound to that page, the notice tells the admin he signed in again" do
       state = login_state(%{"return_to" => "/admin/media/settings"})
       conn = callback(claims(%{"auth_time" => state["started_at"] + 2}), state)
 
@@ -530,14 +534,43 @@ defmodule Nebu.Admin.AdminReauthTest do
       assert m["path"] == "/admin/media/settings"
       assert Map.keys(m) |> Enum.sort() == ["at", "kind", "path", "sub"], "no role mapping fingerprint on this page"
       info = (conn.assigns[:flash] || %{})["info"] || get_in(conn.private, [:phoenix_flash, "info"]) || ""
-      assert info =~ "Your change was not saved yet"
-      assert info =~ ~r/secret key/i
-      assert info =~ "5 minutes"
+      # story admin-reauth-button-flow: no POST was refused; the "secret key is never filled in" statement moved to the storage hint (admin_reauth_button_flow_media_test.exs)
+      assert info =~ "Signed in again"
+      refute info =~ ~r/not saved yet/i
+      refute info =~ ~r/\d+ minutes?/
     end
 
     test "login start keeps the media settings page as return_to" do
       conn = start(%{"mode" => "reauth", "return_to" => "/admin/media/settings"}, %{"current_user" => admin_user()})
       assert get_session(conn, "admin_oidc_login")["return_to"] == "/admin/media/settings"
+    end
+  end
+
+  describe "admin-reauth-button-flow - notice after the return" do
+    for page <- ["/admin/config", "/admin/config/claim-mapping", "/admin/config/role-mapping", "/admin/media/settings", "/admin/oauth/registrations/c1/approve", "/admin/oauth/clients/c1/revoke"] do
+      test "return_to #{page}: no flash about a refused or lost change, no error flash" do
+        state = login_state(%{"return_to" => unquote(page)})
+        conn = callback(claims(%{"auth_time" => state["started_at"] + 2}), state)
+
+        assert location(conn) == unquote(page)
+        assert marker(conn)["path"] == unquote(page)
+        flash = conn.assigns[:flash] || %{}
+        info = flash["info"] || get_in(conn.private, [:phoenix_flash, "info"]) || ""
+        refute info =~ ~r/not saved|refus|rejected|enter (it|your change|the value|the host)\b[^.]*\bagain|must enter/i, "the notice must not talk about a refused POST: #{info}"
+        refute is_binary(flash["error"]), "a fresh sign-in is no error"
+        assert location(conn) =~ ~r{\A/admin/[a-z/0-9-]*\z}, "the redirect carries nothing but the page path"
+      end
+    end
+
+    test "the four config / media pages say: signed in again, nothing is changed yet, and name no minutes (the validity line of the form does)" do
+      for page <- ["/admin/config", "/admin/config/claim-mapping", "/admin/config/role-mapping", "/admin/media/settings"] do
+        state = login_state(%{"return_to" => page})
+        conn = callback(claims(%{"auth_time" => state["started_at"] + 2}), state)
+        info = (conn.assigns[:flash] || %{})["info"] || get_in(conn.private, [:phoenix_flash, "info"]) || ""
+        assert info =~ "Signed in again", page
+        assert info =~ "Nothing is changed yet", page
+        refute info =~ ~r/\d+ minutes?/, page
+      end
     end
   end
 end

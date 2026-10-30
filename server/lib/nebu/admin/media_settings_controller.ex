@@ -540,21 +540,28 @@ defmodule Nebu.Admin.MediaSettingsController do
   # admin (and logged) so a DNS failure or a private-resolving host is not
   # reported as the same generic "invalid URL".
   defp iam_sts_url_problem(value) do
-    if String.starts_with?(String.downcase(value), "https://") do
-      case SSRF.checked_target(value, allow_private: SSRF.allow_private_storage?()) do
-        {:ok, _target} ->
-          :ok
+    cond do
+      not String.starts_with?(String.downcase(value), "https://") ->
+        {:error, "The URL must start with https://."}
 
-        {:error, reason} ->
-          Logger.warning(
-            "Nebu.Admin.MediaSettingsController: IAM/STS endpoint #{inspect(value)} rejected: " <>
-              SSRF.describe_error(reason)
-          )
+      # before the SSRF check and before any log line; neither the message nor the log names any part of the URL (it holds a credential)
+      StorageConfig.iam_sts_user_info?(value) ->
+        Logger.warning("Nebu.Admin.MediaSettingsController: IAM/STS endpoint rejected: the URL carries user info (the URL is not logged)")
+        {:error, "The URL must not contain a user name or password."}
 
-          {:error, "Rejected: " <> SSRF.describe_error(reason) <> "."}
-      end
-    else
-      {:error, "The URL must start with https://."}
+      true ->
+        case SSRF.checked_target(value, allow_private: SSRF.allow_private_storage?()) do
+          {:ok, _target} ->
+            :ok
+
+          {:error, reason} ->
+            Logger.warning(
+              "Nebu.Admin.MediaSettingsController: IAM/STS endpoint host #{inspect(URI.parse(value).host)} rejected: " <>
+                SSRF.describe_error(reason)
+            )
+
+            {:error, "Rejected: " <> SSRF.describe_error(reason) <> "."}
+        end
     end
   end
 
@@ -657,9 +664,12 @@ defmodule Nebu.Admin.MediaSettingsController do
   # form never renders a value= attribute for them regardless, but keeping
   # the map itself free of the submitted plaintext is an extra guard against
   # ever accidentally wiring it into the template later).
+  #
+  # story admin-reauth-button-flow (Kassandra delta): an endpoint value that carries user info (`user:password@host`, refused by the validation) is NOT
+  # echoed either: it holds a credential, like the keys above.
   defp storage_config_from_params(params) do
     %{
-      endpoint: params["endpoint"] || "",
+      endpoint: echo_endpoint(params["endpoint"]),
       bucket: params["bucket"] || "",
       region: params["region"] || "",
       use_ssl: params["use_ssl"] == "true",
@@ -667,10 +677,13 @@ defmodule Nebu.Admin.MediaSettingsController do
       secret_key: nil,
       s3_key_prefix_template: params["s3_key_prefix_template"] || "",
       archive_bucket: params["archive_bucket"] || "",
-      iam_endpoint: params["iam_endpoint"] || "",
-      sts_endpoint: params["sts_endpoint"] || ""
+      iam_endpoint: echo_endpoint(params["iam_endpoint"]),
+      sts_endpoint: echo_endpoint(params["sts_endpoint"])
     }
   end
+
+  defp echo_endpoint(value) when is_binary(value), do: if(StorageConfig.iam_sts_user_info?(value), do: "", else: value)
+  defp echo_endpoint(_), do: ""
 
   def save(conn, params) do
     with {:ok, conn, _kind} <- Nebu.Admin.OAuthAdminHelpers.gate(conn, :marker, @page) do
@@ -933,6 +946,7 @@ defmodule Nebu.Admin.MediaSettingsController do
     |> assign(:secret_key_configured, not is_nil(current_storage_cfg.secret_key))
     |> assign(:orphan_warning, Keyword.get(opts, :orphan_warning))
     |> assign(:test_connection_result, Keyword.get(opts, :test_connection_result))
+    |> Nebu.Admin.OAuthAdminHelpers.assign_reauth(@page)
     |> assign(:page_title, "Media Settings")
     |> assign(:active_nav, "media-settings")
     |> assign(:bootstrap_completed, Nebu.Admin.Auth.bootstrap_completed?())

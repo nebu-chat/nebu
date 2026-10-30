@@ -1,0 +1,478 @@
+diff --git a/server/config/config.exs b/server/config/config.exs
+index 2af32f68..ea4733b0 100644
+--- a/server/config/config.exs
++++ b/server/config/config.exs
+@@ -27,7 +27,24 @@ import Config
+ # oauth-client-revocation (AC11): Phoenix.Logger prints the request parameters of every controller action at :debug.
+ # The OAuth admin forms carry a CSRF token and free-text fields (a revocation reason, the typed host): never logged.
+ config :phoenix,
+-  filter_parameters: ["password", "reason", "confirm_host", "_csrf_token", "csrf_token"]
++  filter_parameters: [
++    "password",
++    "reason",
++    "confirm_host",
++    "_csrf_token",
++    "csrf_token",
++    # story admin-reauth-button-flow: the values of the marker-gated admin forms (a refused or a saved POST is logged at :debug too)
++    "access_key",
++    "secret_key",
++    "webhook_url",
++    "sso_extra_redirect_schemes",
++    "sso_redirect_allowed_origins",
++    "oauth_issuer_url",
++    "oidc_user_id_claim",
++    "oidc_displayname_claim",
++    "oidc_email_claim",
++    "admin_group_claim"
++  ]
+ 
+ # ── admin-ui-migration: Phoenix LiveView Admin UI endpoint (compile-time base) ──
+ # server: false — the AdminEndpoint never opens its own port. The umbrella's single
+diff --git a/server/lib/nebu/admin/auth.ex b/server/lib/nebu/admin/auth.ex
+index 8cde0b0d..5b2b5d85 100644
+--- a/server/lib/nebu/admin/auth.ex
++++ b/server/lib/nebu/admin/auth.ex
+@@ -699,7 +699,7 @@ defmodule Nebu.Admin.Auth do
+     Phoenix.Controller.put_flash(
+       conn,
+       :info,
+-      "Signed in again. Your change was not saved yet: enter it again (for the storage target also the access key and the secret key) and press Save. Your sign-in is valid for #{div(@reauth_ttl_seconds, 60)} minutes and for one save."
++      "Signed in again. You can now enter your change and press Save. Your sign-in is valid for #{div(@reauth_ttl_seconds, 60)} minutes and for one save."
+     )
+   end
+ 
+@@ -709,7 +709,7 @@ defmodule Nebu.Admin.Auth do
+     Phoenix.Controller.put_flash(
+       conn,
+       :info,
+-      "Signed in again. Your change was not saved yet: enter it again and press Save. Your sign-in stays valid for #{div(@reauth_ttl_seconds, 60)} minutes."
++      "Signed in again. You can now enter your change and press Save. Your sign-in stays valid for #{div(@reauth_ttl_seconds, 60)} minutes."
+     )
+   end
+ 
+@@ -767,6 +767,21 @@ defmodule Nebu.Admin.Auth do
+     end
+   end
+ 
++  @doc """
++  Read only (story admin-reauth-button-flow): the remaining validity of the fresh re-authentication marker for `path` as WHOLE minutes, rounded down
++  (`{:ok, 0}` = less than a minute, never more than 5), or `:stale` exactly when `reauth_fresh/2` is `:stale`. Writes nothing.
++  """
++  @spec reauth_remaining_minutes(Plug.Conn.t(), String.t()) :: {:ok, 0..5} | :stale
++  def reauth_remaining_minutes(conn, path) when is_binary(path) do
++    with {:ok, _kind} <- reauth_fresh(conn, path),
++         %{"at" => at} when is_integer(at) <- get_session(conn, @reauth_session_key) do
++      remaining = @reauth_ttl_seconds - (System.system_time(:second) - at)
++      {:ok, div(min(max(remaining, 0), @reauth_ttl_seconds), 60)}
++    else
++      _ -> :stale
++    end
++  end
++
+   # ── self-lock-out guard of the role mapping (story role-mapping-self-lockout-guard, follow-up dg) ─────────────────────────────
+ 
+   @role_fp_hash_bytes 6
+diff --git a/server/lib/nebu/admin/claim_mapping_controller.ex b/server/lib/nebu/admin/claim_mapping_controller.ex
+index 63b48596..13ac60d3 100644
+--- a/server/lib/nebu/admin/claim_mapping_controller.ex
++++ b/server/lib/nebu/admin/claim_mapping_controller.ex
+@@ -35,6 +35,7 @@ defmodule Nebu.Admin.ClaimMappingController do
+     conn
+     |> assign(:values, current_values())
+     |> assign(:errors, %{})
++    |> Nebu.Admin.OAuthAdminHelpers.assign_reauth(@page)
+     |> assign(:page_title, "Claim Mapping")
+     |> assign(:active_nav, "claim-mapping")
+     |> assign(:bootstrap_completed, Nebu.Admin.Auth.bootstrap_completed?())
+@@ -61,7 +62,8 @@ defmodule Nebu.Admin.ClaimMappingController do
+       conn
+       |> assign(:values, changes)
+       |> assign(:errors, errors)
+-      |> assign(:page_title, "Claim Mapping")
++      |> Nebu.Admin.OAuthAdminHelpers.assign_reauth(@page)
++    |> assign(:page_title, "Claim Mapping")
+       |> assign(:active_nav, "claim-mapping")
+       |> assign(:bootstrap_completed, Nebu.Admin.Auth.bootstrap_completed?())
+       |> put_layout(html: {Nebu.Admin.Layouts, :live})
+@@ -97,6 +99,7 @@ defmodule Nebu.Admin.ClaimMappingController do
+     conn
+     |> assign(:values, changes)
+     |> assign(:errors, %{})
++    |> Nebu.Admin.OAuthAdminHelpers.assign_reauth(@page)
+     |> assign(:page_title, "Claim Mapping")
+     |> assign(:active_nav, "claim-mapping")
+     |> assign(:bootstrap_completed, Nebu.Admin.Auth.bootstrap_completed?())
+diff --git a/server/lib/nebu/admin/claim_mapping_html.ex b/server/lib/nebu/admin/claim_mapping_html.ex
+index e58eaf32..6ec7921e 100644
+--- a/server/lib/nebu/admin/claim_mapping_html.ex
++++ b/server/lib/nebu/admin/claim_mapping_html.ex
+@@ -1,6 +1,7 @@
+ defmodule Nebu.Admin.ClaimMappingHTML do
+   @moduledoc "Template module for ClaimMappingController."
+   use Phoenix.Component
++  import Nebu.Admin.ReauthComponents
+ 
+   embed_templates "templates/claim_mapping/*"
+ end
+diff --git a/server/lib/nebu/admin/config_controller.ex b/server/lib/nebu/admin/config_controller.ex
+index 40fb90c8..8abea222 100644
+--- a/server/lib/nebu/admin/config_controller.ex
++++ b/server/lib/nebu/admin/config_controller.ex
+@@ -538,6 +538,7 @@ defmodule Nebu.Admin.ConfigController do
+       |> assign(:oauth_form, conn.assigns[:oauth_form] || default_oauth_form(cfg, env))
+       |> assign(:oauth_errors, conn.assigns[:oauth_errors] || %{})
+     end)
++    |> Nebu.Admin.OAuthAdminHelpers.assign_reauth(@config_path)
+     |> assign(:page_title, "Configuration")
+     # admin-sidebar-nesting coordination contract (UX gate V1): the parent
+     # "config" key belongs to a pure disclosure <button> that never emits
+diff --git a/server/lib/nebu/admin/config_html.ex b/server/lib/nebu/admin/config_html.ex
+index 14522a7e..cd0b854b 100644
+--- a/server/lib/nebu/admin/config_html.ex
++++ b/server/lib/nebu/admin/config_html.ex
+@@ -1,6 +1,7 @@
+ defmodule Nebu.Admin.ConfigHTML do
+   @moduledoc "Template module for ConfigController."
+   use Phoenix.Component
++  import Nebu.Admin.ReauthComponents
+ 
+   embed_templates "templates/config/*"
+ 
+diff --git a/server/lib/nebu/admin/media_settings_controller.ex b/server/lib/nebu/admin/media_settings_controller.ex
+index af2acfea..aa3d573a 100644
+--- a/server/lib/nebu/admin/media_settings_controller.ex
++++ b/server/lib/nebu/admin/media_settings_controller.ex
+@@ -933,6 +933,7 @@ defmodule Nebu.Admin.MediaSettingsController do
+     |> assign(:secret_key_configured, not is_nil(current_storage_cfg.secret_key))
+     |> assign(:orphan_warning, Keyword.get(opts, :orphan_warning))
+     |> assign(:test_connection_result, Keyword.get(opts, :test_connection_result))
++    |> Nebu.Admin.OAuthAdminHelpers.assign_reauth(@page)
+     |> assign(:page_title, "Media Settings")
+     |> assign(:active_nav, "media-settings")
+     |> assign(:bootstrap_completed, Nebu.Admin.Auth.bootstrap_completed?())
+diff --git a/server/lib/nebu/admin/media_settings_html.ex b/server/lib/nebu/admin/media_settings_html.ex
+index 51a7aa06..e2de4c70 100644
+--- a/server/lib/nebu/admin/media_settings_html.ex
++++ b/server/lib/nebu/admin/media_settings_html.ex
+@@ -6,6 +6,7 @@ defmodule Nebu.Admin.MediaSettingsHTML do
+   "templates/<dir>/*"` + a single `templates/media_settings/index.html.heex`).
+   """
+   use Phoenix.Component
++  import Nebu.Admin.ReauthComponents
+ 
+   embed_templates "templates/media_settings/*"
+ end
+diff --git a/server/lib/nebu/admin/oauth_admin_helpers.ex b/server/lib/nebu/admin/oauth_admin_helpers.ex
+index 82ace901..a25ca3ab 100644
+--- a/server/lib/nebu/admin/oauth_admin_helpers.ex
++++ b/server/lib/nebu/admin/oauth_admin_helpers.ex
+@@ -152,6 +152,20 @@ defmodule Nebu.Admin.OAuthAdminHelpers do
+     |> halt()
+   end
+ 
++  @doc """
++  Story admin-reauth-button-flow: assigns `:reauth` = `%{fresh?, minutes, href}` for the marker-gated form(s) bound to `path` (the page path the marker is bound to):
++  decided now by `Auth.reauth_fresh/2` (through `Auth.reauth_remaining_minutes/2`), the href is `Auth.reauth_start_path(path)`, built from the server side path only.
++  """
++  @spec assign_reauth(Plug.Conn.t(), String.t()) :: Plug.Conn.t()
++  def assign_reauth(conn, path) do
++    href = Auth.reauth_start_path(path)
++
++    case Auth.reauth_remaining_minutes(conn, path) do
++      {:ok, minutes} -> assign(conn, :reauth, %{fresh?: true, minutes: minutes, href: href})
++      :stale -> assign(conn, :reauth, %{fresh?: false, minutes: nil, href: href})
++    end
++  end
++
+   @doc "The Matrix user id (else the `sub`) of the signed-in admin, or nil."
+   @spec actor_id(Plug.Conn.t()) :: String.t() | nil
+   def actor_id(conn) do
+diff --git a/server/lib/nebu/admin/oauth_clients_controller.ex b/server/lib/nebu/admin/oauth_clients_controller.ex
+index e4f350c0..6222d0c7 100644
+--- a/server/lib/nebu/admin/oauth_clients_controller.ex
++++ b/server/lib/nebu/admin/oauth_clients_controller.ex
+@@ -77,6 +77,7 @@ defmodule Nebu.Admin.OAuthClientsController do
+         |> assign(:expected, expected_confirmation(client))
+         |> assign(:device_count, device_count(client_id))
+         |> assign(:reauth_fresh, match?({:ok, _}, Nebu.Admin.Auth.reauth_fresh(conn, revoke_path(client_id))))
++        |> Nebu.Admin.OAuthAdminHelpers.assign_reauth(revoke_path(client_id))
+         |> assign(:revoke_path, revoke_path(client_id))
+         |> shell("Revoke OAuth client", "oauth-approved-clients")
+         |> render(:revoke_confirm)
+diff --git a/server/lib/nebu/admin/oauth_clients_html.ex b/server/lib/nebu/admin/oauth_clients_html.ex
+index e4b7c3e6..2f3c2314 100644
+--- a/server/lib/nebu/admin/oauth_clients_html.ex
++++ b/server/lib/nebu/admin/oauth_clients_html.ex
+@@ -1,6 +1,7 @@
+ defmodule Nebu.Admin.OAuthClientsHTML do
+   @moduledoc "Template module for OAuthClientsController (story oauth-client-revocation)."
+   use Phoenix.Component
++  import Nebu.Admin.ReauthComponents
+ 
+   embed_templates "templates/oauth_clients/*"
+ 
+diff --git a/server/lib/nebu/admin/oauth_registrations_controller.ex b/server/lib/nebu/admin/oauth_registrations_controller.ex
+index ce316c39..f5b6af10 100644
+--- a/server/lib/nebu/admin/oauth_registrations_controller.ex
++++ b/server/lib/nebu/admin/oauth_registrations_controller.ex
+@@ -348,6 +348,7 @@ defmodule Nebu.Admin.OAuthRegistrationsController do
+         |> assign(:show_logos, params["logos"] == "1")
+         |> assign(:page, parse_page(params["page"]))
+         |> assign(:reauth_fresh, match?({:ok, _}, Nebu.Admin.Auth.reauth_fresh(conn, @list_path <> "/" <> Helpers.seg(client_id) <> "/approve")))
++        |> Nebu.Admin.OAuthAdminHelpers.assign_reauth(@list_path <> "/" <> Helpers.seg(client_id) <> "/approve")
+         |> assign(:revoked_same_host, revoked_same_host(client))
+         |> assign(:approve_path, @list_path <> "/" <> Helpers.seg(client_id) <> "/approve")
+         |> assign(:back_path, return_path(params))
+diff --git a/server/lib/nebu/admin/oauth_registrations_html.ex b/server/lib/nebu/admin/oauth_registrations_html.ex
+index 65a5780f..607039f5 100644
+--- a/server/lib/nebu/admin/oauth_registrations_html.ex
++++ b/server/lib/nebu/admin/oauth_registrations_html.ex
+@@ -1,6 +1,7 @@
+ defmodule Nebu.Admin.OAuthRegistrationsHTML do
+   @moduledoc "Template module for OAuthRegistrationsController."
+   use Phoenix.Component
++  import Nebu.Admin.ReauthComponents
+ 
+   embed_templates "templates/oauth_registrations/*"
+ 
+diff --git a/server/lib/nebu/admin/role_mapping_controller.ex b/server/lib/nebu/admin/role_mapping_controller.ex
+index 45281690..05a8888a 100644
+--- a/server/lib/nebu/admin/role_mapping_controller.ex
++++ b/server/lib/nebu/admin/role_mapping_controller.ex
+@@ -38,6 +38,7 @@ defmodule Nebu.Admin.RoleMappingController do
+     |> assign(:error, nil)
+     |> assign(:claim_path, Nebu.Admin.Auth.configured_admin_claim_path())
+     |> assign(:reauth_link, nil)
++    |> Nebu.Admin.OAuthAdminHelpers.assign_reauth(@page)
+     |> assign(:page_title, "Role Mapping")
+     |> assign(:active_nav, "role-mapping")
+     |> assign(:bootstrap_completed, Nebu.Admin.Auth.bootstrap_completed?())
+@@ -144,6 +145,7 @@ defmodule Nebu.Admin.RoleMappingController do
+     |> assign(:error, error)
+     |> assign(:claim_path, Nebu.Admin.Auth.configured_admin_claim_path())
+     |> assign(:reauth_link, link)
++    |> Nebu.Admin.OAuthAdminHelpers.assign_reauth(@page)
+     |> assign(:page_title, "Role Mapping")
+     |> assign(:active_nav, "role-mapping")
+     |> assign(:bootstrap_completed, Nebu.Admin.Auth.bootstrap_completed?())
+diff --git a/server/lib/nebu/admin/role_mapping_html.ex b/server/lib/nebu/admin/role_mapping_html.ex
+index ef91a152..0c9d9c6f 100644
+--- a/server/lib/nebu/admin/role_mapping_html.ex
++++ b/server/lib/nebu/admin/role_mapping_html.ex
+@@ -1,6 +1,7 @@
+ defmodule Nebu.Admin.RoleMappingHTML do
+   @moduledoc "Template module for RoleMappingController."
+   use Phoenix.Component
++  import Nebu.Admin.ReauthComponents
+ 
+   embed_templates "templates/role_mapping/*"
+ end
+diff --git a/server/lib/nebu/admin/templates/claim_mapping/index.html.heex b/server/lib/nebu/admin/templates/claim_mapping/index.html.heex
+index 52bced03..42e18f95 100644
+--- a/server/lib/nebu/admin/templates/claim_mapping/index.html.heex
++++ b/server/lib/nebu/admin/templates/claim_mapping/index.html.heex
+@@ -56,8 +56,6 @@
+     browser or a private window before you leave. You can correct a wrong value on this page again after a fresh sign-in; database access
+     is the fallback (deployment guide, "Admin configuration forms and their protection").
+   </p>
+-  <p id="claim-mapping-reauth-hint" class="text-sm text-base-content/70">
+-    Saving this setting needs a fresh sign-in. If you are asked to sign in again, you return to this page and must enter your change again.
+-  </p>
+-  <button type="submit" class="btn btn-primary self-start" aria-describedby="claim-mapping-lockout-hint claim-mapping-reauth-hint">Save</button>
++  <.reauth_hint id="claim-mapping-reauth-hint" reauth={@reauth} class="text-sm text-base-content/70" />
++  <.reauth_control reauth={@reauth} class="btn btn-primary self-start" describedby="claim-mapping-lockout-hint claim-mapping-reauth-hint">Save</.reauth_control>
+ </form>
+diff --git a/server/lib/nebu/admin/templates/config/index.html.heex b/server/lib/nebu/admin/templates/config/index.html.heex
+index 8964fe15..c314d3ed 100644
+--- a/server/lib/nebu/admin/templates/config/index.html.heex
++++ b/server/lib/nebu/admin/templates/config/index.html.heex
+@@ -79,10 +79,8 @@
+     </span>
+   </label>
+ 
+-  <p id="sso-schemes-reauth-hint" class="mt-2 text-sm text-base-content/70">
+-    Saving this setting needs a fresh sign-in. If you are asked to sign in again, you return to this page and must enter your change again.
+-  </p>
+-  <button type="submit" class="btn btn-primary mt-3" aria-describedby="sso-schemes-reauth-hint">Save SSO schemes</button>
++  <.reauth_hint id="sso-schemes-reauth-hint" reauth={@reauth} />
++  <.reauth_control reauth={@reauth} class="btn btn-primary mt-3" describedby="sso-schemes-reauth-hint">Save SSO schemes</.reauth_control>
+ </form>
+ 
+ <%!-- SSO redirect origins: POST form (story legacy-sso-redirect-confirmation, G3-3, D14). The https origins whose
+@@ -132,10 +130,8 @@
+     </div>
+   </div>
+ 
+-  <p id="sso-origins-reauth-hint" class="mt-2 text-sm text-base-content/70">
+-    Saving this setting needs a fresh sign-in. If you are asked to sign in again, you return to this page and must enter your change again.
+-  </p>
+-  <button type="submit" class="btn btn-primary mt-3" aria-describedby="sso-origins-reauth-hint">Save SSO origins</button>
++  <.reauth_hint id="sso-origins-reauth-hint" reauth={@reauth} />
++  <.reauth_control reauth={@reauth} class="btn btn-primary mt-3" describedby="sso-origins-reauth-hint">Save SSO origins</.reauth_control>
+ </form>
+ 
+ <%!-- OIDC refresh mode: POST form. Two native <select>s (Matrix + admin),
+@@ -292,10 +288,8 @@
+       </p>
+     </div>
+ 
+-    <p id="oauth-switch-reauth-hint" class="mt-2 text-sm text-base-content/70">
+-      Saving this setting needs a fresh sign-in. If you are asked to sign in again, you return to this page and must enter your change again.
+-    </p>
+-    <button type="submit" class="btn btn-primary mt-3" aria-describedby="oauth-switch-reauth-hint">Save OAuth settings</button>
++    <.reauth_hint id="oauth-switch-reauth-hint" reauth={@reauth} />
++    <.reauth_control reauth={@reauth} class="btn btn-primary mt-3" describedby="oauth-switch-reauth-hint">Save OAuth settings</.reauth_control>
+   </form>
+ </section>
+ 
+diff --git a/server/lib/nebu/admin/templates/media_settings/index.html.heex b/server/lib/nebu/admin/templates/media_settings/index.html.heex
+index 71bb492c..53a838d5 100644
+--- a/server/lib/nebu/admin/templates/media_settings/index.html.heex
++++ b/server/lib/nebu/admin/templates/media_settings/index.html.heex
+@@ -212,10 +212,8 @@
+     </label>
+   </div>
+ 
+-  <p id="media-policy-reauth-hint" class="text-sm text-base-content/70 mb-2">
+-    Saving this setting needs a fresh sign-in. If you are asked to sign in again, you return to this page and must enter your change again.
+-  </p>
+-  <button type="submit" class="btn btn-primary" aria-describedby="media-policy-reauth-hint">Save</button>
++  <.reauth_hint id="media-policy-reauth-hint" reauth={@reauth} class="text-sm text-base-content/70 mb-2" />
++  <.reauth_control reauth={@reauth} class="btn btn-primary" describedby="media-policy-reauth-hint">Save</.reauth_control>
+ </form>
+ 
+ <h2 class="text-heading font-semibold mb-4">Storage Target</h2>
+@@ -384,10 +382,8 @@
+     </label>
+   </div>
+ 
+-  <p id="media-storage-reauth-hint" class="text-sm text-base-content/70 mb-2">
+-    Saving this setting needs a fresh sign-in. If you are asked to sign in again, you return to this page and must enter your change again, including the access key and the secret key (they are never filled in for you). Test Connection needs no new sign-in.
+-  </p>
+-  <button type="submit" class="btn btn-primary" aria-describedby="media-storage-reauth-hint">Save</button>
++  <.reauth_hint id="media-storage-reauth-hint" reauth={@reauth} keys={true} class="text-sm text-base-content/70 mb-2" />
++  <.reauth_control reauth={@reauth} class="btn btn-primary" describedby="media-storage-reauth-hint">Save</.reauth_control>
+   <button type="submit" formaction="/admin/media/settings/storage/test-connection" class="btn">
+     Test Connection
+   </button>
+diff --git a/server/lib/nebu/admin/templates/oauth_clients/revoke_confirm.html.heex b/server/lib/nebu/admin/templates/oauth_clients/revoke_confirm.html.heex
+index 8370c393..5077fd76 100644
+--- a/server/lib/nebu/admin/templates/oauth_clients/revoke_confirm.html.heex
++++ b/server/lib/nebu/admin/templates/oauth_clients/revoke_confirm.html.heex
+@@ -101,16 +101,16 @@
+         Shown in the list of revoked clients and recorded in the audit log.
+       </p>
+     </div>
+-    <p class="text-sm mb-3" data-role="reauth-state" data-reauth={if @reauth_fresh, do: "fresh", else: "needed"}>
+-      <span :if={@reauth_fresh}>You signed in again a moment ago: you can revoke now.</span>
++    <p id="reauth-state" class="text-sm mb-3" data-role="reauth-state" data-reauth={if @reauth_fresh, do: "fresh", else: "needed"}>
++      <span :if={@reauth_fresh}>You signed in again: you can revoke now. Your fresh sign-in is valid for {validity(@reauth.minutes)} and for one revocation.</span>
+       <span :if={!@reauth_fresh}>
+-        Revoking asks you to sign in again with your identity provider first. You return to this page afterwards and
+-        must type the host and the reason again.
++        Revoking asks you to sign in again with your identity provider first. You return to this page afterwards:
++        then type the host and the reason and revoke.
+       </span>
+     </p>
+     <div class="flex flex-wrap items-center gap-3">
+       <a href="/admin/oauth/clients" class="btn btn-ghost" data-role="revoke-cancel">Cancel</a>
+-      <button type="submit" class="btn btn-error" data-role="revoke-confirm">Revoke client</button>
++      <.reauth_control reauth={@reauth} class="btn btn-error" describedby="reauth-state" link_text="Sign in again to revoke" data-role="revoke-confirm">Revoke client</.reauth_control>
+     </div>
+   </form>
+ </div>
+diff --git a/server/lib/nebu/admin/templates/oauth_registrations/approve_confirm.html.heex b/server/lib/nebu/admin/templates/oauth_registrations/approve_confirm.html.heex
+index 357eb491..f89c9914 100644
+--- a/server/lib/nebu/admin/templates/oauth_registrations/approve_confirm.html.heex
++++ b/server/lib/nebu/admin/templates/oauth_registrations/approve_confirm.html.heex
+@@ -72,8 +72,8 @@
+     Approve only applications you recognise.
+   </p>
+ 
+-  <p class="text-sm mb-4 max-w-3xl" data-role="reauth-state" data-reauth={if @reauth_fresh, do: "fresh", else: "needed"}>
+-    <span :if={@reauth_fresh}>You signed in again a moment ago: you can approve now.</span>
++  <p id="reauth-state" class="text-sm mb-4 max-w-3xl" data-role="reauth-state" data-reauth={if @reauth_fresh, do: "fresh", else: "needed"}>
++    <span :if={@reauth_fresh}>You signed in again: you can approve now. Your fresh sign-in is valid for {validity(@reauth.minutes)} and for one approval.</span>
+     <span :if={!@reauth_fresh}>Approving asks you to sign in again with your identity provider first. You return to this page afterwards.</span>
+   </p>
+ 
+@@ -84,7 +84,7 @@
+     <input type="hidden" name="_click_proof" value="" data-click-proof />
+     <input :if={@page > 1} type="hidden" name="page" value={@page} />
+     <input :if={@show_logos} type="hidden" name="logos" value="1" />
+-    <button type="submit" class="btn btn-primary" data-role="approve-confirm" aria-label={"Approve client " <> display_name(@client)}>Approve client</button>
++    <.reauth_control reauth={@reauth} class="btn btn-primary" describedby="reauth-state" link_text="Sign in again to approve" data-role="approve-confirm" aria-label={"Approve client " <> display_name(@client)}>Approve client</.reauth_control>
+     <a href={@back_path} class="btn btn-ghost" data-role="approve-cancel">Cancel</a>
+   </form>
+ </div>
+diff --git a/server/lib/nebu/admin/templates/role_mapping/index.html.heex b/server/lib/nebu/admin/templates/role_mapping/index.html.heex
+index 8b6d0695..5c4792ec 100644
+--- a/server/lib/nebu/admin/templates/role_mapping/index.html.heex
++++ b/server/lib/nebu/admin/templates/role_mapping/index.html.heex
+@@ -44,8 +44,6 @@
+     A value that is too BROAD is as dangerous: it makes every user an administrator. Use a group that only administrators have. If the bootstrap wizard stored no claim path, the admin check scans ALL claims of the token,
+     so a value that appears anywhere in every token grants admin to everybody.
+   </p>
+-  <p id="role-mapping-reauth-hint" class="text-sm text-base-content/70">
+-    Saving this setting needs a fresh sign-in. If you are asked to sign in again, you return to this page and must enter your change again.
+-  </p>
+-  <button type="submit" class="btn btn-primary self-start" aria-describedby="role-mapping-lockout-hint role-mapping-reauth-hint">Save</button>
++  <.reauth_hint id="role-mapping-reauth-hint" reauth={@reauth} class="text-sm text-base-content/70" />
++  <.reauth_control reauth={@reauth} class="btn btn-primary self-start" describedby="role-mapping-lockout-hint role-mapping-reauth-hint">Save</.reauth_control>
+ </form>
+diff --git a/server/lib/nebu/admin/reauth_components.ex b/server/lib/nebu/admin/reauth_components.ex
+new file mode 100644
+index 00000000..103b08e0
+--- /dev/null
++++ b/server/lib/nebu/admin/reauth_components.ex
+@@ -0,0 +1,50 @@
++defmodule Nebu.Admin.ReauthComponents do
++  @moduledoc """
++  Story admin-reauth-button-flow: the primary control and the hint of a marker-gated admin form, decided by the SERVER at render time.
++
++  `@reauth` is the assign of `Nebu.Admin.OAuthAdminHelpers.assign_reauth/2`: `%{fresh?, minutes, href}`. Stale = a link styled as a button to the
++  sign-in of the page (`Nebu.Admin.Auth.reauth_start_path/1`), fresh = the normal submit button and a validity line in the hint element.
++  """
++  use Phoenix.Component
++
++  attr :reauth, :map, required: true
++  attr :id, :string, required: true
++  attr :class, :string, default: "mt-2 text-sm text-base-content/70"
++  attr :keys, :boolean, default: false, doc: "the storage target: the access key and the secret key are never filled in"
++  attr :action, :string, default: "save"
++
++  def reauth_hint(assigns) do
++    ~H"""
++    <p id={@id} class={@class}>
++      <%= if @reauth.fresh? do %>
++        Your fresh sign-in is valid for {validity(@reauth.minutes)} and for one {@action}.
++      <% else %>
++        Sign in again first: you come back to this page and can then enter your change and save it.
++        <%= if @keys do %>
++          The access key and the secret key are never filled in for you. Test Connection needs no new sign-in.
++        <% end %>
++      <% end %>
++    </p>
++    """
++  end
++
++  attr :reauth, :map, required: true
++  attr :class, :string, required: true
++  attr :describedby, :string, required: true
++  attr :link_text, :string, default: "Sign in again to save"
++  attr :rest, :global
++
++  slot :inner_block, required: true
++
++  def reauth_control(assigns) do
++    ~H"""
++    <button :if={@reauth.fresh?} type="submit" class={@class} aria-describedby={@describedby} {@rest}>{render_slot(@inner_block)}</button>
++    <a :if={!@reauth.fresh?} href={@reauth.href} class={@class} aria-describedby={@describedby}>{@link_text}</a>
++    """
++  end
++
++  @doc "`1 minute`, `N more minutes`... as text: the remaining whole minutes (rounded down), `less than a minute` below 60 s."
++  def validity(0), do: "less than a minute"
++  def validity(1), do: "1 minute"
++  def validity(n) when is_integer(n), do: "#{n} minutes"
++end

@@ -1,0 +1,113 @@
+Mutation checks of the ATDD tests of story admin-reauth-button-flow (reference implementation applied, ONE behaviour changed at a time, then reverted). Re-run after the test-review fix pass.
+Test set: admin_reauth_remaining_test, admin_reauth_button_flow_{config,mappings,media,cross_page,confirm,filter_parameters}_test (186 tests, all green on the reference implementation).
+KILLED = at least one of the 186 tests fails. 'x/186 passed' = tests still green under that mutant. No compile errors occurred.
+
+KILLED    M01 link text changed to "Sign in"  [97/186 passed]
+          first failing: the marker of one page unlocks that page and no other /admin/config: a marker bound to /admin/oauth/clients/c1/revoke leaves every form stale; the marker of one page unlocks that page and no other /admin/config: a marker bound to 
+KILLED    M02 link href constant instead of reauth_start_path of the page  [79/186 passed]
+          first failing: the marker of one page unlocks that page and no other /admin/config/role-mapping: a marker bound to /admin/config/ leaves every form stale; the marker of one page unlocks that page and no other /admin/media/settings: a marker boun
+KILLED    M03 always link (never the submit)  [137/186 passed]
+          first failing: the shared-marker pages change as ONE unit /admin/config: all three forms fresh together, all three stale together; the shared-marker pages change as ONE unit /admin/media/settings: both forms fresh together, both stale together; 
+KILLED    M04 always submit (never the link)  [79/186 passed]
+          first failing: the marker of one page unlocks that page and no other /admin/media/settings: a marker bound to /admin/oauth/clients/c1/revoke leaves every form stale; the marker of one page unlocks that page and no other /admin/config/role-mappin
+KILLED    M05 link AND submit in the fresh state  [134/186 passed]
+          first failing: the sign-in link of a page returns to that page only every page, every marker: the links are exactly reauth_start_path of the page path; the shared-marker pages change as ONE unit /admin/media/settings: both forms fresh together, 
+KILLED    M06 config page asks for the claim mapping marker path  [138/186 passed]
+          first failing: the marker of one page unlocks that page and no other /admin/config: a marker bound to /admin/media/settings leaves every form stale; the marker of one page unlocks that page and no other /admin/config: its own marker turns every 
+KILLED    M07 claim mapping page asks for the config marker path (index)  [167/186 passed]
+          first failing: the marker of one page unlocks that page and no other /admin/config/claim-mapping: a marker bound to /admin/oauth/registrations/c1/approve leaves every form stale; the marker of one page unlocks that page and no other /admin/confi
+KILLED    M08 role mapping index asks for the claim mapping marker path  [167/186 passed]
+          first failing: the marker of one page unlocks that page and no other /admin/config/role-mapping: a marker bound to /admin/oauth/registrations leaves every form stale; the marker of one page unlocks that page and no other /admin/config/role-mappi
+KILLED    M09 role mapping refusal re-render (render_form) does not assign the state  [182/186 passed]
+          first failing: form 5 role mapping - fresh a value missing from the token is refused (200): inline link next to the error, form still fresh; form 5 role mapping - fresh refusals without an inline link (empty value, a value of every token) re-ren
+KILLED    M10 claim mapping validation re-render always stale  [185/186 passed]
+          first failing: form 4 claim mapping - fresh a validation error re-renders the page (200) and keeps the marker: still the Save button
+KILLED    M11 media page asks for the storage POST path as marker path  [146/186 passed]
+          first failing: the marker of one page unlocks that page and no other /admin/media/settings: a marker bound to /admin/dashboard leaves every form stale; the marker of one page unlocks that page and no other /admin/media/settings: a marker bound t
+KILLED    M12 approve page asks for the list path as marker path  [178/186 passed]
+          first failing: form 8 approve - fresh a marker of the approve page of THIS client only: the next pending client's page is stale with the same session; form 8 approve - stale the link replaces the submit: exact text, href of THIS client's approve
+KILLED    M13 revoke page asks for the approve-style path as marker path  [179/186 passed]
+          first failing: form 9 revoke - stale a marker of ANOTHER client's revoke page, of the same client's approve page, or of another admin page does not unlock it; form 9 revoke - fresh a refused typed host (wrong host) keeps the marker: the page aft
+KILLED    M14 validity line missing in the fresh state  [144/186 passed]
+          first failing: the shared-marker pages change as ONE unit /admin/media/settings: both forms fresh together, both stale together; the marker of one page unlocks that page and no other /admin/config: its own marker turns every form of the page fre
+KILLED    M15 minutes rounded up instead of down  [131/186 passed]
+          first failing: the number of whole minutes left (floor) a marker 270 s old (about 30 s left) has 0 whole minutes left; the number of whole minutes left (floor) a marker 70 s old (about 230 s left) has 3 whole minutes left; the number of whole mi
+KILLED    M16 minutes off by one (+1, capped at 5)  [131/186 passed]
+          first failing: the number of whole minutes left (floor) a marker 130 s old (about 170 s left) has 2 whole minutes left; the number of whole minutes left (floor) a marker 190 s old (about 110 s left) has 1 whole minutes left; the number of whole 
+KILLED    M17 consumption not done after a trust list save (marker kept)  [184/186 passed]
+          first failing: scenario 3 - the link comes back after a save SSO schemes saved: the next page (real cookie) shows the three links again; scenario 3 - the link comes back after a save SSO origins saved: the three links come back
+KILLED    M18 OIDC scopes form turned into a sign-in link  [167/186 passed]
+          first failing: scenario 1 - stale: Sign in again link scopes and refresh mode stay plain submits in every marker state; scenario 3 - the link comes back after a save OAuth switch saved: the three links come back; scenario 1 - stale: Sign in agai
+KILLED    M19 refresh mode form turned into a sign-in link  [167/186 passed]
+          first failing: scenario 5 - another marker does not unlock a marker bound to role mapping leaves the three forms stale; scenario 5 - another marker does not unlock a marker bound to claim mapping leaves the three forms stale; scenario 5 - anothe
+KILLED    M20 Test Connection turned into a sign-in link when stale  [158/186 passed]
+          first failing: the marker of one page unlocks that page and no other /admin/media/settings: a marker bound to /admin/oauth/registrations leaves every form stale; the marker of one page unlocks that page and no other /admin/media/settings: a mark
+KILLED    M21 hint id removed (describedby dangles)  [67/186 passed]
+          first failing: the marker of one page unlocks that page and no other /admin/media/settings: a marker bound to /admin/config/claim-mapping leaves every form stale; the marker of one page unlocks that page and no other /admin/config/role-mapping: 
+KILLED    M22 link loses aria-describedby  [88/186 passed]
+          first failing: the marker of one page unlocks that page and no other /admin/media/settings: a marker bound to /admin/dashboard leaves every form stale; the marker of one page unlocks that page and no other /admin/media/settings: a marker bound t
+KILLED    M23 submit loses aria-describedby  [137/186 passed]
+          first failing: the shared-marker pages change as ONE unit /admin/config: all three forms fresh together, all three stale together; the marker of one page unlocks that page and no other /admin/config: its own marker turns every form of the page f
+KILLED    M24 claim mapping loses the lock-out hint in describedby  [167/186 passed]
+          first failing: the marker of one page unlocks that page and no other /admin/config/claim-mapping: a marker bound to /admin/media/settings leaves every form stale; the marker of one page unlocks that page and no other /admin/config/claim-mapping:
+KILLED    M25 stale hint keeps the old wording  [95/186 passed]
+          first failing: the marker of one page unlocks that page and no other /admin/config/role-mapping: a marker bound to /admin/oauth/registrations leaves every form stale; the marker of one page unlocks that page and no other /admin/config/role-mappi
+KILLED    M26 any marker unlocks (path ignored)  [88/186 passed]
+          first failing: the marker of one page unlocks that page and no other /admin/config: a marker bound to /admin/oauth/registrations leaves every form stale; the marker of one page unlocks that page and no other /admin/config: a marker bound to /adm
+KILLED    M27 sign-in href taken from the request params  [183/186 passed]
+          first failing: scenario 1 - stale: Sign in again link the sign-in link is built from the page path, never from the request query string; scenario 1 - stale: Sign in again link the link is built from the page path: no query string parameter reach
+KILLED    M28 stale link keeps data-role approve-confirm  [180/186 passed]
+          first failing: form 8 approve - stale a marker of ANOTHER client's approve page, of the same client's revoke page, or of another admin page does not unlock it; form 8 approve - stale a marker of another subject, and an expired one, do not unlock
+KILLED    M29 inline refusal link of the role mapping removed  [184/186 passed]
+          first failing: form 5 role mapping - fresh a value missing from the token is refused (200): inline link next to the error, form still fresh; form 5 role mapping - fresh a marker without a fingerprint (an older build) is refused the same way, wit
+KILLED    M30 accessor gives a number for a stale marker  [72/186 passed]
+          first failing: it agrees with reauth_fresh/2 and writes nothing {:ok, _} exactly when reauth_fresh is {:ok, _}, across the whole lifetime; stale gives no number an expired marker (older than 300 s) and one from the far future; stale gives no num
+KILLED    M31 validity line misses "one save"  [144/186 passed]
+          first failing: the marker of one page unlocks that page and no other /admin/config/claim-mapping: its own marker turns every form of the page fresh; the marker of one page unlocks that page and no other /admin/config: its own marker turns every 
+KILLED    M32 singular broken ("1 minutes")  [178/186 passed]
+          first failing: form 5 role mapping - fresh the normal Save button, described by both hints, the validity line with the whole minutes and for one save; form 4 claim mapping - fresh less than a minute below 60 s, 1 minute (singular) from 60 s, nev
+KILLED    M33 storage stale hint drops the keys sentence  [159/186 passed]
+          first failing: the marker of one page unlocks that page and no other /admin/media/settings: a marker bound to /admin/oauth/registrations/c1/approve leaves every form stale; the marker of one page unlocks that page and no other /admin/media/setti
+KILLED    M34 approve reauth-state loses data-reauth  [178/186 passed]
+          first failing: form 8 approve - fresh the minutes are the remaining whole minutes, rounded down; form 8 approve - stale the existing hooks stay: the form, Cancel, the back link, the client summary, the reauth-state element with data-reauth=neede
+KILLED    M35 approve submit loses its aria-label  [185/186 passed]
+          first failing: form 8 approve - fresh the submit button keeps data-role and the aria-label naming the client; the validity line is in the reauth-state element
+KILLED    M36 approve submit loses data-role  [185/186 passed]
+          first failing: form 8 approve - fresh the submit button keeps data-role and the aria-label naming the client; the validity line is in the reauth-state element
+KILLED    M37 approve fresh text without the validity line  [182/186 passed]
+          first failing: form 8 approve - consumption and expiry rendered fresh, refused after 300 s: redirect to the sign-in, the client stays pending, nothing leaks; form 8 approve - fresh the minutes are the remaining whole minutes, rounded down; form 
+KILLED    M38 revoke reauth-state without id  [179/186 passed]
+          first failing: form 9 revoke - fresh the minutes are the remaining whole minutes, rounded down; form 9 revoke - stale the link replaces the submit: exact text, href of THIS client's revoke page, described by the reauth-state element; form 9 revo
+KILLED    M39 revoke host input made readonly while stale  [181/186 passed]
+          first failing: form 9 revoke - consumption and expiry rendered fresh, refused after 300 s: redirect to the sign-in of this page, the client stays approved, no typed value in the Location or the log; form 9 revoke - stale a marker of another subj
+KILLED    M40 link loses the btn class  [88/186 passed]
+          first failing: the marker of one page unlocks that page and no other /admin/config: a marker bound to /admin/config/role-mapping leaves every form stale; the marker of one page unlocks that page and no other /admin/config: a marker bound to /adm
+KILLED    M41 click proof field dropped from the SSO origins form  [152/186 passed]
+          first failing: the shared-marker pages change as ONE unit /admin/config: all three forms fresh together, all three stale together; the marker of one page unlocks that page and no other /admin/config: a marker bound to /admin/config/scopes leaves
+KILLED    M43 orphan-risk render path of the media page has no fresh state  [185/186 passed]
+          first failing: scenario 3 - the links come back after a save the orphan-risk warning (200, nothing saved) renders with the marker kept: BOTH forms still fresh
+KILLED    M44 filter_parameters misses oidc_email_claim  [184/186 passed]
+          first failing: filter_parameters masks oidc_email_claim (claim mapping); form 4 claim mapping - consumption and expiry rendered fresh, refused after 300 s: the redirect to the sign-in, nothing saved, no value in the Location or the log
+KILLED    M45 filter_parameters misses secret_key  [183/186 passed]
+          first failing: filter_parameters masks secret_key (storage target); a nested parameter of a gated form is masked too; scenario 4 - marker expires while the page is open media_storage: refused after 300 s, redirect to the sign-in, nothing saved, 
+KILLED    M46 stale link removed from the tab order (tabindex=-1)  [88/186 passed]
+          first failing: the marker of one page unlocks that page and no other /admin/config/claim-mapping: a marker bound to /admin/config leaves every form stale; the marker of one page unlocks that page and no other /admin/config/role-mapping: a marker
+KILLED    M47 stale link sr-only  [88/186 passed]
+          first failing: the marker of one page unlocks that page and no other /admin/config/role-mapping: a marker bound to /admin/media/settings/storage leaves every form stale; the marker of one page unlocks that page and no other /admin/config: a mark
+KILLED    M48 validity line hidden by class  [169/186 passed]
+          first failing: the shared-marker pages change as ONE unit /admin/config: all three forms fresh together, all three stale together; the marker of one page unlocks that page and no other /admin/config: its own marker turns every form of the page f
+KILLED    M49 revoke stale hint says "type ... again"  [182/186 passed]
+          first failing: form 9 revoke - consumption and expiry rendered fresh, refused after 300 s: redirect to the sign-in of this page, the client stays approved, no typed value in the Location or the log; form 9 revoke - stale a marker of another subj
+KILLED    M50 refused POST stores the form in the session  [178/186 passed]
+          first failing: form 5 role mapping - consumption and expiry rendered fresh, refused after 300 s: the redirect to the sign-in, nothing saved, no value in the Location or the log; form 4 claim mapping - consumption and expiry rendered fresh, refus
+KILLED    M51 refused POST sets a refusal flash  [177/186 passed]
+          first failing: form 5 role mapping - consumption and expiry rendered fresh, refused after 300 s: the redirect to the sign-in, nothing saved, no value in the Location or the log; form 4 claim mapping - consumption and expiry rendered fresh, refus
+KILLED    M52 confirm stale hint without "first"  [181/186 passed]
+          first failing: form 8 approve - stale the link replaces the submit: exact text, href of THIS client's approve page, described by the reauth-state element; form 8 approve - stale a marker of another subject, and an expired one, do not unlock it; 
+KILLED    M53 plain scopes form gets a reauth hint element  [166/186 passed]
+          first failing: scenario 3 - the link comes back after a save a scopes save does not touch the marker: the forms keep their state; scenario 3 - the link comes back after a save a rejected scopes value re-renders in the state of the marker; scenar
+M54 reauth_notice/2 keeps the old text "Your change was not saved yet: enter it again ..." (auth.ex)  [admin_reauth_test.exs: 64/70 passed]  KILLED
+          failing: the 3 amended + 3 new notice tests (admin_reauth_test.exs)
+
+Total: 53 mutants, 53 killed, 0 survived.
+New since the first pass: M43 (orphan-risk render path without state), M44 / M45 (filter_parameters misses a field), M46 / M47 / M48 (tabindex=-1, sr-only link, hidden validity line), M49 / M52 (confirm hint wording), M50 / M51 (refused POST stores the form in the session / sets a refusal flash), M53 (plain scopes form gets a reauth hint).

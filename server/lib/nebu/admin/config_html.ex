@@ -1,6 +1,7 @@
 defmodule Nebu.Admin.ConfigHTML do
   @moduledoc "Template module for ConfigController."
   use Phoenix.Component
+  import Nebu.Admin.ReauthComponents
 
   embed_templates "templates/config/*"
 

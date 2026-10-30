@@ -1079,6 +1079,29 @@ defmodule Nebu.Media.StorageConfigTest do
              "no DB write may happen for a non-https iam_endpoint/sts_endpoint"
     end
 
+    # story admin-reauth-button-flow (Kassandra delta #2/#3): an https URL with user info (`https://user:password@host`) is never accepted and never logged,
+    # also when the password holds `/`, `?` or `#` (URI.parse then reads the user name as the host and the rest as the path).
+    test "rejects an iam_endpoint/sts_endpoint with user info (also with / ? # in the password), never persists or logs it", %{calls: calls} do
+      urls = [
+        "https://canary-user:canary-pass@93.184.216.34/iam",
+        "https://canary-user:se/cret-canary@93.184.216.34/iam",
+        "https://canary-user:se?cret-canary@93.184.216.34/iam",
+        "https://canary-user:se#cret-canary@93.184.216.34/iam",
+        "https://canary-user@93.184.216.34/iam"
+      ]
+
+      log =
+        ExUnit.CaptureLog.capture_log([level: :debug], fn ->
+          for field <- [:iam_endpoint, :sts_endpoint], url <- urls do
+            assert {:error, :invalid_iam_sts_endpoint} = StorageConfig.upsert(%{field => url}), "expected #{field}=#{inspect(url)} to be rejected"
+          end
+        end)
+
+      assert Agent.get(calls, & &1.writer) == 0, "no DB write for a URL with user info"
+      assert log =~ "IAM/STS endpoint", "the rejection is logged (value free)"
+      refute log =~ "canary", "nothing of the URL (user name, password, host) is logged: #{log}"
+    end
+
     test "rejects a private/loopback/link-local/metadata iam_endpoint/sts_endpoint and never persists it",
          %{calls: calls} do
       # Literal IPs — no live DNS lookup needed (mirrors the M-2/M-3 SSRF

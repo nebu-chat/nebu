@@ -8,6 +8,7 @@ Feature: Admin UI — the media policy save needs a fresh sign-in
   # /admin/media/settings, single use). Runner: playwright-bdd (admin-ui project). Steps: e2e/step-definitions/admin/media-settings-gate.steps.ts; reused:
   # "the Nebu stack is running", "bootstrap has been completed", "the operator is logged in as admin", "the operator navigates to {string}",
   # "the operator clears the field {string}", "the operator fills in {string} with {string}", "the page shows {string}".
+  # Story admin-reauth-button-flow: the form shows the link "Sign in again to save" until the admin has signed in; the steps follow it, sign in, then type and save.
   # Hygiene: the scenario restores the value it changed (through a second fresh sign-in).
 
   Background:

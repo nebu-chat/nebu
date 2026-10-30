@@ -64,7 +64,7 @@
         id="confirm-host"
         name="confirm_host"
         required
-        autofocus
+        autofocus={@reauth.fresh?}
         autocomplete="off"
         autocapitalize="off"
         spellcheck="false"
@@ -101,16 +101,27 @@
         Shown in the list of revoked clients and recorded in the audit log.
       </p>
     </div>
-    <p class="text-sm mb-3" data-role="reauth-state" data-reauth={if @reauth_fresh, do: "fresh", else: "needed"}>
-      <span :if={@reauth_fresh}>You signed in again a moment ago: you can revoke now.</span>
-      <span :if={!@reauth_fresh}>
-        Revoking asks you to sign in again with your identity provider first. You return to this page afterwards and
-        must type the host and the reason again.
+    <p id="reauth-state" class="text-sm mb-3" data-role="reauth-state" data-reauth={if @reauth.fresh?, do: "fresh", else: "needed"}>
+      <span :if={@reauth.fresh?}>
+        You signed in again: you can revoke now. When this page was opened, your fresh sign-in was valid for {validity(@reauth.minutes)} and for one revocation.
+      </span>
+      <span :if={!@reauth.fresh?}>
+        Revoking asks you to sign in again with your identity provider first. You return to this page afterwards:
+        then type the host and the reason and revoke. Anything you type before signing in is lost.
       </span>
     </p>
     <div class="flex flex-wrap items-center gap-3">
       <a href="/admin/oauth/clients" class="btn btn-ghost" data-role="revoke-cancel">Cancel</a>
-      <button type="submit" class="btn btn-error" data-role="revoke-confirm">Revoke client</button>
+      <.reauth_control
+        reauth={@reauth}
+        class="btn btn-error"
+        link_class="btn"
+        describedby="reauth-state"
+        link_text="Sign in again to revoke"
+        data-role="revoke-confirm"
+      >
+        Revoke client
+      </.reauth_control>
     </div>
   </form>
 </div>

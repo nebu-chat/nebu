@@ -1,6 +1,7 @@
 defmodule Nebu.Admin.ClaimMappingHTML do
   @moduledoc "Template module for ClaimMappingController."
   use Phoenix.Component
+  import Nebu.Admin.ReauthComponents
 
   embed_templates "templates/claim_mapping/*"
 end

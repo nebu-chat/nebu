@@ -248,19 +248,29 @@ defmodule Nebu.Admin.AdminMediaSettingsGateTest do
     end
   end
 
-  describe "UX B1 — the page says in advance that Save needs a fresh sign-in" do
-    test "both forms have the hint and the Save button points at it (aria-describedby), the storage hint names the keys; Test Connection needs none" do
-      {:ok, doc} = admin_conn(:get, @page, %{}) |> call() |> Map.fetch!(:resp_body) |> Floki.parse_document()
+  # story admin-reauth-button-flow: stale = the link "Sign in again to save" (hint: sign in first), fresh = the Save button (hint: the validity line);
+  # the full matrix is in admin_reauth_button_flow_media_test.exs
+  describe "UX B1 — the page says in advance how Save needs a fresh sign-in" do
+    test "both forms have the hint and the control points at it (aria-describedby), the storage hint names the keys; Test Connection needs none" do
+      {:ok, stale} = admin_conn(:get, @page, %{}) |> call() |> Map.fetch!(:resp_body) |> Floki.parse_document()
+      {:ok, fresh} = admin_conn(:get, @page, %{}) |> with_marker() |> call() |> Map.fetch!(:resp_body) |> Floki.parse_document()
 
       for {id, form_action} <- [{"media-policy-reauth-hint", "/admin/media/settings"}, {"media-storage-reauth-hint", "/admin/media/settings/storage"}] do
-        assert [hint] = Floki.find(doc, "p##{id}")
-        assert Floki.text(hint) =~ "needs a fresh sign-in"
-        assert [form] = Floki.find(doc, ~s(form[action="#{form_action}"]))
-        assert [save] = Floki.find(form, ~s(button[aria-describedby="#{id}"]))
+        assert [hint] = Floki.find(stale, "p##{id}")
+        assert Floki.text(hint) =~ ~r/\b(first|before)\b/i
+        assert [form] = Floki.find(stale, ~s(form[action="#{form_action}"]))
+        assert [link] = Floki.find(form, ~s(a[aria-describedby="#{id}"]))
+        assert Floki.text(link) =~ "Sign in again to save"
+        assert Floki.find(form, ~s(button[aria-describedby="#{id}"])) == []
+
+        assert [fresh_hint] = Floki.find(fresh, "p##{id}")
+        assert Floki.text(fresh_hint) =~ ~r/\bvalid\b/
+        assert [fresh_form] = Floki.find(fresh, ~s(form[action="#{form_action}"]))
+        assert [save] = Floki.find(fresh_form, ~s(button[aria-describedby="#{id}"]))
         assert Floki.text(save) =~ "Save"
       end
 
-      assert doc |> Floki.find("p#media-storage-reauth-hint") |> Floki.text() =~ "secret key"
+      assert stale |> Floki.find("p#media-storage-reauth-hint") |> Floki.text() =~ "secret key"
     end
   end
 

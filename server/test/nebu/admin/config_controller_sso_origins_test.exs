@@ -88,9 +88,13 @@ defmodule Nebu.Admin.ConfigControllerSsoOriginsTest do
     end)
   end
 
+  # story admin-reauth-button-flow: the submit "Save SSO origins" is rendered with a fresh sign-in marker bound to /admin/config only (else the link "Sign in again to save")
   defp get_config(rows \\ []) do
     Application.put_env(:nebu_http, :admin_server_config_reader, fn -> {:ok, rows} end)
-    build_admin_conn(:get, "/admin/config") |> endpoint_call()
+
+    build_admin_conn(:get, "/admin/config")
+    |> put_session("admin_reauth", Nebu.OAuth.TestSupport.fresh_marker("admin-1", 0, "auth_time", "/admin/config"))
+    |> endpoint_call()
   end
 
   # source text without `#` comments and @doc / @moduledoc heredocs: prose may name keys and modules

@@ -212,10 +212,8 @@
     </label>
   </div>
 
-  <p id="media-policy-reauth-hint" class="text-sm text-base-content/70 mb-2">
-    Saving this setting needs a fresh sign-in. If you are asked to sign in again, you return to this page and must enter your change again.
-  </p>
-  <button type="submit" class="btn btn-primary" aria-describedby="media-policy-reauth-hint">Save</button>
+  <.reauth_hint id="media-policy-reauth-hint" reauth={@reauth} class="text-sm text-base-content/70 mb-2" />
+  <.reauth_control reauth={@reauth} class="btn btn-primary" describedby="media-policy-reauth-hint">Save</.reauth_control>
 </form>
 
 <h2 class="text-heading font-semibold mb-4">Storage Target</h2>
@@ -384,10 +382,8 @@
     </label>
   </div>
 
-  <p id="media-storage-reauth-hint" class="text-sm text-base-content/70 mb-2">
-    Saving this setting needs a fresh sign-in. If you are asked to sign in again, you return to this page and must enter your change again, including the access key and the secret key (they are never filled in for you). Test Connection needs no new sign-in.
-  </p>
-  <button type="submit" class="btn btn-primary" aria-describedby="media-storage-reauth-hint">Save</button>
+  <.reauth_hint id="media-storage-reauth-hint" reauth={@reauth} keys={true} class="text-sm text-base-content/70 mb-2" />
+  <.reauth_control reauth={@reauth} class="btn btn-primary" describedby="media-storage-reauth-hint">Save</.reauth_control>
   <button type="submit" formaction="/admin/media/settings/storage/test-connection" class="btn">
     Test Connection
   </button>

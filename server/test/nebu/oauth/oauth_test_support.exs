@@ -1311,9 +1311,13 @@ defmodule Nebu.OAuth.TestSupport do
   `%{"sub", "at", "kind", "path"}`; `at` = unix seconds (`ago` seconds in the past), `kind` `"auth_time"` | `"flow"`,
   `path` = the ONE confirm page it was started for (Kassandra M-1: `/admin/oauth/registrations/:id/approve` or
   `/admin/oauth/clients/:id/revoke`); without a `path` the marker is the old, unbound shape (refused).
+
+  `at` is read from `System.system_time/1`, the clock `Nebu.Admin.Auth.reauth_fresh/2` compares it with. NOT `System.os_time/1`: after a step of the
+  OS clock (a host that slept, NTP) the Erlang system time follows only gradually, so the two clocks differ by more than the 5 s skew of
+  `reauth_fresh/2` for minutes and every fresh marker would be read as "from the future" (seen in a CI gate run that spanned a 2 hour host sleep).
   """
   def fresh_marker(sub, ago \\ 0, kind \\ "auth_time", path \\ nil) do
-    base = %{"sub" => sub, "at" => System.os_time(:second) - ago, "kind" => kind}
+    base = %{"sub" => sub, "at" => System.system_time(:second) - ago, "kind" => kind}
     if path, do: Map.put(base, "path", path), else: base
   end
 

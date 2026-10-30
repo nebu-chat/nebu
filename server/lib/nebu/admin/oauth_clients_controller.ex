@@ -76,7 +76,7 @@ defmodule Nebu.Admin.OAuthClientsController do
         |> assign(:client, present(client))
         |> assign(:expected, expected_confirmation(client))
         |> assign(:device_count, device_count(client_id))
-        |> assign(:reauth_fresh, match?({:ok, _}, Nebu.Admin.Auth.reauth_fresh(conn, revoke_path(client_id))))
+        |> Nebu.Admin.OAuthAdminHelpers.assign_reauth(revoke_path(client_id))
         |> assign(:revoke_path, revoke_path(client_id))
         |> shell("Revoke OAuth client", "oauth-approved-clients")
         |> render(:revoke_confirm)

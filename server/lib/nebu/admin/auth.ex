@@ -693,24 +693,14 @@ defmodule Nebu.Admin.Auth do
     end
   end
 
-  # story admin-forms-gate-sweep: the media settings page comes back with an EMPTY form too (the refused POST is never replayed) and the secret key is never
-  # filled in again; the marker covers ONE save of the page (policy or storage target)
-  defp reauth_notice(conn, "/admin/media/settings") do
-    Phoenix.Controller.put_flash(
-      conn,
-      :info,
-      "Signed in again. Your change was not saved yet: enter it again (for the storage target also the access key and the secret key) and press Save. Your sign-in is valid for #{div(@reauth_ttl_seconds, 60)} minutes and for one save."
-    )
-  end
-
-  # story sso-origins-admin-hardening (UX): the config page comes back with an EMPTY form (the refused POST is never
-  # replayed): say so, and how long the fresh sign-in lasts (@reauth_ttl_seconds = 5 minutes).
-  defp reauth_notice(conn, return_to) when return_to in @reauth_config_pages do
-    Phoenix.Controller.put_flash(
-      conn,
-      :info,
-      "Signed in again. Your change was not saved yet: enter it again and press Save. Your sign-in stays valid for #{div(@reauth_ttl_seconds, 60)} minutes."
-    )
+  # story admin-forms-gate-sweep: the media settings page comes back with an EMPTY form too (nothing is replayed, the secret key is never filled in);
+  # the marker covers ONE save of the page (policy or storage target). Story admin-reauth-button-flow: the admin signs in BEFORE entering the change
+  # (the "Sign in again to save" link), so normally no POST was refused. The same notice follows a sign-in after a POST that was refused because the marker
+  # ran out while the page was open (nothing replayed, nothing saved), so it is worded to be true in both cases: nothing is changed yet. It names no
+  # minutes: the flash outlives the page it was set for (it can be read minutes after the sign-in), the validity line of the form is rendered with the
+  # remaining minutes of the page that is shown.
+  defp reauth_notice(conn, return_to) when return_to in @reauth_config_pages or return_to == "/admin/media/settings" do
+    Phoenix.Controller.put_flash(conn, :info, "Signed in again. Nothing is changed yet: enter your change and press Save.")
   end
 
   defp reauth_notice(conn, _return_to), do: conn
@@ -762,6 +752,21 @@ defmodule Nebu.Admin.Auth do
            get_session(conn, @reauth_session_key),
          true <- now - at <= @reauth_ttl_seconds and at <= now + @reauth_future_skew do
       {:ok, kind}
+    else
+      _ -> :stale
+    end
+  end
+
+  @doc """
+  Read only (story admin-reauth-button-flow): the remaining validity of the marker `reauth_fresh/2` accepts for `path`, in WHOLE minutes rounded down
+  (`{:ok, 0}` = less than a minute, never more than 5), else `:stale` (exactly when `reauth_fresh/2` is `:stale`). Writes nothing.
+  """
+  @spec reauth_remaining_minutes(Plug.Conn.t(), String.t()) :: {:ok, 0..5} | :stale
+  def reauth_remaining_minutes(conn, path) when is_binary(path) do
+    with {:ok, _kind} <- reauth_fresh(conn, path),
+         %{"at" => at} <- get_session(conn, @reauth_session_key) do
+      remaining = @reauth_ttl_seconds - (System.system_time(:second) - at)
+      {:ok, remaining |> max(0) |> min(@reauth_ttl_seconds) |> div(60)}
     else
       _ -> :stale
     end

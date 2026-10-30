@@ -399,15 +399,17 @@ defmodule Nebu.Admin.ConfigSsoTrustHardeningTest do
     end
   end
 
-  describe "AC4 — the page tells the admin that saving needs a fresh sign-in" do
-    test "one sentence next to the two forms, referenced by aria-describedby of both submit buttons" do
-      html = (admin_conn(:get, @path) |> call()).resp_body
+  # story admin-reauth-button-flow: the submit button exists in the FRESH state only (stale: the link "Sign in again to save", admin_reauth_button_flow_config_test.exs);
+  # the hint element now carries the validity line there
+  describe "AC4 — the page tells the admin about the fresh sign-in" do
+    test "one sentence next to the two forms, referenced by aria-describedby of both submit buttons (fresh state)" do
+      html = (admin_conn(:get, @path) |> with_marker() |> call()).resp_body
 
       for {form, label} <- [{"sso-schemes-form", "Save SSO schemes"}, {"sso-origins-form", "Save SSO origins"}] do
         [_, block] = Regex.run(~r/<form[^>]*id="#{form}".*?<\/form>/s, html) |> then(&[nil, hd(&1)])
         [button] = Regex.scan(~r/<button\b[^>]*>\s*#{label}\s*<\/button>/s, block) |> Enum.map(&hd/1)
         assert [_, id] = Regex.run(~r/aria-describedby="([^"]+)"/, button), "#{form}: the submit button needs aria-describedby"
-        assert block =~ ~r/id="#{Regex.escape(id)}"[^>]*>[^<]*Saving this setting needs a fresh sign-in\. If you are asked to sign in again, you return to this page and must enter your change again\./,
+        assert block =~ ~r/id="#{Regex.escape(id)}"[^>]*>[^<]*\bvalid\b/,
                "#{form}: the referenced element carries the hint"
       end
     end

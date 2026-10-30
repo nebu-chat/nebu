@@ -11,7 +11,8 @@ Feature: Admin UI — OIDC Claim Mapping Configuration
   #   - "Claim mapping updated" is added to the flash allowlist
   #
   # Story admin-config-privileged-forms-sweep (cw): saving the claim mapping needs a FRESH admin sign-in (strict fetch metadata + a marker bound to
-  # /admin/config/claim-mapping): the save steps go through the Dex login form once (helper saveMappingFormWithAdminReauth).
+  # /admin/config/claim-mapping): the save steps first follow the "Sign in again to save" link (story admin-reauth-button-flow), sign in at the Dex login form once, then type the
+  # values and press Save (helper saveMappingFormWithAdminReauth).
   #
   # Runner: playwright-bdd (Cucumber-based Playwright runner)
   # Step definitions: e2e/step-definitions/admin/claim-mapping.steps.ts

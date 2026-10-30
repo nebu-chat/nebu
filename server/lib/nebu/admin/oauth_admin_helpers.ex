@@ -152,6 +152,21 @@ defmodule Nebu.Admin.OAuthAdminHelpers do
     |> halt()
   end
 
+  @doc """
+  Story admin-reauth-button-flow: assigns `:reauth` = `%{fresh?, minutes, href}` for the marker-gated form(s) bound to `path`, the SAME page path the
+  form's `gate(conn, :marker, path)` checks. Every render path of such a page (GET and each re-render) must pipe through this, so the primary control
+  shows the "Sign in again" link or the submit button as the marker is NOW. `href` is built from the server side `path` only.
+  """
+  @spec assign_reauth(Plug.Conn.t(), String.t()) :: Plug.Conn.t()
+  def assign_reauth(conn, path) do
+    href = Auth.reauth_start_path(path)
+
+    case Auth.reauth_remaining_minutes(conn, path) do
+      {:ok, minutes} -> assign(conn, :reauth, %{fresh?: true, minutes: minutes, href: href})
+      :stale -> assign(conn, :reauth, %{fresh?: false, minutes: nil, href: href})
+    end
+  end
+
   @doc "The Matrix user id (else the `sub`) of the signed-in admin, or nil."
   @spec actor_id(Plug.Conn.t()) :: String.t() | nil
   def actor_id(conn) do

@@ -101,3 +101,7 @@ Code.require_file("nebu/compliance/user_deletion_oauth_test_support.exs", __DIR_
 # of the default suite and nothing here starts epmd or distribution. They are a MANUAL opt-in proof that CI does not run: in a container (epmd and the distribution
 # port on 127.0.0.1, ERL_EPMD_ADDRESS=127.0.0.1), from server/: `elixir --name <node>@127.0.0.1 --cookie <random> -S mix test --only cluster` (distribution exists before the app boots).
 ExUnit.configure(exclude: [:cluster | Keyword.get(ExUnit.configuration(), :exclude, [])])
+
+# story admin-reauth-button-flow: shared helpers (the nine forms, requests with a marker, the stale / fresh assertions) of the admin_reauth_button_flow_* suites. Loaded once,
+# after the OAuth helpers it builds on. The file name ends with `oauth_test_support.exs` on purpose (mix.exs ignores that suffix, see the note above).
+Code.require_file("nebu/admin/reauth_button_flow_oauth_test_support.exs", __DIR__)

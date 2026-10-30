@@ -507,7 +507,8 @@ defmodule Nebu.Admin.ConfigPrivilegedFormsSweepTest do
   describe "AC4 — the forms carry the click proof field, the hint and (mappings) the lock-out warning" do
     for {label, path, form_selector} <- [{"claim mapping", @claim, "form[action='/admin/config/claim-mapping']"}, {"role mapping", @role, "form[action='/admin/config/role-mapping']"}] do
       test "#{label}: hidden _click_proof, the fresh sign-in hint on the button (aria-describedby), the lock-out warning" do
-        conn = admin_conn(:get, unquote(path)) |> call()
+        # story admin-reauth-button-flow: the submit button is the FRESH state (stale: the link, admin_reauth_button_flow_mappings_test.exs)
+        conn = admin_conn(:get, unquote(path)) |> with_marker(unquote(path)) |> call()
         assert conn.status == 200
         {:ok, doc} = Floki.parse_document(conn.resp_body)
         assert [form] = Floki.find(doc, unquote(form_selector))
@@ -519,7 +520,7 @@ defmodule Nebu.Admin.ConfigPrivilegedFormsSweepTest do
         assert length(ids) == 2, "the lock-out hint and the sign-in hint"
         for id <- ids, do: assert(match?([_], Floki.find(doc, "##{id}")), "#{id} exists once")
         hint = ids |> Enum.map_join(" ", fn id -> doc |> Floki.find("##{id}") |> Floki.text() end) |> String.replace(~r/\s+/, " ")
-        assert hint =~ "Saving this setting needs a fresh sign-in. If you are asked to sign in again, you return to this page and must enter your change again."
+        assert hint =~ ~r/\bvalid\b/, "the fresh state says how long the sign-in is valid"
 
         page_text = doc |> Floki.text(sep: " ") |> String.replace(~r/\s+/, " ")
         if unquote(path) == @role do
