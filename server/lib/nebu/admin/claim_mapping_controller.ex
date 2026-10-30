@@ -35,6 +35,7 @@ defmodule Nebu.Admin.ClaimMappingController do
     conn
     |> assign(:values, current_values())
     |> assign(:errors, %{})
+    |> Nebu.Admin.OAuthAdminHelpers.assign_reauth(@page)
     |> assign(:page_title, "Claim Mapping")
     |> assign(:active_nav, "claim-mapping")
     |> assign(:bootstrap_completed, Nebu.Admin.Auth.bootstrap_completed?())
@@ -61,6 +62,7 @@ defmodule Nebu.Admin.ClaimMappingController do
       conn
       |> assign(:values, changes)
       |> assign(:errors, errors)
+      |> Nebu.Admin.OAuthAdminHelpers.assign_reauth(@page)
       |> assign(:page_title, "Claim Mapping")
       |> assign(:active_nav, "claim-mapping")
       |> assign(:bootstrap_completed, Nebu.Admin.Auth.bootstrap_completed?())
@@ -97,6 +99,7 @@ defmodule Nebu.Admin.ClaimMappingController do
     conn
     |> assign(:values, changes)
     |> assign(:errors, %{})
+    |> Nebu.Admin.OAuthAdminHelpers.assign_reauth(@page)
     |> assign(:page_title, "Claim Mapping")
     |> assign(:active_nav, "claim-mapping")
     |> assign(:bootstrap_completed, Nebu.Admin.Auth.bootstrap_completed?())

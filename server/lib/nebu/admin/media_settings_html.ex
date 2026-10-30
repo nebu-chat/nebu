@@ -6,6 +6,7 @@ defmodule Nebu.Admin.MediaSettingsHTML do
   "templates/<dir>/*"` + a single `templates/media_settings/index.html.heex`).
   """
   use Phoenix.Component
+  import Nebu.Admin.ReauthComponents
 
   embed_templates "templates/media_settings/*"
 end

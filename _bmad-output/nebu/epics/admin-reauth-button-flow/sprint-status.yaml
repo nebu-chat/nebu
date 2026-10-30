@@ -1,0 +1,4 @@
+# generated: 2026-10-29
+# story admin-reauth-button-flow done (pipeline: pipeline: marker-gated admin forms show the fresh sign-in state on the primary button (link 'Sign in again to ...' vs submit + validity line), 9 forms on 7 pages; reauth_remaining_minutes/2; filter_parameters + no /admin body capture in RequestLogger; IAM/STS URL userinfo rejected; test-review 0 MAJOR, code-review 0 MAJOR, Kassandra CLEAN (cycle 0 MEDIUM fixed), UX 1 blocking fixed, 2 fix cycles; CI integration 25 known flaky, element-web 35/0, admin-ui 112/0, oauth-https e2e not run): 2026-10-29
+development_status:
+  admin-reauth-button-flow: done

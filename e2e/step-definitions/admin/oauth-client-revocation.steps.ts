@@ -53,6 +53,7 @@ type Registered = { name: string; clientId: string; redirectUri: string };
 let current: Registered | null = null;
 let sawVerifiedHost = false;
 let reauthenticated = false;
+let signedInViaLink = false; // story admin-reauth-button-flow: the sign-in started at the "Sign in again to approve" link
 let fetchStatus = 0;
 
 function theClient(): Registered {
@@ -101,6 +102,7 @@ After({ tags: '@oauth-revocation' }, async () => {
 Given('a client is registered for the revocation scenarios', async ({ request }: { request: APIRequestContext }) => {
   sawVerifiedHost = false;
   reauthenticated = false;
+  signedInViaLink = false;
   fetchStatus = 0;
   current = await registerClient(request);
 });
@@ -126,6 +128,7 @@ When('the operator reviews the pending client and approves it on its confirm pag
   const outcome = await approveThroughConfirmPage(page, c.clientId);
   sawVerifiedHost = outcome.host === CLIENT_HOST;
   reauthenticated = outcome.reauthenticated;
+  signedInViaLink = outcome.viaLink;
 });
 
 When('the operator opens the approved clients page from the OAuth admin menu', async ({ page }: { page: Page }) => {
@@ -226,15 +229,21 @@ When(
   async ({ page }: { page: Page }, reason: string) => {
     const done = (u: URL): boolean => u.pathname === CLIENTS_PATH;
     const isDex = (u: URL): boolean => /\/dex\/auth(\/|$)/i.test(u.pathname);
+    // story admin-reauth-button-flow: without a fresh sign-in the form shows the link "Sign in again to revoke" instead of the submit: Tab to it, press
+    // Enter, sign in, come back to the (empty) confirm page; only then the host and the reason are typed and the form is submitted, all by keyboard
+    // No fresh sign-in is known here (a new revoke confirm page: the marker is bound to ONE client and action): the link is MANDATORY. A page that shows
+    // the submit instead, or a refused POST that redirects to the sign-in, is a defect: this scenario fails.
+    const signInLink = page.locator('[data-role="revoke-confirm-form"]').getByRole('link', { name: 'Sign in again to revoke', exact: true });
+    await expect(signInLink, 'the revoke confirm page shows the "Sign in again to revoke" link').toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('[data-role="revoke-confirm"]'), 'and no submit before the sign-in').toHaveCount(0);
+    await tabTo(page, '[data-role="revoke-confirm-form"] a[href^="/admin/login/start"]');
+    await page.keyboard.press('Enter');
+    await page.waitForURL((u) => isDex(u), { timeout: 60_000 });
+    await signInAtDexAsAdmin(page);
+    await page.waitForURL((u) => /\/revoke$/.test(u.pathname), { timeout: 60_000 });
+    await expect(page.locator('[data-role="revoke-confirm"]')).toBeVisible({ timeout: 15_000 });
     await typeAndSubmitWithKeyboard(page, CLIENT_HOST, reason);
-    await page.waitForURL((u) => done(u) || isDex(u), { timeout: 60_000 });
-    if (isDex(new URL(page.url()))) {
-      // the server asked for a fresh sign-in: sign in, come back to the confirm page and submit again, again by keyboard
-      await signInAtDexAsAdmin(page);
-      await page.waitForURL((u) => /\/revoke$/.test(u.pathname), { timeout: 60_000 });
-      await typeAndSubmitWithKeyboard(page, CLIENT_HOST, reason);
-      await page.waitForURL((u) => done(u), { timeout: 60_000 });
-    }
+    await page.waitForURL((u) => done(u), { timeout: 60_000 });
   },
 );
 
@@ -261,6 +270,7 @@ Then('the confirm page showed the verified host of the client before it was appr
 
 Then('the operator had to sign in again at the identity provider before the approval was saved', async () => {
   expect(reauthenticated, 'the first approval of a session needs a fresh sign-in through Dex (SO4)').toBe(true);
+  expect(signedInViaLink, 'the sign-in started at the "Sign in again to approve" link of the confirm page, not at a refused POST').toBe(true);
 });
 
 Then(
@@ -337,7 +347,13 @@ Then('the host and reason inputs of the confirm page are labelled and described'
   await expect(page.locator('[data-role="revoke-consequences"] h2')).toBeVisible();
   await expect(page.locator('[data-role="revoke-device-count"]')).toBeVisible();
   await expect(page.locator('[data-role="reauth-state"]')).toBeVisible();
-  await expect(host, 'the typed host has the focus when the page opens (autofocus)').toBeFocused();
+  // story admin-reauth-button-flow: the host field takes the autofocus only when the page is fresh (with the sign-in link as primary control the typed text would be lost)
+  const state = await page.locator('[data-role="reauth-state"]').getAttribute('data-reauth');
+  if (state === 'fresh') {
+    await expect(host, 'the typed host has the focus when the page opens fresh (autofocus)').toBeFocused();
+  } else {
+    await expect(host, 'no autofocus while the sign-in link is the primary control').not.toBeFocused();
+  }
 });
 
 Then('the operator stays on the revoke confirm page with an error message', async ({ page }: { page: Page }) => {
@@ -354,3 +370,42 @@ Then(`the client's database status is "approved" and no revocation audit entry e
 Then('the server answers {int}', async ({}, status: number) => {
   expect(fetchStatus, 'a fetch() POST is not a user-clicked form submit (no Sec-Fetch-Mode: navigate)').toBe(status);
 });
+
+// ─── story admin-reauth-button-flow: the state is shown on the primary control of the confirm pages ─────────────────────────────────────
+
+const CONFIRM_SUBMITS = '[data-role="approve-confirm"], [data-role="revoke-confirm"]';
+
+When('the operator opens the approve confirm page of the client', async ({ page }: { page: Page }) => {
+  await page.goto(`${ADMIN_BASE_URL}${REGISTRATIONS_PATH}/${encodeURIComponent(theClient().clientId)}/approve`);
+  await expect(page.locator('[data-page="oauth-approve-confirm"]')).toBeVisible({ timeout: 15_000 });
+});
+
+Then('the confirm page shows the {string} link and no {string} button', async ({ page }: { page: Page }, linkText: string, buttonText: string) => {
+  const link = page.getByRole('link', { name: linkText, exact: true });
+  await expect(link).toBeVisible({ timeout: 10_000 });
+  await expect(link, 'a link to the sign-in of THIS page, keyboard reachable').toHaveAttribute('href', /^\/admin\/login\/start\?mode=reauth&return_to=%2Fadmin%2Foauth%2F/);
+  const describedBy = await link.getAttribute('aria-describedby');
+  expect(describedBy, 'the link keeps aria-describedby').toBeTruthy();
+  await expect(page.locator(`#${describedBy}`)).toContainText(/\b(first|before)\b/i);
+  await expect(page.locator(CONFIRM_SUBMITS).filter({ hasText: buttonText }), `no "${buttonText}" button before the sign-in`).toHaveCount(0);
+  await expect(page.locator('[data-role="reauth-state"]')).toHaveAttribute('data-reauth', 'needed');
+});
+
+When('the operator follows the {string} link and signs in again', async ({ page }: { page: Page }, linkText: string) => {
+  await page.getByRole('link', { name: linkText, exact: true }).click();
+  await page.waitForURL((u) => /\/dex\/auth(\/|$)/i.test(u.pathname), { timeout: 60_000 });
+  await signInAtDexAsAdmin(page);
+  await page.waitForURL((u) => /\/(approve|revoke)$/.test(u.pathname), { timeout: 60_000 });
+});
+
+Then(
+  'the confirm page shows the {string} button, no sign-in link and a validity line',
+  async ({ page }: { page: Page }, buttonText: string) => {
+    await expect(page.locator(CONFIRM_SUBMITS).filter({ hasText: buttonText })).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole('link', { name: /^Sign in again to /i })).toHaveCount(0);
+    const state = page.locator('[data-role="reauth-state"]');
+    await expect(state).toHaveAttribute('data-reauth', 'fresh');
+    await expect(state).toContainText(/\bvalid\b/i);
+    await expect(state).toContainText(/(\d+ minutes?|less than a minute)/i);
+  },
+);

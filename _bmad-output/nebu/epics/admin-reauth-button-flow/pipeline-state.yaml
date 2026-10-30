@@ -1,0 +1,18 @@
+# Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents.
+# Do not edit manually during an active pipeline run.
+# last_updated: 2026-10-29
+# [admin-reauth-button-flow] 2026-10-29T17:53Z committed ✓ (ATDD+Dev+Code CLEAN, 2 fix cycles, Kassandra CLEAN, UX 1 blocking fixed)
+# [admin-reauth-button-flow] 2026-10-29T17:53Z cycle 2 done, ux-gate fixed (1 blocking), kassandra delta CLEAN, ci-gate: integration 25 known-flaky only, element-web 35/35, admin-ui 112/0; oauth-https e2e not run
+# [admin-reauth-button-flow] 2026-10-29T13:35Z code-review → 0 MAJOR 4 MINOR; kassandra → CLEAN (1 MEDIUM RequestLogger /admin body, 1 LOW); fix cycle 1 started
+# [admin-reauth-button-flow] 2026-10-29T11:28Z dev-story → done (cycle 0), 546 tests green, unit_nodb 6876/0
+# [admin-reauth-button-flow] 2026-10-29T11:13Z atdd fix pass → 186 new tests, 53/53 mutants killed, test-review 0 MAJOR
+# [admin-reauth-button-flow] 2026-10-29T11:01Z test-review → 0 MAJOR, 12 MINOR, ATDD fix pass requested
+# [admin-reauth-button-flow] 2026-10-29T10:56Z atdd → 172 new + 13 amended failing tests, 42/42 mutants killed
+# [admin-reauth-button-flow] 2026-10-29T10:20Z create-story → admin-reauth-button-flow.md (REQ-2026-001; ui, sec required, matrix false)
+# [pending] 2026-10-29T10:00Z pipeline started (epic admin-reauth-button-flow)
+story: null
+current_step: null
+completed: []
+cycle_count: 0
+blocked_reason: null
+last_updated: "2026-10-29T17:53Z"

@@ -512,7 +512,7 @@ defmodule Nebu.Admin.RoleMappingSelfLockoutTest do
         |> put_session("current_user", %{"admin" => true, "sub" => String.duplicate("s", 40), "email" => "administrator@example.com", "matrix_user_id" => "@administrator:matrix.example.com", "session_exp" => 1_900_000_000, "refresh_grace_exp" => 1_900_003_600})
         |> put_session("admin_oidc_rt", Base.encode64(:crypto.strong_rand_bytes(1500)))
         |> put_session("_csrf_token", Base.url_encode64(:crypto.strong_rand_bytes(16)))
-        |> put_session("phoenix_flash", %{"info" => "Signed in again. Your change was not saved yet: enter it again and press Save. Your sign-in stays valid for 5 minutes."})
+        |> put_session("phoenix_flash", %{"info" => "Signed in again. Nothing is changed yet: enter your change and press Save."})
         |> send_resp(200, "")
 
       [cookie] = for {"set-cookie", v} <- conn.resp_headers, String.starts_with?(v, "_nebu_admin_key="), do: v

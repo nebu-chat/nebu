@@ -333,23 +333,36 @@ defmodule Nebu.Media.StorageConfig do
   end
 
   defp validate_iam_sts_url(value) do
-    if String.starts_with?(String.downcase(value), "https://") do
-      case SSRF.checked_target(value, allow_private: SSRF.allow_private_storage?()) do
-        {:ok, _target} ->
-          :ok
+    cond do
+      not String.starts_with?(String.downcase(value), "https://") ->
+        {:error, :invalid_iam_sts_endpoint}
 
-        {:error, reason} ->
-          Logger.warning(
-            "Nebu.Media.StorageConfig: IAM/STS endpoint #{inspect(value)} rejected: " <>
-              SSRF.describe_error(reason)
-          )
+      # before the SSRF check and before any log line: nothing of such a URL (a password may hold `/`, `?` or `#`, so even `URI.parse(value).host`
+      # can be a piece of the credential) is logged or echoed
+      iam_sts_user_info?(value) ->
+        Logger.warning("Nebu.Media.StorageConfig: IAM/STS endpoint rejected: the URL carries user info (the URL is not logged)")
+        {:error, :invalid_iam_sts_endpoint}
 
-          {:error, :invalid_iam_sts_endpoint}
-      end
-    else
-      {:error, :invalid_iam_sts_endpoint}
+      true ->
+        case SSRF.checked_target(value, allow_private: SSRF.allow_private_storage?()) do
+          {:ok, _target} ->
+            :ok
+
+          {:error, reason} ->
+            Logger.warning("Nebu.Media.StorageConfig: IAM/STS endpoint host #{inspect(URI.parse(value).host)} rejected: " <> SSRF.describe_error(reason))
+
+            {:error, :invalid_iam_sts_endpoint}
+        end
     end
   end
+
+  @doc """
+  Whether an IAM / STS endpoint URL carries user info (`https://user:password@host`). Any `@` counts: a password with `/`, `?` or `#` moves the `@` out of what
+  `URI.parse/1` reads as the authority, so the parsed `userinfo` alone is not enough. A host URL has no legitimate `@`. Used by this module and by the
+  admin form's own mirror of the check (`Nebu.Admin.MediaSettingsController`), so that both layers agree.
+  """
+  @spec iam_sts_user_info?(String.t()) :: boolean()
+  def iam_sts_user_info?(url) when is_binary(url), do: String.contains?(url, "@") or URI.parse(url).userinfo != nil
 
   @doc "The `:pg` group used for cross-node cache invalidation (ADR-020)."
   @spec pg_group() :: String.t()

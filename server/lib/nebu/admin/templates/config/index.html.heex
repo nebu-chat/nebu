@@ -79,10 +79,8 @@
     </span>
   </label>
 
-  <p id="sso-schemes-reauth-hint" class="mt-2 text-sm text-base-content/70">
-    Saving this setting needs a fresh sign-in. If you are asked to sign in again, you return to this page and must enter your change again.
-  </p>
-  <button type="submit" class="btn btn-primary mt-3" aria-describedby="sso-schemes-reauth-hint">Save SSO schemes</button>
+  <.reauth_hint id="sso-schemes-reauth-hint" reauth={@reauth} />
+  <.reauth_control reauth={@reauth} class="btn btn-primary mt-3" describedby="sso-schemes-reauth-hint">Save SSO schemes</.reauth_control>
 </form>
 
 <%!-- SSO redirect origins: POST form (story legacy-sso-redirect-confirmation, G3-3, D14). The https origins whose
@@ -132,10 +130,8 @@
     </div>
   </div>
 
-  <p id="sso-origins-reauth-hint" class="mt-2 text-sm text-base-content/70">
-    Saving this setting needs a fresh sign-in. If you are asked to sign in again, you return to this page and must enter your change again.
-  </p>
-  <button type="submit" class="btn btn-primary mt-3" aria-describedby="sso-origins-reauth-hint">Save SSO origins</button>
+  <.reauth_hint id="sso-origins-reauth-hint" reauth={@reauth} />
+  <.reauth_control reauth={@reauth} class="btn btn-primary mt-3" describedby="sso-origins-reauth-hint">Save SSO origins</.reauth_control>
 </form>
 
 <%!-- OIDC refresh mode: POST form. Two native <select>s (Matrix + admin),
@@ -292,10 +288,8 @@
       </p>
     </div>
 
-    <p id="oauth-switch-reauth-hint" class="mt-2 text-sm text-base-content/70">
-      Saving this setting needs a fresh sign-in. If you are asked to sign in again, you return to this page and must enter your change again.
-    </p>
-    <button type="submit" class="btn btn-primary mt-3" aria-describedby="oauth-switch-reauth-hint">Save OAuth settings</button>
+    <.reauth_hint id="oauth-switch-reauth-hint" reauth={@reauth} />
+    <.reauth_control reauth={@reauth} class="btn btn-primary mt-3" describedby="oauth-switch-reauth-hint">Save OAuth settings</.reauth_control>
   </form>
 </section>
 

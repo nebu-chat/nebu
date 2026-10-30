@@ -139,11 +139,21 @@ defmodule Nebu.Admin.ConfigOAuthSwitchTest do
 
   defp text(node), do: node |> Floki.text(sep: " ") |> String.replace(~r/\s+/, " ") |> String.trim()
 
+  # story admin-reauth-button-flow: the submit "Save OAuth settings" exists in the FRESH state only (stale: the link "Sign in again to save",
+  # admin_reauth_button_flow_config_test.exs): this page carries a marker bound to /admin/config
+  defp fresh_page(pairs) do
+    stored(pairs)
+    conn = admin_conn(:get, @path) |> with_marker() |> call()
+    assert conn.status == 200
+    {:ok, doc} = Floki.parse_document(conn.resp_body)
+    {conn, doc}
+  end
+
   # ─── AC1 — the page ────────────────────────────────────────────────────────
 
   describe "AC1 — the section and the form" do
     test "section #oauth-switch with the heading, the form and the contract of the fields" do
-      {_conn, doc} = page([])
+      {_conn, doc} = fresh_page([])
 
       assert [section] = Floki.find(doc, "section#oauth-switch")
       assert [heading] = Floki.find(section, "h2#oauth-switch-heading")
@@ -177,7 +187,7 @@ defmodule Nebu.Admin.ConfigOAuthSwitchTest do
     end
 
     test "every control has a label (for / id), the button is described by the fresh sign-in hint" do
-      {_conn, doc} = page([])
+      {_conn, doc} = fresh_page([])
       [form] = Floki.find(doc, "form#oauth-switch-form")
 
       for {id, label_text} <- [{"oauth-enabled-input", "Offer the OAuth 2.0 API"}, {"oauth-issuer-input", "Issuer URL"}, {"oauth-ack-input", "I have read the activation checklist"}] do
@@ -190,7 +200,7 @@ defmodule Nebu.Admin.ConfigOAuthSwitchTest do
       assert text(button) == "Save OAuth settings"
       assert [hint_id] = Floki.attribute(button, "aria-describedby")
       assert [hint] = Floki.find(form, "##{hint_id}")
-      assert text(hint) =~ "Saving this setting needs a fresh sign-in. If you are asked to sign in again, you return to this page and must enter your change again."
+      assert text(hint) =~ ~r/\bvalid\b/
     end
 
     test "the checkbox is checked iff the stored switch is exactly true; the issuer field shows the stored value" do

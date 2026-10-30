@@ -26,8 +26,30 @@ import Config
 
 # oauth-client-revocation (AC11): Phoenix.Logger prints the request parameters of every controller action at :debug.
 # The OAuth admin forms carry a CSRF token and free-text fields (a revocation reason, the typed host): never logged.
+#
+# admin-reauth-button-flow: the marker-gated admin forms (SSO lists, issuer URL, claim and role values, webhook URL, storage keys) are logged too, also
+# when a gate halts the request, so their field names are masked as well (a deny-list: a {:keep, ...} list would blank the parameters of every other controller).
+# "endpoint" is a substring match (it also covers iam_endpoint and sts_endpoint): a user info pasted into an endpoint field (`user:password@host`) is
+# refused by the validation only AFTER the framework logged the parameters. Only the media settings form has such a parameter (every Phoenix controller of the app is an admin controller). The Plug-routed Matrix API is not affected.
 config :phoenix,
-  filter_parameters: ["password", "reason", "confirm_host", "_csrf_token", "csrf_token"]
+  filter_parameters: [
+    "password",
+    "reason",
+    "confirm_host",
+    "_csrf_token",
+    "csrf_token",
+    "access_key",
+    "secret_key",
+    "endpoint",
+    "webhook_url",
+    "sso_extra_redirect_schemes",
+    "sso_redirect_allowed_origins",
+    "oauth_issuer_url",
+    "oidc_user_id_claim",
+    "oidc_displayname_claim",
+    "oidc_email_claim",
+    "admin_group_claim"
+  ]
 
 # ── admin-ui-migration: Phoenix LiveView Admin UI endpoint (compile-time base) ──
 # server: false — the AdminEndpoint never opens its own port. The umbrella's single

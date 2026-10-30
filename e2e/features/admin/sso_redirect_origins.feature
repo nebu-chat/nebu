@@ -13,8 +13,9 @@ Feature: Admin UI — allowed SSO redirect origins
   # {string}", and the "Additional SSO redirect schemes" steps of sso-schemes.steps.ts.
   #
   # Story sso-origins-admin-hardening (X-1): saving the origins form and the schemes form needs a FRESH admin sign-in
-  # (strict fetch metadata + a re-authentication marker bound to /admin/config, single use). The save steps go through
-  # the Dex login form once per save (helper `saveConfigFormWithAdminReauth`, e2e/fixtures/oauth-admin.ts).
+  # (strict fetch metadata + a re-authentication marker bound to /admin/config, single use). The save steps follow the
+  # "Sign in again to save" link (story admin-reauth-button-flow), sign in at the Dex login form once per save, then type the
+  # values and press Save (helper `saveConfigFormWithAdminReauth`, e2e/fixtures/oauth-admin.ts).
   #
   # Hygiene: an @sso-redirect-origins After hook clears both server_config keys through the SAME forms (the save
   # refreshes the server's cache; a direct DB write would leave it stale).
@@ -61,5 +62,5 @@ Feature: Admin UI — allowed SSO redirect origins
   @x1
   Scenario: The two SSO trust forms say that saving needs a fresh sign-in
     When the admin navigates to "/admin/config"
-    Then the "Save SSO origins" button is described by the fresh sign-in hint
-    And the "Save SSO schemes" button is described by the fresh sign-in hint
+    Then the "Save SSO origins" form control is described by the sign-in hint
+    And the "Save SSO schemes" form control is described by the sign-in hint

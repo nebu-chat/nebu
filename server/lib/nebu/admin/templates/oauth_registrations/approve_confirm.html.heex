@@ -72,9 +72,11 @@
     Approve only applications you recognise.
   </p>
 
-  <p class="text-sm mb-4 max-w-3xl" data-role="reauth-state" data-reauth={if @reauth_fresh, do: "fresh", else: "needed"}>
-    <span :if={@reauth_fresh}>You signed in again a moment ago: you can approve now.</span>
-    <span :if={!@reauth_fresh}>Approving asks you to sign in again with your identity provider first. You return to this page afterwards.</span>
+  <p id="reauth-state" class="text-sm mb-4 max-w-3xl" data-role="reauth-state" data-reauth={if @reauth.fresh?, do: "fresh", else: "needed"}>
+    <span :if={@reauth.fresh?}>
+      You signed in again: you can approve now. When this page was opened, your fresh sign-in was valid for {validity(@reauth.minutes)} and for one approval.
+    </span>
+    <span :if={!@reauth.fresh?}>Approving asks you to sign in again with your identity provider first. You return to this page afterwards.</span>
   </p>
 
   <%!-- A plain form, no JavaScript confirm: the browser reports a user-activated submit (Sec-Fetch-User), which
@@ -84,7 +86,16 @@
     <input type="hidden" name="_click_proof" value="" data-click-proof />
     <input :if={@page > 1} type="hidden" name="page" value={@page} />
     <input :if={@show_logos} type="hidden" name="logos" value="1" />
-    <button type="submit" class="btn btn-primary" data-role="approve-confirm" aria-label={"Approve client " <> display_name(@client)}>Approve client</button>
+    <.reauth_control
+      reauth={@reauth}
+      class="btn btn-primary"
+      describedby="reauth-state"
+      link_text="Sign in again to approve"
+      data-role="approve-confirm"
+      aria-label={"Approve client " <> display_name(@client)}
+    >
+      Approve client
+    </.reauth_control>
     <a href={@back_path} class="btn btn-ghost" data-role="approve-cancel">Cancel</a>
   </form>
 </div>

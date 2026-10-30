@@ -538,6 +538,7 @@ defmodule Nebu.Admin.ConfigController do
       |> assign(:oauth_form, conn.assigns[:oauth_form] || default_oauth_form(cfg, env))
       |> assign(:oauth_errors, conn.assigns[:oauth_errors] || %{})
     end)
+    |> Nebu.Admin.OAuthAdminHelpers.assign_reauth(@config_path)
     |> assign(:page_title, "Configuration")
     # admin-sidebar-nesting coordination contract (UX gate V1): the parent
     # "config" key belongs to a pure disclosure <button> that never emits

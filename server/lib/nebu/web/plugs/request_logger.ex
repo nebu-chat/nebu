@@ -146,6 +146,9 @@ defmodule Nebu.Web.Plugs.RequestLogger do
     # message content, only credentials, so it is safe to read immediately.
     auth_header = Plug.Conn.get_req_header(conn, "authorization") |> List.first()
 
+    # Decided HERE, from the segments the routers will match (`path_info` is still the full path in this plug, before any `forward`).
+    admin? = admin_path?(conn.path_info)
+
     Plug.Conn.register_before_send(conn, fn conn ->
       duration_ms = System.monotonic_time(:millisecond) - start_ms
 
@@ -227,7 +230,7 @@ defmodule Nebu.Web.Plugs.RequestLogger do
       # to always make.
       Logger.debug(fn ->
         payload_fields = %{
-          request_body: redacted_request_body(conn),
+          request_body: redacted_request_body(conn, admin?),
           response_body: redacted_response_body(conn),
           auth_header: redact_auth_header(auth_header),
           query_string: redacted_query_string(conn)
@@ -267,9 +270,23 @@ defmodule Nebu.Web.Plugs.RequestLogger do
 
   defp extract_user_id(_other), do: nil
 
-  defp redacted_request_body(conn) do
-    if account_data_content?(conn), do: nil, else: redacted_request_body_params(conn)
+  defp redacted_request_body(conn, admin?) do
+    if account_data_content?(conn) or admin?, do: nil, else: redacted_request_body_params(conn)
   end
+
+  # Story admin-reauth-button-flow (Kassandra #1): the request body of an `/admin/*` form is never captured. The admin forms carry secrets
+  # (the storage access key and secret key), trust lists, the issuer and the claim / role values under field names the exact-key `PayloadRedactor`
+  # does not know, and a new form would leak until its field names were listed. The admin pages are HTML forms, not API content that needs the DEBUG capture.
+  #
+  # The decision is made on the DECODED first segment: `Plug.Router` and the Phoenix router percent-decode the path before matching, so `/%61dmin/...`
+  # reaches the admin app. A first segment that cannot be decoded counts as admin (nothing is captured).
+  defp admin_path?([first | _]) do
+    URI.decode(first) == "admin"
+  rescue
+    ArgumentError -> true
+  end
+
+  defp admin_path?([]), do: false
 
   # Account data (global + room scope) and the room-tag routes are opaque, client-defined USER
   # CONTENT (tag orders / fields, markers, secret-storage blobs): neither the request nor the response body is ever captured, not

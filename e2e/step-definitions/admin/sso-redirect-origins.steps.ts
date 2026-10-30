@@ -87,11 +87,32 @@ Then('the "Allowed SSO redirect origins" field is marked invalid with its error 
   await expect(page.locator('p#sso-origins-error[role="alert"]')).toContainText(/not valid/i);
 });
 
-/** X-1 / AC4: one short sentence next to each of the two forms, referenced by `aria-describedby` of its submit button. */
-Then('the {string} button is described by the fresh sign-in hint', async ({ page }: { page: Page }, buttonName: string) => {
-  const button = page.getByRole('button', { name: buttonName, exact: true });
-  await expect(button).toBeVisible({ timeout: 10_000 });
-  const describedBy = await button.getAttribute('aria-describedby');
+/**
+ * X-1 / AC4: one short sentence next to each of the three forms, referenced by `aria-describedby` of its primary control. Story admin-reauth-button-flow: the
+ * control is the submit button `buttonName` with a fresh sign-in and the link "Sign in again to save" without one; the hint says to sign in first / how long the
+ * fresh sign-in is valid.
+ */
+const FORM_OF_SAVE_BUTTON: Record<string, string> = {
+  'Save SSO origins': '#sso-origins-form',
+  'Save SSO schemes': '#sso-schemes-form',
+  'Save OAuth settings': '#oauth-switch-form',
+};
+Then('the {string} form control is described by the sign-in hint', async ({ page }: { page: Page }, buttonName: string) => {
+  const form = page.locator(FORM_OF_SAVE_BUTTON[buttonName] ?? '');
+  const link = form.getByRole('link', { name: 'Sign in again to save', exact: true });
+  const button = form.getByRole('button', { name: buttonName, exact: true });
+  await expect(button.or(link), `${buttonName}: the submit or the sign-in link`).toBeVisible({ timeout: 10_000 });
+  // the two states are told apart: the link (no fresh sign-in) is described by "sign in first", the submit (fresh sign-in) by the validity line
+  const stale = (await link.count()) > 0;
+  const control = stale ? link : button;
+  const describedBy = await control.getAttribute('aria-describedby');
   expect(describedBy, `${buttonName}: aria-describedby`).toBeTruthy();
-  await expect(page.locator(`#${describedBy}`)).toContainText(/fresh sign-in/i);
+  const hint = page.locator(`#${describedBy}`);
+  if (stale) {
+    await expect(button, `${buttonName}: no submit while the link is shown`).toHaveCount(0);
+    await expect(hint).toContainText(/\b(first|before)\b/i);
+  } else {
+    await expect(hint).toContainText(/\bvalid\b/i);
+    await expect(hint).toContainText(/(\d+ minutes?|less than a minute)/i);
+  }
 });

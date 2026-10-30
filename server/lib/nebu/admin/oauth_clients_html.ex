@@ -1,6 +1,7 @@
 defmodule Nebu.Admin.OAuthClientsHTML do
   @moduledoc "Template module for OAuthClientsController (story oauth-client-revocation)."
   use Phoenix.Component
+  import Nebu.Admin.ReauthComponents
 
   embed_templates "templates/oauth_clients/*"
 

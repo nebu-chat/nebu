@@ -34,7 +34,8 @@
     />
     <p :if={@error} id="admin-group-claim-error" role="alert" data-field="admin_group_claim" class="text-error text-sm mt-1">
       {@error}
-      <a :if={@reauth_link} href={@reauth_link} class="link">Sign in again, then enter the value once more</a>
+      <span :if={@inline_reauth_link}>Just joined this group at your identity provider? Your token holds it only after a new sign-in.</span>
+      <a :if={@inline_reauth_link} href={@reauth.href} class="link">Sign in again, then enter the value once more</a>
     </p>
   </div>
   <p id="role-mapping-lockout-hint" class="alert alert-warning text-sm">
@@ -44,8 +45,6 @@
     A value that is too BROAD is as dangerous: it makes every user an administrator. Use a group that only administrators have. If the bootstrap wizard stored no claim path, the admin check scans ALL claims of the token,
     so a value that appears anywhere in every token grants admin to everybody.
   </p>
-  <p id="role-mapping-reauth-hint" class="text-sm text-base-content/70">
-    Saving this setting needs a fresh sign-in. If you are asked to sign in again, you return to this page and must enter your change again.
-  </p>
-  <button type="submit" class="btn btn-primary self-start" aria-describedby="role-mapping-lockout-hint role-mapping-reauth-hint">Save</button>
+  <.reauth_hint id="role-mapping-reauth-hint" reauth={@reauth} class="text-sm text-base-content/70" />
+  <.reauth_control reauth={@reauth} class="btn btn-primary self-start" describedby="role-mapping-lockout-hint role-mapping-reauth-hint">Save</.reauth_control>
 </form>

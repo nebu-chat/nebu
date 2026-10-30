@@ -357,7 +357,8 @@ defmodule Nebu.OAuth.OAuthAdminClientsTest do
       add_session!(users, c.id)
       add_session!(users, c.id)
 
-      conn = admin_conn(:get, revoke_path(c.id)) |> call()
+      # story admin-reauth-button-flow: the submit exists in the fresh state only (stale: the link "Sign in again to revoke", admin_reauth_button_flow_confirm_test.exs)
+      conn = fresh_admin_conn(:get, revoke_path(c.id)) |> call()
       assert conn.status == 200
       d = doc(conn)
       assert Floki.find(d, ~s([data-page="oauth-revoke-confirm"])) != []
@@ -1025,7 +1026,8 @@ defmodule Nebu.OAuth.OAuthAdminClientsTest do
   describe "review cycle 1 — UX and security details of the confirm pages" do
     test "approve confirm page: the button name contains its visible text (WCAG 2.5.3), no static status role, the back link, the cancel link", %{ids: ids} do
       c = insert_client(ids, "pending", %{name: "Label Me"})
-      d = admin_conn(:get, approve_path(c.id)) |> call() |> doc()
+      # story admin-reauth-button-flow: the submit button is the fresh state (stale: the link "Sign in again to approve")
+      d = fresh_admin_conn(:get, approve_path(c.id)) |> call() |> doc()
       assert [button] = Floki.find(d, ~s(button[data-role="approve-confirm"]))
       assert text(button) == "Approve client"
       assert Floki.attribute(button, "aria-label") |> hd() =~ "Approve client", "the accessible name starts with the visible label"
@@ -1052,17 +1054,23 @@ defmodule Nebu.OAuth.OAuthAdminClientsTest do
       assert Floki.find(d, ~s([role="status"])) == []
       assert [state] = Floki.find(d, ~s(form [data-role="reauth-state"]))
       assert Floki.attribute(state, "data-reauth") == ["needed"]
-      assert text(state) =~ "type the host and the reason again"
-      assert [_] = Floki.find(d, ~s(input[name="confirm_host"][autofocus]))
+      # story admin-reauth-button-flow (Decision): nothing was typed before the sign-in, so the hint says to sign in FIRST and no longer "type ... again"
+      assert text(state) =~ ~r/\bfirst\b/
+      refute text(state) =~ ~r/\btype\b[^.]*\bagain\b/i
+      # story admin-reauth-button-flow (UX gate M4): while the sign-in link is the primary control the host field takes no autofocus (it would be lost at the sign-in)
+      assert Floki.find(d, ~s(input[name="confirm_host"][autofocus])) == []
       assert [h2] = Floki.find(d, ~s([data-role="revoke-consequences"] h2))
       assert text(h2) =~ "What happens"
 
-      html = Floki.raw_html(d)
+      fresh = fresh_admin_conn(:get, revoke_path(c.id)) |> call() |> doc()
+      assert [_] = Floki.find(fresh, ~s(input[name="confirm_host"][autofocus]))
+
+      # story admin-reauth-button-flow: the submit with data-role=revoke-confirm exists in the fresh state only
+      html = Floki.raw_html(fresh)
       {cancel_at, _} = :binary.match(html, ~s(data-role="revoke-cancel"))
       {revoke_at, _} = :binary.match(html, ~s(data-role="revoke-confirm"))
       assert cancel_at < revoke_at, "Cancel comes first in the tab order"
 
-      fresh = fresh_admin_conn(:get, revoke_path(c.id)) |> call() |> doc()
       assert fresh |> Floki.find(~s([data-role="reauth-state"])) |> Floki.attribute("data-reauth") == ["fresh"]
     end
 
