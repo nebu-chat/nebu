@@ -506,7 +506,9 @@ defmodule Nebu.Media.StorageConfigTest do
                  endpoint: "93.184.216.34:9000"
                })
 
-      assert :ok = StorageConfig.upsert(%{endpoint: "93.184.216.35:9001", bucket: "new-bucket"})
+      # (media-storage-uses-admin-config, fix B: a CHANGED endpoint now needs both keys in the same save, so the second
+      # save keeps the endpoint and changes the bucket: the stored keys stay untouched.)
+      assert :ok = StorageConfig.upsert(%{endpoint: "93.184.216.34:9000", bucket: "new-bucket"})
 
       # The partial-column-set write for the SECOND upsert must not even
       # mention the secret-ciphertext columns — proving this is a genuine
@@ -521,7 +523,7 @@ defmodule Nebu.Media.StorageConfigTest do
       assert conn.secret_key == original_secret
 
       result = StorageConfig.get()
-      assert result.endpoint == "93.184.216.35:9001"
+      assert result.endpoint == "93.184.216.34:9000"
       assert result.bucket == "new-bucket"
     end)
   end
@@ -667,7 +669,8 @@ defmodule Nebu.Media.StorageConfigTest do
        %{calls: calls} do
     with_no_at_rest_secret(fn ->
       assert_raise RuntimeError, ~r/SecretBox key unavailable/, fn ->
-        StorageConfig.upsert(%{access_key: "AKIA-SHOULD-NEVER-BE-STORED-0000"})
+        # (both keys: a lone key is `{:error, :key_pair_required}` before it is ever encrypted)
+        StorageConfig.upsert(%{access_key: "AKIA-SHOULD-NEVER-BE-STORED-0000", secret_key: "secret-should-never-be-stored-0000"})
       end
 
       # The raise must propagate BEFORE any DB write — upsert/1 must not
@@ -1173,12 +1176,17 @@ defmodule Nebu.Media.StorageConfigTest do
       ensure_started()
       Application.put_env(:nebu_http, :media_storage_allow_private_endpoints, true)
 
-      assert :ok =
-               StorageConfig.upsert(%{
-                 endpoint: "100.126.127.4:443",
-                 iam_endpoint: "https://100.126.127.4:4443/iam",
-                 sts_endpoint: "https://10.0.0.5:4443/sts"
-               })
+      # a changed endpoint needs both keys in the same save (media-storage-uses-admin-config, fix B), encrypted for the write
+      with_admin_secret_at_rest("storage-config-test-at-rest-key-cgnat", fn ->
+        assert :ok =
+                 StorageConfig.upsert(%{
+                   endpoint: "100.126.127.4:443",
+                   access_key: "AKIA-CGNAT-0001",
+                   secret_key: "CGNAT-SECRET-0002",
+                   iam_endpoint: "https://100.126.127.4:4443/iam",
+                   sts_endpoint: "https://10.0.0.5:4443/sts"
+                 })
+      end)
 
       assert Agent.get(calls, & &1.writer) == 1
     end

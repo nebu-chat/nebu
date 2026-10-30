@@ -147,8 +147,10 @@ if config_env() in [:prod, :dev] do
 end
 
 # ─── media-gateway-migration: S3/MinIO storage for the Elixir media gateway ──
-# Nebu.Media.Storage uses ExAws.S3 against MinIO or a real S3 endpoint, selected
-# entirely by the NEBU_MINIO_* vars below (there is no NEBU_STORAGE_BACKEND switch).
+# Nebu.Media.Storage uses ExAws.S3 against MinIO or a real S3 endpoint. The NEBU_MINIO_*
+# vars below are the boot-time default target (there is no NEBU_STORAGE_BACKEND switch);
+# a target saved under /admin/media/settings takes precedence and is resolved per request
+# by Nebu.Media.StorageConfig, so it needs no restart.
 # Credentials are file-based Docker Secrets (read the file
 # path envs, mirroring what the removed Go `media:` service consumed). Only wired
 # in prod/dev — unit tests inject a fake storage boundary and never touch ExAws.
@@ -165,7 +167,20 @@ if config_env() in [:prod, :dev] do
       path -> path |> File.read!() |> String.trim()
     end
 
-  minio_endpoint = System.get_env("NEBU_MINIO_ENDPOINT", "minio:9000")
+  # Unset keeps the default. Set but empty (or only whitespace) is a misconfiguration that would otherwise boot with a
+  # host-less endpoint and fail every media operation: abort the boot instead.
+  minio_endpoint =
+    case System.get_env("NEBU_MINIO_ENDPOINT") do
+      nil ->
+        "minio:9000"
+
+      value ->
+        case String.trim(value) do
+          "" -> raise "NEBU_MINIO_ENDPOINT is set but empty; set host[:port] or leave it unset (default minio:9000)"
+          endpoint -> endpoint
+        end
+    end
+
   use_ssl? = System.get_env("NEBU_MINIO_USE_SSL", "false") == "true"
 
   {host, port} =
@@ -174,15 +189,15 @@ if config_env() in [:prod, :dev] do
       [h] -> {h, if(use_ssl?, do: 443, else: 80)}
     end
 
+  # Nothing in lib/ reads this key any more: Nebu.Media.Storage takes the bucket from
+  # Nebu.Media.StorageConfig.request_target/0 (saved > NEBU_MINIO_BUCKET > "nebu-media"). Kept for the boot-time
+  # config contract (runtime_storage_endpoint_test); do not wire a new consumer to it, resolve through StorageConfig.
   config :nebu_http, media_bucket: System.get_env("NEBU_MINIO_BUCKET", "nebu-media")
 
-  # media-security-admin-control/8c-media-archive-worker (AC1, Dependencies —
-  # Story 11b): the archive-bucket name Nebu.Media.Storage.archive_bucket/0
-  # reads. Story 11b (Object Storage Target Config) has not landed a
-  # DB-backed source for this on this branch yet — same MinIO/S3 connection
-  # (host/scheme/port/keys/region below) as the primary bucket, just a
-  # different bucket name, per this story's own guardrails (a placeholder
-  # until 11b lands a genuinely separate, admin-configurable target).
+  # media-security-admin-control/8c-media-archive-worker (AC1): the boot-time
+  # archive-bucket name, the fallback Nebu.Media.Storage.archive_bucket/0 uses
+  # when no archive bucket is saved under /admin/media/settings. Same MinIO/S3
+  # connection as the primary bucket, just a different bucket name.
   config :nebu_http,
     media_archive_bucket: System.get_env("NEBU_MINIO_ARCHIVE_BUCKET", "nebu-media-archive")
 
@@ -224,6 +239,8 @@ if config_env() in [:prod, :dev] do
     media_storage_allow_private_endpoints:
       System.get_env("NEBU_STORAGE_ALLOW_PRIVATE_ENDPOINTS", "false") == "true"
 
+  # Baseline ExAws config only: Nebu.Media.Storage overrides host/scheme/port/region/credentials per request with the
+  # resolved target (saved > these env values > defaults), so a saved target never has to be written back here.
   config :ex_aws,
     access_key_id: minio_access_key,
     secret_access_key: minio_secret_key,

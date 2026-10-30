@@ -149,6 +149,8 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
   setup do
     Application.put_env(:nebu_http, :admin_csrf_bypass, true)
     Application.put_env(:compliance, :repo, FakeAuditRepo)
+    # a save that changes the target carries both keys (media-storage-uses-admin-config, fix B), encrypted for the write
+    Application.put_env(:nebu_http, :admin_secret_at_rest, "controller-test-at-rest-secret")
 
     on_exit(fn ->
       Application.delete_env(:nebu_http, :admin_csrf_bypass)
@@ -1178,7 +1180,15 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
       Application.put_env(
         :nebu_http,
         :media_storage_config_loader,
-        fn -> storage_config_loader_row(%{"secret_key_encrypted" => encrypted, "endpoint" => "93.184.216.34:9000", "use_ssl" => true}) end
+        # (a saved endpoint is only used with its full saved pair, so the row carries both keys)
+        fn ->
+          storage_config_loader_row(%{
+            "access_key_encrypted" => encrypt_stored_secret("server-side-only-access-key-abc123"),
+            "secret_key_encrypted" => encrypted,
+            "endpoint" => "93.184.216.34:9000",
+            "use_ssl" => true
+          })
+        end
       )
 
       Application.put_env(:nebu_http, :media_storage_test_connection_fun, fn candidate ->
@@ -1337,7 +1347,7 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
 
       conn =
         post_storage(
-          storage_params(%{
+          typed_keys(%{
             "endpoint" => "93.184.216.34:9000",
             "confirm_orphan_risk" => "true"
           })
@@ -1367,7 +1377,7 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
         :ok
       end)
 
-      conn = post_storage(storage_params(%{"endpoint" => "93.184.216.34:9000"}))
+      conn = post_storage(typed_keys(%{"endpoint" => "93.184.216.34:9000"}))
 
       assert conn.status in [200, 302, 303],
              "a fresh/empty storage config must save normally; got #{conn.status}: " <>
@@ -1398,7 +1408,7 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
         :ok
       end)
 
-      conn = post_storage(storage_params(%{"endpoint" => "93.184.216.34:9000"}))
+      conn = post_storage(typed_keys(%{"endpoint" => "93.184.216.34:9000"}))
 
       assert conn.status in [200, 302, 303],
              "expected a normal save when zero files reference storage_key; got " <>
@@ -1416,7 +1426,7 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
         :media_storage_config_loader,
         fn ->
           storage_config_loader_row(%{
-            "endpoint" => "stable-endpoint:9000",
+            "endpoint" => "93.184.216.34:9000",
             "bucket" => "stable-bucket"
           })
         end
@@ -1431,8 +1441,8 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
 
       conn =
         post_storage(
-          storage_params(%{
-            "endpoint" => "stable-endpoint:9000",
+          typed_keys(%{
+            "endpoint" => "93.184.216.34:9000",
             "bucket" => "stable-bucket",
             "region" => "eu-central-1",
             "use_ssl" => "true",
@@ -1491,7 +1501,7 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
         :ok
       end)
 
-      conn = post_storage(storage_params(%{"bucket" => "brand-new-bucket"}))
+      conn = post_storage(typed_keys(%{"bucket" => "brand-new-bucket"}))
 
       assert conn.status in [200, 302, 303],
              "expected a valid save to succeed; got #{conn.status}: #{conn.resp_body}"
@@ -1744,7 +1754,7 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
 
       Application.put_env(:nebu_http, :media_storage_config_loader, fn ->
         storage_config_loader_row(%{
-          "endpoint" => "stable-endpoint:9000",
+          "endpoint" => "93.184.216.34:9000",
           "bucket" => "stable-bucket",
           "iam_endpoint" => old_iam
         })
@@ -1768,8 +1778,8 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
 
       conn =
         post_storage(
-          storage_params(%{
-            "endpoint" => "stable-endpoint:9000",
+          typed_keys(%{
+            "endpoint" => "93.184.216.34:9000",
             "bucket" => "stable-bucket",
             "iam_endpoint" => "",
             "sts_endpoint" => sts_url
@@ -1798,7 +1808,7 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
 
       Application.put_env(:nebu_http, :media_storage_config_loader, fn ->
         storage_config_loader_row(%{
-          "endpoint" => "stable-endpoint:9000",
+          "endpoint" => "93.184.216.34:9000",
           "bucket" => "stable-bucket",
           "iam_endpoint" => old_iam
         })
@@ -1814,8 +1824,8 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
 
       conn =
         post_storage(
-          storage_params(%{
-            "endpoint" => "stable-endpoint:9000",
+          typed_keys(%{
+            "endpoint" => "93.184.216.34:9000",
             "bucket" => "stable-bucket",
             "iam_endpoint" => ""
           })
@@ -1867,7 +1877,7 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
       # would.
       conn =
         post_storage(
-          storage_params(%{
+          typed_keys(%{
             "region" => "eu-west-2",
             "iam_endpoint" => iam_env,
             "sts_endpoint" => sts_env
@@ -1917,7 +1927,7 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
 
       Application.put_env(:nebu_http, :media_storage_config_loader, fn ->
         storage_config_loader_row(%{
-          "endpoint" => "stable-endpoint:9000",
+          "endpoint" => "93.184.216.34:9000",
           "bucket" => "stable-bucket",
           "iam_endpoint" => db_override_iam
         })
@@ -1936,8 +1946,8 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
 
       conn =
         post_storage(
-          storage_params(%{
-            "endpoint" => "stable-endpoint:9000",
+          typed_keys(%{
+            "endpoint" => "93.184.216.34:9000",
             "bucket" => "stable-bucket",
             "iam_endpoint" => env_iam
           })
@@ -1984,7 +1994,7 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
 
       conn =
         post_storage(
-          storage_params(%{
+          typed_keys(%{
             "region" => "eu-west-2",
             "iam_endpoint" => "",
             "sts_endpoint" => ""
@@ -2044,7 +2054,7 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
 
       conn =
         post_storage(
-          storage_params(%{
+          typed_keys(%{
             "region" => "eu-west-2",
             "iam_endpoint" => ""
           })
@@ -2081,7 +2091,7 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
 
       Application.put_env(:nebu_http, :media_storage_config_loader, fn ->
         storage_config_loader_row(%{
-          "endpoint" => "stable-endpoint:9000",
+          "endpoint" => "93.184.216.34:9000",
           "bucket" => "stable-bucket"
         })
       end)
@@ -2099,8 +2109,8 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
 
       conn =
         post_storage(
-          storage_params(%{
-            "endpoint" => "stable-endpoint:9000",
+          typed_keys(%{
+            "endpoint" => "93.184.216.34:9000",
             "bucket" => "stable-bucket",
             "region" => "eu-south-1",
             "iam_endpoint" => ""
@@ -2137,7 +2147,7 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
 
       Application.put_env(:nebu_http, :media_storage_config_loader, fn ->
         storage_config_loader_row(%{
-          "endpoint" => "stable-endpoint:9000",
+          "endpoint" => "93.184.216.34:9000",
           "bucket" => "stable-bucket",
           "iam_endpoint" => old_iam
         })
@@ -2152,8 +2162,8 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
       end)
 
       params =
-        storage_params(%{
-          "endpoint" => "stable-endpoint:9000",
+        typed_keys(%{
+          "endpoint" => "93.184.216.34:9000",
           "bucket" => "stable-bucket",
           "region" => "eu-west-3"
         })
@@ -2326,7 +2336,7 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
       sts_url = "https://93.184.216.34:4443/sts"
 
       conn =
-        post_storage(storage_params(%{"iam_endpoint" => iam_url, "sts_endpoint" => sts_url}))
+        post_storage(typed_keys(%{"iam_endpoint" => iam_url, "sts_endpoint" => sts_url}))
 
       assert conn.status in [200, 302, 303],
              "expected a valid https iam/sts save to succeed; got #{conn.status}: " <>
@@ -2376,7 +2386,7 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
       # verbatim, untouched.
       conn =
         post_storage(
-          storage_params(%{
+          typed_keys(%{
             "region" => "eu-west-2",
             "iam_endpoint" => bad_env_iam
           })
@@ -2404,7 +2414,7 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
 
       Application.put_env(:nebu_http, :media_storage_config_loader, fn ->
         storage_config_loader_row(%{
-          "endpoint" => "stable-endpoint:9000",
+          "endpoint" => "93.184.216.34:9000",
           "bucket" => "stable-bucket",
           "iam_endpoint" => "https://93.184.216.34:4443/iam"
         })
@@ -2421,7 +2431,7 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
       conn =
         post_storage(
           storage_params(%{
-            "endpoint" => "stable-endpoint:9000",
+            "endpoint" => "93.184.216.34:9000",
             "bucket" => "stable-bucket",
             "iam_endpoint" => "https://127.0.0.1/iam"
           })
@@ -2450,7 +2460,7 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
 
       Application.put_env(:nebu_http, :media_storage_config_loader, fn ->
         storage_config_loader_row(%{
-          "endpoint" => "stable-endpoint:9000",
+          "endpoint" => "93.184.216.34:9000",
           "bucket" => "stable-bucket",
           "iam_endpoint" => bad_db_iam
         })
@@ -2466,8 +2476,8 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
 
       conn =
         post_storage(
-          storage_params(%{
-            "endpoint" => "stable-endpoint:9000",
+          typed_keys(%{
+            "endpoint" => "93.184.216.34:9000",
             "bucket" => "stable-bucket",
             "iam_endpoint" => ""
           })
@@ -2496,7 +2506,7 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
         :media_storage_config_loader,
         fn ->
           storage_config_loader_row(%{
-            "endpoint" => "stable-endpoint:9000",
+            "endpoint" => "93.184.216.34:9000",
             "bucket" => "stable-bucket"
           })
         end
@@ -2517,8 +2527,8 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
 
       conn =
         post_storage(
-          storage_params(%{
-            "endpoint" => "stable-endpoint:9000",
+          typed_keys(%{
+            "endpoint" => "93.184.216.34:9000",
             "bucket" => "stable-bucket",
             "iam_endpoint" => iam_url,
             "sts_endpoint" => sts_url
@@ -2552,7 +2562,8 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
       new_sts = "https://93.184.216.34:4443/sts-new"
 
       Application.put_env(:nebu_http, :media_storage_config_loader, fn ->
-        storage_config_loader_row(%{"iam_endpoint" => old_iam, "sts_endpoint" => nil})
+        # (the endpoint is a public IP literal: a save that carries keys always writes it, and `upsert/2` resolves it)
+        storage_config_loader_row(%{"endpoint" => "93.184.216.34:9000", "iam_endpoint" => old_iam, "sts_endpoint" => nil})
       end)
 
       Application.put_env(:nebu_http, :media_files_storage_key_count_fun, fn -> 0 end)
@@ -2564,12 +2575,12 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
 
       conn =
         post_storage(
-          storage_params(%{
+          typed_keys(%{
             # pinned to the loader row's defaults (test-review MINOR-1): isolates
             # "only iam/sts changed" as the test name implies, independent of the
             # orphan-risk gate's own endpoint/bucket diffing (bypassed here via
             # the stubbed zero file count regardless).
-            "endpoint" => "old-endpoint:9000",
+            "endpoint" => "93.184.216.34:9000",
             "bucket" => "old-bucket",
             # unchanged from the persisted value above
             "iam_endpoint" => old_iam,

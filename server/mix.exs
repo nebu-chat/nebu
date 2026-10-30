@@ -25,7 +25,8 @@ defmodule Nebu.MixProject do
         &String.ends_with?(&1, "redaction_test_support.exs"),
         &String.ends_with?(&1, "membership_state_test_support.exs"),
         &String.ends_with?(&1, "history_visibility_test_support.exs"),
-        &String.ends_with?(&1, "storage_pinned_target_support.exs")
+        &String.ends_with?(&1, "storage_pinned_target_support.exs"),
+        &String.ends_with?(&1, "storage_admin_target_support.exs")
       ],
       deps: deps(),
       releases: [

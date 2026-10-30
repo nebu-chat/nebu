@@ -67,6 +67,7 @@ defmodule Nebu.Media.StoragePinnedTargetTest do
     {:nebu_http, :media_storage_env_reader},
     {:nebu_http, :media_storage_config_loader},
     {:nebu_http, :media_storage_config_writer},
+    {:nebu_http, :admin_secret_at_rest},
     {:ex_aws, :retries},
     {:ex_aws, :hackney_opts}
   ]
@@ -235,7 +236,15 @@ defmodule Nebu.Media.StoragePinnedTargetTest do
       put_resolver(resolver([a.ip]))
 
       # the save path validates only (D4): it checks the endpoint (one resolution) and writes, no HTTP request is issued
-      assert :ok = StorageConfig.upsert(%{endpoint: "#{@host}:#{a.port}"}, "atdd-actor")
+      # (a changed endpoint needs both keys in the same save, which are encrypted for the write:
+      # media-storage-uses-admin-config, fix B)
+      Application.put_env(:nebu_http, :admin_secret_at_rest, "pinned-target-test-at-rest-secret")
+
+      assert :ok =
+               StorageConfig.upsert(
+                 %{endpoint: "#{@host}:#{a.port}", access_key: "AKIA-SAVE-0001", secret_key: "save-secret-0002"},
+                 "atdd-actor"
+               )
 
       assert_received {:resolved, @host}
       assert_received {:writer_called, %{"endpoint" => _}}

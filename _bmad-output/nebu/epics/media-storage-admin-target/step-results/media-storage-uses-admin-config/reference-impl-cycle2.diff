@@ -1,0 +1,300 @@
+--- a/server/lib/nebu/media/storage.ex
++++ b/server/lib/nebu/media/storage.ex
+@@ -139,6 +139,10 @@
+   # An S3 error body (the signature error XML names the access key id and the string that was signed) never leaves this
+   # module: callers log and audit the returned reason.
+   defp without_error_body({:error, {:http_error, status, _body}}), do: {:error, {:http_error, status}}
++  # THROWAWAY REFERENCE (cycle 2, fix J): a closed set; `{type, message}` pairs and other shapes carry server-controlled text
++  defp without_error_body({:error, {:http_error, status}} = error) when is_integer(status), do: error
++  defp without_error_body({:error, reason}) when is_atom(reason), do: {:error, reason}
++  defp without_error_body({:error, _other}), do: {:error, :storage_error}
+   defp without_error_body(result), do: result
+ 
+   defp problem(:storage_endpoint_blank), do: "the storage endpoint (admin media settings / NEBU_MINIO_ENDPOINT) is blank"
+--- a/server/lib/nebu/media/storage_config.ex
++++ b/server/lib/nebu/media/storage_config.ex
+@@ -286,7 +286,22 @@
+     {row, env} = row_and_env()
+     archive_bucket(plain_fields(row, env))
+   end
++
++  @doc """
++  The effective object key prefix template (`s3_key_prefix_template`). Reads no secret.
++  """
++  @spec key_prefix_template() :: String.t()
++  def key_prefix_template do
++    case Application.get_env(:nebu_http, :media_storage_config_source) do
++      fun when is_function(fun, 0) ->
++        fun.() |> merge_over_defaults() |> Map.fetch!(:s3_key_prefix_template)
+ 
++      _ ->
++        {row, env} = row_and_env()
++        plain_fields(row, env).s3_key_prefix_template
++    end
++  end
++
+   defp archive_bucket(%{archive_bucket: bucket}) when is_binary(bucket) and bucket != "", do: bucket
+   defp archive_bucket(_cfg), do: Application.get_env(:nebu_http, :media_archive_bucket, "nebu-media-archive")
+ 
+@@ -294,15 +309,22 @@
+   # A signed request is only ever sent with credentials that were meant for its host. No credential anywhere is
+   # signed as empty (what `runtime.exs` boots with), never as `nil`, which ExAws cannot sign with.
+   defp operation_credentials(row, env) do
+-    endpoint_saved? = row_get(row, "endpoint") != nil
++    # THROWAWAY REFERENCE (cycle 2, fix G): the environment credentials belong to the environment's own target
++    env_target? = env_fallback_allowed?(row, env)
+ 
+     case {saved_secret(row, "access_key_encrypted"), saved_secret(row, "secret_key_encrypted")} do
+       {{:ok, access_key}, {:ok, secret_key}} -> {:ok, access_key, secret_key}
+-      {:none, :none} when not endpoint_saved? -> env_credentials(env)
++      {:none, :none} when env_target? -> env_credentials(env)
+       {:unreadable, _} -> {:error, :storage_credentials_unreadable}
+       {_, :unreadable} -> {:error, :storage_credentials_unreadable}
+       _ -> {:error, :storage_credentials_missing}
+     end
++  end
++
++  # No saved endpoint, or a saved endpoint and Use SSL that are the environment's own target: the `NEBU_MINIO_*`
++  # credentials are meant for exactly that target.
++  defp env_fallback_allowed?(row, env) do
++    row_get(row, "endpoint") == nil or same_target?(plain_fields(row, env), plain_fields(nil, env))
+   end
+ 
+   # `{:ok, plaintext}`, `:none` (column NULL), `:undecryptable` (corrupt or encrypted under another at-rest key) or
+@@ -357,6 +379,7 @@
+     with :ok <- validate_template_field(fields),
+          :ok <- validate_endpoint_field(fields),
+          :ok <- validate_keys_for_target_change(fields),
++         :ok <- validate_key_pair(fields),
+          :ok <- validate_iam_sts_fields(fields) do
+       columns = build_columns(fields)
+       writer = Application.get_env(:nebu_http, :media_storage_config_writer, &default_writer/2)
+@@ -404,16 +427,24 @@
+   # error as Test Connection. Otherwise the old keys would be sent to a host they were never meant for.
+   defp validate_keys_for_target_change(fields) do
+     if Map.has_key?(fields, :endpoint) or Map.has_key?(fields, :use_ssl) do
+-      {row, env} = row_and_env()
+-      effective = plain_fields(row, env)
+-      candidate = %{endpoint: Map.get(fields, :endpoint, effective.endpoint), use_ssl: Map.get(fields, :use_ssl, effective.use_ssl)}
++      # THROWAWAY REFERENCE (cycle 2, fix I): compare with a strict, fresh read of the row that is being written
++      with {:ok, row} <- load_row() do
++        effective = plain_fields(row, safe_env())
++        candidate = %{endpoint: Map.get(fields, :endpoint, effective.endpoint), use_ssl: Map.get(fields, :use_ssl, effective.use_ssl)}
+ 
+-      if same_target?(candidate, effective) or keys_given?(fields), do: :ok, else: {:error, :secret_required}
++        if same_target?(candidate, effective) or keys_given?(fields), do: :ok, else: {:error, :secret_required}
++      end
+     else
+       :ok
+     end
+   end
+ 
++  # THROWAWAY REFERENCE (cycle 2, fix G): exactly one non-blank key is never saved
++  defp validate_key_pair(fields) do
++    count = Enum.count([:access_key, :secret_key], &present_key?(Map.get(fields, &1)))
++    if count == 1, do: {:error, :key_pair_required}, else: :ok
++  end
++
+   defp keys_given?(fields), do: Enum.all?([:access_key, :secret_key], &present_key?(Map.get(fields, &1)))
+ 
+   defp present_key?(value) when is_binary(value), do: String.trim(value) != ""
+@@ -978,6 +1009,9 @@
+   # ever written) or a STRING-keyed map of column values. `env` is a
+   # STRING-keyed map standing in for NEBU_MINIO_*/NEBU_S3_REGION.
+   defp build_resolved(row, env) do
++    # THROWAWAY REFERENCE (cycle 2, fix K/L): the environment credentials are shown only where they would be used
++    fallback? = env_fallback_allowed?(row, env)
++
+     Map.merge(plain_fields(row, env), %{
+       access_key:
+         resolve_secret(
+@@ -985,7 +1019,8 @@
+           env,
+           "NEBU_MINIO_ACCESS_KEY_FILE",
+           "NEBU_MINIO_ACCESS_KEY",
+-          @defaults.access_key
++          @defaults.access_key,
++          fallback?
+         ),
+       secret_key:
+         resolve_secret(
+@@ -993,7 +1028,8 @@
+           env,
+           "NEBU_MINIO_SECRET_KEY_FILE",
+           "NEBU_MINIO_SECRET_KEY",
+-          @defaults.secret_key
++          @defaults.secret_key,
++          fallback?
+         )
+     })
+   end
+@@ -1048,10 +1084,13 @@
+ 
+   # access_key/secret_key: DB ciphertext (decrypted) > env var (_FILE-then-
+   # plain precedence, AC4/AT3) > compiled default.
+-  defp resolve_secret(encrypted_column, env, file_key, plain_key, default) do
++  defp resolve_secret(encrypted_column, env, file_key, plain_key, default, fallback?) do
+     case decrypt_secret(encrypted_column) do
++      nil when not fallback? ->
++        nil
++
+       nil ->
+-        case resolve_env_secret(env, file_key, plain_key) do
++        case env_secret_or_nil(env, file_key, plain_key) do
+           nil -> default
+           value -> value
+         end
+@@ -1061,6 +1100,13 @@
+     end
+   end
+ 
++  # an unreadable secret file is "not set" for the settings page (the operational path reports it as an error)
++  defp env_secret_or_nil(env, file_key, plain_key) do
++    resolve_env_secret(env, file_key, plain_key)
++  rescue
++    _ -> nil
++  end
++
+   defp decrypt_secret(nil), do: nil
+ 
+   # MINOR-2(a): a corrupted ciphertext or a rotated/wrong at-rest key must not
+@@ -1084,21 +1130,19 @@
+         plaintext
+ 
+       {:error, reason} ->
+-        Logger.warning(
+-          "Nebu.Media.StorageConfig: stored secret failed to decrypt (#{inspect(reason)}); " <>
+-            "falling back to env-var/default credential"
+-        )
++        Logger.warning("Nebu.Media.StorageConfig: a stored storage secret cannot be decrypted (#{inspect(reason)}); it is not used")
+ 
+         nil
+     end
+   rescue
+     e in RuntimeError ->
+-      Logger.warning(
+-        "Nebu.Media.StorageConfig: at-rest secret unavailable while decrypting a stored " <>
+-          "secret; falling back to env-var/default credential (#{Exception.message(e)})"
+-      )
++      Logger.warning("Nebu.Media.StorageConfig: the at-rest secret is unavailable, a stored storage secret is not used (#{Exception.message(e)})")
+ 
+       nil
++    _e in File.Error ->
++      Logger.warning("Nebu.Media.StorageConfig: the at-rest key file cannot be read, a stored storage secret is not used")
++
++      nil
+   end
+ 
+   # Mirrors server/config/runtime.exs lines 85-95's `_FILE`-then-plain
+@@ -1333,15 +1377,13 @@
+     secret_key = blank_to_nil(Map.get(candidate, :secret_key))
+ 
+     if is_nil(access_key) or is_nil(secret_key) do
+-      stored = get_for_connection()
+-
+-      # story admin-forms-gate-sweep D4 (Kassandra design review): a stored credential signs a request to the STORED target only. Reusing it for an endpoint (or a
+-      # scheme) the form supplies would hand the access key id and a signature (an offline guessing oracle for the secret) to a host the credentials were never meant
+-      # for. The IAM / STS endpoints are not compared: the test never contacts them (they join the comparison if it ever does).
+-      if same_target?(candidate, stored) do
+-        {:ok, %{candidate | access_key: access_key || stored.access_key, secret_key: secret_key || stored.secret_key}}
++      # THROWAWAY REFERENCE (cycle 2, fix H): the stored credentials by the operational rule (`operation_credentials/2`)
++      with {:ok, {row, env}} <- read_snapshot(),
++           true <- same_target?(candidate, plain_fields(row, env)),
++           {:ok, stored_access, stored_secret} <- operation_credentials(row, env) do
++        {:ok, %{candidate | access_key: access_key || stored_access, secret_key: secret_key || stored_secret}}
+       else
+-        {:error, :secret_required}
++        _ -> {:error, :secret_required}
+       end
+     else
+       {:ok, %{candidate | access_key: access_key, secret_key: secret_key}}
+--- a/server/lib/nebu/media.ex
++++ b/server/lib/nebu/media.ex
+@@ -562,7 +562,7 @@
+     # ("{media_id}") interpolates to the same flat key the pre-11c fallback
+     # used, so this does not change behavior until an admin configures a
+     # non-default template.
+-    template = Nebu.Media.StorageConfig.get().s3_key_prefix_template
++    template = Nebu.Media.StorageConfig.key_prefix_template()
+ 
+     storage_key =
+       Nebu.Media.StorageConfig.compute_key(template, %{
+--- a/server/lib/nebu/admin/media_settings_controller.ex
++++ b/server/lib/nebu/admin/media_settings_controller.ex
+@@ -265,11 +265,11 @@
+         if target_changed?(changes, old_endpoint, old_bucket) and not confirmed_orphan_risk?(params) do
+           maybe_gate_on_orphan_risk(conn, params, changes)
+         else
+-          persist_storage_config(conn, changed_storage_keys(changes))
++          persist_storage_config(conn, params, changed_storage_keys(changes))
+         end
+ 
+       :fresh ->
+-        persist_storage_config(conn, changes)
++        persist_storage_config(conn, params, changes)
+     end
+   end
+ 
+@@ -284,7 +284,7 @@
+         orphan_warning: existing_count
+       )
+     else
+-      persist_storage_config(conn, changed_storage_keys(changes))
++      persist_storage_config(conn, params, changed_storage_keys(changes))
+     end
+   end
+ 
+@@ -313,7 +313,7 @@
+ 
+   defp confirmed_orphan_risk?(params), do: params["confirm_orphan_risk"] == "true"
+ 
+-  defp persist_storage_config(conn, changes) do
++  defp persist_storage_config(conn, params, changes) do
+     case StorageConfig.upsert(changes, actor_id(conn)) do
+       :ok ->
+         conn
+@@ -325,15 +325,22 @@
+         conn
+         |> put_status(200)
+         |> put_flash(:error, StorageConfig.describe_invalid_endpoint(Map.get(changes, :endpoint)))
+-        |> render_settings(state_from_config(Config.get()))
++        |> render_settings(state_from_config(Config.get()), storage_config: storage_config_from_params(params))
+ 
+       # a validation error like the one above: the sign-in marker stays, nothing is written or audited
+       {:error, :secret_required} ->
+         conn
+         |> put_status(200)
+         |> put_flash(:error, "Enter the access key and secret key to use a different endpoint")
+-        |> render_settings(state_from_config(Config.get()))
++        |> render_settings(state_from_config(Config.get()), storage_config: storage_config_from_params(params))
+ 
++      # THROWAWAY REFERENCE (cycle 2, fix G)
++      {:error, :key_pair_required} ->
++        conn
++        |> put_status(200)
++        |> put_flash(:error, "Enter both the access key and the secret key")
++        |> render_settings(state_from_config(Config.get()), storage_config: storage_config_from_params(params))
++
+       {:error, _reason} ->
+         conn
+         |> put_status(200)
+--- a/server/lib/nebu/admin/templates/media_settings/index.html.heex
++++ b/server/lib/nebu/admin/templates/media_settings/index.html.heex
+@@ -370,7 +370,7 @@
+       <input type="password" id="access_key" name="access_key" class="input input-bordered" />
+       <span class="label-text-alt mt-1 text-base-content/70">
+         {if @access_key_configured, do: "Currently configured.", else: "Not currently configured."}
+-        Leave blank to keep the current value. Enter both again if you change the endpoint or Use SSL and press Test Connection.
++        Leave blank to keep the current value. Enter both again if you change the endpoint or Use SSL: Save and Test Connection both need them.
+       </span>
+     </label>
+ 
+@@ -379,7 +379,7 @@
+       <input type="password" id="secret_key" name="secret_key" class="input input-bordered" />
+       <span class="label-text-alt mt-1 text-base-content/70">
+         {if @secret_key_configured, do: "Currently configured.", else: "Not currently configured."}
+-        Leave blank to keep the current value. Enter both again if you change the endpoint or Use SSL and press Test Connection.
++        Leave blank to keep the current value. Enter both again if you change the endpoint or Use SSL: Save and Test Connection both need them.
+       </span>
+     </label>
+   </div>

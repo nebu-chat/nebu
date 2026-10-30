@@ -562,7 +562,7 @@ defmodule Nebu.Media do
     # ("{media_id}") interpolates to the same flat key the pre-11c fallback
     # used, so this does not change behavior until an admin configures a
     # non-default template.
-    template = Nebu.Media.StorageConfig.get().s3_key_prefix_template
+    template = Nebu.Media.StorageConfig.key_prefix_template()
 
     storage_key =
       Nebu.Media.StorageConfig.compute_key(template, %{
