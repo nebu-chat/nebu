@@ -1,0 +1,18 @@
+# Nebu Pipeline State
+# last_updated: 2026-10-30
+# [media-storage-uses-admin-config] 2026-10-30T02:55Z commit → bugfix/media-storage-uses-admin-config
+# [media-storage-uses-admin-config] 2026-10-30T02:50Z ci-gate → integration 21 failures (RoomsFallbackName/TemporaryCapture/LogStore families, untouched files, fail alone too), e2e 176 passed, 37 oauth-tag failures (tags CI excludes), thread test flaky (passes alone)
+# [media-storage-uses-admin-config] 2026-10-30T02:30Z cycles 3+4 done (UX V1/V2, audit names, polish): no-DB suite 6973/0, DB-backed media+admin set 1046/0, CI gate next
+# [media-storage-uses-admin-config] 2026-10-30T01:30Z cycle 2 reviews → kassandra CLEAN (1 LOW residual), code-review 0 MAJOR 5 MINOR, UX 2 blocking (error placement, SSL wording) → cycle 3 (final polish)
+# [media-storage-uses-admin-config] 2026-10-30T00:20Z delta reviews cycle 1 → kassandra CLEAN (3 LOW), code-review 1 NEW MAJOR (fresh-save credential trap) → cycle 2
+# [media-storage-uses-admin-config] 2026-10-29T23:50Z code-review → 1 MAJOR 6 MINOR; kassandra → 0 CRIT/HIGH 2 MEDIUM 2 LOW → cycle 1
+# [media-storage-uses-admin-config] 2026-10-29T23:20Z dev-story → done (cycle 0), 64 new + no-DB suite green
+# [media-storage-uses-admin-config] 2026-10-29T22:40Z test-review → 0 MAJOR, 8 MINOR fixed, 64 tests (58 red), 31 mutants killed
+# [media-storage-uses-admin-config] 2026-10-29T22:10Z atdd → 45 tests (39 red, 7 scenarios), 19/20 mutants killed (1 equivalent)
+# [media-storage-uses-admin-config] 2026-10-29T18:10Z create-story → 7 scenarios (bug flow, security_review required)
+story: null
+current_step: null
+completed: []
+cycle_count: 0
+blocked_reason: null
+last_updated: "2026-10-30T01:42Z"

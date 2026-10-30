@@ -5,12 +5,13 @@ defmodule Nebu.Media.StorageConfig do
 
   ## Purpose
 
-  Since ADR-INFRA-0 (`Nebu.Media.Storage`, pre-epic), the S3/MinIO storage
-  target has been wired exclusively through boot-time `NEBU_MINIO_*`/
-  `NEBU_S3_REGION` env vars in `server/config/runtime.exs`. This module adds
-  an admin-configurable override for the same target, with `access_key`/
-  `secret_key` encrypted at rest via `Nebu.Web.SecretBox` (never a second,
-  parallel AES helper — see the story's Dev Agent Guardrails).
+  The S3/MinIO storage target comes from the boot-time `NEBU_MINIO_*`/
+  `NEBU_S3_REGION` env vars (`server/config/runtime.exs`) unless an admin saved
+  an override for it. This module holds that admin-configurable override, with
+  `access_key`/`secret_key` encrypted at rest via `Nebu.Web.SecretBox` (never a
+  second, parallel AES helper — see the story's Dev Agent Guardrails).
+  `Nebu.Media.Storage` resolves the effective target from here on every call
+  (`request_target/0`), so a saved change needs no restart.
 
   This is a **separate** cache instance from `Nebu.Media.Config` (Story 9a) —
   its own ETS table (`:nebu_media_storage_config`), its own `:pg` group
@@ -22,17 +23,35 @@ defmodule Nebu.Media.StorageConfig do
 
   - `get/0` — the merged config map (DB row > env-var fallback > compiled
     default, per field), with `access_key`/`secret_key` **masked** (AC8).
-    Never returns a decrypted secret.
+    Never returns a decrypted secret. The keys shown are the pair the
+    operational path would sign with (none for a half pair, undecryptable
+    keys, or another endpoint than the environment's without saved keys).
   - `get_for_connection/0` — same merge, but `access_key`/`secret_key` are
-    decrypted to plaintext via `Nebu.Web.SecretBox.decrypt/1`. The only
-    sanctioned way to obtain real credential bytes. Not exposed to any
-    LiveView/JSON-facing surface (none exists in this story).
-  - `upsert/1` — `upsert(%{field => value, ...})`, a partial-update map. The
-    ONLY write path to `media_storage_config`. Rejects an `endpoint` in
+    the plaintext pair. No production caller (the operational path uses
+    `request_target/0`); kept for tests and diagnostics. Not exposed to any
+    LiveView/JSON-facing surface.
+  - `request_target/0` — the per-request `ExAws` overrides and the effective
+    bucket / archive bucket for one operational S3 call of
+    `Nebu.Media.Storage`: an error atom (no request) for a blank or invalid
+    endpoint, missing / unreadable credentials or unreadable saved settings,
+    never a fallback to the boot-time config.
+    `archive_bucket/0` is the effective archive bucket alone;
+    `key_prefix_template/0` the effective object key prefix template (both
+    read no secret).
+  - `stored_target?/2` — whether an endpoint and Use SSL are the stored
+    (effective) target; the settings form words the Test Connection answer
+    with it.
+  - `describe_invalid_endpoint/1` — the admin-facing reason why an endpoint
+    was refused (`{:error, :invalid_endpoint}` carries no detail).
+  - `upsert/2` — `upsert(%{field => value, ...}, actor)`, a partial-update map.
+    The ONLY write path to `media_storage_config`. Rejects an `endpoint` in
     `fields` the same way `test_connection/1` does (see below) BEFORE any DB
     write — fixed post-epic per Kassandra's epic-end security review finding
     M-3 (2026-07-20): previously `endpoint` was stored verbatim with no
-    validation at all on this path.
+    validation at all on this path. Also `{:error, :secret_required}` (a
+    changed `endpoint` / `use_ssl` without both keys), `{:error,
+    :key_pair_required}` (exactly one key mentioned) and `{:error,
+    :storage_config_unavailable}` (the row being written cannot be read).
   - `persisted_target/0` — (story `11b-storage-ui-test-connection`) returns
     `{:ok, %{endpoint: ..., bucket: ...}}` when a `media_storage_config` row
     has ever been written, or `:fresh` when none has. This is the AC4
@@ -74,9 +93,10 @@ defmodule Nebu.Media.StorageConfig do
     the TLS SNI and the certificate hostname verification. There is no second
     DNS resolution between the check and the request (no DNS-rebinding window).
     `upsert/1` (save) performs no request, so there is nothing to pin there; the
-    operational S3 calls of `Nebu.Media.Storage` resolve the stored host per
-    request (a residual of the admin-trusted endpoint, see ADR-033 SO11
-    addendum). The same client also maps hackney 4.x's `HEAD` answer (a 3-tuple)
+    operational S3 calls of `Nebu.Media.Storage` (`request_target/0`) use the
+    configured HTTP client and resolve the stored host per request, not pinned
+    (a residual of the admin-trusted endpoint, see ADR-033 SO11 addendum).
+    The same client also maps hackney 4.x's `HEAD` answer (a 3-tuple)
     that `ExAws.Request.Hackney` did not understand: the production test
     connection used to raise a `CaseClauseError` against any server.
 
@@ -122,10 +142,14 @@ defmodule Nebu.Media.StorageConfig do
   - `Application.get_env(:nebu_http, :media_storage_config_loader)` —
     0-arity fun returning the current persisted `media_storage_config` row as
     a STRING-keyed map (column names), or `nil` when no row has ever been
-    written. Consulted by the GenServer's DB-refresh step AND directly by
+    written (a confirmed absence, which replaces the cached snapshot), or
+    `{:error, term}` (or a raise) when the row could not be read: a failed
+    read keeps the last good snapshot (a refresh) or, with none, makes
+    `request_target/0` fail instead of using the environment target.
+    Consulted by the GenServer's DB-refresh step AND directly by
     `get/0`/`get_for_connection/0` whenever the ETS table is not yet
     populated. Defaults to a real `SELECT ... FROM media_storage_config` when
-    unset.
+    unset (a failed query or an unavailable Repo is an `{:error, _}`).
   - `Application.get_env(:nebu_http, :media_storage_config_writer)` — arity-2
     fun `fn columns, set_at -> :ok | {:error, term()} end`, where `columns`
     is a STRING-keyed map containing ONLY the columns that changed for this
@@ -217,10 +241,11 @@ defmodule Nebu.Media.StorageConfig do
 
   @doc """
   Returns the merged config map (AC4/AC5), `access_key`/`secret_key`
-  **decrypted to plaintext**. The only sanctioned way to obtain real
-  credential bytes — intended for actual `ExAws`/S3-client construction.
-  Never call this from a LiveView assign, a JSON response, or any other
-  admin-facing surface.
+  **decrypted to plaintext** (`nil` where `get/0` shows none). The only
+  function that hands out the plaintext keys in a config map. It is NOT what
+  the operational S3 calls use (`request_target/0` is; it also reports why a
+  pair is unusable) and has no production caller. Never call this from a
+  LiveView assign, a JSON response, or any other admin-facing surface.
   """
   @spec get_for_connection() :: map()
   def get_for_connection do
@@ -228,14 +253,157 @@ defmodule Nebu.Media.StorageConfig do
   end
 
   @doc """
+  What `Nebu.Media.Storage` needs to address the object store for ONE operation, resolved now (DB > env >
+  default, see `get_for_connection/0`): the per-request `ExAws` config overrides (host, scheme, port, region,
+  credentials) plus the effective primary and archive bucket names.
+
+  Never written into the global `:ex_aws` app env: the overrides travel with the request, so a changed saved
+  target is in effect on the next call, on every node, and concurrent calls cannot see each other's values.
+  Unlike the Test Connection overrides, these keep the configured `ExAws` HTTP client and retry policy.
+
+  The credentials are bound to the target they were meant for: an endpoint saved in the admin settings is only ever
+  used with the credentials saved with it. A saved credential that is missing or cannot be decrypted is an error,
+  not replaced by the `NEBU_MINIO_*` credentials (they would sign requests to a host they were not meant for).
+  The one exception is the environment's own target: a saved endpoint and Use SSL that equal the environment's,
+  with both saved keys empty, use the `NEBU_MINIO_*` credentials. Without a saved endpoint, saved credentials win
+  over the environment's and follow the environment's endpoint; that row shape only exists for legacy / SQL-written
+  rows: the Admin form saves the keys together with `endpoint` and `use_ssl`, so after a UI save the target is pinned
+  and a later change of `NEBU_MINIO_ENDPOINT` is not followed. A half-saved or undecryptable pair is an error in
+  every case.
+
+  Errors, all without any credential or path in them (the caller must not send a request, and must not fall back
+  to the boot-time config): `:storage_endpoint_blank` (no host: empty, whitespace only or just `:port`),
+  `:storage_endpoint_invalid` (anything else that is not `host[:port]`), `:storage_credentials_missing`,
+  `:storage_credentials_unreadable` (a secret file or the at-rest key cannot be read) and
+  `:storage_config_unavailable` (the saved settings cannot be read and no earlier snapshot exists). Never raises.
+  """
+  @spec request_target() ::
+          {:ok, %{overrides: keyword(), bucket: String.t(), archive_bucket: String.t()}}
+          | {:error,
+             :storage_endpoint_blank
+             | :storage_endpoint_invalid
+             | :storage_credentials_missing
+             | :storage_credentials_unreadable
+             | :storage_config_unavailable}
+  def request_target do
+    with {:ok, {row, env}} <- read_snapshot(),
+         cfg = plain_fields(row, env),
+         {:ok, host, port} <- parse_endpoint(cfg.endpoint, cfg.use_ssl),
+         {:ok, access_key, secret_key} <- operation_credentials(row, env) do
+      cfg = Map.merge(cfg, %{access_key: access_key, secret_key: secret_key})
+      {:ok, %{overrides: connection_overrides(host, port, cfg), bucket: cfg.bucket, archive_bucket: archive_bucket(cfg)}}
+    end
+  end
+
+  @doc """
+  Whether `endpoint` and `use_ssl` are the stored (effective) target, compared the way Test Connection does: trimmed,
+  ASCII-downcased endpoint, `use_ssl == true`. The settings form uses it to word the Test Connection answer when the
+  stored keys of THAT target are unusable.
+  """
+  @spec stored_target?(String.t() | nil, boolean() | nil) :: boolean()
+  def stored_target?(endpoint, use_ssl) do
+    {row, env} = row_and_env()
+    same_target?(%{endpoint: endpoint, use_ssl: use_ssl}, plain_fields(row, env))
+  end
+
+  @doc """
+  The effective archive bucket name: the saved one, else `:nebu_http, :media_archive_bucket`
+  (`NEBU_MINIO_ARCHIVE_BUCKET`, set by `runtime.exs`), else `"nebu-media-archive"`. Needs no usable endpoint and
+  never touches a credential or a secret file.
+  """
+  @spec archive_bucket() :: String.t()
+  def archive_bucket do
+    {row, env} = row_and_env()
+    archive_bucket(plain_fields(row, env))
+  end
+
+  @doc """
+  The effective object key prefix template (`s3_key_prefix_template`, see `compute_key/2`). Reads no secret (no
+  decryption, no secret file), so a missing key file cannot break an upload before it reaches storage; honours the
+  `:media_storage_config_source` seam like `get/0`.
+  """
+  @spec key_prefix_template() :: String.t()
+  def key_prefix_template do
+    case Application.get_env(:nebu_http, :media_storage_config_source) do
+      fun when is_function(fun, 0) ->
+        fun.() |> merge_over_defaults() |> Map.fetch!(:s3_key_prefix_template)
+
+      _ ->
+        {row, env} = row_and_env()
+        plain_fields(row, env).s3_key_prefix_template
+    end
+  end
+
+  defp archive_bucket(%{archive_bucket: bucket}) when is_binary(bucket) and bucket != "", do: bucket
+  defp archive_bucket(_cfg), do: Application.get_env(:nebu_http, :media_archive_bucket, "nebu-media-archive")
+
+  # The credentials of ONE operational request, from the source the endpoint comes from (see `request_target/0`).
+  # A signed request is only ever sent with credentials that were meant for its host. When the environment's
+  # credentials apply but none is configured, the request is signed with empty strings (what `runtime.exs` boots
+  # with), never with `nil`, which ExAws cannot sign with.
+  defp operation_credentials(row, env) do
+    env_credentials? = env_credentials_apply?(row, env)
+
+    case {saved_secret(row, "access_key_encrypted"), saved_secret(row, "secret_key_encrypted")} do
+      {{:ok, access_key}, {:ok, secret_key}} -> {:ok, access_key, secret_key}
+      {:none, :none} when env_credentials? -> env_credentials(env)
+      {:unreadable, _} -> {:error, :storage_credentials_unreadable}
+      {_, :unreadable} -> {:error, :storage_credentials_unreadable}
+      _ -> {:error, :storage_credentials_missing}
+    end
+  end
+
+  # The `NEBU_MINIO_*` credentials are meant for the environment's own target: they apply when the row has no endpoint,
+  # or when its endpoint and Use SSL are exactly the environment's (a first save that kept the form's pre-filled values,
+  # or a legacy row without keys). Any other target never gets them, and a later change of the environment's endpoint
+  # ends the match again.
+  defp env_credentials_apply?(row, env) do
+    row_get(row, "endpoint") == nil or same_target?(plain_fields(row, env), plain_fields(nil, env))
+  end
+
+  # `{:ok, plaintext}`, `:none` (column NULL), `:undecryptable` (corrupt or encrypted under another at-rest key) or
+  # `:unreadable` (`SecretBox` cannot get its at-rest key, e.g. the key file is missing). Logs nothing: the caller
+  # reports once per operation.
+  defp saved_secret(row, column) do
+    case row_get(row, column) do
+      nil ->
+        :none
+
+      ciphertext ->
+        case SecretBox.decrypt(ciphertext) do
+          {:ok, plaintext} -> {:ok, plaintext}
+          {:error, _reason} -> :undecryptable
+        end
+    end
+  rescue
+    _ -> :unreadable
+  end
+
+  defp env_credentials(env) do
+    {:ok, resolve_env_secret(env, "NEBU_MINIO_ACCESS_KEY_FILE", "NEBU_MINIO_ACCESS_KEY") || "",
+     resolve_env_secret(env, "NEBU_MINIO_SECRET_KEY_FILE", "NEBU_MINIO_SECRET_KEY") || ""}
+  rescue
+    _ -> {:error, :storage_credentials_unreadable}
+  end
+
+  @doc """
   The ONLY write path to `media_storage_config` (AC6). `fields` is a
   partial-update map — only the keys present are written; omitted fields are
   left untouched (AC5/AT6). Encrypts `access_key`/`secret_key` via
-  `Nebu.Web.SecretBox.encrypt/1` before touching the DB (AC3); a fail-closed
+  `Nebu.Web.SecretBox.encrypt/1` before touching the DB (AC3); a save that
+  changes `endpoint` or `use_ssl` versus the effective value must carry BOTH
+  `access_key` and `secret_key` (`{:error, :secret_required}` otherwise, nothing
+  written or audited: the stored keys sign the operational requests to the stored
+  target only, see `request_target/0`; the row being written is read fresh for
+  this, `{:error, :storage_config_unavailable}` when it cannot be read);
+  exactly one key in `fields` (a lone `access_key` or `secret_key`, also `nil`)
+  is `{:error, :key_pair_required}` (both `nil` clears the pair); an `endpoint`
+  the operational parser rejects is `{:error, :invalid_endpoint}`; a fail-closed
   raise from `SecretBox.encrypt/1` propagates BEFORE any DB write (AT12). On
   success, writes a `media_storage_config_updated` audit-log entry with
-  `changed_fields` naming ONLY the fields that changed — never their values
-  (AC9) — then unconditionally refreshes this node's cache (and broadcasts
+  `changed_fields` naming ONLY the fields whose submitted value differs from the
+  row as it was before the write (every submitted field when there was no row;
+  submitted keys always count) — never their values (AC9) — then unconditionally refreshes this node's cache (and broadcasts
   the invalidation to `:pg` peers) before returning `:ok`.
 
   Also rejects a non-`nil` `iam_endpoint`/`sts_endpoint` in `fields` that is
@@ -246,16 +414,22 @@ defmodule Nebu.Media.StorageConfig do
   """
   @spec upsert(map(), String.t()) :: :ok | {:error, term()}
   def upsert(fields, actor \\ @audit_actor) when is_map(fields) do
+    fields = without_blank_keys(fields)
+
     with :ok <- validate_template_field(fields),
          :ok <- validate_endpoint_field(fields),
+         :ok <- validate_keys_for_target_change(fields),
+         :ok <- validate_key_pair(fields),
          :ok <- validate_iam_sts_fields(fields) do
       columns = build_columns(fields)
       writer = Application.get_env(:nebu_http, :media_storage_config_writer, &default_writer/2)
       set_at = System.system_time(:millisecond)
+      # the audit names what differs from the row as it was before this write
+      row_before = load_row()
 
       case writer.(columns, set_at) do
         :ok ->
-          write_audit(actor, fields)
+          write_audit(actor, changed_fields(fields, row_before))
           refresh_cache()
           :ok
 
@@ -289,6 +463,42 @@ defmodule Nebu.Media.StorageConfig do
   end
 
   defp validate_endpoint_field(_fields), do: :ok
+
+  # The stored credentials sign the operational requests to the stored target only (`request_target/0`), so a save that
+  # moves `endpoint` or `use_ssl` away from the effective value must bring BOTH keys: the same rule (`same_target?/2`) and
+  # error as Test Connection. Otherwise the old keys would be sent to a host they were never meant for.
+  #
+  # The comparison base is a fresh, strict read of the row that is about to be written, never the cached snapshot (a
+  # stale cache must neither let a changed endpoint keep the old keys nor reject an unchanged one). A row that cannot be
+  # read fails the save: it cannot be decided whether the old keys would stay with another target.
+  defp validate_keys_for_target_change(fields) do
+    if (Map.has_key?(fields, :endpoint) or Map.has_key?(fields, :use_ssl)) and not keys_given?(fields) do
+      with {:ok, row} <- load_row() do
+        effective = plain_fields(row, safe_env())
+        candidate = %{endpoint: Map.get(fields, :endpoint, effective.endpoint), use_ssl: Map.get(fields, :use_ssl, effective.use_ssl)}
+
+        if same_target?(candidate, effective), do: :ok, else: {:error, :secret_required}
+      end
+    else
+      :ok
+    end
+  end
+
+  # Exactly one key is never written: the operational path needs the pair (`operation_credentials/2`), so a lone key
+  # (a non-blank one, or a `nil` / blank one that would clear half of a pair) would leave the saved target without
+  # usable credentials. Both keys `nil` (clear the pair) or neither key mentioned is fine. Evaluated after the
+  # changed-target rule above.
+  defp validate_key_pair(fields) do
+    mentioned = Enum.count([:access_key, :secret_key], &Map.has_key?(fields, &1))
+    present = Enum.count([:access_key, :secret_key], &present_key?(Map.get(fields, &1)))
+
+    if mentioned == 1 or present == 1, do: {:error, :key_pair_required}, else: :ok
+  end
+
+  defp keys_given?(fields), do: Enum.all?([:access_key, :secret_key], &present_key?(Map.get(fields, &1)))
+
+  defp present_key?(value) when is_binary(value), do: String.trim(value) != ""
+  defp present_key?(_value), do: false
 
   # F-1 fix (Kassandra security review, SEC Gate 1, 2026-10-08): validates
   # iam_endpoint/sts_endpoint BEFORE any DB write, whenever `fields` contains
@@ -467,11 +677,9 @@ defmodule Nebu.Media.StorageConfig do
 
   @doc """
   Story `11c-s3-key-prefix-template` AC2/AC3: interpolates `template` into an
-  actual S3 object key. Called from **exactly one** call site — Story 2b's
-  `store_and_quarantine/...` seam, immediately before `Storage.put/2` (see
-  this module's moduledoc addendum / the story's Dev Agent Record for the
-  precise wiring instruction; NOT wired anywhere yet because Story 2b has not
-  landed on this branch).
+  actual S3 object key. Called from **exactly one** call site — the upload
+  path of `Nebu.Media` (`lib/nebu/media.ex`), immediately before
+  `Storage.put/2`.
 
   `attrs` is `%{media_id:, server_name:, uploaded_at: %DateTime{}}`.
   `{year}`/`{month}`/`{day}` are the UTC calendar date of `uploaded_at`
@@ -703,18 +911,60 @@ defmodule Nebu.Media.StorageConfig do
   defp column_for(:sts_endpoint, value), do: {"sts_endpoint", value}
   defp column_for(_unknown_key, _value), do: nil
 
+  # The plain fields of `fields` (atom key => column name) that can be compared with the row before the write. The
+  # keys are not: a submitted key always counts as changed (the stored ciphertext cannot be compared with a plaintext).
+  @plain_columns %{
+    endpoint: "endpoint",
+    use_ssl: "use_ssl",
+    bucket: "bucket",
+    region: "region",
+    s3_key_prefix_template: "s3_key_prefix_template",
+    archive_bucket: "archive_bucket",
+    iam_endpoint: "iam_endpoint",
+    sts_endpoint: "sts_endpoint"
+  }
+
+  # The field names (atoms, no values) whose submitted value differs from the row as it was read before the write. No
+  # row, or a row that could not be read: every submitted field. A save that carries keys also writes `endpoint` and
+  # `use_ssl` (the controller pins the target to the keys), which are not named when they equal the stored values.
+  defp changed_fields(fields, {:ok, row}) when is_map(row) do
+    fields
+    |> Enum.filter(fn {key, value} ->
+      case Map.fetch(@plain_columns, key) do
+        {:ok, column} -> Map.get(row, column) != value
+        :error -> true
+      end
+    end)
+    |> Enum.map(&elem(&1, 0))
+  end
+
+  defp changed_fields(fields, _no_row), do: Map.keys(fields)
+
+  # Both keys blank (empty or whitespace), or one blank and one `nil`, is "no keys submitted": no key column is
+  # written (`SecretBox.encrypt("")` would store an empty secret) and the keys are not named in the audit; the other
+  # fields are saved as usual. Both `nil` stays the explicit clear of the pair; exactly one usable key is refused by
+  # `validate_key_pair/1`.
+  defp without_blank_keys(fields) do
+    keys = [Map.get(fields, :access_key, :absent), Map.get(fields, :secret_key, :absent)]
+
+    if :absent not in keys and keys != [nil, nil] and not Enum.any?(keys, &present_key?/1) do
+      Map.drop(fields, [:access_key, :secret_key])
+    else
+      fields
+    end
+  end
+
   # AC9: metadata records ONLY which field names changed, never their values
-  # (secret or not). `fields` is the caller's own atom-keyed input map, so
-  # Map.keys/1 is exactly "the field names that changed" — no value, secret
-  # or plain, ever reaches this function's caller (write_audit/2 itself never
+  # (secret or not): `changed_fields/2` hands over atoms only, no value, secret
+  # or plain, ever reaches this function (write_audit/2 itself never
   # touches `columns`/ciphertext/plaintext at all).
-  defp write_audit(actor, fields) do
+  defp write_audit(actor, changed) do
     case AuditWriter.log(
            actor,
            @audit_action,
            @audit_target_type,
            @audit_target_id,
-           %{changed_fields: Map.keys(fields)},
+           %{changed_fields: changed},
            "success"
          ) do
       :ok ->
@@ -765,28 +1015,40 @@ defmodule Nebu.Media.StorageConfig do
   # call) is completely unaffected: `nil == nil` always matches, so the
   # ETS-cache-first hot path (this module's whole reason for existing, per
   # its moduledoc) is unchanged for every real deployment.
+  #
+  # A row that CANNOT be read (see `load_row/0`) is not "no row": `read_snapshot/0` reports it, and this lenient
+  # variant (`get/0`, `get_for_connection/0`, which always answer a map) then shows the environment / defaults.
   defp row_and_env do
-    case :ets.whereis(@table) do
-      :undefined ->
-        {safe_load(), safe_env()}
+    case read_snapshot() do
+      {:ok, snapshot} -> snapshot
+      {:error, :storage_config_unavailable} -> {nil, safe_env()}
+    end
+  end
+
+  # `{:ok, {row, env}}` from the cache, else from a direct read; `{:error, :storage_config_unavailable}` when there is
+  # no usable snapshot and the row cannot be read. The operational path (`request_target/0`) must not fall back to the
+  # environment target then, as a saved target may well exist.
+  defp read_snapshot do
+    case cached_snapshot() do
+      {:ok, _snapshot} = hit ->
+        hit
+
+      :miss ->
+        with {:ok, row} <- load_row(), do: {:ok, {row, safe_env()}}
+    end
+  end
+
+  defp cached_snapshot do
+    case :ets.lookup(@table, :catalog) do
+      [{:catalog, {row, env, loader_seam, env_seam}}] ->
+        if loader_seam == current_loader_seam() and env_seam == current_env_seam(), do: {:ok, {row, env}}, else: :miss
 
       _ ->
-        case :ets.lookup(@table, :catalog) do
-          [{:catalog, {row, env, loader_seam, env_seam}}] ->
-            if loader_seam == current_loader_seam() and env_seam == current_env_seam() do
-              {row, env}
-            else
-              {safe_load(), safe_env()}
-            end
-
-          _ ->
-            {safe_load(), safe_env()}
-        end
+        :miss
     end
   rescue
-    e ->
-      Logger.warning("Nebu.Media.StorageConfig: unexpected error reading ETS table: #{inspect(e)}")
-      {nil, %{}}
+    # the cache table does not exist (the cache process is not running)
+    ArgumentError -> :miss
   end
 
   defp current_loader_seam, do: Application.get_env(:nebu_http, :media_storage_config_loader)
@@ -799,24 +1061,39 @@ defmodule Nebu.Media.StorageConfig do
   # at-rest key can never crash this periodic refresh (MINOR-1/MINOR-2(b)).
   # Tags the snapshot with the seam values that produced it — see
   # `row_and_env/0` above.
+  #
+  # A refresh that cannot read the row keeps the last good snapshot (the next refresh retries): replacing it with "no
+  # row" would send every operational call to the environment target until then. Only a confirmed absent row (`nil`)
+  # replaces the snapshot.
   defp do_refresh do
-    row = safe_load()
-    env = safe_env()
-    :ets.insert(@table, {:catalog, {row, env, current_loader_seam(), current_env_seam()}})
-    {row, env}
+    case load_row() do
+      {:ok, row} -> :ets.insert(@table, {:catalog, {row, safe_env(), current_loader_seam(), current_env_seam()}})
+      {:error, :storage_config_unavailable} -> :ok
+    end
   end
 
-  defp safe_load do
+  # `{:ok, row | nil}` (`nil`: the row is confirmed absent) or `{:error, :storage_config_unavailable}`: the loader seam
+  # answered `{:error, _}` or raised (the default loader answers `{:error, _}` for a failed query or an unavailable Repo).
+  defp load_row do
     loader = Application.get_env(:nebu_http, :media_storage_config_loader, &default_loader/0)
 
     case loader.() do
-      map when is_map(map) -> map
-      _ -> nil
+      map when is_map(map) -> {:ok, map}
+      {:error, _reason} -> {:error, :storage_config_unavailable}
+      _ -> {:ok, nil}
     end
   rescue
     e ->
       Logger.warning("Nebu.Media.StorageConfig: loader raised: #{inspect(e)}")
-      nil
+      {:error, :storage_config_unavailable}
+  end
+
+  # The row for the callers that treat an unreadable row as "no row" (the orphan-risk baselines of the admin form).
+  defp safe_load do
+    case load_row() do
+      {:ok, row} -> row
+      {:error, :storage_config_unavailable} -> nil
+    end
   end
 
   defp safe_env do
@@ -836,7 +1113,25 @@ defmodule Nebu.Media.StorageConfig do
   # env-var fallback > compiled default, per field. `row` is `nil` (no row
   # ever written) or a STRING-keyed map of column values. `env` is a
   # STRING-keyed map standing in for NEBU_MINIO_*/NEBU_S3_REGION.
+  #
+  # The secrets are exactly the pair the operational path would sign with (`operation_credentials/2`): the saved pair,
+  # or the environment's for the environment's own target. For a half pair, undecryptable or unreadable keys, or another
+  # endpoint without saved keys there is no key (`nil`, "Not currently configured." on the settings page), so the page
+  # never presents env keys as the credentials of another saved endpoint nor mixes a saved key with an env key. A read
+  # never raises and logs nothing here: the operational path reports an unusable pair once per operation.
   defp build_resolved(row, env) do
+    {access_key, secret_key} =
+      case operation_credentials(row, env) do
+        {:ok, access_key, secret_key} -> {blank_to_nil(access_key), blank_to_nil(secret_key)}
+        {:error, _reason} -> {nil, nil}
+      end
+
+    Map.merge(plain_fields(row, env), %{access_key: access_key, secret_key: secret_key})
+  end
+
+  # `build_resolved/2` without the two secrets: what is needed to address a request (and to compare targets) and
+  # never decrypts or reads a secret file.
+  defp plain_fields(row, env) do
     %{
       endpoint: pick(row_get(row, "endpoint"), Map.get(env, "NEBU_MINIO_ENDPOINT"), @defaults.endpoint),
       bucket: pick(row_get(row, "bucket"), Map.get(env, "NEBU_MINIO_BUCKET"), @defaults.bucket),
@@ -846,22 +1141,6 @@ defmodule Nebu.Media.StorageConfig do
           row_get(row, "use_ssl"),
           parse_bool(Map.get(env, "NEBU_MINIO_USE_SSL")),
           @defaults.use_ssl
-        ),
-      access_key:
-        resolve_secret(
-          row_get(row, "access_key_encrypted"),
-          env,
-          "NEBU_MINIO_ACCESS_KEY_FILE",
-          "NEBU_MINIO_ACCESS_KEY",
-          @defaults.access_key
-        ),
-      secret_key:
-        resolve_secret(
-          row_get(row, "secret_key_encrypted"),
-          env,
-          "NEBU_MINIO_SECRET_KEY_FILE",
-          "NEBU_MINIO_SECRET_KEY",
-          @defaults.secret_key
         ),
       s3_key_prefix_template:
         pick(row_get(row, "s3_key_prefix_template"), nil, @defaults.s3_key_prefix_template),
@@ -897,61 +1176,6 @@ defmodule Nebu.Media.StorageConfig do
   defp parse_bool(nil), do: nil
   defp parse_bool(value) when is_boolean(value), do: value
   defp parse_bool(value) when is_binary(value), do: value == "true"
-
-  # access_key/secret_key: DB ciphertext (decrypted) > env var (_FILE-then-
-  # plain precedence, AC4/AT3) > compiled default.
-  defp resolve_secret(encrypted_column, env, file_key, plain_key, default) do
-    case decrypt_secret(encrypted_column) do
-      nil ->
-        case resolve_env_secret(env, file_key, plain_key) do
-          nil -> default
-          value -> value
-        end
-
-      plaintext ->
-        plaintext
-    end
-  end
-
-  defp decrypt_secret(nil), do: nil
-
-  # MINOR-2(a): a corrupted ciphertext or a rotated/wrong at-rest key must not
-  # silently fall back to the env-var credential — that is a security-
-  # relevant substitution the admin has no other way to notice. Log (message
-  # only — never the ciphertext or any decrypted fragment) before falling
-  # through to the env-var/default fallback in `resolve_secret/5`.
-  #
-  # MINOR-2(b): a genuinely-unset at-rest secret makes `SecretBox.decrypt/1`
-  # call `SecretBox.at_rest_key/0`, which RAISES by design (fail-closed).
-  # That raise must not propagate out of a config *read* (`get/0`,
-  # `get_for_connection/0`, or the GenServer's `:ttl_tick`/`:pg`-invalidation
-  # refresh) and crash-loop this supervised process — rescue it here and
-  # treat the field as if the ciphertext were absent, same as (a). This does
-  # NOT affect `upsert/1`'s own `SecretBox.encrypt/1` call (`column_for/2`),
-  # which still lets the identical raise propagate unguarded out of the
-  # WRITE path per AT12/AC3.
-  defp decrypt_secret(ciphertext) do
-    case SecretBox.decrypt(ciphertext) do
-      {:ok, plaintext} ->
-        plaintext
-
-      {:error, reason} ->
-        Logger.warning(
-          "Nebu.Media.StorageConfig: stored secret failed to decrypt (#{inspect(reason)}); " <>
-            "falling back to env-var/default credential"
-        )
-
-        nil
-    end
-  rescue
-    e in RuntimeError ->
-      Logger.warning(
-        "Nebu.Media.StorageConfig: at-rest secret unavailable while decrypting a stored " <>
-          "secret; falling back to env-var/default credential (#{Exception.message(e)})"
-      )
-
-      nil
-  end
 
   # Mirrors server/config/runtime.exs lines 85-95's `_FILE`-then-plain
   # precedence exactly: a Docker-secret-file path wins over the
@@ -1022,6 +1246,7 @@ defmodule Nebu.Media.StorageConfig do
   WHERE id = 1
   """
 
+  # `nil` only for a confirmed absent row; a failed query or an unavailable Repo is an `{:error, _}` (see `load_row/0`).
   defp default_loader do
     if Process.whereis(Nebu.Repo) != nil do
       case Ecto.Adapters.SQL.query(Nebu.Repo, @sql_load_media_storage_config, []) do
@@ -1033,15 +1258,15 @@ defmodule Nebu.Media.StorageConfig do
 
         {:error, reason} ->
           Logger.warning("Nebu.Media.StorageConfig: failed to load media_storage_config: #{inspect(reason)}")
-          nil
+          {:error, :load_failed}
       end
     else
-      nil
+      {:error, :repo_unavailable}
     end
   rescue
     e ->
       Logger.warning("Nebu.Media.StorageConfig: unexpected error loading media_storage_config: #{inspect(e)}")
-      nil
+      {:error, :load_failed}
   end
 
   # Dynamic partial column list built ONLY from `columns`' own keys — never
@@ -1119,6 +1344,10 @@ defmodule Nebu.Media.StorageConfig do
       String.contains?(endpoint, "@") ->
         {:error, :invalid_endpoint}
 
+      # what the operational parser would reject later (a path, an IPv6 literal, a bad port) must not be saved or tested
+      unparsable_endpoint?(endpoint) ->
+        {:error, :invalid_endpoint}
+
       true ->
         case SSRF.checked_target("http://" <> endpoint, allow_private: SSRF.allow_private_storage?()) do
           {:ok, target} ->
@@ -1149,21 +1378,28 @@ defmodule Nebu.Media.StorageConfig do
     if String.starts_with?(downcased, "http://") or String.starts_with?(downcased, "https://") do
       "Endpoint must be a bare host[:port] value (no http:// or https:// scheme prefix)."
     else
-      if String.contains?(endpoint, "@") do
-        "Endpoint must be a bare host[:port] value (no user info before an @)."
-      else
-        case SSRF.checked_target("http://" <> endpoint, allow_private: SSRF.allow_private_storage?()) do
-          {:ok, _target} -> "Endpoint is not valid."
-          {:error, reason} -> "Endpoint rejected: " <> SSRF.describe_error(reason) <> "."
-        end
+      cond do
+        String.contains?(endpoint, "@") ->
+          "Endpoint must be a bare host[:port] value (no user info before an @)."
+
+        unparsable_endpoint?(endpoint) ->
+          "Endpoint must be a host name or IPv4 address, optionally followed by :port (1 to 65535); no path, no IPv6 literal."
+
+        true ->
+          case SSRF.checked_target("http://" <> endpoint, allow_private: SSRF.allow_private_storage?()) do
+            {:ok, _target} -> "Endpoint is not valid."
+            {:error, reason} -> "Endpoint rejected: " <> SSRF.describe_error(reason) <> "."
+          end
       end
     end
   end
 
   def describe_invalid_endpoint(_), do: "Endpoint must be a bare host[:port] value."
 
+  defp unparsable_endpoint?(endpoint), do: match?({:error, _reason}, parse_endpoint(endpoint, false))
+
   # AC3: any blank secret in the candidate is resolved against the
-  # CURRENTLY stored decrypted secret (via get_for_connection/0) — this is
+  # CURRENTLY stored decrypted secret — this is
   # the only place a decrypted secret is attached to a candidate map handed
   # to the test-connection fun; the resolved plaintext never round-trips
   # back to the controller/browser (the fun's return value is just :ok /
@@ -1173,15 +1409,17 @@ defmodule Nebu.Media.StorageConfig do
     secret_key = blank_to_nil(Map.get(candidate, :secret_key))
 
     if is_nil(access_key) or is_nil(secret_key) do
-      stored = get_for_connection()
-
       # story admin-forms-gate-sweep D4 (Kassandra design review): a stored credential signs a request to the STORED target only. Reusing it for an endpoint (or a
       # scheme) the form supplies would hand the access key id and a signature (an offline guessing oracle for the secret) to a host the credentials were never meant
       # for. The IAM / STS endpoints are not compared: the test never contacts them (they join the comparison if it ever does).
-      if same_target?(candidate, stored) do
-        {:ok, %{candidate | access_key: access_key || stored.access_key, secret_key: secret_key || stored.secret_key}}
+      # The stored credentials are those the operational path would use for that target (`operation_credentials/2`): the saved
+      # pair, or the environment's for the environment's own target, never the environment's for another saved endpoint.
+      with {:ok, {row, env}} <- read_snapshot(),
+           true <- same_target?(candidate, plain_fields(row, env)),
+           {:ok, stored_access_key, stored_secret_key} <- operation_credentials(row, env) do
+        {:ok, %{candidate | access_key: access_key || stored_access_key, secret_key: secret_key || stored_secret_key}}
       else
-        {:error, :secret_required}
+        _ -> {:error, :secret_required}
       end
     else
       {:ok, %{candidate | access_key: access_key, secret_key: secret_key}}
@@ -1208,48 +1446,75 @@ defmodule Nebu.Media.StorageConfig do
   # story's own Technical Requirement) is the pinned `ex_aws_s3` version's
   # public helper for exactly this operation.
   defp default_test_connection(candidate) do
-    candidate.bucket
-    |> ExAws.S3.head_bucket()
-    |> ExAws.request(config_overrides(candidate))
-    |> case do
-      {:ok, _} -> :ok
-      {:error, reason} -> {:error, reason}
+    with {:ok, overrides} <- config_overrides(candidate),
+         {:ok, _response} <- candidate.bucket |> ExAws.S3.head_bucket() |> ExAws.request(overrides) do
+      :ok
     end
   rescue
     e -> {:error, e}
   end
 
   # storage-test-pinned-target D2: `http_client` / `http_opts` select the pin client for THIS request only (the operational
-  # `Nebu.Media.Storage` calls keep the default hackney client). `http_opts` carries the checked target; the client
+  # `Nebu.Media.Storage` calls, see `request_target/0`, keep the configured HTTP client). `http_opts` carries the checked target; the client
   # fails closed when it is missing (`Map.get/2`: a candidate without `:pinned_target` ends in an error, never in a
   # normal request).
   defp config_overrides(candidate) do
-    {host, port} = split_endpoint(candidate.endpoint, candidate.use_ssl)
+    with {:ok, host, port} <- parse_endpoint(candidate.endpoint, candidate.use_ssl) do
+      {:ok,
+       connection_overrides(host, port, candidate) ++
+         [
+           http_client: Nebu.Media.PinnedHttpClient,
+           http_opts: [pinned_target: Map.get(candidate, :pinned_target)],
+           # ONE attempt for the admin test (this override only; the operational calls keep the configured retries): ExAws would
+           # otherwise repeat a refused / failed pinned request up to `max_attempts` times with a growing backoff while the admin waits.
+           retries: [max_attempts: 1, base_backoff_in_ms: 1, max_backoff_in_ms: 1]
+         ]}
+    end
+  end
 
+  # The per-request ExAws overrides both the Test Connection and the operational calls (`request_target/0`) share.
+  defp connection_overrides(host, port, cfg) do
     [
-      access_key_id: candidate.access_key,
-      secret_access_key: candidate.secret_key,
+      access_key_id: cfg.access_key,
+      secret_access_key: cfg.secret_key,
       host: host,
-      scheme: if(candidate.use_ssl, do: "https://", else: "http://"),
+      scheme: if(ssl?(cfg.use_ssl), do: "https://", else: "http://"),
       port: port,
-      region: candidate.region,
-      http_client: Nebu.Media.PinnedHttpClient,
-      http_opts: [pinned_target: Map.get(candidate, :pinned_target)],
-      # ONE attempt for the admin test (this override only; the operational calls keep the configured retries): ExAws would
-      # otherwise repeat a refused / failed pinned request up to `max_attempts` times with a growing backoff while the admin waits.
-      retries: [max_attempts: 1, base_backoff_in_ms: 1, max_backoff_in_ms: 1]
+      region: cfg.region
     ]
   end
 
-  # Mirrors server/config/runtime.exs lines 100-104's own endpoint parsing
-  # exactly (bare `host[:port]`, port defaults to 443/80 by scheme when
-  # omitted).
-  defp split_endpoint(endpoint, use_ssl?) do
-    case String.split(endpoint, ":", parts: 2) do
-      [h, p] -> {h, String.to_integer(p)}
-      [h] -> {h, if(use_ssl?, do: 443, else: 80)}
+  defp ssl?(use_ssl), do: use_ssl == true
+  defp default_port(use_ssl), do: if(ssl?(use_ssl), do: 443, else: 80)
+
+  # THE `host[:port]` parser: save validation, Test Connection and every operational request decide with it what an
+  # endpoint is, so none of them accepts a value another one rejects. The port defaults to 443/80 by scheme (as
+  # `runtime.exs` does). Never raises: the saved endpoint is admin input and `NEBU_MINIO_ENDPOINT` may be set empty.
+  # `{:error, :storage_endpoint_blank}`: no host. `{:error, :storage_endpoint_invalid}`: a path, an IPv6 literal, a port
+  # that is not a number from 1 to 65535 or any other character that does not belong to a host name.
+  defp parse_endpoint(endpoint, use_ssl) when is_binary(endpoint) do
+    case endpoint |> String.trim() |> String.split(":", parts: 2) do
+      [host, port] -> parse_host_port(String.trim(host), String.trim(port))
+      [host] -> parse_host_port(String.trim(host), default_port(use_ssl))
     end
   end
+
+  defp parse_endpoint(_endpoint, _use_ssl), do: {:error, :storage_endpoint_blank}
+
+  defp parse_host_port("", _port), do: {:error, :storage_endpoint_blank}
+
+  defp parse_host_port(host, port) when is_binary(port) do
+    case Integer.parse(port) do
+      {number, ""} -> parse_host_port(host, number)
+      _ -> {:error, :storage_endpoint_invalid}
+    end
+  end
+
+  defp parse_host_port(host, port) when port in 1..65_535 do
+    if host =~ ~r/\A[A-Za-z0-9._-]+\z/, do: {:ok, host, port}, else: {:error, :storage_endpoint_invalid}
+  end
+
+  defp parse_host_port(_host, _port), do: {:error, :storage_endpoint_invalid}
 
   # Mirrors server/config/runtime.exs lines 78-119's own NEBU_MINIO_*/
   # NEBU_S3_REGION reads exactly. Any absent var is simply not put into the

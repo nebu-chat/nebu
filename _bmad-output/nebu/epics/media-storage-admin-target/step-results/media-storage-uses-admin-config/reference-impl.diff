@@ -1,0 +1,224 @@
+diff --git a/server/config/runtime.exs b/server/config/runtime.exs
+index 3869a487..76dd71d3 100644
+--- a/server/config/runtime.exs
++++ b/server/config/runtime.exs
+@@ -165,7 +165,16 @@ if config_env() in [:prod, :dev] do
+       path -> path |> File.read!() |> String.trim()
+     end
+ 
+-  minio_endpoint = System.get_env("NEBU_MINIO_ENDPOINT", "minio:9000")
++  minio_endpoint =
++    case System.get_env("NEBU_MINIO_ENDPOINT") do
++      nil ->
++        "minio:9000"
++
++      value ->
++        if String.trim(value) == "",
++          do: raise("NEBU_MINIO_ENDPOINT is set but empty; unset it to use the default minio:9000 or give host[:port]"),
++          else: String.trim(value)
++    end
+   use_ssl? = System.get_env("NEBU_MINIO_USE_SSL", "false") == "true"
+ 
+   {host, port} =
+diff --git a/server/lib/nebu/media/storage.ex b/server/lib/nebu/media/storage.ex
+index cb3885a2..440bebea 100644
+--- a/server/lib/nebu/media/storage.ex
++++ b/server/lib/nebu/media/storage.ex
+@@ -1,23 +1,15 @@
+ defmodule Nebu.Media.Storage do
+   @moduledoc """
+-  S3/MinIO object storage via `ExAws.S3`. Production default for the
+-  `:media_storage_module` seam; tests swap it for `Nebu.Web.MediaFakes.Storage`.
++  THROWAWAY REFERENCE (ATDD) of the fix: every operation resolves the effective target per call.
++  """
+ 
+-  Objects are stored encrypted-at-rest (AES-256-GCM, ADR-011); `get/1`/`put/2`
+-  move opaque bytes as-is, while `compress/1` gzips plaintext before encryption
+-  (store-smaller-of-two, ADR-029). The bucket is read from `:nebu_http, :media_bucket`
+-  (NEBU_MINIO_BUCKET), the ExAws connection config (host/scheme/port/keys/region)
+-  is set in `config/runtime.exs` from the NEBU_MINIO_* env vars.
++  alias Nebu.Media.StorageConfig
+ 
+-  GCM requires the whole blob to authenticate, so download decrypts in memory —
+-  `get/1` returns the full object body rather than a stream.
+-  """
++  require Logger
+ 
+   @spec get(String.t()) :: {:ok, binary()} | {:error, term()}
+   def get(key) do
+-    bucket()
+-    |> ExAws.S3.get_object(key)
+-    |> ExAws.request()
++    request(fn t -> ExAws.S3.get_object(t.bucket, key) end)
+     |> case do
+       {:ok, %{body: body}} -> {:ok, body}
+       {:error, {:http_error, 404, _}} -> {:error, :not_found}
+@@ -27,28 +19,16 @@ defmodule Nebu.Media.Storage do
+ 
+   @spec put(String.t(), binary()) :: :ok | {:error, term()}
+   def put(key, bytes) when is_binary(bytes) do
+-    bucket()
+-    |> ExAws.S3.put_object(key, bytes)
+-    |> ExAws.request()
++    request(fn t -> ExAws.S3.put_object(t.bucket, key, bytes) end)
+     |> case do
+       {:ok, _} -> :ok
+       {:error, reason} -> {:error, reason}
+     end
+   end
+ 
+-  # media-security-admin-control/8a-media-cleanup-worker (AC6): permanently
+-  # removes the S3/MinIO object for a hard-deleted media_files row, called by
+-  # Nebu.Workers.MediaCleanupWorker after Nebu.Media.StateMachine.transition/4
+-  # has already moved the row to :hard_deleted (ADR-032 step 2, between the
+-  # state transition and nulling storage_key/uploader_user_id). A 404 means
+-  # the object is already gone -- re-issuing a delete against a non-existent
+-  # S3 key is a safe no-op per ADR-032, so it is treated as :ok rather than an
+-  # error the caller must handle specially.
+   @spec delete(String.t()) :: :ok | {:error, term()}
+   def delete(key) do
+-    bucket()
+-    |> ExAws.S3.delete_object(key)
+-    |> ExAws.request()
++    request(fn t -> ExAws.S3.delete_object(t.bucket, key) end)
+     |> case do
+       {:ok, _} -> :ok
+       {:error, {:http_error, 404, _}} -> :ok
+@@ -56,38 +36,18 @@ defmodule Nebu.Media.Storage do
+     end
+   end
+ 
+-  # media-security-admin-control/8c-media-archive-worker (AC5/AC6/AC11):
+-  # bucket-to-bucket server-side copy of an already-encrypted object into a
+-  # second, admin-configured "archive" bucket, under the SAME object key
+-  # (ADR-029: storage_key is immutable, never recomputed) — no bytes are ever
+-  # pulled into this process, decrypted, or re-uploaded. `dest_bucket` is the
+-  # caller's already-resolved `archive_bucket/0` value (Nebu.Workers.
+-  # MediaArchiveWorker's own `archive_bucket/0` helper calls this), not
+-  # re-resolved here, matching the acceptance tests' own "called with the
+-  # row's storage_key and the configured archive bucket" phrasing.
+   @spec put_object_copy(String.t(), String.t()) :: :ok | {:error, term()}
+   def put_object_copy(key, dest_bucket) do
+-    dest_bucket
+-    |> ExAws.S3.put_object_copy(key, bucket(), key)
+-    |> ExAws.request()
++    request(fn t -> ExAws.S3.put_object_copy(dest_bucket, key, t.bucket, key) end)
+     |> case do
+       {:ok, _} -> :ok
+       {:error, reason} -> {:error, reason}
+     end
+   end
+ 
+-  # media-security-admin-control/8c-media-archive-worker (AC11): the
+-  # download-path counterpart of get/1 above, read by
+-  # Nebu.Media.fetch_and_decrypt/3 only when row.archived_at is truthy.
+-  # Resolves archive_bucket/0 internally (unlike put_object_copy/2, whose
+-  # caller already has the bucket name at hand from the worker's own
+-  # archive_bucket/0 helper) since the download path has no other reason to
+-  # read the archive bucket name itself.
+   @spec get_from_archive(String.t()) :: {:ok, binary()} | {:error, term()}
+   def get_from_archive(key) do
+-    archive_bucket()
+-    |> ExAws.S3.get_object(key)
+-    |> ExAws.request()
++    request(fn t -> ExAws.S3.get_object(t.archive_bucket, key) end)
+     |> case do
+       {:ok, %{body: body}} -> {:ok, body}
+       {:error, {:http_error, 404, _}} -> {:error, :not_found}
+@@ -95,15 +55,19 @@ defmodule Nebu.Media.Storage do
+     end
+   end
+ 
+-  # media-security-admin-control/8c-media-archive-worker (AC1, Dependencies —
+-  # Story 11b): the archive-bucket name. Story 11b (Object Storage Target
+-  # Config) has not landed a DB-backed source for this on this branch yet —
+-  # this falls back to a static env/config.exs value as a placeholder (TODO:
+-  # rewire to whatever 11b's eventual admin-configurable source is, mirroring
+-  # the same not-yet-rewired posture Story 8a/8b's own config.exs values
+-  # already document for Story 9a's Nebu.Media.Config).
+   @spec archive_bucket() :: String.t()
+-  def archive_bucket, do: Application.get_env(:nebu_http, :media_archive_bucket, "nebu-media-archive")
++  def archive_bucket, do: StorageConfig.effective_archive_bucket()
++
++  defp request(build) do
++    case StorageConfig.operation_target() do
++      {:ok, target} ->
++        target |> build.() |> ExAws.request(target.overrides)
++
++      {:error, :storage_endpoint_blank} = error ->
++        Logger.warning("Nebu.Media.Storage: effective storage endpoint is blank; request not sent")
++        error
++    end
++  end
+ 
+   @doc """
+   Gzips `original` and returns whichever of {gzipped, original} is smaller,
+@@ -120,6 +84,4 @@ defmodule Nebu.Media.Storage do
+       {original, false}
+     end
+   end
+-
+-  defp bucket, do: Application.get_env(:nebu_http, :media_bucket, "nebu-media")
+ end
+diff --git a/server/lib/nebu/media/storage_config.ex b/server/lib/nebu/media/storage_config.ex
+index c8d89f1c..51232be2 100644
+--- a/server/lib/nebu/media/storage_config.ex
++++ b/server/lib/nebu/media/storage_config.ex
+@@ -227,6 +227,57 @@ defmodule Nebu.Media.StorageConfig do
+     resolved()
+   end
+ 
++  # THROWAWAY REFERENCE (ATDD): per-call target resolution for Nebu.Media.Storage.
++  @doc false
++  @spec operation_target() ::
++          {:ok, %{overrides: keyword(), bucket: String.t(), archive_bucket: String.t()}}
++          | {:error, :storage_endpoint_blank}
++  def operation_target do
++    cfg = get_for_connection()
++    endpoint = if is_binary(cfg.endpoint), do: String.trim(cfg.endpoint), else: ""
++
++    {host, port} =
++      case String.split(endpoint, ":", parts: 2) do
++        [h, p] ->
++          case Integer.parse(String.trim(p)) do
++            {n, ""} -> {String.trim(h), n}
++            _ -> {"", nil}
++          end
++
++        [h] ->
++          {String.trim(h), if(cfg.use_ssl, do: 443, else: 80)}
++      end
++
++    if host == "" do
++      {:error, :storage_endpoint_blank}
++    else
++      {:ok,
++       %{
++         overrides: [
++           access_key_id: cfg.access_key,
++           secret_access_key: cfg.secret_key,
++           host: host,
++           scheme: if(cfg.use_ssl, do: "https://", else: "http://"),
++           port: port,
++           region: cfg.region
++         ],
++         bucket: cfg.bucket,
++         archive_bucket: effective_archive_bucket(cfg)
++       }}
++    end
++  end
++
++  @doc false
++  @spec effective_archive_bucket() :: String.t()
++  def effective_archive_bucket, do: effective_archive_bucket(get_for_connection())
++
++  defp effective_archive_bucket(cfg) do
++    case cfg.archive_bucket do
++      b when is_binary(b) and b != "" -> b
++      _ -> Application.get_env(:nebu_http, :media_archive_bucket, "nebu-media-archive")
++    end
++  end
++
+   @doc """
+   The ONLY write path to `media_storage_config` (AC6). `fields` is a
+   partial-update map — only the keys present are written; omitted fields are

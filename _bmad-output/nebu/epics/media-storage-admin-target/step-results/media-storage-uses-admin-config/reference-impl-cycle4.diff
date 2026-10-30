@@ -1,0 +1,80 @@
+--- a/server/lib/nebu/media/storage_config.ex
++++ b/server/lib/nebu/media/storage_config.ex
+@@ -403,6 +403,9 @@
+   """
+   @spec upsert(map(), String.t()) :: :ok | {:error, term()}
+   def upsert(fields, actor \\ @audit_actor) when is_map(fields) do
++    # THROWAWAY REFERENCE (cycle 4, fix Z): both keys blank (or one blank and one nil) are "no keys submitted"
++    fields = drop_blank_keys(fields)
++
+     with :ok <- validate_template_field(fields),
+          :ok <- validate_endpoint_field(fields),
+          :ok <- validate_keys_for_target_change(fields),
+@@ -411,10 +414,12 @@
+       columns = build_columns(fields)
+       writer = Application.get_env(:nebu_http, :media_storage_config_writer, &default_writer/2)
+       set_at = System.system_time(:millisecond)
++      # THROWAWAY REFERENCE (cycle 4, fix X): the audit names what differs from the row as it was before this write
++      row_before = with {:ok, row} <- load_row(), do: row
+ 
+       case writer.(columns, set_at) do
+         :ok ->
+-          write_audit(actor, fields)
++          write_audit(actor, audit_fields(fields, row_before))
+           refresh_cache()
+           :ok
+ 
+@@ -478,7 +483,42 @@
+     present = Enum.count([:access_key, :secret_key], &present_key?(Map.get(fields, &1)))
+ 
+     if mentioned == 1 or present == 1, do: {:error, :key_pair_required}, else: :ok
++  end
++
++  defp drop_blank_keys(fields) do
++    access = Map.get(fields, :access_key)
++    secret = Map.get(fields, :secret_key)
++
++    if Map.has_key?(fields, :access_key) and Map.has_key?(fields, :secret_key) and not present_key?(access) and not present_key?(secret) and
++         not (is_nil(access) and is_nil(secret)) do
++      Map.drop(fields, [:access_key, :secret_key])
++    else
++      fields
++    end
++  end
++
++  @audit_columns %{
++    endpoint: "endpoint",
++    use_ssl: "use_ssl",
++    bucket: "bucket",
++    region: "region",
++    s3_key_prefix_template: "s3_key_prefix_template",
++    archive_bucket: "archive_bucket",
++    iam_endpoint: "iam_endpoint",
++    sts_endpoint: "sts_endpoint"
++  }
++
++  # the fields of a save that really change the stored row (the keys count whenever they are submitted)
++  defp audit_fields(fields, row_before) when is_map(row_before) do
++    Map.filter(fields, fn {key, value} ->
++      case Map.fetch(@audit_columns, key) do
++        {:ok, column} -> Map.get(row_before, column) != value
++        :error -> true
++      end
++    end)
+   end
++
++  defp audit_fields(fields, _no_row), do: fields
+ 
+   defp keys_given?(fields), do: Enum.all?([:access_key, :secret_key], &present_key?(Map.get(fields, &1)))
+ 
+--- a/server/lib/nebu/admin/media_settings_controller.ex
++++ b/server/lib/nebu/admin/media_settings_controller.ex
+@@ -342,7 +342,7 @@
+         |> redirect(to: "/admin/media/settings")
+ 
+       {:error, :invalid_endpoint} ->
+-        render_storage_validation_error(conn, params, StorageConfig.describe_invalid_endpoint(params["endpoint"]), ["endpoint"])
++        render_storage_validation_error(conn, params, StorageConfig.describe_invalid_endpoint(String.trim(params["endpoint"] || "")), ["endpoint"])
+ 
+       {:error, :secret_required} ->
+         render_storage_validation_error(

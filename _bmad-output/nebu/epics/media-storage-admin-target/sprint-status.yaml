@@ -1,0 +1,4 @@
+# generated: 2026-10-30
+# story media-storage-uses-admin-config done (pipeline --bug: Nebu.Media.Storage resolves endpoint/credentials/bucket per call from the admin-saved StorageConfig; credentials bound to their endpoint source; blank NEBU_MINIO_ENDPOINT aborts boot; S3 error bodies never reach logs/responses; 5 cycles, test-review 0 MAJOR, code-review 0 MAJOR, Kassandra CLEAN, UX 2 blocking fixed; no-DB suite 6973/0, integration 21 known flaky (RoomsFallbackName, TemporaryCapture, LogStore), e2e admin media features green, element-web thread test flaky (passes alone), oauth e2e tags excluded as in CI): 2026-10-30
+development_status:
+  media-storage-uses-admin-config: done

@@ -1084,12 +1084,18 @@ server/lib/nebu/
 │   │                   ciphertext + raw env values, so the always-running holder never caches a
 │   │                   decrypted secret. `get/0` returns the merged config with secrets MASKED
 │   │                   (`"••••" <> last 4 plaintext chars`); only `get_for_connection/0` returns
-│   │                   plaintext, and it had ZERO production callers in 11a (deferred to 11b+ wiring
-│   │                   an actual S3 client). `upsert/2` is the sole write path; logs a
+│   │                   plaintext (no production caller; tests and diagnostics only).
+│   │                   `request_target/0` (story media-storage-uses-admin-config)
+│   │                   is what `Nebu.Media.Storage` calls before EVERY S3 request: the per-request
+│   │                   ExAws overrides + effective bucket / archive bucket, saved > env > default, a
+│   │                   saved endpoint only with its saved credentials (except the environment's own
+│   │                   endpoint and Use SSL, which use the environment's), an error atom (no request)
+│   │                   for a blank endpoint / missing credentials / unreadable settings; the boot-time
+│   │                   `:ex_aws` config is no longer the source. `upsert/2` is the sole write path
+│   │                   (a changed endpoint / use_ssl needs both keys); logs a
 │   │                   `media_storage_config_updated` audit entry via `Nebu.Compliance.AuditWriter`
-│   │                   naming only which field names changed, never values (secret or not). Does NOT
-│   │                   rewire `Nebu.Media.Storage`'s existing `ExAws.S3` boot-time wiring — explicitly
-│   │                   out of scope, left for follow-up. (11b additions: `persisted_target/0` —
+│   │                   naming only which field names changed, never values (secret or not).
+│   │                   (11b additions: `persisted_target/0` —
 │   │                   returns `{:ok, %{endpoint: ..., bucket: ...}}` when a media_storage_config row
 │   │                   has ever been saved, or `:fresh` if none exists — the AC4 orphan-risk-gate
 │   │                   baseline for MediaSettingsController, deliberately NOT get/0's env-var-merged

@@ -234,6 +234,18 @@
   {elem(@test_connection_result, 1)}
 </p>
 
+<%!-- A refused Save (invalid endpoint, keys required): in the position of the Test Connection result, focused on load, referenced by the fields it is about. --%>
+<p
+  :if={@storage_save_error}
+  id="media-storage-error"
+  role="alert"
+  tabindex="-1"
+  autofocus
+  class="alert alert-error mb-4"
+>
+  {elem(@storage_save_error, 0)}
+</p>
+
 <form
   id="media-storage-form"
   data-testid="media-storage-form"
@@ -249,10 +261,16 @@
       ⚠️ Changing the endpoint or bucket does not migrate existing objects. {@orphan_warning}
       existing file(s) currently stored under the active target will become unreachable
       (download requests will 404) once this change is saved, because their storage keys will
-      no longer resolve against the new endpoint/bucket.
+      no longer resolve against the new endpoint/bucket. Enter the access key and secret key again before saving.
     </p>
     <label for="confirm_orphan_risk" class="flex items-center gap-2">
-      <input type="checkbox" id="confirm_orphan_risk" name="confirm_orphan_risk" value="true" />
+      <input
+        type="checkbox"
+        id="confirm_orphan_risk"
+        name="confirm_orphan_risk"
+        value="true"
+        checked={@orphan_confirmed}
+      />
       <span>
         I understand {@orphan_warning} existing file(s) will become unreachable and want to
         proceed
@@ -268,6 +286,8 @@
         id="endpoint"
         name="endpoint"
         value={@storage_config.endpoint}
+        aria-invalid={@storage_save_error && "endpoint" in elem(@storage_save_error, 1) && "true"}
+        aria-describedby={@storage_save_error && "endpoint" in elem(@storage_save_error, 1) && "media-storage-error"}
         placeholder="minio:9000"
         class="input input-bordered"
       />
@@ -365,19 +385,39 @@
   <div class="flex flex-wrap gap-4 mb-4">
     <label for="access_key" class="form-control">
       <span class="label-text">Access key</span>
-      <input type="password" id="access_key" name="access_key" class="input input-bordered" />
+      <input
+        type="password"
+        id="access_key"
+        name="access_key"
+        aria-invalid={@storage_save_error && "access_key" in elem(@storage_save_error, 1) && "true"}
+        aria-describedby={@storage_save_error && "access_key" in elem(@storage_save_error, 1) && "media-storage-error"}
+        class="input input-bordered"
+      />
       <span class="label-text-alt mt-1 text-base-content/70">
-        {if @access_key_configured, do: "Currently configured.", else: "Not currently configured."}
-        Leave blank to keep the current value. Enter both again if you change the endpoint or Use SSL and press Test Connection.
+        {cond do
+          @storage_save_error -> "Required now: enter both the access key and the secret key."
+          @access_key_configured -> "Currently configured. Leave blank to keep it. Enter both keys again if you change the endpoint or Use SSL; Save and Test Connection both require them."
+          true -> "Not currently configured. Required: Save and Test Connection both need both keys."
+        end}
       </span>
     </label>
 
     <label for="secret_key" class="form-control">
       <span class="label-text">Secret key</span>
-      <input type="password" id="secret_key" name="secret_key" class="input input-bordered" />
+      <input
+        type="password"
+        id="secret_key"
+        name="secret_key"
+        aria-invalid={@storage_save_error && "secret_key" in elem(@storage_save_error, 1) && "true"}
+        aria-describedby={@storage_save_error && "secret_key" in elem(@storage_save_error, 1) && "media-storage-error"}
+        class="input input-bordered"
+      />
       <span class="label-text-alt mt-1 text-base-content/70">
-        {if @secret_key_configured, do: "Currently configured.", else: "Not currently configured."}
-        Leave blank to keep the current value. Enter both again if you change the endpoint or Use SSL and press Test Connection.
+        {cond do
+          @storage_save_error -> "Required now: enter both the access key and the secret key."
+          @secret_key_configured -> "Currently configured. Leave blank to keep it. Enter both keys again if you change the endpoint or Use SSL; Save and Test Connection both require them."
+          true -> "Not currently configured. Required: Save and Test Connection both need both keys."
+        end}
       </span>
     </label>
   </div>

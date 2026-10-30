@@ -1,0 +1,350 @@
+--- a/server/lib/nebu/media/storage.ex
++++ b/server/lib/nebu/media/storage.ex
+@@ -28,7 +28,7 @@
+     request(&ExAws.S3.get_object(&1.bucket, key))
+     |> case do
+       {:ok, %{body: body}} -> {:ok, body}
+-      {:error, {:http_error, 404, _}} -> {:error, :not_found}
++      {:error, {:http_error, 404}} -> {:error, :not_found}
+       {:error, reason} -> {:error, reason}
+     end
+   end
+@@ -55,7 +55,7 @@
+     request(&ExAws.S3.delete_object(&1.bucket, key))
+     |> case do
+       {:ok, _} -> :ok
+-      {:error, {:http_error, 404, _}} -> :ok
++      {:error, {:http_error, 404}} -> :ok
+       {:error, reason} -> {:error, reason}
+     end
+   end
+@@ -91,7 +91,7 @@
+     request(&ExAws.S3.get_object(&1.archive_bucket, key))
+     |> case do
+       {:ok, %{body: body}} -> {:ok, body}
+-      {:error, {:http_error, 404, _}} -> {:error, :not_found}
++      {:error, {:http_error, 404}} -> {:error, :not_found}
+       {:error, reason} -> {:error, reason}
+     end
+   end
+@@ -124,18 +124,21 @@
+   defp request(build) do
+     case StorageConfig.request_target() do
+       {:ok, target} ->
+-        target |> build.() |> ExAws.request(target.overrides)
++        target |> build.() |> ExAws.request(target.overrides) |> sanitize_error()
+ 
+       {:error, reason} ->
+-        Logger.warning(
+-          "Nebu.Media.Storage: request not sent, the storage endpoint (admin media settings / NEBU_MINIO_ENDPOINT) " <>
+-            "is #{endpoint_problem(reason)}"
+-        )
+-
++        Logger.warning("Nebu.Media.Storage: request not sent, #{problem(reason)}")
+         {:error, reason}
+     end
+   end
+ 
+-  defp endpoint_problem(:storage_endpoint_blank), do: "blank"
+-  defp endpoint_problem(:storage_endpoint_invalid), do: "invalid (no usable host and port)"
++  # THROWAWAY REFERENCE (cycle 1, fix F): an S3 error body (access key id, StringToSign) never leaves this module.
++  defp sanitize_error({:error, {:http_error, status, _body}}), do: {:error, {:http_error, status}}
++  defp sanitize_error(other), do: other
++
++  defp problem(:storage_endpoint_blank), do: "the storage endpoint (admin media settings / NEBU_MINIO_ENDPOINT) is blank"
++  defp problem(:storage_endpoint_invalid), do: "the storage endpoint is invalid (no usable host and port)"
++  defp problem(:storage_credentials_missing), do: "the storage credentials are missing or cannot be decrypted"
++  defp problem(:storage_credentials_unreadable), do: "the storage credentials cannot be read (NEBU_MINIO_*_FILE or the at-rest key file)"
++  defp problem(:storage_config_unavailable), do: "the saved storage settings cannot be read"
+ end
+--- a/server/lib/nebu/media/storage_config.ex
++++ b/server/lib/nebu/media/storage_config.ex
+@@ -249,22 +249,107 @@
+           {:ok, %{overrides: keyword(), bucket: String.t(), archive_bucket: String.t()}}
+           | {:error, :storage_endpoint_blank | :storage_endpoint_invalid}
+   def request_target do
+-    cfg = get_for_connection()
+-
+-    with {:ok, host, port} <- parse_endpoint(cfg.endpoint, cfg.use_ssl) do
+-      # No credential anywhere is signed as empty (what `runtime.exs` boots with), never as `nil`, which ExAws cannot sign with.
+-      cfg = %{cfg | access_key: cfg.access_key || "", secret_key: cfg.secret_key || ""}
++    # THROWAWAY REFERENCE (cycle 1, ATDD): credentials bound to the endpoint source, fail closed, no raise.
++    with {:ok, {row, env}} <- strict_snapshot(),
++         cfg = plain_config(row, env),
++         {:ok, host, port} <- parse_endpoint(cfg.endpoint, cfg.use_ssl),
++         {:ok, access_key, secret_key} <- operation_credentials(row, env) do
++      cfg = Map.merge(cfg, %{access_key: access_key, secret_key: secret_key})
+       {:ok, %{overrides: connection_overrides(host, port, cfg), bucket: cfg.bucket, archive_bucket: archive_bucket(cfg)}}
++    end
++  end
++
++  # the non-secret fields of build_resolved/2 (never decrypts or reads a credential file)
++  defp plain_config(row, env) do
++    %{
++      endpoint: pick(row_get(row, "endpoint"), Map.get(env, "NEBU_MINIO_ENDPOINT"), @defaults.endpoint),
++      bucket: pick(row_get(row, "bucket"), Map.get(env, "NEBU_MINIO_BUCKET"), @defaults.bucket),
++      region: pick(row_get(row, "region"), Map.get(env, "NEBU_S3_REGION"), @defaults.region),
++      use_ssl: pick(row_get(row, "use_ssl"), parse_bool(Map.get(env, "NEBU_MINIO_USE_SSL")), @defaults.use_ssl),
++      archive_bucket: pick(row_get(row, "archive_bucket"), nil, @defaults.archive_bucket)
++    }
++  end
++
++  defp operation_credentials(row, env) do
++    endpoint_from_row? = not is_nil(row_get(row, "endpoint"))
++    access = operation_secret(row_get(row, "access_key_encrypted"))
++    secret = operation_secret(row_get(row, "secret_key_encrypted"))
++
++    case {access, secret} do
++      {{:ok, a}, {:ok, s}} ->
++        {:ok, a, s}
++
++      {nil, nil} when not endpoint_from_row? ->
++        env_credentials(env)
++
++      {{:error, :unreadable}, _} ->
++        {:error, :storage_credentials_unreadable}
++
++      {_, {:error, :unreadable}} ->
++        {:error, :storage_credentials_unreadable}
++
++      _ ->
++        {:error, :storage_credentials_missing}
++    end
++  end
++
++  defp operation_secret(nil), do: nil
++
++  defp operation_secret(ciphertext) do
++    case SecretBox.decrypt(ciphertext) do
++      {:ok, plaintext} -> {:ok, plaintext}
++      {:error, _} -> {:error, :undecryptable}
+     end
++  rescue
++    _ -> {:error, :unreadable}
+   end
+ 
++  defp env_credentials(env) do
++    {:ok, resolve_env_secret(env, "NEBU_MINIO_ACCESS_KEY_FILE", "NEBU_MINIO_ACCESS_KEY") || "",
++     resolve_env_secret(env, "NEBU_MINIO_SECRET_KEY_FILE", "NEBU_MINIO_SECRET_KEY") || ""}
++  rescue
++    _ -> {:error, :storage_credentials_unreadable}
++  end
++
++  # {:ok, {row, env}} from the cache (or a direct read), {:error, :storage_config_unavailable} when the saved row cannot be read
++  defp strict_snapshot do
++    case :ets.whereis(@table) do
++      :undefined ->
++        direct_snapshot()
++
++      _ ->
++        case :ets.lookup(@table, :catalog) do
++          [{:catalog, {row, env, loader_seam, env_seam}}] ->
++            if loader_seam == current_loader_seam() and env_seam == current_env_seam(), do: {:ok, {row, env}}, else: direct_snapshot()
++
++          _ ->
++            direct_snapshot()
++        end
++    end
++  end
++
++  defp direct_snapshot do
++    case load_result() do
++      {:ok, row} -> {:ok, {row, safe_env()}}
++      :error -> {:error, :storage_config_unavailable}
++    end
++  end
++
+   @doc """
+   The effective archive bucket name: the saved one, else `:nebu_http, :media_archive_bucket`
+   (`NEBU_MINIO_ARCHIVE_BUCKET`, set by `runtime.exs`), else `"nebu-media-archive"`. Needs no usable endpoint.
+   """
+   @spec archive_bucket() :: String.t()
+-  def archive_bucket, do: archive_bucket(get_for_connection())
++  def archive_bucket do
++    {row, env} =
++      case strict_snapshot() do
++        {:ok, snapshot} -> snapshot
++        _ -> row_and_env()
++      end
+ 
++    archive_bucket(plain_config(row, env))
++  end
++
+   defp archive_bucket(%{archive_bucket: bucket}) when is_binary(bucket) and bucket != "", do: bucket
+   defp archive_bucket(_cfg), do: Application.get_env(:nebu_http, :media_archive_bucket, "nebu-media-archive")
+ 
+@@ -289,6 +374,7 @@
+   def upsert(fields, actor \\ @audit_actor) when is_map(fields) do
+     with :ok <- validate_template_field(fields),
+          :ok <- validate_endpoint_field(fields),
++         :ok <- validate_credentials_for_target_change(fields),
+          :ok <- validate_iam_sts_fields(fields) do
+       columns = build_columns(fields)
+       writer = Application.get_env(:nebu_http, :media_storage_config_writer, &default_writer/2)
+@@ -330,6 +416,29 @@
+   end
+ 
+   defp validate_endpoint_field(_fields), do: :ok
++
++  # THROWAWAY REFERENCE (cycle 1, fix B): a changed endpoint / use_ssl needs both keys in the same save.
++  defp validate_credentials_for_target_change(fields) do
++    if Map.has_key?(fields, :endpoint) or Map.has_key?(fields, :use_ssl) do
++      {row, env} = row_and_env()
++      stored = plain_config(row, env)
++
++      candidate = %{endpoint: Map.get(fields, :endpoint, stored.endpoint), use_ssl: Map.get(fields, :use_ssl, stored.use_ssl)}
++
++      if same_target?(candidate, stored) or keys_given?(fields), do: :ok, else: {:error, :secret_required}
++    else
++      :ok
++    end
++  end
++
++  defp keys_given?(fields) do
++    Enum.all?([:access_key, :secret_key], fn key ->
++      case Map.get(fields, key) do
++        value when is_binary(value) -> String.trim(value) != ""
++        _ -> false
++      end
++    end)
++  end
+ 
+   # F-1 fix (Kassandra security review, SEC Gate 1, 2026-10-08): validates
+   # iam_endpoint/sts_endpoint BEFORE any DB write, whenever `fields` contains
+@@ -828,23 +937,42 @@
+   # Tags the snapshot with the seam values that produced it — see
+   # `row_and_env/0` above.
+   defp do_refresh do
+-    row = safe_load()
+     env = safe_env()
+-    :ets.insert(@table, {:catalog, {row, env, current_loader_seam(), current_env_seam()}})
+-    {row, env}
++
++    case load_result() do
++      {:ok, row} ->
++        :ets.insert(@table, {:catalog, {row, env, current_loader_seam(), current_env_seam()}})
++        {row, env}
++
++      # THROWAWAY REFERENCE (cycle 1, fix C): a failed read keeps the last good snapshot; `nil` is cached only for a confirmed "no row"
++      :error ->
++        case :ets.lookup(@table, :catalog) do
++          [{:catalog, {row, old_env, _, _}}] -> {row, old_env}
++          _ -> {nil, env}
++        end
++    end
+   end
+ 
+   defp safe_load do
++    case load_result() do
++      {:ok, row} -> row
++      :error -> nil
++    end
++  end
++
++  # {:ok, row | nil} (nil = a confirmed "no row") or :error (the row could not be read)
++  defp load_result do
+     loader = Application.get_env(:nebu_http, :media_storage_config_loader, &default_loader/0)
+ 
+     case loader.() do
+-      map when is_map(map) -> map
+-      _ -> nil
++      map when is_map(map) -> {:ok, map}
++      {:error, _reason} -> :error
++      _ -> {:ok, nil}
+     end
+   rescue
+     e ->
+       Logger.warning("Nebu.Media.StorageConfig: loader raised: #{inspect(e)}")
+-      nil
++      :error
+   end
+ 
+   defp safe_env do
+@@ -1061,15 +1189,15 @@
+ 
+         {:error, reason} ->
+           Logger.warning("Nebu.Media.StorageConfig: failed to load media_storage_config: #{inspect(reason)}")
+-          nil
++          {:error, :load_failed}
+       end
+     else
+-      nil
++      {:error, :repo_unavailable}
+     end
+   rescue
+     e ->
+       Logger.warning("Nebu.Media.StorageConfig: unexpected error loading media_storage_config: #{inspect(e)}")
+-      nil
++      {:error, :load_failed}
+   end
+ 
+   # Dynamic partial column list built ONLY from `columns`' own keys — never
+@@ -1145,6 +1273,10 @@
+       # a bare `host[:port]` never carries user info (`user@host`): it would be signed into the Host value and could make the
+       # host the SSRF check resolved differ from the one a reader of the endpoint sees (storage-test-pinned-target, Kassandra INFO-2)
+       String.contains?(endpoint, "@") ->
++        {:error, :invalid_endpoint}
++
++      # THROWAWAY REFERENCE (cycle 1, fix D): the SAME parser as the operational path decides what host[:port] is
++      match?({:error, _}, parse_endpoint(endpoint, false)) ->
+         {:error, :invalid_endpoint}
+ 
+       true ->
+@@ -1180,9 +1312,10 @@
+       if String.contains?(endpoint, "@") do
+         "Endpoint must be a bare host[:port] value (no user info before an @)."
+       else
+-        case SSRF.checked_target("http://" <> endpoint, allow_private: SSRF.allow_private_storage?()) do
+-          {:ok, _target} -> "Endpoint is not valid."
+-          {:error, reason} -> "Endpoint rejected: " <> SSRF.describe_error(reason) <> "."
++        if match?({:error, _}, parse_endpoint(endpoint, false)) do
++          "Endpoint must be host or host:port with a port from 1 to 65535 (no path, no IPv6 literal)."
++        else
++          describe_checked(endpoint)
+         end
+       end
+     end
+@@ -1190,6 +1323,13 @@
+ 
+   def describe_invalid_endpoint(_), do: "Endpoint must be a bare host[:port] value."
+ 
++  defp describe_checked(endpoint) do
++    case SSRF.checked_target("http://" <> endpoint, allow_private: SSRF.allow_private_storage?()) do
++      {:ok, _target} -> "Endpoint is not valid."
++      {:error, reason} -> "Endpoint rejected: " <> SSRF.describe_error(reason) <> "."
++    end
++  end
++
+   # AC3: any blank secret in the candidate is resolved against the
+   # CURRENTLY stored decrypted secret (via get_for_connection/0) — this is
+   # the only place a decrypted secret is attached to a candidate map handed
+@@ -1280,10 +1420,9 @@
+   # exactly (bare `host[:port]`, port defaults to 443/80 by scheme when
+   # omitted).
+   defp split_endpoint(endpoint, use_ssl?) do
+-    case String.split(endpoint, ":", parts: 2) do
+-      [h, p] -> {h, String.to_integer(p)}
+-      [h] -> {h, default_port(use_ssl?)}
+-    end
++    # the endpoint passed validate_candidate_endpoint/1 (same parser), so this cannot fail
++    {:ok, host, port} = parse_endpoint(endpoint, use_ssl?)
++    {host, port}
+   end
+ 
+   defp default_port(true), do: 443
+--- a/server/lib/nebu/admin/media_settings_controller.ex
++++ b/server/lib/nebu/admin/media_settings_controller.ex
+@@ -327,6 +327,13 @@
+         |> put_flash(:error, StorageConfig.describe_invalid_endpoint(Map.get(changes, :endpoint)))
+         |> render_settings(state_from_config(Config.get()))
+ 
++      # THROWAWAY REFERENCE (cycle 1, fix B)
++      {:error, :secret_required} ->
++        conn
++        |> put_status(200)
++        |> put_flash(:error, "Enter the access key and secret key to use a different endpoint")
++        |> render_settings(state_from_config(Config.get()))
++
+       {:error, _reason} ->
+         conn
+         |> put_status(200)

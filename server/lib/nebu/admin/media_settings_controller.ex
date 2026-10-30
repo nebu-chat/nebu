@@ -237,12 +237,19 @@ defmodule Nebu.Admin.MediaSettingsController do
 
       # story admin-forms-gate-sweep D4: the stored credentials belong to the stored endpoint and scheme only
       {:error, :secret_required} ->
+        # for the stored target itself the keys are what is wrong (missing, half a pair, undecryptable): say so
+        message =
+          if StorageConfig.stored_target?(candidate.endpoint, candidate.use_ssl) do
+            "The stored access key and secret key are missing or unusable. Enter both keys to test. Nothing was saved."
+          else
+            "Enter the access key and secret key to test a different endpoint or a changed Use SSL setting: the stored credentials are only used for the stored endpoint and scheme. Nothing was saved."
+          end
+
         conn
         |> put_status(200)
         |> render_settings(state_from_config(Config.get()),
           storage_config: storage_config_from_params(params),
-          test_connection_result:
-            {:error, "Enter the access key and secret key to test a different endpoint or a changed Use SSL setting: the stored credentials are only used for the stored endpoint and scheme. Nothing was saved."}
+          test_connection_result: {:error, message}
         )
 
       {:error, reason} ->
@@ -265,11 +272,11 @@ defmodule Nebu.Admin.MediaSettingsController do
         if target_changed?(changes, old_endpoint, old_bucket) and not confirmed_orphan_risk?(params) do
           maybe_gate_on_orphan_risk(conn, params, changes)
         else
-          persist_storage_config(conn, changed_storage_keys(changes))
+          persist_storage_config(conn, params, changed_storage_keys(changes))
         end
 
       :fresh ->
-        persist_storage_config(conn, changes)
+        persist_storage_config(conn, params, changes)
     end
   end
 
@@ -284,7 +291,7 @@ defmodule Nebu.Admin.MediaSettingsController do
         orphan_warning: existing_count
       )
     else
-      persist_storage_config(conn, changed_storage_keys(changes))
+      persist_storage_config(conn, params, changed_storage_keys(changes))
     end
   end
 
@@ -295,9 +302,12 @@ defmodule Nebu.Admin.MediaSettingsController do
   # code review (Cycle 2, MINOR-2): mirrors save/2's own changed_keys/2 —
   # diffs the submitted storage-target `changes` against the currently
   # persisted (StorageConfig.get/0, the same merged view that pre-fills the
-  # form) values so a no-op/single-field resubmit no longer inflates
-  # StorageConfig.upsert/2's audit `changed_fields` to the full submitted
-  # field set. The AC4 orphan-risk-gate comparison above (`target_changed?`)
+  # form) values, which keeps a no-op/single-field resubmit from writing the
+  # whole submitted field set. (The audit `changed_fields` is decided by
+  # StorageConfig.upsert/2 itself, against the row as it was before the write:
+  # it names the really changed fields, so the endpoint / use_ssl added for a
+  # key save below are not named when they equal the stored values.)
+  # The AC4 orphan-risk-gate comparison above (`target_changed?`)
   # deliberately runs FIRST against the raw, undiffed `changes` — orphan-risk
   # detection must see the actual submitted endpoint/bucket, not a
   # post-diff-filtered view. Only reached once `persisted_target/0` has
@@ -306,14 +316,27 @@ defmodule Nebu.Admin.MediaSettingsController do
   # config there is nothing yet to diff against, and `get/0`'s env-var/
   # compiled-default-merged view could otherwise coincidentally match a
   # submitted value and wrongly suppress the very first save (AC1).
+  #
+  # A save that carries keys always writes `endpoint` and `use_ssl` with them (also when they equal the stored view): the
+  # keys are saved for exactly that target, in the same row write, so a row never holds keys for one endpoint and another
+  # endpoint beside them. (`upsert/2` validates the endpoint then, including the SSRF / DNS check.)
   defp changed_storage_keys(changes) do
     persisted = StorageConfig.get()
-    Map.filter(changes, fn {key, value} -> Map.get(persisted, key) != value end)
+    changed = Map.filter(changes, fn {key, value} -> Map.get(persisted, key) != value end)
+
+    if Map.has_key?(changes, :access_key) or Map.has_key?(changes, :secret_key) do
+      Map.merge(changed, Map.take(changes, [:endpoint, :use_ssl]))
+    else
+      changed
+    end
   end
 
   defp confirmed_orphan_risk?(params), do: params["confirm_orphan_risk"] == "true"
 
-  defp persist_storage_config(conn, changes) do
+  # A validation error re-renders the form with the values the admin typed (never the keys); the message is rendered
+  # in the Storage Target section, in the position of the Test Connection result, with aria hooks on the fields it is
+  # about. The sign-in marker stays and nothing is written or audited.
+  defp persist_storage_config(conn, params, changes) do
     case StorageConfig.upsert(changes, actor_id(conn)) do
       :ok ->
         conn
@@ -322,10 +345,19 @@ defmodule Nebu.Admin.MediaSettingsController do
         |> redirect(to: "/admin/media/settings")
 
       {:error, :invalid_endpoint} ->
-        conn
-        |> put_status(200)
-        |> put_flash(:error, StorageConfig.describe_invalid_endpoint(Map.get(changes, :endpoint)))
-        |> render_settings(state_from_config(Config.get()))
+        render_storage_validation_error(conn, params, StorageConfig.describe_invalid_endpoint(String.trim(params["endpoint"] || "")), ["endpoint"])
+
+      {:error, :secret_required} ->
+        render_storage_validation_error(
+          conn,
+          params,
+          "Enter the access key and secret key to use a different endpoint or a changed Use SSL setting. " <>
+            "The stored credentials are only used for the stored endpoint and scheme. Nothing was saved.",
+          ["access_key", "secret_key"]
+        )
+
+      {:error, :key_pair_required} ->
+        render_storage_validation_error(conn, params, "Enter both the access key and the secret key. Nothing was saved.", ["access_key", "secret_key"])
 
       {:error, _reason} ->
         conn
@@ -333,6 +365,23 @@ defmodule Nebu.Admin.MediaSettingsController do
         |> put_flash(:error, "Failed to save storage settings")
         |> render_settings(state_from_config(Config.get()))
     end
+  end
+
+  # `fields`: the ids of the inputs the message is about (aria-invalid / aria-describedby). A ticked orphan-risk
+  # confirmation stays ticked and its warning stays visible, so the next submit with the keys passes without a third
+  # round trip.
+  defp render_storage_validation_error(conn, params, message, fields) do
+    confirmed? = confirmed_orphan_risk?(params)
+    existing_count = if confirmed?, do: DB.count_media_with_storage_key(), else: 0
+
+    conn
+    |> put_status(200)
+    |> render_settings(state_from_config(Config.get()),
+      storage_config: storage_config_from_params(params),
+      storage_save_error: {message, fields},
+      orphan_warning: if(existing_count > 0, do: existing_count),
+      orphan_confirmed: confirmed?
+    )
   end
 
   # Required: endpoint/bucket. Optional fields (region, s3_key_prefix_template,
@@ -945,6 +994,8 @@ defmodule Nebu.Admin.MediaSettingsController do
     |> assign(:access_key_configured, not is_nil(current_storage_cfg.access_key))
     |> assign(:secret_key_configured, not is_nil(current_storage_cfg.secret_key))
     |> assign(:orphan_warning, Keyword.get(opts, :orphan_warning))
+    |> assign(:orphan_confirmed, Keyword.get(opts, :orphan_confirmed, false))
+    |> assign(:storage_save_error, Keyword.get(opts, :storage_save_error))
     |> assign(:test_connection_result, Keyword.get(opts, :test_connection_result))
     |> Nebu.Admin.OAuthAdminHelpers.assign_reauth(@page)
     |> assign(:page_title, "Media Settings")

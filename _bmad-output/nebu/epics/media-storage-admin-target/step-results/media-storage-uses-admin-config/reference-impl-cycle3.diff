@@ -1,0 +1,320 @@
+--- a/server/lib/nebu/media/storage_config.ex
++++ b/server/lib/nebu/media/storage_config.ex
+@@ -304,6 +304,13 @@
+     end
+   end
+ 
++  @doc false
++  @spec stored_target?(String.t() | nil, boolean() | nil) :: boolean()
++  def stored_target?(endpoint, use_ssl) do
++    {row, env} = row_and_env()
++    same_target?(%{endpoint: endpoint, use_ssl: use_ssl}, plain_fields(row, env))
++  end
++
+   defp archive_bucket(%{archive_bucket: bucket}) when is_binary(bucket) and bucket != "", do: bucket
+   defp archive_bucket(_cfg), do: Application.get_env(:nebu_http, :media_archive_bucket, "nebu-media-archive")
+ 
+@@ -448,10 +455,11 @@
+   # Exactly one key is never saved: the operational path needs the pair (`operation_credentials/2`), so a lone key would
+   # leave the saved target without usable credentials. Evaluated after the changed-target rule above.
+   defp validate_key_pair(fields) do
+-    case Enum.count([:access_key, :secret_key], &present_key?(Map.get(fields, &1))) do
+-      1 -> {:error, :key_pair_required}
+-      _ -> :ok
+-    end
++    # THROWAWAY REFERENCE (cycle 3, fix W): a lone key (non-blank, nil or blank) is never written
++    mentioned = Enum.count([:access_key, :secret_key], &Map.has_key?(fields, &1))
++    present = Enum.count([:access_key, :secret_key], &present_key?(Map.get(fields, &1)))
++
++    if mentioned == 1 or present == 1, do: {:error, :key_pair_required}, else: :ok
+   end
+ 
+   defp keys_given?(fields), do: Enum.all?([:access_key, :secret_key], &present_key?(Map.get(fields, &1)))
+@@ -1022,22 +1030,14 @@
+   # where `env_credentials_apply?/2` allows them, so the settings page does not present env keys as the credentials of
+   # another saved endpoint.
+   defp build_resolved(row, env) do
+-    env_credentials? = env_credentials_apply?(row, env)
++    # THROWAWAY REFERENCE (cycle 3, fix V): the keys shown are exactly the pair `operation_credentials/2` would sign with
++    {access_key, secret_key} =
++      case operation_credentials(row, env) do
++        {:ok, access_key, secret_key} -> {blank_to_nil(access_key), blank_to_nil(secret_key)}
++        _ -> {nil, nil}
++      end
+ 
+-    Map.merge(plain_fields(row, env), %{
+-      access_key:
+-        resolve_secret(
+-          row_get(row, "access_key_encrypted"),
+-          env_credentials? && {env, "NEBU_MINIO_ACCESS_KEY_FILE", "NEBU_MINIO_ACCESS_KEY"},
+-          @defaults.access_key
+-        ),
+-      secret_key:
+-        resolve_secret(
+-          row_get(row, "secret_key_encrypted"),
+-          env_credentials? && {env, "NEBU_MINIO_SECRET_KEY_FILE", "NEBU_MINIO_SECRET_KEY"},
+-          @defaults.secret_key
+-        )
+-    })
++    Map.merge(plain_fields(row, env), %{access_key: access_key, secret_key: secret_key})
+   end
+ 
+   # `build_resolved/2` without the two secrets: what is needed to address a request (and to compare targets) and
+@@ -1088,75 +1088,6 @@
+   defp parse_bool(value) when is_boolean(value), do: value
+   defp parse_bool(value) when is_binary(value), do: value == "true"
+ 
+-  # access_key/secret_key: DB ciphertext (decrypted) > env var (_FILE-then-
+-  # plain precedence, AC4/AT3) > compiled default. `env_source` is `{env, file_key, plain_key}`, or `false` when the
+-  # environment's credentials do not apply to the resolved target (`env_credentials_apply?/2`): the field is then
+-  # unset (`nil`), not the compiled default.
+-  defp resolve_secret(encrypted_column, env_source, default) do
+-    case decrypt_secret(encrypted_column) do
+-      nil when env_source == false ->
+-        nil
+-
+-      nil ->
+-        case env_secret_or_nil(env_source) do
+-          nil -> default
+-          value -> value
+-        end
+-
+-      plaintext ->
+-        plaintext
+-    end
+-  end
+-
+-  # An unreadable secret file is "not set" for this read (the operational path reports it as an error instead).
+-  defp env_secret_or_nil({env, file_key, plain_key}) do
+-    resolve_env_secret(env, file_key, plain_key)
+-  rescue
+-    _error -> nil
+-  end
+-
+-  defp decrypt_secret(nil), do: nil
+-
+-  # MINOR-2(a): a corrupted ciphertext or a rotated/wrong at-rest key is not
+-  # used (and, when the environment's credentials apply to the target, they
+-  # take its place in this read). Log (message only — never the ciphertext or
+-  # any decrypted fragment) so the admin can notice.
+-  #
+-  # MINOR-2(b): a genuinely-unset at-rest secret makes `SecretBox.decrypt/1`
+-  # call `SecretBox.at_rest_key/0`, which RAISES by design (fail-closed).
+-  # That raise must not propagate out of a config *read* (`get/0`,
+-  # `get_for_connection/0`, or the GenServer's `:ttl_tick`/`:pg`-invalidation
+-  # refresh) and crash-loop this supervised process — rescue it here and
+-  # treat the field as if the ciphertext were absent, same as (a). This does
+-  # NOT affect `upsert/1`'s own `SecretBox.encrypt/1` call (`column_for/2`),
+-  # which still lets the identical raise propagate unguarded out of the
+-  # WRITE path per AT12/AC3.
+-  defp decrypt_secret(ciphertext) do
+-    case SecretBox.decrypt(ciphertext) do
+-      {:ok, plaintext} ->
+-        plaintext
+-
+-      {:error, reason} ->
+-        Logger.warning("Nebu.Media.StorageConfig: a stored storage secret cannot be decrypted (#{inspect(reason)}); it is not used")
+-
+-        nil
+-    end
+-  rescue
+-    e in RuntimeError ->
+-      Logger.warning(
+-        "Nebu.Media.StorageConfig: the at-rest secret is unavailable, a stored storage secret is not used " <>
+-          "(#{Exception.message(e)})"
+-      )
+-
+-      nil
+-
+-    # the at-rest key file cannot be read (the message would name its path)
+-    File.Error ->
+-      Logger.warning("Nebu.Media.StorageConfig: the at-rest key file cannot be read, a stored storage secret is not used")
+-
+-      nil
+-  end
+-
+   # Mirrors server/config/runtime.exs lines 85-95's `_FILE`-then-plain
+   # precedence exactly: a Docker-secret-file path wins over the
+   # simultaneously-set plain env var (AT3).
+--- a/server/lib/nebu/admin/media_settings_controller.ex
++++ b/server/lib/nebu/admin/media_settings_controller.ex
+@@ -237,12 +237,18 @@
+ 
+       # story admin-forms-gate-sweep D4: the stored credentials belong to the stored endpoint and scheme only
+       {:error, :secret_required} ->
++        message =
++          if StorageConfig.stored_target?(candidate.endpoint, candidate.use_ssl) do
++            "The stored access key and secret key are missing or unusable. Enter both keys to test. Nothing was saved."
++          else
++            "Enter the access key and secret key to test a different endpoint or a changed Use SSL setting: the stored credentials are only used for the stored endpoint and scheme. Nothing was saved."
++          end
++
+         conn
+         |> put_status(200)
+         |> render_settings(state_from_config(Config.get()),
+           storage_config: storage_config_from_params(params),
+-          test_connection_result:
+-            {:error, "Enter the access key and secret key to test a different endpoint or a changed Use SSL setting: the stored credentials are only used for the stored endpoint and scheme. Nothing was saved."}
++          test_connection_result: {:error, message}
+         )
+ 
+       {:error, reason} ->
+@@ -308,7 +314,14 @@
+   # submitted value and wrongly suppress the very first save (AC1).
+   defp changed_storage_keys(changes) do
+     persisted = StorageConfig.get()
+-    Map.filter(changes, fn {key, value} -> Map.get(persisted, key) != value end)
++    filtered = Map.filter(changes, fn {key, value} -> Map.get(persisted, key) != value end)
++
++    # THROWAWAY REFERENCE (cycle 3, fix U): keys and the target they belong to go into the same row write
++    if Map.has_key?(changes, :access_key) or Map.has_key?(changes, :secret_key) do
++      Map.merge(filtered, Map.take(changes, [:endpoint, :use_ssl]))
++    else
++      filtered
++    end
+   end
+ 
+   defp confirmed_orphan_risk?(params), do: params["confirm_orphan_risk"] == "true"
+@@ -324,13 +337,18 @@
+         |> redirect(to: "/admin/media/settings")
+ 
+       {:error, :invalid_endpoint} ->
+-        render_storage_validation_error(conn, params, StorageConfig.describe_invalid_endpoint(Map.get(changes, :endpoint)))
++        render_storage_validation_error(conn, params, StorageConfig.describe_invalid_endpoint(Map.get(changes, :endpoint)), ["endpoint"])
+ 
+       {:error, :secret_required} ->
+-        render_storage_validation_error(conn, params, "Enter the access key and secret key to use a different endpoint")
++        render_storage_validation_error(
++          conn,
++          params,
++          "Enter the access key and secret key to use a different endpoint or a changed Use SSL setting. The stored credentials are only used for the stored endpoint and scheme. Nothing was saved.",
++          ["access_key", "secret_key"]
++        )
+ 
+       {:error, :key_pair_required} ->
+-        render_storage_validation_error(conn, params, "Enter both the access key and the secret key")
++        render_storage_validation_error(conn, params, "Enter both the access key and the secret key. Nothing was saved.", ["access_key", "secret_key"])
+ 
+       {:error, _reason} ->
+         conn
+@@ -340,11 +358,20 @@
+     end
+   end
+ 
+-  defp render_storage_validation_error(conn, params, message) do
++  # THROWAWAY REFERENCE (cycle 3, fix Q/T): the message sits inside the Storage Target section (not only as a flash); a
++  # ticked orphan-risk confirmation stays ticked and its warning stays visible
++  defp render_storage_validation_error(conn, params, message, fields) do
++    confirmed? = confirmed_orphan_risk?(params)
++    orphan = if confirmed?, do: DB.count_media_with_storage_key(), else: 0
++
+     conn
+     |> put_status(200)
+-    |> put_flash(:error, message)
+-    |> render_settings(state_from_config(Config.get()), storage_config: storage_config_from_params(params))
++    |> render_settings(state_from_config(Config.get()),
++      storage_config: storage_config_from_params(params),
++      storage_save_error: {message, fields},
++      orphan_warning: if(orphan > 0, do: orphan),
++      orphan_confirmed: confirmed?
++    )
+   end
+ 
+   # Required: endpoint/bucket. Optional fields (region, s3_key_prefix_template,
+@@ -944,6 +971,8 @@
+     |> assign(:access_key_configured, not is_nil(current_storage_cfg.access_key))
+     |> assign(:secret_key_configured, not is_nil(current_storage_cfg.secret_key))
+     |> assign(:orphan_warning, Keyword.get(opts, :orphan_warning))
++    |> assign(:orphan_confirmed, Keyword.get(opts, :orphan_confirmed, false))
++    |> assign(:storage_save_error, Keyword.get(opts, :storage_save_error))
+     |> assign(:test_connection_result, Keyword.get(opts, :test_connection_result))
+     |> assign(:page_title, "Media Settings")
+     |> assign(:active_nav, "media-settings")
+--- a/server/lib/nebu/admin/templates/media_settings/index.html.heex
++++ b/server/lib/nebu/admin/templates/media_settings/index.html.heex
+@@ -236,6 +236,17 @@
+   {elem(@test_connection_result, 1)}
+ </p>
+ 
++<p
++  :if={@storage_save_error}
++  id="media-storage-error"
++  role="alert"
++  tabindex="-1"
++  autofocus
++  class="alert alert-error mb-4"
++>
++  {elem(@storage_save_error, 0)}
++</p>
++
+ <form
+   id="media-storage-form"
+   data-testid="media-storage-form"
+@@ -251,10 +262,10 @@
+       ⚠️ Changing the endpoint or bucket does not migrate existing objects. {@orphan_warning}
+       existing file(s) currently stored under the active target will become unreachable
+       (download requests will 404) once this change is saved, because their storage keys will
+-      no longer resolve against the new endpoint/bucket.
++      no longer resolve against the new endpoint/bucket. Enter the access key and secret key again before saving.
+     </p>
+     <label for="confirm_orphan_risk" class="flex items-center gap-2">
+-      <input type="checkbox" id="confirm_orphan_risk" name="confirm_orphan_risk" value="true" />
++      <input type="checkbox" id="confirm_orphan_risk" name="confirm_orphan_risk" value="true" checked={@orphan_confirmed} />
+       <span>
+         I understand {@orphan_warning} existing file(s) will become unreachable and want to
+         proceed
+@@ -270,6 +281,8 @@
+         id="endpoint"
+         name="endpoint"
+         value={@storage_config.endpoint}
++        aria-invalid={@storage_save_error && "endpoint" in elem(@storage_save_error, 1) && "true"}
++        aria-describedby={@storage_save_error && "endpoint" in elem(@storage_save_error, 1) && "media-storage-error"}
+         placeholder="minio:9000"
+         class="input input-bordered"
+       />
+@@ -367,19 +380,39 @@
+   <div class="flex flex-wrap gap-4 mb-4">
+     <label for="access_key" class="form-control">
+       <span class="label-text">Access key</span>
+-      <input type="password" id="access_key" name="access_key" class="input input-bordered" />
++      <input
++        type="password"
++        id="access_key"
++        name="access_key"
++        aria-invalid={@storage_save_error && "access_key" in elem(@storage_save_error, 1) && "true"}
++        aria-describedby={@storage_save_error && "access_key" in elem(@storage_save_error, 1) && "media-storage-error"}
++        class="input input-bordered"
++      />
+       <span class="label-text-alt mt-1 text-base-content/70">
+-        {if @access_key_configured, do: "Currently configured.", else: "Not currently configured."}
+-        Leave blank to keep the current value. Enter both again if you change the endpoint or Use SSL: Save and Test Connection both need them.
++        {cond do
++          @storage_save_error -> "Required now: enter both the access key and the secret key."
++          @access_key_configured -> "Currently configured. Leave blank to keep it. Enter both keys again if you change the endpoint or Use SSL; Save and Test Connection both require them."
++          true -> "Not currently configured. Required: Save and Test Connection both need both keys."
++        end}
+       </span>
+     </label>
+ 
+     <label for="secret_key" class="form-control">
+       <span class="label-text">Secret key</span>
+-      <input type="password" id="secret_key" name="secret_key" class="input input-bordered" />
++      <input
++        type="password"
++        id="secret_key"
++        name="secret_key"
++        aria-invalid={@storage_save_error && "secret_key" in elem(@storage_save_error, 1) && "true"}
++        aria-describedby={@storage_save_error && "secret_key" in elem(@storage_save_error, 1) && "media-storage-error"}
++        class="input input-bordered"
++      />
+       <span class="label-text-alt mt-1 text-base-content/70">
+-        {if @secret_key_configured, do: "Currently configured.", else: "Not currently configured."}
+-        Leave blank to keep the current value. Enter both again if you change the endpoint or Use SSL: Save and Test Connection both need them.
++        {cond do
++          @storage_save_error -> "Required now: enter both the access key and the secret key."
++          @secret_key_configured -> "Currently configured. Leave blank to keep it. Enter both keys again if you change the endpoint or Use SSL; Save and Test Connection both require them."
++          true -> "Not currently configured. Required: Save and Test Connection both need both keys."
++        end}
+       </span>
+     </label>
+   </div>
