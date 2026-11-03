@@ -115,48 +115,54 @@ dev-reset-db:
 	@echo "Starting all services (the server will run migrations on startup)..."
 	docker compose up -d
 	@echo "Waiting for the server to be healthy (max 120s)..."
-	@_retries=0; until docker compose exec -T server curl -fs http://localhost:4000/health >/dev/null 2>&1; do \
+	@_retries=0; until docker compose exec -T server /app/healthcheck >/dev/null 2>&1; do \
 		_retries=$$((_retries+1)); \
 		if [ "$$_retries" -ge 60 ]; then echo "ERROR: server did not become healthy after 120s"; exit 1; fi; \
 		sleep 2; \
 	done
 	@echo "dev-reset-db complete. Run 'docker compose logs server' to verify migrations ran cleanly."
 
-## setup: First-time setup — generate .secrets/internal_secret, MinIO credentials, and dev credentials
+## setup: First-time setup — generate .secrets/internal_secret, object store credentials, and dev credentials
 setup:
 	@mkdir -p .secrets
+	@for n in root_user root_password app_access_key app_secret_key; do \
+		if [ -f .secrets/minio_$$n ] && [ ! -f .secrets/media_storage_$$n ]; then \
+			mv .secrets/minio_$$n .secrets/media_storage_$$n; \
+			echo "Renamed .secrets/minio_$$n -> .secrets/media_storage_$$n"; \
+		fi; \
+	done
 	@if [ ! -f .secrets/internal_secret ]; then \
 		openssl rand -hex 32 > .secrets/internal_secret; \
 		echo "Generated .secrets/internal_secret"; \
 	else \
 		echo ".secrets/internal_secret already exists, skipping"; \
 	fi
-	@if [ ! -f .secrets/minio_root_user ]; then \
-		openssl rand -hex 16 > .secrets/minio_root_user; \
-		echo "Generated .secrets/minio_root_user"; \
+	@if [ ! -f .secrets/media_storage_root_user ]; then \
+		openssl rand -hex 16 > .secrets/media_storage_root_user; \
+		echo "Generated .secrets/media_storage_root_user"; \
 	else \
-		echo ".secrets/minio_root_user already exists, skipping"; \
+		echo ".secrets/media_storage_root_user already exists, skipping"; \
 	fi
-	@if [ ! -f .secrets/minio_root_password ]; then \
-		openssl rand -hex 16 > .secrets/minio_root_password; \
-		echo "Generated .secrets/minio_root_password"; \
+	@if [ ! -f .secrets/media_storage_root_password ]; then \
+		openssl rand -hex 16 > .secrets/media_storage_root_password; \
+		echo "Generated .secrets/media_storage_root_password"; \
 	else \
-		echo ".secrets/minio_root_password already exists, skipping"; \
+		echo ".secrets/media_storage_root_password already exists, skipping"; \
 	fi
-	@if [ ! -f .secrets/minio_app_access_key ]; then \
-		openssl rand -hex 16 > .secrets/minio_app_access_key; \
-		echo "Generated .secrets/minio_app_access_key"; \
+	@if [ ! -f .secrets/media_storage_app_access_key ]; then \
+		openssl rand -hex 16 > .secrets/media_storage_app_access_key; \
+		echo "Generated .secrets/media_storage_app_access_key"; \
 	else \
-		echo ".secrets/minio_app_access_key already exists, skipping"; \
+		echo ".secrets/media_storage_app_access_key already exists, skipping"; \
 	fi
-	@if [ ! -f .secrets/minio_app_secret_key ]; then \
-		openssl rand -hex 16 > .secrets/minio_app_secret_key; \
-		echo "Generated .secrets/minio_app_secret_key"; \
+	@if [ ! -f .secrets/media_storage_app_secret_key ]; then \
+		openssl rand -hex 16 > .secrets/media_storage_app_secret_key; \
+		echo "Generated .secrets/media_storage_app_secret_key"; \
 	else \
-		echo ".secrets/minio_app_secret_key already exists, skipping"; \
+		echo ".secrets/media_storage_app_secret_key already exists, skipping"; \
 	fi
 	@echo ""
-	@echo "WARNING: MinIO credentials in .secrets/ are for LOCAL DEVELOPMENT only."
+	@echo "WARNING: Object store credentials in .secrets/ are for LOCAL DEVELOPMENT only."
 	@echo "Replace before first production start."
 	@echo ""
 	@echo "Dev credentials (Dex local users):"
@@ -169,8 +175,9 @@ test-unit-go:
 	@echo "Error: Go layer has been removed in the full-elixir-stack migration. See docs/stories/full-elixir-stack/go-removal-cleanup.md" && exit 1
 
 ## test-unit-elixir: Run Elixir unit tests inside container
+## Optional: TEST_ARGS="test/nebu/foo_test.exs:42 --max-failures 3" runs a focused subset (default: whole suite).
 test-unit-elixir:
-	$(DOCKER_ELIXIR) sh -c "cd server && mix local.hex --force && mix deps.get && mix test --warnings-as-errors"
+	$(DOCKER_ELIXIR) sh -c "cd server && mix local.hex --force && mix deps.get && mix test --warnings-as-errors $(TEST_ARGS)"
 
 ## test-integration: Run full stack integration tests against the live Elixir stack.
 ## go-removal-cleanup (full-elixir-stack): the Go integration runner was removed — the server
@@ -389,7 +396,7 @@ test-compose-ports:
 	fi
 
 ## test-compose-minio: CI smoke test — assert that MinIO service and secrets are configured correctly.
-## Story 12.1 AC1+AC2: verifies minio service exists with minio_root_user + minio_root_password secrets.
+## Story 12.1 AC1+AC2: verifies minio service exists with media_storage_root_user + media_storage_root_password secrets.
 ## Story 12.3 AC2+AC3: verifies nebu-app IAM credentials present; createbuckets does NOT set public bucket policy.
 test-compose-minio:
 	@echo "Checking MinIO service configuration in docker-compose.yml..."
@@ -398,10 +405,10 @@ test-compose-minio:
 	svc=cfg.get('services',{}); \
 	assert 'minio' in svc, 'FAIL: minio service missing from docker-compose.yml'; \
 	secrets=cfg.get('secrets',{}); \
-	assert 'minio_root_user' in secrets, 'FAIL: minio_root_user secret missing from docker-compose.yml'; \
-	assert 'minio_root_password' in secrets, 'FAIL: minio_root_password secret missing from docker-compose.yml'; \
-	assert 'minio_app_access_key' in secrets, 'FAIL: minio_app_access_key secret missing (Story 12.3 AC2)'; \
-	assert 'minio_app_secret_key' in secrets, 'FAIL: minio_app_secret_key secret missing (Story 12.3 AC2)'; \
+	assert 'media_storage_root_user' in secrets, 'FAIL: media_storage_root_user secret missing from docker-compose.yml'; \
+	assert 'media_storage_root_password' in secrets, 'FAIL: media_storage_root_password secret missing from docker-compose.yml'; \
+	assert 'media_storage_app_access_key' in secrets, 'FAIL: media_storage_app_access_key secret missing (Story 12.3 AC2)'; \
+	assert 'media_storage_app_secret_key' in secrets, 'FAIL: media_storage_app_secret_key secret missing (Story 12.3 AC2)'; \
 	ports=svc.get('minio',{}).get('ports',[]); \
 	targets=[str(p.get('target','')) for p in ports if isinstance(p,dict)]; \
 	assert '9000' in targets, 'FAIL: MinIO S3 API port 9000 not published'; \

@@ -158,7 +158,7 @@ make dev       # starts server (Elixir), postgres, dex (OIDC) via docker compose
 | MinIO Console         | http://localhost:9001                       | Object storage console     |
 | MinIO S3 API          | http://localhost:9000                       | Object storage (S3-compat) |
 
-> **MinIO credentials:** `make setup` generates `.secrets/minio_root_user` and `.secrets/minio_root_password` automatically. These are example credentials for local development only. **Replace before first production start.** The `.secrets/` directory is gitignored and never committed.
+> **Object store credentials:** `make setup` generates `.secrets/media_storage_root_user` and `.secrets/media_storage_root_password` automatically. These are example credentials for local development only. **Replace before first production start.** The `.secrets/` directory is gitignored and never committed.
 
 Dex (the dev OIDC provider) is reachable at `dex.localtest.me:5556` — a public DNS
 name that resolves to `127.0.0.1` (the [`*.localtest.me`](http://readme.localtest.me/)

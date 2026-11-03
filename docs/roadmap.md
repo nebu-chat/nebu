@@ -5,7 +5,7 @@ Since v0.3.0 the project uses **named epics** (no numeric identifiers — see CL
 Convention"). The historical numbered MVP epics (1–8) are complete; development since then proceeds
 as a stream of named feature epics, each on its own `feature/<epic-name>` branch (ADR-017).
 
-## Current Status (2026-06-30)
+## Current Status (2026-11-02)
 
 **Pre-alpha, single Elixir/OTP stack.** Core chat functionality plus a spec-faithful client
 surface (device-key directory, cross-signing key directory, account_data, devices, whoami) is
@@ -61,7 +61,13 @@ Done since the numbered MVP — each a named epic (see `_bmad-output/nebu/epics/
 | `oidc-bootstrap-only` | OIDC configured exclusively via the Bootstrap Wizard (`server_config`); all `NEBU_OIDC_*`/`NEBU_ADMIN_OIDC_*` env vars removed; single OIDC client for both Matrix Bearer + admin login; fail-closed until bootstrapped | ADR-022 |
 | `client-crypto-setup` | Opaque cross-signing key directory (upload/read-back) so clients complete crypto setup cleanly while E2EE stays off | ADR-011, ADR-023 (draft) |
 | `forget-room-membership-purge` | `POST /rooms/{id}/forget` — persist + purge forgotten rooms from `/sync` | — |
-| `upcloud-deployment` | UpCloud deployment posture / IaC | ADR-014 |
+| `upcloud-deployment` | UpCloud deployment posture / IaC (plus follow-up fixes: non-root secrets, proxy header buffers, private-only S3 endpoint, IAM/STS endpoints in the admin UI) | ADR-014 |
+| `enhanced-logging` | Leitstand / War Room operational visibility, trace map, dedicated War Room page | — |
+| `oidc-simplification`, `configurable-sso-redirect-schemes`, `sso-redirect-error-page`, `server-paced-session-refresh` | Simplified OIDC login, configurable SSO redirect schemes with error page, server-paced session refresh | ADR-022 |
+| `matrix-spec-gaps` | Room account data, read markers, room tags, media download/thumbnail routes and further Matrix C-S spec gap closure | — |
+| `media-security-admin-control` | Media security and admin control: async scan pipeline (ClamAV, Oban), media state machine, admin media table/live updates, retention/archive/orphan cron workers, scan health alerts, kill switch | ADR-024 – ADR-032 |
+| `oauth-broker` | Nebu as OAuth 2.0 authorization server (metadata, DCR, admin approval); merged to `main` 2026-10-28; runtime-switchable via `server_config` `oauth_enabled` (admin UI / release kill switch) | ADR-033 |
+| `admin-reauth-button-flow`, `media-storage-admin-target` | Fresh sign-in state on marker-gated admin forms; uploads/downloads/deletes use the admin-saved storage target | ADR-027 |
 
 A series of bugfix epics (`fix-bootstrap-wizard-*`, `fix-matrix-sso-redirect-missing`,
 `fix-missing-matrix-room-routes`, `fix-jwt-denylist-persistence`, `fix-short-oidc-sessions`,
@@ -74,9 +80,9 @@ A series of bugfix epics (`fix-bootstrap-wizard-*`, `fix-matrix-sso-redirect-mis
 
 | Epic | Description | Status |
 |---|---|---|
-| `client-crypto-setup` | Cross-signing key-directory polish + 400/403 fidelity follow-up | In progress (SEC Gate 2 clean) |
+| `e2ee-client-support` | Client-side E2EE support on the server: key backup and to-device messages landed on `feature/e2ee-client-support` (not yet merged); device-key directory still open. Still not server-side E2EE (ADR-011/023) | In progress |
+| `secrets-module` | Secrets module (env vars `SECRETS_*`), 4 stories on `feature/secrets-module`; its ADR is still to be written/numbered | In progress |
 | `e2e-test-rehab` | Stabilize the brittle admin/Element Playwright suite (shared login steps, room seeding) — a dedicated test-rehab workstream | In progress |
-| account_data durability | Durable PostgreSQL `account_data` + `/sync` delivery | Recently landed |
 
 ---
 

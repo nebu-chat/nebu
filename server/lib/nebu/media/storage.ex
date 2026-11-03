@@ -8,7 +8,7 @@ defmodule Nebu.Media.Storage do
   (store-smaller-of-two, ADR-029).
 
   Every call addresses the object store resolved at that moment by
-  `Nebu.Media.StorageConfig.request_target/0` (saved admin target > `NEBU_MINIO_*`
+  `Nebu.Media.StorageConfig.request_target/0` (saved admin target > `NEBU_MEDIA_STORAGE_*`
   env > default): endpoint, region, credentials, bucket and archive bucket are
   handed to ExAws as per-request overrides, so a target saved under
   /admin/media/settings is used without a restart. The boot-time `:ex_aws` config
@@ -102,7 +102,7 @@ defmodule Nebu.Media.Storage do
   end
 
   # The effective archive-bucket name: saved under /admin/media/settings, else
-  # NEBU_MINIO_ARCHIVE_BUCKET, else "nebu-media-archive" (see
+  # NEBU_MEDIA_STORAGE_ARCHIVE_BUCKET, else "nebu-media-archive" (see
   # StorageConfig.archive_bucket/0). Usable even when the endpoint is not.
   @spec archive_bucket() :: String.t()
   def archive_bucket, do: StorageConfig.archive_bucket()
@@ -145,9 +145,9 @@ defmodule Nebu.Media.Storage do
   defp closed_error({:error, _other}), do: {:error, :storage_error}
   defp closed_error(result), do: result
 
-  defp problem(:storage_endpoint_blank), do: "the storage endpoint (admin media settings / NEBU_MINIO_ENDPOINT) is blank"
-  defp problem(:storage_endpoint_invalid), do: "the storage endpoint (admin media settings / NEBU_MINIO_ENDPOINT) is invalid"
+  defp problem(:storage_endpoint_blank), do: "the storage endpoint (admin media settings / NEBU_MEDIA_STORAGE_ENDPOINT) is blank"
+  defp problem(:storage_endpoint_invalid), do: "the storage endpoint (admin media settings / NEBU_MEDIA_STORAGE_ENDPOINT) is invalid"
   defp problem(:storage_credentials_missing), do: "the storage credentials saved for the endpoint are missing or cannot be decrypted"
-  defp problem(:storage_credentials_unreadable), do: "the storage credentials cannot be read (NEBU_MINIO_*_FILE or the at-rest key)"
+  defp problem(:storage_credentials_unreadable), do: "the storage credentials cannot be read (NEBU_MEDIA_STORAGE_*_FILE or the at-rest key)"
   defp problem(:storage_config_unavailable), do: "the saved storage settings cannot be read"
 end

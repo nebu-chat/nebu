@@ -3,7 +3,9 @@
 Install nebu .claude/ files from canonical sources in skills/nebu-pipeline/install/.
 
 Copies agent definitions to .claude/agents/, path-scoped rules to .claude/rules/,
-and merges hook configuration into .claude/settings.json.
+merges hook configuration into .claude/settings.json and adds the shared
+skillOverrides (install/settings-skill-overrides.json) and permissions.deny rules
+(install/settings-permissions.json) to .claude/settings.json.
 
 Idempotent — safe to run multiple times. Always overwrites agents and rules with
 the canonical versions from the install directory (source of truth is in git).
@@ -65,11 +67,62 @@ def merge_settings(install_dir: Path, claude_dir: Path) -> str:
     if "hooks" not in existing:
         existing["hooks"] = {}
 
+    def ours(entry) -> bool:
+        return any("skills/nebu-pipeline/scripts/" in h.get("command", "") for h in entry.get("hooks", []))
+
     for hook_type, hook_list in new_hooks.items():
-        existing["hooks"][hook_type] = hook_list
+        # replace our own entries, keep the user's own hooks of the same type
+        kept = [e for e in existing["hooks"].get(hook_type, []) if not ours(e)]
+        existing["hooks"][hook_type] = kept + hook_list
 
     settings_dst.write_text(json.dumps(existing, indent=2) + "\n")
     return "  ✓ .claude/settings.json (hooks merged)"
+
+
+def merge_skill_overrides(install_dir: Path, claude_dir: Path) -> str:
+    """Add shared skillOverrides to .claude/settings.json (additive, never overwrites).
+
+    Existing keys are kept as-is, so a deliberate local choice in settings.json
+    survives. settings.local.json takes precedence over settings.json anyway.
+    """
+    src = install_dir / "settings-skill-overrides.json"
+    if not src.exists():
+        return "  - skillOverrides: no template found, skipped"
+
+    template = json.loads(src.read_text()).get("skillOverrides", {})
+    settings_dst = claude_dir / "settings.json"
+    try:
+        existing = json.loads(settings_dst.read_text()) if settings_dst.exists() else {}
+    except json.JSONDecodeError:
+        existing = {}
+
+    overrides = existing.setdefault("skillOverrides", {})
+    added = 0
+    for skill, mode in template.items():
+        if skill not in overrides:
+            overrides[skill] = mode
+            added += 1
+
+    settings_dst.write_text(json.dumps(existing, indent=2) + "\n")
+    return f"  ✓ .claude/settings.json (skillOverrides: {added} added, {len(overrides)} total)"
+
+
+def merge_permissions(install_dir: Path, claude_dir: Path) -> str:
+    """Add shared permissions.deny rules to .claude/settings.json (additive; existing rules and other keys stay)."""
+    src = install_dir / "settings-permissions.json"
+    if not src.exists():
+        return "  - permissions: no template found, skipped"
+    template = json.loads(src.read_text()).get("permissions", {}).get("deny", [])
+    settings_dst = claude_dir / "settings.json"
+    try:
+        existing = json.loads(settings_dst.read_text()) if settings_dst.exists() else {}
+    except json.JSONDecodeError:
+        existing = {}
+    deny = existing.setdefault("permissions", {}).setdefault("deny", [])
+    added = [r for r in template if r not in deny]
+    deny.extend(added)
+    settings_dst.write_text(json.dumps(existing, indent=2) + "\n")
+    return f"  ✓ .claude/settings.json (permissions.deny: {len(added)} added, {len(deny)} total)"
 
 
 def main():
@@ -88,6 +141,8 @@ def main():
     results.extend(install_agents(install_dir, claude_dir))
     results.extend(install_rules(install_dir, claude_dir))
     results.append(merge_settings(install_dir, claude_dir))
+    results.append(merge_skill_overrides(install_dir, claude_dir))
+    results.append(merge_permissions(install_dir, claude_dir))
 
     for line in results:
         print(line)

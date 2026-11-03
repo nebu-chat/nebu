@@ -52,7 +52,7 @@ defmodule Nebu.Media.StorageConfigKeyRulesTest do
       :ok
     end)
 
-    T.install_env(%{"NEBU_MINIO_ENDPOINT" => @env_endpoint, "NEBU_MINIO_USE_SSL" => "false", "NEBU_MINIO_ACCESS_KEY" => "ENVAKIDKEYRULES0801", "NEBU_MINIO_SECRET_KEY" => "env-secret-keyrules-0801"})
+    T.install_env(%{"NEBU_MEDIA_STORAGE_ENDPOINT" => @env_endpoint, "NEBU_MEDIA_STORAGE_USE_SSL" => "false", "NEBU_MEDIA_STORAGE_ACCESS_KEY" => "ENVAKIDKEYRULES0801", "NEBU_MEDIA_STORAGE_SECRET_KEY" => "env-secret-keyrules-0801"})
     :ok
   end
 

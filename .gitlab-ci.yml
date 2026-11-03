@@ -267,18 +267,8 @@ build-server-image:
     - if: '$CI_COMMIT_BRANCH =~ /^release\//'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
 # ─── Pre-release Image Builds (main branch) ───────────────────────────────
-# Pushes preview images on every commit to the `main` branch.
-# Tags: dev-<CI_PIPELINE_ID> (immutable per run) + dev-latest (mutable pointer).
-# These images reflect development state and are NOT intended for production.
-
-# go-removal-cleanup (full-elixir-stack): prerelease-gateway-image was removed.
-prerelease-server-image:
-  !!merge <<: *build_ci_image
-  stage: build
-  script:
-    - /kaniko/executor --context "${CI_PROJECT_DIR}/server" --dockerfile server/Dockerfile --destination "${CI_REGISTRY_IMAGE}/nebu-server:dev-${CI_PIPELINE_ID}" --destination "${CI_REGISTRY_IMAGE}/nebu-server:dev-latest" --build-arg "GIT_COMMIT=${CI_COMMIT_SHA}" --build-arg "BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" --cache=true --cache-ttl=24h
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
+# The dev-* tags are aliases of the DevGuard-attested main image: job `prerelease-version-tag` lives in
+# .gitlab/ci/prerelease-image-aliases.yml (included with the same main rule as the DevGuard components, see there).
 # go-removal-cleanup (full-elixir-stack): prerelease-media-image was removed.
 
 # ─── Integration Test ─────────────────────────────────────────────────────────
@@ -608,23 +598,8 @@ validate-helm:
     - echo "==> Helm validation passed."
   rules: *rules_deploy
 # ─── Release Image Builds ─────────────────────────────────────────────────────
-# Triggered exclusively by SemVer Git tags (e.g. git tag v1.0.0 && git push origin v1.0.0).
-# Produces the versioned image: <CI_REGISTRY_IMAGE>/nebu-server:<semver>.
-# Referenced by operators via nebu_version in OpenTofu variables or server.image.tag in Helm.
-#
-# go-removal-cleanup (full-elixir-stack): release-gateway-image and release-media-image
-# were removed — the server is the only release image now (serves Matrix, /_matrix/media, admin).
-#
-# --cache=false: avoid reusing branch-build Kaniko cache layers in release builds (deterministic, reproducible production images).
-release-server-image:
-  !!merge <<: *build_ci_image
-  stage: release
-  interruptible: false
-  needs: [] # run independent of branch-only build/integration jobs
-  script:
-    - RELEASE_VERSION="${CI_COMMIT_TAG#v}" && /kaniko/executor --context "${CI_PROJECT_DIR}/server" --dockerfile server/Dockerfile --destination "${CI_REGISTRY_IMAGE}/nebu-server:${RELEASE_VERSION}" --build-arg "GIT_COMMIT=${CI_COMMIT_SHA}" --build-arg "BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" --build-arg "RELEASE_VERSION=${RELEASE_VERSION}" --cache=false
-  rules:
-    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
+# The SemVer-tag image is built and attested by the second DevGuard include at the end of this file; its alias job
+# `release-version-tag` lives in .gitlab/ci/release-image-aliases.yml (included with the same tag rule, see there).
 # ─── Renovate ─────────────────────────────────────────────────────────────────
 # Runs dependency updates via Renovate on a weekly GitLab schedule.
 # Setup:
@@ -723,12 +698,35 @@ include:
       # lives at server/Dockerfile (mirrors the build-server-image job below),
       # so devguard:build_oci_image failed with "please provide a valid path
       # to a Dockerfile within the build context" until this was pointed there.
-      build_args: "--context $CI_PROJECT_DIR/server --dockerfile server/Dockerfile"
+      # image_path points at nebu-server so the attested image is the one the dev-* tags (prerelease-version-tag) alias.
+      build_args: "--context $CI_PROJECT_DIR/server --dockerfile server/Dockerfile --build-arg GIT_COMMIT=$CI_COMMIT_SHA --build-arg BUILD_TIME=$CI_COMMIT_TIMESTAMP"
+      image_path: "$CI_REGISTRY_IMAGE/nebu-server"
     rules:
     # Decoupled from the Renovate schedule (CI_PIPELINE_SOURCE == "schedule")
     # on purpose: DevGuard scans the actual code on main, not every weekly
     # dependency-update run. Runs once per push/merge to main.
     - if: '$CI_COMMIT_BRANCH == "main"'
+  - local: .gitlab/ci/prerelease-image-aliases.yml
+    rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+  # Release image (tag pipelines): same components, second instance. job_suffix keeps the job names apart from the
+  # main-branch instance above. image_path points at nebu-server so the attested image is the release image.
+  # build_args mirrors the former release-server-image job (--cache=false, GIT_COMMIT / RELEASE_VERSION); BUILD_TIME is the
+  # commit timestamp (deterministic) instead of the wall clock.
+  - remote: "https://gitlab.opencode.de/l3montree/devguard-ci-components/-/raw/v1.6.0/templates/full.yml"
+    inputs:
+      job_suffix: "-release"
+      devguard_asset_name: "$DEVGUARD_ASSET_NAME"
+      devguard_token: "$DEVGUARD_TOKEN"
+      devguard_api_url: "$DEVGUARD_API_URL"
+      devguard_web_ui: "https://devguard.opencode.de"
+      image_path: "$CI_REGISTRY_IMAGE/nebu-server"
+      build_args: "--context $CI_PROJECT_DIR/server --dockerfile server/Dockerfile --cache=false --build-arg GIT_COMMIT=$CI_COMMIT_SHA --build-arg BUILD_TIME=$CI_COMMIT_TIMESTAMP --build-arg RELEASE_VERSION=${CI_COMMIT_TAG#v}"
+    rules:
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
+  - local: .gitlab/ci/release-image-aliases.yml
+    rules:
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
 # devguard-ci-components exposes no input to disable individual jobs, so the
 # only way to turn one off is to override it by job name after the include.
 # IaC scanning (devguard:infrastructure_as_code_scanning) only has

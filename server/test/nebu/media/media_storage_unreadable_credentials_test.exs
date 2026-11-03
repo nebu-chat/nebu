@@ -1,7 +1,7 @@
 defmodule Nebu.Media.MediaStorageUnreadableCredentialsTest do
   @moduledoc """
   Story `media-storage-uses-admin-config`, fix E (code review MINOR-2): the credentials are
-  read on every call now (`NEBU_MINIO_*_FILE` secret files, the at-rest key file of `Nebu.Web.SecretBox`). A missing or
+  read on every call now (`NEBU_MEDIA_STORAGE_*_FILE` secret files, the at-rest key file of `Nebu.Web.SecretBox`). A missing or
   unreadable file must not raise out of `Nebu.Media.Storage` (the download route has no rescue): every operation returns
   `{:error, :storage_credentials_unreadable}` (or `:storage_credentials_missing` when the cause is a saved secret that
   cannot be decrypted), sends nothing, and logs only the setting name, never the file path or any credential.
@@ -60,13 +60,13 @@ defmodule Nebu.Media.MediaStorageUnreadableCredentialsTest do
     end
   end
 
-  describe "an unreadable NEBU_MINIO_*_FILE credential file" do
-    for {label, key} <- [{"access key", "NEBU_MINIO_ACCESS_KEY_FILE"}, {"secret key", "NEBU_MINIO_SECRET_KEY_FILE"}] do
+  describe "an unreadable NEBU_MEDIA_STORAGE_*_FILE credential file" do
+    for {label, key} <- [{"access key", "NEBU_MEDIA_STORAGE_ACCESS_KEY_FILE"}, {"secret key", "NEBU_MEDIA_STORAGE_SECRET_KEY_FILE"}] do
       test "a missing #{label} file: all five operations return an error tuple, nothing is sent, the path is not logged", %{env_stub: env_stub} do
         T.install_row(nil)
 
         env =
-          %{"NEBU_MINIO_ENDPOINT" => T.endpoint(env_stub), "NEBU_MINIO_ACCESS_KEY_FILE" => T.write_secret_file!("FILEAKID0201"), "NEBU_MINIO_SECRET_KEY_FILE" => T.write_secret_file!("file-secret-0201")}
+          %{"NEBU_MEDIA_STORAGE_ENDPOINT" => T.endpoint(env_stub), "NEBU_MEDIA_STORAGE_ACCESS_KEY_FILE" => T.write_secret_file!("FILEAKID0201"), "NEBU_MEDIA_STORAGE_SECRET_KEY_FILE" => T.write_secret_file!("file-secret-0201")}
           |> Map.put(unquote(key), @missing_path)
 
         T.install_env(env)
@@ -83,9 +83,9 @@ defmodule Nebu.Media.MediaStorageUnreadableCredentialsTest do
       T.install_row(nil)
 
       T.install_env(%{
-        "NEBU_MINIO_ENDPOINT" => T.endpoint(env_stub),
-        "NEBU_MINIO_ACCESS_KEY_FILE" => System.tmp_dir!(),
-        "NEBU_MINIO_SECRET_KEY_FILE" => T.write_secret_file!("file-secret-0201")
+        "NEBU_MEDIA_STORAGE_ENDPOINT" => T.endpoint(env_stub),
+        "NEBU_MEDIA_STORAGE_ACCESS_KEY_FILE" => System.tmp_dir!(),
+        "NEBU_MEDIA_STORAGE_SECRET_KEY_FILE" => T.write_secret_file!("file-secret-0201")
       })
 
       assert_all_unreadable(run_ops())
@@ -94,7 +94,7 @@ defmodule Nebu.Media.MediaStorageUnreadableCredentialsTest do
 
     test "an unreadable file does not matter when the saved row has its own endpoint and credentials", %{saved: saved} do
       T.install_row(T.saved_row(%{endpoint: T.endpoint(saved), use_ssl: false, region: "r-2", bucket: "b-2", access_key: "ROWAKID0201", secret_key: "row-secret-0201"}))
-      T.install_env(%{"NEBU_MINIO_ACCESS_KEY_FILE" => @missing_path, "NEBU_MINIO_SECRET_KEY_FILE" => @missing_path})
+      T.install_env(%{"NEBU_MEDIA_STORAGE_ACCESS_KEY_FILE" => @missing_path, "NEBU_MEDIA_STORAGE_SECRET_KEY_FILE" => @missing_path})
 
       assert :ok = Storage.put("obj", "x")
       assert T.credential_scope(T.next_request!(:saved)) == {"ROWAKID0201", "r-2"}
@@ -124,9 +124,9 @@ defmodule Nebu.Media.MediaStorageUnreadableCredentialsTest do
       T.install_row(nil)
 
       T.install_env(%{
-        "NEBU_MINIO_ENDPOINT" => T.endpoint(env_stub),
-        "NEBU_MINIO_ACCESS_KEY_FILE" => @missing_path,
-        "NEBU_MINIO_SECRET_KEY_FILE" => @missing_path
+        "NEBU_MEDIA_STORAGE_ENDPOINT" => T.endpoint(env_stub),
+        "NEBU_MEDIA_STORAGE_ACCESS_KEY_FILE" => @missing_path,
+        "NEBU_MEDIA_STORAGE_SECRET_KEY_FILE" => @missing_path
       })
 
       log = capture_log([level: :debug], fn -> send(self(), {:bucket, Storage.archive_bucket()}) end)
@@ -159,7 +159,7 @@ defmodule Nebu.Media.MediaStorageUnreadableCredentialsTest do
     test "a download with an unreadable credential file answers the existing 502 \"Media storage unavailable\"", %{env_stub: env_stub} do
       ctx = T.download_setup!()
       T.install_row(nil)
-      T.install_env(%{"NEBU_MINIO_ENDPOINT" => T.endpoint(env_stub), "NEBU_MINIO_ACCESS_KEY_FILE" => @missing_path})
+      T.install_env(%{"NEBU_MEDIA_STORAGE_ENDPOINT" => T.endpoint(env_stub), "NEBU_MEDIA_STORAGE_ACCESS_KEY_FILE" => @missing_path})
 
       conn = T.get_download(ctx)
 

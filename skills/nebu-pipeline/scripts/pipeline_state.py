@@ -27,6 +27,7 @@ Multiple flags combine in one call:
 
 import argparse
 import re
+import os
 import sys
 from datetime import datetime, timezone
 
@@ -154,13 +155,25 @@ def main():
     ts = args.timestamp or now_iso()
     date_only = ts[:10]
 
+    if not os.path.exists(args.file):
+        # first call for a new epic: create the file instead of failing (the pipeline used to improvise this by hand)
+        os.makedirs(os.path.dirname(os.path.abspath(args.file)), exist_ok=True)
+        with open(args.file, "w") as fh:
+            fh.write(
+                "# Nebu Pipeline State \u2014 written by nebu-pipeline, read by all nebu agents.\n"
+                "# Do not edit manually during an active pipeline run.\n"
+                f"# last_updated: {date_only}\n"
+                "story: null\ncurrent_step: null\ncompleted: []\ncycle_count: 0\nblocked_reason: null\n"
+                f'last_updated: "{ts}"\n'
+            )
     lines = read_file(args.file)
     comment_lines, yaml_lines = split_blocks(lines)
 
     # Comment block updates
     update_last_updated_comment(comment_lines, date_only)
     if args.log:
-        prepend_log_line(comment_lines, args.log)
+        # the literal word TIMESTAMP is filled in here (script clock), so the LLM never has to guess the time
+        prepend_log_line(comment_lines, args.log.replace("TIMESTAMP", ts))
 
     # YAML field updates
     if args.commit:

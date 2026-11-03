@@ -5,7 +5,7 @@ defmodule Nebu.Media.StorageConfig do
 
   ## Purpose
 
-  The S3/MinIO storage target comes from the boot-time `NEBU_MINIO_*`/
+  The S3/MinIO storage target comes from the boot-time `NEBU_MEDIA_STORAGE_*`/
   `NEBU_S3_REGION` env vars (`server/config/runtime.exs`) unless an admin saved
   an override for it. This module holds that admin-configurable override, with
   `access_key`/`secret_key` encrypted at rest via `Nebu.Web.SecretBox` (never a
@@ -72,7 +72,7 @@ defmodule Nebu.Media.StorageConfig do
     Rejects a candidate `endpoint` carrying an `http://`/`https://` scheme
     prefix (`{:error, :invalid_endpoint}`) BEFORE issuing any real request —
     this module's own env-var-fallback env reader and `runtime.exs`'s
-    `NEBU_MINIO_ENDPOINT` both use a bare `host[:port]` contract (no scheme),
+    `NEBU_MEDIA_STORAGE_ENDPOINT` both use a bare `host[:port]` contract (no scheme),
     so a scheme-prefixed candidate is always a malformed/attacker-influenced
     value, not a legitimate configuration this module would ever itself
     produce. Beyond the scheme check, also resolves the host and rejects a
@@ -158,7 +158,7 @@ defmodule Nebu.Media.StorageConfig do
     present). Defaults to a real `INSERT ... ON CONFLICT (id) DO UPDATE`
     with a partial `SET` clause when unset.
   - `Application.get_env(:nebu_http, :media_storage_env_reader)` — 0-arity
-    fun returning a STRING-keyed map standing in for the `NEBU_MINIO_*`/
+    fun returning a STRING-keyed map standing in for the `NEBU_MEDIA_STORAGE_*`/
     `NEBU_S3_REGION` env vars `server/config/runtime.exs` already reads at
     boot. Any absent/nil key means "not set", exactly like
     `System.get_env/1`'s own contract. Defaults to a real `System.get_env/1`
@@ -263,12 +263,12 @@ defmodule Nebu.Media.StorageConfig do
 
   The credentials are bound to the target they were meant for: an endpoint saved in the admin settings is only ever
   used with the credentials saved with it. A saved credential that is missing or cannot be decrypted is an error,
-  not replaced by the `NEBU_MINIO_*` credentials (they would sign requests to a host they were not meant for).
+  not replaced by the `NEBU_MEDIA_STORAGE_*` credentials (they would sign requests to a host they were not meant for).
   The one exception is the environment's own target: a saved endpoint and Use SSL that equal the environment's,
-  with both saved keys empty, use the `NEBU_MINIO_*` credentials. Without a saved endpoint, saved credentials win
+  with both saved keys empty, use the `NEBU_MEDIA_STORAGE_*` credentials. Without a saved endpoint, saved credentials win
   over the environment's and follow the environment's endpoint; that row shape only exists for legacy / SQL-written
   rows: the Admin form saves the keys together with `endpoint` and `use_ssl`, so after a UI save the target is pinned
-  and a later change of `NEBU_MINIO_ENDPOINT` is not followed. A half-saved or undecryptable pair is an error in
+  and a later change of `NEBU_MEDIA_STORAGE_ENDPOINT` is not followed. A half-saved or undecryptable pair is an error in
   every case.
 
   Errors, all without any credential or path in them (the caller must not send a request, and must not fall back
@@ -308,7 +308,7 @@ defmodule Nebu.Media.StorageConfig do
 
   @doc """
   The effective archive bucket name: the saved one, else `:nebu_http, :media_archive_bucket`
-  (`NEBU_MINIO_ARCHIVE_BUCKET`, set by `runtime.exs`), else `"nebu-media-archive"`. Needs no usable endpoint and
+  (`NEBU_MEDIA_STORAGE_ARCHIVE_BUCKET`, set by `runtime.exs`), else `"nebu-media-archive"`. Needs no usable endpoint and
   never touches a credential or a secret file.
   """
   @spec archive_bucket() :: String.t()
@@ -353,7 +353,7 @@ defmodule Nebu.Media.StorageConfig do
     end
   end
 
-  # The `NEBU_MINIO_*` credentials are meant for the environment's own target: they apply when the row has no endpoint,
+  # The `NEBU_MEDIA_STORAGE_*` credentials are meant for the environment's own target: they apply when the row has no endpoint,
   # or when its endpoint and Use SSL are exactly the environment's (a first save that kept the form's pre-filled values,
   # or a legacy row without keys). Any other target never gets them, and a later change of the environment's endpoint
   # ends the match again.
@@ -380,8 +380,8 @@ defmodule Nebu.Media.StorageConfig do
   end
 
   defp env_credentials(env) do
-    {:ok, resolve_env_secret(env, "NEBU_MINIO_ACCESS_KEY_FILE", "NEBU_MINIO_ACCESS_KEY") || "",
-     resolve_env_secret(env, "NEBU_MINIO_SECRET_KEY_FILE", "NEBU_MINIO_SECRET_KEY") || ""}
+    {:ok, resolve_env_secret(env, "NEBU_MEDIA_STORAGE_ACCESS_KEY_FILE", "NEBU_MEDIA_STORAGE_ACCESS_KEY") || "",
+     resolve_env_secret(env, "NEBU_MEDIA_STORAGE_SECRET_KEY_FILE", "NEBU_MEDIA_STORAGE_SECRET_KEY") || ""}
   rescue
     _ -> {:error, :storage_credentials_unreadable}
   end
@@ -1112,7 +1112,7 @@ defmodule Nebu.Media.StorageConfig do
   # Builds the unmasked, plaintext-secret catalog (AC4/AC5): DB row value >
   # env-var fallback > compiled default, per field. `row` is `nil` (no row
   # ever written) or a STRING-keyed map of column values. `env` is a
-  # STRING-keyed map standing in for NEBU_MINIO_*/NEBU_S3_REGION.
+  # STRING-keyed map standing in for NEBU_MEDIA_STORAGE_*/NEBU_S3_REGION.
   #
   # The secrets are exactly the pair the operational path would sign with (`operation_credentials/2`): the saved pair,
   # or the environment's for the environment's own target. For a half pair, undecryptable or unreadable keys, or another
@@ -1133,13 +1133,13 @@ defmodule Nebu.Media.StorageConfig do
   # never decrypts or reads a secret file.
   defp plain_fields(row, env) do
     %{
-      endpoint: pick(row_get(row, "endpoint"), Map.get(env, "NEBU_MINIO_ENDPOINT"), @defaults.endpoint),
-      bucket: pick(row_get(row, "bucket"), Map.get(env, "NEBU_MINIO_BUCKET"), @defaults.bucket),
+      endpoint: pick(row_get(row, "endpoint"), Map.get(env, "NEBU_MEDIA_STORAGE_ENDPOINT"), @defaults.endpoint),
+      bucket: pick(row_get(row, "bucket"), Map.get(env, "NEBU_MEDIA_STORAGE_BUCKET"), @defaults.bucket),
       region: pick(row_get(row, "region"), Map.get(env, "NEBU_S3_REGION"), @defaults.region),
       use_ssl:
         pick(
           row_get(row, "use_ssl"),
-          parse_bool(Map.get(env, "NEBU_MINIO_USE_SSL")),
+          parse_bool(Map.get(env, "NEBU_MEDIA_STORAGE_USE_SSL")),
           @defaults.use_ssl
         ),
       s3_key_prefix_template:
@@ -1154,8 +1154,8 @@ defmodule Nebu.Media.StorageConfig do
       # (a non-nil value reaching upsert/1) is validated separately by
       # validate_iam_sts_fields/1 — this READ path never re-validates an
       # already-resolved value, DB-, env-, or default-sourced alike.
-      iam_endpoint: pick(row_get(row, "iam_endpoint"), Map.get(env, "NEBU_MINIO_IAM_ENDPOINT"), @defaults.iam_endpoint),
-      sts_endpoint: pick(row_get(row, "sts_endpoint"), Map.get(env, "NEBU_MINIO_STS_ENDPOINT"), @defaults.sts_endpoint)
+      iam_endpoint: pick(row_get(row, "iam_endpoint"), Map.get(env, "NEBU_MEDIA_STORAGE_IAM_ENDPOINT"), @defaults.iam_endpoint),
+      sts_endpoint: pick(row_get(row, "sts_endpoint"), Map.get(env, "NEBU_MEDIA_STORAGE_STS_ENDPOINT"), @defaults.sts_endpoint)
     }
   end
 
@@ -1306,7 +1306,7 @@ defmodule Nebu.Media.StorageConfig do
 
   # M-1/M-2/M-3 (SSRF + transport-downgrade; M-1 forward-carried from the 11a
   # security review, M-2/M-3 fixed per the epic-end security review,
-  # 2026-07-20): `runtime.exs`'s NEBU_MINIO_ENDPOINT and this module's own
+  # 2026-07-20): `runtime.exs`'s NEBU_MEDIA_STORAGE_ENDPOINT and this module's own
   # env-var-fallback reader both use a bare `host[:port]` contract, never a
   # URL with a scheme. A candidate carrying `http://`/`https://` would let an
   # admin (or a request that reached this far with attacker-influenced
@@ -1489,7 +1489,7 @@ defmodule Nebu.Media.StorageConfig do
 
   # THE `host[:port]` parser: save validation, Test Connection and every operational request decide with it what an
   # endpoint is, so none of them accepts a value another one rejects. The port defaults to 443/80 by scheme (as
-  # `runtime.exs` does). Never raises: the saved endpoint is admin input and `NEBU_MINIO_ENDPOINT` may be set empty.
+  # `runtime.exs` does). Never raises: the saved endpoint is admin input and `NEBU_MEDIA_STORAGE_ENDPOINT` may be set empty.
   # `{:error, :storage_endpoint_blank}`: no host. `{:error, :storage_endpoint_invalid}`: a path, an IPv6 literal, a port
   # that is not a number from 1 to 65535 or any other character that does not belong to a host name.
   defp parse_endpoint(endpoint, use_ssl) when is_binary(endpoint) do
@@ -1516,25 +1516,25 @@ defmodule Nebu.Media.StorageConfig do
 
   defp parse_host_port(_host, _port), do: {:error, :storage_endpoint_invalid}
 
-  # Mirrors server/config/runtime.exs lines 78-119's own NEBU_MINIO_*/
+  # Mirrors server/config/runtime.exs lines 78-119's own NEBU_MEDIA_STORAGE_*/
   # NEBU_S3_REGION reads exactly. Any absent var is simply not put into the
   # map — "any absent/nil key means not set", matching System.get_env/1's own
   # nil-when-unset contract.
   defp default_env_reader do
     %{}
-    |> maybe_put_env("NEBU_MINIO_ENDPOINT")
-    |> maybe_put_env("NEBU_MINIO_USE_SSL")
-    |> maybe_put_env("NEBU_MINIO_BUCKET")
+    |> maybe_put_env("NEBU_MEDIA_STORAGE_ENDPOINT")
+    |> maybe_put_env("NEBU_MEDIA_STORAGE_USE_SSL")
+    |> maybe_put_env("NEBU_MEDIA_STORAGE_BUCKET")
     |> maybe_put_env("NEBU_S3_REGION")
-    |> maybe_put_env("NEBU_MINIO_ACCESS_KEY_FILE")
-    |> maybe_put_env("NEBU_MINIO_ACCESS_KEY")
-    |> maybe_put_env("NEBU_MINIO_SECRET_KEY_FILE")
-    |> maybe_put_env("NEBU_MINIO_SECRET_KEY")
+    |> maybe_put_env("NEBU_MEDIA_STORAGE_ACCESS_KEY_FILE")
+    |> maybe_put_env("NEBU_MEDIA_STORAGE_ACCESS_KEY")
+    |> maybe_put_env("NEBU_MEDIA_STORAGE_SECRET_KEY_FILE")
+    |> maybe_put_env("NEBU_MEDIA_STORAGE_SECRET_KEY")
     # bugfix-upcloud-s3-iam-sts-endpoints (AC1): UpCloud Managed Object
     # Storage's separate IAM/STS endpoint URLs, mirroring runtime.exs's own
-    # NEBU_MINIO_IAM_ENDPOINT/NEBU_MINIO_STS_ENDPOINT reads (AC2).
-    |> maybe_put_env("NEBU_MINIO_IAM_ENDPOINT")
-    |> maybe_put_env("NEBU_MINIO_STS_ENDPOINT")
+    # NEBU_MEDIA_STORAGE_IAM_ENDPOINT/NEBU_MEDIA_STORAGE_STS_ENDPOINT reads (AC2).
+    |> maybe_put_env("NEBU_MEDIA_STORAGE_IAM_ENDPOINT")
+    |> maybe_put_env("NEBU_MEDIA_STORAGE_STS_ENDPOINT")
   end
 
   defp maybe_put_env(map, key) do

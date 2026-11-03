@@ -752,21 +752,21 @@ write_files:
 %{ endif ~}
 %{ if enable_media_gateway ~}
             # Media object storage — server serves /_matrix/media from the S3 bucket.
-            NEBU_MINIO_ENDPOINT: "${s3_endpoint}"
+            NEBU_MEDIA_STORAGE_ENDPOINT: "${s3_endpoint}"
 %{ if s3_iam_endpoint != "" ~}
-            NEBU_MINIO_IAM_ENDPOINT: "${s3_iam_endpoint}"
+            NEBU_MEDIA_STORAGE_IAM_ENDPOINT: "${s3_iam_endpoint}"
 %{ endif ~}
 %{ if s3_sts_endpoint != "" ~}
-            NEBU_MINIO_STS_ENDPOINT: "${s3_sts_endpoint}"
+            NEBU_MEDIA_STORAGE_STS_ENDPOINT: "${s3_sts_endpoint}"
 %{ endif ~}
             # The VM reaches Managed Object Storage over the private network; the
             # *-private endpoints resolve to CGNAT addresses (100.64.0.0/10) that the
             # storage-endpoint SSRF guard otherwise rejects.
             NEBU_STORAGE_ALLOW_PRIVATE_ENDPOINTS: "true"
-            NEBU_MINIO_ACCESS_KEY_FILE: "/run/secrets/s3_access_key"
-            NEBU_MINIO_SECRET_KEY_FILE: "/run/secrets/s3_secret_key"
-            NEBU_MINIO_BUCKET: "${s3_bucket}"
-            NEBU_MINIO_USE_SSL: "true"
+            NEBU_MEDIA_STORAGE_ACCESS_KEY_FILE: "/run/secrets/s3_access_key"
+            NEBU_MEDIA_STORAGE_SECRET_KEY_FILE: "/run/secrets/s3_secret_key"
+            NEBU_MEDIA_STORAGE_BUCKET: "${s3_bucket}"
+            NEBU_MEDIA_STORAGE_USE_SSL: "true"
 %{ endif ~}
           env_file:
             - .env
@@ -786,9 +786,9 @@ write_files:
             - "127.0.0.1:8080:4000"
 %{ endif ~}
           healthcheck:
-            test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+            test: ["CMD", "/app/healthcheck"]
             interval: 10s
-            timeout: 5s
+            timeout: 15s # the probe boots a throw-away Erlang VM (no curl in the hardened image)
             retries: 3
             start_period: 30s
           deploy:

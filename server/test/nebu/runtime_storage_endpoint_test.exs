@@ -1,10 +1,10 @@
 defmodule Nebu.RuntimeStorageEndpointTest do
   @moduledoc """
   Story `media-storage-uses-admin-config`, scenarios 6 and 7: how `config/runtime.exs` treats
-  `NEBU_MINIO_ENDPOINT`.
+  `NEBU_MEDIA_STORAGE_ENDPOINT`.
 
     * S6 - set but empty (or whitespace only) in a production or development environment: boot aborts with a message
-      that names `NEBU_MINIO_ENDPOINT` (an empty value would otherwise silently become host "" / port 80);
+      that names `NEBU_MEDIA_STORAGE_ENDPOINT` (an empty value would otherwise silently become host "" / port 80);
     * S7 - not set: the endpoint defaults to `minio:9000` (host "minio", port 9000), independent of `use_ssl`.
 
   Same technique as `Nebu.Web.RateLimitTiersTest`: the REAL runtime.exs is evaluated with `Config.Reader.read!/2` under a
@@ -46,25 +46,25 @@ defmodule Nebu.RuntimeStorageEndpointTest do
 
   defp s3(config), do: config |> Keyword.fetch!(:ex_aws) |> Keyword.fetch!(:s3)
 
-  describe "S6 - empty NEBU_MINIO_ENDPOINT aborts boot" do
+  describe "S6 - empty NEBU_MEDIA_STORAGE_ENDPOINT aborts boot" do
     for env <- [:prod, :dev], {label, value} <- [{"empty", ""}, {"whitespace-only", "   "}, {"tab and spaces", " \t "}] do
-      test "#{label} value in #{env} aborts boot with a message naming NEBU_MINIO_ENDPOINT" do
+      test "#{label} value in #{env} aborts boot with a message naming NEBU_MEDIA_STORAGE_ENDPOINT" do
         error =
           try do
-            read_runtime(unquote(env), %{"NEBU_MINIO_ENDPOINT" => unquote(value)})
+            read_runtime(unquote(env), %{"NEBU_MEDIA_STORAGE_ENDPOINT" => unquote(value)})
             nil
           rescue
             e -> e
           end
 
         assert error != nil, "boot must abort, but runtime.exs was evaluated without an error"
-        assert Exception.message(error) =~ "NEBU_MINIO_ENDPOINT"
+        assert Exception.message(error) =~ "NEBU_MEDIA_STORAGE_ENDPOINT"
       end
     end
 
     test "a blank value aborts regardless of use_ssl and of configured credentials" do
-      for vars <- [%{"NEBU_MINIO_USE_SSL" => "true"}, %{"NEBU_MINIO_ACCESS_KEY" => "a", "NEBU_MINIO_SECRET_KEY" => "b"}] do
-        assert_raise_naming_endpoint(fn -> read_runtime(:prod, Map.put(vars, "NEBU_MINIO_ENDPOINT", "")) end)
+      for vars <- [%{"NEBU_MEDIA_STORAGE_USE_SSL" => "true"}, %{"NEBU_MEDIA_STORAGE_ACCESS_KEY" => "a", "NEBU_MEDIA_STORAGE_SECRET_KEY" => "b"}] do
+        assert_raise_naming_endpoint(fn -> read_runtime(:prod, Map.put(vars, "NEBU_MEDIA_STORAGE_ENDPOINT", "")) end)
       end
     end
 
@@ -72,9 +72,9 @@ defmodule Nebu.RuntimeStorageEndpointTest do
       error =
         try do
           read_runtime(:prod, %{
-            "NEBU_MINIO_ENDPOINT" => "",
-            "NEBU_MINIO_ACCESS_KEY" => "RUNTIMECANARYACCESS0005",
-            "NEBU_MINIO_SECRET_KEY" => "runtime-canary-secret-0005"
+            "NEBU_MEDIA_STORAGE_ENDPOINT" => "",
+            "NEBU_MEDIA_STORAGE_ACCESS_KEY" => "RUNTIMECANARYACCESS0005",
+            "NEBU_MEDIA_STORAGE_SECRET_KEY" => "runtime-canary-secret-0005"
           })
 
           nil
@@ -88,22 +88,22 @@ defmodule Nebu.RuntimeStorageEndpointTest do
     end
 
     test "the :test environment is not affected (the storage block only runs in prod / dev)" do
-      config = read_runtime(:test, %{"NEBU_MINIO_ENDPOINT" => ""})
+      config = read_runtime(:test, %{"NEBU_MEDIA_STORAGE_ENDPOINT" => ""})
       assert Keyword.get(config, :ex_aws) == nil
     end
 
     test "valid endpoints keep working: host:port, host without port by scheme" do
-      assert s3(read_runtime(:prod, %{"NEBU_MINIO_ENDPOINT" => "storage.internal:9100"})) |> Keyword.take([:host, :port, :scheme]) ==
+      assert s3(read_runtime(:prod, %{"NEBU_MEDIA_STORAGE_ENDPOINT" => "storage.internal:9100"})) |> Keyword.take([:host, :port, :scheme]) ==
                [scheme: "http://", host: "storage.internal", port: 9100]
 
-      assert s3(read_runtime(:dev, %{"NEBU_MINIO_ENDPOINT" => "s3.example.test", "NEBU_MINIO_USE_SSL" => "true"})) |> Keyword.take([:host, :port, :scheme]) ==
+      assert s3(read_runtime(:dev, %{"NEBU_MEDIA_STORAGE_ENDPOINT" => "s3.example.test", "NEBU_MEDIA_STORAGE_USE_SSL" => "true"})) |> Keyword.take([:host, :port, :scheme]) ==
                [scheme: "https://", host: "s3.example.test", port: 443]
 
-      assert s3(read_runtime(:dev, %{"NEBU_MINIO_ENDPOINT" => "s3.example.test"})) |> Keyword.take([:host, :port]) == [host: "s3.example.test", port: 80]
+      assert s3(read_runtime(:dev, %{"NEBU_MEDIA_STORAGE_ENDPOINT" => "s3.example.test"})) |> Keyword.take([:host, :port]) == [host: "s3.example.test", port: 80]
     end
   end
 
-  describe "S7 - unset NEBU_MINIO_ENDPOINT keeps the default endpoint" do
+  describe "S7 - unset NEBU_MEDIA_STORAGE_ENDPOINT keeps the default endpoint" do
     for env <- [:prod, :dev] do
       test "in #{env} the storage endpoint defaults to minio:9000" do
         s3 = s3(read_runtime(unquote(env), %{}))
@@ -111,8 +111,8 @@ defmodule Nebu.RuntimeStorageEndpointTest do
       end
     end
 
-    test "the default endpoint does not depend on NEBU_MINIO_USE_SSL (explicit port 9000)" do
-      s3 = s3(read_runtime(:prod, %{"NEBU_MINIO_USE_SSL" => "true"}))
+    test "the default endpoint does not depend on NEBU_MEDIA_STORAGE_USE_SSL (explicit port 9000)" do
+      s3 = s3(read_runtime(:prod, %{"NEBU_MEDIA_STORAGE_USE_SSL" => "true"}))
       assert {s3[:scheme], s3[:host], s3[:port]} == {"https://", "minio", 9000}
     end
 
@@ -133,6 +133,6 @@ defmodule Nebu.RuntimeStorageEndpointTest do
       end
 
     assert error != nil, "boot must abort, but runtime.exs was evaluated without an error"
-    assert Exception.message(error) =~ "NEBU_MINIO_ENDPOINT"
+    assert Exception.message(error) =~ "NEBU_MEDIA_STORAGE_ENDPOINT"
   end
 end

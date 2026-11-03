@@ -4,6 +4,13 @@
 
 Accepted - 2026-03-18
 
+> **Superseded 2026-11-02 (ADR-021).** This ADR assumed a stateless **Go Gateway** buffering
+> writes while the Elixir Core was unavailable ("ROT status"). With the gateway removed there is
+> no gateway↔core boundary: Matrix HTTP routers call the domain functions in-process, so a
+> request either succeeds or fails within the same BEAM node. No Elixir code reads or writes the
+> `message_buffer` table; it exists only in the initial migration (`000001_init`). The linear/AIMD
+> drain design below is retained as the historical record only.
+
 ## Context
 
 When the Elixir Core is temporarily unavailable (ROT status), the Go Gateway must not fail Matrix

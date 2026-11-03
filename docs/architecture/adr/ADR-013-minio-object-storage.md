@@ -4,6 +4,13 @@
 
 Accepted - 2026-05-12
 
+> **Amended 2026-11-02.** MinIO is discontinued upstream (its container images and the `mc` client are no longer
+> obtainable). The S3-compatible object-store decision stands, but the local-dev and CI implementation is now
+> **RustFS** (`rustfs/rustfs`, Apache-2.0) with its `rc` client for bucket / IAM-user / policy setup. Nebu talks plain
+> S3 through `ExAws.S3`, so production endpoints are unaffected; the `minio` compose service name is kept as a stable name,
+> and the environment variables were renamed from `NEBU_MINIO_*` to `NEBU_MEDIA_STORAGE_*` (story
+> neutral-media-storage-env-names). The text below is the original MinIO-era record.
+
 ## Context
 
 Epic 12 (Media Gateway Phase 2) requires a local-dev object storage backend for media upload,

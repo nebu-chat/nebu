@@ -4,6 +4,13 @@
 
 Accepted - 2026-03-18
 
+> **Amended 2026-11-02.** The decision (no Redis/NATS/Kafka; ETS + `pg` process groups) is
+> unchanged. Three details below are historical: (1) there are **no EventBus gRPC streams** —
+> gRPC was removed (ADR-005 / ADR-021) and `pg` fans out to in-process subscribers; (2) the
+> **message-buffer drain worker "in Go"** no longer exists since the Go gateway is gone (see
+> ADR-006); (3) `docker compose up` no longer runs a *gateway* service — the stack is the single
+> Elixir server plus postgres, an OIDC provider (dex in dev) and S3-compatible object storage.
+
 ## Context
 
 Many chat server architectures require Redis for session caching and pub/sub, and NATS or Kafka

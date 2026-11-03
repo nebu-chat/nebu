@@ -58,8 +58,8 @@ services:
     # server2 does not publish host ports — only server1 (base service) is reachable
     # from the host. Front both with an external LB for true multi-replica serving.
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      test: ["CMD", "/app/healthcheck"]
       interval: 10s
-      timeout: 5s
+      timeout: 15s # the probe boots a throw-away Erlang VM (no curl in the hardened image)
       retries: 3
       start_period: 30s

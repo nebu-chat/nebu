@@ -1,0 +1,39 @@
+# Included from .gitlab-ci.yml with the SAME include rule as the -release DevGuard instance (SemVer tags only).
+# This is deliberate: GitLab validates needs: statically against the merged config, and devguard:* jobs only exist where
+# their include rule matches. Defining these jobs in the main file made every non-main pipeline fail with
+# "undefined need: devguard:generate_tag". Defined here, they exist exactly where the jobs they need exist.
+
+# ─── Release Image Builds ─────────────────────────────────────────────────────
+# Triggered exclusively by SemVer Git tags (e.g. git tag v1.0.0 && git push origin v1.0.0).
+# Produces the versioned image: <CI_REGISTRY_IMAGE>/nebu-server:<semver>.
+# Referenced by operators via nebu_version in OpenTofu variables or server.image.tag in Helm.
+#
+# The release image is built, scanned, pushed, signed and attested by the DevGuard components
+# (second `include:` at the end of this file, job_suffix "-release"). That yields, linked to the
+# image in the registry (openCode badge supply-chain/container-attestation, Gold):
+#   - signature, CycloneDX SBOM + VEX, SARIF 2.1.0 (SAST), SLSA build provenance,
+#   - source provenance (schema 1.0.1, via source-provenance-upload-release).
+# DevGuard names the image <CI_REGISTRY_IMAGE>/nebu-server:v<semver>-amd64. `release-version-tag`
+# below adds the operator-facing tag <semver> as an alias of that exact digest, so the attestations
+# (stored per digest) apply to <semver> as well. There is deliberately NO second, separate build of
+# <semver>: a rebuild would produce a different digest without any attestations.
+release-version-tag:
+  stage: attestation
+  interruptible: false
+  image:
+    name: registry.gitlab.com/l3montree/devguard/osscontainertools-kaniko-crane:kaniko-v1.27.3-devguard-scanner-v1.3.1@sha256:2966ade3c7d565ae56c48cfa50d5df6e36a5371f4173606eb4de57558186433d
+    entrypoint: [""]
+  needs:
+    - devguard:generate_tag-release
+    - devguard:build_oci_image-release # its dotenv makes IMAGE_TAG "<tag>@<digest>": the alias is pinned to the attested digest
+    - devguard:attest-release
+    - source-provenance-upload-release
+  # No `dependencies:` (see prerelease-version-tag): the -release include only exists in tag pipelines.
+  variables:
+    GIT_STRATEGY: none
+  script:
+    - /crane auth login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+    - /crane tag "$IMAGE_TAG" "${CI_COMMIT_TAG#v}"
+    - echo "Tagged ${CI_COMMIT_TAG#v} -> $IMAGE_TAG"
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'

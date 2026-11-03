@@ -137,7 +137,7 @@ defmodule Nebu.Media.StorageConfigEndpointSaveTest do
 
     test "fresh config (no row): the effective endpoint is the environment's, so another endpoint needs the keys too" do
       T.install_row(nil)
-      T.install_env(%{"NEBU_MINIO_ENDPOINT" => @stored_endpoint})
+      T.install_env(%{"NEBU_MEDIA_STORAGE_ENDPOINT" => @stored_endpoint})
 
       assert {:error, :secret_required} = StorageConfig.upsert(%{endpoint: @other_endpoint})
       assert_nothing_persisted()
@@ -146,7 +146,7 @@ defmodule Nebu.Media.StorageConfigEndpointSaveTest do
 
     test "fresh config: the environment's own endpoint and use_ssl, no keys: saved (not a change)" do
       T.install_row(nil)
-      T.install_env(%{"NEBU_MINIO_ENDPOINT" => @stored_endpoint, "NEBU_MINIO_USE_SSL" => "false"})
+      T.install_env(%{"NEBU_MEDIA_STORAGE_ENDPOINT" => @stored_endpoint, "NEBU_MEDIA_STORAGE_USE_SSL" => "false"})
 
       assert :ok = StorageConfig.upsert(%{endpoint: @stored_endpoint, use_ssl: false, bucket: "first-bucket"})
       assert_received {:written, _}

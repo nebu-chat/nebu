@@ -127,9 +127,9 @@ defmodule Nebu.Media.MediaStorageSecretsNotLoggedTest do
       T.install_row(nil)
 
       T.install_env(%{
-        "NEBU_MINIO_ENDPOINT" => "127.0.0.1:#{T.closed_port()}",
-        "NEBU_MINIO_ACCESS_KEY" => @access_key,
-        "NEBU_MINIO_SECRET_KEY" => @secret_key
+        "NEBU_MEDIA_STORAGE_ENDPOINT" => "127.0.0.1:#{T.closed_port()}",
+        "NEBU_MEDIA_STORAGE_ACCESS_KEY" => @access_key,
+        "NEBU_MEDIA_STORAGE_SECRET_KEY" => @secret_key
       })
 
       {log, results} = run_logged()

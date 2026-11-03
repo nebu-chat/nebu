@@ -12,3 +12,4 @@
 
 ## My Files
 _This section grows as I create organic files. Update it when adding new files._
+- `archive/MEMORY-full-2026-11-02.md` — vollständiger MEMORY.md-Stand vor der Verdichtung (Recurring Patterns und Review-Historie im Volltext). Nicht beim Rebirth laden; nur gezielt nachschlagen.

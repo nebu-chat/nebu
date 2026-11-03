@@ -1,9 +1,33 @@
 # Pipeline Steps Specification
 
-Agent prompts for each nebu-pipeline step. Selected by `select_pipeline_step.py --step <name>`.
-The coordinator (SKILL.md) injects runtime values for `[BRACKETED]` placeholders before
-passing the prompt to the subagent. Conditional blocks (`[IF X — omit if null]`) are
-evaluated by the coordinator: if the variable is null/empty, the entire block is dropped.
+Prompts for the skill-driven steps of nebu-pipeline, selected by `select_pipeline_step.py --step <name>`.
+The coordinator injects runtime values for `[BRACKETED]` placeholders; conditional blocks
+(`[IF X — omit if none]`) are dropped when the variable is `none`/empty.
+
+**Named agents carry their own prompt.** For `oracle-gate`, `test-review`, `dev-story`, `ux-gate`,
+`code-review` and `security-review` the prompt lives in `.claude/agents/nebu-*.md` (source:
+`skills/nebu-pipeline/install/agents/`). The coordinator sends ONLY a short launch message of
+`KEY: value` lines (see `steps/*.md`) — never the report text or the story sections.
+
+**ATDD.** In `ATDD_MODE: lean` (default) the `atdd` section below is NOT used: `atdd_scaffold.py` writes the scaffold, `@nebu-atdd` (prompt in `.claude/agents/nebu-atdd.md`; launch keys
+`STORY_FILE`, `TEST_FILE`, `FEATURE_FILE`, `ORACLE_FILE`, `VERIFY_FILE` on retry) fills it and replies `DONE tests=N red=N`, `atdd_verify.py` checks it (see `steps/2-atdd.md`).
+The section below is the `tea` prompt (BMAD skill) for `ATDD_MODE: tea`, stories without Gherkin and `--bug` runs.
+
+## Digest contract (all report-writing agents)
+
+The agent writes its full report to `REPORT_FILE` (inside `$STEP_RESULTS_DIR/[STORY_ID]/`) and replies with ONLY:
+
+```
+VERDICT: CLEAN | MINOR | MAJOR | CRITICAL      (dev-story: DONE | BLOCKED; ux: CLEAN | VIOLATIONS; Kassandra: CLEAN | HIGH | CRITICAL)
+COUNTS: major=N minor=N info=N
+REPORT: <path>
+TOP: <≤3 MAJOR/CRITICAL titles, "; "-separated, or "-">
+```
+
+Report file: one finding per line `<SEV> | <file:line> | <issue> | <fix hint>`. Downstream steps pass the **file path**
+(`TEST_REVIEW_FILE`, `ORACLE_FILE`, `CODE_REVIEW_FILE`, `REVIEW_DELTA_FILE`) to the next agent; the coordinator never
+re-emits report content. If an agent replies with prose instead of a digest, the coordinator writes that reply to
+`REPORT_FILE` once and continues (legacy behaviour).
 
 ---
 
@@ -19,81 +43,47 @@ Work through this completely, then finish.
 
 ## oracle-gate
 
-Read and follow skills/nebu-agent-oracle/SKILL.md.
-Load references/spec-lookup.md and references/test-guidance.md.
-
-Story context:
-[ORACLE_INPUT]
-
-1. Which Matrix CS API endpoints, event types, and behavioral rules apply?
-   List all MUST requirements.
-2. Which spec-defined error codes, HTTP status codes, and edge cases MUST be test-covered?
-
-Return compact Markdown (max 40 lines). Lists only, no prose. Then finish.
+`spec_extract.py` runs first; with full coverage its draft is the Oracle context. Otherwise launch `@nebu-oracle` with: `STORY_FILE`, `REPORT_FILE` (= `$STEP_RESULTS_DIR/[STORY_ID]/oracle-context.md`), `SPEC_DRAFT_FILE`.
+The prompt (MUST requirements, error codes, edge cases; max 40 lines) lives in the agent definition.
 
 ---
 
 ## atdd
 
 Read and follow .claude/skills/bmad-testarch-atdd/SKILL.md.
-Acceptance Criteria and existing test stubs:
-[ATDD_INPUT]
+Story: [STORY_FILE]. Read the acceptance criteria with:
+`python3 skills/nebu-pipeline/scripts/extract_story_section.py --story [STORY_FILE] --sections "Story" "Acceptance Criteria" "Acceptance Tests"`
 Generate failing acceptance tests for all acceptance criteria.
 Tests MUST be failing before any implementation code exists.
 
-[IF ORACLE_CONTEXT — omit this block if null:]
-Matrix spec requirements (from Oracle):
-[ORACLE_CONTEXT]
+[IF ORACLE_FILE — omit this block if none:]
+Matrix spec requirements (from Oracle) are in [ORACLE_FILE] — read it.
 Cover ALL spec-defined error codes, HTTP status codes, and edge cases
 as separate failing tests.
 
-Finish after generating the tests.
+Finish after generating the tests. Reply with ONE line: `DONE tests=<N> red=<N>` — no summary of the tests.
 
 ---
 
 ## test-review
 
-Read and follow .claude/skills/bmad-testarch-test-review/SKILL.md.
-Review all staged test files (git diff --staged).
-
-Context: these are FAILING tests from ATDD, not yet validated by a green run.
-
-Story and Acceptance Criteria (verify each has at least one test):
-[AC_SECTION]
-
-Check:
-- Does each acceptance criterion have at least one test?
-- Any hard waits, non-deterministic assertions, or brittle selectors?
-- GenServer state stories: is there a crash/restart test?
-- UI stories (ui: true in frontmatter): are Playwright tests present in e2e/tests/ or e2e/features/?
-- Are Matrix spec error codes and HTTP status codes tested (not just the happy path)?
-
-Classify each finding: MAJOR / MINOR / INFO.
-MAJOR = missing AC coverage, missing crash/restart test for GenServer state,
-        missing Playwright tests for a UI story.
-
-Output the full report and finish.
+`test_lint.py` runs first; `@nebu-test-reviewer` only when it reports `LLM_NEEDED: yes`. Launch keys: `STORY_FILE`, `CYCLE`, `REPORT_FILE` (= `…/test-review-findings.md`), `LINT_FILE`, `ORACLE_FILE`.
+The prompt lives in the agent definition.
 
 ---
 
 ## dev-story
 
-The agent definition `.claude/agents/nebu-dev-story.md` carries the full prompt
-(conventions, workflow, non-negotiable rules). Do NOT load `bmad-dev-story`.
-
-Launch `@nebu-dev-story` with placeholders substituted:
-- `[STORY_FILE]` → path
-- `[TEST_REVIEW_FINDINGS]` → value or drop block if empty
-- `[ORACLE_CONTEXT]` → value or drop block if empty
-- `[CODE_REVIEW_FINDINGS]` → value or drop block if empty (cycle 0)
-- `[CYCLE_COUNT]` → current cycle number
+Launch `@nebu-dev-story` with: `STORY_FILE`, `CYCLE`, `TEST_REVIEW_FILE`, `ORACLE_FILE`, `CODE_REVIEW_FILE` (`none` in cycle 0).
+The agent definition `.claude/agents/nebu-dev-story.md` carries the full prompt. Do NOT load `bmad-dev-story`.
 
 ---
 
 ## ci-gate
 
-Run `make redeploy` to rebuild the server image, then `make test-integration` to run
+Cycle 0 (or Step 6b): run `make redeploy` to rebuild the server image, then `make test-integration` to run
 the full Gherkin E2E test suite against a fresh database and real stack.
+Cycles >= 1 (fast gate): only `make test-unit-elixir`; the full integration run is deferred to Step 6b.
 
 Compare results against the baseline log from Step 1d
 ($STEP_RESULTS_DIR/[STORY_ID]/baseline-integration.log).
@@ -104,94 +94,44 @@ Finish after reporting.
 
 ## ux-gate
 
-Read and follow skills/nebu-agent-ux/SKILL.md.
-Run in --headless mode: accessibility audit on staged changes.
-
-Story context:
-[STORY_SECTIONS]
-
-Audit changed templates against:
-- PRD accessibility requirements (from your BOND.md)
-- WCAG 2.1 AA baseline
-- DaisyUI consistency with existing components
-
-Return findings as: violations (blocking) | advisories (non-blocking).
-Finish after the audit.
+Launch `@nebu-ux-reviewer` with: `STORY_FILE`, `REPORT_FILE` (= `…/ux-findings.md`).
+The prompt (headless accessibility audit) lives in the agent definition.
 
 ---
 
 ## code-review
 
-Read and follow .claude/skills/bmad-code-review/SKILL.md.
-Review all staged changes (git diff --staged).
-
-IMPORTANT: Do NOT fix issues yourself.
-Identify all issues, classify them (MAJOR / MINOR / INFO), return the full list.
-The pipeline hands MINOR issues back to the dev agent for fixing.
-Only MAJOR/CRITICAL issues require user decision.
-
-Story and Acceptance Criteria (verify implementation covers each):
-[AC_SECTION]
-
-Test quality findings (from pre-dev test-review):
-[TEST_REVIEW_FINDINGS]
-
-[IF ORACLE_CONTEXT — omit this block if null:]
-Matrix spec requirements (from Oracle):
-[ORACLE_CONTEXT]
-Verify the implementation satisfies ALL MUST requirements.
-Missing error codes or wrong HTTP status = MAJOR.
-
-Current review cycle: [CYCLE_COUNT] (escalate to user if same issues persist for 3+ cycles)
-
-Output the full report. Classify every finding as MAJOR, MINOR, or INFO. Finish.
+Launch `@nebu-code-reviewer` with: `STORY_FILE`, `CYCLE`, `REPORT_FILE` (= `…/code-review-findings.md`), `PRESCAN_FILE` (= `…/review-prescan.md`, from `review_prescan.py`),
+`TEST_REVIEW_FILE`, `ORACLE_FILE`, `CODE_REVIEW_FILE` (previous findings; `none` in cycle 0), `REVIEW_DELTA_FILE` (`none` = full review).
+The prompt (review rules, delta mode) lives in the agent definition.
 
 ---
 
 ## security-review
 
-Launch `@nebu-kassandra` — the full review scope (per-story + epic) lives in the
-agent definition `.claude/agents/nebu-kassandra.md`. Do NOT load
-`skills/nebu-agent-kassandra/SKILL.md` or its `references/*.md` files —
-the scope is inlined in the agent body.
+Launch `@nebu-kassandra` with: `STORY_FILE`, `STORY_ID`, `DATE`, `EPIC`, `CANDIDATES_FILE` (= `…/sec-candidates.md`, from `sec_prescan.py`). The full review scope (per-story + epic)
+lives in the agent definition `.claude/agents/nebu-kassandra.md`. Do NOT load `skills/nebu-agent-kassandra/SKILL.md`
+or its `references/*.md` files — the scope is inlined in the agent body.
 
-Substitute:
-- `[SEC_CONTEXT]` → story sections (Story + Acceptance Criteria)
-
-Scope: staged diff (`git diff --staged`)
-
-Write the report to:
-`docs/stories/[EPIC]/security-reports/[STORY_ID]-security-review-[DATE].md`
-Always write the report, even if zero findings (audit trail).
-
-Return: Classification (CRITICAL | HIGH | CLEAN) + report path + severity count.
+Scope: staged diff (`git diff --staged`). Report: `docs/stories/[EPIC]/security-reports/[STORY_ID]-security-review-[DATE].md`
+(always written, even with zero findings — audit trail). Reply: digest (CLEAN | HIGH | CRITICAL).
 
 ---
 
 ## epic-security-review
 
-Launch `@nebu-kassandra` — same agent as `security-review`, epic scope is in the
-agent definition. Do NOT load `skills/nebu-agent-kassandra/SKILL.md` or its
-`references/*.md` files.
-
-Substitute:
-- `[EPIC_BASE]` → base commit SHA for `git diff [EPIC_BASE]..HEAD`
-- `[SEC_CONTEXT]` → epic context (stories covered, scope description)
-
-Report path: `_bmad-output/implementation-artifacts/epic-[N]-security-review-[DATE].md`
-Always write the report — this is a mandatory audit artifact.
-
-Return: Classification (CRITICAL | HIGH | CLEAN) + report path.
+Launch `@nebu-kassandra` (same agent) with: `EPIC_BASE` (base commit SHA for `git diff [EPIC_BASE]..HEAD`), `EPIC_ID`, `DATE`.
+Report: `_bmad-output/implementation-artifacts/epic-[N]-security-review-[DATE].md` — mandatory audit artifact.
+Reply: digest (CLEAN | HIGH | CRITICAL).
 
 ---
 
 ## arc42-update
 
 Read and follow [ARC42_SKILL_PATH].
-Story context:
-[ARC42_CONTEXT]
-Staged changes: [STAGED_FILES]
+Story: [STORY_FILE]. Context: `python3 skills/nebu-pipeline/scripts/extract_story_section.py --story [STORY_FILE] --sections "Story" "Dev Notes"`
+Staged changes: run `git diff --staged --name-only`.
 
 Perform a delta update of the arc42 documentation.
 Update only the sections affected by this story. No full rewrites.
-Finish after the update.
+Finish after the update. Reply with ONE line: `DONE sections=<list of updated sections>`.

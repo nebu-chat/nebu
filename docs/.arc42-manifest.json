@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-13T12:06:34Z",
+  "generated_at": "2026-11-02T13:41:13Z",
   "generator": "bmad-maintain-arc42 skill (delta update for the phase-2 gate-closing stories of epic oauth-broker: Nebu.Web.ClientIP / trusted proxy CIDRs, consent step, refresh lease, revoke_client cascade, admin re-auth + BrowserPost, per-device legacy logout, Nebu.Web.Unrecognized, config cache (ADR-020 exception), signing key rotation; 05 building blocks, 06 runtime views, 07 deployment (preconditions table, manual verification before activation, topology), 08 concepts, 11 risks (accepted / deferred, gate (s) re-scoped); ADR-033 Phase 2 summary; docs only, oauth_enabled stays false)",
   "source_artifacts": [
     "_bmad-output/planning-artifacts/architecture.md",
@@ -94,7 +94,7 @@
     },
     "docs/architecture/02-constraints.md": {
       "editable": false,
-      "generated_at": "2026-09-01T07:13:16Z",
+      "generated_at": "2026-11-02T13:41:13Z",
       "source": "_bmad-output/planning-artifacts/architecture.md",
       "arc42_section": "02 Architecture Constraints"
     },
@@ -106,7 +106,7 @@
     },
     "docs/architecture/04-solution-strategy.md": {
       "editable": false,
-      "generated_at": "2026-09-01T07:13:16Z",
+      "generated_at": "2026-11-02T13:41:13Z",
       "source": "_bmad-output/planning-artifacts/architecture.md",
       "arc42_section": "04 Solution Strategy"
     },
@@ -160,55 +160,55 @@
     },
     "docs/architecture/adr/ADR-001-elixir-otp.md": {
       "editable": false,
-      "generated_at": "2026-09-01T07:13:16Z",
+      "generated_at": "2026-11-02T13:41:13Z",
       "source": "_bmad-output/planning-artifacts/architecture.md",
       "arc42_section": "ADR-001"
     },
     "docs/architecture/adr/ADR-002-no-redis-nats.md": {
       "editable": false,
-      "generated_at": "2026-09-01T07:13:16Z",
+      "generated_at": "2026-11-02T13:41:13Z",
       "source": "_bmad-output/planning-artifacts/architecture.md",
       "arc42_section": "ADR-002"
     },
     "docs/architecture/adr/ADR-003-content-hash-event-id.md": {
       "editable": false,
-      "generated_at": "2026-09-01T07:13:16Z",
+      "generated_at": "2026-11-02T13:41:13Z",
       "source": "_bmad-output/planning-artifacts/architecture.md",
       "arc42_section": "ADR-003"
     },
     "docs/architecture/adr/ADR-004-horde-registry.md": {
       "editable": false,
-      "generated_at": "2026-09-01T07:13:16Z",
+      "generated_at": "2026-11-02T13:41:13Z",
       "source": "_bmad-output/planning-artifacts/architecture.md",
       "arc42_section": "ADR-004"
     },
     "docs/architecture/adr/ADR-005-grpc-eventbus.md": {
       "editable": false,
-      "generated_at": "2026-09-01T07:13:16Z",
+      "generated_at": "2026-11-02T13:41:13Z",
       "source": "_bmad-output/planning-artifacts/architecture.md",
       "arc42_section": "ADR-005"
     },
     "docs/architecture/adr/ADR-006-message-buffer-drain.md": {
       "editable": false,
-      "generated_at": "2026-09-01T07:13:16Z",
+      "generated_at": "2026-11-02T13:41:13Z",
       "source": "_bmad-output/planning-artifacts/architecture.md",
       "arc42_section": "ADR-006"
     },
     "docs/architecture/adr/ADR-007-ed25519-x25519-keypairs.md": {
       "editable": false,
-      "generated_at": "2026-09-01T07:13:16Z",
+      "generated_at": "2026-11-02T13:41:13Z",
       "source": "_bmad-output/planning-artifacts/architecture.md",
       "arc42_section": "ADR-007"
     },
     "docs/architecture/adr/ADR-008-node-registration-psk.md": {
       "editable": false,
-      "generated_at": "2026-09-01T07:13:16Z",
+      "generated_at": "2026-11-02T13:41:13Z",
       "source": "_bmad-output/planning-artifacts/architecture.md",
       "arc42_section": "ADR-008"
     },
     "docs/architecture/adr/ADR-009-openapi-spec-first.md": {
       "editable": false,
-      "generated_at": "2026-09-01T07:13:16Z",
+      "generated_at": "2026-11-02T13:41:13Z",
       "source": "_bmad-output/planning-artifacts/architecture.md",
       "arc42_section": "ADR-009"
     },
@@ -244,7 +244,7 @@
     },
     "docs/roadmap.md": {
       "editable": false,
-      "generated_at": "2026-09-01T07:13:16Z",
+      "generated_at": "2026-11-02T13:41:13Z",
       "source": "_bmad-output/planning-artifacts/epics.md",
       "arc42_section": "Roadmap"
     }

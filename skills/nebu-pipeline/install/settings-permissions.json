@@ -1,0 +1,11 @@
+{
+  "_comment": "Pfade, die kein Agent lesen soll (generiert/riesig/Abhaengigkeiten). Additiv per install_claude_files.py in .claude/settings.json permissions.deny gemergt; vorhandene Regeln bleiben. Rueckgaengig: Eintraege entfernen. server/deps und .claude/worktrees sind bewusst NICHT gesperrt (Dependency-Quellen, aktive Worktrees).",
+  "permissions": {
+    "deny": [
+      "Read(**/node_modules/**)",
+      "Read(/server/_build/**)",
+      "Read(**/package-lock.json)",
+      "Read(/.playwright-mcp/**)"
+    ]
+  }
+}

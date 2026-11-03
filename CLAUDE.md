@@ -32,6 +32,14 @@ make test-integration      # full stack + Gherkin E2E tests
 
 **Nach Code-Commits immer `make redeploy`** — `make build-server` baut kein Docker-Image.
 
+## Commits
+
+Commits sollen wenn möglich signiert sein (SSH-Signatur). Dafür den Command
+`/commits "<Commit-Nachricht>"` nutzen (`.claude/commands/commits.md`, führt `git commit -S -m` aus)
+oder bei manuellen Commits `git commit -S` verwenden. Nie `--no-gpg-sign` und keine
+Signing-Config ändern. Schlägt das Signieren fehl, nicht ungesignt weiter-committen,
+sondern den Fehler melden.
+
 ## Named Epic Convention
 
 Stories: `docs/stories/<epic-name>/<story-slug>.md`

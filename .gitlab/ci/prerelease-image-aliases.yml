@@ -1,0 +1,38 @@
+# Included from .gitlab-ci.yml with the SAME include rule as the DevGuard components (main only).
+# This is deliberate: GitLab validates needs: statically against the merged config, and devguard:* jobs only exist where
+# their include rule matches. Defining these jobs in the main file made every non-main pipeline fail with
+# "undefined need: devguard:generate_tag". Defined here, they exist exactly where the jobs they need exist.
+
+# ─── Pre-release Image Builds (main branch) ───────────────────────────────
+# Preview images on every commit to the `main` branch.
+# Tags: dev-<CI_PIPELINE_ID> (immutable per run) + dev-latest (mutable pointer).
+# These images reflect development state and are NOT intended for production.
+#
+# The image itself is built, scanned, pushed, signed and attested by the DevGuard components (first `include:` at the end of this
+# file), as <CI_REGISTRY_IMAGE>/nebu-server:main-amd64. This job only adds the dev-* tags as aliases of that exact digest, so the
+# SARIF / SBOM / SLSA / source-provenance attestations (stored per digest) apply to dev-latest and dev-<pipeline> too.
+# There is deliberately NO separate Kaniko build of the dev-* tags: a rebuild would be a different digest without attestations.
+# It needs devguard:attest, so a dev-* tag is only moved once the attestations exist.
+prerelease-version-tag:
+  stage: attestation
+  interruptible: false
+  image:
+    name: registry.gitlab.com/l3montree/devguard/osscontainertools-kaniko-crane:kaniko-v1.27.3-devguard-scanner-v1.3.1@sha256:2966ade3c7d565ae56c48cfa50d5df6e36a5371f4173606eb4de57558186433d
+    entrypoint: [""]
+  needs:
+    - devguard:generate_tag
+    - devguard:build_oci_image # its dotenv makes IMAGE_TAG "<tag>@<digest>": the aliases are pinned to the attested digest
+    - devguard:attest
+    - source-provenance-upload
+  # No `dependencies:` here on purpose: GitLab validates it statically against the config, and the DevGuard includes are
+  # only part of the config on main (include rules), so it fails with "undefined dependency" on every other pipeline.
+  # `needs:` already downloads the artifacts (incl. the dotenv with IMAGE_TAG) and is only checked for jobs that exist.
+  variables:
+    GIT_STRATEGY: none
+  script:
+    - /crane auth login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+    - /crane tag "$IMAGE_TAG" "dev-${CI_PIPELINE_ID}"
+    - /crane tag "$IMAGE_TAG" "dev-latest"
+    - echo "Tagged dev-${CI_PIPELINE_ID} and dev-latest -> $IMAGE_TAG"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'

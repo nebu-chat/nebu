@@ -531,12 +531,12 @@ defmodule Nebu.Media.StoragePinnedTargetTest do
 
       Application.put_env(:nebu_http, :media_storage_env_reader, fn ->
         %{
-          "NEBU_MINIO_ENDPOINT" => "#{@host}:#{a.port}",
-          "NEBU_MINIO_BUCKET" => "pinned-bucket",
+          "NEBU_MEDIA_STORAGE_ENDPOINT" => "#{@host}:#{a.port}",
+          "NEBU_MEDIA_STORAGE_BUCKET" => "pinned-bucket",
           "NEBU_S3_REGION" => "us-east-1",
-          "NEBU_MINIO_USE_SSL" => "false",
-          "NEBU_MINIO_ACCESS_KEY" => "STOREDACCESSKEY",
-          "NEBU_MINIO_SECRET_KEY" => "stored-secret-key"
+          "NEBU_MEDIA_STORAGE_USE_SSL" => "false",
+          "NEBU_MEDIA_STORAGE_ACCESS_KEY" => "STOREDACCESSKEY",
+          "NEBU_MEDIA_STORAGE_SECRET_KEY" => "stored-secret-key"
         }
       end)
 
@@ -555,12 +555,12 @@ defmodule Nebu.Media.StoragePinnedTargetTest do
 
       Application.put_env(:nebu_http, :media_storage_env_reader, fn ->
         %{
-          "NEBU_MINIO_ENDPOINT" => "stored.pinned.test:9000",
-          "NEBU_MINIO_BUCKET" => "pinned-bucket",
+          "NEBU_MEDIA_STORAGE_ENDPOINT" => "stored.pinned.test:9000",
+          "NEBU_MEDIA_STORAGE_BUCKET" => "pinned-bucket",
           "NEBU_S3_REGION" => "us-east-1",
-          "NEBU_MINIO_USE_SSL" => "false",
-          "NEBU_MINIO_ACCESS_KEY" => "STOREDACCESSKEY",
-          "NEBU_MINIO_SECRET_KEY" => "stored-secret-key"
+          "NEBU_MEDIA_STORAGE_USE_SSL" => "false",
+          "NEBU_MEDIA_STORAGE_ACCESS_KEY" => "STOREDACCESSKEY",
+          "NEBU_MEDIA_STORAGE_SECRET_KEY" => "stored-secret-key"
         }
       end)
 

@@ -9,7 +9,7 @@
 # Matrix + media + admin). There is no separate gateway/media image.
 # For local kind dev workflows: keep "dev" (matches what `make build-server` produces).
 # For release builds: use the SemVer tag without the 'v' prefix (e.g. "1.0.0" for
-# Git tag v1.0.0), produced by the CI release pipeline (release-server-image job).
+# Git tag v1.0.0), produced by the CI release pipeline (DevGuard release instance + release-version-tag job).
 server_image_tag = "dev"
 
 # namespace   = "nebu"                   # default: nebu

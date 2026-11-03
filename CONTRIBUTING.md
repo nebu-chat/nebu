@@ -307,6 +307,19 @@ direct, focus on the work.
 
 ---
 
+## Procedures, Roles and Compliance
+
+The development, test, configuration and asset procedures, the maintainer
+roles and the review schedule are described in
+[`docs/compliance/verfahren-und-zustaendigkeiten.md`](docs/compliance/verfahren-und-zustaendigkeiten.md).
+Everyone who contributes should read it once; maintainers are onboarded with
+it. Areas and their owners are listed in [`CODEOWNERS`](CODEOWNERS): owners
+are requested as reviewers automatically, so changes to these procedures reach
+the responsible people through the merge request itself. Procedure changes are
+announced in [`CHANGELOG.md`](CHANGELOG.md).
+
+---
+
 ## Questions?
 
 Open an issue with the `question` label — that is the canonical place to

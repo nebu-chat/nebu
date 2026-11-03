@@ -9,7 +9,7 @@ Usage:
   python3 classify_story.py --story PATH
 
 Output (JSON to stdout):
-  {"matrix": true|false, "ui": true|false, "security_review": "required|optional|not-needed"}
+  {"matrix": bool, "ui": bool, "infra": bool, "security_review": "required|optional|not-needed"}
 
 The script reads the story frontmatter for security_review. If missing, it
 runs `git diff --staged --name-only` and checks for security-critical paths.
@@ -26,14 +26,10 @@ MATRIX_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 
-SECURITY_PATHS = [
-    "gateway/internal/auth/",
-    "gateway/internal/middleware/",
-    "gateway/internal/admin/",
-    "gateway/internal/db/",
-    "core/apps/signature/",
-    "core/apps/permissions/",
-]
+# Elixir layout (the Go paths gateway/… and core/apps/… no longer exist). One list for classify_story and sec_prescan.
+import os as _os
+sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+from sec_prescan import SECURITY_PATH_PATTERNS  # noqa: E402
 
 
 def read_story(path):
@@ -73,15 +69,11 @@ def classify_security(frontmatter, staged_files):
     if value in ("required", "optional", "not-needed"):
         return value
 
-    # Auto-classify from staged files
+    # Auto-classify from staged files (only meaningful after dev; at Step 1c nothing is staged yet — Step 7 re-checks)
     for f in staged_files:
-        for path in SECURITY_PATHS:
-            if f.startswith(path):
+        for pat in SECURITY_PATH_PATTERNS:
+            if re.search(pat, f):
                 return "required"
-        if re.search(r"gateway/migrations/", f):
-            return "required"
-        if re.search(r"gateway/cmd/gateway/main\.go", f):
-            return "required"
 
     return "not-needed"
 
@@ -98,6 +90,7 @@ def main():
     result = {
         "matrix": bool(MATRIX_PATTERNS.search(content)),
         "ui": frontmatter.get("ui", "").lower() == "true",
+        "infra": frontmatter.get("infra", "").lower() == "true",
         "security_review": classify_security(frontmatter, staged),
     }
 
