@@ -147,7 +147,7 @@ defmodule Nebu.Media.StorageAdminTargetSupport do
     put_env_scoped(:nebu_http, :media_storage_config_loader, fn -> row end)
   end
 
-  @doc "Installs the string-keyed map standing in for the `NEBU_MINIO_*` / `NEBU_S3_REGION` OS env vars."
+  @doc "Installs the string-keyed map standing in for the `NEBU_MEDIA_STORAGE_*` / `NEBU_S3_REGION` OS env vars."
   def install_env(env) when is_map(env) do
     put_env_scoped(:nebu_http, :media_storage_env_reader, fn -> env end)
   end

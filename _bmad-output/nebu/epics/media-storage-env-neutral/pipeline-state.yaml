@@ -1,0 +1,21 @@
+# Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents.
+# Do not edit manually during an active pipeline run.
+# last_updated: 2026-11-02
+# [neutral-media-storage-env-names] 2026-11-02T16:04Z committed ✓ (ATDD+1 fix cycle+Code CLEAN+Kassandra CLEAN)
+# [neutral-media-storage-env-names] 2026-11-02T16:04Z arc42-update → skipped (docs already updated in-story: 07-deployment, ADR-013 amendment, CHANGELOG; maintain-arc42 regenerates from planning artifacts which are unchanged)
+# [neutral-media-storage-env-names] 2026-11-02T16:03Z security-review → Kassandra CLEAN (1 LOW advisory: unmigrated deployments silently fall back to http://minio:9000 with empty credentials; follow-up: boot warning when legacy NEBU_MINIO_* names are set)
+# [neutral-media-storage-env-names] 2026-11-02T16:02Z code-review → CLEAN (cycle 1); final integration gate SKIPPED (no docker in sandbox, CI is the gate)
+# [neutral-media-storage-env-names] 2026-11-02T16:01Z code-review → 4 MINOR (doc wording only) → cycle 1
+# [neutral-media-storage-env-names] 2026-11-02T16:00Z code-review prescan → MAJOR (comment edit in shipped migration 000037) reverted by coordinator (brief had allowed it); re-scan CLEAN
+# [neutral-media-storage-env-names] 2026-11-02T15:59Z ci-gate → LIMITED: compile --warnings-as-errors OK, 6/6 story tests OK (--no-start); every other storage test fails only with 'stub did not start' (port binding) / no Postgres in sandbox; full unit + integration suite is deferred to CI
+# [neutral-media-storage-env-names] 2026-11-02T15:49Z test-review → CLEAN (0 MAJOR, 0 MINOR)
+# [neutral-media-storage-env-names] 2026-11-02T15:49Z atdd → 6 red tests (5 scenarios); atdd_verify MAJOR was environmental (mix test boots app: no ports/DB in sandbox); verified manually with --no-start: 0/6 pass, assertion failures on new names
+# [neutral-media-storage-env-names] 2026-11-02T15:47Z classify → matrix=false ui=false infra=false security_review=required; baseline-integration → SKIPPED (no docker/ports/postgres in this sandbox; CI is the gate)
+# [neutral-media-storage-env-names] 2026-11-02T15:47Z create-story → neutral-media-storage-env-names.md (REQ-2026-001)
+# [pending] 2026-11-02T15:46Z pipeline started (media-storage-env-neutral, hard break NEBU_MINIO_* -> NEBU_MEDIA_STORAGE_*)
+story: null
+current_step: null
+completed: []
+cycle_count: 0
+blocked_reason: null
+last_updated: "2026-11-02T16:04Z"

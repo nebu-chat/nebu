@@ -50,19 +50,12 @@ Pass `--epic <name>` to all `nebu-pipeline` sub-agent invocations so they resolv
 ## Step 0: Discover Pending Stories
 
 ```bash
-find $STORY_DIR -name "*.md" 2>/dev/null | sort
+python3 skills/nebu-pipeline/scripts/epic_status.py --epic <name>      # legacy numbered epic: --legacy <N>
 ```
+Prints `STORIES: total=N done=N open=N`, `OPEN: slug, slug, …` (in file order), `NEXT`, `COMPLETE`, `BASE`. Stories with status `done`/`superseded` are finished; every other status
+(`ready-for-dev`, `in-progress`, `review`) is pending; files without a `status:` (reports, notes) are ignored. No `find`/`grep` loop needed.
 
-For each file, check its status:
-```bash
-grep "^Status:" [STORY_FILE]
-```
-
-- `Status: done` → skip (already committed)
-- `Status: ready-for-dev` or `Status: in-progress` or no status → pending
-- `Status: review` → treat as in-progress (pipeline will resume)
-
-Show the pending list with index and title (H1 line of each file):
+Show the pending list with index and title (`title:` of the story frontmatter):
 ```
 Pending stories for epic [EPIC_ID]:
   1. [STORY_FILE] — [H1 title]
@@ -83,7 +76,7 @@ For each pending story in order:
 
 Print: `▶ [[INDEX]/[TOTAL]] Story [STORY_ID] starting — isolated sub-agent`
 
-Spawn a sub-agent with this prompt (no other context from previous stories):
+Spawn a sub-agent (`model: sonnet` — it only orchestrates) with this prompt (no other context from previous stories):
 
 ```
 Read and follow skills/nebu-pipeline/SKILL.md.
@@ -103,10 +96,11 @@ Skip Step 1 (create-story) — the story is already written.
 [  TRACEABILITY_MATRIX = _bmad-output/nebu/epics/[EPIC_ID]/traceability-matrix.yaml]
 [IF LEGACY EPIC: omit the path configuration block — use legacy default paths]
 
-Run all pipeline steps: 1c → 1b → 2 → 3 → 4 → 5 → 5b → 6 → 7 → 8 → 9.
-For each step, use select_pipeline_step.py and extract_story_section.py as defined in the pipeline.
+Run all pipeline steps: 1c → 1b → 1d → 2 → 3 → 4 → 5 → 5b → 6 → 6b → 7 → 8 → 9 (see the Tuning table in SKILL.md for the cycle and gate defaults).
+Read each step's file (skills/nebu-pipeline/steps/<file>.md, see the step table in SKILL.md) right before you run it. Launch agents with file paths only
+(never paste story text or reports); they answer with a 4-line digest and write reports to $STEP_RESULTS_DIR/[STORY_ID]/.
 
-Cycle behavior (code-review MINOR findings): auto-cycle back to dev-story without asking.
+Cycle behavior (code-review MINOR findings): auto-cycle back to dev-story without asking, at most MAX_AUTO_MINOR_CYCLES times; leftover MINORs are deferred (deferred-minor.md), not looped.
 Stop and surface to user only for:
   - MAJOR or CRITICAL code-review findings (user chooses fix/accept/stop)
   - CRITICAL security-review findings
@@ -159,23 +153,17 @@ After all stories are done:
 
 ### SEC Gate 2 — Mandatory Epic Security Review
 
-Determine the epic base commit:
-- **Named epic:** look for the feature branch start commit or the first story commit:
-  ```bash
-  rtk git log --oneline docs/stories/[EPIC_ID]/ | tail -1
-  ```
-  Or ask: "Epic base commit SHA or tag for `git diff [BASE]..HEAD`?"
-- **Legacy numbered epic:**
-  ```bash
-  rtk git log --grep="epic-[N-1]-retrospective\|retrospektive\|epic-[N-1]" --oneline | head -3
-  ```
+The epic base commit is `BASE` of `epic_status.py` (named epic: parent of the first commit that added a story file; legacy: the previous epic's retrospective commit).
+`BASE: unclear` → ask: "Epic base commit SHA or tag for `git diff [BASE]..HEAD`?"
 
 Spawn `@nebu-kassandra` sub-agent (model: opus, fresh context) — the epic-review
 scope is inlined in the agent definition `.claude/agents/nebu-kassandra.md`.
 Do NOT load `skills/nebu-agent-kassandra/SKILL.md` or its `references/*.md` files.
 
-Substitute `[EPIC_BASE]` → base commit SHA, `[SEC_CONTEXT]` → epic context
-(stories covered, scope description), `{N}` → epic number.
+Launch message (nothing else): `EPIC_BASE: <base commit SHA>`, `EPIC_ID: {N}`, `DATE: <YYYY-MM-DD>`. She writes the audit report herself and
+replies with a 4-line digest (`VERDICT: CLEAN | HIGH | CRITICAL`, `COUNTS`, `REPORT`, `TOP`).
+
+Evaluate with `pipeline_gates.py decide --step epic-security --story [EPIC_ID] --digest - <<'EOF' … EOF` (digest lines verbatim; `ACTION: ASK_USER` ⇒ the block below, `NEXT` ⇒ clean).
 
 **If CRITICAL or HIGH:**
 ```

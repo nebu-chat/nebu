@@ -1071,7 +1071,7 @@ server/lib/nebu/
 │   │                   two gained DB-override support via migration 000037, story
 │   │                   bugfix-add-sts-iam-endpoints-to-admin-ui — previously env-only).
 │   │                   Per-field precedence: DB value (if
-│   │                   saved) > `NEBU_MINIO_*`/`NEBU_S3_REGION` env-var fallback (preserving the
+│   │                   saved) > `NEBU_MEDIA_STORAGE_*`/`NEBU_S3_REGION` env-var fallback (preserving the
 │   │                   pre-existing boot-time `_FILE`-then-plain Docker-secret precedence from
 │   │                   `server/config/runtime.exs`) > compiled default. `access_key`/`secret_key` are
 │   │                   encrypted at rest via `Nebu.Web.SecretBox` (AES-256-GCM, key =

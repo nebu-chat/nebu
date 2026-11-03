@@ -1,0 +1,17 @@
+feat(media)!: neutral NEBU_MEDIA_STORAGE_* names for the object store variables
+
+BREAKING: NEBU_MINIO_* (ENDPOINT, BUCKET, ARCHIVE_BUCKET, USE_SSL, ACCESS_KEY[_FILE],
+SECRET_KEY[_FILE], IAM_ENDPOINT, STS_ENDPOINT) and NEBU_TEST_MINIO_ENDPOINT are renamed
+to NEBU_MEDIA_STORAGE_* / NEBU_TEST_MEDIA_STORAGE_ENDPOINT. No fallback: the old names are
+silently ignored, so a deployment that still sets them boots with the defaults
+(minio:9000, empty credentials). See the CHANGELOG entry for the full mapping.
+
+Updated in the same change: runtime.exs, storage_config/storage/media settings texts,
+tests, docker-compose.yml, the UpCloud and StackIT deployment examples, docs.
+Compose service name `minio` and the minio_* secret file names are kept.
+
+Not run locally (no Postgres / ports in the sandbox): the DB-dependent storage tests and the
+integration suite; CI is the gate. Follow-up: boot warning when legacy names are set.
+
+Pipeline: ATDD, 1 fix cycle, Code CLEAN, Kassandra CLEAN.
+Refs: REQ-2026-001

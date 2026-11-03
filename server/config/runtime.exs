@@ -147,7 +147,7 @@ if config_env() in [:prod, :dev] do
 end
 
 # ─── media-gateway-migration: S3/MinIO storage for the Elixir media gateway ──
-# Nebu.Media.Storage uses ExAws.S3 against MinIO or a real S3 endpoint. The NEBU_MINIO_*
+# Nebu.Media.Storage uses ExAws.S3 against MinIO or a real S3 endpoint. The NEBU_MEDIA_STORAGE_*
 # vars below are the boot-time default target (there is no NEBU_STORAGE_BACKEND switch);
 # a target saved under /admin/media/settings takes precedence and is resolved per request
 # by Nebu.Media.StorageConfig, so it needs no restart.
@@ -156,32 +156,32 @@ end
 # in prod/dev — unit tests inject a fake storage boundary and never touch ExAws.
 if config_env() in [:prod, :dev] do
   minio_access_key =
-    case System.get_env("NEBU_MINIO_ACCESS_KEY_FILE") do
-      nil -> System.get_env("NEBU_MINIO_ACCESS_KEY", "")
+    case System.get_env("NEBU_MEDIA_STORAGE_ACCESS_KEY_FILE") do
+      nil -> System.get_env("NEBU_MEDIA_STORAGE_ACCESS_KEY", "")
       path -> path |> File.read!() |> String.trim()
     end
 
   minio_secret_key =
-    case System.get_env("NEBU_MINIO_SECRET_KEY_FILE") do
-      nil -> System.get_env("NEBU_MINIO_SECRET_KEY", "")
+    case System.get_env("NEBU_MEDIA_STORAGE_SECRET_KEY_FILE") do
+      nil -> System.get_env("NEBU_MEDIA_STORAGE_SECRET_KEY", "")
       path -> path |> File.read!() |> String.trim()
     end
 
   # Unset keeps the default. Set but empty (or only whitespace) is a misconfiguration that would otherwise boot with a
   # host-less endpoint and fail every media operation: abort the boot instead.
   minio_endpoint =
-    case System.get_env("NEBU_MINIO_ENDPOINT") do
+    case System.get_env("NEBU_MEDIA_STORAGE_ENDPOINT") do
       nil ->
         "minio:9000"
 
       value ->
         case String.trim(value) do
-          "" -> raise "NEBU_MINIO_ENDPOINT is set but empty; set host[:port] or leave it unset (default minio:9000)"
+          "" -> raise "NEBU_MEDIA_STORAGE_ENDPOINT is set but empty; set host[:port] or leave it unset (default minio:9000)"
           endpoint -> endpoint
         end
     end
 
-  use_ssl? = System.get_env("NEBU_MINIO_USE_SSL", "false") == "true"
+  use_ssl? = System.get_env("NEBU_MEDIA_STORAGE_USE_SSL", "false") == "true"
 
   {host, port} =
     case String.split(minio_endpoint, ":", parts: 2) do
@@ -190,20 +190,20 @@ if config_env() in [:prod, :dev] do
     end
 
   # Nothing in lib/ reads this key any more: Nebu.Media.Storage takes the bucket from
-  # Nebu.Media.StorageConfig.request_target/0 (saved > NEBU_MINIO_BUCKET > "nebu-media"). Kept for the boot-time
+  # Nebu.Media.StorageConfig.request_target/0 (saved > NEBU_MEDIA_STORAGE_BUCKET > "nebu-media"). Kept for the boot-time
   # config contract (runtime_storage_endpoint_test); do not wire a new consumer to it, resolve through StorageConfig.
-  config :nebu_http, media_bucket: System.get_env("NEBU_MINIO_BUCKET", "nebu-media")
+  config :nebu_http, media_bucket: System.get_env("NEBU_MEDIA_STORAGE_BUCKET", "nebu-media")
 
   # media-security-admin-control/8c-media-archive-worker (AC1): the boot-time
   # archive-bucket name, the fallback Nebu.Media.Storage.archive_bucket/0 uses
   # when no archive bucket is saved under /admin/media/settings. Same MinIO/S3
   # connection as the primary bucket, just a different bucket name.
   config :nebu_http,
-    media_archive_bucket: System.get_env("NEBU_MINIO_ARCHIVE_BUCKET", "nebu-media-archive")
+    media_archive_bucket: System.get_env("NEBU_MEDIA_STORAGE_ARCHIVE_BUCKET", "nebu-media-archive")
 
   # bugfix-upcloud-s3-iam-sts-endpoints (AC2): UpCloud Managed Object Storage
   # exposes separate IAM/STS endpoint URLs alongside the public S3 endpoint
-  # (NEBU_MINIO_ENDPOINT above) — plumbed through as-is (no default, nil when
+  # (NEBU_MEDIA_STORAGE_ENDPOINT above) — plumbed through as-is (no default, nil when
   # unset) so the S3 driver config carries them for providers that need them.
   # Unrelated/unused by MinIO and other S3-compatible backends that don't set
   # these vars. Mirrors Nebu.Media.StorageConfig's own env resolution of the
@@ -227,8 +227,8 @@ if config_env() in [:prod, :dev] do
   # of reading these Application.get_env keys directly — do not wire a new
   # consumer to them.
   config :nebu_http,
-    media_iam_endpoint: normalize_optional_env.(System.get_env("NEBU_MINIO_IAM_ENDPOINT")),
-    media_sts_endpoint: normalize_optional_env.(System.get_env("NEBU_MINIO_STS_ENDPOINT"))
+    media_iam_endpoint: normalize_optional_env.(System.get_env("NEBU_MEDIA_STORAGE_IAM_ENDPOINT")),
+    media_sts_endpoint: normalize_optional_env.(System.get_env("NEBU_MEDIA_STORAGE_STS_ENDPOINT"))
 
   # Opt-in: let the admin-configured storage endpoints (endpoint/iam_endpoint/
   # sts_endpoint) resolve to private addresses (RFC1918, CGNAT, IPv6 ULA).
@@ -259,7 +259,7 @@ end
 # NEBU_CLAMAV_HOST/NEBU_CLAMAV_PORT let operators point at a real clamd;
 # defaults match the dev-stack's Docker Compose service name ("clamav" on the
 # default network, port 3310) — the same "env var defaults to the compose
-# service name" pattern used for NEBU_MINIO_ENDPOINT above. Only wired in
+# service name" pattern used for NEBU_MEDIA_STORAGE_ENDPOINT above. Only wired in
 # prod/dev — unit tests configure Nebu.Media.ClamAV directly (per-test, via
 # Application.put_env) against a fake clamd and never touch this block
 # (config/test.exs also disables the Application-supervised instance,

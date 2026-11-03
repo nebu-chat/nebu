@@ -964,13 +964,13 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
       end
     end
 
-    test "a fresh/empty storage config pre-fills endpoint/bucket/region from NEBU_MINIO_* env vars" do
+    test "a fresh/empty storage config pre-fills endpoint/bucket/region from NEBU_MEDIA_STORAGE_* env vars" do
       Application.put_env(:nebu_http, :media_storage_config_loader, fn -> nil end)
 
       Application.put_env(:nebu_http, :media_storage_env_reader, fn ->
         %{
-          "NEBU_MINIO_ENDPOINT" => "env-minio:9000",
-          "NEBU_MINIO_BUCKET" => "env-bucket",
+          "NEBU_MEDIA_STORAGE_ENDPOINT" => "env-minio:9000",
+          "NEBU_MEDIA_STORAGE_BUCKET" => "env-bucket",
           "NEBU_S3_REGION" => "env-region-1"
         }
       end)
@@ -988,7 +988,7 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
             {"region", "env-region-1"}
           ] do
         assert field_rendered_with_value?(body, field, value),
-               "expected #{field} to fall back to its NEBU_MINIO_*/NEBU_S3_REGION env var " <>
+               "expected #{field} to fall back to its NEBU_MEDIA_STORAGE_*/NEBU_S3_REGION env var " <>
                  "#{inspect(value)} when no media_storage_config row exists yet, body: #{body}"
       end
     end
@@ -1008,8 +1008,8 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
 
       Application.put_env(:nebu_http, :media_storage_env_reader, fn ->
         %{
-          "NEBU_MINIO_ENDPOINT" => "should-be-ignored:9000",
-          "NEBU_MINIO_BUCKET" => "should-be-ignored-bucket",
+          "NEBU_MEDIA_STORAGE_ENDPOINT" => "should-be-ignored:9000",
+          "NEBU_MEDIA_STORAGE_BUCKET" => "should-be-ignored-bucket",
           "NEBU_S3_REGION" => "should-be-ignored-region"
         }
       end)
@@ -1859,8 +1859,8 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
 
       Application.put_env(:nebu_http, :media_storage_env_reader, fn ->
         %{
-          "NEBU_MINIO_IAM_ENDPOINT" => iam_env,
-          "NEBU_MINIO_STS_ENDPOINT" => sts_env
+          "NEBU_MEDIA_STORAGE_IAM_ENDPOINT" => iam_env,
+          "NEBU_MEDIA_STORAGE_STS_ENDPOINT" => sts_env
         }
       end)
 
@@ -1936,7 +1936,7 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
       Application.put_env(:nebu_http, :media_files_storage_key_count_fun, fn -> 0 end)
 
       Application.put_env(:nebu_http, :media_storage_env_reader, fn ->
-        %{"NEBU_MINIO_IAM_ENDPOINT" => env_iam}
+        %{"NEBU_MEDIA_STORAGE_IAM_ENDPOINT" => env_iam}
       end)
 
       Application.put_env(:nebu_http, :media_storage_config_writer, fn columns, set_at ->
@@ -1966,7 +1966,7 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
     end
 
     # code review (cycle 1 re-review, MINOR-2): companion fix bundled with
-    # MAJOR-N1 — `NEBU_MINIO_IAM_ENDPOINT`/`NEBU_MINIO_STS_ENDPOINT` set but
+    # MAJOR-N1 — `NEBU_MEDIA_STORAGE_IAM_ENDPOINT`/`NEBU_MEDIA_STORAGE_STS_ENDPOINT` set but
     # EMPTY (common when a Terraform/env template always defines the var,
     # just blank by default). The form pre-fills both inputs with "" (the
     # resolved value), and the admin leaves them untouched. Under the OLD
@@ -1977,14 +1977,14 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
     # never did. The fix: both sides normalize through `blank_to_nil/1`
     # before comparing, so submitted (nil) == baseline (nil) -> omit, exactly
     # like every other already-blank, untouched field.
-    test "MINOR-2: NEBU_MINIO_IAM_ENDPOINT/NEBU_MINIO_STS_ENDPOINT set but empty, on a fresh install, converges — no redundant write, no phantom audit entry" do
+    test "MINOR-2: NEBU_MEDIA_STORAGE_IAM_ENDPOINT/NEBU_MEDIA_STORAGE_STS_ENDPOINT set but empty, on a fresh install, converges — no redundant write, no phantom audit entry" do
       test_pid = self()
 
       Application.put_env(:nebu_http, :media_storage_config_loader, fn -> nil end)
       Application.put_env(:nebu_http, :media_files_storage_key_count_fun, fn -> 0 end)
 
       Application.put_env(:nebu_http, :media_storage_env_reader, fn ->
-        %{"NEBU_MINIO_IAM_ENDPOINT" => "", "NEBU_MINIO_STS_ENDPOINT" => ""}
+        %{"NEBU_MEDIA_STORAGE_IAM_ENDPOINT" => "", "NEBU_MEDIA_STORAGE_STS_ENDPOINT" => ""}
       end)
 
       Application.put_env(:nebu_http, :media_storage_config_writer, fn columns, set_at ->
@@ -2044,7 +2044,7 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
       Application.put_env(:nebu_http, :media_files_storage_key_count_fun, fn -> 0 end)
 
       Application.put_env(:nebu_http, :media_storage_env_reader, fn ->
-        %{"NEBU_MINIO_IAM_ENDPOINT" => env_iam}
+        %{"NEBU_MEDIA_STORAGE_IAM_ENDPOINT" => env_iam}
       end)
 
       Application.put_env(:nebu_http, :media_storage_config_writer, fn columns, set_at ->
@@ -2099,7 +2099,7 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
       Application.put_env(:nebu_http, :media_files_storage_key_count_fun, fn -> 0 end)
 
       Application.put_env(:nebu_http, :media_storage_env_reader, fn ->
-        %{"NEBU_MINIO_IAM_ENDPOINT" => env_iam}
+        %{"NEBU_MEDIA_STORAGE_IAM_ENDPOINT" => env_iam}
       end)
 
       Application.put_env(:nebu_http, :media_storage_config_writer, fn columns, set_at ->
@@ -2365,15 +2365,15 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
       test_pid = self()
 
       # Literal loopback IP (no DNS lookup needed) — simulates the shape of
-      # this project's own NEBU_MINIO_ENDPOINT: "minio:9000" docker-compose
-      # convention, if ever applied to NEBU_MINIO_IAM_ENDPOINT.
+      # this project's own NEBU_MEDIA_STORAGE_ENDPOINT: "minio:9000" docker-compose
+      # convention, if ever applied to NEBU_MEDIA_STORAGE_IAM_ENDPOINT.
       bad_env_iam = "https://127.0.0.1:9000/iam"
 
       Application.put_env(:nebu_http, :media_storage_config_loader, fn -> nil end)
       Application.put_env(:nebu_http, :media_files_storage_key_count_fun, fn -> 0 end)
 
       Application.put_env(:nebu_http, :media_storage_env_reader, fn ->
-        %{"NEBU_MINIO_IAM_ENDPOINT" => bad_env_iam}
+        %{"NEBU_MEDIA_STORAGE_IAM_ENDPOINT" => bad_env_iam}
       end)
 
       Application.put_env(:nebu_http, :media_storage_config_writer, fn columns, set_at ->
@@ -2614,8 +2614,8 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
 
       Application.put_env(:nebu_http, :media_storage_env_reader, fn ->
         %{
-          "NEBU_MINIO_IAM_ENDPOINT" => iam_url,
-          "NEBU_MINIO_STS_ENDPOINT" => sts_url
+          "NEBU_MEDIA_STORAGE_IAM_ENDPOINT" => iam_url,
+          "NEBU_MEDIA_STORAGE_STS_ENDPOINT" => sts_url
         }
       end)
 
@@ -2627,11 +2627,11 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
       body = conn.resp_body
 
       assert field_rendered_with_value?(body, "iam_endpoint", iam_url),
-             "expected iam_endpoint to pre-fill from NEBU_MINIO_IAM_ENDPOINT when no DB row " <>
+             "expected iam_endpoint to pre-fill from NEBU_MEDIA_STORAGE_IAM_ENDPOINT when no DB row " <>
                "exists, body: #{body}"
 
       assert field_rendered_with_value?(body, "sts_endpoint", sts_url),
-             "expected sts_endpoint to pre-fill from NEBU_MINIO_STS_ENDPOINT when no DB row " <>
+             "expected sts_endpoint to pre-fill from NEBU_MEDIA_STORAGE_STS_ENDPOINT when no DB row " <>
                "exists, body: #{body}"
     end
 
@@ -2645,8 +2645,8 @@ defmodule Nebu.Admin.MediaSettingsControllerTest do
 
       Application.put_env(:nebu_http, :media_storage_env_reader, fn ->
         %{
-          "NEBU_MINIO_IAM_ENDPOINT" => "https://should-be-ignored.example.com/iam",
-          "NEBU_MINIO_STS_ENDPOINT" => "https://should-be-ignored.example.com/sts"
+          "NEBU_MEDIA_STORAGE_IAM_ENDPOINT" => "https://should-be-ignored.example.com/iam",
+          "NEBU_MEDIA_STORAGE_STS_ENDPOINT" => "https://should-be-ignored.example.com/sts"
         }
       end)
 

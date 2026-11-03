@@ -6,7 +6,7 @@ defmodule Nebu.Media.MediaStorageCredentialBindingTest do
     * the effective endpoint comes from the saved row  =>  the credentials come from the saved row too. Row
       credentials NULL (either one) or undecryptable (corrupt ciphertext, wrong at-rest key)  =>  every
       `Nebu.Media.Storage` operation returns `{:error, :storage_credentials_missing}` and NO request is sent: the
-      `NEBU_MINIO_*` credentials never sign a request to the saved host;
+      `NEBU_MEDIA_STORAGE_*` credentials never sign a request to the saved host;
     * the saved row has NO endpoint (endpoint from env / default)  =>  row credentials win when present, else the env
       credentials (key rotation), but a row credential that cannot be decrypted is not replaced by the env ones either;
     * a decrypt failure is logged at most once per operation, without any secret or ciphertext.
@@ -35,11 +35,11 @@ defmodule Nebu.Media.MediaStorageCredentialBindingTest do
     saved = T.start_stub(tag: :saved)
 
     T.install_env(%{
-      "NEBU_MINIO_ENDPOINT" => T.endpoint(env_stub),
+      "NEBU_MEDIA_STORAGE_ENDPOINT" => T.endpoint(env_stub),
       "NEBU_S3_REGION" => "env-region-1",
-      "NEBU_MINIO_BUCKET" => "env-bucket",
-      "NEBU_MINIO_ACCESS_KEY" => @env_akid,
-      "NEBU_MINIO_SECRET_KEY" => @env_secret
+      "NEBU_MEDIA_STORAGE_BUCKET" => "env-bucket",
+      "NEBU_MEDIA_STORAGE_ACCESS_KEY" => @env_akid,
+      "NEBU_MEDIA_STORAGE_SECRET_KEY" => @env_secret
     })
 
     T.put_env_scoped(:nebu_http, :media_bucket, "env-bucket")
@@ -84,12 +84,12 @@ defmodule Nebu.Media.MediaStorageCredentialBindingTest do
       assert_all_fail_closed()
     end
 
-    test "the credential files of the environment (NEBU_MINIO_*_FILE) do not sign a request to the saved host either", %{saved: saved} do
+    test "the credential files of the environment (NEBU_MEDIA_STORAGE_*_FILE) do not sign a request to the saved host either", %{saved: saved} do
       T.install_row(T.saved_row(saved_attrs(saved)))
 
       T.install_env(%{
-        "NEBU_MINIO_ACCESS_KEY_FILE" => T.write_secret_file!(@env_akid),
-        "NEBU_MINIO_SECRET_KEY_FILE" => T.write_secret_file!(@env_secret)
+        "NEBU_MEDIA_STORAGE_ACCESS_KEY_FILE" => T.write_secret_file!(@env_akid),
+        "NEBU_MEDIA_STORAGE_SECRET_KEY_FILE" => T.write_secret_file!(@env_secret)
       })
 
       assert_all_fail_closed()

@@ -3,7 +3,7 @@ defmodule Nebu.Media.MediaStorageUploadCredentialsTest do
   An upload through the real router (`POST /_matrix/media/v3/upload`, real `Nebu.Media.Storage`) when the storage
   credentials cannot be used (story `media-storage-uses-admin-config`):
 
-  * an unreadable `NEBU_MINIO_*_FILE` credential file, an unreadable at-rest key file or undecryptable saved keys answer
+  * an unreadable `NEBU_MEDIA_STORAGE_*_FILE` credential file, an unreadable at-rest key file or undecryptable saved keys answer
     the existing 500 M_UNKNOWN "Failed to store media file": no crash, nothing sent, no file path in the response or in a
     log line;
   * looking up the object key prefix template for an upload reads no secret: nothing is decrypted and no
@@ -48,13 +48,13 @@ defmodule Nebu.Media.MediaStorageUploadCredentialsTest do
     refute log =~ @missing_path, "the file path must not be logged"
   end
 
-  test "an unreadable NEBU_MINIO_*_FILE credential file and no saved keys: the existing 500, no crash", %{env_stub: env_stub} do
+  test "an unreadable NEBU_MEDIA_STORAGE_*_FILE credential file and no saved keys: the existing 500, no crash", %{env_stub: env_stub} do
     T.install_row(nil)
 
     T.install_env(%{
-      "NEBU_MINIO_ENDPOINT" => T.endpoint(env_stub),
-      "NEBU_MINIO_ACCESS_KEY_FILE" => @missing_path,
-      "NEBU_MINIO_SECRET_KEY_FILE" => T.write_secret_file!("file-secret-1001")
+      "NEBU_MEDIA_STORAGE_ENDPOINT" => T.endpoint(env_stub),
+      "NEBU_MEDIA_STORAGE_ACCESS_KEY_FILE" => @missing_path,
+      "NEBU_MEDIA_STORAGE_SECRET_KEY_FILE" => T.write_secret_file!("file-secret-1001")
     })
 
     token = T.upload_setup!()
@@ -67,7 +67,7 @@ defmodule Nebu.Media.MediaStorageUploadCredentialsTest do
 
   test "a saved template with an unreadable credential file elsewhere: the same 500", %{env_stub: env_stub} do
     T.install_row(T.saved_row(%{s3_key_prefix_template: "{year}/{media_id}"}))
-    T.install_env(%{"NEBU_MINIO_ENDPOINT" => T.endpoint(env_stub), "NEBU_MINIO_SECRET_KEY_FILE" => @missing_path})
+    T.install_env(%{"NEBU_MEDIA_STORAGE_ENDPOINT" => T.endpoint(env_stub), "NEBU_MEDIA_STORAGE_SECRET_KEY_FILE" => @missing_path})
 
     token = T.upload_setup!()
     log = capture_log([level: :debug], fn -> send(self(), {:conn, T.post_upload(token)}) end)
@@ -79,7 +79,7 @@ defmodule Nebu.Media.MediaStorageUploadCredentialsTest do
 
   test "saved keys and an unreadable at-rest key file: the existing 500, no crash, no path in the log", %{env_stub: env_stub} do
     T.install_row(T.saved_row(%{access_key: "ROWAKID1001", secret_key: "row-secret-1001", s3_key_prefix_template: "{year}/{media_id}"}))
-    T.install_env(%{"NEBU_MINIO_ENDPOINT" => T.endpoint(env_stub)})
+    T.install_env(%{"NEBU_MEDIA_STORAGE_ENDPOINT" => T.endpoint(env_stub)})
 
     T.delete_env_scoped(:nebu_http, :admin_secret_at_rest)
     T.put_os_env_scoped("NEBU_INTERNAL_SECRET", nil)
@@ -100,7 +100,7 @@ defmodule Nebu.Media.MediaStorageUploadCredentialsTest do
       |> Map.put("secret_key_encrypted", T.corrupt_ciphertext())
     )
 
-    T.install_env(%{"NEBU_MINIO_ENDPOINT" => T.endpoint(env_stub), "NEBU_MINIO_ACCESS_KEY" => "ENVAKID1001", "NEBU_MINIO_SECRET_KEY" => "env-secret-1001"})
+    T.install_env(%{"NEBU_MEDIA_STORAGE_ENDPOINT" => T.endpoint(env_stub), "NEBU_MEDIA_STORAGE_ACCESS_KEY" => "ENVAKID1001", "NEBU_MEDIA_STORAGE_SECRET_KEY" => "env-secret-1001"})
 
     token = T.upload_setup!()
     log = capture_log([level: :debug], fn -> send(self(), {:conn, T.post_upload(token)}) end)

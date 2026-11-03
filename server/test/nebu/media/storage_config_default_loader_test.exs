@@ -23,7 +23,7 @@ defmodule Nebu.Media.StorageConfigDefaultLoaderTest do
     decoy = T.start_stub(tag: :decoy)
     T.decoy_boot_env!(decoy)
     # the env reader stays a seam so that the environment of the test host cannot matter; the LOADER is the real default
-    T.install_env(%{"NEBU_MINIO_ENDPOINT" => "127.0.0.1:#{decoy.port}", "NEBU_MINIO_ACCESS_KEY" => "ENVAKID1101", "NEBU_MINIO_SECRET_KEY" => "env-secret-1101"})
+    T.install_env(%{"NEBU_MEDIA_STORAGE_ENDPOINT" => "127.0.0.1:#{decoy.port}", "NEBU_MEDIA_STORAGE_ACCESS_KEY" => "ENVAKID1101", "NEBU_MEDIA_STORAGE_SECRET_KEY" => "env-secret-1101"})
     :ok
   end
 

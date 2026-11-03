@@ -109,13 +109,29 @@ CRITICAL: [N] | HIGH: [N] | MEDIUM: [N] | LOW: [N]
 **Epic security gate:** [PASS / BLOCKED — requires follow-up stories]
 ```
 
+## Working style (token discipline)
+
+- Issue independent reads/greps in ONE turn (parallel tool calls) — never one file per turn.
+- No narration between tool calls and no restating file contents: decide, act, continue.
+- Large files: the read-guard refuses Reads above ~40 KB without `limit`. Grep for the symbol, then Read with `offset`/`limit` (≤ 250 lines). Never `cat` logs — use `grep -n … | head -n 40` or `tail -n 40`.
+- Run tests only through `python3 skills/nebu-pipeline/scripts/test_digest.py -- <command>`.
+- Write reports with one heredoc; the final reply is only the digest.
+
 ## Pipeline Invocation
 
-Story context:
-[SEC_CONTEXT]
+Inputs (launch message, `KEY: value` lines): story review → `STORY_FILE`, `STORY_ID`, `DATE`, `EPIC`, `CANDIDATES_FILE`; epic review → `EPIC_BASE`, `EPIC_ID`, `DATE`.
+`CANDIDATES_FILE` (if a path): output of `sec_prescan.py` — grep-level candidates on the staged diff (file:line, category, CWE, why it matters). **Verify each candidate first** (read the code around it,
+decide exploitable or not, rate it) and list only real findings; dismissed candidates need no entry. Then review what a grep cannot see: authorisation logic and IDOR, business-logic flaws, trust boundaries, cross-request state.
+Do not search the diff from scratch for the patterns the prescan already covers (SQL/command injection, atom exhaustion, XSS, open redirect, SSRF, timing compare, secrets in logs, weak crypto, cookies, new routes, sensitive migrations).
+Story context: `python3 skills/nebu-pipeline/scripts/extract_story_section.py --story <STORY_FILE> --sections "Story" "Acceptance Criteria"`. If the launch message has `FULL_STORY: yes`, use `--all` instead of `--sections …` (context fallback).
 
-For epic review, substitute `[EPIC_BASE]` with the base commit SHA.
+Write the full report to the mandatory artifact path above (write it with Bash; never touch any other file). Reply with ONLY this digest:
 
-Return: Classification (CRITICAL | HIGH | CLEAN) + report path + severity count.
+```
+VERDICT: CLEAN | HIGH | CRITICAL        (highest open severity; MEDIUM/LOW only → CLEAN)
+COUNTS: critical=N high=N medium=N low=N
+REPORT: <report path>
+TOP: <up to 3 CRITICAL/HIGH titles separated by "; ", or "-">
+```
 
 After reviewing, update your agent memory with recurring vulnerability patterns observed.

@@ -6,7 +6,7 @@ defmodule Nebu.Media.MediaStorageBlankEndpointTest do
   existing 500 "Failed to store media file".
 
   A blank effective endpoint has three sources, all covered: a saved row with an empty / whitespace-only endpoint, an
-  empty `NEBU_MINIO_ENDPOINT` seen through the env reader, and a host-less `:9000`.
+  empty `NEBU_MEDIA_STORAGE_ENDPOINT` seen through the env reader, and a host-less `:9000`.
   """
   use ExUnit.Case, async: false
 
@@ -40,15 +40,15 @@ defmodule Nebu.Media.MediaStorageBlankEndpointTest do
     {"saved endpoint is the empty string", :row, ""},
     {"saved endpoint is whitespace only", :row, "   "},
     {"saved endpoint has a port but no host", :row, ":9000"},
-    {"no saved row and NEBU_MINIO_ENDPOINT is empty", :env, ""},
-    {"no saved row and NEBU_MINIO_ENDPOINT is whitespace only", :env, "  \t "}
+    {"no saved row and NEBU_MEDIA_STORAGE_ENDPOINT is empty", :env, ""},
+    {"no saved row and NEBU_MEDIA_STORAGE_ENDPOINT is whitespace only", :env, "  \t "}
   ]
 
   defp install(:row, endpoint), do: T.install_row(saved_blank(endpoint))
 
   defp install(:env, endpoint) do
     T.install_row(nil)
-    T.install_env(%{"NEBU_MINIO_ENDPOINT" => endpoint, "NEBU_MINIO_ACCESS_KEY" => "BLANKAKIDCANARY0003", "NEBU_MINIO_SECRET_KEY" => "blank-secret-canary-0003"})
+    T.install_env(%{"NEBU_MEDIA_STORAGE_ENDPOINT" => endpoint, "NEBU_MEDIA_STORAGE_ACCESS_KEY" => "BLANKAKIDCANARY0003", "NEBU_MEDIA_STORAGE_SECRET_KEY" => "blank-secret-canary-0003"})
   end
 
   defp assert_nothing_sent do
@@ -91,10 +91,10 @@ defmodule Nebu.Media.MediaStorageBlankEndpointTest do
       assert_nothing_sent()
     end
 
-    test "an empty NEBU_MINIO_ENDPOINT does not hide a saved endpoint: the saved row wins and works" do
+    test "an empty NEBU_MEDIA_STORAGE_ENDPOINT does not hide a saved endpoint: the saved row wins and works" do
       saved = T.start_stub(tag: :saved)
       T.install_row(T.saved_row(%{endpoint: T.endpoint(saved), use_ssl: false, region: "r-1", bucket: "saved-bucket", access_key: "AKIDX1", secret_key: "sk-x1"}))
-      T.install_env(%{"NEBU_MINIO_ENDPOINT" => ""})
+      T.install_env(%{"NEBU_MEDIA_STORAGE_ENDPOINT" => ""})
 
       assert :ok = Nebu.Media.Storage.put("obj", "x")
       assert T.next_request!(:saved).target == "/saved-bucket/obj"

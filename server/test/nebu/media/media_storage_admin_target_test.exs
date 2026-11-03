@@ -150,7 +150,7 @@ defmodule Nebu.Media.MediaStorageAdminTargetTest do
     test "with no saved row and no env values, all five operations use minio:9000, nebu-media and nebu-media-archive" do
       T.use_recording_client!()
       T.install_row(nil)
-      T.install_env(%{"NEBU_MINIO_ACCESS_KEY" => "ENVAKIDCANARY0002", "NEBU_MINIO_SECRET_KEY" => "env-secret-canary-0002"})
+      T.install_env(%{"NEBU_MEDIA_STORAGE_ACCESS_KEY" => "ENVAKIDCANARY0002", "NEBU_MEDIA_STORAGE_SECRET_KEY" => "env-secret-canary-0002"})
 
       for {name, fun, expect} <- T.operations() do
         result = fun.()
@@ -177,13 +177,13 @@ defmodule Nebu.Media.MediaStorageAdminTargetTest do
       T.install_row(nil)
 
       T.install_env(%{
-        "NEBU_MINIO_ENDPOINT" => T.endpoint(env_stub),
-        "NEBU_MINIO_USE_SSL" => "false",
-        "NEBU_MINIO_BUCKET" => "env-bucket",
-        "NEBU_MINIO_ARCHIVE_BUCKET" => "env-archive-bucket",
+        "NEBU_MEDIA_STORAGE_ENDPOINT" => T.endpoint(env_stub),
+        "NEBU_MEDIA_STORAGE_USE_SSL" => "false",
+        "NEBU_MEDIA_STORAGE_BUCKET" => "env-bucket",
+        "NEBU_MEDIA_STORAGE_ARCHIVE_BUCKET" => "env-archive-bucket",
         "NEBU_S3_REGION" => "env-region-2",
-        "NEBU_MINIO_ACCESS_KEY" => "ENVAKIDCANARY0002",
-        "NEBU_MINIO_SECRET_KEY" => "env-secret-canary-0002"
+        "NEBU_MEDIA_STORAGE_ACCESS_KEY" => "ENVAKIDCANARY0002",
+        "NEBU_MEDIA_STORAGE_SECRET_KEY" => "env-secret-canary-0002"
       })
 
       # config/runtime.exs derives the two bucket names from the same variables at boot
@@ -204,7 +204,7 @@ defmodule Nebu.Media.MediaStorageAdminTargetTest do
     test "a saved row without archive bucket keeps the environment archive bucket for the archive operations" do
       saved = T.start_stub(tag: :saved)
       T.install_row(row(saved, %{archive_bucket: nil}) |> Map.delete("archive_bucket"))
-      T.install_env(%{"NEBU_MINIO_ARCHIVE_BUCKET" => "env-archive-bucket"})
+      T.install_env(%{"NEBU_MEDIA_STORAGE_ARCHIVE_BUCKET" => "env-archive-bucket"})
       T.put_env_scoped(:nebu_http, :media_archive_bucket, "env-archive-bucket")
 
       assert :ok = Storage.put_object_copy("obj-copy", Storage.archive_bucket())
@@ -250,8 +250,8 @@ defmodule Nebu.Media.MediaStorageAdminTargetTest do
       T.install_row(T.saved_row(%{endpoint: T.endpoint(saved), access_key: @access_key, secret_key: @secret_key}))
 
       T.install_env(%{
-        "NEBU_MINIO_BUCKET" => "env-bucket",
-        "NEBU_MINIO_ARCHIVE_BUCKET" => "env-archive-bucket",
+        "NEBU_MEDIA_STORAGE_BUCKET" => "env-bucket",
+        "NEBU_MEDIA_STORAGE_ARCHIVE_BUCKET" => "env-archive-bucket",
         "NEBU_S3_REGION" => "env-region-2"
       })
 
@@ -270,19 +270,19 @@ defmodule Nebu.Media.MediaStorageAdminTargetTest do
       assert_decoy_untouched()
     end
 
-    test "credentials come from the NEBU_MINIO_*_FILE secret files (they win over the plain variables) when nothing is saved" do
+    test "credentials come from the NEBU_MEDIA_STORAGE_*_FILE secret files (they win over the plain variables) when nothing is saved" do
       stub = T.start_stub(tag: :saved)
       key_file = T.write_secret_file!("FILEAKIDCANARY0006")
       secret_file = T.write_secret_file!("file-secret-canary-0006")
       T.install_row(nil)
 
       T.install_env(%{
-        "NEBU_MINIO_ENDPOINT" => T.endpoint(stub),
+        "NEBU_MEDIA_STORAGE_ENDPOINT" => T.endpoint(stub),
         "NEBU_S3_REGION" => "file-region-6",
-        "NEBU_MINIO_ACCESS_KEY_FILE" => key_file,
-        "NEBU_MINIO_SECRET_KEY_FILE" => secret_file,
-        "NEBU_MINIO_ACCESS_KEY" => "PLAINVALUELOSES0006",
-        "NEBU_MINIO_SECRET_KEY" => "plain-value-loses-0006"
+        "NEBU_MEDIA_STORAGE_ACCESS_KEY_FILE" => key_file,
+        "NEBU_MEDIA_STORAGE_SECRET_KEY_FILE" => secret_file,
+        "NEBU_MEDIA_STORAGE_ACCESS_KEY" => "PLAINVALUELOSES0006",
+        "NEBU_MEDIA_STORAGE_SECRET_KEY" => "plain-value-loses-0006"
       })
 
       assert :ok = Storage.put("obj-put", "x")
@@ -299,12 +299,12 @@ defmodule Nebu.Media.MediaStorageAdminTargetTest do
       T.install_row(row(saved))
 
       T.install_env(%{
-        "NEBU_MINIO_ENDPOINT" => T.endpoint(env_stub),
-        "NEBU_MINIO_BUCKET" => "env-bucket",
-        "NEBU_MINIO_ARCHIVE_BUCKET" => "env-archive-bucket",
+        "NEBU_MEDIA_STORAGE_ENDPOINT" => T.endpoint(env_stub),
+        "NEBU_MEDIA_STORAGE_BUCKET" => "env-bucket",
+        "NEBU_MEDIA_STORAGE_ARCHIVE_BUCKET" => "env-archive-bucket",
         "NEBU_S3_REGION" => "env-region-2",
-        "NEBU_MINIO_ACCESS_KEY" => "ENVAKIDCANARY0002",
-        "NEBU_MINIO_SECRET_KEY" => "env-secret-canary-0002"
+        "NEBU_MEDIA_STORAGE_ACCESS_KEY" => "ENVAKIDCANARY0002",
+        "NEBU_MEDIA_STORAGE_SECRET_KEY" => "env-secret-canary-0002"
       })
 
       T.put_env_scoped(:nebu_http, :media_bucket, "env-bucket")

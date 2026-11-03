@@ -34,9 +34,9 @@ defmodule Nebu.Media.MediaStorageRefreshResilienceTest do
     saved_b = T.start_stub(tag: :saved_b)
 
     T.install_env(%{
-      "NEBU_MINIO_ENDPOINT" => T.endpoint(env_stub),
-      "NEBU_MINIO_ACCESS_KEY" => "ENVAKIDRESIL0401",
-      "NEBU_MINIO_SECRET_KEY" => "env-secret-resil-0401"
+      "NEBU_MEDIA_STORAGE_ENDPOINT" => T.endpoint(env_stub),
+      "NEBU_MEDIA_STORAGE_ACCESS_KEY" => "ENVAKIDRESIL0401",
+      "NEBU_MEDIA_STORAGE_SECRET_KEY" => "env-secret-resil-0401"
     })
 
     {:ok, saved_a: saved_a, saved_b: saved_b}

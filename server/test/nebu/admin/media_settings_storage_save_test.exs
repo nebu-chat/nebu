@@ -193,7 +193,7 @@ defmodule Nebu.Admin.MediaSettingsStorageSaveTest do
 
     test "fresh config (no row): an endpoint other than the environment's needs the keys as well" do
       Application.put_env(:nebu_http, :media_storage_config_loader, fn -> nil end)
-      Application.put_env(:nebu_http, :media_storage_env_reader, fn -> %{"NEBU_MINIO_ENDPOINT" => "93.184.216.36:9000"} end)
+      Application.put_env(:nebu_http, :media_storage_env_reader, fn -> %{"NEBU_MEDIA_STORAGE_ENDPOINT" => "93.184.216.36:9000"} end)
 
       conn = save(form())
 

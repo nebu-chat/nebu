@@ -90,11 +90,11 @@ defmodule Nebu.Admin.MediaSettingsStorageErrorsTest do
     end)
 
     S.install_env(%{
-      "NEBU_MINIO_ENDPOINT" => @env_endpoint,
-      "NEBU_MINIO_USE_SSL" => "false",
+      "NEBU_MEDIA_STORAGE_ENDPOINT" => @env_endpoint,
+      "NEBU_MEDIA_STORAGE_USE_SSL" => "false",
       "NEBU_S3_REGION" => "env-region-1",
-      "NEBU_MINIO_ACCESS_KEY" => "ENVAKIDERRORS1301",
-      "NEBU_MINIO_SECRET_KEY" => "env-secret-errors-1301"
+      "NEBU_MEDIA_STORAGE_ACCESS_KEY" => "ENVAKIDERRORS1301",
+      "NEBU_MEDIA_STORAGE_SECRET_KEY" => "env-secret-errors-1301"
     })
 
     {:ok, store: store}

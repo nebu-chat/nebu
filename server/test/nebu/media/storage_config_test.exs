@@ -22,7 +22,7 @@ defmodule Nebu.Media.StorageConfigTest do
     * AC2 — field catalog (endpoint/bucket/region/use_ssl/access_key/
       secret_key/s3_key_prefix_template/archive_bucket).
     * AC3 — secret fields encrypted at rest via `Nebu.Web.SecretBox`.
-    * AC4 — env-var fallback (`NEBU_MINIO_*`/`NEBU_S3_REGION`), `_FILE`-then-
+    * AC4 — env-var fallback (`NEBU_MEDIA_STORAGE_*`/`NEBU_S3_REGION`), `_FILE`-then-
       plain precedence for the two secret fields.
     * AC5 — DB config takes precedence over env vars, per field.
     * AC6 — `get/0` / `get_for_connection/0` / `upsert/1` public API shape,
@@ -100,12 +100,12 @@ defmodule Nebu.Media.StorageConfigTest do
       closely as this table's different row-shape (singleton, partial
       column set vs. key/value upsert) allows.
     * `Application.get_env(:nebu_http, :media_storage_env_reader)` — 0-arity
-      fun returning a STRING-keyed map standing in for the `NEBU_MINIO_*`/
+      fun returning a STRING-keyed map standing in for the `NEBU_MEDIA_STORAGE_*`/
       `NEBU_S3_REGION` env vars `server/config/runtime.exs` already reads at
-      boot (keys: `"NEBU_MINIO_ENDPOINT"`, `"NEBU_MINIO_USE_SSL"`,
-      `"NEBU_MINIO_BUCKET"`, `"NEBU_S3_REGION"`, `"NEBU_MINIO_ACCESS_KEY_FILE"`,
-      `"NEBU_MINIO_ACCESS_KEY"`, `"NEBU_MINIO_SECRET_KEY_FILE"`,
-      `"NEBU_MINIO_SECRET_KEY"` — any absent/nil key means "not set", exactly
+      boot (keys: `"NEBU_MEDIA_STORAGE_ENDPOINT"`, `"NEBU_MEDIA_STORAGE_USE_SSL"`,
+      `"NEBU_MEDIA_STORAGE_BUCKET"`, `"NEBU_S3_REGION"`, `"NEBU_MEDIA_STORAGE_ACCESS_KEY_FILE"`,
+      `"NEBU_MEDIA_STORAGE_ACCESS_KEY"`, `"NEBU_MEDIA_STORAGE_SECRET_KEY_FILE"`,
+      `"NEBU_MEDIA_STORAGE_SECRET_KEY"` — any absent/nil key means "not set", exactly
       like `System.get_env/1`'s own `nil`-when-unset contract). **This is the
       THIRD, most consequential judgment call in this file**: the story's own
       Acceptance Test #2 text says env vars must be injected "via the app-env
@@ -187,7 +187,7 @@ defmodule Nebu.Media.StorageConfigTest do
   endpoint URLs (public S3, IAM, STS) — only the public S3 one has ever been
   wired through (`endpoint`, above). This bugfix adds two new resolved-config
   keys, `iam_endpoint` and `sts_endpoint`, each resolved from new env vars
-  `NEBU_MINIO_IAM_ENDPOINT`/`NEBU_MINIO_STS_ENDPOINT` via the SAME
+  `NEBU_MEDIA_STORAGE_IAM_ENDPOINT`/`NEBU_MEDIA_STORAGE_STS_ENDPOINT` via the SAME
   `:media_storage_env_reader` seam `endpoint` already uses — see the seam
   contract note above (the real env-var names are added to
   `server/config/runtime.exs`'s S3 block and to the env-reader map
@@ -370,15 +370,15 @@ defmodule Nebu.Media.StorageConfigTest do
   # AT2 — AC4: env-var fallback when no row exists, secrets masked
   # ════════════════════════════════════════════════════════════════════════
 
-  test "AT2: get/0 with no row but NEBU_MINIO_*/NEBU_S3_REGION env vars set falls back to them, masked" do
+  test "AT2: get/0 with no row but NEBU_MEDIA_STORAGE_*/NEBU_S3_REGION env vars set falls back to them, masked" do
     Application.put_env(:nebu_http, :media_storage_env_reader, fn ->
       %{
-        "NEBU_MINIO_ENDPOINT" => "s3.example.internal:9000",
-        "NEBU_MINIO_BUCKET" => "custom-bucket",
+        "NEBU_MEDIA_STORAGE_ENDPOINT" => "s3.example.internal:9000",
+        "NEBU_MEDIA_STORAGE_BUCKET" => "custom-bucket",
         "NEBU_S3_REGION" => "eu-central-1",
-        "NEBU_MINIO_USE_SSL" => "true",
-        "NEBU_MINIO_ACCESS_KEY" => "env-access-key-1234",
-        "NEBU_MINIO_SECRET_KEY" => "env-secret-key-5678"
+        "NEBU_MEDIA_STORAGE_USE_SSL" => "true",
+        "NEBU_MEDIA_STORAGE_ACCESS_KEY" => "env-access-key-1234",
+        "NEBU_MEDIA_STORAGE_SECRET_KEY" => "env-secret-key-5678"
       }
     end)
 
@@ -407,10 +407,10 @@ defmodule Nebu.Media.StorageConfigTest do
 
     Application.put_env(:nebu_http, :media_storage_env_reader, fn ->
       %{
-        "NEBU_MINIO_ACCESS_KEY_FILE" => access_key_path,
-        "NEBU_MINIO_ACCESS_KEY" => "plain-value-should-lose-0000",
-        "NEBU_MINIO_SECRET_KEY_FILE" => secret_key_path,
-        "NEBU_MINIO_SECRET_KEY" => "plain-value-should-lose-1111"
+        "NEBU_MEDIA_STORAGE_ACCESS_KEY_FILE" => access_key_path,
+        "NEBU_MEDIA_STORAGE_ACCESS_KEY" => "plain-value-should-lose-0000",
+        "NEBU_MEDIA_STORAGE_SECRET_KEY_FILE" => secret_key_path,
+        "NEBU_MEDIA_STORAGE_SECRET_KEY" => "plain-value-should-lose-1111"
       }
     end)
 
@@ -534,7 +534,7 @@ defmodule Nebu.Media.StorageConfigTest do
   # apart independently)
   # ════════════════════════════════════════════════════════════════════════
 
-  test "AT7: a fresh media_storage_config table with no env vars set behaves identically to the pre-Story-11a boot-time NEBU_MINIO_* wiring" do
+  test "AT7: a fresh media_storage_config table with no env vars set behaves identically to the pre-Story-11a boot-time NEBU_MEDIA_STORAGE_* wiring" do
     # No row, no env vars — identical premise to AT1, but asserted against
     # LITERAL inline strings matching server/config/runtime.exs lines 78-119
     # verbatim, rather than reusing AT1's expectation, so a future edit to
@@ -552,7 +552,7 @@ defmodule Nebu.Media.StorageConfigTest do
   # AT8 — AC5: DB config takes precedence per field, not all-or-nothing
   # ════════════════════════════════════════════════════════════════════════
 
-  test "AT8: after a DB row sets endpoint, get/0 returns the DB value even though NEBU_MINIO_ENDPOINT is still set to a different value",
+  test "AT8: after a DB row sets endpoint, get/0 returns the DB value even though NEBU_MEDIA_STORAGE_ENDPOINT is still set to a different value",
        %{store: store} do
     # Seed the store directly (simulating a prior upsert/1 that only ever
     # touched `endpoint`) WITHOUT calling upsert/1 itself — mirrors
@@ -564,8 +564,8 @@ defmodule Nebu.Media.StorageConfigTest do
 
     Application.put_env(:nebu_http, :media_storage_env_reader, fn ->
       %{
-        "NEBU_MINIO_ENDPOINT" => "env-endpoint-should-lose:1111",
-        "NEBU_MINIO_BUCKET" => "env-bucket-should-win-since-db-unset"
+        "NEBU_MEDIA_STORAGE_ENDPOINT" => "env-endpoint-should-lose:1111",
+        "NEBU_MEDIA_STORAGE_BUCKET" => "env-bucket-should-win-since-db-unset"
       }
     end)
 
@@ -864,7 +864,7 @@ defmodule Nebu.Media.StorageConfigTest do
   # (`iam-sts-AT1`, `iam-sts-AT2`, `iam-sts-AT3`) now pass (GREEN):
   # `Nebu.Media.StorageConfig.get/0` and `get_for_connection/0` return a map
   # with both fields added to `@defaults`, resolved from
-  # `NEBU_MINIO_IAM_ENDPOINT`/`NEBU_MINIO_STS_ENDPOINT` inside
+  # `NEBU_MEDIA_STORAGE_IAM_ENDPOINT`/`NEBU_MEDIA_STORAGE_STS_ENDPOINT` inside
   # `build_resolved/2`.
   # ════════════════════════════════════════════════════════════════════════
 
@@ -891,8 +891,8 @@ defmodule Nebu.Media.StorageConfigTest do
 
       Application.put_env(:nebu_http, :media_storage_env_reader, fn ->
         %{
-          "NEBU_MINIO_IAM_ENDPOINT" => iam_url,
-          "NEBU_MINIO_STS_ENDPOINT" => sts_url
+          "NEBU_MEDIA_STORAGE_IAM_ENDPOINT" => iam_url,
+          "NEBU_MEDIA_STORAGE_STS_ENDPOINT" => sts_url
         }
       end)
 
@@ -921,7 +921,7 @@ defmodule Nebu.Media.StorageConfigTest do
       sts_url = "https://7mf5k.upcloudobjects.com:4443/sts"
 
       Application.put_env(:nebu_http, :media_storage_env_reader, fn ->
-        %{"NEBU_MINIO_IAM_ENDPOINT" => iam_url}
+        %{"NEBU_MEDIA_STORAGE_IAM_ENDPOINT" => iam_url}
       end)
 
       assert StorageConfig.get().iam_endpoint == iam_url
@@ -930,7 +930,7 @@ defmodule Nebu.Media.StorageConfigTest do
       assert StorageConfig.get_for_connection().sts_endpoint == nil
 
       Application.put_env(:nebu_http, :media_storage_env_reader, fn ->
-        %{"NEBU_MINIO_STS_ENDPOINT" => sts_url}
+        %{"NEBU_MEDIA_STORAGE_STS_ENDPOINT" => sts_url}
       end)
 
       assert StorageConfig.get().iam_endpoint == nil
@@ -1014,8 +1014,8 @@ defmodule Nebu.Media.StorageConfigTest do
 
       Application.put_env(:nebu_http, :media_storage_env_reader, fn ->
         %{
-          "NEBU_MINIO_IAM_ENDPOINT" => "https://env-iam-should-lose.example.com/iam",
-          "NEBU_MINIO_STS_ENDPOINT" => "https://env-sts-should-win.example.com/sts"
+          "NEBU_MEDIA_STORAGE_IAM_ENDPOINT" => "https://env-iam-should-lose.example.com/iam",
+          "NEBU_MEDIA_STORAGE_STS_ENDPOINT" => "https://env-sts-should-win.example.com/sts"
         }
       end)
 
@@ -1344,12 +1344,12 @@ defmodule Nebu.Media.StorageConfigTest do
 
       Application.put_env(:nebu_http, :media_storage_env_reader, fn ->
         %{
-          "NEBU_MINIO_ENDPOINT" => "93.184.216.34:9000",
-          "NEBU_MINIO_BUCKET" => "stored-bucket",
+          "NEBU_MEDIA_STORAGE_ENDPOINT" => "93.184.216.34:9000",
+          "NEBU_MEDIA_STORAGE_BUCKET" => "stored-bucket",
           "NEBU_S3_REGION" => "us-east-1",
-          "NEBU_MINIO_USE_SSL" => "true",
-          "NEBU_MINIO_ACCESS_KEY" => "STORED-ACCESS-KEY",
-          "NEBU_MINIO_SECRET_KEY" => "stored-secret-key"
+          "NEBU_MEDIA_STORAGE_USE_SSL" => "true",
+          "NEBU_MEDIA_STORAGE_ACCESS_KEY" => "STORED-ACCESS-KEY",
+          "NEBU_MEDIA_STORAGE_SECRET_KEY" => "stored-secret-key"
         }
       end)
 
@@ -1374,7 +1374,7 @@ defmodule Nebu.Media.StorageConfigTest do
 
     test "the STORED endpoint is compared trimmed (blanks around the stored value do not break the match)" do
       Application.put_env(:nebu_http, :media_storage_env_reader, fn ->
-        %{"NEBU_MINIO_ENDPOINT" => "  93.184.216.34:9000 ", "NEBU_MINIO_USE_SSL" => "true", "NEBU_MINIO_ACCESS_KEY" => "STORED-ACCESS-KEY", "NEBU_MINIO_SECRET_KEY" => "stored-secret-key"}
+        %{"NEBU_MEDIA_STORAGE_ENDPOINT" => "  93.184.216.34:9000 ", "NEBU_MEDIA_STORAGE_USE_SSL" => "true", "NEBU_MEDIA_STORAGE_ACCESS_KEY" => "STORED-ACCESS-KEY", "NEBU_MEDIA_STORAGE_SECRET_KEY" => "stored-secret-key"}
       end)
 
       assert :ok = StorageConfig.test_connection(candidate())

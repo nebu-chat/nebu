@@ -4,9 +4,9 @@ defmodule Nebu.Media.MediaStorageEnvEqualCredentialsTest do
   shows for the keys (story `media-storage-uses-admin-config`).
 
   * A saved endpoint is only ever used with the credentials saved with it. The one exception: when the row's endpoint
-    and Use SSL setting are the SAME target as the environment's own (`NEBU_MINIO_ENDPOINT` / `NEBU_MINIO_USE_SSL`,
+    and Use SSL setting are the SAME target as the environment's own (`NEBU_MEDIA_STORAGE_ENDPOINT` / `NEBU_MEDIA_STORAGE_USE_SSL`,
     compared like Test Connection does: trimmed, ASCII-downcased endpoint, `use_ssl == true`) and both saved keys are
-    NULL, the `NEBU_MINIO_*` credentials are used, because they belong to exactly that target (a first save that only
+    NULL, the `NEBU_MEDIA_STORAGE_*` credentials are used, because they belong to exactly that target (a first save that only
     changed the bucket, region or key prefix template; legacy rows saved before the keys mattered).
   * A row whose endpoint differs from the environment's own, a half-saved key pair and undecryptable keys fail closed with
     `{:error, :storage_credentials_missing}`; the environment credentials are never used and nothing is sent.
@@ -45,11 +45,11 @@ defmodule Nebu.Media.MediaStorageEnvEqualCredentialsTest do
     T.install_env(
       Map.merge(
         %{
-          "NEBU_MINIO_ENDPOINT" => endpoint,
-          "NEBU_MINIO_USE_SSL" => "false",
+          "NEBU_MEDIA_STORAGE_ENDPOINT" => endpoint,
+          "NEBU_MEDIA_STORAGE_USE_SSL" => "false",
           "NEBU_S3_REGION" => "env-region-1",
-          "NEBU_MINIO_ACCESS_KEY" => @env_akid,
-          "NEBU_MINIO_SECRET_KEY" => @env_secret
+          "NEBU_MEDIA_STORAGE_ACCESS_KEY" => @env_akid,
+          "NEBU_MEDIA_STORAGE_SECRET_KEY" => @env_secret
         },
         extra
       )
@@ -140,7 +140,7 @@ defmodule Nebu.Media.MediaStorageEnvEqualCredentialsTest do
   end
 
   describe "the environment target changes after the row was saved" do
-    test "a row that matched no longer does after NEBU_MINIO_ENDPOINT changed: fail closed again" do
+    test "a row that matched no longer does after NEBU_MEDIA_STORAGE_ENDPOINT changed: fail closed again" do
       T.install_row(row(%{endpoint: @env_endpoint}))
       assert_all_signed_with(@env_akid)
 
@@ -148,11 +148,11 @@ defmodule Nebu.Media.MediaStorageEnvEqualCredentialsTest do
       assert_all_fail_closed()
     end
 
-    test "the same after NEBU_MINIO_USE_SSL changed" do
+    test "the same after NEBU_MEDIA_STORAGE_USE_SSL changed" do
       T.install_row(row(%{endpoint: @env_endpoint}))
       assert_all_signed_with(@env_akid)
 
-      install_env(@env_endpoint, %{"NEBU_MINIO_USE_SSL" => "true"})
+      install_env(@env_endpoint, %{"NEBU_MEDIA_STORAGE_USE_SSL" => "true"})
       assert_all_fail_closed()
     end
 

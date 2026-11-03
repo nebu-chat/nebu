@@ -1,0 +1,146 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 0167f64d..9a89d129 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -16,8 +16,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
+ - **Room moderation routes `POST /_matrix/client/v3/rooms/{roomId}/kick`, `/ban` and `/unban` (story moderation-routes-atomic-ban; follow-ups `ex` and `ew` closed)**: the three routes work as the Matrix spec and room version 10 define them, including the "Disinvite" of a pending invitee (a kick of an invited user) and pre-emptive bans. Every change that a ban can race (kick, ban, unban, the invite event, the decline, the join) is decided and written inside the room process, stamped after the user's latest member event and committed in ONE database transaction. A fourth per-user rate-limit tier `moderation` (30 per minute, burst 60, one unit per request of the three routes; a labelled divergence from the spec's "Rate-limited: No"; env `NEBU_RATE_LIMIT_MODERATION_PER_MIN` / `NEBU_RATE_LIMIT_MODERATION_BURST`, passed through by `docker-compose.yml`). New audit actions `room_member_kicked`, `room_member_banned`, `room_member_unbanned`. Operator query Q-half (banned users that are still in the member set) in `docs/architecture/07-deployment.md`.
+ 
+ ### Changed
+-- **BREAKING: object store environment variables renamed from `NEBU_MINIO_*` to `NEBU_MEDIA_STORAGE_*` (story neutral-media-storage-env-names, REQ-2026-001; hard break, NO fallback)**: the variables no longer name a discontinued product. The old names are NOT READ any more and are IGNORED SILENTLY: no warning, no error. A deployment that still sets `NEBU_MINIO_*` boots without complaint but with the DEFAULTS (endpoint `minio:9000`, bucket `nebu-media`, no credentials, no SSL, no IAM/STS endpoint), so media uploads and downloads fail or go to the wrong place until the variables are renamed. Rename every one before you upgrade: `NEBU_MINIO_ENDPOINT` -> `NEBU_MEDIA_STORAGE_ENDPOINT`, `NEBU_MINIO_USE_SSL` -> `NEBU_MEDIA_STORAGE_USE_SSL`, `NEBU_MINIO_BUCKET` -> `NEBU_MEDIA_STORAGE_BUCKET`, `NEBU_MINIO_ARCHIVE_BUCKET` -> `NEBU_MEDIA_STORAGE_ARCHIVE_BUCKET`, `NEBU_MINIO_ACCESS_KEY` -> `NEBU_MEDIA_STORAGE_ACCESS_KEY`, `NEBU_MINIO_ACCESS_KEY_FILE` -> `NEBU_MEDIA_STORAGE_ACCESS_KEY_FILE`, `NEBU_MINIO_SECRET_KEY` -> `NEBU_MEDIA_STORAGE_SECRET_KEY`, `NEBU_MINIO_SECRET_KEY_FILE` -> `NEBU_MEDIA_STORAGE_SECRET_KEY_FILE`, `NEBU_MINIO_IAM_ENDPOINT` -> `NEBU_MEDIA_STORAGE_IAM_ENDPOINT`, `NEBU_MINIO_STS_ENDPOINT` -> `NEBU_MEDIA_STORAGE_STS_ENDPOINT`, and for the test suite `NEBU_TEST_MINIO_ENDPOINT` -> `NEBU_TEST_MEDIA_STORAGE_ENDPOINT`. Semantics are unchanged: a `*_FILE` variable still wins over the plain one, an empty endpoint still aborts the boot, and credentials are never logged. The `docker-compose.yml`, the UpCloud and StackIT tofu examples and `docs/architecture/07-deployment.md` use the new names; the compose service name `minio` and the `minio_*` secret file names are unchanged.
+-- **Local / CI object store is RustFS, not MinIO; dependencies upgraded; server image on a hardened base (chore/hardened-container-images)**: `docker-compose.yml` runs `rustfs/rustfs:1.0.4` (service name `minio`, the `minio_*` secrets stay; the `NEBU_MINIO_*` variables are renamed, see the BREAKING entry below) and the `createbuckets` one-shot uses the RustFS client `rc` (bucket, `nebu-app` user, least-privilege policy), because MinIO and `minio/mc` are no longer obtainable upstream. **Local dev:** the old `minio_data` volume is not migrated; media uploaded to a local stack are gone after the switch (`docker compose down -v` is not needed, the new volume is `rustfs_data`). `mix deps.update --all` clears all `mix hex.audit` advisories (hackney, assent, ssl_verify_fun, bandit, jose, plug_crypto, phoenix_html). The server image is built on `elixir:1.20.5-otp-29` (glibc) and runs on the openCode / container.gov.de hardened base `zendis/base` (non-root 53111, digest-pinned, no curl: healthchecks call `/app/healthcheck`). Elixir 1.21 is not released yet. Not yet verified end to end: the rc admin commands in `createbuckets` and the hardened image start.
++- **BREAKING: object store environment variables renamed from `NEBU_MINIO_*` to `NEBU_MEDIA_STORAGE_*` (story neutral-media-storage-env-names, REQ-2026-001; hard break, NO fallback)**: the variables no longer name a discontinued product. The old names are NOT READ any more and are IGNORED SILENTLY: no warning, no error. A deployment that still sets `NEBU_MINIO_*` boots without complaint but with the DEFAULTS (endpoint `minio:9000`, bucket `nebu-media`, no credentials, no SSL, no IAM/STS endpoint), so media uploads and downloads fail or go to the wrong place until the variables are renamed. Rename every one before you upgrade: `NEBU_MINIO_ENDPOINT` -> `NEBU_MEDIA_STORAGE_ENDPOINT`, `NEBU_MINIO_USE_SSL` -> `NEBU_MEDIA_STORAGE_USE_SSL`, `NEBU_MINIO_BUCKET` -> `NEBU_MEDIA_STORAGE_BUCKET`, `NEBU_MINIO_ARCHIVE_BUCKET` -> `NEBU_MEDIA_STORAGE_ARCHIVE_BUCKET`, `NEBU_MINIO_ACCESS_KEY` -> `NEBU_MEDIA_STORAGE_ACCESS_KEY`, `NEBU_MINIO_ACCESS_KEY_FILE` -> `NEBU_MEDIA_STORAGE_ACCESS_KEY_FILE`, `NEBU_MINIO_SECRET_KEY` -> `NEBU_MEDIA_STORAGE_SECRET_KEY`, `NEBU_MINIO_SECRET_KEY_FILE` -> `NEBU_MEDIA_STORAGE_SECRET_KEY_FILE`, `NEBU_MINIO_IAM_ENDPOINT` -> `NEBU_MEDIA_STORAGE_IAM_ENDPOINT`, `NEBU_MINIO_STS_ENDPOINT` -> `NEBU_MEDIA_STORAGE_STS_ENDPOINT`. `NEBU_TEST_MINIO_ENDPOINT` was only read by the removed Go media service and has no replacement: nothing reads a test-endpoint variable any more, so it can simply be dropped. Semantics are unchanged: a `*_FILE` variable still wins over the plain one, an empty endpoint still aborts the boot, and credentials are never logged. The `docker-compose.yml`, the UpCloud and StackIT tofu examples and `docs/architecture/07-deployment.md` use the new names; the compose service name `minio` and the `minio_*` secret file names are unchanged.
++- **Local / CI object store is RustFS, not MinIO; dependencies upgraded; server image on a hardened base (chore/hardened-container-images)**: `docker-compose.yml` runs `rustfs/rustfs:1.0.4` (service name `minio`, the `minio_*` secrets stay; the `NEBU_MINIO_*` variables are renamed, see the BREAKING entry above) and the `createbuckets` one-shot uses the RustFS client `rc` (bucket, `nebu-app` user, least-privilege policy), because MinIO and `minio/mc` are no longer obtainable upstream. **Local dev:** the old `minio_data` volume is not migrated; media uploaded to a local stack are gone after the switch (`docker compose down -v` is not needed, the new volume is `rustfs_data`). `mix deps.update --all` clears all `mix hex.audit` advisories (hackney, assent, ssl_verify_fun, bandit, jose, plug_crypto, phoenix_html). The server image is built on `elixir:1.20.5-otp-29` (glibc) and runs on the openCode / container.gov.de hardened base `zendis/base` (non-root 53111, digest-pinned, no curl: healthchecks call `/app/healthcheck`). Elixir 1.21 is not released yet. Not yet verified end to end: the rc admin commands in `createbuckets` and the hardened image start.
+ - **⚠ Empty `NEBU_MEDIA_STORAGE_ENDPOINT` aborts the boot (story media-storage-uses-admin-config; behaviour change)**: a `NEBU_MEDIA_STORAGE_ENDPOINT` that is set but empty or only whitespace now stops the server at boot with a message naming the variable (it used to boot with a host-less endpoint and fail every media request); unset keeps `minio:9000`. **Operators of the UpCloud / StackIT deploy templates:** `s3_endpoint` can render as `""` there (the cloud-init file then writes `NEBU_MEDIA_STORAGE_ENDPOINT=`), which now crash-loops the server instead of failing only media: set the endpoint or switch the media gateway off.
+ - **⚠ Saving a changed storage endpoint or Use SSL needs the keys again (story media-storage-uses-admin-config; behaviour change)**: on `/admin/media/settings`, a save that changes the endpoint or Use SSL must carry BOTH the access key and the secret key, exactly one key is refused ("Enter both the access key and the secret key. Nothing was saved."), a save that carries keys always writes the endpoint and Use SSL with them (so the endpoint is resolved and SSRF-checked then), and Test Connection follows the same rule. Since the keys are saved together with the endpoint and Use SSL, a save through the page pins the target: a later change of `NEBU_MEDIA_STORAGE_ENDPOINT` is not followed (saved keys without a saved endpoint, which only legacy or SQL-written rows have, still follow the environment). Errors of the storage validation (an endpoint that is refused, the keys-required rules) are shown inside the Storage Target section with the affected fields marked, the early field-level errors (missing endpoint or bucket, scheme prefix, IAM / STS) still at the top of the page, and the key fields say whether the keys are configured. The audit row `media_storage_config_updated` names only the fields that really changed. Existing objects stay in the old store when the endpoint changes.
+ - **⚠ A saved storage endpoint is only used with the credentials saved with it (story media-storage-uses-admin-config; behaviour change)**: the `NEBU_MEDIA_STORAGE_*` credentials are used only for the environment's own endpoint and Use SSL. **Upgrade:** a row saved earlier with an endpoint but no keys keeps working with the environment credentials when its endpoint and Use SSL equal the environment's; for any other endpoint every media operation fails (`storage credentials missing`, nothing is sent) until both keys are saved. See `docs/architecture/07-deployment.md` ("Media storage target").
+diff --git a/_bmad-output/nebu/epics/media-storage-env-neutral/pipeline-state.yaml b/_bmad-output/nebu/epics/media-storage-env-neutral/pipeline-state.yaml
+index 4c3745d4..5e6ac8d5 100644
+--- a/_bmad-output/nebu/epics/media-storage-env-neutral/pipeline-state.yaml
++++ b/_bmad-output/nebu/epics/media-storage-env-neutral/pipeline-state.yaml
+@@ -1,6 +1,8 @@
+ # Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents.
+ # Do not edit manually during an active pipeline run.
+ # last_updated: 2026-11-02
++# [neutral-media-storage-env-names] 2026-11-02T16:01Z code-review → 4 MINOR (doc wording only) → cycle 1
++# [neutral-media-storage-env-names] 2026-11-02T16:00Z code-review prescan → MAJOR (comment edit in shipped migration 000037) reverted by coordinator (brief had allowed it); re-scan CLEAN
+ # [neutral-media-storage-env-names] 2026-11-02T15:59Z ci-gate → LIMITED: compile --warnings-as-errors OK, 6/6 story tests OK (--no-start); every other storage test fails only with 'stub did not start' (port binding) / no Postgres in sandbox; full unit + integration suite is deferred to CI
+ # [neutral-media-storage-env-names] 2026-11-02T15:49Z test-review → CLEAN (0 MAJOR, 0 MINOR)
+ # [neutral-media-storage-env-names] 2026-11-02T15:49Z atdd → 6 red tests (5 scenarios); atdd_verify MAJOR was environmental (mix test boots app: no ports/DB in sandbox); verified manually with --no-start: 0/6 pass, assertion failures on new names
+@@ -8,12 +10,12 @@
+ # [neutral-media-storage-env-names] 2026-11-02T15:47Z create-story → neutral-media-storage-env-names.md (REQ-2026-001)
+ # [pending] 2026-11-02T15:46Z pipeline started (media-storage-env-neutral, hard break NEBU_MINIO_* -> NEBU_MEDIA_STORAGE_*)
+ story: "neutral-media-storage-env-names"
+-current_step: "code-review"
++current_step: "dev-story"
+ completed:
+   - create-story
+   - atdd
+   - test-review
+   - dev-story
+-cycle_count: 0
++cycle_count: 1
+ blocked_reason: null
+-last_updated: "2026-11-02T15:59Z"
++last_updated: "2026-11-02T16:01Z"
+diff --git a/_bmad-output/nebu/epics/media-storage-env-neutral/step-results/neutral-media-storage-env-names/code-review-findings.md b/_bmad-output/nebu/epics/media-storage-env-neutral/step-results/neutral-media-storage-env-names/code-review-findings.md
+new file mode 100644
+index 00000000..9b307f34
+--- /dev/null
++++ b/_bmad-output/nebu/epics/media-storage-env-neutral/step-results/neutral-media-storage-env-names/code-review-findings.md
+@@ -0,0 +1,13 @@
++# code-review — cycle 0
++INFO | prescan | prescan reported no MAJOR/MINOR/HINT lines (643 added lines, 41 files, no migration) | -
++MINOR | CHANGELOG.md:20 | RustFS entry says "the NEBU_MINIO_* variables are renamed, see the BREAKING entry below", but the BREAKING entry is line 19, ABOVE it | change "below" to "above" (or move the BREAKING entry under it)
++MINOR | docs/architecture/adr/ADR-013-minio-object-storage.md:10 | mechanical rename now says "the NEBU_MEDIA_STORAGE_* variables and the minio compose service name are kept as stable names" which is false: they were just renamed (hard break) | reword: compose service name `minio` stays; the env vars were renamed NEBU_MINIO_* -> NEBU_MEDIA_STORAGE_* (story neutral-media-storage-env-names)
++MINOR | docker-compose.yml:205 | same sed artefact: "The compose SERVICE NAME stays `minio`, and so do the `minio_*` secrets and the NEBU_MEDIA_STORAGE_* variables" claims the vars "stay"; comment also cites scripts/e2e-ci.sh and Makefile as part of the contract though neither references any media storage variable | reword: service name and `minio_*` secrets stay; the server reads the neutral NEBU_MEDIA_STORAGE_* variables (server/config/runtime.exs); drop the e2e-ci.sh/Makefile reference
++MINOR | docs/architecture/07-deployment.md:33 + CHANGELOG.md:19 | docs state "the tests use NEBU_TEST_MEDIA_STORAGE_ENDPOINT", but nothing in server/, scripts/, Makefile or CI reads it (NEBU_TEST_MINIO_ENDPOINT was only read by the removed Go media service); operators/devs are told about a variable with no effect | in 07-deployment drop the parenthesis or say it is reserved/not read; in the CHANGELOG mark the test rename as "name only, no current reader"
++INFO | docs/architecture/07-deployment.md:1384,1822 | the StackIT/UpCloud env-var code blocks lost their column alignment after the longer names (NEBU_DB_URL / NEBU_STORAGE_BACKEND / NEBU_OIDC_ISSUER rows now misaligned) | optional realign
++INFO | docs/architecture/07-deployment.md:23 | "wired with the MinIO Docker secrets (NEBU_MEDIA_STORAGE_ACCESS_KEY_FILE ...)" still calls them MinIO secrets; acceptable since the secret files keep the minio_* names | optional wording
++INFO | server/priv/migrations/000037_media_storage_config_iam_sts.up.sql:4 | old names remain in a shipped migration comment; correctly left untouched (shipped migrations must not be edited) | none
++INFO | server/config/runtime.exs:158-231, server/lib/nebu/media/storage_config.ex:382,1135-1158,1524-1536 | verified: no read of any NEBU_MINIO_* / NEBU_TEST_MINIO_ENDPOINT left in server/lib or server/config; *_FILE-over-plain order unchanged in both runtime.exs and env_credentials/1; default endpoint minio:9000, buckets nebu-media / nebu-media-archive and use_ssl default unchanged; operator texts (raise message, Storage.problem/1) use new names | none
++INFO | docker-compose.yml:138, deploy/tofu/examples/{upcloud,stackit}/cloud-init.tftpl, upcloud/outputs.tf | verified: every variable passed to the server container (ENDPOINT, ACCESS_KEY_FILE, SECRET_KEY_FILE, BUCKET, USE_SSL, IAM/STS_ENDPOINT) is read by runtime.exs/StorageConfig; no variables.tf references env names; Makefile/scripts reference none | none
++INFO | server/test/** | test diffs outside the ATDD file are pure renames (every changed line contains an old/new name); ATDD file covers all 5 scenarios incl. blank/unreadable legacy values not aborting boot and canary credentials absent from log/boot error | none
++INFO | CHANGELOG.md:19 | BREAKING entry lists all 10 NEBU_MINIO_* names + NEBU_TEST_MINIO_ENDPOINT with replacements, states "NOT READ ... IGNORED SILENTLY: no warning, no error" and the defaults a stale deployment gets; 07-deployment.md:30-36 carries the operator note (AC4 met) | none
+diff --git a/_bmad-output/nebu/epics/media-storage-env-neutral/step-results/neutral-media-storage-env-names/review-prescan.digest b/_bmad-output/nebu/epics/media-storage-env-neutral/step-results/neutral-media-storage-env-names/review-prescan.digest
+index 9c63b019..b17819f0 100644
+--- a/_bmad-output/nebu/epics/media-storage-env-neutral/step-results/neutral-media-storage-env-names/review-prescan.digest
++++ b/_bmad-output/nebu/epics/media-storage-env-neutral/step-results/neutral-media-storage-env-names/review-prescan.digest
+@@ -1,4 +1,4 @@
+-VERDICT: MAJOR
+-COUNTS: major=1 minor=0 hints=0
++VERDICT: CLEAN
++COUNTS: major=0 minor=0 hints=0
+ REPORT: _bmad-output/nebu/epics/media-storage-env-neutral/step-results/neutral-media-storage-env-names/review-prescan.md
+-TOP: server/priv/migrations/000037_media_storage_config_iam_sts.up.sql: an existing (shipped) m
++TOP: -
+diff --git a/_bmad-output/nebu/epics/media-storage-env-neutral/step-results/neutral-media-storage-env-names/review-prescan.md b/_bmad-output/nebu/epics/media-storage-env-neutral/step-results/neutral-media-storage-env-names/review-prescan.md
+index 969a16cb..39259f27 100644
+--- a/_bmad-output/nebu/epics/media-storage-env-neutral/step-results/neutral-media-storage-env-names/review-prescan.md
++++ b/_bmad-output/nebu/epics/media-storage-env-neutral/step-results/neutral-media-storage-env-names/review-prescan.md
+@@ -1,2 +1,2 @@
+-# review-prescan — 639 added lines, 40 changed files, last shipped migration 000055
+-MAJOR | server/priv/migrations/000037_media_storage_config_iam_sts.up.sql | an existing (shipped) migration was modified/deleted/renamed | never edit a shipped migration — add a new one
++# review-prescan — 643 added lines, 41 changed files, last shipped migration 000055
++
+diff --git a/_bmad-output/nebu/epics/media-storage-env-neutral/step-results/neutral-media-storage-env-names/reviewed-tree.txt b/_bmad-output/nebu/epics/media-storage-env-neutral/step-results/neutral-media-storage-env-names/reviewed-tree.txt
+new file mode 100644
+index 00000000..57110a2a
+--- /dev/null
++++ b/_bmad-output/nebu/epics/media-storage-env-neutral/step-results/neutral-media-storage-env-names/reviewed-tree.txt
+@@ -0,0 +1 @@
++1e321e47556e98a0e3e2a48b9f2def3b58aa4585
+diff --git a/docker-compose.yml b/docker-compose.yml
+index 0ad3075d..d7f2e2a5 100644
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -203,8 +203,8 @@ services:
+ 
+   # Object storage (S3-compatible) for media uploads — RustFS (Apache-2.0). MinIO is discontinued upstream
+   # (its images/binaries, incl. minio/mc, are no longer obtainable), so Nebu's local/CI stack runs on RustFS.
+-  # The compose SERVICE NAME stays `minio`, and so do the `minio_*` secrets and the NEBU_MEDIA_STORAGE_* variables: they are
+-  # Nebu's generic S3 settings contract (server/config/runtime.exs, scripts/e2e-ci.sh, Makefile), not a MinIO dependency.
++  # The compose SERVICE NAME stays `minio`, and so do the `minio_*` secret file names. The server reads the vendor-neutral
++  # NEBU_MEDIA_STORAGE_* variables (renamed from NEBU_MINIO_*, see server/config/runtime.exs).
+   # Credentials are read from Docker Secrets generated by `make setup` (.secrets/ is gitignored). RustFS reads
+   # RUSTFS_ACCESS_KEY_FILE / RUSTFS_SECRET_KEY_FILE itself (same pattern as MINIO_ROOT_*_FILE).
+   # The container runs as uid 10001 (rustfs); the named volume below is initialised with that ownership by the image.
+diff --git a/docs/architecture/07-deployment.md b/docs/architecture/07-deployment.md
+index 4759a50d..1e7f1c09 100644
+--- a/docs/architecture/07-deployment.md
++++ b/docs/architecture/07-deployment.md
+@@ -21,16 +21,16 @@ services:
+ service serves the Matrix C-S API, the Matrix media API (`/_matrix/media/v3/*` and
+ `/_matrix/client/v1/media/*`), and the Admin UI (`/admin/*`) on the same Bandit port
+ 4000. The Admin UI uses Phoenix HTTP controllers (PRG pattern) for CRUD pages and Phoenix LiveView for
+-real-time pages (Dashboard, AuditLog, Bootstrap Wizard). `server` is wired with the MinIO Docker secrets (`NEBU_MEDIA_STORAGE_ACCESS_KEY_FILE` /
++real-time pages (Dashboard, AuditLog, Bootstrap Wizard). `server` is wired with the object store Docker secrets (`minio_*` files; `NEBU_MEDIA_STORAGE_ACCESS_KEY_FILE` /
+ `NEBU_MEDIA_STORAGE_SECRET_KEY_FILE`), the `NEBU_MEDIA_STORAGE_*` env vars, and `depends_on` on `minio` (healthy) and
+-`createbuckets` (completed). ExAws config in `server/config/runtime.exs` reads the file-based MinIO
++`createbuckets` (completed). ExAws config in `server/config/runtime.exs` reads the file-based object store
+ credentials. Media access control is a local `room_members` SQL call inside the app — no cross-process
+ hop.
+ 
+ > **Breaking change: object store variables renamed (`NEBU_MINIO_*` -> `NEBU_MEDIA_STORAGE_*`).**
+ > The server reads only `NEBU_MEDIA_STORAGE_ENDPOINT`, `NEBU_MEDIA_STORAGE_USE_SSL`, `NEBU_MEDIA_STORAGE_BUCKET`,
+ > `NEBU_MEDIA_STORAGE_ARCHIVE_BUCKET`, `NEBU_MEDIA_STORAGE_ACCESS_KEY[_FILE]`, `NEBU_MEDIA_STORAGE_SECRET_KEY[_FILE]`,
+-> `NEBU_MEDIA_STORAGE_IAM_ENDPOINT` and `NEBU_MEDIA_STORAGE_STS_ENDPOINT` (the tests use `NEBU_TEST_MEDIA_STORAGE_ENDPOINT`).
++> `NEBU_MEDIA_STORAGE_IAM_ENDPOINT` and `NEBU_MEDIA_STORAGE_STS_ENDPOINT`. (`NEBU_TEST_MINIO_ENDPOINT` was only read by the removed Go media service and has no replacement.)
+ > There is no fallback: the old `NEBU_MINIO_*` names are silently ignored, with no warning and no error. A deployment that still sets them boots
+ > with the defaults (endpoint `minio:9000`, bucket `nebu-media`, no credentials) and media storage does not work until the variables are
+ > renamed. The `*_FILE` variant still wins over the plain variable. See the CHANGELOG for the full old-to-new list.
+diff --git a/docs/architecture/adr/ADR-013-minio-object-storage.md b/docs/architecture/adr/ADR-013-minio-object-storage.md
+index 0c531eb1..9118bf09 100644
+--- a/docs/architecture/adr/ADR-013-minio-object-storage.md
++++ b/docs/architecture/adr/ADR-013-minio-object-storage.md
+@@ -7,8 +7,9 @@ Accepted - 2026-05-12
+ > **Amended 2026-11-02.** MinIO is discontinued upstream (its container images and the `mc` client are no longer
+ > obtainable). The S3-compatible object-store decision stands, but the local-dev and CI implementation is now
+ > **RustFS** (`rustfs/rustfs`, Apache-2.0) with its `rc` client for bucket / IAM-user / policy setup. Nebu talks plain
+-> S3 through `ExAws.S3`, so production endpoints are unaffected; the `NEBU_MEDIA_STORAGE_*` variables and the `minio` compose
+-> service name are kept as stable names. The text below is the original MinIO-era record.
++> S3 through `ExAws.S3`, so production endpoints are unaffected; the `minio` compose service name is kept as a stable name,
++> and the environment variables were renamed from `NEBU_MINIO_*` to `NEBU_MEDIA_STORAGE_*` (story
++> neutral-media-storage-env-names). The text below is the original MinIO-era record.
+ 
+ ## Context
+ 

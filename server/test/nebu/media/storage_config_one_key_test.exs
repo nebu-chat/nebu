@@ -31,7 +31,7 @@ defmodule Nebu.Media.StorageConfigOneKeyTest do
     T.put_env_scoped(:compliance, :repo, FakeAuditRepo)
     T.put_env_scoped(:compliance, :__test_one_key_pid__, test_pid)
     T.put_env_scoped(:nebu_http, :media_storage_config_writer, fn columns, _set_at -> send(test_pid, {:written, columns}); :ok end)
-    T.install_env(%{"NEBU_MINIO_ENDPOINT" => "93.184.216.34:9000"})
+    T.install_env(%{"NEBU_MEDIA_STORAGE_ENDPOINT" => "93.184.216.34:9000"})
     T.install_row(T.saved_row(%{endpoint: "93.184.216.34:9000", use_ssl: false, bucket: "b", region: "r", access_key: "STOREDAKID1401", secret_key: "stored-secret-1401"}))
     :ok
   end

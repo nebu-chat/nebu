@@ -1,0 +1,19 @@
+# Code owners — automatically requested as reviewers on merge requests.
+# Responsibilities per area: docs/compliance/verfahren-und-zustaendigkeiten.md
+# GitLab syntax: https://docs.gitlab.com/ee/user/project/codeowners/
+
+# Default owner for everything
+*                           @oc000145045930
+
+# Change, test and configuration procedures (Grundschutz++ TEST / KONF / DEV / ASST)
+/CONTRIBUTING.md            @oc000145045930
+/CODEOWNERS                 @oc000145045930
+/.gitlab-ci.yml             @oc000145045930
+/.gitlab/                   @oc000145045930
+/renovate.json              @oc000145045930
+/docs/compliance/           @oc000145045930
+/docs/architecture/adr/     @oc000145045930
+
+# Security-relevant paths
+/SECURITY.md                @oc000145045930
+/deploy/                    @oc000145045930

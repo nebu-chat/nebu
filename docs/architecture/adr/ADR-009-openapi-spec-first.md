@@ -4,6 +4,12 @@
 
 Accepted - 2026-03-18
 
+> **Superseded 2026-11-02 (ADR-021).** This ADR described a Go Admin API generated with
+> `oapi-codegen` from `gateway/api/openapi.yaml`. The Go gateway and `gateway/` tree were removed;
+> the Admin surface is now Elixir — Phoenix controllers + LiveView under `Nebu.Admin.*`
+> (ADR-019/020) — and there is no OpenAPI spec or code-generation step in the repository. The
+> spec-first rationale below is retained as the historical record.
+
 ## Context
 
 The Nebu Admin API (`/api/v1/*`) needs:

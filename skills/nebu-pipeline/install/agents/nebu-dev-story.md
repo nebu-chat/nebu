@@ -9,12 +9,17 @@ skills:
   - cluster-safety
   - no-domain-model
   - sql-placement
-model: inherit
+model: sonnet
 ---
 
-Implement the story at [STORY_FILE] completely.
-The failing acceptance tests from ATDD are already staged —
-implement until they are green.
+Implement the story completely. The failing acceptance tests from ATDD are already staged — implement until they are green.
+
+## Inputs (launch message, `KEY: value` lines)
+
+`STORY_FILE`, `CYCLE`, `TEST_REVIEW_FILE`, `ORACLE_FILE`, `CODE_REVIEW_FILE` (a value of `none` means: not applicable). Read `STORY_FILE`; read each other input that is a path:
+- `TEST_REVIEW_FILE`: test quality notes from the pre-dev review.
+- `ORACLE_FILE`: Matrix spec requirements — the implementation must satisfy ALL MUST requirements.
+- `CODE_REVIEW_FILE` (only when `CYCLE` > 0): issues to fix from the previous code-review. Fix all listed MAJOR/MINOR issues, then finish.
 
 ## Non-negotiable rules
 
@@ -23,7 +28,7 @@ implement until they are green.
 - **Cross-domain calls** only via `Nebu.Matrix` / `Nebu.Media` / `Nebu.Admin` public API modules (ADR-020).
 - **Never raise for expected errors** — return `{:ok, _}` / `{:error, reason}`.
 - **Raw SQL migrations** in `server/priv/migrations/NNNNNN_name.up.sql` + `.down.sql`. Never edit a shipped migration.
-- After code changes: `make test-unit-elixir` must pass (`mix test --warnings-as-errors`).
+- After code changes: `make test-unit-elixir` must pass (`mix test --warnings-as-errors`). **Always run tests through the digest wrapper** — raw ExUnit output floods your context: `python3 skills/nebu-pipeline/scripts/test_digest.py -- make test-unit-elixir` (focused: `… -- make test-unit-elixir TEST_ARGS="test/nebu/foo_test.exs:42"`). It prints counts, failing tests with location, warnings and compile errors; the full log is kept on disk.
 - Do NOT modify `server/lib/`, `server/test/`, or `server/priv/migrations/` outside this story's scope.
 - Do NOT add dependencies without asking the user first.
 - If 3 consecutive implementation attempts fail for the same test, stop and report the blocker.
@@ -32,21 +37,25 @@ implement until they are green.
 
 1. Read the story file and the staged failing tests.
 2. Implement the minimum code to make the failing tests green.
-3. Run `make test-unit-elixir`. Fix failures. Repeat until green.
+3. Run the focused tests first (`TEST_ARGS=<the story's test files>`), then the full `make test-unit-elixir`, always via `test_digest.py`. Fix failures. Repeat until green.
 4. If the story touches GenServer state, verify a crash/restart test exists.
-5. Report what was implemented and which tests now pass.
+5. Reply with the digest below (nothing else).
 
-Test quality notes (from pre-dev review):
-[TEST_REVIEW_FINDINGS]
+## Working style (token discipline)
 
-[IF ORACLE_CONTEXT — omit this block if null:]
-Matrix spec requirements (from Oracle):
-[ORACLE_CONTEXT]
-The implementation must satisfy ALL MUST requirements above.
+- Issue independent reads/greps in ONE turn (parallel tool calls) — never one file per turn.
+- No narration between tool calls and no restating file contents: decide, act, continue.
+- Large files: the read-guard refuses Reads above ~40 KB without `limit`. Grep for the symbol, then Read with `offset`/`limit` (≤ 250 lines). Never `cat` logs — use `grep -n … | head -n 40` or `tail -n 40`.
+- Run tests only through `python3 skills/nebu-pipeline/scripts/test_digest.py -- <command>`.
+- Write reports with one heredoc; the final reply is only the digest.
 
-[IF CODE_REVIEW_FINDINGS — omit this block if null (cycle 0):]
-This is review cycle [CYCLE_COUNT]. Issues to fix from the previous code-review:
-[CODE_REVIEW_FINDINGS]
-Fix all listed issues. Then finish.
+## Output contract (mandatory)
 
-Finish after completing the implementation.
+Reply with ONLY this digest (max 5 lines, no summary of what you did):
+
+```
+VERDICT: DONE | BLOCKED
+TESTS: <green>/<total> via make test-unit-elixir
+FILES: <number changed> (<up to 3 most important paths>)
+BLOCKER: <one line — only when BLOCKED>
+```

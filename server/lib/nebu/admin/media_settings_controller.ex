@@ -515,7 +515,7 @@ defmodule Nebu.Admin.MediaSettingsController do
   # review): mirrors the identical guard in Nebu.Media.StorageConfig's own
   # test_connection/1 (defense in depth — this controller-level check stops
   # a bad endpoint before it ever reaches upsert/2, not just before an ExAws
-  # call). runtime.exs's NEBU_MINIO_ENDPOINT contract is bare host[:port],
+  # call). runtime.exs's NEBU_MEDIA_STORAGE_ENDPOINT contract is bare host[:port],
   # never a URL with a scheme.
   defp invalid_endpoint_scheme?(endpoint) do
     downcased = String.downcase(endpoint)
@@ -549,9 +549,9 @@ defmodule Nebu.Admin.MediaSettingsController do
   # unconditionally, in validate_storage_params/1's `cond`, BEFORE `changes`
   # was even built: an untouched, env-pre-filled value that happens to fail
   # this very check (e.g. a private/internal address — exactly this
-  # project's own `NEBU_MINIO_ENDPOINT: "minio:9000"` docker-compose
-  # convention, if ever applied to NEBU_MINIO_IAM_ENDPOINT/
-  # NEBU_MINIO_STS_ENDPOINT) would then permanently block EVERY storage
+  # project's own `NEBU_MEDIA_STORAGE_ENDPOINT: "minio:9000"` docker-compose
+  # convention, if ever applied to NEBU_MEDIA_STORAGE_IAM_ENDPOINT/
+  # NEBU_MEDIA_STORAGE_STS_ENDPOINT) would then permanently block EVERY storage
   # save, not just that field — since the form always re-renders the same
   # env value, the admin could never again save any storage setting without
   # manually blanking the field on every single submission, forever.

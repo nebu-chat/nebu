@@ -14,7 +14,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 skills/nebu-pipeline/scripts/pipeline_state.py --log-subagent-stop 2>/dev/null || true"
+            "command": "python3 skills/nebu-pipeline/scripts/token_metrics.py hook 2>/dev/null || true"
           }
         ]
       }
@@ -24,7 +24,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 skills/nebu-pipeline/scripts/pipeline_state.py --log-subagent-start 2>/dev/null || true"
+            "command": "python3 skills/nebu-pipeline/scripts/token_metrics.py hook 2>/dev/null || true"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Read|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 skills/nebu-pipeline/scripts/read_guard.py 2>/dev/null || true"
           }
         ]
       }

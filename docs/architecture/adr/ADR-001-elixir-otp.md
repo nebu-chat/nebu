@@ -4,6 +4,12 @@
 
 Accepted - 2026-03-18
 
+> **Amended 2026-11-02.** The decision (Elixir/OTP as runtime) stands and is now the *only*
+> runtime: the Go gateway was removed (ADR-021) and the whole stack is one OTP app `:nebu`
+> (ADR-019). The `GRPC` library listed below is **no longer a dependency** — gRPC was fully
+> removed (`grpc-removal` epic, see ADR-005). Current pins: Elixir 1.19 / OTP 27, see
+> [02-constraints](../02-constraints.md).
+
 ## Context
 
 Nebu requires a stateful messaging core capable of managing thousands of concurrent room processes,

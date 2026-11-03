@@ -17,6 +17,7 @@ Arguments:
   --summary TEXT    Pipeline summary for the comment, e.g. "ATDD+Code CLEAN"
   --status STATUS   New status value (default: done)
   --date DATE       Date string (default: today, YYYY-MM-DD)
+  --story-file F    Also set `status:` in this story file's frontmatter
 """
 
 import argparse
@@ -77,6 +78,41 @@ def update_story_status(yaml_lines, story_id, new_status):
     return False
 
 
+def append_story_entry(yaml_lines, story_id, new_status):
+    """Named epics list stories by slug (`  <slug>: done`) — append the entry when it is not there yet."""
+    for i, line in enumerate(yaml_lines):
+        if re.match(rf"^\s+{re.escape(story_id)}:\s*\S+", line):
+            yaml_lines[i] = re.sub(r"(:\s*)\S+(\s*)$", rf"\g<1>{new_status}\g<2>", line)
+            return True
+    if not any(l.startswith("development_status:") for l in yaml_lines):
+        return False
+    last = max(i for i, l in enumerate(yaml_lines) if l.strip() and not l.lstrip().startswith("#"))
+    if not yaml_lines[last].endswith("\n"):
+        yaml_lines[last] += "\n"
+    yaml_lines.insert(last + 1, f"  {story_id}: {new_status}\n")
+    return True
+
+
+def set_story_file_status(path, new_status):
+    """Set `status:` in the story file's frontmatter (adds it when missing). Returns True when changed."""
+    try:
+        text = open(path, encoding="utf-8").read()
+    except OSError:
+        return False
+    m = re.match(r"^(---\n)(.*?)(\n---)", text, re.S)
+    if not m:
+        return False
+    fm = m.group(2)
+    if re.search(r"^status:", fm, re.M):
+        fm2 = re.sub(r"^status:.*$", f"status: {new_status}", fm, count=1, flags=re.M)
+    else:
+        fm2 = fm + f"\nstatus: {new_status}"
+    if fm2 == fm:
+        return False
+    open(path, "w", encoding="utf-8").write(m.group(1) + fm2 + text[m.end(2):])
+    return True
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--file", required=True)
@@ -84,6 +120,7 @@ def main():
     parser.add_argument("--summary", required=True, help="Pipeline summary for log comment")
     parser.add_argument("--status", default="done", help="New status value (default: done)")
     parser.add_argument("--date", default=None, help="Date string (default: today)")
+    parser.add_argument("--story-file", default=None, help="Story file whose frontmatter `status:` is set to --status as well")
     args = parser.parse_args()
 
     date_str = args.date or date.today().isoformat()
@@ -96,10 +133,14 @@ def main():
 
     found = update_story_status(yaml_lines, args.story, args.status)
     if not found:
+        found = append_story_entry(yaml_lines, args.story, args.status)
+    if not found:
         print(f"Warning: story entry for '{args.story}' not found in YAML block", file=sys.stderr)
 
     write_file(args.file, comment_lines + yaml_lines)
     print(f"✓ {args.file}: story {args.story} → {args.status}")
+    if args.story_file and set_story_file_status(args.story_file, args.status):
+        print(f"✓ {args.story_file}: status → {args.status}")
 
 
 if __name__ == "__main__":
