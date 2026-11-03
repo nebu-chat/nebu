@@ -27,7 +27,10 @@ release-version-tag:
     - devguard:generate_tag-release
     - devguard:build_oci_image-release # its dotenv makes IMAGE_TAG "<tag>@<digest>": the alias is pinned to the attested digest
     - devguard:attest-release
-    - source-provenance-upload-release
+    # optional: the source-provenance include is gated on CI_SERVER_FQDN == gitlab.opencode.de (see devguard full.yml), so this job
+    # does not exist on other GitLab instances (e.g. the innoq mirror); a plain need would fail pipeline creation there.
+    - job: source-provenance-upload-release
+      optional: true
   # No `dependencies:` (see prerelease-version-tag): the -release include only exists in tag pipelines.
   variables:
     GIT_STRATEGY: none

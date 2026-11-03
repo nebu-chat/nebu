@@ -23,7 +23,10 @@ prerelease-version-tag:
     - devguard:generate_tag
     - devguard:build_oci_image # its dotenv makes IMAGE_TAG "<tag>@<digest>": the aliases are pinned to the attested digest
     - devguard:attest
-    - source-provenance-upload
+    # optional: the source-provenance include is gated on CI_SERVER_FQDN == gitlab.opencode.de (see devguard full.yml), so this job
+    # does not exist on other GitLab instances (e.g. the innoq mirror); a plain need would fail pipeline creation there.
+    - job: source-provenance-upload
+      optional: true
   # No `dependencies:` here on purpose: GitLab validates it statically against the config, and the DevGuard includes are
   # only part of the config on main (include rules), so it fails with "undefined dependency" on every other pipeline.
   # `needs:` already downloads the artifacts (incl. the dotenv with IMAGE_TAG) and is only checked for jobs that exist.
