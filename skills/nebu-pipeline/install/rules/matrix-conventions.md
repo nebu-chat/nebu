@@ -25,8 +25,15 @@ Public API Entry-Point: `Nebu.Matrix` — andere Domains dürfen nur dieses Modu
 - Room-State: GenServer (`handle_*` Callbacks only)
 - Crash/Restart-Test verpflichtend für alle Stories die Room-State berühren
 
-## E2EE — ausdrücklich verboten (ADR-011)
+## E2EE — Client-Infrastruktur ja, verschlüsselte Räume nein (ADR-011, Update 2026-11-02)
 
-- `m.room.encryption` Events werden rejected/skipped in jedem State-Write-Pfad
-- Kein Endpoint für `/_matrix/client/v3/keys/claim` (Olm-Schlüssel)
-- Device-Key-Directory (keys/upload, keys/query) existiert — ist aber NICHT E2EE
+Entscheidung 2026-10-30 (Epic `e2ee-client-support`): Der Server unterstützt die Client-seitige E2EE-Infrastruktur
+(Schlüssel-Backup, To-Device, Geräte-Schlüsselverzeichnis, Geräteverifikation). Er speichert nur opake Blobs bzw.
+öffentliche Schlüssel und Geräteliste-Metadaten, entschlüsselt nichts und loggt kein Schlüsselmaterial.
+
+- **Weiterhin verboten:** `m.room.encryption` Events werden rejected/skipped in jedem State-Write-Pfad — Räume bleiben unverschlüsselt
+- Erlaubt und implementiert: `keys/upload`, `keys/query`, `keys/claim`, `keys/changes`, `keys/signatures/upload`, `room_keys/*` (Backup), `sendToDevice`
+  sowie die E2E-Felder im `/sync` (`to_device`, `device_lists`, `device_one_time_keys_count`, `device_unused_fallback_key_types`)
+- Neue Endpoints dieser Familie: Limits, Rate-Limits und GDPR-Erasure sind Pflicht (siehe `11-risks.md`, `gdpr-deletion-runbook.md`);
+  Schlüsselmaterial, Tokens und Nachrichteninhalt dürfen nie in Logs landen
+- Verschlüsselte Räume (Einschalten von `m.room.encryption`) wären eine neue ADR-Entscheidung, kein Nebeneffekt einer Story

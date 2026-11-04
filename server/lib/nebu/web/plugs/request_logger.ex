@@ -291,8 +291,10 @@ defmodule Nebu.Web.Plugs.RequestLogger do
   # Account data (global + room scope) and the room-tag routes are opaque, client-defined USER
   # CONTENT (tag orders / fields, markers, secret-storage blobs): neither the request nor the response body is ever captured, not
   # even redacted (Logging Law: no user content in logs).
+  # Server-side key backup (story server-side-key-backup): `session_data` / `auth_data` are client-encrypted USER CONTENT too.
   defp account_data_content?(conn) do
-    Nebu.Web.Plugs.RawBodyReader.opaque_content_shape?(conn.request_path)
+    Nebu.Web.Plugs.RawBodyReader.opaque_content_shape?(conn.request_path) or Nebu.Web.Plugs.RawBodyReader.room_keys_shape?(conn.request_path) or
+      Nebu.Web.Plugs.RawBodyReader.to_device_shape?(conn.request_path) or Nebu.Web.Plugs.RawBodyReader.key_material_shape?(conn.request_path)
   end
 
   defp redacted_request_body_params(conn) do
@@ -405,7 +407,7 @@ defmodule Nebu.Web.Plugs.RequestLogger do
         path = normalized_path(conn.request_path)
 
         cond do
-          path in @names_only_query_paths or account_path?(path) -> names_only(qs)
+          path in @names_only_query_paths or account_path?(path) or Nebu.Web.Plugs.RawBodyReader.key_changes_shape?(path) -> names_only(qs)
           sso_redirect_path?(path) -> qs |> mask_params(@sso_masked_prefixes) |> PayloadRedactor.redact_payload()
           true -> PayloadRedactor.redact_payload(qs)
         end

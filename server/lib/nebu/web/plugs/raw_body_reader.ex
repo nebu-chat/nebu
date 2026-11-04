@@ -82,6 +82,63 @@ defmodule Nebu.Web.Plugs.RawBodyReader do
   @spec opaque_content_shape?(String.t() | [String.t()]) :: boolean()
   def opaque_content_shape?(path), do: account_data_shape?(path) or room_tags_shape?(path)
 
+  @doc """
+  True for every path under `/_matrix/client/{version}/room_keys` (the server-side key backup, story server-side-key-backup), any method, normalized like
+  `account_data_shape?/1`. Their bodies (`auth_data`, `session_data`) are client-encrypted USER CONTENT: the `RequestLogger` never captures them. Deliberately
+  NOT part of `opaque_content_shape?/1` / `opaque_content_put?/1`: the raw body is not cached and an oversize body is answered by `JsonBody` itself.
+  """
+  @spec room_keys_shape?(String.t() | [String.t()]) :: boolean()
+  def room_keys_shape?(path) when is_binary(path), do: path |> String.split("/") |> room_keys_shape?()
+
+  def room_keys_shape?(segments) when is_list(segments) do
+    case segments |> Enum.reject(&(&1 == "")) |> Enum.map(&safe_decode/1) do
+      ["_matrix", "client", _version, "room_keys" | _] -> true
+      _ -> false
+    end
+  end
+
+  @doc """
+  True for every path under `/_matrix/client/{version}/sendToDevice` (story to-device-messaging), any method, normalized like `account_data_shape?/1`.
+  The message contents are client-encrypted (Olm) or key material: the `RequestLogger` never captures them.
+  """
+  @spec to_device_shape?(String.t() | [String.t()]) :: boolean()
+  def to_device_shape?(path) when is_binary(path), do: path |> String.split("/") |> to_device_shape?()
+
+  def to_device_shape?(segments) when is_list(segments) do
+    case segments |> Enum.reject(&(&1 == "")) |> Enum.map(&safe_decode/1) do
+      ["_matrix", "client", _version, "sendToDevice" | _] -> true
+      _ -> false
+    end
+  end
+
+  @doc """
+  True for `POST /_matrix/client/{version}/keys/claim`, `.../keys/upload` (story device-key-directory), `.../keys/query`, `.../keys/signatures/upload`
+  (story key-query-hardening, D11) and `.../keys/device_signing/upload` (story e2ee-compliance-channel-guard, D4: master / self-signing / user-signing keys), any method, normalized like `account_data_shape?/1`. The bodies carry KEY MATERIAL (one-time keys, fallback keys, device keys, signatures; the claim answer hands the keys out): the
+  `RequestLogger` never captures a request or a response body of these routes.
+  """
+  @spec key_material_shape?(String.t() | [String.t()]) :: boolean()
+  def key_material_shape?(path) when is_binary(path), do: path |> String.split("/") |> key_material_shape?()
+
+  def key_material_shape?(segments) when is_list(segments) do
+    case segments |> Enum.reject(&(&1 == "")) |> Enum.map(&safe_decode/1) do
+      ["_matrix", "client", _version, "keys", name] when name in ["claim", "upload", "query"] -> true
+      ["_matrix", "client", _version, "keys", "signatures", "upload"] -> true
+      ["_matrix", "client", _version, "keys", "device_signing", "upload"] -> true
+      _ -> false
+    end
+  end
+
+  @doc "True for `GET /_matrix/client/{version}/keys/changes`: its query carries sync tokens (the `RequestLogger` logs the parameter names only)."
+  @spec key_changes_shape?(String.t() | [String.t()]) :: boolean()
+  def key_changes_shape?(path) when is_binary(path), do: path |> String.split("/") |> key_changes_shape?()
+
+  def key_changes_shape?(segments) when is_list(segments) do
+    case segments |> Enum.reject(&(&1 == "")) |> Enum.map(&safe_decode/1) do
+      ["_matrix", "client", _version, "keys", "changes"] -> true
+      _ -> false
+    end
+  end
+
   @doc "True for a `PUT` on an account-data or room-tag path shape (raw body kept, 413 rendered by the handler)."
   @spec opaque_content_put?(Plug.Conn.t()) :: boolean()
   def opaque_content_put?(%Plug.Conn{method: "PUT", path_info: path_info}), do: opaque_content_shape?(path_info)

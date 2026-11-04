@@ -1,0 +1,961 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 7927db3c..c5c85bcb 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -11,6 +11,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
+ 
+ ### Added
+ 
++- **Server-side key backup `/_matrix/client/v3/room_keys/**` (story server-side-key-backup, epic e2ee-client-support; migration 000056)**: Element's "chat recovery" and secret-storage bootstrap work. `POST|GET /room_keys/version`, `GET|PUT|DELETE /room_keys/version/{version}` and `PUT|GET|DELETE /room_keys/keys[/{roomId}[/{sessionId}]]` replace the former acceptance stub (a constant `200 {"version":"1"}` that stored nothing): an OPAQUE per-user store (tables `room_key_backup_versions` and `room_key_backup_sessions`; the server never decrypts or logs a blob, ADR-011 stays: no E2EE room is enabled), the spec's merge rule for a re-uploaded session, `etag` and `count` from the database, `403 M_WRONG_ROOM_KEYS_VERSION` with `current_version`, idempotent `DELETE` with a soft-delete marker (versions are never reused). Limits: 10 versions per user (the 11th is `403 M_FORBIDDEN`), 100 000 sessions per version, 8 KiB per `session_data`, 16 KiB per `auth_data`, 5 MiB per request body on these routes; writes are rate limited per user (60 per minute, burst 30; reads are not). The GDPR erasure deletes all versions and sessions of the user. Operators: run the migration with the release; rolling back discards every user's key backup.
++
+ - **`PUT /_matrix/client/v3/rooms/{roomId}/redact/{eventId}/{txnId}` and applied `m.room.redaction` events, audit action `room_event_redacted`, migration 000051 (story state-writer-redaction; follow-ups `fw`, `fv`, `fz`, `fx` closed)**: Element's "Remove" and "Remove recent messages" work. A redaction is decided and written by the room process (own event: `events["m.room.redaction"]`; another user's event: also the `redact` level), stored with a top-level `redacts` (new column `events.redacts`, migration 000051) and served with `redacts` and `content.redacts`; the redacted event is served pruned (`content: {}`, `unsigned.redacted_because`) on every read path while its content stays in the database (Compliance Mode); a redaction of another user's event writes the audit row `room_event_redacted`. Operator query **Q-rd** (07-deployment) lists legacy unchecked redactions.
+ - **`PUT /_matrix/client/v3/rooms/{roomId}/state/m.room.power_levels` (story power-levels-enforcement; follow-ups `eq`, `er`, `fr` closed)**: power levels can be changed after the room was created (Element's Roles & Permissions, `/op`, `/deop`) under the room version 10 change rules, decided and written in the room process in one transaction; new audit action `room_power_levels_changed`; the PUT is charged to the `moderation` tier; operator query Q-pl in `docs/architecture/07-deployment.md`.
+ - **Room moderation routes `POST /_matrix/client/v3/rooms/{roomId}/kick`, `/ban` and `/unban` (story moderation-routes-atomic-ban; follow-ups `ex` and `ew` closed)**: the three routes work as the Matrix spec and room version 10 define them, including the "Disinvite" of a pending invitee (a kick of an invited user) and pre-emptive bans. Every change that a ban can race (kick, ban, unban, the invite event, the decline, the join) is decided and written inside the room process, stamped after the user's latest member event and committed in ONE database transaction. A fourth per-user rate-limit tier `moderation` (30 per minute, burst 60, one unit per request of the three routes; a labelled divergence from the spec's "Rate-limited: No"; env `NEBU_RATE_LIMIT_MODERATION_PER_MIN` / `NEBU_RATE_LIMIT_MODERATION_BURST`, passed through by `docker-compose.yml`). New audit actions `room_member_kicked`, `room_member_banned`, `room_member_unbanned`. Operator query Q-half (banned users that are still in the member set) in `docs/architecture/07-deployment.md`.
+diff --git a/docs/architecture/05-building-blocks.md b/docs/architecture/05-building-blocks.md
+index 295124fc..09f6084f 100644
+--- a/docs/architecture/05-building-blocks.md
++++ b/docs/architecture/05-building-blocks.md
+@@ -2311,4 +2311,10 @@ Response: `Event event` - the full event proto (same `Event` message used by syn
+ >    draw from one ETS bucket per IP) — flagged during security review as a known architectural limitation for
+ >    follow-up (per-tier isolation not scope of this story).
+ 
++> **Server-side key backup (story `server-side-key-backup`, epic e2ee-client-support):** `Nebu.Matrix.HttpRoomKeys` serves
++> `/_matrix/client/v3/room_keys/version[/{version}]` and `/room_keys/keys[/{roomId}[/{sessionId}]]` (14 route clauses in
++> `Nebu.Web.Router.Protected`) as an OPAQUE per-user store in the tables `room_key_backup_versions` and `room_key_backup_sessions`
++> (migration 000056, SQL inline per ADR-018). `etag` and `count` come from the database (cluster-safe); the writers take the per-user
++> `sync_global` advisory lock; the GDPR erasure deletes both tables (`UserDeletion.erased_tables/0`). See 08-concepts "Server-side key backup".
++
+ _Source: `_bmad-output/planning-artifacts/architecture.md`, §Project Structure & Boundaries, §Complete Project Directory Structure; Story 9-19 (room_moderation.go, sync.go, event_dispatcher/server.ex, forgotten_rooms migration); Story 9-22 (per-device sync tokens, device_id in proto); Story 9-24 (GlobalAccountDataDB interface, ListGlobalAccountData, top-level account_data in syncResponse); Story 9-25 (syntheticNextBatch helper, syntheticBatchSeq atomic counter, sinceToken param removed from buildResponseFromBufferedEvents); Story 9-27 (upgrade_room/2 full Matrix §11.35.1 flow, GRPC.RPCError error handling, archive_room_atomic, terminate_child, try/rescue failure audit); Story 9-28 (GetRelations RPC, unsigned_relations field on Event, attach_thread_aggregations, fetch_events_by_relation, count_thread_children, event_in_room?, migration 000042); Story 9-29 (base /relations/{eventId} route, three-segment /{relType}/{eventType} route, dir/event_type/recurse/from query params, prev_batch in response, fetch_events_by_relation/5 dynamic WHERE builder); Story 11-3 (SearchMessages gRPC handler, proto extension, delegated search_db_module pattern, offset-cap security fix); Story 11-4 (search.go Gateway handler, SearchCoreClient consumer interface, §11.14.1 response shape, gRPC error mapping); Story 11-5 (NewUserRateLimiter middleware, per-user 10 req/min for /search, retry_after_ms in body); Story 11-8 (GetEvent RPC, event.go Go handler, fetch_event/2 DB function, core_grpc.pb.ex rpc :GetEvent + rpc :GetRelations bug fix); Story 11-9 (health/info.go NewInfoHandler, Nebu.BuildInfo module, GET /info on pubMux + health server, Admin UI footer via page_data.go SetBuildInfo/newPageData, ErrorMode on PageData, Dockerfile ARG/ldflags injection, docker-compose.yml build args); Story 11-10 (ClaimMappingHandler + ClaimMappingPageData + ClaimMappingConfig in claim_mapping.go, claim-mapping.html template, ClaimSelectionHandler atomic claim persistence in auth.go, ServerConfigReader LoadClaimMapping/SaveClaimMapping extension, FormatUserIDFromClaims signature refactor in grpc/metadata.go, JWTMiddleware userIDClaimLoader param, LoginHandler per-request claim resolution, migration 000044 claim mapping defaults seed); Story 12.16 (media/internal/auth middleware - TokenVerifier interface + fail-closed nil guard; media/internal/config handler; CSP + Cross-Origin-Resource-Policy headers on download/thumbnail; v1 authenticated routes in main.go); oidc-middleware-migration (nebu_http: NebuHttp.Plugs.OidcPlug Bearer-token validation, NebuHttp.JwksCache GenServer with TTL refresh + last-known-good, NebuHttp.Router.Protected /_matrix sub-router — built + unit-tested, NOT yet on the live request path; live cutover owned by matrix-api-migration); media-gateway-migration (nebu_http: NebuHttp.Media + Crypto/DB/Membership/Storage/HttpFetch/SSRF submodules + NebuHttp.Router.Media serving /_matrix/media/v3/* behind OidcPlug; media access-control now a local room_members SQL call replacing the gRPC CheckMembership RPC; ExAws.S3/MinIO storage with Finch pool in NebuHttp.Application; AES-256-GCM at-rest encryption per ADR-011; SSRF-guarded + rate-limited preview_url fetch; inline SQL per ADR-018; replaces the standalone Go media service)_
+diff --git a/docs/architecture/07-deployment.md b/docs/architecture/07-deployment.md
+index 29e3c012..466df7ae 100644
+--- a/docs/architecture/07-deployment.md
++++ b/docs/architecture/07-deployment.md
+@@ -433,6 +433,8 @@ DELETE FROM read_receipts WHERE user_id IN (SELECT user_id FROM users WHERE dele
+ DELETE FROM oauth_account_sessions WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
+ DELETE FROM oauth_consent_requests WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
+ DELETE FROM oauth_codes WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
++DELETE FROM room_key_backup_sessions WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
++DELETE FROM room_key_backup_versions WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
+ -- the post-commit session teardown tables (a teardown that failed after the commit left them; the tokens are dead, the rows are not)
+ DELETE FROM sync_room_cursors WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
+ DELETE FROM oauth_idp_refresh_leases WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
+diff --git a/docs/architecture/08-concepts.md b/docs/architecture/08-concepts.md
+index 6cda94eb..beeff30e 100644
+--- a/docs/architecture/08-concepts.md
++++ b/docs/architecture/08-concepts.md
+@@ -1386,13 +1386,23 @@ percent-decoded). Error behavior: 400 `M_NOT_JSON` for a tag PUT without / with
+ per-user total-bytes cap (4 MiB), which also refuses growth of an existing row. The 64 KiB per-event cap only
+ applies when the event grows, so a tag can still be deleted after an operator lowered the cap.
+ 
++### Server-side key backup (story server-side-key-backup)
++
++`/_matrix/client/v3/room_keys/**` (Matrix CS v1.18 "Server-side key backups") is an OPAQUE per-user store: `auth_data` and the `session_data` blobs are kept verbatim as JSON text, never decrypted and never parsed beyond well-formedness and size, and never logged (the `RequestLogger` captures no body of these routes; a failing write logs its error kind only). ADR-011 stays: this enables no E2EE room, `m.room.encryption` is still rejected. SQL is inline in the handler (ADR-018); the state lives only in `room_key_backup_versions` and `room_key_backup_sessions` (migration 000056, runtime-role grants, row level security enabled and forced), so `count` and `etag` are the same on every node (ADR-020).
++
++- *Versions:* a version is a decimal string, a per-user counter (the first version of every user is `1`, strictly increasing; the session rows have a foreign key to their version without a cascade, so sessions are deleted before their version); the newest non-deleted one is the current one (after deleting it the newest remaining one, else `404 M_NOT_FOUND`). `DELETE /version/{version}` deletes the info and all its keys at once and leaves a soft-delete marker (no `auth_data`), so a number is never reused and a repeated DELETE is idempotent (`404` only for a number that never existed). At most 10 backup versions per user: the 11th is `403 M_FORBIDDEN` (never `M_LIMIT_EXCEEDED`, which clients retry; nothing is deleted silently); deleted versions do not count.
++- *Writes* go to the current version only: any other version (older, deleted, unknown, another user's) is `403 M_WRONG_ROOM_KEYS_VERSION` with the top-level `current_version`, or `404 M_NOT_FOUND` when the user has no backup. Reads and deletes work on every own non-deleted version and answer `404` for anything else; another user's version looks unknown. The `version` query parameter is required (`400 M_MISSING_PARAM`). Missing members are `M_MISSING_PARAM`, mistyped ones `M_INVALID_PARAM`, malformed JSON `M_NOT_JSON`, a non-object body `M_BAD_JSON`; a request is stored whole or not at all.
++- *Merge rule* of a re-uploaded session (spec order): if `is_verified` differs the verified one is kept; else the lower `first_message_index`; if equal the lower `forwarded_count`; on a full tie the stored session is kept. A replace does not change `count`; `etag` changes whenever the stored set changes. The merge is decided in one SQL statement under the per-user lock, so concurrent uploads of one session never double count and the best one wins.
++- *Limits:* 100 000 sessions per version (`403 M_FORBIDDEN` for a batch that would pass it, as a whole; the seam `:nebu, :room_keys_max_sessions_per_version`), 8 KiB per `session_data` and 16 KiB per `auth_data` (canonical JSON bytes, `413 M_TOO_LARGE`), 5 MiB per request body on these routes for requests that carry an `Authorization: Bearer` credential (`JsonBody` parses before the authentication, so anonymous requests, and a query-string `access_token`, keep the 1 MB default; every other route keeps 1 MB). Writes are rate limited per user (tier `room_keys`: 60 per minute, burst 30, like the `account_data` tier); reads are not limited (a divergence from the spec's "rate-limited": a restoring client reads one session per undecryptable event).
++- *Erasure:* both tables are in `UserDeletion.erased_tables/0` (sessions first, the soft-delete markers too); the creating writers (POST /version, PUT /keys) take the `sync_global` lock and refuse a user whose erasure is under way (`403 M_USER_DEACTIVATED`).
++
+ ### GDPR erasure inventory (story gdpr-erasure-global-data)
+ 
+ GDPR erasure (`Nebu.Compliance.UserDeletion.delete_user_keys/3`) physically deletes every row of personal data that is stored under the user in a per-user table, in the SAME transaction, in this order: the `deletion_in_progress` marker, the private keys set to NULL, the row locks and the advisory lock (below), the per-user deletes (then a check that no `oauth_codes` row is left), the profile anonymisation, and `keys_deleted`; one failing step rolls everything back and writes the `user_keys_deletion_attempted` audit row, whose `error_detail` names the failing step (`step=<name>`, a code atom, never data). *Lock order:* the transaction first locks the user's `uia_sessions` rows and `cross_signing_keys` row (`FOR UPDATE`) and only THEN takes the per-user `sync_global` advisory lock of `AccountDataStore.put/3`, `CrossSigningKeyStore.put_keys/2` and the signature merge: the order of the cross-signing reset writer (uia row, cross-signing row, advisory lock), so a writer in flight is serialised with the erasure and the two do not deadlock (one narrow exception, below). Those three writers refuse a user whose `deletion_status` is set (`{:error, :user_erased}`, answered `403 M_USER_DEACTIVATED`). The cross-signing writers (both branches of `device_signing/upload` and the signature merge) decide on the stored keys only through `CrossSigningKeyStore.lock_keys/1`, in the same order: the `cross_signing_keys` row lock, then the `sync_global` advisory lock, and only THEN the read (row -> advisory -> read; story cross-signing-upload-races), so two concurrent first uploads store one key set and a signature merge never writes back a stale merge base. The exception is the absent-then-present window (accepted residual): when the row lock of a signature merge found no row and a first upload commits the row before the merge gets the advisory lock, an erasure that locks the new row and waits for the advisory lock can form a cycle with the merge's write, which only now waits for that row; PostgreSQL aborts one side (`40P01`: the erasure fails closed, or the merge answers 500). A first upload has the same window when the row committed in between has a NULL master (a partial upload): its read sees no master and its upsert takes the row lock only after the advisory lock (pre-existing; the erasure fails closed, or the upload answers 500). Three actors of one user within milliseconds; closing it would need the advisory lock first everywhere, which the story rejected. Events authored by the user are retained (room history preservation, recital 65; immutable signed event log, the sender is the pseudonym); the profile is anonymised (`displayname = 'Deleted User'`, `avatar_url = NULL`, `users.anonymized_at`); admin deactivation keeps all of it (reversible). A second erasure answers `:conflict` and changes nothing.
+ 
+ **The erasure is terminal for authentication.** The last step also sets `users.is_active = false` and NULLs the `users` PII columns (display name, avatar and email ciphertexts: the display name and avatar are encrypted with the server-wide key, so the key deletion does not shred them; also `last_seen_at` and `deactivation_reason`, admin free text that may describe the person). Every authentication gate (`TokenValidator`, `OAuthSessionStore.user_active/1`, `Nebu.Matrix.active?/1`, the account pages, `invitable_local_users`) treats `deletion_status IS NOT NULL` as deactivated, so neither a fresh IdP token, an SSO login, an OAuth authorization nor an admin reactivation revives the account, and `Profile.DB.upsert_profile/3` writes nothing for an erased user. A bearer (an unbound raw IdP JWT included) that the node-local provisioning cache of the OIDC plug (60 s TTL) already confirmed is still accepted on that node until the entry expires: new requests, not only one in flight, for up to 60 s, the same bound as for an admin deactivation. In that window it can still write the tables WITHOUT a guard (device keys, receipts, room account data, the lazy device row with its IP); the profile PUT, global account data, cross-signing, the signature merge and the sync persist are refused. The eviction of the cache entry on every node (a broadcast over `:pg` on erasure and deactivation) is the proper fix, recorded in follow-up `gn`. Admin UI access of an erased administrator follows the IdP admin group claim, not the erasure: remove the person from the IdP admin group. `Nebu.Admin.DB.set_is_active/2` refuses to reactivate an erased user (`:erased`, answered as a failed precondition) and the admin user suggestions never offer one.
+ 
+-**Erased by the transaction** (`UserDeletion.erased_tables/0`, the list the deleting code and the guard test share): `user_room_account_data`, `account_data`, `cross_signing_keys`, `device_keys`, `device_one_time_keys`, `device_fallback_keys`, `forgotten_rooms`, `auto_join_opt_outs`, `read_receipts`, `uia_sessions`, `oauth_account_sessions`, `oauth_consent_requests`, `oauth_codes`. (`oauth_codes` needs the delete policy of migration 000055.)
++**Erased by the transaction** (`UserDeletion.erased_tables/0`, the list the deleting code and the guard test share): `user_room_account_data`, `account_data`, `cross_signing_keys`, `device_keys`, `device_one_time_keys`, `device_fallback_keys`, `forgotten_rooms`, `auto_join_opt_outs`, `read_receipts`, `uia_sessions`, `oauth_account_sessions`, `oauth_consent_requests`, `oauth_codes`, `room_key_backup_sessions`, `room_key_backup_versions` (the server-side key backup of story server-side-key-backup, migration 000056: every version row, the soft-delete markers included, and every session row). (`oauth_codes` needs the delete policy of migration 000055.)
+ 
+ **Ended after the commit by the session teardown** (best effort, outside the transaction): `devices`, `matrix_sessions`, `jwt_device_bindings`, `sessions`, `oauth_idp_refresh_leases`, `sync_tokens`, `sync_room_cursors` (the dispatcher also removes the `devices` rows of legacy devices).
+ 
+diff --git a/docs/architecture/adr/ADR-011-managed-e2ee-key-escrow.md b/docs/architecture/adr/ADR-011-managed-e2ee-key-escrow.md
+index 4691ac1a..3d1d8ed8 100644
+--- a/docs/architecture/adr/ADR-011-managed-e2ee-key-escrow.md
++++ b/docs/architecture/adr/ADR-011-managed-e2ee-key-escrow.md
+@@ -10,9 +10,19 @@ Im Rahmen der Compliance-Architektur wurde evaluiert, ob und wie Ende-zu-Ende-Ve
+ mit der Anforderung nach vollständigem Compliance-Zugriff vereinbar ist.
+ 
+ Nebu zielt auf compliance-first-Organisationen ab, die server-seitige Nachrichtensichtbarkeit für
+-Audit-Logging, Four-Eyes-Compliance-Zugriff und rechtlichen Export benötigen. Die E2EE-Stubs
++Audit-Logging, Four-Eyes-Compliance-Zugriff und rechtlichen Export benötigen. Die Client-Kompatibilitäts-Endpunkte
+ (`keys/upload`, `keys/query`, `keys/device_signing/upload`, `room_keys/*`) bleiben in Betrieb,
+-um Client-Fehlerdialoge zu verhindern.
++um Client-Fehlerdialoge zu verhindern (siehe die Updates unten: sie sind keine reinen Stubs mehr).
++
++> **Update 2026-10-30 (story `server-side-key-backup`, epic e2ee-client-support):** `room_keys/*`
++> (Matrix CS v1.18 "Server-side key backups") ist **kein Stub mehr**, sondern ein **opaker,
++> PostgreSQL-gestützter Schlüssel-Backup-Speicher** pro Nutzer (Tabellen `room_key_backup_versions`,
++> `room_key_backup_sessions`; Migration `000056`). Der Server speichert `auth_data` und die
++> `session_data`-Blobs unverändert als JSON, **entschlüsselt sie nie** und parst sie nicht über
++> Wohlgeformtheit und Größe hinaus; sie werden nie geloggt und beim GDPR-Erase mit gelöscht. Das
++> schaltet **keinen** E2EE-Raum ein: `m.room.encryption` wird weiterhin in jedem Schreibpfad
++> abgelehnt (diese ADR bleibt gültig), der Speicher dient nur dem Wiederherstellen von
++> Client-Schlüsseln ("Chat-Wiederherstellung") und dem Abschluss des Secret-Storage-Bootstraps.
+ 
+ > **Update 2026-06-26 (bugfix `fix-device-key-registration`):** Die reinen No-op-Stubs für
+ > `keys/upload`/`keys/query` lösten in Element den Fehler *"device could not be registered"* aus
+@@ -88,7 +98,8 @@ Die E2EE-Stubs bleiben unverändert in Betrieb. Epic 10 ruht bis zur Wiederaufna
+ ## Konsequenzen
+ 
+ - Keine neuen E2EE-Implementierungsarbeiten bis zur Wiederaufnahme
+-- E2EE-Stubs (`keys/device_signing/upload`, `room_keys/*`) bleiben aktiv; `keys/upload`/`keys/query`/
++- `room_keys/*` ist seit `server-side-key-backup` (2026-10-30) ein opaker Schlüssel-Backup-Speicher
++  (kein Stub, kein E2EE, siehe Update oben); `keys/device_signing/upload` bleibt aktiv; `keys/upload`/`keys/query`/
+   `devices` sind seit `fix-device-key-registration` (2026-06-26) ein funktionierendes
+   Geräteschlüssel-Verzeichnis (kein E2EE — siehe Kontext-Update oben)
+ - Der Server erzwingt aktiv das No-E2EE-Invariant: `m.room.encryption` wird in allen Schreibpfaden
+diff --git a/docs/compliance/gdpr-deletion-runbook.md b/docs/compliance/gdpr-deletion-runbook.md
+index 483faad5..cb73b2ac 100644
+--- a/docs/compliance/gdpr-deletion-runbook.md
++++ b/docs/compliance/gdpr-deletion-runbook.md
+@@ -103,6 +103,8 @@ SELECT COUNT(*) FROM uia_sessions WHERE user_id = '@alice:example.com';
+ SELECT COUNT(*) FROM oauth_account_sessions WHERE user_id = '@alice:example.com';
+ SELECT COUNT(*) FROM oauth_consent_requests WHERE user_id = '@alice:example.com';
+ SELECT COUNT(*) FROM oauth_codes WHERE user_id = '@alice:example.com';
++SELECT COUNT(*) FROM room_key_backup_sessions WHERE user_id = '@alice:example.com';
++SELECT COUNT(*) FROM room_key_backup_versions WHERE user_id = '@alice:example.com';
+ -- Expected: 0 for each table above
+ 
+ -- Confirm the session teardown tables are empty (it is best effort after the commit; if a count is not 0 run the sweep below for this user)
+@@ -181,6 +183,8 @@ DELETE FROM read_receipts WHERE user_id IN (SELECT user_id FROM users WHERE dele
+ DELETE FROM oauth_account_sessions WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
+ DELETE FROM oauth_consent_requests WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
+ DELETE FROM oauth_codes WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
++DELETE FROM room_key_backup_sessions WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
++DELETE FROM room_key_backup_versions WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
+ -- the post-commit session teardown tables (a teardown that failed after the commit left them; the tokens are dead, the rows are not)
+ DELETE FROM sync_room_cursors WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
+ DELETE FROM oauth_idp_refresh_leases WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
+diff --git a/server/lib/nebu/compliance/user_deletion.ex b/server/lib/nebu/compliance/user_deletion.ex
+index b6eb4524..46a7cbc9 100644
+--- a/server/lib/nebu/compliance/user_deletion.ex
++++ b/server/lib/nebu/compliance/user_deletion.ex
+@@ -43,6 +43,7 @@ defmodule Nebu.Compliance.UserDeletion do
+     device_keys device_one_time_keys device_fallback_keys
+     forgotten_rooms auto_join_opt_outs read_receipts
+     uia_sessions oauth_account_sessions oauth_consent_requests oauth_codes
++    room_key_backup_sessions room_key_backup_versions
+   )
+ 
+   # the step name of each DELETE, fixed at compile time (the attempted audit and the log name the failing step)
+diff --git a/server/lib/nebu/matrix/http_room_keys.ex b/server/lib/nebu/matrix/http_room_keys.ex
+new file mode 100644
+index 00000000..f579ea7d
+--- /dev/null
++++ b/server/lib/nebu/matrix/http_room_keys.ex
+@@ -0,0 +1,559 @@
++defmodule Nebu.Matrix.HttpRoomKeys do
++  @moduledoc """
++  Matrix CS v1.18 "Server-side key backups" (`/_matrix/client/v3/room_keys/**`), story server-side-key-backup (epic e2ee-client-support).
++
++  An OPAQUE per-user store (ADR-011 stays: this enables no E2EE room): `auth_data` and the `session_data` blobs are kept verbatim as JSON text and
++  never decrypted or parsed beyond well-formedness and size. SQL inline (ADR-018). State lives only in PostgreSQL (`room_key_backup_versions`,
++  `room_key_backup_sessions`): `count` and `etag` come from the database, so every node of a cluster answers the same.
++
++  Every write runs in one transaction under the per-user `sync_global` advisory lock (the SAME key as `AccountDataStore.put/3` and
++  `CrossSigningKeyStore.put_keys/2`): the merge, the quota and the version number are decided on the locked state and the erasure serialises with them.
++  Nothing here logs a blob; a failing write logs its error KIND only.
++  """
++  import Nebu.Matrix.Http, only: [send_json: 3, error: 4]
++  require Logger
++
++  @algorithm "m.megolm_backup.v1.curve25519-aes-sha2"
++  @max_versions 10
++  @default_max_sessions 100_000
++  @max_session_data_bytes 8 * 1024
++  @max_auth_data_bytes 16 * 1024
++  @max_id_bytes 255
++  @max_index 4_294_967_295
++  @lock_sql "SELECT pg_advisory_xact_lock(hashtextextended('sync_global|' || $1::text, 0))"
++
++  # ── versions ────────────────────────────────────────────────────────────────
++
++  @doc "POST /room_keys/version"
++  def create_version(conn) do
++    with {:ok, body} <- body_object(conn),
++         {:ok, algorithm, auth_data} <- version_body(body) do
++      uid = conn.assigns[:current_user]
++      now = now_ms()
++
++      transact(conn, fn ->
++        lock_and_check_erased!(uid)
++        %{rows: [[live]]} = q!("SELECT count(*) FROM room_key_backup_versions WHERE user_id = $1 AND deleted_at IS NULL", [uid])
++        if live >= @max_versions, do: fail(403, "M_FORBIDDEN", "Too many key backup versions (at most #{@max_versions}); delete one first")
++        %{rows: [[next]]} = q!("SELECT COALESCE(max(version), 0) + 1 FROM room_key_backup_versions WHERE user_id = $1", [uid])
++
++        q!(
++          "INSERT INTO room_key_backup_versions (user_id, version, algorithm, auth_data, etag, created_at, updated_at) VALUES ($1, $2, $3, $4, 0, $5, $5)",
++          [uid, next, algorithm, Jason.encode!(auth_data), now]
++        )
++
++        {200, %{"version" => Integer.to_string(next)}}
++      end)
++    else
++      {:error, err} -> api_error(conn, err)
++    end
++  end
++
++  @doc "GET /room_keys/version (the current version) and GET /room_keys/version/{version}"
++  def get_version(conn, version \\ nil) do
++    uid = conn.assigns[:current_user]
++
++    guard_read(conn, fn ->
++      v =
++        if version == nil do
++          current_version(uid)
++        else
++          case parse_version(version) do
++            {:ok, v} -> v
++            :error -> nil
++          end
++        end
++
++      if v == nil, do: not_found(conn, version), else: reply_info(conn, uid, v, version)
++    end)
++  end
++
++  defp reply_info(conn, uid, v, version) do
++    case q("SELECT algorithm, auth_data, etag FROM room_key_backup_versions WHERE user_id = $1 AND version = $2 AND deleted_at IS NULL", [uid, v]) do
++      {:ok, %{rows: [[algorithm, auth_data, etag]]}} ->
++        %{rows: [[count]]} = q!("SELECT count(*) FROM room_key_backup_sessions WHERE user_id = $1 AND version = $2", [uid, v])
++
++        send_json(conn, 200, %{
++          "algorithm" => algorithm,
++          "auth_data" => Jason.decode!(auth_data),
++          "count" => count,
++          "etag" => Integer.to_string(etag),
++          "version" => Integer.to_string(v)
++        })
++
++      {:ok, _} ->
++        not_found(conn, version)
++
++      {:error, e} ->
++        internal(conn, e)
++    end
++  end
++
++  @doc "PUT /room_keys/version/{version}"
++  def update_version(conn, version) do
++    uid = conn.assigns[:current_user]
++
++    with {:ok, body} <- body_object(conn),
++         {:ok, algorithm, auth_data} <- update_body(body) do
++      transact(conn, fn ->
++        lock!(uid)
++
++        v =
++          case parse_version(version) do
++            {:ok, v} -> v
++            :error -> fail(404, "M_NOT_FOUND", "Unknown backup version")
++          end
++
++        case q!("SELECT algorithm FROM room_key_backup_versions WHERE user_id = $1 AND version = $2 AND deleted_at IS NULL FOR UPDATE", [uid, v]) do
++          %{rows: [[stored]]} ->
++            if algorithm != stored, do: fail(400, "M_INVALID_PARAM", "The algorithm of a backup cannot be changed")
++
++            case Map.fetch(body, "version") do
++              {:ok, ^version} -> :ok
++              {:ok, _} -> fail(400, "M_INVALID_PARAM", "The version in the body does not match the version in the path")
++              :error -> :ok
++            end
++
++            q!("UPDATE room_key_backup_versions SET auth_data = $3, updated_at = $4 WHERE user_id = $1 AND version = $2", [uid, v, Jason.encode!(auth_data), now_ms()])
++            {200, %{}}
++
++          _ ->
++            fail(404, "M_NOT_FOUND", "Unknown backup version")
++        end
++      end)
++    else
++      {:error, err} -> api_error(conn, err)
++    end
++  end
++
++  @doc "DELETE /room_keys/version/{version}"
++  def delete_version(conn, version) do
++    uid = conn.assigns[:current_user]
++
++    transact(conn, fn ->
++      lock!(uid)
++
++      v =
++        case parse_version(version) do
++          {:ok, v} -> v
++          :error -> fail(404, "M_NOT_FOUND", "Unknown backup version")
++        end
++
++      case q!("SELECT deleted_at FROM room_key_backup_versions WHERE user_id = $1 AND version = $2 FOR UPDATE", [uid, v]) do
++        %{rows: []} ->
++          fail(404, "M_NOT_FOUND", "Unknown backup version")
++
++        %{rows: [[nil]]} ->
++          q!("DELETE FROM room_key_backup_sessions WHERE user_id = $1 AND version = $2", [uid, v])
++          now = now_ms()
++
++          q!(
++            "UPDATE room_key_backup_versions SET algorithm = NULL, auth_data = NULL, etag = etag + 1, deleted_at = $3, updated_at = $3 WHERE user_id = $1 AND version = $2",
++            [uid, v, now]
++          )
++
++          {200, %{}}
++
++        %{rows: [[_deleted_at]]} ->
++          {200, %{}}
++      end
++    end)
++  end
++
++  # ── keys ────────────────────────────────────────────────────────────────────
++
++  @doc "PUT /room_keys/keys[/{room}[/{session}]]; `scope` is `:all`, `{:room, room}` or `{:session, room, session}`"
++  def put_keys(conn, scope) do
++    uid = conn.assigns[:current_user]
++
++    with {:ok, version} <- version_param(conn),
++         :ok <- scope_ids(scope),
++         {:ok, body} <- body_object(conn),
++         {:ok, entries} <- parse_entries(scope, body) do
++      transact(conn, fn ->
++        lock_and_check_erased!(uid)
++
++        v =
++          case current_version(uid) do
++            nil ->
++              fail(404, "M_NOT_FOUND", "Unknown backup version")
++
++            current ->
++              if parse_version(version) != {:ok, current},
++                do: fail(403, "M_WRONG_ROOM_KEYS_VERSION", "The version is not the current backup version", %{"current_version" => Integer.to_string(current)})
++
++              current
++          end
++
++        store!(uid, v, entries)
++        {200, count_etag(uid, v)}
++      end)
++    else
++      {:error, err} -> api_error(conn, err)
++    end
++  end
++
++  defp store!(_uid, _v, []), do: :ok
++
++  defp store!(uid, v, entries) do
++    rooms = Enum.map(entries, & &1.room_id)
++    sids = Enum.map(entries, & &1.session_id)
++    fmis = Enum.map(entries, & &1.first_message_index)
++    fwds = Enum.map(entries, & &1.forwarded_count)
++    vers = Enum.map(entries, & &1.is_verified)
++    datas = Enum.map(entries, & &1.session_data)
++
++    %{rows: [[existing]]} = q!("SELECT count(*) FROM room_key_backup_sessions WHERE user_id = $1 AND version = $2", [uid, v])
++
++    %{rows: [[fresh]]} =
++      q!(
++        "SELECT count(*) FROM unnest($3::text[], $4::text[]) AS i(room_id, session_id) WHERE NOT EXISTS " <>
++          "(SELECT 1 FROM room_key_backup_sessions s WHERE s.user_id = $1 AND s.version = $2 AND s.room_id = i.room_id AND s.session_id = i.session_id)",
++        [uid, v, rooms, sids]
++      )
++
++    if existing + fresh > max_sessions(), do: fail(403, "M_FORBIDDEN", "Too many sessions in this backup version")
++
++    # the merge rule of the spec, in order: verified wins; else the lower first_message_index; if equal the lower forwarded_count; a full tie keeps the stored one
++    %{rows: [[changed]]} =
++      q!(
++        """
++        WITH upserted AS (
++          INSERT INTO room_key_backup_sessions AS s
++            (user_id, version, room_id, session_id, first_message_index, forwarded_count, is_verified, session_data, updated_at)
++          SELECT $1::text, $2::bigint, i.room_id, i.session_id, i.fmi, i.fwd, i.ver, i.data, $9::bigint
++          FROM unnest($3::text[], $4::text[], $5::bigint[], $6::bigint[], $7::boolean[], $8::text[]) AS i(room_id, session_id, fmi, fwd, ver, data)
++          ON CONFLICT (user_id, version, room_id, session_id) DO UPDATE
++            SET first_message_index = EXCLUDED.first_message_index,
++                forwarded_count     = EXCLUDED.forwarded_count,
++                is_verified         = EXCLUDED.is_verified,
++                session_data        = EXCLUDED.session_data,
++                updated_at          = EXCLUDED.updated_at
++            WHERE (EXCLUDED.is_verified AND NOT s.is_verified)
++               OR (EXCLUDED.is_verified = s.is_verified
++                   AND (EXCLUDED.first_message_index < s.first_message_index
++                        OR (EXCLUDED.first_message_index = s.first_message_index AND EXCLUDED.forwarded_count < s.forwarded_count)))
++          RETURNING 1
++        )
++        SELECT count(*) FROM upserted
++        """,
++        [uid, v, rooms, sids, fmis, fwds, vers, datas, now_ms()]
++      )
++
++    if changed > 0, do: bump_etag!(uid, v)
++    :ok
++  end
++
++  @doc "GET /room_keys/keys[/{room}[/{session}]]"
++  def get_keys(conn, scope) do
++    uid = conn.assigns[:current_user]
++
++    with {:ok, version} <- version_param(conn),
++         :ok <- scope_ids(scope) do
++      guard_read(conn, fn ->
++        case live_version(uid, version) do
++          nil -> not_found(conn, version)
++          v -> send_keys(conn, uid, v, scope)
++        end
++      end)
++    else
++      {:error, err} -> api_error(conn, err)
++    end
++  end
++
++  defp send_keys(conn, uid, v, :all) do
++    %{rows: rows} = q!("SELECT room_id, session_id, first_message_index, forwarded_count, is_verified, session_data FROM room_key_backup_sessions WHERE user_id = $1 AND version = $2", [uid, v])
++
++    rooms =
++      Enum.reduce(rows, %{}, fn [room, sid | rest], acc ->
++        Map.update(acc, room, %{"sessions" => %{sid => kbd(rest)}}, fn %{"sessions" => s} -> %{"sessions" => Map.put(s, sid, kbd(rest))} end)
++      end)
++
++    send_json(conn, 200, %{"rooms" => rooms})
++  end
++
++  defp send_keys(conn, uid, v, {:room, room}) do
++    %{rows: rows} = q!("SELECT session_id, first_message_index, forwarded_count, is_verified, session_data FROM room_key_backup_sessions WHERE user_id = $1 AND version = $2 AND room_id = $3", [uid, v, room])
++    send_json(conn, 200, %{"sessions" => Map.new(rows, fn [sid | rest] -> {sid, kbd(rest)} end)})
++  end
++
++  defp send_keys(conn, uid, v, {:session, room, session}) do
++    case q!("SELECT first_message_index, forwarded_count, is_verified, session_data FROM room_key_backup_sessions WHERE user_id = $1 AND version = $2 AND room_id = $3 AND session_id = $4", [uid, v, room, session]) do
++      %{rows: [row]} -> send_json(conn, 200, kbd(row))
++      _ -> error(conn, 404, "M_NOT_FOUND", "Unknown key")
++    end
++  end
++
++  defp kbd([fmi, fwd, verified, data]), do: %{"first_message_index" => fmi, "forwarded_count" => fwd, "is_verified" => verified, "session_data" => Jason.decode!(data)}
++
++  @doc "DELETE /room_keys/keys[/{room}[/{session}]]"
++  def delete_keys(conn, scope) do
++    uid = conn.assigns[:current_user]
++
++    with {:ok, version} <- version_param(conn),
++         :ok <- scope_ids(scope) do
++      transact(conn, fn ->
++        lock!(uid)
++
++        v =
++          case live_version(uid, version) do
++            nil -> fail(404, "M_NOT_FOUND", "Unknown backup version")
++            v -> v
++          end
++
++        %{num_rows: deleted} =
++          case scope do
++            :all -> q!("DELETE FROM room_key_backup_sessions WHERE user_id = $1 AND version = $2", [uid, v])
++            {:room, room} -> q!("DELETE FROM room_key_backup_sessions WHERE user_id = $1 AND version = $2 AND room_id = $3", [uid, v, room])
++            {:session, room, session} -> q!("DELETE FROM room_key_backup_sessions WHERE user_id = $1 AND version = $2 AND room_id = $3 AND session_id = $4", [uid, v, room, session])
++          end
++
++        if deleted > 0, do: bump_etag!(uid, v)
++        {200, count_etag(uid, v)}
++      end)
++    else
++      {:error, err} -> api_error(conn, err)
++    end
++  end
++
++  # ── validation ──────────────────────────────────────────────────────────────
++
++  defp body_object(conn) do
++    cond do
++      conn.assigns[:json_parse_error] == true -> {:error, {400, "M_NOT_JSON", "Request body is not valid JSON", %{}}}
++      is_struct(conn.body_params, Plug.Conn.Unfetched) -> {:ok, %{}}
++      is_map(conn.body_params) and map_size(conn.body_params) == 1 and Map.has_key?(conn.body_params, "_json") -> {:error, {400, "M_BAD_JSON", "Request body must be a JSON object", %{}}}
++      is_map(conn.body_params) -> {:ok, conn.body_params}
++      true -> {:ok, %{}}
++    end
++  end
++
++  defp version_param(conn) do
++    case conn.query_params["version"] do
++      v when is_binary(v) and v != "" -> {:ok, v}
++      _ -> {:error, {400, "M_MISSING_PARAM", "Missing the `version` query parameter", %{}}}
++    end
++  end
++
++  defp version_body(body) do
++    with {:ok, algorithm} <- required(body, "algorithm", &is_binary/1),
++         {:ok, auth_data} <- required(body, "auth_data", &is_map/1),
++         :ok <- size_ok(auth_data, @max_auth_data_bytes, "auth_data"),
++         :ok <- if(algorithm == @algorithm, do: :ok, else: {:error, {400, "M_INVALID_PARAM", "Unsupported algorithm", %{}}}) do
++      {:ok, algorithm, auth_data}
++    end
++  end
++
++  defp update_body(body) do
++    with {:ok, algorithm} <- required(body, "algorithm", &is_binary/1),
++         {:ok, auth_data} <- required(body, "auth_data", &is_map/1),
++         :ok <- size_ok(auth_data, @max_auth_data_bytes, "auth_data"),
++         :ok <- optional(body, "version", &is_binary/1) do
++      {:ok, algorithm, auth_data}
++    end
++  end
++
++  defp required(body, key, valid?) do
++    case Map.fetch(body, key) do
++      :error -> {:error, {400, "M_MISSING_PARAM", "Missing #{key}", %{}}}
++      {:ok, value} -> if valid?.(value), do: {:ok, value}, else: {:error, {400, "M_INVALID_PARAM", "Invalid #{key}", %{}}}
++    end
++  end
++
++  defp optional(body, key, valid?) do
++    case Map.fetch(body, key) do
++      :error -> :ok
++      {:ok, value} -> if valid?.(value), do: :ok, else: {:error, {400, "M_INVALID_PARAM", "Invalid #{key}", %{}}}
++    end
++  end
++
++  defp size_ok(value, max, what) do
++    if byte_size(Jason.encode!(value)) > max, do: {:error, {413, "M_TOO_LARGE", "#{what} is too large", %{}}}, else: :ok
++  end
++
++  defp scope_ids(:all), do: :ok
++  defp scope_ids({:room, room}), do: id_ok(room)
++  defp scope_ids({:session, room, session}), do: with(:ok <- id_ok(room), do: id_ok(session))
++
++  defp id_ok(id) do
++    if is_binary(id) and byte_size(id) in 1..@max_id_bytes and String.valid?(id) and not String.contains?(id, <<0>>),
++      do: :ok,
++      else: {:error, {400, "M_INVALID_PARAM", "Invalid room or session id", %{}}}
++  end
++
++  # the body of a key write as a list of validated entries (the whole request or nothing)
++  defp parse_entries(:all, body) do
++    with {:ok, rooms} <- required(body, "rooms", &is_map/1) do
++      flat_map_ok(rooms, fn {room, room_body} ->
++        with :ok <- id_ok(room),
++             {:ok, sessions} <- required(room_body_map(room_body), "sessions", &is_map/1) do
++          sessions_entries(room, sessions)
++        end
++      end)
++    end
++  end
++
++  defp parse_entries({:room, room}, body) do
++    with {:ok, sessions} <- required(body, "sessions", &is_map/1), do: sessions_entries(room, sessions)
++  end
++
++  defp parse_entries({:session, room, session}, body) do
++    with {:ok, entry} <- entry(room, session, body), do: {:ok, [entry]}
++  end
++
++  defp room_body_map(m) when is_map(m), do: m
++  defp room_body_map(_), do: %{"sessions" => :invalid}
++
++  defp sessions_entries(room, sessions) do
++    flat_map_ok(sessions, fn {sid, kbd} ->
++      with :ok <- id_ok(sid), {:ok, entry} <- entry(room, sid, kbd), do: {:ok, [entry]}
++    end)
++  end
++
++  defp entry(room, sid, kbd) when is_map(kbd) do
++    with {:ok, fmi} <- required(kbd, "first_message_index", &index?/1),
++         {:ok, fwd} <- required(kbd, "forwarded_count", &index?/1),
++         {:ok, verified} <- required(kbd, "is_verified", &is_boolean/1),
++         {:ok, data} <- required(kbd, "session_data", &is_map/1),
++         :ok <- size_ok(data, @max_session_data_bytes, "session_data") do
++      {:ok, %{room_id: room, session_id: sid, first_message_index: fmi, forwarded_count: fwd, is_verified: verified, session_data: Jason.encode!(data)}}
++    end
++  end
++
++  defp entry(_room, _sid, _kbd), do: {:error, {400, "M_INVALID_PARAM", "A session must be a JSON object", %{}}}
++
++  defp index?(n), do: is_integer(n) and n >= 0 and n <= @max_index
++
++  defp flat_map_ok(enumerable, fun) do
++    Enum.reduce_while(enumerable, {:ok, []}, fn item, {:ok, acc} ->
++      case fun.(item) do
++        {:ok, list} -> {:cont, {:ok, acc ++ list}}
++        {:error, _} = err -> {:halt, err}
++      end
++    end)
++  end
++
++  # ── versions in the database ────────────────────────────────────────────────
++
++  # a version is a decimal string without a leading zero that fits an int64
++  defp parse_version(version) when is_binary(version) do
++    if Regex.match?(~r/\A[1-9][0-9]{0,17}\z/, version), do: {:ok, String.to_integer(version)}, else: :error
++  end
++
++  defp parse_version(_), do: :error
++
++  defp current_version(uid) do
++    case q!("SELECT max(version) FROM room_key_backup_versions WHERE user_id = $1 AND deleted_at IS NULL", [uid]) do
++      %{rows: [[v]]} -> v
++    end
++  end
++
++  defp live_version(uid, version) do
++    with {:ok, v} <- parse_version(version),
++         %{rows: [[1]]} <- q!("SELECT 1 FROM room_key_backup_versions WHERE user_id = $1 AND version = $2 AND deleted_at IS NULL", [uid, v]) do
++      v
++    else
++      _ -> nil
++    end
++  end
++
++  defp count_etag(uid, v) do
++    %{rows: [[count]]} = q!("SELECT count(*) FROM room_key_backup_sessions WHERE user_id = $1 AND version = $2", [uid, v])
++    %{rows: [[etag]]} = q!("SELECT etag FROM room_key_backup_versions WHERE user_id = $1 AND version = $2", [uid, v])
++    %{"count" => count, "etag" => Integer.to_string(etag)}
++  end
++
++  defp bump_etag!(uid, v), do: q!("UPDATE room_key_backup_versions SET etag = etag + 1, updated_at = $3 WHERE user_id = $1 AND version = $2", [uid, v, now_ms()])
++
++  defp max_sessions do
++    case Application.get_env(:nebu, :room_keys_max_sessions_per_version, @default_max_sessions) do
++      n when is_integer(n) and n > 0 -> n
++      _ -> @default_max_sessions
++    end
++  end
++
++  # ── plumbing ────────────────────────────────────────────────────────────────
++
++  defp now_ms, do: System.system_time(:millisecond)
++
++  defp lock!(uid), do: q!(@lock_sql, [uid])
++
++  defp lock_and_check_erased!(uid) do
++    lock!(uid)
++
++    case q!("SELECT 1 FROM users WHERE user_id = $1 AND deletion_status IS NOT NULL", [uid]) do
++      %{rows: [_ | _]} ->
++        Logger.info("room keys write refused: user_erased")
++        fail(403, "M_USER_DEACTIVATED", "This account has been deactivated")
++
++      _ ->
++        :ok
++    end
++  end
++
++  defp q(sql, params), do: Nebu.Repo.query(sql, params)
++
++  # inside a transaction (or a read): a database error aborts with its KIND only (never a message, which can quote row data)
++  defp q!(sql, params) do
++    case Nebu.Repo.query(sql, params) do
++      {:ok, result} -> result
++      {:error, e} -> throw({:db_error, error_kind(e)})
++    end
++  end
++
++  defp fail(status, errcode, message, extra \\ %{}), do: Nebu.Repo.rollback({:api, status, errcode, message, extra})
++
++  defp transact(conn, fun) do
++    result =
++      try do
++        Nebu.Repo.transaction(fn ->
++          try do
++            fun.()
++          catch
++            :throw, {:db_error, kind} -> Nebu.Repo.rollback({:db, kind})
++          end
++        end)
++      rescue
++        e -> {:error, {:db, error_kind(e)}}
++      end
++
++    case result do
++      {:ok, {status, body}} ->
++        send_json(conn, status, body)
++
++      {:error, {:api, _, _, _, _} = err} ->
++        api_error(conn, Tuple.delete_at(err, 0))
++
++      {:error, {:db, kind}} ->
++        Logger.error("room keys write failed: #{kind}")
++        error(conn, 500, "M_UNKNOWN", "The key backup could not be written, please try again.")
++
++      {:error, other} ->
++        Logger.error("room keys write failed: #{error_kind(other)}")
++        error(conn, 500, "M_UNKNOWN", "The key backup could not be written, please try again.")
++    end
++  end
++
++  defp api_error(conn, {status, errcode, message, extra}), do: send_json(conn, status, Map.merge(%{"errcode" => errcode, "error" => message}, extra))
++
++  defp not_found(conn, _version), do: error(conn, 404, "M_NOT_FOUND", "No backup found")
++
++  defp internal(conn, e) do
++    Logger.error("room keys read failed: #{error_kind(e)}")
++    error(conn, 500, "M_UNKNOWN", "The key backup could not be read, please try again.")
++  end
++
++  # a read: a database error answers a generic 500 (kind only in the log)
++  defp guard_read(conn, fun) do
++    fun.()
++  rescue
++    e -> internal(conn, e)
++  catch
++    :throw, {:db_error, _kind} -> internal(conn, :db_error)
++  end
++
++  # the kind of an error for the log: an exception's module or an atom, never its message
++  defp error_kind(%{__struct__: module}), do: inspect(module)
++  defp error_kind(reason) when is_atom(reason), do: Atom.to_string(reason)
++  defp error_kind(_), do: "error"
++end
+diff --git a/server/lib/nebu/web/plugs/json_body.ex b/server/lib/nebu/web/plugs/json_body.ex
+index bd15f6ec..01bbdfb4 100644
+--- a/server/lib/nebu/web/plugs/json_body.ex
++++ b/server/lib/nebu/web/plugs/json_body.ex
+@@ -54,6 +54,16 @@ defmodule Nebu.Web.Plugs.JsonBody do
+                           pass: ["*/*"]
+                         )
+ 
++  # Server-side key backup (story server-side-key-backup): a batch upload of room keys (up to ~600 sessions of 8 KiB) is far above the 1 MB default, so the
++  # `room_keys` routes get a cap of 5 MiB (the story's limit). Oversize is answered like on every other `/_matrix/*` route (413 M_TOO_LARGE, halted).
++  @room_keys_parser_opts Plug.Parsers.init(
++                           parsers: [:json],
++                           json_decoder: Jason,
++                           length: 5_242_880,
++                           body_reader: {Nebu.Web.Plugs.RawBodyReader, :read_body, []},
++                           pass: ["*/*"]
++                         )
++
+   @impl Plug
+   def init(opts), do: opts
+ 
+@@ -100,6 +110,15 @@ defmodule Nebu.Web.Plugs.JsonBody do
+   def call(%Plug.Conn{path_info: ["oauth2", "register" | _]} = conn, _opts),
+     do: parse(conn, @register_parser_opts)
+ 
++  # the 5 MiB cap applies only to a request that CARRIES credentials (an `Authorization: Bearer <token>` header, the only form `OidcPlug` accepts):
++  # the body is parsed before the authentication, so an anonymous request keeps the 1 MB default
++  def call(%Plug.Conn{path_info: ["_matrix", "client", "v3", "room_keys" | _]} = conn, _opts) do
++    case Plug.Conn.get_req_header(conn, "authorization") do
++      ["Bearer " <> token | _] when token != "" -> parse(conn, @room_keys_parser_opts)
++      _ -> parse(conn, @parser_opts)
++    end
++  end
++
+   def call(conn, _opts), do: parse(conn, @parser_opts)
+ 
+   defp parse(conn, parser_opts) do
+diff --git a/server/lib/nebu/web/plugs/raw_body_reader.ex b/server/lib/nebu/web/plugs/raw_body_reader.ex
+index 98c86b91..19ba41e4 100644
+--- a/server/lib/nebu/web/plugs/raw_body_reader.ex
++++ b/server/lib/nebu/web/plugs/raw_body_reader.ex
+@@ -82,6 +82,21 @@ defmodule Nebu.Web.Plugs.RawBodyReader do
+   @spec opaque_content_shape?(String.t() | [String.t()]) :: boolean()
+   def opaque_content_shape?(path), do: account_data_shape?(path) or room_tags_shape?(path)
+ 
++  @doc """
++  True for every path under `/_matrix/client/{version}/room_keys` (the server-side key backup, story server-side-key-backup), any method, normalized like
++  `account_data_shape?/1`. Their bodies (`auth_data`, `session_data`) are client-encrypted USER CONTENT: the `RequestLogger` never captures them. Deliberately
++  NOT part of `opaque_content_shape?/1` / `opaque_content_put?/1`: the raw body is not cached and an oversize body is answered by `JsonBody` itself.
++  """
++  @spec room_keys_shape?(String.t() | [String.t()]) :: boolean()
++  def room_keys_shape?(path) when is_binary(path), do: path |> String.split("/") |> room_keys_shape?()
++
++  def room_keys_shape?(segments) when is_list(segments) do
++    case segments |> Enum.reject(&(&1 == "")) |> Enum.map(&safe_decode/1) do
++      ["_matrix", "client", _version, "room_keys" | _] -> true
++      _ -> false
++    end
++  end
++
+   @doc "True for a `PUT` on an account-data or room-tag path shape (raw body kept, 413 rendered by the handler)."
+   @spec opaque_content_put?(Plug.Conn.t()) :: boolean()
+   def opaque_content_put?(%Plug.Conn{method: "PUT", path_info: path_info}), do: opaque_content_shape?(path_info)
+diff --git a/server/lib/nebu/web/plugs/request_logger.ex b/server/lib/nebu/web/plugs/request_logger.ex
+index bddc7541..114e8193 100644
+--- a/server/lib/nebu/web/plugs/request_logger.ex
++++ b/server/lib/nebu/web/plugs/request_logger.ex
+@@ -274,8 +274,9 @@ defmodule Nebu.Web.Plugs.RequestLogger do
+   # Account data (global + room scope) and the room-tag routes are opaque, client-defined USER
+   # CONTENT (tag orders / fields, markers, secret-storage blobs): neither the request nor the response body is ever captured, not
+   # even redacted (Logging Law: no user content in logs).
++  # Server-side key backup (story server-side-key-backup): `session_data` / `auth_data` are client-encrypted USER CONTENT too.
+   defp account_data_content?(conn) do
+-    Nebu.Web.Plugs.RawBodyReader.opaque_content_shape?(conn.request_path)
++    Nebu.Web.Plugs.RawBodyReader.opaque_content_shape?(conn.request_path) or Nebu.Web.Plugs.RawBodyReader.room_keys_shape?(conn.request_path)
+   end
+ 
+   defp redacted_request_body_params(conn) do
+diff --git a/server/lib/nebu/web/router/protected.ex b/server/lib/nebu/web/router/protected.ex
+index 07e3c255..cbb3ca04 100644
+--- a/server/lib/nebu/web/router/protected.ex
++++ b/server/lib/nebu/web/router/protected.ex
+@@ -596,20 +596,72 @@ defmodule Nebu.Web.Router.Protected do
+     error(conn, 404, "M_NOT_FOUND", "No TURN server configured")
+   end
+ 
+-  # GET /room_keys/version — no key backup configured. 404 M_NOT_FOUND is the
+-  # spec-defined response (Matrix CS §Server-side key backups).
++  # Server-side key backups (Matrix CS v1.18, story server-side-key-backup): an OPAQUE per-user store (ADR-011 stays: this
++  # enables no E2EE room), implemented in Nebu.Matrix.HttpRoomKeys. The WRITES (POST / PUT / DELETE) are charged to a per-user
++  # tier of their own (60 per minute, burst 30, like the sibling account_data tier); reads are not limited (a client restoring
++  # a backup reads one session per undecryptable event).
++  @room_keys_write_rate_limit Nebu.Web.Plugs.RateLimit.init(rate_per_min: 60, burst: 30, tier: "room_keys", key: :user)
++
+   get "/client/v3/room_keys/version" do
+-    error(conn, 404, "M_NOT_FOUND", "No backup found")
++    Nebu.Matrix.HttpRoomKeys.get_version(conn)
+   end
+ 
+-  # POST /room_keys/version — key backup creation ACCEPTANCE STUB (story room-keys-version-post-stub).
+-  # Element Web creates a key backup right after the cross-signing bootstrap of a user's first login;
+-  # without a 2xx it shows "Unable to set up keys". The Go gateway had exactly this stub (dropped by the
+-  # Elixir migration). Nebu has no server-side key backup (ADR-011: no E2EE rooms, nothing to back up):
+-  # the body is ignored, NOTHING is stored (no DB access), the GET above keeps answering "no backup".
+-  # Every other room_keys/* route stays M_UNRECOGNIZED.
+   post "/client/v3/room_keys/version" do
+-    send_json(conn, 200, %{"version" => "1"})
++    room_keys_write(conn, fn -> Nebu.Matrix.HttpRoomKeys.create_version(conn) end)
++  end
++
++  get "/client/v3/room_keys/version/:version" do
++    Nebu.Matrix.HttpRoomKeys.get_version(conn, version)
++  end
++
++  put "/client/v3/room_keys/version/:version" do
++    room_keys_write(conn, fn -> Nebu.Matrix.HttpRoomKeys.update_version(conn, version) end)
++  end
++
++  delete "/client/v3/room_keys/version/:version" do
++    room_keys_write(conn, fn -> Nebu.Matrix.HttpRoomKeys.delete_version(conn, version) end)
++  end
++
++  get "/client/v3/room_keys/keys" do
++    Nebu.Matrix.HttpRoomKeys.get_keys(conn, :all)
++  end
++
++  put "/client/v3/room_keys/keys" do
++    room_keys_write(conn, fn -> Nebu.Matrix.HttpRoomKeys.put_keys(conn, :all) end)
++  end
++
++  delete "/client/v3/room_keys/keys" do
++    room_keys_write(conn, fn -> Nebu.Matrix.HttpRoomKeys.delete_keys(conn, :all) end)
++  end
++
++  get "/client/v3/room_keys/keys/:room_id" do
++    Nebu.Matrix.HttpRoomKeys.get_keys(conn, {:room, room_id})
++  end
++
++  put "/client/v3/room_keys/keys/:room_id" do
++    room_keys_write(conn, fn -> Nebu.Matrix.HttpRoomKeys.put_keys(conn, {:room, room_id}) end)
++  end
++
++  delete "/client/v3/room_keys/keys/:room_id" do
++    room_keys_write(conn, fn -> Nebu.Matrix.HttpRoomKeys.delete_keys(conn, {:room, room_id}) end)
++  end
++
++  get "/client/v3/room_keys/keys/:room_id/:session_id" do
++    Nebu.Matrix.HttpRoomKeys.get_keys(conn, {:session, room_id, session_id})
++  end
++
++  put "/client/v3/room_keys/keys/:room_id/:session_id" do
++    room_keys_write(conn, fn -> Nebu.Matrix.HttpRoomKeys.put_keys(conn, {:session, room_id, session_id}) end)
++  end
++
++  delete "/client/v3/room_keys/keys/:room_id/:session_id" do
++    room_keys_write(conn, fn -> Nebu.Matrix.HttpRoomKeys.delete_keys(conn, {:session, room_id, session_id}) end)
++  end
++
++  # the rate limit of the room_keys writes runs BEFORE the body is looked at
++  defp room_keys_write(conn, fun) do
++    conn = Nebu.Web.Plugs.RateLimit.call(conn, @room_keys_write_rate_limit)
++    if conn.halted, do: conn, else: fun.()
+   end
+ 
+   # GET MSC3814 dehydrated_device — not in CS API v1.18; unstable proposal only.
+diff --git a/server/priv/migrations/000056_room_key_backup.down.sql b/server/priv/migrations/000056_room_key_backup.down.sql
+new file mode 100644
+index 00000000..849b4734
+--- /dev/null
++++ b/server/priv/migrations/000056_room_key_backup.down.sql
+@@ -0,0 +1,8 @@
++-- 000056_room_key_backup.down.sql
++-- Reverses 000056_room_key_backup.up.sql.
++-- WARNING: dropping these tables DISCARDS every user's server-side key backup (all versions and all stored sessions). After a down + up
++-- cycle clients find "no backup" (404 on GET /room_keys/version) and must create a new backup from their own device keys; chat history that
++-- was only recoverable from the backup stays unreadable for devices that no longer hold the keys.
++
++DROP TABLE IF EXISTS room_key_backup_sessions;
++DROP TABLE IF EXISTS room_key_backup_versions;
+diff --git a/server/priv/migrations/000056_room_key_backup.up.sql b/server/priv/migrations/000056_room_key_backup.up.sql
+new file mode 100644
+index 00000000..83a57cee
+--- /dev/null
++++ b/server/priv/migrations/000056_room_key_backup.up.sql
+@@ -0,0 +1,71 @@
++-- 000056_room_key_backup.up.sql
++-- Story server-side-key-backup (epic e2ee-client-support, REQ-2026-011): the Matrix CS v1.18 "Server-side key backups" store
++-- (/_matrix/client/v3/room_keys/**). OPAQUE per user: the server stores `auth_data` and the `session_data` blobs verbatim as JSON text,
++-- never decrypts and never parses them beyond well-formedness and size (ADR-011 stays: this enables no E2EE room).
++--
++-- room_key_backup_versions: one row per backup version of a user. `version` is a per-user counter (the newest non-deleted version is the
++--   CURRENT one). A deleted version stays as a soft-delete MARKER (`deleted_at` set, `algorithm` / `auth_data` NULL: nothing but the number)
++--   so a version number is never reused and a repeated DELETE is idempotent. `etag` is a counter bumped by every change of the stored set
++--   of the version (cluster-safe: state lives only here). The marker carries `user_id`: the GDPR erasure deletes it too.
++-- room_key_backup_sessions: one row per stored session (user, version, room, session); the megolm indexes are unsigned 32 bit numbers.
++--
++-- Both tables are per-user data: `user_id TEXT NOT NULL`, deleted by the GDPR erasure (`Nebu.Compliance.UserDeletion`, sessions first).
++-- UpCloud managed PostgreSQL has no ALTER DEFAULT PRIVILEGES for the migrate role, so the runtime role gets its grants here.
++-- Row level security is ENABLEd and FORCEd (in the single-role dev setup the runtime role owns the tables); a policy exists for each command.
++-- Only new tables: no existing table is touched (rolling-deploy safe). All timestamps are BIGINT epoch-millis.
++
++CREATE TABLE IF NOT EXISTS room_key_backup_versions (
++    user_id    TEXT   NOT NULL,
++    version    BIGINT NOT NULL,
++    algorithm  TEXT,
++    auth_data  TEXT,
++    etag       BIGINT NOT NULL DEFAULT 0,
++    created_at BIGINT NOT NULL,
++    updated_at BIGINT NOT NULL,
++    deleted_at BIGINT,
++    PRIMARY KEY (user_id, version),
++    CONSTRAINT room_key_backup_versions_live_check
++        CHECK ((deleted_at IS NULL AND algorithm IS NOT NULL AND auth_data IS NOT NULL)
++            OR (deleted_at IS NOT NULL AND algorithm IS NULL AND auth_data IS NULL))
++);
++
++CREATE TABLE IF NOT EXISTS room_key_backup_sessions (
++    user_id             TEXT    NOT NULL,
++    version             BIGINT  NOT NULL,
++    room_id             TEXT    NOT NULL,
++    session_id          TEXT    NOT NULL,
++    first_message_index BIGINT  NOT NULL,
++    forwarded_count     BIGINT  NOT NULL,
++    is_verified         BOOLEAN NOT NULL,
++    session_data        TEXT    NOT NULL,
++    updated_at          BIGINT  NOT NULL,
++    PRIMARY KEY (user_id, version, room_id, session_id),
++    FOREIGN KEY (user_id, version) REFERENCES room_key_backup_versions (user_id, version),
++    CONSTRAINT room_key_backup_sessions_index_check
++        CHECK (first_message_index BETWEEN 0 AND 4294967295 AND forwarded_count BETWEEN 0 AND 4294967295)
++);
++
++GRANT SELECT, INSERT, UPDATE, DELETE ON room_key_backup_versions TO nebu_app;
++GRANT SELECT, INSERT, UPDATE, DELETE ON room_key_backup_sessions TO nebu_app;
++
++ALTER TABLE room_key_backup_versions ENABLE ROW LEVEL SECURITY;
++ALTER TABLE room_key_backup_versions FORCE ROW LEVEL SECURITY;
++DROP POLICY IF EXISTS room_key_backup_versions_select ON room_key_backup_versions;
++CREATE POLICY room_key_backup_versions_select ON room_key_backup_versions FOR SELECT USING (true);
++DROP POLICY IF EXISTS room_key_backup_versions_insert ON room_key_backup_versions;
++CREATE POLICY room_key_backup_versions_insert ON room_key_backup_versions FOR INSERT WITH CHECK (true);
++DROP POLICY IF EXISTS room_key_backup_versions_update ON room_key_backup_versions;
++CREATE POLICY room_key_backup_versions_update ON room_key_backup_versions FOR UPDATE USING (true) WITH CHECK (true);
++DROP POLICY IF EXISTS room_key_backup_versions_delete ON room_key_backup_versions;
++CREATE POLICY room_key_backup_versions_delete ON room_key_backup_versions FOR DELETE USING (true);
++
++ALTER TABLE room_key_backup_sessions ENABLE ROW LEVEL SECURITY;
++ALTER TABLE room_key_backup_sessions FORCE ROW LEVEL SECURITY;
++DROP POLICY IF EXISTS room_key_backup_sessions_select ON room_key_backup_sessions;
++CREATE POLICY room_key_backup_sessions_select ON room_key_backup_sessions FOR SELECT USING (true);
++DROP POLICY IF EXISTS room_key_backup_sessions_insert ON room_key_backup_sessions;
++CREATE POLICY room_key_backup_sessions_insert ON room_key_backup_sessions FOR INSERT WITH CHECK (true);
++DROP POLICY IF EXISTS room_key_backup_sessions_update ON room_key_backup_sessions;
++CREATE POLICY room_key_backup_sessions_update ON room_key_backup_sessions FOR UPDATE USING (true) WITH CHECK (true);
++DROP POLICY IF EXISTS room_key_backup_sessions_delete ON room_key_backup_sessions;
++CREATE POLICY room_key_backup_sessions_delete ON room_key_backup_sessions FOR DELETE USING (true);

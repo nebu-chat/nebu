@@ -157,6 +157,26 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
     Application.get_env(:event_dispatcher, :room_supervisor_module, Nebu.Matrix.Room.RoomSupervisor)
   end
 
+  # story e2ee-compliance-channel-guard (D1, ADR-011): the ONE place that names the room event type Nebu never stores. An `m.room.encrypted`
+  # event is opaque ciphertext in a room (archive and audit could not read it); the router (send route, state PUT), createRoom `initial_state`
+  # (@initial_state_forbidden_types) and the dispatcher's send path all use this attribute / `encrypted_room_event?/1`, so the next write path
+  # cannot forget it. The refusal text is the one of the `m.room.encryption` rejection (no id, no content echoed).
+  @encrypted_room_event_type "m.room.encrypted"
+  @e2ee_refusal_message "End-to-end encryption is not supported on this server"
+
+  @doc "True for the exact (decoded) event type `m.room.encrypted`, which no room write path accepts (story e2ee-compliance-channel-guard, D1)."
+  @spec encrypted_room_event?(term()) :: boolean()
+  def encrypted_room_event?(type), do: type == @encrypted_room_event_type
+
+  @doc "The fixed 403 M_FORBIDDEN text of the E2EE refusals (`m.room.encryption` and `m.room.encrypted`)."
+  @spec e2ee_refusal_message() :: String.t()
+  def e2ee_refusal_message, do: @e2ee_refusal_message
+
+  # defence in depth (D1): no caller of the dispatcher can store an m.room.encrypted event (message or state), whatever the room, before any lookup
+  def send_event(%{event_type: @encrypted_room_event_type}, _stream) do
+    raise Nebu.Matrix.Error, status: Nebu.Matrix.Status.permission_denied(), errcode: "M_FORBIDDEN", message: @e2ee_refusal_message
+  end
+
   # story state-writer-redaction (D3): `m.room.redaction` goes through the ONE redaction writer, never stored as-is
   def send_event(%{event_type: "m.room.redaction"} = request, _stream) do
     content =
@@ -956,7 +976,7 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
   # m.room.member (authoritative create / join setup), m.room.encryption (ADR-011), m.room.tombstone,
   # m.room.third_party_invite. Story power-levels-enforcement (D7, follow-up `er`): an m.room.power_levels entry is APPLIED at
   # step 6 (a full replacement through the room-process power-level writer), no longer skipped.
-  @initial_state_forbidden_types ~w(m.room.create m.room.member m.room.encryption m.room.tombstone m.room.third_party_invite)
+  @initial_state_forbidden_types ~w(m.room.create m.room.member m.room.encryption m.room.tombstone m.room.third_party_invite) ++ [@encrypted_room_event_type]
 
   @power_levels_type "m.room.power_levels"
 
@@ -6094,6 +6114,13 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
   defp do_incremental_sync(%{user_id: user_id, device_id: device_id} = ctx, timeout_ms, full_state?) do
     build = &build_delta(&1, ctx, full_state?)
     user_group = "user:#{user_id}"
+
+    # test seam (story to-device-messaging, ATDD): runs between the HTTP pre-check and the subscription, the window of a missed wake-up
+    case Application.get_env(:nebu, :atdd_to_device_before_join) do
+      hook when is_function(hook, 0) -> hook.()
+      _ -> :ok
+    end
+
     :pg.join(user_group, self())
 
     delivery =
@@ -6105,10 +6132,12 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
         try do
           first = consistent_delivery(user_id, partition, build)
 
-          if first.ends_wait? or timeout_ms <= 0 do
+          # story to-device-messaging: a message that was queued before this process joined the user group (so no wake-up reached it) must not make
+          # the poll wait: the check runs AFTER the join
+          if first.ends_wait? or timeout_ms <= 0 or Nebu.Matrix.ToDeviceStore.undelivered?(user_id, device_id) do
             first
           else
-            case wait_for_wakeup(timeout_ms, MapSet.new(first.join_room_ids), user_id) do
+            case wait_for_wakeup(timeout_ms, MapSet.new(first.join_room_ids), user_id, device_id) do
               # memberships may have changed meanwhile (invite -> join, join -> leave): rebuild EVERYTHING from fresh reads
               :wake -> consistent_delivery(user_id, nil, build)
               :timeout -> first
@@ -6290,18 +6319,22 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
   # `{:account_data_changed}`. Any other `{:new_event}` (a message in an invite room, someone else's member event there, a
   # stale event of a room the user has left) is ignored and the wait goes on with the ORIGINAL timer, so a room the user is
   # merely invited to cannot end the long-poll with an empty answer for every message (Kassandra L-3).
-  defp wait_for_wakeup(timeout_ms, join_room_ids, user_id) do
+  defp wait_for_wakeup(timeout_ms, join_room_ids, user_id, device_id) do
     timer_ref = Process.send_after(self(), :sync_long_poll_timeout, timeout_ms)
-    result = wait_loop(join_room_ids, user_id)
+    result = wait_loop(join_room_ids, user_id, device_id)
     Process.cancel_timer(timer_ref)
     flush_long_poll_timeout()
     result
   end
 
-  defp wait_loop(join_room_ids, user_id) do
+  defp wait_loop(join_room_ids, user_id, device_id) do
     receive do
       {:new_event, event} ->
-        if wakes_sync?(event, join_room_ids, user_id), do: :wake, else: wait_loop(join_room_ids, user_id)
+        if wakes_sync?(event, join_room_ids, user_id), do: :wake, else: wait_loop(join_room_ids, user_id, device_id)
+
+      # story to-device-messaging: a message queued for THIS device wakes it (the other devices of the user keep waiting)
+      {:to_device, target_device} ->
+        if target_device == device_id, do: :wake, else: wait_loop(join_room_ids, user_id, device_id)
 
       {:new_invite, _room_id} ->
         :wake
@@ -9254,6 +9287,12 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
     end
   end
 
+  # story e2ee-compliance-channel-guard (D1, review LOW 1): the funnel of every state write (PUT state, initial_state, preset, name / topic / alias,
+  # the upgrade copies) never emits an m.room.encrypted event, so no caller can store one (the named guard of `encrypted_room_event?/1`)
+  defp check_not_encrypted_event(event_type) do
+    if encrypted_room_event?(event_type), do: {:error, :encrypted_event_forbidden}, else: :ok
+  end
+
   # Like emit_state_event/5 but stamps the event max(now, not_before) and returns the timestamp used.
   defp emit_state_event_at(room_id, sender_id, event_type, state_key, content, not_before) do
     ts = max(Nebu.DB.Helpers.now_ms(), not_before)
@@ -9276,7 +9315,8 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
     # (no extra encode: `event_json` exists already). The one authoritative size check of every state write that goes through here:
     # PUT state, initial_state, the preset, name, topic and alias events, the upgrade copies.
     # the keys too (a type / state key above 255 bytes cannot come through the router, which refuses it first; this covers every other caller)
-    with :ok <- check_state_keys(event_type, state_key),
+    with :ok <- check_not_encrypted_event(event_type),
+         :ok <- check_state_keys(event_type, state_key),
          :ok <- Nebu.Matrix.EventSize.check_stored(event_json) do
       signature     = :crypto.sign(:eddsa, :none, event_json, [priv, :ed25519])
       sig_b64       = Base.encode64(signature)
@@ -9331,6 +9371,9 @@ defmodule Nebu.Matrix.EventDispatcher.Server do
       "m.room.tombstone",
       "m.room.aliases",
       "m.room.encryption",
+      # a legacy m.room.encrypted STATE event (stored by an initial_state of before story e2ee-compliance-channel-guard) is skipped, not
+      # copied (emit_state_event_at/6 refuses it too; the upgrade itself stays a success)
+      @encrypted_room_event_type,
       "m.space.child",
       "m.space.parent"
     ]

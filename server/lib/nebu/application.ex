@@ -174,6 +174,11 @@ defmodule Nebu.Application do
           Nebu.Web.RateLimitSweeper,
           # story membership-state-model (D19, security cycle 3): the node-wide gate of the member-state reads; before Bandit
           Nebu.Matrix.MemberSliceGate,
+          # story server-side-key-backup (cycle 2): the node-local slots of the bulk key backup reads (one per user, two per node; monitor based,
+          # freed on :DOWN); same position and reason as the gate above
+          Nebu.Matrix.RoomKeysReadGate,
+          # story to-device-messaging: the node-local slots of the to-device sends (per user and per node; monitor based, freed on :DOWN); same position and reason
+          Nebu.Matrix.ToDeviceSendGate,
           # story oauth-hardening-hygiene (HY4): owner of the per-node OAuth ETS caches (config TTL cache and
           # decoded signing keys); after the Repo, before Bandit, so no request process ever creates a table.
           Nebu.OAuth.CacheOwner,

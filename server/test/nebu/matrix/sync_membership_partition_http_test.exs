@@ -340,7 +340,7 @@ defmodule Nebu.Matrix.SyncMembershipPartitionHttpTest do
 
     test "next_batch keeps the <core>.<pos> shape; a user without rooms gets three empty sections", %{a: a} do
       body = sync(a)
-      assert next(body) =~ ~r/\A[^.]+\.\d+\z/
+      assert next(body) =~ ~r/\A[^.]+\.\d+\.d\d+\z/, "<core>.<pos> then the device-list group .d<n> of story device-key-directory (D11), always last"
       assert joined(body) == %{} and invited(body) == %{} and left(body) == %{}
     end
   end
@@ -905,7 +905,7 @@ defmodule Nebu.Matrix.SyncMembershipPartitionHttpTest do
       # lookup per response). A message keeps exactly `age`; the leave event (B joined before it) has age + the three predecessor keys.
       assert Map.keys(message["unsigned"]) == ["age"], "a message never carries predecessor keys"
       assert Enum.sort(Map.keys(member["unsigned"])) == ["age", "prev_content", "prev_sender", "replaces_state"], "the leave event of a joined member has its predecessor (the join)"
-      assert next(body) =~ ~r/\A[^.]+\.\d+\z/
+      assert next(body) =~ ~r/\A[^.]+\.\d+\.d\d+\z/, "<core>.<pos> then the device-list group .d<n> of story device-key-directory (D11), always last"
     end
 
     test "a limited leave window (more than 20 events) has limited true and a non-empty prev_batch; the join event is not prepended", %{a: a, b: b} do

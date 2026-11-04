@@ -70,9 +70,24 @@ Code.require_file("nebu/media/clamav_fake_server.exs", __DIR__)
 # isolation, DCR request builders, RFC 7591 error assertions) for server/test/nebu/oauth/*.
 Code.require_file("nebu/oauth/oauth_test_support.exs", __DIR__)
 
+# e2ee-client-support/server-side-key-backup: shared helpers (users, requests, paths, fixtures, size builders, database probes, env seams, the backup seed of the
+# erasure world) of the room_keys suites. Loaded right after the OAuth helpers it builds on. The file name ends with `oauth_test_support.exs` on purpose: mix.exs already
+# ignores that suffix (`test_ignore_filters`), so no mix.exs change is needed. Every function is `def`.
+Code.require_file("nebu/matrix/room_keys_oauth_test_support.exs", __DIR__)
+
 # oauth-broker/moderation-routes-atomic-ban: shared helpers (users, rooms, kick / ban / unban requests, the barrier race, database probes,
 # the sync client) of the real-database moderation suites. Loaded once; every function is `def` (no unused private helper per suite).
 Code.require_file("nebu/matrix/moderation_test_support.exs", __DIR__)
+
+# e2ee-client-support/to-device-messaging: shared helpers (users and devices, the sendToDevice requests, the sync client, database probes, env seams, the to-device seed of the
+# erasure world) of the to_device suites. Loaded after the moderation helpers it builds on (rooms, the sync client); the file name ends with `oauth_test_support.exs` on purpose
+# (`test_ignore_filters`, no mix.exs change). Every function is `def`.
+Code.require_file("nebu/matrix/to_device_oauth_test_support.exs", __DIR__)
+
+# e2ee-client-support/device-key-directory: shared helpers (claim and changes requests, key fixtures, the sync token position, the stream probes, held transactions,
+# the stream seed of the erasure world) of the device_key_directory suites. Loaded after the to-device helpers it builds on; the file name ends with
+# `oauth_test_support.exs` on purpose (`test_ignore_filters`, no mix.exs change). Every function is `def`.
+Code.require_file("nebu/matrix/device_key_directory_oauth_test_support.exs", __DIR__)
 
 # oauth-broker/power-levels-enforcement: shared helpers (levels builders, PUT m.room.power_levels requests, database probes, the armed gap / db /
 # admin hooks) of the power-level suites. Loaded once, after the moderation helpers they build on; every function is `def`.

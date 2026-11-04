@@ -394,75 +394,12 @@ defmodule Nebu.Web.MatrixClientCompatTest do
       assert body["error"] == "No TURN server configured"
     end
 
-    # AC 3 — room_keys/version: 404 M_NOT_FOUND (no backup found)
-    test "GET /room_keys/version with valid Bearer → 404 M_NOT_FOUND", %{token: token} do
-      conn = call(:get, "/_matrix/client/v3/room_keys/version", nil, auth(token))
-      assert conn.status == 404
-      body = json(conn)
-      assert body["errcode"] == "M_NOT_FOUND"
-      assert body["error"] == "No backup found"
-    end
-
-    # story room-keys-version-post-stub (AC1, AC3, AC4): Element Web creates a key backup right after
-    # the cross-signing bootstrap of a first login; without a 2xx it shows "Unable to set up keys".
-    # The Go gateway had this stub (dropped by the Elixir migration): accept, store nothing.
-    # D1 "nothing stored": proven by the DB-free environment (no Nebu.Repo process: a handler that touched the
-    # database would fail here); the handler is one `send_json` line (no DB, no body read).
-    @tag :no_repo
-    test "POST /room_keys/version with valid Bearer → 200 {version: \"1\"} (stub, nothing stored)", %{token: token} do
-      assert Process.whereis(Nebu.Repo) == nil
-      body = %{
-        "algorithm" => "m.megolm_backup.v1.curve25519-aes-sha2",
-        "auth_data" => %{"public_key" => "AAAA", "signatures" => %{}}
-      }
-
-      conn = call(:post, "/_matrix/client/v3/room_keys/version", body, auth(token))
-      assert conn.status == 200
-      assert json(conn) == %{"version" => "1"}
-      assert Plug.Conn.get_resp_header(conn, "content-type") |> hd() =~ "application/json"
-    end
-
-    test "POST /room_keys/version is idempotent and GET still says no backup afterwards", %{token: token} do
-      for _ <- 1..2 do
-        conn = call(:post, "/_matrix/client/v3/room_keys/version", %{"algorithm" => "x"}, auth(token))
-        assert conn.status == 200
-        assert json(conn) == %{"version" => "1"}
-      end
-
-      # D5: the stub ignores the body entirely (nothing is stored): an empty and a malformed body are a 200 too
-      conn = call(:post, "/_matrix/client/v3/room_keys/version", nil, auth(token))
-      assert {conn.status, json(conn)} == {200, %{"version" => "1"}}
-
-      bad =
-        conn(:post, "/_matrix/client/v3/room_keys/version", "{not json")
-        |> put_req_header("content-type", "application/json")
-        |> put_req_header("authorization", "Bearer " <> token)
-        |> Nebu.Web.Router.call(@router_opts)
-
-      assert {bad.status, json(bad)} == {200, %{"version" => "1"}}
-
-      conn = call(:get, "/_matrix/client/v3/room_keys/version", nil, auth(token))
-      assert conn.status == 404
-      assert json(conn)["errcode"] == "M_NOT_FOUND"
-      assert json(conn)["error"] == "No backup found"
-    end
-
-    test "only the creation stub exists: room_keys/keys and room_keys/version/{v} stay M_UNRECOGNIZED", %{token: token} do
-      for {method, path} <- [
-            {:put, "/_matrix/client/v3/room_keys/keys"},
-            {:get, "/_matrix/client/v3/room_keys/keys"},
-            {:delete, "/_matrix/client/v3/room_keys/version/1"},
-            {:get, "/_matrix/client/v3/room_keys/version/1"}
-          ] do
-        conn = call(method, path, nil, auth(token))
-        assert json(conn)["errcode"] == "M_UNRECOGNIZED", "#{method} #{path}: #{conn.status} #{conn.resp_body}"
-        assert conn.status in [404, 405], "#{method} #{path}: #{conn.status}"
-
-        # the fall-through is the same without a token (RU10: the catch-all runs before authentication)
-        anon = call(method, path)
-        assert json(anon)["errcode"] == "M_UNRECOGNIZED", "anonymous #{method} #{path}: #{anon.status}"
-      end
-    end
+    # AC 3 — room_keys/version: 404 M_NOT_FOUND (no backup found), and the story room-keys-version-post-stub (Element Web
+    # creates a key backup right after the cross-signing bootstrap of a first login): MOVED to the `:integration` describe
+    # "room_keys - the Element startup contract" below by story server-side-key-backup. The stub (a constant 200 {version: "1"},
+    # nothing stored, no DB access: tested in this DB-free group with `@tag :no_repo`) is replaced by the real, database-backed key
+    # backup store (`/room_keys/**`), so these answers now need the live Repo. The contract is EXTENDED, not weakened: the same
+    # answers for the same requests that Element sends, plus the stored version that GET reads back.
 
     # AC 4 — MSC3814 dehydrated_device: 404 M_NOT_FOUND (no dehydrated device)
     test "GET /unstable/msc3814 dehydrated_device with valid Bearer → 404 M_NOT_FOUND", %{
@@ -503,6 +440,113 @@ defmodule Nebu.Web.MatrixClientCompatTest do
     # plain 200 {} contract is now covered against a real DB by the integration
     # suite in cross_signing_test.exs (AC2 "first upload (no existing MSK) →
     # plain 200 {} (no UIA)").
+  end
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # room_keys — the Element startup contract (PostgreSQL-backed — integration)
+  #
+  # Story server-side-key-backup (epic e2ee-client-support, REQ-2026-011) REPLACES the acceptance stub of story
+  # room-keys-version-post-stub (POST /room_keys/version = a constant 200 {version: "1"}, body ignored, nothing stored, GET still
+  # "no backup") by the real key backup store. The requests Element sends right after the cross-signing bootstrap of a first login
+  # keep their answers (GET 404 "No backup found", POST 200 {version}); what changes is that the version is REAL, GET reads it back,
+  # and the body is validated (the stub accepted anything). Moved here from the DB-free groups above because the answers now need the
+  # live Repo; the full contract is room_keys_*_http_test.exs. A raw IdP JWT is used (the path Element's session takes).
+  # ══════════════════════════════════════════════════════════════════════════
+
+  describe "room_keys - the Element startup contract (integration)" do
+    @describetag :integration
+
+    @rk_algo "m.megolm_backup.v1.curve25519-aes-sha2"
+
+    setup do
+      priv = setup_oidc_keys()
+      {uid, token} = bearer_for("rk-compat-#{:erlang.unique_integer([:positive])}", priv)
+      {:ok, user_id: uid, token: token}
+    end
+
+    defp rk_body(tag \\ "x"), do: %{"algorithm" => @rk_algo, "auth_data" => %{"public_key" => "AAAA" <> tag, "signatures" => %{}}}
+
+    test "GET /room_keys/version with valid Bearer and no backup → 404 M_NOT_FOUND \"No backup found\" (Element reads 404 as \"no backup\")", %{token: token} do
+      conn = call(:get, "/_matrix/client/v3/room_keys/version", nil, auth(token))
+      assert conn.status == 404
+      body = json(conn)
+      assert body["errcode"] == "M_NOT_FOUND"
+      assert body["error"] == "No backup found"
+    end
+
+    test "POST /room_keys/version with valid Bearer → 200 {version: <string>} and GET then returns that REAL version (the stub stored nothing)", %{token: token} do
+      conn = call(:post, "/_matrix/client/v3/room_keys/version", rk_body(), auth(token))
+      assert conn.status == 200
+      assert Plug.Conn.get_resp_header(conn, "content-type") |> hd() =~ "application/json"
+      assert %{"version" => version} = json(conn)
+      assert version =~ ~r/\A[1-9][0-9]*\z/
+
+      conn = call(:get, "/_matrix/client/v3/room_keys/version", nil, auth(token))
+      assert conn.status == 200
+      info = json(conn)
+      assert info["version"] == version
+      assert info["algorithm"] == @rk_algo
+      assert info["auth_data"] == rk_body()["auth_data"]
+      assert info["count"] === 0 and is_binary(info["etag"])
+    end
+
+    test "POST /room_keys/version twice creates two versions (no constant \"1\"); the stub's leniency is gone: an empty, malformed or wrong-algorithm body is a 400 and stores nothing", %{token: token} do
+      v1 = json(call(:post, "/_matrix/client/v3/room_keys/version", rk_body("1"), auth(token)))["version"]
+      v2 = json(call(:post, "/_matrix/client/v3/room_keys/version", rk_body("2"), auth(token)))["version"]
+      assert String.to_integer(v2) > String.to_integer(v1)
+
+      conn = call(:post, "/_matrix/client/v3/room_keys/version", nil, auth(token))
+      assert {conn.status, json(conn)["errcode"]} == {400, "M_MISSING_PARAM"}
+
+      bad =
+        conn(:post, "/_matrix/client/v3/room_keys/version", "{not json")
+        |> put_req_header("content-type", "application/json")
+        |> put_req_header("authorization", "Bearer " <> token)
+        |> Nebu.Web.Router.call(@router_opts)
+
+      assert {bad.status, json(bad)["errcode"]} == {400, "M_NOT_JSON"}
+
+      wrong = call(:post, "/_matrix/client/v3/room_keys/version", %{"algorithm" => "x", "auth_data" => %{}}, auth(token))
+      assert {wrong.status, json(wrong)["errcode"]} == {400, "M_INVALID_PARAM"}
+
+      conn = call(:get, "/_matrix/client/v3/room_keys/version", nil, auth(token))
+      assert conn.status == 200 and json(conn)["version"] == v2, "the refused requests stored nothing"
+    end
+
+    test "the keys and version/{v} routes are real now (no longer M_UNRECOGNIZED): Element's backup flow works end to end", %{token: token} do
+      version = json(call(:post, "/_matrix/client/v3/room_keys/version", rk_body(), auth(token)))["version"]
+      session = %{"first_message_index" => 0, "forwarded_count" => 0, "is_verified" => false, "session_data" => %{"ciphertext" => "ct", "ephemeral" => "e", "mac" => "m"}}
+      room = URI.encode_www_form("!r:test.local")
+
+      conn = call(:put, "/_matrix/client/v3/room_keys/keys?version=#{version}", %{"rooms" => %{"!r:test.local" => %{"sessions" => %{"s1" => session}}}}, auth(token))
+      assert conn.status == 200 and json(conn)["count"] == 1 and is_binary(json(conn)["etag"])
+
+      conn = call(:get, "/_matrix/client/v3/room_keys/keys/#{room}/s1?version=#{version}", nil, auth(token))
+      assert conn.status == 200 and json(conn) == session
+
+      conn = call(:put, "/_matrix/client/v3/room_keys/keys", %{"rooms" => %{}}, auth(token))
+      assert {conn.status, json(conn)["errcode"]} == {400, "M_MISSING_PARAM"}, "the version query parameter is required"
+
+      conn = call(:get, "/_matrix/client/v3/room_keys/version/#{version}", nil, auth(token))
+      assert conn.status == 200 and json(conn)["count"] == 1
+
+      conn = call(:delete, "/_matrix/client/v3/room_keys/version/#{version}", nil, auth(token))
+      assert conn.status == 200 and json(conn) == %{}
+
+      conn = call(:get, "/_matrix/client/v3/room_keys/version/#{version}", nil, auth(token))
+      assert {conn.status, json(conn)["errcode"]} == {404, "M_NOT_FOUND"}
+      conn = call(:get, "/_matrix/client/v3/room_keys/version", nil, auth(token))
+      assert {conn.status, json(conn)["errcode"]} == {404, "M_NOT_FOUND"}
+    end
+
+    test "a path that is not one of the story's shapes stays M_UNRECOGNIZED, with and without a token", %{token: token} do
+      for path <- ["/_matrix/client/v3/room_keys/keys/a/b/c", "/_matrix/client/v3/room_keys/version/1/x", "/_matrix/client/v3/room_keys"] do
+        for t <- [token, nil] do
+          conn = if t, do: call(:get, path, nil, auth(t)), else: call(:get, path)
+          assert {conn.status, json(conn)["errcode"]} == {404, "M_UNRECOGNIZED"}, "#{path}: #{conn.status} #{conn.resp_body}"
+        end
+      end
+    end
   end
 
   # ══════════════════════════════════════════════════════════════════════════

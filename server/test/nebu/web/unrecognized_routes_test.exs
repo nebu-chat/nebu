@@ -228,6 +228,24 @@ defmodule Nebu.Web.UnrecognizedRoutesTest do
       {:put, "/_matrix/client/v3/sync", ["GET"]},
       {:put, "/_matrix/client/v3/room_keys/version", ["GET", "POST"]},
       {:delete, "/_matrix/client/v3/room_keys/version", ["GET", "POST"]},
+      # story server-side-key-backup (DELIBERATE extension, old -> new): /room_keys/version keeps GET + POST (above); the rest of the
+      # Server-side key backup routes are real now (GET, PUT, DELETE), so a POST on them is a 405 with that Allow set instead of the 404 fall-through
+      {:post, "/_matrix/client/v3/room_keys/version/1", ["GET", "PUT", "DELETE"]},
+      {:post, "/_matrix/client/v3/room_keys/keys", ["GET", "PUT", "DELETE"]},
+      {:post, "/_matrix/client/v3/room_keys/keys/!r:test.local", ["GET", "PUT", "DELETE"]},
+      {:post, "/_matrix/client/v3/room_keys/keys/!r:test.local/sess", ["GET", "PUT", "DELETE"]},
+      # story to-device-messaging (DELIBERATE extension, old -> new): PUT /sendToDevice/{type}/{txn} is a real route now; every other method is a 405 with Allow PUT
+      # (before: unrouted, a 404 fall-through)
+      {:get, "/_matrix/client/v3/sendToDevice/m.dummy/t1", ["PUT"]},
+      {:post, "/_matrix/client/v3/sendToDevice/m.dummy/t1", ["PUT"]},
+      {:delete, "/_matrix/client/v3/sendToDevice/m.dummy/t1", ["PUT"]},
+      # story device-key-directory (DELIBERATE extension, old -> new): POST /keys/claim and GET /keys/changes are real routes now (before: unrouted, a 404 fall-through)
+      {:get, "/_matrix/client/v3/keys/claim", ["POST"]},
+      {:put, "/_matrix/client/v3/keys/claim", ["POST"]},
+      {:delete, "/_matrix/client/v3/keys/claim", ["POST"]},
+      {:post, "/_matrix/client/v3/keys/changes", ["GET"]},
+      {:put, "/_matrix/client/v3/keys/changes", ["GET"]},
+      {:delete, "/_matrix/client/v3/keys/changes", ["GET"]},
       {:get, "/_matrix/client/v3/createRoom", ["POST"]},
       {:post, "/_matrix/client/v3/devices/X", ["GET", "PUT", "DELETE"]},
       {:put, "/_matrix/media/v3/upload", ["POST"]},
@@ -387,6 +405,20 @@ defmodule Nebu.Web.UnrecognizedRoutesTest do
     {:get, "/client/v3/voip/turnServer"},
     {:get, "/client/v3/room_keys/version"},
     {:post, "/client/v3/room_keys/version"},
+    # story server-side-key-backup (DELIBERATE re-pin, old -> new): twelve new route clauses (Server-side key backups: version/{version} and the
+    # three key granularities, each GET / PUT / DELETE), behind the same auth plug (before: unrouted, answered by the fall-through)
+    {:get, "/client/v3/room_keys/version/:p"},
+    {:put, "/client/v3/room_keys/version/:p"},
+    {:delete, "/client/v3/room_keys/version/:p"},
+    {:get, "/client/v3/room_keys/keys"},
+    {:put, "/client/v3/room_keys/keys"},
+    {:delete, "/client/v3/room_keys/keys"},
+    {:get, "/client/v3/room_keys/keys/:p"},
+    {:put, "/client/v3/room_keys/keys/:p"},
+    {:delete, "/client/v3/room_keys/keys/:p"},
+    {:get, "/client/v3/room_keys/keys/:p/:p"},
+    {:put, "/client/v3/room_keys/keys/:p/:p"},
+    {:delete, "/client/v3/room_keys/keys/:p/:p"},
     {:get, "/client/unstable/org.matrix.msc3814.v1/dehydrated_device"},
     {:get, "/client/unstable/org.matrix.msc4143/rtc/transports"},
     {:post, "/client/v3/keys/device_signing/upload"},
@@ -419,6 +451,11 @@ defmodule Nebu.Web.UnrecognizedRoutesTest do
     {:post, "/client/v3/rooms/:p/ban"},
     {:post, "/client/v3/rooms/:p/unban"},
     {:put, "/client/v3/rooms/:p/send/:p/:p"},
+    # story to-device-messaging (DELIBERATE re-pin; old -> new): one new route clause, behind the same auth plug (before: unrouted, answered by the fall-through)
+    {:put, "/client/v3/sendToDevice/:p/:p"},
+    # story device-key-directory (DELIBERATE extension, old -> new): two new route clauses behind the same auth plug (before: unrouted, answered by the fall-through)
+    {:post, "/client/v3/keys/claim"},
+    {:get, "/client/v3/keys/changes"},
     # story state-writer-redaction (DELIBERATE re-pin, test review STORY-1; old -> new): one new route clause, behind the same auth plug (before: unrouted, answered by the fall-through)
     {:put, "/client/v3/rooms/:p/redact/:p/:p"},
     {:get, "/client/v3/rooms/:p/messages"},

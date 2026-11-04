@@ -360,8 +360,23 @@ defmodule Nebu.Web.CrossSigningTest do
       {:ok, user_id: uid, token: token, device_id: "SIGDEV#{n}"}
     end
 
+    # story key-query-hardening (D6): the signature is a REAL Ed25519 signature of the self-signing key over the canonical JSON of the device key
+    # (without `signatures` and `unsigned`), verified against the self-signing key the user stored
     test "AC4: signatures/upload merges a signature into a stored device key, visible in keys/query",
          %{user_id: uid, token: token, device_id: device_id} do
+      {ssk_pub, ssk_priv} = :crypto.generate_key(:eddsa, :ed25519)
+      ssk_b64 = Base.encode64(ssk_pub, padding: false)
+
+      up =
+        call(
+          :post,
+          "/_matrix/client/v3/keys/device_signing/upload",
+          Map.put(signing_upload_body(uid), "self_signing_key", self_signing_key(uid, ssk_b64)),
+          auth(token)
+        )
+
+      assert up.status == 200, "precondition: the cross-signing keys with a real self-signing key"
+
       dk = device_keys_obj(uid, device_id)
 
       _ =
@@ -372,13 +387,13 @@ defmodule Nebu.Web.CrossSigningTest do
           auth(token)
         )
 
-      ssk_sig =
-        "SSKsigOverDevice0000000000000000000000000000000000000000000000000000000000000000000000000000"
+      message = dk |> Map.drop(["signatures", "unsigned"]) |> Nebu.Matrix.CanonicalJson.encode!()
+      ssk_sig = Base.encode64(:crypto.sign(:eddsa, :none, message, [ssk_priv, :ed25519]), padding: false)
 
       signed_device =
         dk
         |> Map.put("signatures", %{
-          uid => %{"ed25519:SSKpub00000000000000000000000000000000000000" => ssk_sig}
+          uid => %{("ed25519:" <> ssk_b64) => ssk_sig}
         })
 
       sig_up =
@@ -400,8 +415,7 @@ defmodule Nebu.Web.CrossSigningTest do
 
       assert is_map(device)
       # merged: the new SSK signature is present...
-      assert get_in(device, ["signatures", uid, "ed25519:SSKpub00000000000000000000000000000000000000"]) ==
-               ssk_sig
+      assert get_in(device, ["signatures", uid, "ed25519:" <> ssk_b64]) == ssk_sig
 
       # ...and the original device self-signature is preserved.
       assert get_in(device, ["signatures", uid, "ed25519:#{device_id}"]) ==

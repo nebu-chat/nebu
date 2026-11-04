@@ -41,6 +41,16 @@ defmodule Nebu.OAuth.LegacyLogoutPerDeviceTest do
   @env_keys [:oauth_repo, :oauth_session_repo, :uia_fresh_auth_seconds]
 
   setup do
+    prior_server_name = Application.fetch_env(:event_dispatcher, :server_name)
+    Application.put_env(:event_dispatcher, :server_name, "test.local")
+
+    on_exit(fn ->
+      case prior_server_name do
+        {:ok, value} -> Application.put_env(:event_dispatcher, :server_name, value)
+        :error -> Application.delete_env(:event_dispatcher, :server_name)
+      end
+    end)
+
     prior = for k <- @env_keys, into: %{}, do: {k, Application.fetch_env(:nebu_http, k)}
     T.enable_oauth()
     T.reset_rate_limits()
@@ -252,6 +262,8 @@ defmodule Nebu.OAuth.LegacyLogoutPerDeviceTest do
   describe "AC1 — legacy opaque logout ends ONLY its own device (gate r core)" do
     test "200 {}; session rows, device and ALL keys of L gone; O untouched and still refreshing", %{cid: cid, priv: priv} do
       f = fixture(cid, priv)
+      # story key-query-hardening (D1): /keys/query serves the keys of a user to peers who share a joined room with it only: the stranger becomes a peer
+      Nebu.Matrix.ModerationTestSupport.invite_room(f.stranger, [%{uid: f.uid, at: f.o.at}])
       o_before = o_state(f)
       assert Map.has_key?(keys_query(f.stranger.at, f.uid), f.l_dev), "precondition: L is visible to a peer"
       assert f.l_dev in listed_devices(f.o.at), "precondition: L is listed"

@@ -51,7 +51,14 @@ defmodule Nebu.Matrix.MemberPrevContentHttpTest do
   # `advance_positions`; `list_since` takes the place of `list_all_and_clear` one for one
   # story sync-stream-position (DELIBERATE re-pin, old -> new, MEASURED on the final design): 57 -> 59: + ONE head statement (`room_heads`, D12), and the
   # persist is a transaction of TWO statements (the token upsert and ONE cursor statement, whatever the number of rooms) instead of the one token upsert.
-  @baseline_initial_sync_statements 59
+  # story to-device-messaging (DELIBERATE re-pin, test review m3): the pin is now a RANGE, the old baseline 59 is the floor and 61 (MEASURED on the reference implementation:
+  # the delivery of the device's to-device queue is TWO more statements of a sync that has nothing pending) the CEILING; the cap that matters is pinned by
+  # `to_device_concurrency_test.exs`. A leaner implementation stays inside the range, nothing may exceed the ceiling.
+  # story device-key-directory (DELIBERATE re-pin, old -> new, MEASURED: 63 for this initial sync): the range moves from 59..61 to 61..63, the floor and the ceiling
+  # both +2. Every /sync now runs a per-request CONSTANT number of device-list statements (the stream bound `DeviceListStore.position/0` and the device-list
+  # `changes`/`shared_users` read, each ONE statement whatever the number of rooms: they take the caller's user id, not a room list), so nothing scales with the rooms.
+  @baseline_initial_sync_statements 61
+  @ceiling_initial_sync_statements 63
   @baseline_join_statements 11
 
   setup do
@@ -896,8 +903,8 @@ defmodule Nebu.Matrix.MemberPrevContentHttpTest do
       # the recorded baseline, computed on the code before the story (HEAD 54ecc9ed): the statements of one initial sync of this user (his
       # session / token / user reads, the partition reads, and per joined room the member, state and timeline reads); `noise?/1` drops what
       # other suites of the run switch on (audit log, log store)
-      assert length(statements) == @baseline_initial_sync_statements,
-             "the statement count of an initial sync (3 rooms) is the pinned count (code before the story: 54, re-pinned by story sync-token-per-device to 57 and by story sync-stream-position to 59): #{@baseline_initial_sync_statements}, got #{length(statements)}\n#{listing(statements)}"
+      assert length(statements) in @baseline_initial_sync_statements..@ceiling_initial_sync_statements,
+             "the statement count of an initial sync (3 rooms) is within the pinned range (code before the story: 54, re-pinned by story sync-token-per-device to 57, by story sync-stream-position to 59, story to-device-messaging allows up to 61, re-pinned by story device-key-directory to 61..63: +2 per request, independent of the room count): #{@baseline_initial_sync_statements}..#{@ceiling_initial_sync_statements}, got #{length(statements)}\n#{listing(statements)}"
 
       # control (red before the story: the statement does not exist yet): the widened lookup runs, once per room and block
       assert marker_count(statements) >= 3, "control: the predecessor lookup must run for the 3 rooms, got #{marker_count(statements)}"

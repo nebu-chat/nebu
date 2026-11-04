@@ -1,0 +1,346 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index c59cade7..c1e5e439 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -11,7 +11,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
+ 
+ ### Added
+ 
+-- **Server-side key backup `/_matrix/client/v3/room_keys/**` (story server-side-key-backup, epic e2ee-client-support; migration 000058)**: Element's "chat recovery" and secret-storage bootstrap work. `POST|GET /room_keys/version`, `GET|PUT|DELETE /room_keys/version/{version}` and `PUT|GET|DELETE /room_keys/keys[/{roomId}[/{sessionId}]]` replace the former acceptance stub (a constant `200 {"version":"1"}` that stored nothing): an OPAQUE per-user store (tables `room_key_backup_versions` and `room_key_backup_sessions`; the server never decrypts or logs a blob, ADR-011 stays: no E2EE room is enabled), the spec's merge rule for a re-uploaded session, `etag` and `count` from the database, `403 M_WRONG_ROOM_KEYS_VERSION` with `current_version`, idempotent `DELETE` with a soft-delete marker (versions are never reused). Limits: 10 versions per user (the 11th is `403 M_FORBIDDEN`), 1000 version rows per user including the markers, 100 000 sessions per version, 8 KiB per `session_data`, 16 KiB per `auth_data`, 5 MiB per request body (read only after the authentication), a per-user storage budget of 256 MiB over all live versions (`403 M_FORBIDDEN`); writes are rate limited per user (60 per minute, burst 30), the two bulk reads (`GET /keys`, `GET /keys/{room}`) have their own bucket (30 per minute, burst 10), a writer that cannot get the per-user lock within 2 s answers `429 M_LIMIT_EXCEEDED`. The GDPR erasure deletes all versions and sessions of the user. Operators: run migration 000058 with the release; rolling back discards every user's key backup.
++- **Server-side key backup `/_matrix/client/v3/room_keys/**` (story server-side-key-backup, epic e2ee-client-support; migration 000058)**: Element's "chat recovery" and secret-storage bootstrap work. `POST|GET /room_keys/version`, `GET|PUT|DELETE /room_keys/version/{version}` and `PUT|GET|DELETE /room_keys/keys[/{roomId}[/{sessionId}]]` replace the former acceptance stub (a constant `200 {"version":"1"}` that stored nothing): an OPAQUE per-user store (tables `room_key_backup_versions` and `room_key_backup_sessions`; the server never decrypts or logs a blob, ADR-011 stays: no E2EE room is enabled), the spec's merge rule for a re-uploaded session, `etag` and `count` from the database, `403 M_WRONG_ROOM_KEYS_VERSION` with `current_version`, idempotent `DELETE` with a soft-delete marker (versions are never reused). Limits: 10 versions per user (the 11th is `403 M_FORBIDDEN`), 1000 version rows per user including the markers, 100 000 sessions per version, 8 KiB per `session_data`, 16 KiB per `auth_data`, 5 MiB per request body (read only after the authentication), a per-user storage budget of 64 MiB over all live versions (every session row costs its ids and 128 bytes besides its data; `403 M_FORBIDDEN`); writes are rate limited per user (60 per minute, burst 5), the two bulk reads (`GET /keys`, `GET /keys/{room}`) have their own bucket (30 per minute, burst 3) and at most one is in flight per user and two per node, `GET /version` has a light bucket (120 per minute, burst 30), a writer that finds the per-user lock busy answers `429 M_LIMIT_EXCEEDED` at once. The GDPR erasure deletes all versions and sessions of the user. Operators: run migration 000058 with the release; rolling back discards every user's key backup.
+ 
+ - **`PUT /_matrix/client/v3/rooms/{roomId}/redact/{eventId}/{txnId}` and applied `m.room.redaction` events, audit action `room_event_redacted`, migration 000051 (story state-writer-redaction; follow-ups `fw`, `fv`, `fz`, `fx` closed)**: Element's "Remove" and "Remove recent messages" work. A redaction is decided and written by the room process (own event: `events["m.room.redaction"]`; another user's event: also the `redact` level), stored with a top-level `redacts` (new column `events.redacts`, migration 000051) and served with `redacts` and `content.redacts`; the redacted event is served pruned (`content: {}`, `unsigned.redacted_because`) on every read path while its content stays in the database (Compliance Mode); a redaction of another user's event writes the audit row `room_event_redacted`. Operator query **Q-rd** (07-deployment) lists legacy unchecked redactions.
+ - **`PUT /_matrix/client/v3/rooms/{roomId}/state/m.room.power_levels` (story power-levels-enforcement; follow-ups `eq`, `er`, `fr` closed)**: power levels can be changed after the room was created (Element's Roles & Permissions, `/op`, `/deop`) under the room version 10 change rules, decided and written in the room process in one transaction; new audit action `room_power_levels_changed`; the PUT is charged to the `moderation` tier; operator query Q-pl in `docs/architecture/07-deployment.md`.
+diff --git a/docs/architecture/08-concepts.md b/docs/architecture/08-concepts.md
+index a6462a22..9962c86d 100644
+--- a/docs/architecture/08-concepts.md
++++ b/docs/architecture/08-concepts.md
+@@ -1393,15 +1393,16 @@ applies when the event grows, so a tag can still be deleted after an operator lo
+ - *Versions:* a version is a decimal string, a per-user counter (the first version of every user is `1`, strictly increasing; the session rows have a foreign key to their version without a cascade, so sessions are deleted before their version); the newest non-deleted one is the current one (after deleting it the newest remaining one, else `404 M_NOT_FOUND`). `DELETE /version/{version}` deletes the info and all its keys at once and leaves a soft-delete marker (no `auth_data`), so a number is never reused and a repeated DELETE is idempotent (`404` only for a number that never existed). At most 10 backup versions per user: the 11th is `403 M_FORBIDDEN` (never `M_LIMIT_EXCEEDED`, which clients retry; nothing is deleted silently); deleted versions do not count.
+ - *Writes* go to the current version only: any other version (older, deleted, unknown, another user's) is `403 M_WRONG_ROOM_KEYS_VERSION` with the top-level `current_version`, or `404 M_NOT_FOUND` when the user has no backup. Reads and deletes work on every own non-deleted version and answer `404` for anything else; another user's version looks unknown. The `version` query parameter is required (`400 M_MISSING_PARAM`). Missing members are `M_MISSING_PARAM`, mistyped ones `M_INVALID_PARAM`, malformed JSON `M_NOT_JSON`, a non-object body `M_BAD_JSON`; a request is stored whole or not at all.
+ - *Merge rule* of a re-uploaded session (spec order): if `is_verified` differs the verified one is kept; else the lower `first_message_index`; if equal the lower `forwarded_count`; on a full tie the stored session is kept. A replace does not change `count`; `etag` changes whenever the stored set changes. The merge is decided in one SQL statement under the per-user lock, so concurrent uploads of one session never double count and the best one wins.
+-- *Limits:* 100 000 sessions per version (`403 M_FORBIDDEN` for a batch that would pass it, as a whole; the seam `:nebu, :room_keys_max_sessions_per_version`), 8 KiB per `session_data` and 16 KiB per `auth_data` (canonical JSON bytes, `413 M_TOO_LARGE`), 5 MiB per request body on these routes. The body is read only after the authentication: `JsonBody` leaves the bodies of these routes unfetched, the route authenticates first (an anonymous or junk-bearer request is 401 without its body being read, whatever its size), then charges the write rate limit (a 429 comes before the body is read), and only then parses the body with the 5 MiB limit; every other route keeps its 1 MB pre-router parse. Writes are rate limited per user (tier `room_keys`: 60 per minute, burst 30, like the `account_data` tier). The two bulk reads (`GET /keys`, `GET /keys/{room}`) have a bucket of their own (30 per minute, burst 10 per user, 429 `M_LIMIT_EXCEEDED` with `retry_after_ms`); the single-session GET and the version GETs are not limited (a divergence from the spec's "rate-limited": a restoring client reads one session per undecryptable event). The bulk response is spliced from the stored JSON text, not decoded and re-encoded per blob.
+-- *Storage quotas:* a per-user aggregate byte budget over all live versions (the canonical bytes of every `session_data` plus every live version's `auth_data`; default 256 MiB, seam `:nebu, :room_keys_max_bytes_per_user`), decided under the advisory lock and net of replacements (a replace counts only the size delta), freed by deleting sessions or a version; exceeded is `403 M_FORBIDDEN` and nothing is stored. The total version rows per user, soft-delete markers included, are capped at 1000 (seam `:nebu, :room_keys_max_version_rows_per_user`; the 1001st create is `403 M_FORBIDDEN`): the markers are never pruned (needed for never-reused numbers and the idempotent DELETE), their growth is bounded by that cap and accepted (a partial index on the live versions keeps the lookups cheap).
+-- *Lock timeout:* every writer runs `SET LOCAL lock_timeout` (seam `:nebu, :room_keys_lock_timeout_ms`, default 2000, i.e. 2 s) before it takes the `sync_global` lock; a lock that is not granted in time (SQLSTATE 55P03) is `429 M_LIMIT_EXCEEDED` with `retry_after_ms` and stores nothing, so waiters cannot exhaust the shared pool of 10 connections. Reads take no lock.
++- *Limits:* 100 000 sessions per version (`403 M_FORBIDDEN` for a batch that would pass it, as a whole; the seam `:nebu, :room_keys_max_sessions_per_version`), 8 KiB per `session_data` and 16 KiB per `auth_data` (canonical JSON bytes, `413 M_TOO_LARGE`), 5 MiB per request body on these routes. The body is read only after the authentication: `JsonBody` leaves the bodies of these routes unfetched, the route authenticates first (an anonymous or junk-bearer request is 401 without its body being read, whatever its size), then charges the write rate limit (a 429 comes before the body is read), and only then parses the body with the 5 MiB limit; every other route keeps its 1 MB pre-router parse. Writes are rate limited per user (tier `room_keys`: 60 per minute, burst 5). The two bulk reads (`GET /keys`, `GET /keys/{room}`) have a bucket of their own (30 per minute, burst 3 per user, 429 `M_LIMIT_EXCEEDED` with `retry_after_ms`); `GET /version` and `GET /version/{version}` (a `count(*)` over up to 100 000 rows) have a light bucket of their own (120 per minute, burst 30 per user, shared by the two routes, separate from the bulk and the write buckets); the single-session GET is not limited (a divergence from the spec's "rate-limited": a restoring client reads one session per undecryptable event). All buckets and slots are node-local: in a cluster of N nodes the effective limit is N x the documented limit. The bulk response is spliced from the stored JSON text, not decoded and re-encoded per blob.
++- *Storage quotas:* a per-user aggregate byte budget over all live versions (for every stored session the `octet_length` of its `room_id` and its `session_id` plus a fixed 128 bytes per row plus the canonical bytes of its `session_data`, plus every live version's `auth_data`; default 64 MiB, seam `:nebu, :room_keys_max_bytes_per_user`; the check sums the user's rows on every write, O(scan), an O(1) counter column is a follow-up), decided under the advisory lock and net of replacements (a replace counts only the size delta), freed by deleting sessions or a version; exceeded is `403 M_FORBIDDEN` and nothing is stored. The total version rows per user, soft-delete markers included, are capped at 1000 (seam `:nebu, :room_keys_max_version_rows_per_user`; the 1001st create is `403 M_FORBIDDEN`): the markers are never pruned automatically (needed for never-reused numbers and the idempotent DELETE), their growth is bounded by that cap and accepted (a partial index on the live versions keeps the lookups cheap); an operator frees a locked-out user with the SQL of `docs/compliance/gdpr-deletion-runbook.md` ("Pruning old key backup version markers"), which keeps the highest-numbered marker.
++- *Per-user lock (try-lock):* every writer takes the `sync_global` lock with `pg_try_advisory_xact_lock`: a busy lock is `429 M_LIMIT_EXCEEDED` with `retry_after_ms` at once (nothing stored), so no waiter ever holds one of the 10 pooled connections. Reads take no lock. `SET LOCAL lock_timeout` (seam `:nebu, :room_keys_lock_timeout_ms`, default 2000) stays only as the safety net of row locks (SQLSTATE 55P03 is 429 as well).
++- *Bulk reads (memory):* at most ONE bulk read in flight per user and at most TWO per node (seam `:nebu, :room_keys_max_concurrent_bulk_reads_per_node`, default 2): a monitor based slot (`Nebu.Matrix.RoomKeysReadGate` monitors the request process and frees the slot on `DOWN`, so a killed request frees it); the excess is `429 M_LIMIT_EXCEEDED` with `retry_after_ms`, answered before any database work. The response is not streamed (follow-up); see 11-risks for the peak.
+ - *Logging:* the route normalizer replaces the client-chosen room and session id segments of `room_keys/keys/**`.
+ - *Erasure:* both tables are in `UserDeletion.erased_tables/0` (sessions first, the soft-delete markers too); the creating writers (POST /version, PUT /keys) take the `sync_global` lock and refuse a user whose erasure is under way (`403 M_USER_DEACTIVATED`).
+ 
+ ### GDPR erasure inventory (story gdpr-erasure-global-data)
+ 
+-GDPR erasure (`Nebu.Compliance.UserDeletion.delete_user_keys/3`) physically deletes every row of personal data that is stored under the user in a per-user table, in the SAME transaction, in this order: the `deletion_in_progress` marker, the private keys set to NULL, the row locks and the advisory lock (below), the per-user deletes (then a check that no `oauth_codes` row is left), the profile anonymisation, and `keys_deleted`; one failing step rolls everything back and writes the `user_keys_deletion_attempted` audit row, whose `error_detail` names the failing step (`step=<name>`, a code atom, never data). *Lock order:* the transaction first locks the user's `uia_sessions` rows and `cross_signing_keys` row (`FOR UPDATE`) and only THEN takes the per-user `sync_global` advisory lock of `AccountDataStore.put/3`, `CrossSigningKeyStore.put_keys/2` and the signature merge: the order of the cross-signing reset writer (uia row, cross-signing row, advisory lock), so a writer in flight is serialised with the erasure and the two do not deadlock (one narrow exception, below). Those three writers refuse a user whose `deletion_status` is set (`{:error, :user_erased}`, answered `403 M_USER_DEACTIVATED`). The key backup writers `RoomKeyBackupStore.create_version/3` and `RoomKeyBackupStore.put_sessions/3` take the same per-user `sync_global` lock and refuse an erased user the same way (they run after the lock, so a write in flight is serialised with the erasure; the lock has a timeout, see "Server-side key backup"). The cross-signing writers (both branches of `device_signing/upload` and the signature merge) decide on the stored keys only through `CrossSigningKeyStore.lock_keys/1`, in the same order: the `cross_signing_keys` row lock, then the `sync_global` advisory lock, and only THEN the read (row -> advisory -> read; story cross-signing-upload-races), so two concurrent first uploads store one key set and a signature merge never writes back a stale merge base. The exception is the absent-then-present window (accepted residual): when the row lock of a signature merge found no row and a first upload commits the row before the merge gets the advisory lock, an erasure that locks the new row and waits for the advisory lock can form a cycle with the merge's write, which only now waits for that row; PostgreSQL aborts one side (`40P01`: the erasure fails closed, or the merge answers 500). A first upload has the same window when the row committed in between has a NULL master (a partial upload): its read sees no master and its upsert takes the row lock only after the advisory lock (pre-existing; the erasure fails closed, or the upload answers 500). Three actors of one user within milliseconds; closing it would need the advisory lock first everywhere, which the story rejected. Events authored by the user are retained (room history preservation, recital 65; immutable signed event log, the sender is the pseudonym); the profile is anonymised (`displayname = 'Deleted User'`, `avatar_url = NULL`, `users.anonymized_at`); admin deactivation keeps all of it (reversible). A second erasure answers `:conflict` and changes nothing.
++GDPR erasure (`Nebu.Compliance.UserDeletion.delete_user_keys/3`) physically deletes every row of personal data that is stored under the user in a per-user table, in the SAME transaction, in this order: the `deletion_in_progress` marker, the private keys set to NULL, the row locks and the advisory lock (below), the per-user deletes (then a check that no `oauth_codes` row is left), the profile anonymisation, and `keys_deleted`; one failing step rolls everything back and writes the `user_keys_deletion_attempted` audit row, whose `error_detail` names the failing step (`step=<name>`, a code atom, never data). *Lock order:* the transaction first locks the user's `uia_sessions` rows and `cross_signing_keys` row (`FOR UPDATE`) and only THEN takes the per-user `sync_global` advisory lock of `AccountDataStore.put/3`, `CrossSigningKeyStore.put_keys/2` and the signature merge: the order of the cross-signing reset writer (uia row, cross-signing row, advisory lock), so a writer in flight is serialised with the erasure and the two do not deadlock (one narrow exception, below). Those three writers refuse a user whose `deletion_status` is set (`{:error, :user_erased}`, answered `403 M_USER_DEACTIVATED`). The key backup writers `RoomKeyBackupStore.create_version/3` and `RoomKeyBackupStore.put_sessions/3` take the same per-user `sync_global` lock and refuse an erased user the same way (they run after the lock, so a write in flight is serialised with the erasure; the lock is a try-lock, a busy lock is a 429, see "Server-side key backup"). The cross-signing writers (both branches of `device_signing/upload` and the signature merge) decide on the stored keys only through `CrossSigningKeyStore.lock_keys/1`, in the same order: the `cross_signing_keys` row lock, then the `sync_global` advisory lock, and only THEN the read (row -> advisory -> read; story cross-signing-upload-races), so two concurrent first uploads store one key set and a signature merge never writes back a stale merge base. The exception is the absent-then-present window (accepted residual): when the row lock of a signature merge found no row and a first upload commits the row before the merge gets the advisory lock, an erasure that locks the new row and waits for the advisory lock can form a cycle with the merge's write, which only now waits for that row; PostgreSQL aborts one side (`40P01`: the erasure fails closed, or the merge answers 500). A first upload has the same window when the row committed in between has a NULL master (a partial upload): its read sees no master and its upsert takes the row lock only after the advisory lock (pre-existing; the erasure fails closed, or the upload answers 500). Three actors of one user within milliseconds; closing it would need the advisory lock first everywhere, which the story rejected. Events authored by the user are retained (room history preservation, recital 65; immutable signed event log, the sender is the pseudonym); the profile is anonymised (`displayname = 'Deleted User'`, `avatar_url = NULL`, `users.anonymized_at`); admin deactivation keeps all of it (reversible). A second erasure answers `:conflict` and changes nothing.
+ 
+ **The erasure is terminal for authentication.** The last step also sets `users.is_active = false` and NULLs the `users` PII columns (display name, avatar and email ciphertexts: the display name and avatar are encrypted with the server-wide key, so the key deletion does not shred them; also `last_seen_at` and `deactivation_reason`, admin free text that may describe the person). Every authentication gate (`TokenValidator`, `OAuthSessionStore.user_active/1`, `Nebu.Matrix.active?/1`, the account pages, `invitable_local_users`) treats `deletion_status IS NOT NULL` as deactivated, so neither a fresh IdP token, an SSO login, an OAuth authorization nor an admin reactivation revives the account, and `Profile.DB.upsert_profile/3` writes nothing for an erased user. A bearer (an unbound raw IdP JWT included) that the node-local provisioning cache of the OIDC plug (60 s TTL) already confirmed is still accepted on that node until the entry expires: new requests, not only one in flight, for up to 60 s, the same bound as for an admin deactivation. In that window it can still write the tables WITHOUT a guard (device keys, receipts, room account data, the lazy device row with its IP); the profile PUT, global account data, cross-signing, the signature merge and the sync persist are refused. The eviction of the cache entry on every node (a broadcast over `:pg` on erasure and deactivation) is the proper fix, recorded in follow-up `gn`. Admin UI access of an erased administrator follows the IdP admin group claim, not the erasure: remove the person from the IdP admin group. `Nebu.Admin.DB.set_is_active/2` refuses to reactivate an erased user (`:erased`, answered as a failed precondition) and the admin user suggestions never offer one.
+ 
+diff --git a/docs/architecture/11-risks.md b/docs/architecture/11-risks.md
+index ee32e890..fe19f2e2 100644
+--- a/docs/architecture/11-risks.md
++++ b/docs/architecture/11-risks.md
+@@ -28,7 +28,7 @@
+ | Admin route source classification could leak email into operational logs (fixed pre-ship) | Resolved | Story `war-room-mode`, security-review-driven fix |
+ | Bootstrap-mode OIDC scope ignored the operator's Step 3 config — providers needing a non-`openid` scope to expose the admin claim could never complete bootstrap | Resolved | `bugfix-bootstrap-scope-ignored`, 2026-07-09 |
+ | Admin-logs source-classification: 1 MEDIUM accepted non-blocking after a fix attempt was reverted for an architecture conflict | Accepted risk | Story `admin-logs-monitoring-view`, Kassandra review |
+-| Server-side key backup (`/room_keys/**`, Kassandra review of story `server-side-key-backup`): resource exhaustion (CWE-400/770). Resolved by design: the request body is read only after the authentication (no pre-auth parse; an anonymous or junk-bearer request is 401 without its body being read) and after the write rate limit; a per-user aggregate byte budget of 256 MiB over all live versions (net of replacements, decided under the advisory lock); the bulk reads (`GET /keys`, `GET /keys/{room}`) have their own rate-limit bucket and are spliced from the stored JSON text; every writer has a lock timeout (2 s, 429) so lock waiters cannot exhaust the shared pool of 10 connections; the total version rows per user are capped at 1000. Accepted: the soft-delete markers are never pruned (needed for never-reused numbers and the idempotent DELETE), their growth is bounded by the row cap; the rate-limit buckets are per node; the RLS policies are `USING (true)` like the sibling tables (isolation rests on the `user_id` predicate of every statement) | Resolved / accepted (markers, per-node buckets, RLS pattern) | Story `server-side-key-backup`, `docs/stories/e2ee-client-support/security-reports/server-side-key-backup-security-review-2026-10-30.md` |
++| Server-side key backup (`/room_keys/**`, Kassandra review of story `server-side-key-backup`): resource exhaustion (CWE-400/770). Resolved by design: the request body is read only after the authentication (no pre-auth parse; an anonymous or junk-bearer request is 401 without its body being read) and after the write rate limit; a per-user aggregate byte budget of 64 MiB over all live versions (every row costs its room and session id bytes + 128 bytes besides `session_data`; net of replacements, decided under the advisory lock); the bulk reads (`GET /keys`, `GET /keys/{room}`) have their own rate-limit bucket (30 per minute, burst 3), at most ONE in flight per user and TWO per node (`:room_keys_max_concurrent_bulk_reads_per_node`, a monitor based slot, 429 before any database work), and are spliced from the stored JSON text; `GET /version` has a light bucket (120 per minute, burst 30); every writer takes the per-user lock with a try-lock (a busy lock is a 429 at once, `lock_timeout` stays as the safety net of row locks) so lock waiters cannot exhaust the shared pool of 10 connections; the total version rows per user are capped at 1000 (an operator prunes old markers with the SQL of the GDPR runbook). Honest peak memory: one bulk read peaked at about 300-350 MiB for a version at the former 256 MiB budget (the spliced iodata copy, the rows, and +0.75x with gzip); at the 64 MiB budget it is about 64 MiB x 2.5, and at most two run per node; streaming the response is the recorded follow-up. Accepted: the soft-delete markers are never pruned automatically (needed for never-reused numbers and the idempotent DELETE), their growth is bounded by the row cap; the rate-limit buckets and the slots are node-local (a cluster of N nodes allows N x the limit); the RLS policies are `USING (true)` like the sibling tables (accepted: isolation rests on the `user_id` predicate of every statement); the byte check is O(scan) of the user's rows on every write (follow-up: an O(1) counter column) | Resolved / accepted (markers, node-local buckets, RLS pattern, O(scan) per write) | Story `server-side-key-backup`, `docs/stories/e2ee-client-support/security-reports/server-side-key-backup-security-review-2026-10-30.md` |
+ | State-event forgery (pre-existing, FIXED 2026-10-07) | **CLOSED** | bugfix-unsigned-replaces-state: `Room.Server.do_send_event/7` now persists `state_key` as NULL instead of `""`, preventing any joined member from forging state events via PUT /send/{eventType}. Migration 000036 backfills `m.room.message` rows empirically. Follow-up data remediation query documented; query-filter hardening (F-3/F-4/F-6) deferred. |
+ | Search-pipeline encryption exclusion still matches post-fix `state_key = NULL` forged encryption rows (pre-existing, related to above) | Medium | bugfix-unsigned-replaces-state security review F-2: `search/db.ex` predicates must be tightened to `enc.state_key = ''` (not `IS NULL`) after state-forgery path is closed + m.room.encryption guard added to non-state send_event/2 path. Separate /nebu-pipeline bugfix required (not blocking this story). |
+ | **OAuth broker gate items (from story oauth-metadata-dcr-admin-approval, Kassandra SEC Gate 1, 2026-10-09)** | In progress | ADR-033, "Gate items before `oauth_enabled` / story 2 merge"; Tracked in `docs/stories/oauth-broker/follow-ups.md` |
+diff --git a/docs/compliance/gdpr-deletion-runbook.md b/docs/compliance/gdpr-deletion-runbook.md
+index cb73b2ac..6e50d9ef 100644
+--- a/docs/compliance/gdpr-deletion-runbook.md
++++ b/docs/compliance/gdpr-deletion-runbook.md
+@@ -139,6 +139,17 @@ The Matrix event timeline is an immutable append-only log - event content is pre
+ The user's PII is removed from their profile, but message content in rooms is not scrubbed.
+ This is consistent with Matrix CS API v1.18 behavior.
+ 
++## Pruning old key backup version markers
++
++A deleted key backup version stays as a soft-delete marker row (so version numbers are never reused). The markers of a user count against the cap of 1000 version rows per user; a user who created and deleted versions 1000 times is refused `POST /room_keys/version` (`403 M_FORBIDDEN`, "contact the server administrator") until an operator prunes. Run this against the database as the owner, replacing `<user_id>` (a Matrix user ID); it deletes the markers of that user except the highest-numbered one, so a version number is never reused, and touches no live version and no session row:
++
++```sql
++DELETE FROM room_key_backup_versions
++WHERE user_id = '<user_id>'
++  AND deleted_at IS NOT NULL
++  AND version < (SELECT max(version) FROM room_key_backup_versions WHERE user_id = '<user_id>' AND deleted_at IS NOT NULL);
++```
++
+ ## Rate Limits
+ 
+ The endpoint is governed by the `complianceRL` rate limiter: 10 requests/minute per IP (burst 10).
+diff --git a/docs/stories/e2ee-client-support/security-reports/server-side-key-backup-security-review-2026-10-30.md b/docs/stories/e2ee-client-support/security-reports/server-side-key-backup-security-review-2026-10-30.md
+index 13674ad6..8e66a34f 100644
+--- a/docs/stories/e2ee-client-support/security-reports/server-side-key-backup-security-review-2026-10-30.md
++++ b/docs/stories/e2ee-client-support/security-reports/server-side-key-backup-security-review-2026-10-30.md
+@@ -10,6 +10,6 @@ Date: 2026-10-30. Scope: staged worktree `open-chat-e2ee`, branch `feature/e2ee-
+ | 3 | MEDIUM | `json_body.ex:115-117` | CWE-770/400 pre-auth: the 5 MiB read+parse is unlocked by the mere presence of `Authorization: Bearer <anything>`, before the token is verified; contradicts the story Decision (anonymous keeps 1 MB). | Parse after authentication: JsonBody leaves room_keys bodies unfetched; `Protected` parses with the 5 MiB opts after `:authenticate` (and after the write rate limit). Tests: junk bearer + >1 MB body => 401/413 without a 5 MiB parse; valid token + 4 MiB => 200. |
+ | 4 | LOW | `room_key_backup_store.ex:84` | CWE-770: create/delete loops accumulate marker rows without limit (~86k tiny rows per user per day). | Cap total rows including markers (e.g. 1000), 403 beyond. |
+ | 5 | LOW | `lib/nebu/web/log_store/route_normalizer.ex:83-90` | CWE-532 (minor): client-chosen `sessionId`/non-sigil `roomId` segments logged unnormalized. | Add anchor `"room_keys" => %{3 => ":session_id"}` + test with a non-sigil room id. |
+-| 6 | LOW | migration `000056_room_key_backup.up.sql` | RLS `USING (true)`: isolation rests only on app predicates (as siblings 000041-000045). | Accepted pattern; record. |
++| 6 | LOW | migration `000058_room_key_backup.up.sql` | RLS `USING (true)`: isolation rests only on app predicates (as siblings 000041-000045). | Accepted pattern; record. |
+ 
+ Checked clean: IDOR/per-user isolation in every statement (composite FK (user_id, version)), SQL injection (all bound; version regex int64-safe, `\z` anchored), NUL/500-oracle, quota decisions under the lock, duplicate keys collapse, canonical-byte size accounting, GDPR erasure (both tables, sessions first, in-flight writers refused with M_USER_DEACTIVATED), log hygiene (RequestLogger/RawBodyReader skip room_keys; Repo log false), no response leakage, migration grants (no TRUNCATE/DDL), ADR-011, OIDC scopes law.
+diff --git a/server/lib/nebu/application.ex b/server/lib/nebu/application.ex
+index 2dd999ba..d63f1b1a 100644
+--- a/server/lib/nebu/application.ex
++++ b/server/lib/nebu/application.ex
+@@ -174,6 +174,7 @@ defmodule Nebu.Application do
+           Nebu.Web.RateLimitSweeper,
+           # story membership-state-model (D19, security cycle 3): the node-wide gate of the member-state reads; before Bandit
+           Nebu.Matrix.MemberSliceGate,
++          Nebu.Matrix.RoomKeysReadGate,
+           # story oauth-hardening-hygiene (HY4): owner of the per-node OAuth ETS caches (config TTL cache and
+           # decoded signing keys); after the Repo, before Bandit, so no request process ever creates a table.
+           Nebu.OAuth.CacheOwner,
+diff --git a/server/lib/nebu/matrix/http_room_keys.ex b/server/lib/nebu/matrix/http_room_keys.ex
+index 95e9734f..baec23d0 100644
+--- a/server/lib/nebu/matrix/http_room_keys.ex
++++ b/server/lib/nebu/matrix/http_room_keys.ex
+@@ -161,6 +161,8 @@ defmodule Nebu.Matrix.HttpRoomKeys do
+   # the writer could not get the per-user lock in time: a time-based condition, the client may retry
+   # (the shared 429 envelope: `retry_after_ms` in the body, `Retry-After` header)
+   defp reply_error(conn, :lock_timeout), do: Nebu.Web.Plugs.RateLimit.respond_limited(conn, 1)
++  # the per-user lock is busy (a try-lock): the same answer, at once
++  defp reply_error(conn, :lock_busy), do: Nebu.Web.Plugs.RateLimit.respond_limited(conn, 1)
+ 
+   defp reply_error(conn, {:wrong_version, current}) do
+     send_json(conn, 403, %{
+diff --git a/server/lib/nebu/matrix/room_key_backup_store.ex b/server/lib/nebu/matrix/room_key_backup_store.ex
+index 6f0bfdbb..552e15c3 100644
+--- a/server/lib/nebu/matrix/room_key_backup_store.ex
++++ b/server/lib/nebu/matrix/room_key_backup_store.ex
+@@ -31,17 +31,18 @@ defmodule Nebu.Matrix.RoomKeyBackupStore do
+   the locked state, and the erasure serialises with a write in flight. The creating writers (`create_version/3`,
+   `put_sessions/3`) refuse a user whose erasure is under way (`{:error, :user_erased}`).
+ 
+-  A waiter of the lock holds a pooled database connection, so the lock is requested under `SET LOCAL lock_timeout`
+-  (default 2000 ms, `config :nebu, :room_keys_lock_timeout_ms`): a writer that cannot get it in time is
+-  `{:error, :lock_timeout}` (SQLSTATE 55P03; answered `429 M_LIMIT_EXCEEDED`) and stores nothing. Reads take no lock.
++  The lock is a TRY-lock (`pg_try_advisory_xact_lock`): a busy lock is `{:error, :lock_busy}` AT ONCE (answered `429 M_LIMIT_EXCEEDED`), no
++  waiter ever holds a pooled database connection, and the request stores nothing. Reads take no lock. `SET LOCAL lock_timeout`
++  (default 2000 ms, `config :nebu, :room_keys_lock_timeout_ms`) stays only as the safety net of ROW locks: a writer that cannot get a row
++  in time is `{:error, :lock_timeout}` (SQLSTATE 55P03, answered 429 as well).
+ 
+   ## Quotas (all decided under the lock; a refused request stores nothing)
+ 
+     * 10 live versions per user, and at most 1000 version rows per user INCLUDING the soft-delete markers
+       (`:room_keys_max_version_rows_per_user`): a create / delete loop cannot grow the table without limit;
+     * 100 000 sessions per version (`:room_keys_max_sessions_per_version`);
+-    * an aggregate byte budget per user over all live versions: the compact JSON bytes of every stored `session_data` plus
+-      the `auth_data` of every live version, default 256 MiB (`:room_keys_max_bytes_per_user`). It is checked AFTER the
++    * an aggregate byte budget per user over all live versions: for every stored session `octet_length(room_id) + octet_length(session_id) + 128`
++      plus the compact JSON bytes of its `session_data`, plus the `auth_data` of every live version, default 64 MiB (`:room_keys_max_bytes_per_user`). It is checked AFTER the
+       write inside the transaction (so a replacement counts only its size delta) and rolled back when exceeded; a delete
+       frees its bytes. The check sums the user's rows (bounded by the budget itself).
+ 
+@@ -60,8 +61,9 @@ defmodule Nebu.Matrix.RoomKeyBackupStore do
+ 
+   @max_versions 10
+   @default_max_sessions 100_000
+-  # cycle 1: aggregate bytes per user (256 MiB), version rows per user incl. markers, and the lock timeout of the writers
+-  @default_max_bytes 256 * 1024 * 1024
++  # aggregate bytes per user (64 MiB since cycle 2), version rows per user incl. markers, and the lock timeout of the writers
++  @default_max_bytes 64 * 1024 * 1024
++  @row_overhead_bytes 128
+   @default_max_version_rows 1000
+   @default_lock_timeout_ms 2000
+ 
+@@ -518,8 +520,9 @@ defmodule Nebu.Matrix.RoomKeyBackupStore do
+   # A waiter of the lock holds a pooled connection, so the lock is requested with a TIMEOUT: `SET LOCAL lock_timeout` (`set_config(.., true)` is the
+   # parameterised form, it ends with the transaction) and a wait that runs out is `{:error, :lock_timeout}` (see `query/2`), answered 429.
+   defp lock_user(user_id) do
+-    with {:ok, _} <- query("SELECT set_config('lock_timeout', $1::text, true)", ["#{lock_timeout_ms()}ms"]) do
+-      query("SELECT pg_advisory_xact_lock(hashtextextended('sync_global|' || $1::text, 0))", [user_id])
++    with {:ok, _} <- query("SELECT set_config('lock_timeout', $1::text, true)", ["#{lock_timeout_ms()}ms"]),
++         {:ok, %{rows: [[locked?]]}} <- query("SELECT pg_try_advisory_xact_lock(hashtextextended('sync_global|' || $1::text, 0))", [user_id]) do
++      if locked?, do: {:ok, :locked}, else: {:error, :lock_busy}
+     end
+   end
+ 
+@@ -538,7 +541,10 @@ defmodule Nebu.Matrix.RoomKeyBackupStore do
+   # request (so a replace counts only its delta); over the budget the transaction rolls back and nothing is stored
+   defp ensure_byte_budget(user_id) do
+     with {:ok, %{rows: [[sessions]]}} <-
+-           query("SELECT COALESCE(sum(octet_length(session_data)), 0)::bigint FROM room_key_backup_sessions WHERE user_id = $1", [user_id]),
++           query(
++             "SELECT COALESCE(sum(octet_length(room_id) + octet_length(session_id) + #{@row_overhead_bytes} + octet_length(session_data)), 0)::bigint FROM room_key_backup_sessions WHERE user_id = $1",
++             [user_id]
++           ),
+          {:ok, %{rows: [[auth]]}} <-
+            query("SELECT COALESCE(sum(octet_length(auth_data)), 0)::bigint FROM room_key_backup_versions WHERE user_id = $1 AND deleted_at IS NULL", [user_id]) do
+       if sessions + auth > max_bytes(), do: {:error, :bytes_quota}, else: :ok
+diff --git a/server/lib/nebu/matrix/room_keys_read_gate.ex b/server/lib/nebu/matrix/room_keys_read_gate.ex
+new file mode 100644
+index 00000000..16058b36
+--- /dev/null
++++ b/server/lib/nebu/matrix/room_keys_read_gate.ex
+@@ -0,0 +1,68 @@
++defmodule Nebu.Matrix.RoomKeysReadGate do
++  @moduledoc """
++  The slots of the BULK key reads (`GET /room_keys/keys`, `GET /room_keys/keys/{roomId}`; story server-side-key-backup, cycle 2): at most ONE bulk read in
++  flight per user and at most `max_per_node/0` (default 2, `config :nebu, :room_keys_max_concurrent_bulk_reads_per_node`, read per admission) on this node.
++  Node-local by design, like the rate tiers. A supervised GenServer: a holder is a MONITORED request process, its slots are freed by `run/2` and, when the
++  process is killed during the read, on its `:DOWN`. A reader that finds no slot is refused at once (the caller answers 429 before any database work).
++  """
++  use GenServer
++
++  @default_per_node 2
++
++  def start_link(_opts), do: GenServer.start_link(__MODULE__, :ok, name: __MODULE__)
++
++  @spec max_per_node() :: pos_integer()
++  def max_per_node do
++    case Application.get_env(:nebu, :room_keys_max_concurrent_bulk_reads_per_node, @default_per_node) do
++      n when is_integer(n) and n > 0 -> n
++      _ -> @default_per_node
++    end
++  end
++
++  @doc "Runs `fun` in the calling process while a slot of `user_id` is held: `{:ok, result}` or `:overflow`."
++  @spec run(String.t() | nil, (-> result)) :: {:ok, result} | :overflow when result: term()
++  def run(user_id, fun) when is_function(fun, 0) do
++    case acquire(user_id) do
++      {:ok, slot} ->
++        try do
++          {:ok, fun.()}
++        after
++          GenServer.cast(__MODULE__, {:release, slot})
++        end
++
++      :overflow ->
++        :overflow
++    end
++  end
++
++  defp acquire(user_id) do
++    GenServer.call(__MODULE__, {:acquire, user_id, self()}, 5_000)
++  catch
++    :exit, _ -> :overflow
++  end
++
++  @impl GenServer
++  def init(:ok), do: {:ok, %{holders: %{}}}
++
++  @impl GenServer
++  def handle_call({:acquire, user_id, pid}, _from, state) do
++    busy_user? = Enum.any?(state.holders, fn {_slot, {user, _pid}} -> user == user_id end)
++
++    if busy_user? or map_size(state.holders) >= max_per_node() do
++      {:reply, :overflow, state}
++    else
++      slot = Process.monitor(pid)
++      {:reply, {:ok, slot}, %{state | holders: Map.put(state.holders, slot, {user_id, pid})}}
++    end
++  end
++
++  @impl GenServer
++  def handle_cast({:release, slot}, state) do
++    Process.demonitor(slot, [:flush])
++    {:noreply, %{state | holders: Map.delete(state.holders, slot)}}
++  end
++
++  @impl GenServer
++  def handle_info({:DOWN, slot, :process, _pid, _reason}, state), do: {:noreply, %{state | holders: Map.delete(state.holders, slot)}}
++  def handle_info(_other, state), do: {:noreply, state}
++end
+diff --git a/server/lib/nebu/web/log_store/route_normalizer.ex b/server/lib/nebu/web/log_store/route_normalizer.ex
+index 866f412b..c9d1032b 100644
+--- a/server/lib/nebu/web/log_store/route_normalizer.ex
++++ b/server/lib/nebu/web/log_store/route_normalizer.ex
+@@ -171,6 +171,13 @@ defmodule Nebu.Web.LogStore.RouteNormalizer do
+           acc
+ 
+         {:ok, offsets} ->
++          # `/room_keys/version/{n}`: the number is a version, not a room id
++          offsets =
++            case {decoded, Enum.at(routed, pos + 1)} do
++              {"room_keys", {_idx, "version"}} -> %{2 => ":version"}
++              _ -> offsets
++            end
++
+           Enum.reduce(offsets, acc, fn {offset, placeholder}, acc2 ->
+             target = pos + offset
+ 
+diff --git a/server/lib/nebu/web/plugs/json_body.ex b/server/lib/nebu/web/plugs/json_body.ex
+index 1ea38eb6..8d2927a1 100644
+--- a/server/lib/nebu/web/plugs/json_body.ex
++++ b/server/lib/nebu/web/plugs/json_body.ex
+@@ -113,9 +113,19 @@ defmodule Nebu.Web.Plugs.JsonBody do
+   # The key backup (story server-side-key-backup): the bodies of `v3/room_keys/**` stay UNFETCHED here. This plug runs before the authentication, so
+   # any read or parse of a body here would be a pre-auth cost (a 5 MiB body for every anonymous or junk-credential request). The authenticated route
+   # (`Nebu.Web.Router.Protected`) reads the body with `parse_room_keys/1` after the authentication and the write rate limit.
+-  def call(%Plug.Conn{path_info: ["_matrix", "client", "v3", "room_keys" | _]} = conn, _opts), do: conn
++  def call(%Plug.Conn{path_info: path_info} = conn, _opts) do
++    # `Plug.Router` matches on the DECODED segments (`room%5Fkeys` is the room_keys route): so does the skip
++    case Enum.map(Enum.take(path_info, 4), &decode_segment/1) do
++      ["_matrix", "client", "v3", "room_keys"] -> conn
++      _ -> parse(conn, @parser_opts)
++    end
++  end
+ 
+-  def call(conn, _opts), do: parse(conn, @parser_opts)
++  defp decode_segment(segment) do
++    URI.decode(segment)
++  rescue
++    ArgumentError -> segment
++  end
+ 
+   @doc """
+   Reads and parses the JSON body of an AUTHENTICATED `room_keys` request with the 5 MiB limit (called by the route after the authentication and the write
+diff --git a/server/lib/nebu/web/router/protected.ex b/server/lib/nebu/web/router/protected.ex
+index 0de62d8b..9f70237a 100644
+--- a/server/lib/nebu/web/router/protected.ex
++++ b/server/lib/nebu/web/router/protected.ex
+@@ -602,11 +602,12 @@ defmodule Nebu.Web.Router.Protected do
+   # tier of their own (60 per minute, burst 30, like the sibling account_data tier). The two BULK reads (GET /keys, GET /keys/{room}) load a whole
+   # version: a bucket of their own (30 per minute, burst 10 per user), independent of the write bucket. The single-session read and the version reads
+   # are not limited (a client restoring a backup reads one session per undecryptable event).
+-  @room_keys_write_rate_limit Nebu.Web.Plugs.RateLimit.init(rate_per_min: 60, burst: 30, tier: "room_keys", key: :user)
+-  @room_keys_bulk_read_rate_limit Nebu.Web.Plugs.RateLimit.init(rate_per_min: 30, burst: 10, tier: "room_keys_bulk_read", key: :user)
++  @room_keys_write_rate_limit Nebu.Web.Plugs.RateLimit.init(rate_per_min: 60, burst: 5, tier: "room_keys", key: :user)
++  @room_keys_bulk_read_rate_limit Nebu.Web.Plugs.RateLimit.init(rate_per_min: 30, burst: 3, tier: "room_keys_bulk_read", key: :user)
++  @room_keys_version_read_rate_limit Nebu.Web.Plugs.RateLimit.init(rate_per_min: 120, burst: 30, tier: "room_keys_version_read", key: :user)
+ 
+   get "/client/v3/room_keys/version" do
+-    HttpRoomKeys.get_version(conn)
++    room_keys_version_read(conn, fn conn -> HttpRoomKeys.get_version(conn) end)
+   end
+ 
+   post "/client/v3/room_keys/version" do
+@@ -614,7 +615,7 @@ defmodule Nebu.Web.Router.Protected do
+   end
+ 
+   get "/client/v3/room_keys/version/:version" do
+-    HttpRoomKeys.get_version(conn, version)
++    room_keys_version_read(conn, fn conn -> HttpRoomKeys.get_version(conn, version) end)
+   end
+ 
+   put "/client/v3/room_keys/version/:version" do
+@@ -674,9 +675,23 @@ defmodule Nebu.Web.Router.Protected do
+     end
+   end
+ 
++  defp room_keys_version_read(conn, fun) do
++    conn = Nebu.Web.Plugs.RateLimit.call(conn, @room_keys_version_read_rate_limit)
++    if conn.halted, do: conn, else: fun.(conn)
++  end
++
++  # a bulk read: the rate limit, then the slot (at most one in flight per user, two per node), answered 429 before any database work when taken
+   defp room_keys_bulk_read(conn, fun) do
+     conn = Nebu.Web.Plugs.RateLimit.call(conn, @room_keys_bulk_read_rate_limit)
+-    if conn.halted, do: conn, else: fun.(conn)
++
++    if conn.halted do
++      conn
++    else
++      case Nebu.Matrix.RoomKeysReadGate.run(conn.assigns[:current_user], fn -> fun.(conn) end) do
++        {:ok, conn} -> conn
++        :overflow -> Nebu.Web.Plugs.RateLimit.respond_limited(conn, 1)
++      end
++    end
+   end
+ 
+   # GET MSC3814 dehydrated_device — not in CS API v1.18; unstable proposal only.

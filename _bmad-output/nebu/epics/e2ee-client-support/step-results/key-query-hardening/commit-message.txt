@@ -1,0 +1,28 @@
+feat(e2ee): key query hardening (restricted /keys/query, cross-user signatures, Ed25519 verification)
+
+/keys/query now serves the device keys, master key and self-signing key of a user only
+to the user itself and to peers who share a room in which both are joined; every other
+user (not shared, invited, left, unknown, keyless, remote, malformed) is left out and
+the answer is byte-identical for all of them, from one statement shape. The user-signing
+key stays owner-only. A device rename shows in the next query.
+
+POST /keys/signatures/upload verifies every uploaded signature with Ed25519 over the
+canonical JSON (signatures and unsigned removed) against the right stored key of the
+caller, and accepts the caller's user-signing signature over another user's master key
+when both share a joined room (table cross_signing_user_signatures, migration 000061).
+Cross-user signatures are visible to the signer only, are bound to the master key value
+and dropped with a replaced key, and are erased with either user. Errors are per entry
+inside HTTP 200: M_FORBIDDEN (foreign device or key, no shared room, identical to an
+unknown user), M_INVALID_SIGNATURE, M_INVALID_PARAM. Limits: 200 objects per request,
+4 caller signatures per object (at most 800 verifications), 1000 users per query, a
+per-user keys_signatures rate tier. A stored own-device or own-master signature stamps
+the signer in the device-list stream.
+
+Security review (Kassandra): first pass CLEAN with 3 LOW (signature row bound to the key
+id only, up to 4000 verifications per request, advisory lock taken by peers); all fixed
+or documented, the delta pass is CLEAN. The CI gate found a test-support regression
+(adapted suites used an invite that depends on the runtime server name) and an
+order-dependent AdminStaleRooms test (page of 50), both fixed.
+
+Pipeline: ATDD, 3 fix cycles, code review CLEAN, Kassandra CLEAN.
+Refs: REQ-2026-014

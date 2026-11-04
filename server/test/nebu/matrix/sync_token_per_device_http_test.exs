@@ -212,7 +212,12 @@ defmodule Nebu.Matrix.SyncTokenPerDeviceHttpTest do
         S.sync(f.a, nil, full_state: true)
       ]
 
-      for b <- bodies_, do: assert(is_binary(next(b)) and next(b) =~ shape, "next_batch #{inspect(next(b))}")
+      # story device-key-directory (D11): the device-list group `.d<n>` is appended LAST to EVERY next_batch; the shape pin is about `<core>.<pos>` before it.
+      for b <- bodies_ do
+        assert is_binary(next(b)) and next(b) =~ ~r/\.d[0-9]+\z/, "device-list group present and last: #{inspect(next(b))}"
+        stripped = Regex.replace(~r/\.d[0-9]+\z/, next(b), "")
+        assert stripped =~ shape, "next_batch #{inspect(next(b))}"
+      end
     end
 
     test "a user with many syncs on one device keeps exactly one row; three devices keep exactly three (rows are bounded by the devices, no '' row)" do

@@ -1,0 +1,804 @@
+diff --git a/_bmad-output/nebu/epics/e2ee-client-support/pipeline-state.yaml b/_bmad-output/nebu/epics/e2ee-client-support/pipeline-state.yaml
+index 2e875a56..2ace5967 100644
+--- a/_bmad-output/nebu/epics/e2ee-client-support/pipeline-state.yaml
++++ b/_bmad-output/nebu/epics/e2ee-client-support/pipeline-state.yaml
+@@ -1,5 +1,8 @@
+ # Nebu Pipeline State
+ # last_updated: 2026-11-03
++# [key-query-hardening] 2026-11-03T15:06Z security-review → Kassandra CLEAN, 3 LOW (L1 signature row bound to key id not key, L2 4000 Ed25519 verifies/request, L3 peers take target advisory lock); user preference (fix small things) → dev cycle 3 (key-bound rows, verify only caller signatures max 4/object, risk doc)
++# [key-query-hardening] 2026-11-03T15:01Z ci-gate-final → full gate on final code: e2e 147/0; integration 24 failures (baseline 35) all in baseline families except AdminStaleRooms (list_rooms(50) page filled by other suites' rooms; failed in both runs because this story's tests add stale rooms) → test hardened with a cursor (proved: old test fails / new passes with 120 filler rooms); rest = known flakes (tick/0, SsoLogin, ReleaseTest 56/57, ...)
++# [key-query-hardening] 2026-11-03T14:22Z code-review → CLEAN (cycle 2 delta; D10 (b) stamp kept, pin adapted to +1 position); 6b final gate running (gate.sh)
+ # [key-query-hardening] 2026-11-03T14:13Z code-review → cycle 1 full review MINOR (0 MAJOR, 4 MINOR: D10 missing for own-master signature, orphaned unfiltered query_cross_signing/1, D7/D10 negative halves unpinned, stale prose); user preference (fix small things) → dev cycle 2 instead of deferral
+ # [key-query-hardening] 2026-11-03T14:08Z ci-gate → cycle 1 fix verified by orchestrator (dev agent could not run it: BLOCKED = unverified only): 3 adapted suites + kqh 148/148 under NEBU_SERVER_NAME=localhost AND test.local; unit 1.19: 2 failures = known (MemberSliceGate throughput load flake, ReleaseTest 56/57). Integration full gate re-run owed at 6b only if review changes code
+ # [key-query-hardening] 2026-11-03T14:02Z ci-gate → full gate cycle 0: e2e 147/0; integration 38 vs baseline 35: 3 real regressions (adapted legacy_logout/oauth_revoke/user_deletion_global_data tests: invite refused 'other servers', OAuth support uid domain test.local vs runtime server_name; reproduced with NEBU_SERVER_NAME=localhost), rest flakes (tick/0, AdminStaleRooms page-50) → fix cycle 1
+@@ -45,6 +48,7 @@ completed:
+   - test-review
+   - dev-story
+   - ci-gate
+-cycle_count: 2
++  - code-review
++cycle_count: 3
+ blocked_reason: null
+-last_updated: "2026-11-03T14:13Z"
++last_updated: "2026-11-03T15:06Z"
+diff --git a/_bmad-output/nebu/epics/e2ee-client-support/step-results/key-query-hardening/code-review-findings.md b/_bmad-output/nebu/epics/e2ee-client-support/step-results/key-query-hardening/code-review-findings.md
+index 11c05556..f5e02005 100644
+--- a/_bmad-output/nebu/epics/e2ee-client-support/step-results/key-query-hardening/code-review-findings.md
++++ b/_bmad-output/nebu/epics/e2ee-client-support/step-results/key-query-hardening/code-review-findings.md
+@@ -1,13 +1,9 @@
+-# code-review — cycle 1
+-INFO | review-prescan.md | prescan: no MAJOR/MINOR lines, no HINT lines (36 files, migration 000061 contiguous after 000060, no clash on other local branches) | -
+-MINOR | server/test/nebu/matrix/key_query_hardening_test.exs:434,590 | D7/D10 negative halves unpinned: no test that a put_keys with an UNCHANGED master key keeps the cross-user rows (a `DELETE ... WHERE target_user_id = $1` without the `NOT (target_key_id = ANY(...))` guard passes every test) and no test that re-uploading an identical cross-user signature stamps nothing (D10 "only when changed", key_signature_store.ex:312) | add: partial replacement keeping the master (replace path / put_keys with same master) -> alice's signature still visible; sign twice -> DK.keys_pos(alice) unchanged after the 2nd upload
+-MINOR | server/lib/nebu/matrix/key_signature_store.ex:145-151 | D10 applied to (a) and (c) only: an own MASTER signature by an own device (b) goes through CrossSigningKeyStore.merge_signatures/put_keys_no_flag, which never calls DeviceListStore.stamp_keys!, so the signer's other devices (and peers) get no device_lists.changed for a stored signature; D10 says "a stored signature stamps the signer's own key row" | stamp the caller inside the merge transaction when the merged object changed (or record (b) as an explicit D10 exception in the story/08-concepts)
+-MINOR | server/lib/nebu/matrix/cross_signing_key_store.ex:204-210 | orphaned public reader: query_cross_signing/1 lost its only caller (the old /keys/query handler) and is an UNFILTERED cross-signing lookup without the D1 visibility predicate; its doc still says "Bulk lookup for /keys/query" — a future caller re-opens the directory leak | delete it (or mark @doc false with a "no visibility filter, never serve to a client" warning)
+-MINOR | docs/architecture/08-concepts.md:1547; server/lib/nebu/matrix/device_key_store.ex:7,239,249; server/lib/nebu/matrix/cross_signing_key_store.ex:8-9 | stale prose after the move: 08-concepts says `/keys/query` reads `query_devices/1` (now KeyQueryStore's own statement), device_key_store docs query_devices as the /keys/query reader, cross_signing_key_store moduledoc says signatures/upload merges every signature into the key object (cross-user ones now live in cross_signing_user_signatures) | reword to name KeyQueryStore / cross_signing_user_signatures; grep docs/ + lib/ for query_devices / query_cross_signing
+-INFO | server/lib/nebu/matrix/key_signature_store.ex:222 | stricter than Synapse: EVERY signature of the caller in the object must verify with the D5 key type; Synapse verifies only the expected key's signature and ignores the rest. A client that re-submits a device object still carrying the device's own `ed25519:<dev>` self-signature (or a master with its self-signature) gets M_INVALID_SIGNATURE. rust-sdk (signatures.clear()) and dart cloneForSigning appear to clear first, so likely fine | confirm with an Element/FluffyChat own-device + peer verification smoke test; option: skip props whose value equals the stored signature
+-INFO | server/lib/nebu/matrix/key_signature_store.ex:294-318 | the shared-room check is not repeated under the advisory locks: a signer who leaves the room between upload_foreign's statement and the insert still stores the row (harmless: only shown to the signer while shared; covered by 11-risks residual (3)) | none
+-INFO | server/lib/nebu/matrix/canonical_json.ex:28-32 | encode_strict reuses Jason escaping: control characters other than \b\f\n\r\t are emitted as uppercase `\u001F`, Matrix canonical JSON uses lowercase hex; a signed object with such a char would not verify. No real key object carries one | optional: known-answer test vector / lowercase escape
+-INFO | server/lib/nebu/web/router/protected.ex:878 | /keys/query has no route-level tier (D8 says "keeps its existing tier"; there is none besides the global plug) while one request may run the vis EXISTS for 1000 ids | optional: own per-user tier like keys_changes; or record in 11-risks
+-INFO | server/lib/nebu/matrix/http_key_query.ex:30 | limits/0 hardcodes 60/20 separately from @keys_signatures_rate_limit in the router (drift risk) | derive from one constant
+-INFO | server/lib/nebu/matrix/key_signature_store.ex:68-86 | earlier entries commit in their own transactions, a later DB error answers 500 (partial apply then 500; idempotent, pre-existing I-3) | none
+-INFO | verified clean | query: one statement for every id (vis CTE, both-sides left_at IS NULL, device-id filter applied after the visibility join, empty/NUL-only request skip is request-only), failures always {}, USK owner-only, D4 per-viewer master sigs filtered to the current master key ids; upload: shape check before state, sharing+lookup in one statement with identical :forbidden, verification outside locks, strict unpadded base64 64/32 bytes, :crypto.verify rescued, encode_strict additive (existing encode!/sha256_hex callers unchanged); locks: sorted sync_global| advisories, no row lock in (c), put_keys D7 delete under the same advisory, erasure fence via deletion_status predicate + D9 target delete; rate tier before body work, cap before verification, ETS key = user id; logs carry error kinds only, body logging excluded for both routes; no Ecto schema; adapted suites only add TD.share preconditions / real Ed25519 signatures and the decided errcode changes (nothing weakened) | -
++# code-review — cycle 2
++INFO | review-prescan.md | prescan: no MAJOR/MINOR/HINT lines (copied from cycle 1, unchanged) | -
++INFO | cycle-1 MINOR 1 (D7/D10 negative halves) FIXED | key_query_hardening_test.exs:245-299: D10 (b) stamp + identical re-upload stamps nothing, identical cross-user re-upload keeps keys_pos, D7 put_keys with unchanged master keeps the cross-user row (precondition asserted, replacement asserted) - each fails against the named mutant | -
++INFO | cycle-1 MINOR 2 (D10 for own-master signature) FIXED | cross_signing_key_store.ex:233-239: stamp_keys! after put_keys_no_flag inside the same Repo.transaction, only when merged != obj (locked-read object); lock order cs row -> sync_global| advisory -> device_list_changes row, identical to put_keys/2 (line 127); no devices/device_keys lock is taken in this path, so no new edge and no new lock | -
++INFO | cycle-1 MINOR 3 (orphaned query_cross_signing/1) FIXED | deleted with its maybe_put helper; no reference left in server/lib, server/test, docs/architecture, docs/matrix-api-scope.md, docs/compliance (grep clean) | -
++INFO | cycle-1 MINOR 4 (stale prose) FIXED | 08-concepts.md:1547, device_key_store.ex moduledoc + query_devices doc, cross_signing_key_store.ex moduledoc now name KeyQueryStore / cross_signing_user_signatures; query_devices/1 doc says "no visibility filter, must never be served to a client"; no production caller outside its own definition (only 5 test files use it) | -
++INFO | pin adaptation cross_signing_upload_races_test.exs:578-591 | seq() == before + 1 is tighter, not weaker (still asserts the other keys, cross_signing_changed and cross_signing_keys.changed_pos untouched and the merged signature present); sync_token_per_device_store_test.exs:341 (merge moves neither changed_pos nor flag) stays true because the stamp only touches device_list_changes | -
++INFO | server/lib/nebu/matrix/key_signature_store.ex:43-46; docs/architecture/08-concepts.md:1468 | D10 prose still describes only the cross-user (c) stamp; (a) device-signature and (b) own-master stamps are not named (nothing false, story D10 says "a stored signature") | optional: one clause "own-device and own-master signatures stamp the owner's key row too"
++INFO | verification gap | tests not re-run by this review (mix lock fails with :eperm in the review sandbox); the orchestrator owns the green run of key_query_hardening_test, cross_signing_upload_races_test, sync_token_per_device_store_test | run the three files before commit
+diff --git a/_bmad-output/nebu/epics/e2ee-client-support/step-results/key-query-hardening/integration-stale b/_bmad-output/nebu/epics/e2ee-client-support/step-results/key-query-hardening/integration-stale
+deleted file mode 100644
+index e69de29b..00000000
+diff --git a/_bmad-output/nebu/epics/e2ee-client-support/step-results/key-query-hardening/review-delta.diff b/_bmad-output/nebu/epics/e2ee-client-support/step-results/key-query-hardening/review-delta.diff
+new file mode 100644
+index 00000000..44398723
+--- /dev/null
++++ b/_bmad-output/nebu/epics/e2ee-client-support/step-results/key-query-hardening/review-delta.diff
+@@ -0,0 +1,303 @@
++diff --git a/_bmad-output/nebu/epics/e2ee-client-support/pipeline-state.yaml b/_bmad-output/nebu/epics/e2ee-client-support/pipeline-state.yaml
++index 6fff23b8..2e875a56 100644
++--- a/_bmad-output/nebu/epics/e2ee-client-support/pipeline-state.yaml
+++++ b/_bmad-output/nebu/epics/e2ee-client-support/pipeline-state.yaml
++@@ -1,5 +1,6 @@
++ # Nebu Pipeline State
++ # last_updated: 2026-11-03
+++# [key-query-hardening] 2026-11-03T14:13Z code-review → cycle 1 full review MINOR (0 MAJOR, 4 MINOR: D10 missing for own-master signature, orphaned unfiltered query_cross_signing/1, D7/D10 negative halves unpinned, stale prose); user preference (fix small things) → dev cycle 2 instead of deferral
++ # [key-query-hardening] 2026-11-03T14:08Z ci-gate → cycle 1 fix verified by orchestrator (dev agent could not run it: BLOCKED = unverified only): 3 adapted suites + kqh 148/148 under NEBU_SERVER_NAME=localhost AND test.local; unit 1.19: 2 failures = known (MemberSliceGate throughput load flake, ReleaseTest 56/57). Integration full gate re-run owed at 6b only if review changes code
++ # [key-query-hardening] 2026-11-03T14:02Z ci-gate → full gate cycle 0: e2e 147/0; integration 38 vs baseline 35: 3 real regressions (adapted legacy_logout/oauth_revoke/user_deletion_global_data tests: invite refused 'other servers', OAuth support uid domain test.local vs runtime server_name; reproduced with NEBU_SERVER_NAME=localhost), rest flakes (tick/0, AdminStaleRooms page-50) → fix cycle 1
++ # [key-query-hardening] 2026-11-03T13:15Z dev-story → DONE (cycle 0, agent could not run mix): verified by orchestrator: key_query_hardening_test.exs 30/30 green with warnings-as-errors; migration 000061 applies
++@@ -37,13 +38,13 @@
++ # [server-side-key-backup] 2026-10-30T11:10Z atdd+test-review → 199 tests (187 red), 59/60 new mutants killed, 0 MAJOR 12 MINOR fixed
++ # [server-side-key-backup] 2026-10-30T07:00Z create-story → 5 scenarios + scope list (also to-device-messaging, device-key-directory written; run in that order)
++ story: "key-query-hardening"
++-current_step: "code-review"
+++current_step: "dev-story"
++ completed:
++   - create-story
++   - atdd
++   - test-review
++   - dev-story
++   - ci-gate
++-cycle_count: 1
+++cycle_count: 2
++ blocked_reason: null
++-last_updated: "2026-11-03T14:08Z"
+++last_updated: "2026-11-03T14:13Z"
++diff --git a/_bmad-output/nebu/epics/e2ee-client-support/step-results/key-query-hardening/code-review-previous.md b/_bmad-output/nebu/epics/e2ee-client-support/step-results/key-query-hardening/code-review-previous.md
++new file mode 100644
++index 00000000..11c05556
++--- /dev/null
+++++ b/_bmad-output/nebu/epics/e2ee-client-support/step-results/key-query-hardening/code-review-previous.md
++@@ -0,0 +1,13 @@
+++# code-review — cycle 1
+++INFO | review-prescan.md | prescan: no MAJOR/MINOR lines, no HINT lines (36 files, migration 000061 contiguous after 000060, no clash on other local branches) | -
+++MINOR | server/test/nebu/matrix/key_query_hardening_test.exs:434,590 | D7/D10 negative halves unpinned: no test that a put_keys with an UNCHANGED master key keeps the cross-user rows (a `DELETE ... WHERE target_user_id = $1` without the `NOT (target_key_id = ANY(...))` guard passes every test) and no test that re-uploading an identical cross-user signature stamps nothing (D10 "only when changed", key_signature_store.ex:312) | add: partial replacement keeping the master (replace path / put_keys with same master) -> alice's signature still visible; sign twice -> DK.keys_pos(alice) unchanged after the 2nd upload
+++MINOR | server/lib/nebu/matrix/key_signature_store.ex:145-151 | D10 applied to (a) and (c) only: an own MASTER signature by an own device (b) goes through CrossSigningKeyStore.merge_signatures/put_keys_no_flag, which never calls DeviceListStore.stamp_keys!, so the signer's other devices (and peers) get no device_lists.changed for a stored signature; D10 says "a stored signature stamps the signer's own key row" | stamp the caller inside the merge transaction when the merged object changed (or record (b) as an explicit D10 exception in the story/08-concepts)
+++MINOR | server/lib/nebu/matrix/cross_signing_key_store.ex:204-210 | orphaned public reader: query_cross_signing/1 lost its only caller (the old /keys/query handler) and is an UNFILTERED cross-signing lookup without the D1 visibility predicate; its doc still says "Bulk lookup for /keys/query" — a future caller re-opens the directory leak | delete it (or mark @doc false with a "no visibility filter, never serve to a client" warning)
+++MINOR | docs/architecture/08-concepts.md:1547; server/lib/nebu/matrix/device_key_store.ex:7,239,249; server/lib/nebu/matrix/cross_signing_key_store.ex:8-9 | stale prose after the move: 08-concepts says `/keys/query` reads `query_devices/1` (now KeyQueryStore's own statement), device_key_store docs query_devices as the /keys/query reader, cross_signing_key_store moduledoc says signatures/upload merges every signature into the key object (cross-user ones now live in cross_signing_user_signatures) | reword to name KeyQueryStore / cross_signing_user_signatures; grep docs/ + lib/ for query_devices / query_cross_signing
+++INFO | server/lib/nebu/matrix/key_signature_store.ex:222 | stricter than Synapse: EVERY signature of the caller in the object must verify with the D5 key type; Synapse verifies only the expected key's signature and ignores the rest. A client that re-submits a device object still carrying the device's own `ed25519:<dev>` self-signature (or a master with its self-signature) gets M_INVALID_SIGNATURE. rust-sdk (signatures.clear()) and dart cloneForSigning appear to clear first, so likely fine | confirm with an Element/FluffyChat own-device + peer verification smoke test; option: skip props whose value equals the stored signature
+++INFO | server/lib/nebu/matrix/key_signature_store.ex:294-318 | the shared-room check is not repeated under the advisory locks: a signer who leaves the room between upload_foreign's statement and the insert still stores the row (harmless: only shown to the signer while shared; covered by 11-risks residual (3)) | none
+++INFO | server/lib/nebu/matrix/canonical_json.ex:28-32 | encode_strict reuses Jason escaping: control characters other than \b\f\n\r\t are emitted as uppercase `\u001F`, Matrix canonical JSON uses lowercase hex; a signed object with such a char would not verify. No real key object carries one | optional: known-answer test vector / lowercase escape
+++INFO | server/lib/nebu/web/router/protected.ex:878 | /keys/query has no route-level tier (D8 says "keeps its existing tier"; there is none besides the global plug) while one request may run the vis EXISTS for 1000 ids | optional: own per-user tier like keys_changes; or record in 11-risks
+++INFO | server/lib/nebu/matrix/http_key_query.ex:30 | limits/0 hardcodes 60/20 separately from @keys_signatures_rate_limit in the router (drift risk) | derive from one constant
+++INFO | server/lib/nebu/matrix/key_signature_store.ex:68-86 | earlier entries commit in their own transactions, a later DB error answers 500 (partial apply then 500; idempotent, pre-existing I-3) | none
+++INFO | verified clean | query: one statement for every id (vis CTE, both-sides left_at IS NULL, device-id filter applied after the visibility join, empty/NUL-only request skip is request-only), failures always {}, USK owner-only, D4 per-viewer master sigs filtered to the current master key ids; upload: shape check before state, sharing+lookup in one statement with identical :forbidden, verification outside locks, strict unpadded base64 64/32 bytes, :crypto.verify rescued, encode_strict additive (existing encode!/sha256_hex callers unchanged); locks: sorted sync_global| advisories, no row lock in (c), put_keys D7 delete under the same advisory, erasure fence via deletion_status predicate + D9 target delete; rate tier before body work, cap before verification, ETS key = user id; logs carry error kinds only, body logging excluded for both routes; no Ecto schema; adapted suites only add TD.share preconditions / real Ed25519 signatures and the decided errcode changes (nothing weakened) | -
++diff --git a/_bmad-output/nebu/epics/e2ee-client-support/step-results/key-query-hardening/deferred-minor.md b/_bmad-output/nebu/epics/e2ee-client-support/step-results/key-query-hardening/deferred-minor.md
++new file mode 100644
++index 00000000..11c05556
++--- /dev/null
+++++ b/_bmad-output/nebu/epics/e2ee-client-support/step-results/key-query-hardening/deferred-minor.md
++@@ -0,0 +1,13 @@
+++# code-review — cycle 1
+++INFO | review-prescan.md | prescan: no MAJOR/MINOR lines, no HINT lines (36 files, migration 000061 contiguous after 000060, no clash on other local branches) | -
+++MINOR | server/test/nebu/matrix/key_query_hardening_test.exs:434,590 | D7/D10 negative halves unpinned: no test that a put_keys with an UNCHANGED master key keeps the cross-user rows (a `DELETE ... WHERE target_user_id = $1` without the `NOT (target_key_id = ANY(...))` guard passes every test) and no test that re-uploading an identical cross-user signature stamps nothing (D10 "only when changed", key_signature_store.ex:312) | add: partial replacement keeping the master (replace path / put_keys with same master) -> alice's signature still visible; sign twice -> DK.keys_pos(alice) unchanged after the 2nd upload
+++MINOR | server/lib/nebu/matrix/key_signature_store.ex:145-151 | D10 applied to (a) and (c) only: an own MASTER signature by an own device (b) goes through CrossSigningKeyStore.merge_signatures/put_keys_no_flag, which never calls DeviceListStore.stamp_keys!, so the signer's other devices (and peers) get no device_lists.changed for a stored signature; D10 says "a stored signature stamps the signer's own key row" | stamp the caller inside the merge transaction when the merged object changed (or record (b) as an explicit D10 exception in the story/08-concepts)
+++MINOR | server/lib/nebu/matrix/cross_signing_key_store.ex:204-210 | orphaned public reader: query_cross_signing/1 lost its only caller (the old /keys/query handler) and is an UNFILTERED cross-signing lookup without the D1 visibility predicate; its doc still says "Bulk lookup for /keys/query" — a future caller re-opens the directory leak | delete it (or mark @doc false with a "no visibility filter, never serve to a client" warning)
+++MINOR | docs/architecture/08-concepts.md:1547; server/lib/nebu/matrix/device_key_store.ex:7,239,249; server/lib/nebu/matrix/cross_signing_key_store.ex:8-9 | stale prose after the move: 08-concepts says `/keys/query` reads `query_devices/1` (now KeyQueryStore's own statement), device_key_store docs query_devices as the /keys/query reader, cross_signing_key_store moduledoc says signatures/upload merges every signature into the key object (cross-user ones now live in cross_signing_user_signatures) | reword to name KeyQueryStore / cross_signing_user_signatures; grep docs/ + lib/ for query_devices / query_cross_signing
+++INFO | server/lib/nebu/matrix/key_signature_store.ex:222 | stricter than Synapse: EVERY signature of the caller in the object must verify with the D5 key type; Synapse verifies only the expected key's signature and ignores the rest. A client that re-submits a device object still carrying the device's own `ed25519:<dev>` self-signature (or a master with its self-signature) gets M_INVALID_SIGNATURE. rust-sdk (signatures.clear()) and dart cloneForSigning appear to clear first, so likely fine | confirm with an Element/FluffyChat own-device + peer verification smoke test; option: skip props whose value equals the stored signature
+++INFO | server/lib/nebu/matrix/key_signature_store.ex:294-318 | the shared-room check is not repeated under the advisory locks: a signer who leaves the room between upload_foreign's statement and the insert still stores the row (harmless: only shown to the signer while shared; covered by 11-risks residual (3)) | none
+++INFO | server/lib/nebu/matrix/canonical_json.ex:28-32 | encode_strict reuses Jason escaping: control characters other than \b\f\n\r\t are emitted as uppercase `\u001F`, Matrix canonical JSON uses lowercase hex; a signed object with such a char would not verify. No real key object carries one | optional: known-answer test vector / lowercase escape
+++INFO | server/lib/nebu/web/router/protected.ex:878 | /keys/query has no route-level tier (D8 says "keeps its existing tier"; there is none besides the global plug) while one request may run the vis EXISTS for 1000 ids | optional: own per-user tier like keys_changes; or record in 11-risks
+++INFO | server/lib/nebu/matrix/http_key_query.ex:30 | limits/0 hardcodes 60/20 separately from @keys_signatures_rate_limit in the router (drift risk) | derive from one constant
+++INFO | server/lib/nebu/matrix/key_signature_store.ex:68-86 | earlier entries commit in their own transactions, a later DB error answers 500 (partial apply then 500; idempotent, pre-existing I-3) | none
+++INFO | verified clean | query: one statement for every id (vis CTE, both-sides left_at IS NULL, device-id filter applied after the visibility join, empty/NUL-only request skip is request-only), failures always {}, USK owner-only, D4 per-viewer master sigs filtered to the current master key ids; upload: shape check before state, sharing+lookup in one statement with identical :forbidden, verification outside locks, strict unpadded base64 64/32 bytes, :crypto.verify rescued, encode_strict additive (existing encode!/sha256_hex callers unchanged); locks: sorted sync_global| advisories, no row lock in (c), put_keys D7 delete under the same advisory, erasure fence via deletion_status predicate + D9 target delete; rate tier before body work, cap before verification, ETS key = user id; logs carry error kinds only, body logging excluded for both routes; no Ecto schema; adapted suites only add TD.share preconditions / real Ed25519 signatures and the decided errcode changes (nothing weakened) | -
++diff --git a/_bmad-output/nebu/epics/e2ee-client-support/step-results/key-query-hardening/reviewed-tree.txt b/_bmad-output/nebu/epics/e2ee-client-support/step-results/key-query-hardening/reviewed-tree.txt
++new file mode 100644
++index 00000000..729b4a63
++--- /dev/null
+++++ b/_bmad-output/nebu/epics/e2ee-client-support/step-results/key-query-hardening/reviewed-tree.txt
++@@ -0,0 +1 @@
+++6ff78ba479b6e24df99f58473e2e0423c64fe245
++diff --git a/docs/architecture/08-concepts.md b/docs/architecture/08-concepts.md
++index b6badf63..69a412c4 100644
++--- a/docs/architecture/08-concepts.md
+++++ b/docs/architecture/08-concepts.md
++@@ -1544,7 +1544,7 @@ may publish. Two tables back this split, both keyed on `(user_id, device_id)`:
++   `devices` row).
++ - **`GET /devices` / `GET /devices/{deviceId}` read from `devices`** (`list_devices/1`, `get_device/2`,
++   `sole_device_id/1`), so a keyless device is listed and manageable.
++-- **`POST /keys/query` reads the JOIN** (`query_devices/1` INNER-JOINs `devices` + `device_keys`), so it
+++- **`POST /keys/query` reads the JOIN** (`Nebu.Matrix.KeyQueryStore`'s own visibility-filtered statement INNER-JOINs `devices` + `device_keys`; `DeviceKeyStore.query_devices/1` is the same join without the visibility filter and not a client reader), so it
++   returns ONLY key-bearing devices — Matrix `/keys/query` semantics are unchanged. The JOIN can never
++   hide a current key-bearing device because every `device_keys` row is guaranteed a `devices` row (the
++   000010 backfill + the put-order invariant above).
++diff --git a/server/lib/nebu/matrix/cross_signing_key_store.ex b/server/lib/nebu/matrix/cross_signing_key_store.ex
++index 1611c8b8..dca0da41 100644
++--- a/server/lib/nebu/matrix/cross_signing_key_store.ex
+++++ b/server/lib/nebu/matrix/cross_signing_key_store.ex
++@@ -4,10 +4,14 @@ defmodule Nebu.Matrix.CrossSigningKeyStore do
++ 
++   Stores and serves a user's cross-signing keys — `master_key`,
++   `self_signing_key`, and `user_signing_key` — published via
++-  `POST /_matrix/client/v3/keys/device_signing/upload` and read back via
++-  `POST /_matrix/client/v3/keys/query`. Signatures added via
++-  `POST /_matrix/client/v3/keys/signatures/upload` are merged into the relevant
++-  stored key object's `signatures` map.
+++  `POST /_matrix/client/v3/keys/device_signing/upload`. `get_keys/1` is the owner's own
+++  read-back; `POST /_matrix/client/v3/keys/query` is served by `Nebu.Matrix.KeyQueryStore`
+++  (its own visibility-filtered statement, story key-query-hardening). Signatures of the
+++  user's OWN devices on the master key (`POST /_matrix/client/v3/keys/signatures/upload`,
+++  `Nebu.Matrix.KeySignatureStore`) are merged into the stored master key object's
+++  `signatures` map by `merge_signatures/4`; cross-USER signatures (signer != owner) are
+++  not part of the key object, they live in `cross_signing_user_signatures`
+++  (migration 000061).
++ 
++   Plain module, inline parameterised SQL via `Nebu.Repo` (ADR-018 — no Ecto
++   schema, no Repository/Service layer). PostgreSQL-backed rather than ETS so the
++@@ -200,44 +204,6 @@ defmodule Nebu.Matrix.CrossSigningKeyStore do
++     e -> {:error, e}
++   end
++ 
++-  @doc """
++-  Bulk lookup for `/keys/query`. Returns, for each requested user that has stored
++-  cross-signing keys, `%{"master" => obj, "self_signing" => obj, "user_signing" => obj}`
++-  (absent keys omitted). Users with nothing stored are omitted from the result.
++-  Read path that never raises (mirrors `DeviceKeyStore`).
++-  """
++-  @spec query_cross_signing([String.t()]) :: %{optional(String.t()) => map()}
++-  def query_cross_signing(user_ids) when is_list(user_ids) do
++-    case user_ids do
++-      [] ->
++-        %{}
++-
++-      _ ->
++-        case safe_query(
++-               """
++-               SELECT user_id, master_key_json, self_signing_key_json, user_signing_key_json
++-               FROM cross_signing_keys
++-               WHERE user_id = ANY($1)
++-               """,
++-               [user_ids]
++-             ) do
++-          {:ok, %{rows: rows}} ->
++-            Enum.reduce(rows, %{}, fn [uid, mk, ssk, usk], acc ->
++-              entry =
++-                %{}
++-                |> maybe_put("master", decode_key(mk))
++-                |> maybe_put("self_signing", decode_key(ssk))
++-                |> maybe_put("user_signing", decode_key(usk))
++-
++-              if map_size(entry) > 0, do: Map.put(acc, uid, entry), else: acc
++-            end)
++-
++-          _ ->
++-            %{}
++-        end
++-    end
++-  end
++-
++   @doc """
++   Merges signatures into the stored cross-signing key object whose key-id matches
++   `key_id`. `new_signatures` is the `signatures` map carried by the signed object.
++@@ -252,7 +218,8 @@ defmodule Nebu.Matrix.CrossSigningKeyStore do
++   Story cross-signing-upload-races (D4): ONE transaction. `lock_keys/1` (row lock -> advisory lock -> read), the key is
++   found by its id IN THAT READ, the object comparison is made against the LOCKED object, the signatures are
++   deep-merged and all three columns are written from the locked read. A concurrent cross-signing reset or a concurrent
++-  merge is therefore never overwritten with a stale merge base. A failed locked read or a failed write raises
+++  merge is therefore never overwritten with a stale merge base. When the merge changed the stored object, the user's own key row of the
+++  device-list stream is stamped in the same transaction (story key-query-hardening, D10). A failed locked read or a failed write raises
++   (`"cross-signing signature merge failed"`, the request answers 500), never "nothing stored".
++   """
++   @spec merge_signatures(String.t(), String.t(), map(), map()) :: :ok | :not_found
++@@ -266,7 +233,12 @@ defmodule Nebu.Matrix.CrossSigningKeyStore do
++           merged = deep_merge_signatures(obj, new_signatures)
++ 
++           case put_keys_no_flag(user_id, Map.put(stored, body_key, merged)) do
++-            :ok -> :ok
+++            :ok ->
+++              # story key-query-hardening (D10): a stored signature stamps the signer's (= the owner's) own key row of the device-list stream, only when the
+++              # stored object changed; after the row and advisory locks of lock_keys/1 (the order of put_keys/2: devices -> device_keys -> stream row)
+++              if merged != obj, do: Nebu.Matrix.DeviceListStore.stamp_keys!(Nebu.Repo, user_id)
+++              :ok
+++
++             :refused -> :not_found
++             {:error, reason} -> Nebu.Repo.rollback(reason)
++           end
++@@ -448,8 +420,6 @@ defmodule Nebu.Matrix.CrossSigningKeyStore do
++   defp decode_key(nil), do: nil
++   defp decode_key(json) when is_binary(json), do: Jason.decode!(json)
++ 
++-  defp maybe_put(map, _key, nil), do: map
++-  defp maybe_put(map, key, value), do: Map.put(map, key, value)
++ 
++   defp now_ms, do: System.system_time(:millisecond)
++ 
++diff --git a/server/lib/nebu/matrix/device_key_store.ex b/server/lib/nebu/matrix/device_key_store.ex
++index 8ba314c5..3a1b6a5d 100644
++--- a/server/lib/nebu/matrix/device_key_store.ex
+++++ b/server/lib/nebu/matrix/device_key_store.ex
++@@ -4,7 +4,8 @@ defmodule Nebu.Matrix.DeviceKeyStore do
++ 
++   Stores and serves per-device identity keys, one-time keys (OTKs), and fallback
++   keys published via `POST /_matrix/client/v3/keys/upload`, and read back via
++-  `POST /_matrix/client/v3/keys/query` / `GET /sync` / `GET /devices`.
+++  `GET /sync` / `GET /devices` (`POST /_matrix/client/v3/keys/query` is served by
+++  `Nebu.Matrix.KeyQueryStore`, story key-query-hardening: one visibility-filtered statement).
++ 
++   Plain module, inline parameterised SQL via `Nebu.Repo` (ADR-018 — no Ecto
++   schema, no Repository/Service layer). PostgreSQL-backed rather than ETS so the
++@@ -236,8 +237,10 @@ defmodule Nebu.Matrix.DeviceKeyStore do
++   @doc """
++   Returns the stored device-key objects for the given users:
++   `%{user_id => %{device_id => device_info}}`, where `device_info` is the uploaded
++-  `device_keys` object plus an `unsigned` property (spec §/keys/query). Users/devices
++-  with no published keys are simply omitted.
+++  `device_keys` object plus an `unsigned` property. Users/devices with no published keys are
+++  simply omitted. NOT the reader of `POST /keys/query` any more (that is `Nebu.Matrix.KeyQueryStore`,
+++  which filters by visibility): this lookup has no visibility filter and must never be served to a
+++  client as is.
++   """
++   #
++   # The INNER JOIN onto `devices` intentionally requires a matching `devices` row for every
++diff --git a/server/test/nebu/matrix/cross_signing_upload_races_test.exs b/server/test/nebu/matrix/cross_signing_upload_races_test.exs
++index f143963c..25bb5916 100644
++--- a/server/test/nebu/matrix/cross_signing_upload_races_test.exs
+++++ b/server/test/nebu/matrix/cross_signing_upload_races_test.exs
++@@ -575,7 +575,7 @@ defmodule Nebu.Matrix.CrossSigningUploadRacesTest do
++              "a lost update: got #{inspect(signatures)}"
++     end
++ 
++-    test "pin: a plain merge adds the signature, keeps the other keys, and moves neither cross_signing_changed nor changed_pos", ctx do
+++    test "pin: a plain merge adds the signature, keeps the other keys, and moves neither cross_signing_changed nor cross_signing_keys.changed_pos (it draws only the D10 stream position)", ctx do
++       w = oauth_world!(ctx)
++       T.sql!("UPDATE cross_signing_keys SET cross_signing_changed = FALSE WHERE user_id = $1", [w.uid])
++       [_, _, _, pos, false] = cs_row(w.uid)
++@@ -588,7 +588,7 @@ defmodule Nebu.Matrix.CrossSigningUploadRacesTest do
++       assert keys["master_key"]["signatures"] == sig_for(w.uid, w.old["master_key"], "P")
++       assert keys["self_signing_key"] == w.old["self_signing_key"] and keys["user_signing_key"] == w.old["user_signing_key"]
++       assert [_, _, _, ^pos, false] = cs_row(w.uid), "a merge does not touch cross_signing_changed / changed_pos"
++-      assert seq() == before, "a merge draws no position"
+++      assert seq() == before + 1, "the merge draws exactly one stream position: the D10 stamp of the signer's own key row"
++     end
++ 
++     test "pin: a submitted object that differs from the stored one writes nothing and reports the failure entry", ctx do
++diff --git a/server/test/nebu/matrix/key_query_hardening_test.exs b/server/test/nebu/matrix/key_query_hardening_test.exs
++index aaaab5c2..d3c1398e 100644
++--- a/server/test/nebu/matrix/key_query_hardening_test.exs
+++++ b/server/test/nebu/matrix/key_query_hardening_test.exs
++@@ -603,6 +603,62 @@ defmodule Nebu.Matrix.KeyQueryHardeningTest do
++     assert alice.uid in DK.dl_changed(DK.sync(other_device, token)), "the signer's other device sees the change in device_lists.changed"
++   end
++ 
+++  @tag ac: "oracle-own-master-signature-stamps-the-signer"
+++  test "oracle D10 (b): a stored signature on my own master key stamps my key row, an identical one does not" do
+++    alice = person!("KQA")
+++    second = extra_device!(alice)
+++    token = DK.token(alice)
+++    before = DK.keys_pos(alice.uid)
+++
+++    assert sigs!(alice, %{alice.uid => %{alice.msk.b64 => signed(alice.master, alice.uid, second.dev, second.dkp)}}) == %{}
+++
+++    stamped = DK.keys_pos(alice.uid)
+++    assert stamped > before, "the signer's key row is stamped"
+++    assert alice.uid in DK.dl_changed(DK.sync(alice, token)), "the signer's other device sees the change in device_lists.changed"
+++
+++    assert sigs!(alice, %{alice.uid => %{alice.msk.b64 => signed(alice.master, alice.uid, second.dev, second.dkp)}}) == %{}
+++    assert DK.keys_pos(alice.uid) == stamped, "an identical signature changes nothing and stamps nothing"
+++  end
+++
+++  @tag ac: "oracle-identical-cross-user-signature-stamps-nothing"
+++  test "oracle D10: uploading an identical cross-user signature again stamps nothing" do
+++    alice = person!("KQA")
+++    bob = person!("KQB")
+++    TD.share!(alice, bob)
+++
+++    assert sign_master!(alice, bob) == %{}
+++    stamped = DK.keys_pos(alice.uid)
+++    assert stamped > 0
+++
+++    assert sign_master!(alice, bob) == %{}, "the second upload is accepted"
+++    assert DK.keys_pos(alice.uid) == stamped, "the signer's key row is not stamped again"
+++    assert Map.has_key?(master_sigs(query!(alice, [bob.uid]), bob.uid), alice.uid), "the signature is still stored"
+++  end
+++
+++  @tag ac: "oracle-unchanged-master-keeps-the-cross-user-signatures"
+++  test "oracle D7: a put_keys with an UNCHANGED master key keeps the cross-user signatures" do
+++    alice = person!("KQA")
+++    bob = person!("KQB")
+++    TD.share!(alice, bob)
+++    assert sign_master!(alice, bob) == %{}
+++    assert Map.has_key?(master_sigs(query!(alice, [bob.uid]), bob.uid), alice.uid), "precondition: the signature is visible"
+++
+++    # the master key stays, the self-signing key is replaced
+++    new_ssk = keypair()
+++    new_ssk_obj = cs_obj(bob.uid, "self_signing", new_ssk)
+++
+++    :ok =
+++      Store.put_keys(bob.uid, %{
+++        "master_key" => signed(bob.master, bob.uid, bob.dev, bob.dkp),
+++        "self_signing_key" => signed(new_ssk_obj, bob.uid, bob.msk.b64, bob.msk),
+++        "user_signing_key" => signed(bob.usk_obj, bob.uid, bob.msk.b64, bob.msk)
+++      })
+++
+++    body = query!(alice, [bob.uid])
+++    assert get_in(body, ["self_signing_keys", bob.uid, "keys"]) == new_ssk_obj["keys"], "precondition: the replacement was stored"
+++    assert Map.has_key?(master_sigs(body, bob.uid), alice.uid), "the signature on the unchanged master key stays: #{inspect(master_sigs(body, bob.uid))}"
+++  end
+++
++   @tag ac: "oracle-no-bodies-in-logs"
++   test "oracle D11: the bodies of keys/query and keys/signatures/upload never reach a log line" do
++     alice = person!("KQA")
+diff --git a/_bmad-output/nebu/epics/e2ee-client-support/step-results/key-query-hardening/review-prescan.md b/_bmad-output/nebu/epics/e2ee-client-support/step-results/key-query-hardening/review-prescan.md
+index 1addda51..ff342f3a 100644
+--- a/_bmad-output/nebu/epics/e2ee-client-support/step-results/key-query-hardening/review-prescan.md
++++ b/_bmad-output/nebu/epics/e2ee-client-support/step-results/key-query-hardening/review-prescan.md
+@@ -1,2 +1,2 @@
+-# review-prescan — 1949 added lines, 36 changed files, last shipped migration 000060
++# review-prescan — 2077 added lines, 43 changed files, last shipped migration 000060
+ 
+diff --git a/_bmad-output/nebu/epics/e2ee-client-support/step-results/key-query-hardening/reviewed-tree.txt b/_bmad-output/nebu/epics/e2ee-client-support/step-results/key-query-hardening/reviewed-tree.txt
+index 729b4a63..06cad96f 100644
+--- a/_bmad-output/nebu/epics/e2ee-client-support/step-results/key-query-hardening/reviewed-tree.txt
++++ b/_bmad-output/nebu/epics/e2ee-client-support/step-results/key-query-hardening/reviewed-tree.txt
+@@ -1 +1 @@
+-6ff78ba479b6e24df99f58473e2e0423c64fe245
++0f53481ce120385edd2b55a62ed44136be79cfaa
+diff --git a/_bmad-output/nebu/epics/e2ee-client-support/step-results/key-query-hardening/sec-candidates.md b/_bmad-output/nebu/epics/e2ee-client-support/step-results/key-query-hardening/sec-candidates.md
+new file mode 100644
+index 00000000..8040950e
+--- /dev/null
++++ b/_bmad-output/nebu/epics/e2ee-client-support/step-results/key-query-hardening/sec-candidates.md
+@@ -0,0 +1,2 @@
++# sec-prescan — 2373 added lines, 44 files; path trigger: server/lib/nebu/compliance/user_deletion.ex
++LOW | server/priv/migrations/000061_cross_signing_user_signatures.up.sql:23 | sensitive-migration: secret-like column — stored encrypted/hashed? erasure/retention covered? |
+diff --git a/_bmad-output/nebu/epics/e2ee-client-support/step-results/key-query-hardening/security-fix-findings.md b/_bmad-output/nebu/epics/e2ee-client-support/step-results/key-query-hardening/security-fix-findings.md
+new file mode 100644
+index 00000000..3ddd0309
+--- /dev/null
++++ b/_bmad-output/nebu/epics/e2ee-client-support/step-results/key-query-hardening/security-fix-findings.md
+@@ -0,0 +1,14 @@
++# Fix brief — Kassandra findings of key-query-hardening (cycle 3, user decided: fix the small things)
++
++Report: `docs/stories/e2ee-client-support/security-reports/key-query-hardening-security-review-2026-11-03.md` (read all three LOW details first). Scope: ONLY the three items. Verdict was CLEAN; these are hardening.
++
++## L1 — cross-user signature rows are bound to the master key ID, not to the key (D7 hole)
++If a user replaces its master key with one that keeps the same key id but another public key (nothing enforces id == public key), `put_keys/2` keeps the old cross-user rows (the D7 `DELETE ... NOT (target_key_id = ANY(...))` guard compares ids only) and `/keys/query` still shows the stale signature. Fix: bind the row to the key itself, with the smallest change that closes it — e.g. also store the target key's public key value (`target_key` text, in migration **000061 edited in place: it is untracked/unshipped, check `git status`/`git ls-files` to be sure; if it is tracked, add 000062 instead**) and make BOTH the D7 drop in `put_keys/2` and the visibility join of `KeyQueryStore` compare the key value, not only the id; or drop all of a target's rows whenever its master `keys` map changed at all. Test: replace the master key keeping the SAME id with a different public key: the signature is gone from the query and the row is deleted; an unchanged re-upload (same id AND key) keeps it (the existing D7 negative-half test must stay green). GDPR erasure and RLS of the table stay as they are.
++
++## L2 — up to 4000 Ed25519 verifications per request
++Only the signature made BY THE CALLER can ever be stored or matter; verifying other users' signatures in an uploaded object is wasted work. Verify only `signatures[caller]` entries, cap them at 4 key entries per object (`400`-free: an object with more than 4 caller signatures fails per entry with `M_INVALID_PARAM`, before any verification), and ignore (neither verify nor reject, but do not store) signatures of other users as the spec allows; keep the 200-object cap. Worst case per request becomes 800 verifications; document the number. Test: object with 5 caller signatures -> M_INVALID_PARAM and no verification work is needed for it (assert the answer, not the work); an object carrying a foreign user's garbage signature next to a valid caller signature still verifies and stores; existing tests that rely on the old cap of 20 (grep `20 signatures`, docs and tests) are adapted, not weakened.
++
++## L3 — peers now take the target's `sync_global|` advisory lock
++Docs only: one risk row/sentence in `docs/architecture/11-risks.md` (what, impact: short holds, contention not DoS, no deadlock cycle found because the two locks are taken in sorted order; mitigation/monitoring) and the matching sentence where the lock order is documented (08-concepts).
++
++Do not touch anything else. Keep the lock order devices -> device_keys -> stream row and the sorted `sync_global|` order. Your sandbox cannot run mix/Docker: say so, the orchestrator verifies with quick.sh (migration changed -> it resets the database).
+diff --git a/docs/architecture/07-deployment.md b/docs/architecture/07-deployment.md
+index 1af7c550..4d173806 100644
+--- a/docs/architecture/07-deployment.md
++++ b/docs/architecture/07-deployment.md
+@@ -2088,4 +2088,4 @@ _Source: Story 13-11 staged changes - `.gitlab-ci.yml`, `Makefile`, `deploy/helm
+ 
+ ### Key query hardening operations (story key-query-hardening, epic e2ee-client-support; migration 000061)
+ 
+-`POST /_matrix/client/v3/keys/query` and `POST /_matrix/client/v3/keys/signatures/upload` use the new table `cross_signing_user_signatures` and the existing key tables. Nothing to configure: the migration creates the table (RLS enabled and forced, one policy per command, the runtime role gets its grants there); only a new table, rolling-deploy safe (an old node answers `keys/query` without the restriction and ignores the table until it is replaced; run the deploy to completion). Operator facts: (1) limits: at most 200 signed objects per upload request (`400 M_INVALID_PARAM`), at most 1000 queried users per `keys/query` (`400 M_INVALID_PARAM`), at most 20 signatures on one object, the body-size cap of the raw body reader applies; tier `keys_signatures`: 60 per minute, burst 20 per user, node-local (they live in the memory of each node): with N nodes the effective limit is up to N x the documented limit, the bucket is keyed by the authenticated user id (never by a term of the request body); (2) `keys/query` serves the caller and the users who share a room with the caller in which BOTH are joined; every other user (also an invited one) is left out, so right after the deploy a client that queries a user it only shares an invitation with finds no keys until it has joined; (3) the table keeps one row per (signer, target user, target master key id), replaced idempotently, bounded by signers x the users they share a room with; the rows of a replaced master key are deleted with the key write; there is nothing to prune; a down / up cycle (`000061` down drops the table) discards the cross-user signatures, users have to verify each other again; (4) the GDPR erasure deletes both directions (`user_id` is the signer, `target_user_id` the user whose master key was signed) and the sweep above deletes them for users erased before the deploy (`DELETE FROM cross_signing_user_signatures WHERE user_id IN (...)` and `... WHERE target_user_id IN (...)`); (5) logging: the request logger captures no body of `keys/query` and `keys/signatures/upload`, and no key id, object or signature appears in an error text or a log line (a failing statement logs its kind only); (6) a stored signature moves the device-list stream position of the signer once (the signer's other devices re-query); monitoring: a rising rate of `M_INVALID_SIGNATURE` failures in the answers of `keys/signatures/upload` means a client signs with a key the server does not know (the user-signing key was not uploaded) and is not an error of the server.
++`POST /_matrix/client/v3/keys/query` and `POST /_matrix/client/v3/keys/signatures/upload` use the new table `cross_signing_user_signatures` and the existing key tables. Nothing to configure: the migration creates the table (RLS enabled and forced, one policy per command, the runtime role gets its grants there); only a new table, rolling-deploy safe (an old node answers `keys/query` without the restriction and ignores the table until it is replaced; run the deploy to completion). Operator facts: (1) limits: at most 200 signed objects per upload request (`400 M_INVALID_PARAM`), at most 1000 queried users per `keys/query` (`400 M_INVALID_PARAM`), at most 4 signatures by the caller on one object (signatures of other users are ignored, never verified), so at most 800 Ed25519 verifications per request, the body-size cap of the raw body reader applies; tier `keys_signatures`: 60 per minute, burst 20 per user, node-local (they live in the memory of each node): with N nodes the effective limit is up to N x the documented limit, the bucket is keyed by the authenticated user id (never by a term of the request body); (2) `keys/query` serves the caller and the users who share a room with the caller in which BOTH are joined; every other user (also an invited one) is left out, so right after the deploy a client that queries a user it only shares an invitation with finds no keys until it has joined; (3) the table keeps one row per (signer, target user, target master key id), replaced idempotently, bounded by signers x the users they share a room with; the rows of a replaced master key are deleted with the key write; there is nothing to prune; a down / up cycle (`000061` down drops the table) discards the cross-user signatures, users have to verify each other again; (4) the GDPR erasure deletes both directions (`user_id` is the signer, `target_user_id` the user whose master key was signed) and the sweep above deletes them for users erased before the deploy (`DELETE FROM cross_signing_user_signatures WHERE user_id IN (...)` and `... WHERE target_user_id IN (...)`); (5) logging: the request logger captures no body of `keys/query` and `keys/signatures/upload`, and no key id, object or signature appears in an error text or a log line (a failing statement logs its kind only); (6) a stored signature moves the device-list stream position of the signer once (the signer's other devices re-query); monitoring: a rising rate of `M_INVALID_SIGNATURE` failures in the answers of `keys/signatures/upload` means a client signs with a key the server does not know (the user-signing key was not uploaded) and is not an error of the server.
+diff --git a/docs/architecture/08-concepts.md b/docs/architecture/08-concepts.md
+index 69a412c4..6f4b476b 100644
+--- a/docs/architecture/08-concepts.md
++++ b/docs/architecture/08-concepts.md
+@@ -1459,11 +1459,11 @@ applies when the event grows, so a tag can still be deleted after an operator lo
+ 
+ *Who may sign what (D5).* Per entry of `keys/signatures/upload`: (a) the caller's own device key signed by the caller's self-signing key (merged into the stored device key object), (b) the caller's own master key signed by one of the caller's devices (merged into the stored master key object), (c) the master key of ANOTHER user (the object sits under the other user's id) signed by the caller's user-signing key, only when both are joined in a shared room. Everything else is `M_FORBIDDEN` for that entry: a foreign device, a foreign self-signing or user-signing key, the caller's own self-signing or user-signing key through this endpoint, a foreign master key without a shared joined room. The sharing check and the lookup of the target are ONE statement and run before anything of the target is examined, so an unknown user, a user who shares no room and a shared user whose key is not the named master key get the identical failure (no existence oracle).
+ 
+-*Verification (D6).* Every signature is verified with Ed25519 (`:crypto.verify(:eddsa, ...)`): the message is the canonical JSON (`Nebu.Matrix.CanonicalJson.encode_strict/1`: UTF-8, keys sorted by code point, no whitespace, integers only in [-(2^53)+1, 2^53-1], no floats) of the submitted object WITHOUT `signatures` AND WITHOUT `unsigned`; the signature is the unpadded base64 of 64 bytes; the verifying key (32 bytes, unpadded base64) is the one the caller stored under the key id named by the signature (`signatures[caller]["ed25519:<id>"]`): the self-signing key for (a), the ed25519 key of one of the caller's devices for (b), the user-signing key for (c). A valid signature by another key of the caller is not enough. The submitted object must also equal the stored key object apart from `signatures` and `unsigned`. A bad signature, an unknown signing key id or a changed object is `M_INVALID_SIGNATURE`; a non-object entry, a malformed `signatures` member (not a map of maps), no signature by the caller or more than 20 signatures on one object is `M_INVALID_PARAM`; a body that is not a JSON object is `400 M_NOT_JSON` / `M_BAD_JSON`. Failures are always inside HTTP 200 `{"failures": {user: {key_id: {errcode, error}}}}` with fixed texts (nothing of the request is echoed); valid entries of the same request still apply (partial success), nothing is stored for a failed entry. Only the signatures of the caller are ever stored. The verification runs before any lock is taken; the write re-reads the target under its lock and compares the object again, so a concurrent key replacement is never overwritten.
++*Verification (D6).* Every signature is verified with Ed25519 (`:crypto.verify(:eddsa, ...)`): the message is the canonical JSON (`Nebu.Matrix.CanonicalJson.encode_strict/1`: UTF-8, keys sorted by code point, no whitespace, integers only in [-(2^53)+1, 2^53-1], no floats) of the submitted object WITHOUT `signatures` AND WITHOUT `unsigned`; the signature is the unpadded base64 of 64 bytes; the verifying key (32 bytes, unpadded base64) is the one the caller stored under the key id named by the signature (`signatures[caller]["ed25519:<id>"]`): the self-signing key for (a), the ed25519 key of one of the caller's devices for (b), the user-signing key for (c). A valid signature by another key of the caller is not enough. The submitted object must also equal the stored key object apart from `signatures` and `unsigned`. A bad signature, an unknown signing key id or a changed object is `M_INVALID_SIGNATURE`; a non-object entry, a malformed `signatures` member (not a map of maps), no signature by the caller or more than 4 signatures by the caller on one object is `M_INVALID_PARAM`; a body that is not a JSON object is `400 M_NOT_JSON` / `M_BAD_JSON`. Failures are always inside HTTP 200 `{"failures": {user: {key_id: {errcode, error}}}}` with fixed texts (nothing of the request is echoed); valid entries of the same request still apply (partial success), nothing is stored for a failed entry. Only the signatures of the caller are ever stored. The verification runs before any lock is taken; the write re-reads the target under its lock and compares the object again, so a concurrent key replacement is never overwritten.
+ 
+ *Limits (D8).* At most 200 signed objects per upload request (`400 M_INVALID_PARAM` before any verification or database work; the body-size cap of the raw body reader applies), a per-user rate tier `keys_signatures` (60 per minute, burst 20, node-local like every tier) in front of the handler (keyed by the authenticated user id, never by a term of the request body), at most 1000 queried users per `keys/query`.
+ 
+-*Locks.* Order of the device-key directory (`devices` -> `device_keys` -> stream row) and of the cross-signing writers. (a) takes the `device_keys` row `FOR UPDATE`, then the stream stamp; (b) is `CrossSigningKeyStore.merge_signatures/4` (row, advisory lock, read); (c) takes the per-user advisory locks `sync_global|<user>` of the signer and of the target (sorted by user id, so two users who sign each other cannot cycle) and writes the row: they are the fence of the erasure (it holds the advisory lock of the erased user until it commits, so an insert either lands before its DELETE or waits and finds `deletion_status` set and stores nothing) and they serialise the insert with a master key replacement of the target, which holds the same lock.
++*Locks.* Order of the device-key directory (`devices` -> `device_keys` -> stream row) and of the cross-signing writers. (a) takes the `device_keys` row `FOR UPDATE`, then the stream stamp; (b) is `CrossSigningKeyStore.merge_signatures/4` (row, advisory lock, read); (c) takes the per-user advisory locks `sync_global|<user>` of the signer and of the target (sorted by user id, so two users who sign each other cannot cycle) and writes the row: they are the fence of the erasure (it holds the advisory lock of the erased user until it commits, so an insert either lands before its DELETE or waits and finds `deletion_status` set and stores nothing) and they serialise the insert with a master key replacement of the target, which holds the same lock. Consequence (Kassandra review, L3): a signer who signs the master key of a peer takes the PEER'S `sync_global|<user>` advisory lock too (not only its own), so a peer's key write or erasure can wait for a signer's short transaction and vice versa; the two locks are always taken in sorted order (the same order in every writer), so no deadlock cycle exists. Binding of the row (L1): a stored cross-user signature carries the public key value of the signed key next to its id, and both the drop in `put_keys/2` and the visibility join compare the pair (id AND key), not the id alone.
+ 
+ *Device-list stream (D10).* A stored cross-user signature stamps the SIGNER's own key row in `device_list_changes` (the signer's other devices see the change in `device_lists.changed` and re-query), not the target (the signature is invisible to everybody else); an identical signature stored again changes nothing and stamps nothing.
+ 
+diff --git a/docs/architecture/11-risks.md b/docs/architecture/11-risks.md
+index 287e17c1..10ec50fc 100644
+--- a/docs/architecture/11-risks.md
++++ b/docs/architecture/11-risks.md
+@@ -30,7 +30,7 @@
+ | Admin-logs source-classification: 1 MEDIUM accepted non-blocking after a fix attempt was reverted for an architecture conflict | Accepted risk | Story `admin-logs-monitoring-view`, Kassandra review |
+ | To-device messaging (`/sendToDevice`, Kassandra review of story `to-device-messaging`), accepted residuals: (1) a full queue evicts its OLDEST messages silently (the sender is never told, no 429), so a flooded device can lose old verification messages; bounded by the per-device, per-user and per-sender budgets, the loss is the intended price of not letting one sender block others; (2) the rate limit buckets are node-local: N x the documented limit in a cluster; (3) the recipient restriction (a shared JOINED room or an own device) is a client compatibility cost: a user you share no joined room with cannot be reached by to-device messages (Element and FluffyChat verify in the room); (3a) only MANY senders, each below its share, can still evict a victim's older messages once the shares add up beyond the queue (fair device- and user-level eviction, per-sender shares 100 messages / 1 MiB per device and 200 / 4 MiB per user, 4000 / 16 MiB over all recipients): a single flooder or two colluding co-members cannot; the worst-case database footprint is bounded per sender (16 MiB) and per recipient (32 MiB), so (users sharing a room) x 32 MiB in total, documented in 07-deployment; (4) the `*` fan-out is truncated silently at 100 targets and 1 MiB of rows per request (the targets beyond are dropped like an unreachable one); (4a) one request can wake (and make rebuild its sync) up to 100 long polls of a victim's devices (bounded by the fan-out cap, the budgets and the rate limit; only users who share a joined room can do it); (4b) the node-wide send slots (6) can be held by colluding accounts (4 per user): a recipient-independent starvation of sends on that node, accepted, retried with 429 (the 2 s statement timeout is per statement: a send runs about a dozen statements in two transactions (the rows, then the soft eviction), so a slot is held for the whole run, at worst a multiple of 2 s, and a node has 6); the byte-cost bucket is node-local like the rate limit (N x in a cluster); (5) RLS on both tables is `USING (true)` (accepted, as the sibling tables: isolation rests on the `user_id` predicates); (6) E2EE rooms stay disabled (ADR-011), the queue is transport only; (7) no browser / Element end-to-end test in the story (the verification flow needs Dex, Element Web and two devices; the API level is covered through the full router with real sessions and rooms): a MANUAL Element Web <-> FluffyChat self-verification (SAS) check and a `/sync` long-poll latency check with a real client are a release checkbox; (8) the acknowledgement is a position in the token, not a list of ids: a response's position never covers a row it did not carry (it is the highest stamp of the rows it carried, else the `since` position; a sync that lost the stamp race with an overlapping sync of the same `since` carries only what is stamped), but two syncs of the SAME device in flight at once (a client does not do that) can still let a LATER position cover a message that only the other, lost response carried (see 08-concepts); (9) follow-ups, not part of this story: a sync decodes up to 1 MiB of stored JSON and encodes it again (inserting the stored canonical JSON with `Jason.Fragment` is the follow-up; the only writer is the send), and the per-queue counts and bytes of the eviction are re-aggregated per send (a running counter per queue would remove that cost); (10) accepted notes: the TTL purge walks `ctid` batches, the purge job shares the `oauth_cleanup` Oban queue, and the token position is a compare-and-set free read (no CAS on the token); the delivery and stamp sequences (`to_device_delivery_seq`, the `stream_pos` identity) restart low after a down+up of migration 000059 or a restore from an old backup (operator note in 07-deployment: set them above the table maxima first); (11) a send (a `*` or an explicit device entry) that meets a concurrent delete of one of the target devices waits for that delete at most the 100 ms `lock_timeout` (the send takes `FOR KEY SHARE` on the device rows, the delete locks the row first) and is then answered 429, the client retries with the same txn id (nothing is stored, the id is not burnt); the same wait also hits a send to a device whose OAuth token rotates at that moment (up to 100 ms, then 429): a weak "device active now" timing signal, only for joined co-members; (12) CLOSED in cycle 4 (was the reverse direction of the device-delete race): a send takes `FOR KEY SHARE` on the target `devices` rows only around the INSERT (from the target lookup to the commit of its first transaction; no eviction runs inside that window), so overlapping sends can no longer starve the victim's OAuth token rotation, `/oauth2/revoke`, `DELETE /devices` and the admin revoke past their 300 ms `lock_timeout`; the soft eviction runs in a second, separate transaction after the commit without any lock on `devices`; residual: the caps are momentarily soft (a queue can exceed its caps until the sender's own second transaction has finished, concurrent senders add up) and a failed or timed-out eviction leaves the excess until an eviction succeeds (the next send to that queue) or the 7-day purge (the second transaction is all-or-nothing: one failing statement rolls back the other six; the send itself is answered 200 and its transaction id is recorded); (12a) the `FOR KEY SHARE` window is now two indexed lookups, the INSERT and the commit: starving a victim's 300 ms bounded `FOR UPDATE` needs an unbroken chain of overlapping windows on the victim's row (about 30+ sends per 300 ms), i.e. dozens of colluding co-members at 6 slots per node under the 60 per minute (burst 30) per-user tier, not reachable by one account (optional hardening: `FOR KEY SHARE SKIP LOCKED`); (12b) a failed phase 2 leaves the excess until the next successful eviction or the purge (possible later hardening: the purge worker also runs the sender-total and user caps); (13) the per-sender total (4000 messages / 16 MiB) is a SOFT cap: it is "16 MiB + the in-flight fan-out" (concurrent sends, 4 per user and N nodes, up to 1 MiB each, and rows another transaction holds and `SKIP LOCKED` skips can leave the sender above the cap until its next send; about 4N MiB + the locked rows), no cross-user effect; (14) follow-up: a hot 200 loop after a failed or empty-while-pending delivery (while a row is pending the long poll has timeout 0 and the answer is an empty `to_device` at once, so a client re-syncs without backoff; bounded by the sync rate tier and the 2 s statement timeout, no data loss, no oracle): a node-local per-device cooldown of 1-2 s, or let the long poll wait min(timeout, 2 s); (15) `DeviceKeyStore.delete_device/2` is all-or-nothing and silent (the caller sees `:ok` even when the transaction failed; its only caller is the own device after UIA, the TTL job cleans a leftover queue): accepted. | Low | Accepted |
+ | Device-key directory (`/keys/claim`, `/keys/changes`, `device_lists`, story `device-key-directory`), accepted residuals: (1) the rate buckets are node-local (N x the limit in a cluster); the per-target buckets are keyed by a SHA-256 digest of the caller-chosen user and device ids (fixed size, never a sub-binary of the request body: Kassandra finding F1 of 2026-11-02, an ETS key that referenced the body pinned up to 1000 request bodies) and are created only after the caller buckets paid (a request refused there creates no row), so the rows one account can create are bounded by its targets budget (600 targets per minute, burst 1000; a refusal in the second stage keeps the first stage tokens spent, which never depends on the state of a target) and by the one hour idle sweep; `GET /keys/changes` has a per-user tier `keys_changes` (60 per minute, burst 20); (2) the claim restriction (own devices and users sharing a joined room) is stricter than the spec and Element's DM pre-check, which queries users without a shared room, then creates the DM unencrypted (harmless, ADR-011); a shared-room attacker can drain at most 5 + 10 per hour keys of one device; (3) `left` can over-report a user who shared a room with the caller only at another time (never under-reports a real loss in `/sync`, whose end token is the current position; a `/keys/changes` window with an old `to` that ends between that user's leave and the caller's own later leave reports the user one window later) and the departure of an ERASED user is not reported; (4) positions are drawn at commit under one global advisory lock, so key and membership writes wait for each other's commit for an instant (never while a client thinks) and a long running commit would delay the others; (5) a change that arrives during a parked long poll is delivered with the next response (no wake-up); (6) `POST /keys/query` restriction, cross-user signatures and signature verification: DONE in the follow-up story `key-query-hardening` (REQ-2026-014, see the row below); `user_signing_keys` for the owner only (decision D1 of the story) is DONE in this story and pinned by `device_key_directory_d1_optional_test.exs`; (7) a fallback key stored before migration 000060 has no key id and is claimed as `<algorithm>:fallback` until the client rotates it; (8) the request logger captures no body of `keys/claim` and `keys/upload` (and, since `key-query-hardening`, none of `keys/query` and `keys/signatures/upload`); (9) claimed one-time-key rows are KEPT (`claimed_at` set, `key_json` kept: store-once, so a consumed key id can never be handed out again), so `device_one_time_keys` grows with every claim until the device is deleted (a prune of claimed rows past an age that keeps `key_id` as a tombstone is a possible follow-up); (10) the GDPR erasure does not touch `room_members`: a later membership change of an erased user (kick, leave) re-creates `device_list_changes` rows for the erased user id, which the sweep of 07-deployment removes again (run it periodically); (11) rolling deploy: identity-key and cross-signing uploads served by OLD nodes are not stamped into the stream (only the `room_members` trigger is node independent), so peers learn of such a change only with the next stamped change of that user; (12) the first sync after the deploy with a token that has no `.d` group lists every shared user (with auto-join rooms that is every user) for every device, answered at once: an N x N `/keys/query` burst from the clients, which is the price of the conservative answer; (13) the device-list position of a sync token moves up to the highest visible position read before the two stream reads (decision D11), so a quiet device does not rescan old rows; the cost of an incremental sync still grows with the stream rows above the token, not with their number overall. | Accepted risk | Story `device-key-directory`, oracle context and `## Decisions` D1-D20 |
+-| Key query hardening (`/keys/query`, `/keys/signatures/upload`, story `key-query-hardening`, REQ-2026-014), accepted residuals: (1) the restriction (the caller and users who share a room in which both are joined) is stricter than the spec; Element's DM pre-check queries invitees, finds no keys and creates the DM unencrypted (harmless while rooms stay unencrypted, ADR-011); allowing a pending invitation is an owner option; (2) the tier `keys_signatures` (60 per minute, burst 20 per user) is node-local (N x the limit in a cluster) and keyed by the authenticated user id only; the other bounds are per request (200 signed objects, 20 signatures per object, 1000 queried users) and the body-size cap, so one request costs at most a few thousand Ed25519 verifications and about three statements per entry; (3) the rows of `cross_signing_user_signatures` are bounded by signers x the users they share a room with, but a signer who later leaves the shared rooms keeps its rows until the target replaces its master key or one of the two is erased (the rows are only ever shown to the signer, and only for a target the signer still shares a room with, because `keys/query` leaves other users out); (4) a signature is verified before the write locks are taken and the target is re-read and compared under the lock, but the signing key is not re-read: a self-signing / user-signing key replaced in that window can leave one signature by the previous key, which clients ignore (they verify against the current key); (5) R11 of the oracle (a server MUST NOT allow a device id equal to a cross-signing public key) is not enforced: the lookup of a key id tries the own device first. | Accepted risk | Story `key-query-hardening`, oracle context and `## Decisions` D1-D11 |
++| Key query hardening (`/keys/query`, `/keys/signatures/upload`, story `key-query-hardening`, REQ-2026-014), accepted residuals: (1) the restriction (the caller and users who share a room in which both are joined) is stricter than the spec; Element's DM pre-check queries invitees, finds no keys and creates the DM unencrypted (harmless while rooms stay unencrypted, ADR-011); allowing a pending invitation is an owner option; (2) the tier `keys_signatures` (60 per minute, burst 20 per user) is node-local (N x the limit in a cluster) and keyed by the authenticated user id only; the other bounds are per request (200 signed objects, 4 signatures by the caller per object, 1000 queried users) and the body-size cap, so one request costs at most 800 Ed25519 verifications (200 objects x 4; only the caller's own signatures are ever verified) and about three statements per entry; (3) the rows of `cross_signing_user_signatures` are bounded by signers x the users they share a room with, but a signer who later leaves the shared rooms keeps its rows until the target replaces its master key or one of the two is erased (the rows are only ever shown to the signer, and only for a target the signer still shares a room with, because `keys/query` leaves other users out); (4) a signature is verified before the write locks are taken and the target is re-read and compared under the lock, but the signing key is not re-read: a self-signing / user-signing key replaced in that window can leave one signature by the previous key, which clients ignore (they verify against the current key); (5) R11 of the oracle (a server MUST NOT allow a device id equal to a cross-signing public key) is not enforced: the lookup of a key id tries the own device first; (6) a cross-user signature upload takes the target's `sync_global|<user>` advisory lock as well as the signer's (Kassandra L3): a peer's key write or erasure can wait for the signer's short transaction (two row writes), contention not denial of service (the holds are short, the upload is rate limited, 200 objects and 4 signatures per object); no deadlock cycle was found because every writer takes the two locks in sorted order (`first <= second`) and the order devices -> device_keys -> stream row is unchanged; mitigation / monitoring: the 2 s statement timeout and the lock wait metrics of PostgreSQL (`pg_locks` advisory waits), a rising count of statement timeouts on `keys/signatures/upload` is the signal. | Accepted risk | Story `key-query-hardening`, oracle context and `## Decisions` D1-D11 |
+ | Device-key directory, cluster-wide advisory lock (4760, 60), Kassandra finding F4 (LOW, 2026-11-02): ONE advisory lock serialises every membership and key write from the stamp trigger to COMMIT (positions of `device_list_changes` are drawn at commit), and every `/sync` without a `.d` group and every initial sync takes it as well. Impact: contention (writes and syncs wait for each other's commit), not a denial of service, because sync is rate limited and the lock is held only while the commit finishes. Mitigation: the rate limits, monitoring of lock waits (`pg_locks` with `locktype = 'advisory'`, commit latency); option if it ever hurts: `pg_try_advisory_xact_lock` with a bounded retry instead of a blocking wait. | Accepted risk | Story `device-key-directory`, security review `device-key-directory-security-review-2026-11-02` |
+ | Server-side key backup (`/room_keys/**`, Kassandra review of story `server-side-key-backup`): resource exhaustion (CWE-400/770). Resolved by design: the request body is read only after the authentication (no pre-auth parse; an anonymous or junk-bearer request is 401 without its body being read) and after the write rate limit; a per-user aggregate byte budget of 64 MiB over all live versions (every row costs its room and session id bytes + 128 bytes besides `session_data`; net of replacements, decided under the advisory lock); the bulk reads (`GET /keys`, `GET /keys/{room}`) have their own rate-limit bucket (30 per minute, burst 3), at most ONE in flight per user and TWO per node (`:room_keys_max_concurrent_bulk_reads_per_node`, a monitor based slot, 429 before any database work), and are spliced from the stored JSON text; `GET /version` has a light bucket (120 per minute, burst 30); every writer takes the per-user lock with a try-lock (a busy lock is a 429 at once, `lock_timeout` stays as the safety net of row locks) so lock waiters cannot exhaust the shared pool of 10 connections; the total version rows per user are capped at 1000 (an operator prunes old markers with the SQL of the GDPR runbook). Honest peak memory: one bulk read peaked at about 300-350 MiB for a version at the former 256 MiB budget (the spliced iodata copy, the rows, and +0.75x with gzip); at the 64 MiB budget it is about 64 MiB x 2.5, and at most two run per node; streaming the response is the recorded follow-up. Accepted: the soft-delete markers are never pruned automatically (needed for never-reused numbers and the idempotent DELETE), their growth is bounded by the row cap; the rate-limit buckets and the slots are node-local (a cluster of N nodes allows N x the limit); the RLS policies are `USING (true)` like the sibling tables (accepted: isolation rests on the `user_id` predicate of every statement); the byte check is O(scan) of the user's rows on every write (follow-up: an O(1) counter column) | Resolved / accepted (markers, node-local buckets, RLS pattern, O(scan) per write) | Story `server-side-key-backup`, `docs/stories/e2ee-client-support/security-reports/server-side-key-backup-security-review-2026-10-30.md` |
+ | Server-side key backup, accepted residuals of the cycle-2 review (`server-side-key-backup-security-review-2026-10-30-cycle2.md`, code review cycle 2): (1) WRITE-side peak: the per-user lock is taken after the body is parsed, so a 5 MiB body costs about 25 MiB of decoded heap and the burst of 5 writes about 125 MiB per account, with NO node-wide cap on the parses; about 3 colluding accounts can strain a 1Gi node and about 8-10 a 2g node (follow-ups: a node-wide gate for the `room_keys` body parsing in the style of `RoomKeysReadGate`, or a body cap of 1-2 MiB). (2) The two node slots of the bulk reads cover the database read, the gzip and the send: two accounts with full budgets or slow readers can hold both until Bandit's send timeout (about 30 s; ingress-nginx defaults to `proxy-buffering: off`, so the drip reaches Bandit), and other users' restores on that node answer 429 meanwhile: with open registration a cross-user availability coupling on a recovery path (cap 2), no data impact (follow-ups: byte-weighted admission, streaming the read, `proxy-buffering on` for the Kubernetes ingress). (3) The try-lock shares the `sync_global` key with the blocking `AccountDataStore.put/3` and `CrossSigningKeyStore.put_keys/2`: a concurrent Element setup can get a `429` on a `PUT /room_keys/*` with the fixed `retry_after_ms` of 1000; clients retry. (4) The fixed 128 bytes per row of the byte budget do not model the real row overhead (about 0.3-0.5 KiB per row, nor gzip): the "64 MiB x 2.5" peak above is an order of magnitude, not a bound | Accepted risk | Story `server-side-key-backup`, security review cycle 2 (APPROVED, 2 accepted MEDIUM) |
+diff --git a/docs/stories/e2ee-client-support/security-reports/key-query-hardening-security-review-2026-11-03.md b/docs/stories/e2ee-client-support/security-reports/key-query-hardening-security-review-2026-11-03.md
+new file mode 100644
+index 00000000..03085dd9
+--- /dev/null
++++ b/docs/stories/e2ee-client-support/security-reports/key-query-hardening-security-review-2026-11-03.md
+@@ -0,0 +1,48 @@
++## Security Review — key-query-hardening (epic e2ee-client-support)
++
++**Diff scope:** staged diff. New `Nebu.Matrix.HttpKeyQuery`, `KeyQueryStore` (visibility-filtered `/keys/query`, one statement), `KeySignatureStore` (Ed25519-verified `/keys/signatures/upload`, cases a/b/c), `CanonicalJson.encode_strict/1`, `CrossSigningKeyStore` (D7 delete on master replacement, D10 stamp, removal of the unfiltered `query_cross_signing/1`), migration 000061 `cross_signing_user_signatures` (GRANT + FORCE RLS), router (`keys_signatures` tier 60/min burst 20 charged before work), `RawBodyReader.key_material_shape?/1` (query + signatures/upload excluded from body capture), `UserDeletion` (both directions erased).
++**Date:** 2026-11-03
++
++### Prescan candidates
++
++| Candidate | Decision |
++|---|---|
++| 000061 up.sql:23 `signature` column "secret-like" | Dismissed: a public Ed25519 signature, no secret. Erasure covers both directions (signer via `@erased_tables`, target via `run_delete_signed_on/1`), inside the 4a/4b transaction that holds the erased user's `sync_global|` lock; `deletion_status` is committed in step 2 before, so the upsert guard `NOT EXISTS ... deletion_status IS NOT NULL` refuses late writers. |
++
++### Findings
++
++| # | Severity | Location | Vulnerability | Remediation |
++|---|----------|----------|---------------|-------------|
++| 1 | LOW | server/lib/nebu/matrix/cross_signing_key_store.ex (put_keys D7 DELETE), server/lib/nebu/matrix/key_query_store.ex `master_for/4` | Cross-user signature row is bound to the master key ID only, not to the key material: a master key replacement that keeps the key id (`ed25519:<id>` with a different public key; the upload does not enforce id == pub) keeps and serves the stale signature | Store the target public key (or sha256 of the stripped canonical master object) in the row and compare it in the D7 DELETE and in the reader |
++| 2 | LOW | server/lib/nebu/matrix/key_signature_store.ex:@max_signatures_per_object, verify/4 | CPU budget: 200 objects x 20 caller signatures = up to 4000 Ed25519 verifies per request (all reachable with 20 own devices / 20 keys in own SSK/USK), 60 req/min per account | Add a per-request verification budget (e.g. 200 total) or cap caller signatures per object at 1-2 |
++| 3 | LOW | server/lib/nebu/matrix/key_signature_store.ex write_cross_user/5 | New cross-user acquisition of the TARGET's `sync_global|` advisory lock by any co-member (auto-join = everyone); the victim's own writers (key backup has a 2000 ms lock_timeout -> 429) queue behind it | Holds are short (no verify under lock, one tx per entry), so advisory only; keep the lock window minimal, consider a dedicated `xsig|<target>` key taken also by put_keys/erasure if contention is observed |
++
++### Detail
++
++**Finding #1 — signature bound to key id, not key** [LOW]
++`cross_signing_user_signatures` stores `target_key_id`; `put_keys/2` deletes only rows whose `target_key_id` is NOT among the new master key ids, and `KeyQueryStore.master_for/4` shows a row while `key_id in master_key_ids(obj)`. Matrix key ids are conventionally the base64 public key, but nothing in device_signing/upload enforces `keys["ed25519:X"] == X`. The target (or whoever holds the target's UIA for a reset) can replace the master public key under the same id; the viewer then receives its own old USK signature attached to the NEW master object. The upload path itself is correct (signature verified against the STORED object, re-checked under the lock), and conforming clients re-verify the USK signature cryptographically (the stale signature fails and the identity shows as changed), so no direct trust escalation — but the D7/D4 claim "a replaced master key drops its rows" is not true for this case and a lax client would show a stale "verified" state. Fix: bind the row to the public key value (or a hash of the stripped canonical object) and compare that in both places; alternatively reject a master upload whose key id differs from its public key.
++
++**Finding #2 — Ed25519 verification amplification inside the caps** [LOW]
++Caps hold (rate tier charged before work, 200-object cap before any verification, object must `===` the stored key so canonical JSON work is bounded by the 1 MB body). `Enum.all?` short-circuits on the first bad signature, but an attacker controls its own keys and can make 19 of 20 valid: 4000 verifies (~0.25 s CPU) per request, burst 20 -> ~5 s CPU instantly per account, ~0.25 core sustained per account; multiplied by accounts. Spec usage needs one signature per caller per object. Fix: total-verify budget per request or `@max_signatures_per_object` 1-2.
++
++**Finding #3 — cross-user sync_global| lock** [LOW]
++Previously only the user's own writers and the erasure took `sync_global|<user>`; now every co-member's upload (case c) takes it per entry (sorted pair, so no deadlock cycle between mutual signers; lock order vs erasure (row -> advisory) and put_keys (advisory first) verified: write_cross_user takes no row lock on cross_signing_keys and stamps only the signer's stream row, no cycle). Holds are milliseconds; starvation of the victim's 2000 ms-bounded key-backup writer would need sustained parallel load across many accounts. Advisory.
++
++### Checked and clean (from the launch focus list)
++
++1. Memory/ETS: no request-derived ETS/cache key; rate key `:user` is the authenticated id; denied (429) requests allocate no rows/locks; failed entries store nothing.
++2. Existence oracle: `/keys/query` is one statement with the visibility CTE, no per-user early return, `failures` always `{}`; NUL ids dropped request-only. `/keys/signatures/upload` (c): shape check first (state-independent), then ONE statement (share EXISTS + master lookup); unknown / non-shared / keyless / non-master key id all `:forbidden` with fixed text. Visible (shared) users may get `:invalid_signature` — no new information.
++3. CPU: see #2; `encode_strict` rejects floats/out-of-range ints without raising; base64/length checks before `:crypto.verify`, rescue -> false (fail closed).
++4. Locking: see #3; write_device row lock -> stream row matches `put_device_keys`; merge (b) reuses lock_keys protocol; erasure fence verified.
++5. Authorization: (a) own device by own SSK, (b) own master by own device key, (c) foreign master by own USK with joined-room share; foreign device/SSK/USK and own SSK/USK refused; verification keys selected from the caller's STORED keys by prop; object compared to the STORED key (unlocked and again under lock); only `%{caller => sigs}` is ever stored (forged `signatures[other]` entries ignored).
++6. Exposure: master key served with owner's signatures + the viewer's own rows only (`s.user_id = $1`), USK only to owner, unfiltered `query_cross_signing/1` deleted; table has GRANT + ENABLE/FORCE RLS; both erasure directions.
++7. Logging: both routes in `key_material_shape?/1`; all error logs use `error_kind` (module/atom only); failure texts fixed, no key id/object/signature echoed except the request's own map keys.
++
++### Summary
++
++CRITICAL: 0 — block commit
++HIGH: 0 — block commit
++MEDIUM: 0 — advisory, address before epic end
++LOW: 3 — advisory
++
++**Verdict:** APPROVED
+diff --git a/server/lib/nebu/matrix/cross_signing_key_store.ex b/server/lib/nebu/matrix/cross_signing_key_store.ex
+index dca0da41..2a710fee 100644
+--- a/server/lib/nebu/matrix/cross_signing_key_store.ex
++++ b/server/lib/nebu/matrix/cross_signing_key_store.ex
+@@ -81,7 +81,7 @@ defmodule Nebu.Matrix.CrossSigningKeyStore do
+   `sync_global|` advisory lock in one transaction (nested in the caller's transaction
+   when there is one: the lock then lives until that commits). A failed write returns
+   `{:error, reason}`. Story key-query-hardening (D7): the cross-user signatures stored on the user's master key
+-  (`cross_signing_user_signatures`, migration 000061) that name a key which is no longer a key of the new master key are deleted in the same transaction.
++  (`cross_signing_user_signatures`, migration 000061) that name a key (id AND public key value) which is no longer a key of the new master key are deleted in the same transaction.
+   """
+   @spec put_keys(String.t(), map()) :: :ok | {:error, term()}
+   def put_keys(user_id, keys) when is_binary(user_id) and is_map(keys) do
+@@ -120,8 +120,12 @@ defmodule Nebu.Matrix.CrossSigningKeyStore do
+              # transaction (an unchanged master key keeps them); the writers of those rows hold the same `sync_global|` advisory lock
+              {:ok, _} <-
+                query(
+-                 "DELETE FROM cross_signing_user_signatures WHERE target_user_id = $1::text AND NOT (target_key_id = ANY($2::text[]))",
+-                 [user_id, master_key_ids(keys["master_key"])]
++                 """
++                 DELETE FROM cross_signing_user_signatures s
++                  WHERE s.target_user_id = $1::text
++                    AND NOT EXISTS (SELECT 1 FROM unnest($2::text[], $3::text[]) AS k(id, key) WHERE k.id = s.target_key_id AND k.key = s.target_key)
++                 """,
++                 [user_id | master_key_pairs(keys["master_key"])]
+                ) do
+           # story device-key-directory: the cross-signing key change goes into the device-list stream (peers see it in `device_lists.changed` and `/keys/changes`)
+           Nebu.Matrix.DeviceListStore.stamp_keys!(Nebu.Repo, user_id)
+@@ -411,8 +415,14 @@ defmodule Nebu.Matrix.CrossSigningKeyStore do
+     end)
+   end
+ 
+-  defp master_key_ids(%{"keys" => keys}) when is_map(keys), do: Enum.map(Map.keys(keys), &key_id_of/1)
+-  defp master_key_ids(_master), do: []
++  # [ids, public keys] (two parallel lists) of the master key: a cross-user signature is bound to the key itself (id AND public key value, nothing enforces
++  # id == key), so a replacement that keeps the id with another key drops it as well
++  defp master_key_pairs(%{"keys" => keys}) when is_map(keys) do
++    pairs = for {prop, key} <- keys, is_binary(key), do: {key_id_of(prop), key}
++    [Enum.map(pairs, &elem(&1, 0)), Enum.map(pairs, &elem(&1, 1))]
++  end
++
++  defp master_key_pairs(_master), do: [[], []]
+ 
+   defp encode_key(nil), do: nil
+   defp encode_key(obj) when is_map(obj), do: Jason.encode!(obj)
+diff --git a/server/lib/nebu/matrix/key_query_store.ex b/server/lib/nebu/matrix/key_query_store.ex
+index f308aa92..d4a1892b 100644
+--- a/server/lib/nebu/matrix/key_query_store.ex
++++ b/server/lib/nebu/matrix/key_query_store.ex
+@@ -26,13 +26,13 @@ defmodule Nebu.Matrix.KeyQueryStore do
+           WHERE r.u = $1
+              OR EXISTS (SELECT 1 FROM room_members o JOIN room_members m ON m.room_id = o.room_id
+                          WHERE o.user_id = r.u AND o.left_at IS NULL AND m.user_id = $1 AND m.left_at IS NULL))
+-  SELECT 'd'::text, dk.user_id, dk.device_id, dk.device_keys_json, d.display_name
++  SELECT 'd'::text, dk.user_id, dk.device_id, dk.device_keys_json, d.display_name, NULL::text
+     FROM device_keys dk JOIN devices d USING (user_id, device_id) JOIN vis ON vis.user_id = dk.user_id
+   UNION ALL
+-  SELECT 'c', c.user_id, c.master_key_json, c.self_signing_key_json, c.user_signing_key_json
++  SELECT 'c', c.user_id, c.master_key_json, c.self_signing_key_json, c.user_signing_key_json, NULL
+     FROM cross_signing_keys c JOIN vis ON vis.user_id = c.user_id
+   UNION ALL
+-  SELECT 's', s.target_user_id, s.target_key_id, s.signing_key_id, s.signature
++  SELECT 's', s.target_user_id, s.target_key_id, s.signing_key_id, s.signature, s.target_key
+     FROM cross_signing_user_signatures s JOIN vis ON vis.user_id = s.target_user_id
+    WHERE s.user_id = $1
+   """
+@@ -64,15 +64,18 @@ defmodule Nebu.Matrix.KeyQueryStore do
+   defp build(caller, requested, rows) do
+     devices =
+       Enum.reduce(rows, %{}, fn
+-        ["d", uid, did, json, name], acc -> put_device(acc, requested, uid, did, json, name)
++        ["d", uid, did, json, name, _], acc -> put_device(acc, requested, uid, did, json, name)
+         _row, acc -> acc
+       end)
+ 
+-    cross = for ["c", uid, mk, ssk, usk] <- rows, into: %{}, do: {uid, {decode(mk), decode(ssk), decode(usk)}}
++    cross = for ["c", uid, mk, ssk, usk, _] <- rows, into: %{}, do: {uid, {decode(mk), decode(ssk), decode(usk)}}
+ 
+     sigs =
+       Enum.reduce(rows, %{}, fn
+-        ["s", uid, key_id, signing_key_id, signature], acc -> Map.update(acc, uid, [{key_id, signing_key_id, signature}], &[{key_id, signing_key_id, signature} | &1])
++        ["s", uid, key_id, signing_key_id, signature, target_key], acc ->
++          entry = {key_id, target_key, signing_key_id, signature}
++          Map.update(acc, uid, [entry], &[entry | &1])
++
+         _row, acc -> acc
+       end)
+ 
+@@ -111,13 +114,14 @@ defmodule Nebu.Matrix.KeyQueryStore do
+   # D4: the signatures of the master key of `uid` for `caller`: the own signatures of `uid` and the ones made by the caller
+   defp master_for(caller, uid, obj, cross_sigs) do
+     own = signer_map(Map.get(obj, "signatures"), uid)
+-    ids = master_key_ids(obj)
++    # the row is bound to the KEY, not only to its id: a replacement keeping the id with another public key shows no stale signature
++    pairs = master_key_pairs(obj)
+ 
+     visible =
+       if caller == uid do
+         own
+       else
+-        mine = for {key_id, signing_key_id, signature} <- cross_sigs, key_id in ids, into: %{}, do: {signing_key_id, signature}
++        mine = for {key_id, target_key, signing_key_id, signature} <- cross_sigs, {key_id, target_key} in pairs, into: %{}, do: {signing_key_id, signature}
+         if map_size(mine) == 0, do: own, else: Map.put(own, caller, mine)
+       end
+ 
+@@ -134,8 +138,8 @@ defmodule Nebu.Matrix.KeyQueryStore do
+ 
+   defp signer_map(_sigs, _uid), do: %{}
+ 
+-  defp master_key_ids(%{"keys" => keys}) when is_map(keys), do: Enum.map(Map.keys(keys), &Nebu.Matrix.CrossSigningKeyStore.key_id_of/1)
+-  defp master_key_ids(_obj), do: []
++  defp master_key_pairs(%{"keys" => keys}) when is_map(keys), do: for({prop, key} <- keys, is_binary(key), do: {Nebu.Matrix.CrossSigningKeyStore.key_id_of(prop), key})
++  defp master_key_pairs(_obj), do: []
+ 
+   defp decode(nil), do: nil
+   defp decode(json) when is_binary(json), do: Jason.decode!(json)
+diff --git a/server/lib/nebu/matrix/key_signature_store.ex b/server/lib/nebu/matrix/key_signature_store.ex
+index 3f9a7a2c..5e18af1a 100644
+--- a/server/lib/nebu/matrix/key_signature_store.ex
++++ b/server/lib/nebu/matrix/key_signature_store.ex
+@@ -52,8 +52,9 @@ defmodule Nebu.Matrix.KeySignatureStore do
+ 
+   alias Nebu.Matrix.{CanonicalJson, CrossSigningKeyStore, DeviceListStore}
+ 
+-  # signatures by the caller on ONE object; a bound before any verification (an object that names more is `:invalid_param`)
+-  @max_signatures_per_object 20
++  # signatures by the caller on ONE object; a bound before any verification (an object that names more is `:invalid_param`). Only the CALLER's signatures are
++  # ever verified (those of other users are ignored, not verified, not stored), so one request costs at most 200 objects x 4 = 800 Ed25519 verifications.
++  @max_signatures_per_object 4
+   @max_id_bytes 255
+ 
+   @type reason :: :invalid_param | :forbidden | :invalid_signature
+@@ -171,6 +172,13 @@ defmodule Nebu.Matrix.KeySignatureStore do
+   defp has_key_id?(%{"keys" => keys}, key_id) when is_map(keys), do: Enum.any?(Map.keys(keys), &(CrossSigningKeyStore.key_id_of(&1) == key_id))
+   defp has_key_id?(_obj, _key_id), do: false
+ 
++  # the public key value of the key named `key_id` (the smallest property when several share the id, so the choice is deterministic)
++  defp key_value_of(%{"keys" => keys}, key_id) when is_map(keys) do
++    keys |> Enum.filter(fn {prop, value} -> CrossSigningKeyStore.key_id_of(prop) == key_id and is_binary(value) end) |> Enum.sort() |> Enum.map(&elem(&1, 1)) |> List.first()
++  end
++
++  defp key_value_of(_obj, _key_id), do: nil
++
+   # the keys a signature of the caller may be verified with: prop ("ed25519:<id>") => public key
+   defp self_signing_keys(%{ssk: %{"keys" => keys}}) when is_map(keys), do: keys
+   defp self_signing_keys(_own), do: %{}
+@@ -283,11 +291,11 @@ defmodule Nebu.Matrix.KeySignatureStore do
+   @advisory "SELECT pg_advisory_xact_lock(hashtextextended('sync_global|' || $1::text, 0))"
+ 
+   @upsert """
+-  INSERT INTO cross_signing_user_signatures (user_id, target_user_id, target_key_id, signing_key_id, signature, updated_at)
+-  SELECT $1::text, $2::text, $3::text, $4::text, $5::text, $6::bigint
++  INSERT INTO cross_signing_user_signatures (user_id, target_user_id, target_key_id, target_key, signing_key_id, signature, updated_at)
++  SELECT $1::text, $2::text, $3::text, $7::text, $4::text, $5::text, $6::bigint
+    WHERE NOT EXISTS (SELECT 1 FROM users WHERE user_id IN ($1::text, $2::text) AND deletion_status IS NOT NULL)
+   ON CONFLICT (user_id, target_user_id, target_key_id) DO UPDATE
+-    SET signing_key_id = EXCLUDED.signing_key_id, signature = EXCLUDED.signature, updated_at = EXCLUDED.updated_at
++    SET target_key = EXCLUDED.target_key, signing_key_id = EXCLUDED.signing_key_id, signature = EXCLUDED.signature, updated_at = EXCLUDED.updated_at
+   """
+ 
+   # (c) one row per (signer, target user, target key), replaced idempotently
+@@ -304,9 +312,11 @@ defmodule Nebu.Matrix.KeySignatureStore do
+              true <- is_binary(master_json),
+              master = Jason.decode!(master_json),
+              true <- has_key_id?(master, key_id) and Map.drop(master, ["signatures", "unsigned"]) === Map.drop(obj, ["signatures", "unsigned"]),
++             # the row is bound to the key itself (id AND public key value), see migration 000061
++             target_key when is_binary(target_key) <- key_value_of(master, key_id),
+              {:ok, %{rows: existing}} <-
+                query("SELECT signing_key_id, signature FROM cross_signing_user_signatures WHERE user_id = $1 AND target_user_id = $2 AND target_key_id = $3", [caller, target, key_id]),
+-             {:ok, %{num_rows: n}} <- query(@upsert, [caller, target, key_id, signing_key_id, signature, now_ms()]),
++             {:ok, %{num_rows: n}} <- query(@upsert, [caller, target, key_id, signing_key_id, signature, now_ms(), target_key]),
+              true <- n > 0 do
+           # D10: the SIGNER's key row is stamped (not the target's), and only when the stored signature changed
+           if existing != [[signing_key_id, signature]], do: DeviceListStore.stamp_keys!(Nebu.Repo, caller)
+diff --git a/server/priv/migrations/000061_cross_signing_user_signatures.up.sql b/server/priv/migrations/000061_cross_signing_user_signatures.up.sql
+index e5bd67b6..b0e45362 100644
+--- a/server/priv/migrations/000061_cross_signing_user_signatures.up.sql
++++ b/server/priv/migrations/000061_cross_signing_user_signatures.up.sql
+@@ -10,7 +10,8 @@
+ -- user_id is the SIGNER and the DELETE key of the GDPR erasure (UserDeletion.erased_tables/0); target_user_id is the second erasure key (the signatures made
+ -- ON the keys of an erased user are deleted by one more statement). The name contains `signature` on purpose: the acceptance test of the erasure scans every
+ -- table of that name. There is no foreign key (a row may outlive neither user, the erasure deletes both directions); target_key_id is the id of the target
+--- master key, so the reader only shows a row whose target key is still the CURRENT master key of the target (a replaced master key drops its rows, see
++-- master key and target_key its public key value (nothing enforces id == public key, so a replacement keeping the id must not keep the signature): the reader
++-- only shows a row whose (id, key) is still a key of the CURRENT master key of the target (a replaced master key drops its rows, see
+ -- CrossSigningKeyStore.put_keys/2).
+ --
+ -- UpCloud managed PostgreSQL has no ALTER DEFAULT PRIVILEGES for the migrate role, so the runtime role gets its grants here. Row level security is ENABLEd and
+@@ -19,6 +20,7 @@ CREATE TABLE IF NOT EXISTS cross_signing_user_signatures (
+     user_id        TEXT   NOT NULL,
+     target_user_id TEXT   NOT NULL,
+     target_key_id  TEXT   NOT NULL,
++    target_key     TEXT   NOT NULL,
+     signing_key_id TEXT   NOT NULL,
+     signature      TEXT   NOT NULL,
+     updated_at     BIGINT NOT NULL,
+diff --git a/server/test/nebu/admin/admin_stale_rooms_test.exs b/server/test/nebu/admin/admin_stale_rooms_test.exs
+index 15f1de37..a641714b 100644
+--- a/server/test/nebu/admin/admin_stale_rooms_test.exs
++++ b/server/test/nebu/admin/admin_stale_rooms_test.exs
+@@ -112,7 +112,9 @@ defmodule Nebu.Admin.AdminStaleRoomsTest do
+     end
+ 
+     test "returns exactly the active + 0-member room" do
+-      {rooms, _next} = DB.list_rooms(50, "", "stale", "")
++      # the shared database may hold more than 50 stale rooms of other suites that sort before the seeded ids (ORDER BY room_id, LIMIT 51):
++      # start the page right before them. The cursor `room_id > $C` is a prefix of every seeded id, so it sorts before all of them.
++      {rooms, _next} = DB.list_rooms(50, "!#{@run_id}", "stale", "")
+ 
+       ids = MapSet.new(rooms, & &1.room_id)
+ 
+diff --git a/server/test/nebu/compliance/user_deletion_oauth_test_support.exs b/server/test/nebu/compliance/user_deletion_oauth_test_support.exs
+index d906edfa..c8929a26 100644
+--- a/server/test/nebu/compliance/user_deletion_oauth_test_support.exs
++++ b/server/test/nebu/compliance/user_deletion_oauth_test_support.exs
+@@ -198,8 +198,9 @@ defmodule Nebu.Compliance.UserDeletionTestSupport do
+     # story key-query-hardening: a cross-user signature of the user (as signer) and one made on its master key by the partner (as target)
+     for {signer, target} <- [{uid, partner}, {partner, uid}] do
+       T.sql!(
+-        "INSERT INTO cross_signing_user_signatures (user_id, target_user_id, target_key_id, signing_key_id, signature, updated_at) VALUES ($1, $2, $3, $4, $5, $6)",
+-        [signer, target, "MSK#{canary}", "ed25519:USK#{canary}", "sig-#{canary}", now]
++        "INSERT INTO cross_signing_user_signatures (user_id, target_user_id, target_key_id, target_key, signing_key_id, signature, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7)",
++        # target_key is the public key value of the master key `T.cross_signing_keys/2` stores (id and value are both "MSK<canary>")
++        [signer, target, "MSK#{canary}", "MSK#{canary}", "ed25519:USK#{canary}", "sig-#{canary}", now]
+       )
+     end
+ 
+diff --git a/server/test/nebu/matrix/key_query_hardening_test.exs b/server/test/nebu/matrix/key_query_hardening_test.exs
+index d3c1398e..d9bce673 100644
+--- a/server/test/nebu/matrix/key_query_hardening_test.exs
++++ b/server/test/nebu/matrix/key_query_hardening_test.exs
+@@ -659,6 +659,72 @@ defmodule Nebu.Matrix.KeyQueryHardeningTest do
+     assert Map.has_key?(master_sigs(body, bob.uid), alice.uid), "the signature on the unchanged master key stays: #{inspect(master_sigs(body, bob.uid))}"
+   end
+ 
++  # Security review L1: the cross-user signature is bound to the KEY, not only to its id
++  @tag ac: "oracle-same-id-other-key-drops-the-cross-user-signatures"
++  test "security L1: a master key replaced by ANOTHER public key under the SAME id drops the cross-user signature" do
++    alice = person!("KQA")
++    bob = person!("KQB")
++    TD.share!(alice, bob)
++    assert sign_master!(alice, bob) == %{}
++    assert Map.has_key?(master_sigs(query!(alice, [bob.uid]), bob.uid), alice.uid), "precondition: the signature is visible"
++
++    count = fn ->
++      {:ok, %{rows: [[n]]}} = Ecto.Adapters.SQL.query(Nebu.Repo, "SELECT count(*) FROM cross_signing_user_signatures WHERE target_user_id = $1", [bob.uid])
++      n
++    end
++
++    assert count.() == 1
++
++    # an UNCHANGED re-upload (same id AND key) keeps the row
++    :ok =
++      Store.put_keys(bob.uid, %{
++        "master_key" => signed(bob.master, bob.uid, bob.dev, bob.dkp),
++        "self_signing_key" => signed(bob.ssk_obj, bob.uid, bob.msk.b64, bob.msk),
++        "user_signing_key" => signed(bob.usk_obj, bob.uid, bob.msk.b64, bob.msk)
++      })
++
++    assert count.() == 1
++    assert Map.has_key?(master_sigs(query!(alice, [bob.uid]), bob.uid), alice.uid), "an unchanged re-upload keeps the signature"
++
++    # the same key id, another public key
++    other = keypair()
++    new_master = %{"user_id" => bob.uid, "usage" => ["master"], "keys" => %{("ed25519:" <> bob.msk.b64) => other.b64}}
++
++    :ok =
++      Store.put_keys(bob.uid, %{
++        "master_key" => signed(new_master, bob.uid, bob.dev, bob.dkp),
++        "self_signing_key" => signed(bob.ssk_obj, bob.uid, bob.msk.b64, bob.msk),
++        "user_signing_key" => signed(bob.usk_obj, bob.uid, bob.msk.b64, bob.msk)
++      })
++
++    body = query!(alice, [bob.uid])
++    assert get_in(body, ["master_keys", bob.uid, "keys"]) == new_master["keys"], "precondition: the new key is served"
++    refute Map.has_key?(master_sigs(body, bob.uid), alice.uid), "the stale signature is gone from the query"
++    assert count.() == 0, "and the row is deleted"
++  end
++
++  # Security review L2: at most 4 signatures by the caller per object; signatures of other users are ignored
++  @tag ac: "oracle-signature-cap-per-object"
++  test "security L2: an object with 5 signatures by the caller is M_INVALID_PARAM; a foreign garbage signature next to a valid one still stores" do
++    alice = person!("KQA")
++    second = extra_device!(alice)
++
++    five = for i <- 1..5, into: %{}, do: {"ed25519:KEY#{i}", sig(alice.master, alice.dkp)}
++    failures = sigs!(alice, %{alice.uid => %{alice.msk.b64 => Map.put(alice.master, "signatures", %{alice.uid => five})}})
++    assert_failure(failures, alice.uid, alice.msk.b64, "M_INVALID_PARAM")
++
++    mixed =
++      Map.put(alice.master, "signatures", %{
++        alice.uid => %{("ed25519:" <> second.dev) => sig(alice.master, second.dkp)},
++        "@someone-else:test.local" => %{"ed25519:X" => "garbage"}
++      })
++
++    assert sigs!(alice, %{alice.uid => %{alice.msk.b64 => mixed}}) == %{}
++    stored = master_sigs(query!(alice, [alice.uid]), alice.uid)
++    assert get_in(stored, [alice.uid, "ed25519:" <> second.dev]) == sig(alice.master, second.dkp), "the valid caller signature is stored"
++    refute Map.has_key?(stored, "@someone-else:test.local"), "the foreign signature is not stored"
++  end
++
+   @tag ac: "oracle-no-bodies-in-logs"
+   test "oracle D11: the bodies of keys/query and keys/signatures/upload never reach a log line" do
+     alice = person!("KQA")

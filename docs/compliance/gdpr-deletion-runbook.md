@@ -104,6 +104,15 @@ SELECT COUNT(*) FROM oauth_account_sessions WHERE user_id = '@alice:example.com'
 SELECT COUNT(*) FROM oauth_consent_requests WHERE user_id = '@alice:example.com';
 SELECT COUNT(*) FROM oauth_consent_grants WHERE user_id = '@alice:example.com';
 SELECT COUNT(*) FROM oauth_codes WHERE user_id = '@alice:example.com';
+SELECT COUNT(*) FROM room_key_backup_sessions WHERE user_id = '@alice:example.com';
+SELECT COUNT(*) FROM room_key_backup_versions WHERE user_id = '@alice:example.com';
+SELECT COUNT(*) FROM to_device_messages WHERE user_id = '@alice:example.com';
+SELECT COUNT(*) FROM to_device_messages WHERE sender = '@alice:example.com';
+SELECT COUNT(*) FROM to_device_txns WHERE user_id = '@alice:example.com';
+SELECT COUNT(*) FROM device_list_changes WHERE user_id = '@alice:example.com';
+-- story key-query-hardening: the cross-user signatures Alice MADE (user_id) and the ones made ON her master key by others (target_user_id)
+SELECT COUNT(*) FROM cross_signing_user_signatures WHERE user_id = '@alice:example.com';
+SELECT COUNT(*) FROM cross_signing_user_signatures WHERE target_user_id = '@alice:example.com';
 -- Expected: 0 for each table above
 
 -- Confirm the session teardown tables are empty (it is best effort after the commit; if a count is not 0 run the sweep below for this user)
@@ -137,6 +146,19 @@ Per GDPR recital 65, messages sent by the deleted user remain in room history.
 The Matrix event timeline is an immutable append-only log - event content is preserved as sent.
 The user's PII is removed from their profile, but message content in rooms is not scrubbed.
 This is consistent with Matrix CS API v1.18 behavior.
+
+## Pruning old key backup version markers
+
+A deleted key backup version stays as a soft-delete marker row (so version numbers are never reused). The markers of a user count against the cap of 1000 version rows per user; a user who created and deleted versions 1000 times is refused `POST /room_keys/version` (`403 M_FORBIDDEN`, "contact the server administrator") until an operator prunes. Run this against the database as the owner, replacing `<user_id>` (a Matrix user ID); it deletes the markers of that user except the highest-numbered one, so a version number is never reused, and touches no live version and no session row:
+
+```sql
+DELETE FROM room_key_backup_versions
+WHERE user_id = '<user_id>'
+  AND deleted_at IS NOT NULL
+  AND version < (SELECT max(version) FROM room_key_backup_versions WHERE user_id = '<user_id>' AND deleted_at IS NOT NULL);
+```
+
+A pruned marker is gone for good: `DELETE /_matrix/client/v3/room_keys/version/{n}` for the number of a pruned marker answers `404 M_NOT_FOUND` (the "never existed" answer) instead of the idempotent `200`; the number itself is still never reused, because the highest-numbered marker stays.
 
 ## Rate Limits
 
@@ -183,6 +205,14 @@ DELETE FROM oauth_account_sessions WHERE user_id IN (SELECT user_id FROM users W
 DELETE FROM oauth_consent_requests WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
 DELETE FROM oauth_consent_grants WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
 DELETE FROM oauth_codes WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
+DELETE FROM room_key_backup_sessions WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
+DELETE FROM room_key_backup_versions WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
+DELETE FROM to_device_messages WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
+DELETE FROM to_device_messages WHERE sender IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
+DELETE FROM to_device_txns WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
+DELETE FROM device_list_changes WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
+DELETE FROM cross_signing_user_signatures WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
+DELETE FROM cross_signing_user_signatures WHERE target_user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
 -- the post-commit session teardown tables (a teardown that failed after the commit left them; the tokens are dead, the rows are not)
 DELETE FROM sync_room_cursors WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
 DELETE FROM oauth_idp_refresh_leases WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');

@@ -1,0 +1,7 @@
+# test-lint — e2ee-compliance-channel-guard: 8 scenarios, 9 ExUnit tests, 0 e2e files
+MINOR | _bmad-output/nebu/epics/e2ee-client-support/step-results/e2ee-compliance-channel-guard/oracle-context.md | spec error code M_BAD_JSON is not referenced by any test | add a test for it or note why it does not apply
+MINOR | _bmad-output/nebu/epics/e2ee-client-support/step-results/e2ee-compliance-channel-guard/oracle-context.md | spec error code M_DUPLICATE_ANNOTATION is not referenced by any test | add a test for it or note why it does not apply
+MINOR | _bmad-output/nebu/epics/e2ee-client-support/step-results/e2ee-compliance-channel-guard/oracle-context.md | spec error code M_INVALID_SIGNATURE is not referenced by any test | add a test for it or note why it does not apply
+MINOR | _bmad-output/nebu/epics/e2ee-client-support/step-results/e2ee-compliance-channel-guard/oracle-context.md | spec error code M_MISSING_PARAM is not referenced by any test | add a test for it or note why it does not apply
+MINOR | _bmad-output/nebu/epics/e2ee-client-support/step-results/e2ee-compliance-channel-guard/oracle-context.md | spec error code M_UNKNOWN is not referenced by any test | add a test for it or note why it does not apply
+MINOR | _bmad-output/nebu/epics/e2ee-client-support/step-results/e2ee-compliance-channel-guard/oracle-context.md | spec error code M_UNRECOGNIZED is not referenced by any test | add a test for it or note why it does not apply

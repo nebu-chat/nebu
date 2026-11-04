@@ -32,6 +32,24 @@ defmodule Nebu.Matrix.CanonicalJson do
     |> Jason.encode!()
   end
 
+  @max_int 9_007_199_254_740_991
+
+  @doc """
+  The Matrix canonical JSON of a decoded JSON value for SIGNATURE checks (Matrix CS v1.18, appendix "Canonical JSON"): `encode!/1` after a check of the
+  numbers: integers only in [-(2^53)+1, 2^53-1], no floats (a float, `1.0` and `1e3` included, or an integer beyond the range has no canonical form).
+  `{:error, :not_canonical}` for such a value; never raises for one.
+  """
+  @spec encode_strict(term()) :: {:ok, binary()} | {:error, :not_canonical}
+  def encode_strict(value) do
+    if canonical_numbers?(value), do: {:ok, encode!(value)}, else: {:error, :not_canonical}
+  end
+
+  defp canonical_numbers?(map) when is_map(map), do: Enum.all?(map, fn {_k, v} -> canonical_numbers?(v) end)
+  defp canonical_numbers?(list) when is_list(list), do: Enum.all?(list, &canonical_numbers?/1)
+  defp canonical_numbers?(int) when is_integer(int), do: int >= -@max_int and int <= @max_int
+  defp canonical_numbers?(float) when is_float(float), do: false
+  defp canonical_numbers?(_other), do: true
+
   @doc """
   Lowercase hex SHA-256 of the canonical JSON encoding of `value` (story oauth-account-management, A14:
   the `m.oauth` approval is bound to the hash of ALL supplied cross-signing keys, whatever their key

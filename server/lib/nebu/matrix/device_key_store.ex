@@ -4,7 +4,8 @@ defmodule Nebu.Matrix.DeviceKeyStore do
 
   Stores and serves per-device identity keys, one-time keys (OTKs), and fallback
   keys published via `POST /_matrix/client/v3/keys/upload`, and read back via
-  `POST /_matrix/client/v3/keys/query` / `GET /sync` / `GET /devices`.
+  `GET /sync` / `GET /devices` (`POST /_matrix/client/v3/keys/query` is served by
+  `Nebu.Matrix.KeyQueryStore`, story key-query-hardening: one visibility-filtered statement).
 
   Plain module, inline parameterised SQL via `Nebu.Repo` (ADR-018 — no Ecto
   schema, no Repository/Service layer). PostgreSQL-backed rather than ETS so the
@@ -17,7 +18,8 @@ defmodule Nebu.Matrix.DeviceKeyStore do
   """
 
   # Deletion order of `delete_device/2` / `delete_device!/2` (children before `devices`).
-  @device_tables ["device_one_time_keys", "device_fallback_keys", "device_keys", "devices"]
+  # story to-device-messaging: the queue and the idempotency records of a device go with it
+  @device_tables ["to_device_messages", "to_device_txns", "device_one_time_keys", "device_fallback_keys", "device_keys", "devices"]
 
   @doc """
   Upserts a device's IDENTITY row in `devices` (S1 device-registry-model).
@@ -74,20 +76,30 @@ defmodule Nebu.Matrix.DeviceKeyStore do
     # is required. The reverse order could leave a device_keys row with no devices row.
     :ok = upsert_device(user_id, device_id, display_name: display_name, last_seen_ts: now)
 
+    # story device-key-directory: the stream stamp (identity keys new or different) rides in the transaction of the key upsert
     {:ok, _} =
-      query(
-        """
-        INSERT INTO device_keys
-          (user_id, device_id, device_keys_json, display_name, last_seen_ts, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $6)
-        ON CONFLICT (user_id, device_id) DO UPDATE
-          SET device_keys_json = EXCLUDED.device_keys_json,
-              display_name      = COALESCE(EXCLUDED.display_name, device_keys.display_name),
-              last_seen_ts      = EXCLUDED.last_seen_ts,
-              updated_at        = EXCLUDED.updated_at
-        """,
-        [user_id, device_id, json, display_name, now, now]
-      )
+      Nebu.Repo.transaction(fn ->
+        {:ok, %{rows: old_rows}} =
+          query("SELECT device_keys_json FROM device_keys WHERE user_id = $1 AND device_id = $2 FOR UPDATE", [user_id, device_id])
+
+        {:ok, _} =
+          query(
+            """
+            INSERT INTO device_keys
+              (user_id, device_id, device_keys_json, display_name, last_seen_ts, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $6)
+            ON CONFLICT (user_id, device_id) DO UPDATE
+              SET device_keys_json = EXCLUDED.device_keys_json,
+                  display_name      = COALESCE(EXCLUDED.display_name, device_keys.display_name),
+                  last_seen_ts      = EXCLUDED.last_seen_ts,
+                  updated_at        = EXCLUDED.updated_at
+            """,
+            [user_id, device_id, json, display_name, now, now]
+          )
+
+        if old_rows != [[json]], do: Nebu.Matrix.DeviceListStore.stamp_keys!(Nebu.Repo, user_id)
+        :ok
+      end)
 
     :ok
   end
@@ -132,17 +144,17 @@ defmodule Nebu.Matrix.DeviceKeyStore do
 
     Enum.each(fallback_keys, fn {prop, key} ->
       case split_algorithm(prop) do
-        {algorithm, _key_id} ->
+        {algorithm, key_id} ->
           {:ok, _} =
             query(
               """
               INSERT INTO device_fallback_keys
-                (user_id, device_id, algorithm, key_json, used, created_at)
-              VALUES ($1, $2, $3, $4, FALSE, $5)
+                (user_id, device_id, algorithm, key_id, key_json, used, created_at)
+              VALUES ($1, $2, $3, $4, $5, FALSE, $6)
               ON CONFLICT (user_id, device_id, algorithm) DO UPDATE
-                SET key_json = EXCLUDED.key_json, used = FALSE, created_at = EXCLUDED.created_at
+                SET key_id = EXCLUDED.key_id, key_json = EXCLUDED.key_json, used = FALSE, created_at = EXCLUDED.created_at
               """,
-              [user_id, device_id, algorithm, Jason.encode!(key), now]
+              [user_id, device_id, algorithm, key_id, Jason.encode!(key), now]
             )
 
         :error ->
@@ -195,7 +207,22 @@ defmodule Nebu.Matrix.DeviceKeyStore do
     end
   end
 
-  @doc "Algorithms for which the user (any device) has an unused fallback key."
+  @doc """
+  Algorithms for which THIS device has a fallback key that no claim has returned yet (story device-key-directory; the Matrix spec lists them per DEVICE:
+  an aggregate over the user's devices masks the used fallback key of a second device, which then never rotates it).
+  """
+  @spec unused_fallback_key_types(String.t(), String.t()) :: [String.t()]
+  def unused_fallback_key_types(user_id, device_id) when is_binary(user_id) and is_binary(device_id) do
+    case safe_query(
+           "SELECT algorithm FROM device_fallback_keys WHERE user_id = $1 AND device_id = $2 AND used = FALSE ORDER BY algorithm",
+           [user_id, device_id]
+         ) do
+      {:ok, %{rows: rows}} -> Enum.map(rows, fn [alg] -> alg end)
+      _ -> []
+    end
+  end
+
+  @doc "Legacy aggregate: algorithms for which the user (any device) has an unused fallback key (a device-LESS request only)."
   @spec unused_fallback_key_types_for_user(String.t()) :: [String.t()]
   def unused_fallback_key_types_for_user(user_id) when is_binary(user_id) do
     case safe_query(
@@ -210,8 +237,10 @@ defmodule Nebu.Matrix.DeviceKeyStore do
   @doc """
   Returns the stored device-key objects for the given users:
   `%{user_id => %{device_id => device_info}}`, where `device_info` is the uploaded
-  `device_keys` object plus an `unsigned` property (spec §/keys/query). Users/devices
-  with no published keys are simply omitted.
+  `device_keys` object plus an `unsigned` property. Users/devices with no published keys are
+  simply omitted. NOT the reader of `POST /keys/query` any more (that is `Nebu.Matrix.KeyQueryStore`,
+  which filters by visibility): this lookup has no visibility filter and must never be served to a
+  client as is.
   """
   #
   # The INNER JOIN onto `devices` intentionally requires a matching `devices` row for every
@@ -361,15 +390,32 @@ defmodule Nebu.Matrix.DeviceKeyStore do
       when is_binary(user_id) and is_binary(device_id) do
     now = now_ms()
 
-    case safe_query(
-           """
-           UPDATE devices
-              SET display_name = $3, updated_at = $4
-            WHERE user_id = $1 AND device_id = $2
-           """,
-           [user_id, device_id, display_name, now]
-         ) do
-      {:ok, %{num_rows: 1}} -> :ok
+    # story device-key-directory: a rename of a device WITH identity keys is a device-list change (the name is in `unsigned.device_display_name`)
+    result =
+      try do
+        Nebu.Repo.transaction(fn ->
+          case query(
+                 """
+                 UPDATE devices
+                    SET display_name = $3, updated_at = $4
+                  WHERE user_id = $1 AND device_id = $2
+                 """,
+                 [user_id, device_id, display_name, now]
+               ) do
+            {:ok, %{num_rows: 1}} ->
+              stamp_if_keyed!(Nebu.Repo, user_id, device_id)
+              :ok
+
+            _ ->
+              Nebu.Repo.rollback(:error)
+          end
+        end)
+      rescue
+        _ -> {:error, :error}
+      end
+
+    case result do
+      {:ok, :ok} -> :ok
       _ -> :error
     end
   end
@@ -401,15 +447,37 @@ defmodule Nebu.Matrix.DeviceKeyStore do
   @spec delete_device(String.t(), String.t()) :: :ok
   def delete_device(user_id, device_id)
       when is_binary(user_id) and is_binary(device_id) do
-    for table <- @device_tables do
-      _ =
-        safe_query(
-          "DELETE FROM #{table} WHERE user_id = $1 AND device_id = $2",
-          [user_id, device_id]
-        )
-    end
+    # story to-device-messaging (Kassandra #6): ONE transaction that locks the device row FIRST (`FOR UPDATE`; a to-device send holds `FOR KEY SHARE` on the rows it
+    # targets, so a send in flight finishes before the queue is deleted and no row for a gone device is left behind). Best-effort: never raises.
+    _ =
+      try do
+        Nebu.Repo.transaction(fn ->
+          lock_device_row!(Nebu.Repo, user_id, device_id)
+          delete_device_rows!(Nebu.Repo, user_id, device_id)
+        end)
+      rescue
+        _ -> :error
+      catch
+        :exit, _ -> :error
+      end
 
     :ok
+  end
+
+  # story device-key-directory: removing a device that HAD identity keys is a device-list change (a keyless device is not)
+  defp stamp_if_keyed!(repo, user_id, device_id) do
+    case Ecto.Adapters.SQL.query(repo, "SELECT 1 FROM device_keys WHERE user_id = $1 AND device_id = $2", [user_id, device_id]) do
+      {:ok, %{num_rows: n}} when n > 0 -> Nebu.Matrix.DeviceListStore.stamp_keys!(repo, user_id)
+      {:ok, _} -> :ok
+      {:error, error} -> raise error
+    end
+  end
+
+  defp lock_device_row!(repo, user_id, device_id) do
+    case Ecto.Adapters.SQL.query(repo, "SELECT 1 FROM devices WHERE user_id = $1 AND device_id = $2 FOR UPDATE", [user_id, device_id]) do
+      {:ok, _} -> :ok
+      {:error, error} -> raise error
+    end
   end
 
   @doc """
@@ -423,13 +491,23 @@ defmodule Nebu.Matrix.DeviceKeyStore do
   @spec delete_device!(String.t(), String.t(), module()) :: :ok
   def delete_device!(user_id, device_id, repo \\ Nebu.Repo)
       when is_binary(user_id) and is_binary(device_id) do
-    for table <- @device_tables do
-      case Ecto.Adapters.SQL.query(repo, "DELETE FROM #{table} WHERE user_id = $1 AND device_id = $2", [user_id, device_id]) do
-        {:ok, _} -> :ok
-        {:error, error} -> raise error
-      end
-    end
+    :ok = lock_device_row!(repo, user_id, device_id)
+    delete_device_rows!(repo, user_id, device_id)
+  end
 
+  # ONE lock order with `put_device_keys/4` (story device-key-directory, code review MINOR 4): the `device_keys` row first (the DELETE locks it), the stream
+  # row `(user, '')` LAST (the stamp). `put_device_keys` locks `device_keys` FOR UPDATE and then stamps, so a re-key racing a delete queues behind it instead of
+  # deadlocking. Whether the device HAD identity keys is decided by the rows the DELETE of `device_keys` removed (a keyless device is no change).
+  defp delete_device_rows!(repo, user_id, device_id) do
+    keyed? =
+      Enum.reduce(@device_tables, false, fn table, keyed? ->
+        case Ecto.Adapters.SQL.query(repo, "DELETE FROM #{table} WHERE user_id = $1 AND device_id = $2", [user_id, device_id]) do
+          {:ok, %{num_rows: n}} -> keyed? or (table == "device_keys" and n > 0)
+          {:error, error} -> raise error
+        end
+      end)
+
+    if keyed?, do: Nebu.Matrix.DeviceListStore.stamp_keys!(repo, user_id)
     :ok
   end
 

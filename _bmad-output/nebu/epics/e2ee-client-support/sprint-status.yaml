@@ -1,0 +1,12 @@
+# generated: 2026-10-30
+# story to-device-messaging done (pipeline: sendToDevice + /sync to_device delivery with ack by token position, budgets and rate limits, purge worker, GDPR erasure, migration 000059; Kassandra cycle 0 BLOCKED 1 HIGH, delta cycle APPROVED with residuals 11-risks (12)-(15); e2e 147 passed; known red release_test contiguity until the OAuth branch merges)
+# story e2ee-compliance-channel-guard done (pipeline: ATDD, 2 fix cycles, Code CLEAN, Kassandra CLEAN): 2026-11-03
+# story key-query-hardening done (pipeline: ATDD, 3 fix cycles, Code CLEAN, Kassandra CLEAN): 2026-11-03
+# story device-key-directory done (pipeline: ATDD, 5 fix cycles, Code MINOR fixed, Kassandra CLEAN): 2026-11-03
+# story server-side-key-backup done (pipeline: 13 room_keys routes under /_matrix/client/v3/room_keys, tables room_key_backup_versions/sessions, migration 000058; 64 MiB per user, 1000 version rows, bulk read gate, try-lock, rate buckets; code review cycle 0 1 MAJOR 6 MINOR, delta cycles 0 MAJOR; Kassandra 3 cycles, cycle 2 APPROVED with 2 accepted MEDIUM; e2e 147 passed 0 failed; merge after bugfix/oauth-session-lifetime-and-consent because of migrations 56/57)
+development_status:
+  server-side-key-backup: done
+  to-device-messaging: done
+  device-key-directory: done
+  key-query-hardening: done
+  e2ee-compliance-channel-guard: done

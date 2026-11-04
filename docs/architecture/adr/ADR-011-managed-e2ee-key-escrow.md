@@ -10,9 +10,49 @@ Im Rahmen der Compliance-Architektur wurde evaluiert, ob und wie Ende-zu-Ende-Ve
 mit der Anforderung nach vollständigem Compliance-Zugriff vereinbar ist.
 
 Nebu zielt auf compliance-first-Organisationen ab, die server-seitige Nachrichtensichtbarkeit für
-Audit-Logging, Four-Eyes-Compliance-Zugriff und rechtlichen Export benötigen. Die E2EE-Stubs
+Audit-Logging, Four-Eyes-Compliance-Zugriff und rechtlichen Export benötigen. Die Client-Kompatibilitäts-Endpunkte
 (`keys/upload`, `keys/query`, `keys/device_signing/upload`, `room_keys/*`) bleiben in Betrieb,
-um Client-Fehlerdialoge zu verhindern.
+um Client-Fehlerdialoge zu verhindern (siehe die Updates unten: sie sind keine reinen Stubs mehr).
+
+> **Update 2026-10-30 (story `server-side-key-backup`, epic e2ee-client-support):** `room_keys/*`
+> (Matrix CS v1.18 "Server-side key backups") ist **kein Stub mehr**, sondern ein **opaker,
+> PostgreSQL-gestützter Schlüssel-Backup-Speicher** pro Nutzer (Tabellen `room_key_backup_versions`,
+> `room_key_backup_sessions`; Migration `000058`). Der Server speichert `auth_data` und die
+> `session_data`-Blobs unverändert als JSON, **entschlüsselt sie nie** und parst sie nicht über
+> Wohlgeformtheit und Größe hinaus; sie werden nie geloggt und beim GDPR-Erase mit gelöscht. Das
+> schaltet **keinen** E2EE-Raum ein: `m.room.encryption` wird weiterhin in jedem Schreibpfad
+> abgelehnt (diese ADR bleibt gültig), der Speicher dient nur dem Wiederherstellen von
+> Client-Schlüsseln ("Chat-Wiederherstellung") und dem Abschluss des Secret-Storage-Bootstraps.
+
+> **Update 2026-11-02 (story `device-key-directory`, epic e2ee-client-support):** `POST /keys/claim`, `GET /keys/changes` und die E2E-Felder
+> des `/sync` (`device_lists`, `device_one_time_keys_count`, `device_unused_fallback_key_types`) vervollstaendigen das Schluesselverzeichnis (nur oeffentliche
+> Schluessel und Geraetelisten-Metadaten; Tabelle `device_list_changes`, Migration `000060`). Der Server entschluesselt nichts und loggt kein Schluesselmaterial. Das
+> schaltet **keinen** E2EE-Raum ein: `m.room.encryption` wird weiterhin abgelehnt (diese ADR bleibt gueltig).
+
+> **Update 2026-10-30 (story `to-device-messaging`, epic e2ee-client-support):** `sendToDevice` und
+> `to_device.events` des `/sync` (Matrix CS v1.18 "Send-to-Device messaging") sind ein **opaker,
+> PostgreSQL-gestützter Transport** pro Gerät (Tabellen `to_device_messages`, `to_device_txns`;
+> Migration `000059`): der Server entschlüsselt oder interpretiert den Inhalt nie, loggt ihn nie und
+> löscht ihn beim GDPR-Erase mit. Das schaltet **keinen** E2EE-Raum ein: `m.room.encryption` wird
+> weiterhin in jedem Schreibpfad abgelehnt (diese ADR bleibt gültig); der Transport dient
+> Geräte-Verifikation, Schlüsselanfragen und Secret-Sharing der Clients.
+
+> **Update 2026-11-03 (story `e2ee-compliance-channel-guard`, epic e2ee-client-support, Epic-Security-Gate 2, HIGH-Befund #1):** Die E2EE-Client-Infrastruktur darf
+> keinen unbeschraenkten opaken Kanal neben den archivierten Raeumen oeffnen. (1) **Raum-Events:** `m.room.encrypted` wird auf JEDEM Raum-Schreibpfad mit `403 M_FORBIDDEN`
+> und dem festen Text der `m.room.encryption`-Ablehnung verweigert (Raum-`send`-Route vor Raum-Lookup und Txn-Dedup, State-PUT, Dispatcher als Defence in Depth);
+> in `initial_state` von createRoom wird der Eintrag uebersprungen. In-Raum-Verifikation (`m.key.verification.*`) und `m.room.redaction` bleiben unveraendert.
+> (2) **To-device:** `sendToDevice` akzeptiert nur noch eine feste **Allowlist** (exakter Match, eine benannte Konstante in `http_to_device.ex`, ein neuer Typ ist eine
+> begutachtete Ein-Zeilen-Aenderung): `m.room.encrypted`, `m.room_key_request`, `m.room_key.withheld`, `m.secret.request`, `m.dummy` und die acht Verifikationstypen
+> `m.key.verification.request`, `m.key.verification.ready`, `m.key.verification.start`, `m.key.verification.accept`, `m.key.verification.key`, `m.key.verification.mac`,
+> `m.key.verification.done`, `m.key.verification.cancel` (QR-Verifikation nutzt `.start` mit Methode `m.reciprocate.v1` und `.done`). Bewusst NICHT in der Liste:
+> `m.room_key`, `m.forwarded_room_key` und `m.secret.send` (laut Spec innere, Olm-verpackte Nutzlasten, nie der aeussere Typ) und der unstable Alias
+> `org.matrix.room_key.withheld`. Jeder andere Typ ist `400 M_INVALID_PARAM` (fester Text, vor Rate-Limit, Body, Empfaenger und Budgets, ohne Empfaenger-Orakel).
+> Bekannter Ausschluss: der to-device-Schluesseltransport von Element Call / MatrixRTC (`io.element.call.encryption_keys`, `m.call.*`) wird verweigert, Ende-zu-Ende
+> verschluesselte Element-Call-Anrufe funktionieren gegen Nebu nicht. (3) **Akzeptiertes Restrisiko (vom Owner am Epic-Gate abgenommen):** to-device bleibt ein
+> **nicht archivierter, server-opaker Nutzer-zu-Nutzer-Kanal** fuer die Allowlist-Typen (Olm-verpackter Inhalt ist per Design opak und fuer Schluesselaustausch und
+> Verifikation noetig), begrenzt durch die Budgets von `to-device-messaging` (64 KiB je Request, 50 Empfaenger, Queues je Geraet/Paar/Sender, TTL 7 Tage, Rate-Limit).
+> Die Allowlist ist ein **Typ-Filter, kein Inhalts-Filter**: sie begrenzt, welche Typen benutzt werden duerfen, prueft oder begrenzt den Inhalt aber nicht unterhalb der bestehenden Budgets (beliebiger Inhalt passiert unter `m.dummy`, den Verifikationstypen, `m.room_key_request`, `m.secret.request`, `m.room_key.withheld`); der Kanal ist fuer die erlaubten Typen so gross wie zuvor. Auch die Key-Backup-Blobs und die Cross-Signing-Signaturen sind opake Client-Daten. Es gibt **kein Audit je Sendung** von to-device-Verkehr; wer eines braucht,
+> eroeffnet eine neue Story. Siehe `11-risks.md` und `07-deployment.md`.
 
 > **Update 2026-06-26 (bugfix `fix-device-key-registration`):** Die reinen No-op-Stubs für
 > `keys/upload`/`keys/query` lösten in Element den Fehler *"device could not be registered"* aus
@@ -88,7 +128,8 @@ Die E2EE-Stubs bleiben unverändert in Betrieb. Epic 10 ruht bis zur Wiederaufna
 ## Konsequenzen
 
 - Keine neuen E2EE-Implementierungsarbeiten bis zur Wiederaufnahme
-- E2EE-Stubs (`keys/device_signing/upload`, `room_keys/*`) bleiben aktiv; `keys/upload`/`keys/query`/
+- `room_keys/*` ist seit `server-side-key-backup` (2026-10-30) ein opaker Schlüssel-Backup-Speicher
+  (kein Stub, kein E2EE, siehe Update oben); `keys/device_signing/upload` bleibt aktiv; `keys/upload`/`keys/query`/
   `devices` sind seit `fix-device-key-registration` (2026-06-26) ein funktionierendes
   Geräteschlüssel-Verzeichnis (kein E2EE — siehe Kontext-Update oben)
 - Der Server erzwingt aktiv das No-E2EE-Invariant: `m.room.encryption` wird in allen Schreibpfaden

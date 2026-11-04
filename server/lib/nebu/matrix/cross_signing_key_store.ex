@@ -4,10 +4,14 @@ defmodule Nebu.Matrix.CrossSigningKeyStore do
 
   Stores and serves a user's cross-signing keys — `master_key`,
   `self_signing_key`, and `user_signing_key` — published via
-  `POST /_matrix/client/v3/keys/device_signing/upload` and read back via
-  `POST /_matrix/client/v3/keys/query`. Signatures added via
-  `POST /_matrix/client/v3/keys/signatures/upload` are merged into the relevant
-  stored key object's `signatures` map.
+  `POST /_matrix/client/v3/keys/device_signing/upload`. `get_keys/1` is the owner's own
+  read-back; `POST /_matrix/client/v3/keys/query` is served by `Nebu.Matrix.KeyQueryStore`
+  (its own visibility-filtered statement, story key-query-hardening). Signatures of the
+  user's OWN devices on the master key (`POST /_matrix/client/v3/keys/signatures/upload`,
+  `Nebu.Matrix.KeySignatureStore`) are merged into the stored master key object's
+  `signatures` map by `merge_signatures/4`; cross-USER signatures (signer != owner) are
+  not part of the key object, they live in `cross_signing_user_signatures`
+  (migration 000061).
 
   Plain module, inline parameterised SQL via `Nebu.Repo` (ADR-018 — no Ecto
   schema, no Repository/Service layer). PostgreSQL-backed rather than ETS so the
@@ -71,10 +75,13 @@ defmodule Nebu.Matrix.CrossSigningKeyStore do
   `%{"master_key" => obj, "self_signing_key" => obj, "user_signing_key" => obj}`;
   any of the three may be absent or nil (stored as SQL NULL). Sets the
   consume-once `cross_signing_changed` flag (device-less `/sync`) and draws a new
-  `changed_pos` (device-bound `/sync`, also for identical keys), under the per-user
+  `changed_pos` (device-bound `/sync`, also for identical keys; story device-key-directory: the row is written with the pending
+  marker -1 and the commit-time stamp of the device-list stream (migration 000060, `Nebu.Matrix.DeviceListStore.stamp_keys!/2`) assigns
+  the position drawn at COMMIT, so one key change draws exactly ONE position), under the per-user
   `sync_global|` advisory lock in one transaction (nested in the caller's transaction
   when there is one: the lock then lives until that commits). A failed write returns
-  `{:error, reason}`.
+  `{:error, reason}`. Story key-query-hardening (D7): the cross-user signatures stored on the user's master key
+  (`cross_signing_user_signatures`, migration 000061) that name a key (id AND public key value) which is no longer a key of the new master key are deleted in the same transaction.
   """
   @spec put_keys(String.t(), map()) :: :ok | {:error, term()}
   def put_keys(user_id, keys) when is_binary(user_id) and is_map(keys) do
@@ -89,14 +96,14 @@ defmodule Nebu.Matrix.CrossSigningKeyStore do
                  INSERT INTO cross_signing_keys
                    (user_id, master_key_json, self_signing_key_json, user_signing_key_json,
                     cross_signing_changed, changed_pos, created_at, updated_at)
-                 SELECT $1::text, $2::text, $3::text, $4::text, TRUE, nextval('sync_global_pos_seq'), $5::bigint, $5::bigint
+                 SELECT $1::text, $2::text, $3::text, $4::text, TRUE, -1::bigint, $5::bigint, $5::bigint
                  WHERE NOT EXISTS (SELECT 1 FROM users WHERE user_id = $1::text AND deletion_status IS NOT NULL)
                  ON CONFLICT (user_id) DO UPDATE
                    SET master_key_json       = EXCLUDED.master_key_json,
                        self_signing_key_json = EXCLUDED.self_signing_key_json,
                        user_signing_key_json = EXCLUDED.user_signing_key_json,
                        cross_signing_changed = TRUE,
-                       changed_pos           = nextval('sync_global_pos_seq'),
+                       changed_pos           = -1,
                        updated_at            = EXCLUDED.updated_at
                  """,
                  [
@@ -108,8 +115,20 @@ defmodule Nebu.Matrix.CrossSigningKeyStore do
                  ]
                ),
              # story gdpr-erasure-global-data (D10): an erased (or being erased) user's upload stores nothing
-             :ok <- if(n == 0, do: {:error, :user_erased}, else: :ok) do
-          :ok
+             :ok <- if(n == 0, do: {:error, :user_erased}, else: :ok),
+             # story key-query-hardening (D7): the cross-user signatures made on a master key that is no longer the user's master key are dropped in the SAME
+             # transaction (an unchanged master key keeps them); the writers of those rows hold the same `sync_global|` advisory lock
+             {:ok, _} <-
+               query(
+                 """
+                 DELETE FROM cross_signing_user_signatures s
+                  WHERE s.target_user_id = $1::text
+                    AND NOT EXISTS (SELECT 1 FROM unnest($2::text[], $3::text[]) AS k(id, key) WHERE k.id = s.target_key_id AND k.key = s.target_key)
+                 """,
+                 [user_id | master_key_pairs(keys["master_key"])]
+               ) do
+          # story device-key-directory: the cross-signing key change goes into the device-list stream (peers see it in `device_lists.changed` and `/keys/changes`)
+          Nebu.Matrix.DeviceListStore.stamp_keys!(Nebu.Repo, user_id)
         else
           {:error, reason} -> Nebu.Repo.rollback(reason)
         end
@@ -190,44 +209,6 @@ defmodule Nebu.Matrix.CrossSigningKeyStore do
   end
 
   @doc """
-  Bulk lookup for `/keys/query`. Returns, for each requested user that has stored
-  cross-signing keys, `%{"master" => obj, "self_signing" => obj, "user_signing" => obj}`
-  (absent keys omitted). Users with nothing stored are omitted from the result.
-  Read path that never raises (mirrors `DeviceKeyStore`).
-  """
-  @spec query_cross_signing([String.t()]) :: %{optional(String.t()) => map()}
-  def query_cross_signing(user_ids) when is_list(user_ids) do
-    case user_ids do
-      [] ->
-        %{}
-
-      _ ->
-        case safe_query(
-               """
-               SELECT user_id, master_key_json, self_signing_key_json, user_signing_key_json
-               FROM cross_signing_keys
-               WHERE user_id = ANY($1)
-               """,
-               [user_ids]
-             ) do
-          {:ok, %{rows: rows}} ->
-            Enum.reduce(rows, %{}, fn [uid, mk, ssk, usk], acc ->
-              entry =
-                %{}
-                |> maybe_put("master", decode_key(mk))
-                |> maybe_put("self_signing", decode_key(ssk))
-                |> maybe_put("user_signing", decode_key(usk))
-
-              if map_size(entry) > 0, do: Map.put(acc, uid, entry), else: acc
-            end)
-
-          _ ->
-            %{}
-        end
-    end
-  end
-
-  @doc """
   Merges signatures into the stored cross-signing key object whose key-id matches
   `key_id`. `new_signatures` is the `signatures` map carried by the signed object.
   Returns `:ok` if a matching cross-signing key was updated, `:not_found` otherwise
@@ -241,7 +222,8 @@ defmodule Nebu.Matrix.CrossSigningKeyStore do
   Story cross-signing-upload-races (D4): ONE transaction. `lock_keys/1` (row lock -> advisory lock -> read), the key is
   found by its id IN THAT READ, the object comparison is made against the LOCKED object, the signatures are
   deep-merged and all three columns are written from the locked read. A concurrent cross-signing reset or a concurrent
-  merge is therefore never overwritten with a stale merge base. A failed locked read or a failed write raises
+  merge is therefore never overwritten with a stale merge base. When the merge changed the stored object, the user's own key row of the
+  device-list stream is stamped in the same transaction (story key-query-hardening, D10). A failed locked read or a failed write raises
   (`"cross-signing signature merge failed"`, the request answers 500), never "nothing stored".
   """
   @spec merge_signatures(String.t(), String.t(), map(), map()) :: :ok | :not_found
@@ -255,7 +237,12 @@ defmodule Nebu.Matrix.CrossSigningKeyStore do
           merged = deep_merge_signatures(obj, new_signatures)
 
           case put_keys_no_flag(user_id, Map.put(stored, body_key, merged)) do
-            :ok -> :ok
+            :ok ->
+              # story key-query-hardening (D10): a stored signature stamps the signer's (= the owner's) own key row of the device-list stream, only when the
+              # stored object changed; after the row and advisory locks of lock_keys/1 (the order of put_keys/2: devices -> device_keys -> stream row)
+              if merged != obj, do: Nebu.Matrix.DeviceListStore.stamp_keys!(Nebu.Repo, user_id)
+              :ok
+
             :refused -> :not_found
             {:error, reason} -> Nebu.Repo.rollback(reason)
           end
@@ -428,14 +415,21 @@ defmodule Nebu.Matrix.CrossSigningKeyStore do
     end)
   end
 
+  # [ids, public keys] (two parallel lists) of the master key: a cross-user signature is bound to the key itself (id AND public key value, nothing enforces
+  # id == key), so a replacement that keeps the id with another key drops it as well
+  defp master_key_pairs(%{"keys" => keys}) when is_map(keys) do
+    pairs = for {prop, key} <- keys, is_binary(key), do: {key_id_of(prop), key}
+    [Enum.map(pairs, &elem(&1, 0)), Enum.map(pairs, &elem(&1, 1))]
+  end
+
+  defp master_key_pairs(_master), do: [[], []]
+
   defp encode_key(nil), do: nil
   defp encode_key(obj) when is_map(obj), do: Jason.encode!(obj)
 
   defp decode_key(nil), do: nil
   defp decode_key(json) when is_binary(json), do: Jason.decode!(json)
 
-  defp maybe_put(map, _key, nil), do: map
-  defp maybe_put(map, key, value), do: Map.put(map, key, value)
 
   defp now_ms, do: System.system_time(:millisecond)
 

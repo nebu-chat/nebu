@@ -870,9 +870,22 @@ defmodule Nebu.Matrix.HistoryVisibilityHttpTest do
       # Initial: `room_heads` + the persist transaction (token upsert, ONE cursor statement) instead of the one upsert. Incremental: the old 51 (and every
       # earlier incremental pin) was the count of a FALLBACK, because the map iteration order ran `initial_sync` first (see `measured` below); now it is a
       # REAL incremental sync of one moved room: `room_heads` + ONE range read + the guarded token UPDATE + ONE cursor statement, no SET LOCAL.
-      initial_sync: {50, 2},
-      incremental_sync: {30, 0}
+      # story device-key-directory (DELIBERATE re-pin, old -> new, MEASURED: initial 54 with 2 SET LOCAL): initial_sync {50, 2} -> {52, 2}, +2 (the floor moves with the ceiling).
+      # A /sync now runs a per-request CONSTANT of device-list statements (the stream bound and the device-list read, one statement each whatever the number of rooms:
+      # they take the user id, not a room list); the SET LOCAL count is unchanged.
+      # story device-key-directory (DELIBERATE re-pin, old -> new, MEASURED: incremental 36 with 0 SET LOCAL): incremental_sync {30, 0} -> {33, 0}, +3 (the floor moves with
+      # the ceiling). An incremental /sync runs `DeviceListStore.changes/3` with a position: the stream bound (`bound/0`), the `changed` read and the `left` read, one
+      # statement each, keyed on the user id, a per-request CONSTANT independent of the number of rooms.
+      initial_sync: {52, 2},
+      incremental_sync: {33, 0}
     }
+
+    # story to-device-messaging (DELIBERATE re-pin, test review m3): the two /sync paths are RANGES, the old baseline is the floor and this the CEILING (MEASURED on the
+    # reference implementation: initial 52, incremental 33 = the delivery of the device's to-device queue, plus the pre-check `pending?`); the number of SET LOCAL
+    # statement_timeout statements stays EXACT (the `lock_timeout` is a `set_config`). The cap that matters is pinned by `to_device_concurrency_test.exs`.
+    # story device-key-directory: the initial_sync ceiling 52 -> 54 (+2) and the incremental_sync ceiling 33 -> 36 (+3), see @baseline: the device-list position
+    # + changed + left, one statement each keyed on the user id, constant per request and independent of the room count.
+    @sync_ceiling %{initial_sync: 54, incremental_sync: 36}
 
     defp count_fixture! do
       s = scenario!("shared")
@@ -909,7 +922,14 @@ defmodule Nebu.Matrix.HistoryVisibilityHttpTest do
         end
 
       counts = Map.new(results, fn {name, statements} -> {name, {length(statements), Enum.count(statements, &String.contains?(&1, "SET LOCAL"))}} end)
-      assert counts == @baseline, "the statement counts changed: #{inspect(counts)}"
+      sync_names = Map.keys(@sync_ceiling)
+      assert Map.drop(counts, sync_names) == Map.drop(@baseline, sync_names), "the statement counts changed: #{inspect(counts)}"
+
+      for name <- sync_names do
+        {total, locals} = counts[name]
+        {floor, floor_locals} = @baseline[name]
+        assert total in floor..@sync_ceiling[name] and locals == floor_locals, "#{name}: #{total} statements / #{locals} SET LOCAL, allowed #{floor}..#{@sync_ceiling[name]} / #{floor_locals}"
+      end
       assert Enum.sum(for {_name, {total, _}} <- @baseline, do: total) > 0, "the baseline was recorded"
 
       for name <- [:messages, :event, :search] do
