@@ -3,7 +3,9 @@ defmodule Nebu.Admin.OAuthSwitch do
   The pure parts of the OAuth switch section of `/admin/config` (story `admin-oauth-switch`, ADR-033 "Admin UI switch",
   AS1 - AS12): turning the submitted form into a change or per-field errors (`validate/2`) and deriving the non-blocking
   precondition list the server can see itself (`status/2`). No database access in either function; `current_env/0` reads the
-  running node for `status/2`. The write itself is `Nebu.OAuth.save_switch/2` (ADR-020: this module reaches the OAuth domain
+  running node for `status/2`. The section "Matrix session lifetime" of the same page (story session-lifetime-setting) has its helpers here too
+  (`validate_session_lifetime/1`, `stored_session_lifetime/1`, `lifetime_text/1`: pure; `session_lifetime_in_effect/1` asks `Nebu.Web.SessionConfig` for the
+  effective value, a per-node cache read). The write itself is `Nebu.OAuth.save_switch/2` (ADR-020: this module reaches the OAuth domain
   only through `Nebu.OAuth`).
 
   ## Validation (AS3)
@@ -191,6 +193,58 @@ defmodule Nebu.Admin.OAuthSwitch do
     if (turning_on? or issuer_differs?) and ack != "true",
       do: Map.put(errors, :ack, "Tick the box to confirm that you have read the activation checklist before OAuth is switched on or an issuer is set or changed: the issuer origin is also trusted by the legacy SSO login, with OAuth off too."),
       else: errors
+  end
+
+  # ─── Matrix session lifetime (story session-lifetime-setting) ───────────────
+
+  @doc """
+  Validates the text of the lifetime field: whole seconds as plain decimal digits (surrounding white space trimmed) between the bounds of
+  `Nebu.OAuth.matrix_session_ttl_bounds/0` (3600 .. 7 776 000, the numbers the runtime reader uses). `{:ok, seconds}` or `{:error, message}`; the
+  message is fixed text and never echoes the submitted value. Anything that is not text is an error.
+  """
+  @spec validate_session_lifetime(term()) :: {:ok, pos_integer()} | {:error, String.t()}
+  def validate_session_lifetime(raw) when is_binary(raw) do
+    case Nebu.OAuth.parse_matrix_session_ttl(raw) do
+      {:ok, seconds} -> {:ok, seconds}
+      :error -> {:error, session_lifetime_error()}
+    end
+  end
+
+  def validate_session_lifetime(_other), do: {:error, session_lifetime_error()}
+
+  defp session_lifetime_error do
+    {min, max} = Nebu.OAuth.matrix_session_ttl_bounds()
+    "Enter a whole number of seconds between #{min} (#{lifetime_text(min)}) and #{max} (#{lifetime_text(max)})."
+  end
+
+  @doc "The saved lifetime of the page's `config` (`[{key, value}]` list or map) when it is valid, else `nil` (the same parser as the runtime reader)."
+  @spec stored_session_lifetime(list() | map()) :: pos_integer() | nil
+  def stored_session_lifetime(config) do
+    case Nebu.OAuth.parse_matrix_session_ttl(value(config, "matrix_session_ttl_seconds")) do
+      {:ok, seconds} -> seconds
+      :error -> nil
+    end
+  end
+
+  @doc """
+  The lifetime in effect for a new session on this node: the saved one of `config`, else `Nebu.Web.SessionConfig` (the node's last known good value, the env
+  value, 8 hours).
+  """
+  @spec session_lifetime_in_effect(list() | map()) :: pos_integer()
+  def session_lifetime_in_effect(config), do: stored_session_lifetime(config) || Nebu.Web.SessionConfig.matrix_session_ttl_seconds()
+
+  @doc "A number of seconds as human text: `\"8 hours\"`, `\"90 days\"`, `\"1 hour 30 minutes\"`; a value that is not a whole number of minutes is shown in seconds."
+  @spec lifetime_text(pos_integer()) :: String.t()
+  def lifetime_text(seconds) when is_integer(seconds) and seconds > 0 do
+    if rem(seconds, 60) != 0 do
+      "#{seconds} seconds"
+    else
+      minutes = div(seconds, 60)
+
+      [{div(minutes, 1440), "day"}, {div(rem(minutes, 1440), 60), "hour"}, {rem(minutes, 60), "minute"}]
+      |> Enum.reject(fn {n, _unit} -> n == 0 end)
+      |> Enum.map_join(" ", fn {n, unit} -> "#{n} #{unit}#{if n == 1, do: "", else: "s"}" end)
+    end
   end
 
   # ─── status ────────────────────────────────────────────────────────────────

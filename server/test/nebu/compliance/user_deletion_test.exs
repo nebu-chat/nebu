@@ -686,7 +686,7 @@ defmodule Nebu.Compliance.UserDeletionTest do
   defp delete_idx(seq, table), do: index_of(seq, fn sql, _ -> deleting?(sql, table) end)
 
   @inventory_deletes ~w(user_room_account_data account_data cross_signing_keys device_keys device_one_time_keys device_fallback_keys
-                        forgotten_rooms auto_join_opt_outs read_receipts uia_sessions oauth_account_sessions oauth_consent_requests oauth_codes)
+                        forgotten_rooms auto_join_opt_outs read_receipts uia_sessions oauth_account_sessions oauth_consent_requests oauth_consent_grants oauth_codes)
 
   test "ck: statement sequence: guard, in-progress mark, writer lock BEFORE the account data / cross-signing deletes, a DELETE per inventory table, status flip last",
        %{sql_bucket: sql_bucket} do

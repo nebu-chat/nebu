@@ -1,0 +1,581 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 7927db3c..bde4ead8 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -11,6 +11,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
+ 
+ ### Added
+ 
++- **Admin-configurable Matrix session lifetime (story session-lifetime-setting, epic oauth-session-and-consent; migration 000056, audit action `session_lifetime_changed`)**: the section "Matrix session lifetime" on `/admin/config` sets how long a new Matrix session (OAuth and legacy login) lasts, in whole seconds from 3600 to 7776000 (1 hour to 90 days), stored as `server_config.matrix_session_ttl_seconds`. Without a saved value `NEBU_MATRIX_SESSION_TTL_SECONDS` applies, else 8 hours (unchanged default). The lifetime stays an absolute ceiling from the sign-in; a change applies to the next sign-in and existing OAuth sessions keep the ceiling they were issued with (legacy sessions follow the current setting when they are extended, lowered or raised, because they have no stored ceiling; their `expires_at` is never shortened). The form is gated like the OAuth switch (fresh sign-in, "Sign in again to save"), refuses out-of-range values next to the field, and writes one audit row with the old and new number in the same transaction. The value is read through the per-node config cache (the saving node at once, other nodes within `NEBU_OAUTH_CONFIG_CACHE_MS`). Migration 000056 adds the key to the `server_config` update allowlist (the second save would fail without it). See `docs/architecture/07-deployment.md`, "Matrix session lifetime".
+ - **`PUT /_matrix/client/v3/rooms/{roomId}/redact/{eventId}/{txnId}` and applied `m.room.redaction` events, audit action `room_event_redacted`, migration 000051 (story state-writer-redaction; follow-ups `fw`, `fv`, `fz`, `fx` closed)**: Element's "Remove" and "Remove recent messages" work. A redaction is decided and written by the room process (own event: `events["m.room.redaction"]`; another user's event: also the `redact` level), stored with a top-level `redacts` (new column `events.redacts`, migration 000051) and served with `redacts` and `content.redacts`; the redacted event is served pruned (`content: {}`, `unsigned.redacted_because`) on every read path while its content stays in the database (Compliance Mode); a redaction of another user's event writes the audit row `room_event_redacted`. Operator query **Q-rd** (07-deployment) lists legacy unchecked redactions.
+ - **`PUT /_matrix/client/v3/rooms/{roomId}/state/m.room.power_levels` (story power-levels-enforcement; follow-ups `eq`, `er`, `fr` closed)**: power levels can be changed after the room was created (Element's Roles & Permissions, `/op`, `/deop`) under the room version 10 change rules, decided and written in the room process in one transaction; new audit action `room_power_levels_changed`; the PUT is charged to the `moderation` tier; operator query Q-pl in `docs/architecture/07-deployment.md`.
+ - **Room moderation routes `POST /_matrix/client/v3/rooms/{roomId}/kick`, `/ban` and `/unban` (story moderation-routes-atomic-ban; follow-ups `ex` and `ew` closed)**: the three routes work as the Matrix spec and room version 10 define them, including the "Disinvite" of a pending invitee (a kick of an invited user) and pre-emptive bans. Every change that a ban can race (kick, ban, unban, the invite event, the decline, the join) is decided and written inside the room process, stamped after the user's latest member event and committed in ONE database transaction. A fourth per-user rate-limit tier `moderation` (30 per minute, burst 60, one unit per request of the three routes; a labelled divergence from the spec's "Rate-limited: No"; env `NEBU_RATE_LIMIT_MODERATION_PER_MIN` / `NEBU_RATE_LIMIT_MODERATION_BURST`, passed through by `docker-compose.yml`). New audit actions `room_member_kicked`, `room_member_banned`, `room_member_unbanned`. Operator query Q-half (banned users that are still in the member set) in `docs/architecture/07-deployment.md`.
+diff --git a/docs/architecture/07-deployment.md b/docs/architecture/07-deployment.md
+index dfb77877..41829c2a 100644
+--- a/docs/architecture/07-deployment.md
++++ b/docs/architecture/07-deployment.md
+@@ -206,6 +206,18 @@ Instances without a convenient database console (UpCloud, Stackit) switch OAuth
+ - **Status list.** The section lists what the server can see itself, each item prefixed with `OK`, `Attention` or `Note`: the stored switch and issuer; whether THIS node answers `auth_metadata` with 200 right now (and the propagation note when it differs from the stored setting); `NEBU_TRUSTED_PROXY_CIDRS` is empty (every per-IP limit and per-source cap is global behind a proxy, G3-2; right only when clients connect directly); the issuer host differs from `NEBU_SERVER_NAME` (right only with `.well-known` delegation); `matrix_oidc_refresh_mode` is online while `oauth_idp_revalidation` is `per_refresh` (OAuth logins would be refused: the IdP issues no refresh token); an insecure admin session; the re-authentication opt-out. **None of this blocks saving and none of it says that OAuth is ready.** The server cannot see the load balancer, whether the client addresses it forwards are the real ones (the positive client-IP test of G3-2), what the IdP puts into `auth_time` or how the clients behave: those and the manual verification groups A-F stay the operator's job.
+ - **Local stack.** `dev/tls/oauth.sh` (`make dev-tls-oauth-on` / `-off`) stays; it writes the same two keys with SQL.
+ 
++### Matrix session lifetime (story session-lifetime-setting)
++
++How long a signed-in Matrix session lasts is set on the **Configuration** page of the Admin UI (`/admin/config`, section "Matrix session lifetime"; `server_config.matrix_session_ttl_seconds`): whole seconds from 3600 (1 hour) to 7776000 (90 days). Without a saved value the environment value `NEBU_MATRIX_SESSION_TTL_SECONDS` applies, else 8 hours; the environment value stays the fallback below a saved value (and the way the e2e stack shortens the ceiling). A login is never refused because of the setting.
++
++- **What it is.** An ABSOLUTE ceiling from the sign-in (`matrix_sessions.session_expires_at` of an OAuth session; the `expires_at` bound of a legacy login): a refresh never extends it, this story adds no sliding window. It applies to the OAuth and to the legacy login (`Nebu.Web.SessionConfig.matrix_session_ttl_seconds/0`). The admin session ceiling (`NEBU_ADMIN_SESSION_TTL_SECONDS`) is not part of it.
++- **Existing OAuth sessions keep their ceiling.** A change applies to the NEXT sign-in; OAuth sessions issued before keep the `session_expires_at` they were issued with, also across refreshes. To end them earlier use the revoke paths of the activation checklist.
++- **Legacy sessions follow the setting (accepted).** A legacy (non-OAuth) session has no stored ceiling: the bound of its extension by the background refresh worker and of the refresh-token reuse window is `created_at` plus the CURRENT lifetime. A lowered value therefore stops the extension of existing legacy sessions earlier, a raised value lets the worker extend them up to the new bound; their `expires_at` is never shortened. The absolute guarantee above is for OAuth sessions only.
++- **Unreadable configuration.** If `server_config` cannot be read, a login uses the environment value / 8 hours (fail safe; the failed read is not cached, the next call reads again). A saved value that is damaged or out of range is ignored (never clamped) with one `WARNING` that names the key and never the value.
++- **Protection and audit.** The same as the OAuth switch: admin role, CSRF, strict fetch metadata and a fresh sign-in (marker bound to `/admin/config`; the form shows "Sign in again to save" until you have signed in, then "Save session lifetime"). One `audit_log` row `session_lifetime_changed` per change (actor, `before_seconds`, `after_seconds`: numbers only), written in the same transaction as the value; if the row cannot be written nothing is saved (a shorter lifetime is not exempt). A value outside the bounds is refused with a message next to the field and nothing is saved or audited.
++- **Effect.** The saving node uses the new value at once; every other node within `NEBU_OAUTH_CONFIG_CACHE_MS` (default 2 s, at most 5 s), because the value is read through the same per-node cache as the OAuth switch (no `server_config` query per login).
++- **Migration 000056** adds `matrix_session_ttl_seconds` to the `config_update_mutable` row-level-security allowlist of `server_config`. Without it the first save works and the second fails with an RLS error. Rolling-deploy safe: old nodes never read the key.
++
+ ### Admin configuration forms and their protection (story admin-config-privileged-forms-sweep)
+ 
+ Every form under `/admin/config*` is behind the admin role, the Phoenix CSRF token and strict fetch metadata (Chrome / Firefox the four `Sec-Fetch-*` headers, Safari the click proof `_click_proof`, a notice page instead of a 403); the pages of the forms below are not framable and `no-store`. The forms that grant authority or widen trust additionally need a **fresh sign-in** (5 minutes, bound to the page, single use, consumed by a successful save), listed in the table below.
+@@ -218,6 +230,7 @@ The forms, their protection and the reason:
+ |---|---|---|---|
+ | SSO redirect origins, SSO redirect schemes | `/admin/config` | strict + fresh sign-in; audit rows `sso_redirect_origins_changed` / `sso_redirect_schemes_changed` | redirect sinks for a `loginToken` |
+ | OAuth 2.0 authorization server | `/admin/config` | strict + fresh sign-in + acknowledgement; audit row `oauth_switch_changed` | see "The Admin UI switch" |
++| Matrix session lifetime (`matrix_session_ttl_seconds`) | `/admin/config` | strict + fresh sign-in; audit row `session_lifetime_changed` (before / after seconds) in the same transaction, always required | a longer lifetime keeps a stolen session usable for longer; see "Matrix session lifetime" |
+ | Role mapping (`admin_group_claim`) | `/admin/config/role-mapping` | strict + fresh sign-in; audit row `admin_group_claim_changed` | decides who is an administrator |
+ | Claim mapping (`oidc_user_id_claim`, `oidc_displayname_claim`, `oidc_email_claim`) | `/admin/config/claim-mapping` | strict + fresh sign-in; audit row `oidc_claim_mapping_changed` (claim names) | decides which IdP claim identifies a user |
+ | OIDC scopes, OIDC refresh mode | `/admin/config` | strict fetch metadata only, NO fresh sign-in; audit rows `oidc_scopes_changed` / `oidc_refresh_mode_changed` | they grant no authority by themselves (except on an instance WITHOUT a configured admin claim path, where the admin check scans every claim and an extra scope can feed it, the already accepted scanner risk) but change the claim set the IdP issues and the token lifetime; the fresh sign-in would use the very scopes / refresh mode the form changes, a wrong value would lock you out of the sign-in needed to correct it |
+diff --git a/server/config/config.exs b/server/config/config.exs
+index 72d9a7ca..3beb536f 100644
+--- a/server/config/config.exs
++++ b/server/config/config.exs
+@@ -48,7 +48,8 @@ config :phoenix,
+     "oidc_user_id_claim",
+     "oidc_displayname_claim",
+     "oidc_email_claim",
+-    "admin_group_claim"
++    "admin_group_claim",
++    "matrix_session_ttl_seconds"
+   ]
+ 
+ # ── admin-ui-migration: Phoenix LiveView Admin UI endpoint (compile-time base) ──
+diff --git a/server/lib/nebu/admin/config_controller.ex b/server/lib/nebu/admin/config_controller.ex
+index 8abea222..341a1d54 100644
+--- a/server/lib/nebu/admin/config_controller.ex
++++ b/server/lib/nebu/admin/config_controller.ex
+@@ -478,6 +478,76 @@ defmodule Nebu.Admin.ConfigController do
+     %{enabled: stored.enabled, issuer: suggestion || stored.issuer, ack: false, suggested?: suggestion != nil}
+   end
+ 
++  # Story session-lifetime-setting: the Matrix session lifetime (`matrix_session_ttl_seconds`, whole seconds 3600..7_776_000). The same gate as the OAuth
++  # switch (strict fetch metadata, then a fresh admin sign-in bound to /admin/config; both BEFORE anything is validated or written), validation
++  # (`Nebu.Admin.OAuthSwitch.validate_session_lifetime/1`), then ONE transaction (`save_config_audited`: the upsert and the audit row, which is ALWAYS required:
++  # no way-back exemption). The marker is consumed after a SUCCESSFUL write only. The form is read from the BODY.
++  def save_session_lifetime(conn, _params) do
++    with {:ok, conn, _kind} <- Nebu.Admin.OAuthAdminHelpers.gate(conn, :marker, @config_path) do
++      do_save_session_lifetime(conn, conn.body_params)
++    else
++      {:halt, conn} -> conn
++    end
++  end
++
++  defp do_save_session_lifetime(conn, params) do
++    submitted = params["matrix_session_ttl_seconds"]
++    cfg = load_config()
++    saved = Nebu.Admin.OAuthSwitch.stored_session_lifetime(cfg)
++    # the audit's "before" is the value in effect (saved, else env, else 8 hours); "no change" is judged against the SAVED value only
++    current = Nebu.Admin.OAuthSwitch.session_lifetime_in_effect(cfg)
++
++    case Nebu.Admin.OAuthSwitch.validate_session_lifetime(submitted) do
++      {:error, message} ->
++        conn
++        |> put_status(200)
++        |> assign(:lifetime_value, if(is_binary(submitted), do: submitted, else: ""))
++        |> assign(:lifetime_error, message)
++        |> render_config()
++
++      {:ok, ^saved} ->
++        conn
++        |> put_flash(:info, "No change: the session lifetime already is #{Nebu.Admin.OAuthSwitch.lifetime_text(saved)}.")
++        |> redirect(to: "/admin/config#session-lifetime")
++
++      {:ok, seconds} ->
++        save_session_lifetime_change(conn, current, seconds)
++    end
++  end
++
++  defp save_session_lifetime_change(conn, before_seconds, seconds) do
++    result =
++      H.save_config_audited(conn, %{"matrix_session_ttl_seconds" => Integer.to_string(seconds)},
++        action: "session_lifetime_changed",
++        target_id: "matrix_session_ttl_seconds",
++        metadata: %{"before_seconds" => before_seconds, "after_seconds" => seconds},
++        label: "Matrix session lifetime",
++        form: :session_lifetime,
++        unaudited_ok: false
++      )
++
++    case result do
++      {:ok, _audited} ->
++        conn
++        |> Nebu.Admin.Auth.consume_reauth()
++        |> put_flash(
++          :info,
++          "Session lifetime saved: #{Nebu.Admin.OAuthSwitch.lifetime_text(seconds)}. New sign-ins use it; existing sessions keep the ceiling they were issued with. " <> oauth_propagation_sentence()
++        )
++        |> redirect(to: "/admin/config#session-lifetime")
++
++      {:error, :audit} ->
++        conn
++        |> put_flash(:error, H.audit_refused_flash("Session lifetime"))
++        |> redirect(to: "/admin/config#session-lifetime")
++
++      {:error, :db} ->
++        conn
++        |> put_flash(:error, "Failed to save the session lifetime.")
++        |> redirect(to: "/admin/config#session-lifetime")
++    end
++  end
++
+   # AC5: each comma-separated token must (a) be non-empty/non-whitespace, (b) match
+   # RFC 3986 scheme syntax, (c) not case-insensitively collide with the hardcoded
+   # denylist. An empty overall string is valid input (operator clearing custom
+@@ -525,6 +595,16 @@ defmodule Nebu.Admin.ConfigController do
+     end
+   end
+ 
++  # the lifetime section: the value in effect (shown as text), the field value (the rejected text again after a refused save) and the error
++  defp assign_session_lifetime(conn, cfg) do
++    in_effect = Nebu.Admin.OAuthSwitch.session_lifetime_in_effect(cfg)
++
++    conn
++    |> assign(:lifetime_text, Nebu.Admin.OAuthSwitch.lifetime_text(in_effect))
++    |> assign(:lifetime_value, conn.assigns[:lifetime_value] || Integer.to_string(in_effect))
++    |> assign(:lifetime_error, conn.assigns[:lifetime_error])
++  end
++
+   defp render_config(conn) do
+     cfg = load_config()
+     env = Nebu.Admin.OAuthSwitch.current_env()
+@@ -538,6 +618,7 @@ defmodule Nebu.Admin.ConfigController do
+       |> assign(:oauth_form, conn.assigns[:oauth_form] || default_oauth_form(cfg, env))
+       |> assign(:oauth_errors, conn.assigns[:oauth_errors] || %{})
+     end)
++    |> assign_session_lifetime(cfg)
+     |> Nebu.Admin.OAuthAdminHelpers.assign_reauth(@config_path)
+     |> assign(:page_title, "Configuration")
+     # admin-sidebar-nesting coordination contract (UX gate V1): the parent
+diff --git a/server/lib/nebu/admin/db.ex b/server/lib/nebu/admin/db.ex
+index 951d6a7b..86bf2b5c 100644
+--- a/server/lib/nebu/admin/db.ex
++++ b/server/lib/nebu/admin/db.ex
+@@ -802,6 +802,12 @@ defmodule Nebu.Admin.DB do
+       Nebu.Web.LogStore.refresh_policy_cache()
+     end
+ 
++    # story session-lifetime-setting: the Matrix session lifetime is read at every login through the per-node cache of `Nebu.OAuth.Config` (ADR-020: through the
++    # OAuth facade). The saving node drops its entry so the next login uses the new value at once; other nodes follow within `NEBU_OAUTH_CONFIG_CACHE_MS`.
++    if Map.has_key?(stringify_keys(changes), "matrix_session_ttl_seconds") do
++      Nebu.OAuth.invalidate_config_cache()
++    end
++
+     :ok
+   end
+ 
+diff --git a/server/lib/nebu/admin/oauth_switch.ex b/server/lib/nebu/admin/oauth_switch.ex
+index 506df387..1e5588f4 100644
+--- a/server/lib/nebu/admin/oauth_switch.ex
++++ b/server/lib/nebu/admin/oauth_switch.ex
+@@ -193,6 +193,66 @@ defmodule Nebu.Admin.OAuthSwitch do
+       else: errors
+   end
+ 
++  # ─── Matrix session lifetime (story session-lifetime-setting) ───────────────
++
++  @doc """
++  Validates the text of the lifetime field: whole seconds as plain decimal digits (surrounding white space trimmed) between the bounds of
++  `Nebu.OAuth.matrix_session_ttl_bounds/0` (3600 .. 7 776 000, the numbers the runtime reader uses). `{:ok, seconds}` or `{:error, message}`; the
++  message is fixed text and never echoes the submitted value. Anything that is not text is an error.
++  """
++  @spec validate_session_lifetime(term()) :: {:ok, pos_integer()} | {:error, String.t()}
++  def validate_session_lifetime(raw) when is_binary(raw) do
++    {min, max} = Nebu.OAuth.matrix_session_ttl_bounds()
++    trimmed = String.trim(raw)
++
++    with true <- Regex.match?(~r/\A[0-9]{1,12}\z/, trimmed),
++         seconds = String.to_integer(trimmed),
++         true <- seconds >= min and seconds <= max do
++      {:ok, seconds}
++    else
++      _ -> {:error, session_lifetime_error(min, max)}
++    end
++  end
++
++  def validate_session_lifetime(_other) do
++    {min, max} = Nebu.OAuth.matrix_session_ttl_bounds()
++    {:error, session_lifetime_error(min, max)}
++  end
++
++  defp session_lifetime_error(min, max),
++    do: "Enter a whole number of seconds between #{min} (#{lifetime_text(min)}) and #{max} (#{lifetime_text(max)})."
++
++  @doc "The saved lifetime of the page's `config` list (`[{key, value}]`) when it is valid, else `nil`."
++  @spec stored_session_lifetime(list() | map()) :: pos_integer() | nil
++  def stored_session_lifetime(config) do
++    {min, max} = Nebu.OAuth.matrix_session_ttl_bounds()
++
++    with raw when is_binary(raw) <- value(config, "matrix_session_ttl_seconds"),
++         {:ok, seconds} when seconds >= min and seconds <= max <- validate_session_lifetime(raw) do
++      seconds
++    else
++      _ -> nil
++    end
++  end
++
++  @doc "The lifetime in effect for the page: the saved one, else the env value / 8 hours (`Nebu.Web.SessionConfig`)."
++  @spec session_lifetime_in_effect(list() | map()) :: pos_integer()
++  def session_lifetime_in_effect(config), do: stored_session_lifetime(config) || Nebu.Web.SessionConfig.matrix_session_ttl_seconds()
++
++  @doc "A number of seconds as human text: `\"8 hours\"`, `\"90 days\"`, `\"1 hour 30 minutes\"`; a value that is not a whole number of minutes is shown in seconds."
++  @spec lifetime_text(pos_integer()) :: String.t()
++  def lifetime_text(seconds) when is_integer(seconds) and seconds > 0 do
++    if rem(seconds, 60) != 0 do
++      "#{seconds} seconds"
++    else
++      minutes = div(seconds, 60)
++
++      [{div(minutes, 1440), "day"}, {div(rem(minutes, 1440), 60), "hour"}, {rem(minutes, 60), "minute"}]
++      |> Enum.reject(fn {n, _unit} -> n == 0 end)
++      |> Enum.map_join(" ", fn {n, unit} -> "#{n} #{unit}#{if n == 1, do: "", else: "s"}" end)
++    end
++  end
++
+   # ─── status ────────────────────────────────────────────────────────────────
+ 
+   @doc """
+diff --git a/server/lib/nebu/admin/router.ex b/server/lib/nebu/admin/router.ex
+index 900460fc..e61dff54 100644
+--- a/server/lib/nebu/admin/router.ex
++++ b/server/lib/nebu/admin/router.ex
+@@ -123,7 +123,7 @@ defmodule Nebu.Admin.Router do
+   # Decided on `conn.path_info` (the segment list the routing uses; empty segments are already dropped), NOT on
+   # `request_path`: `/admin/config/`, `/admin//config` or `/admin/oauth//registrations` reach the same actions and must
+   # get the same headers (review cycle 1, Kassandra Y-1).
+-  @config_unframed_segments ["refresh-mode", "scopes", "sso-schemes", "sso-origins", "oauth-switch", "claim-mapping", "role-mapping"]
++  @config_unframed_segments ["refresh-mode", "scopes", "sso-schemes", "sso-origins", "oauth-switch", "session-lifetime", "claim-mapping", "role-mapping"]
+ 
+   defp unframed_path?(["admin", "oauth" | _]), do: true
+   defp unframed_path?(["admin", "config"]), do: true
+@@ -242,6 +242,7 @@ defmodule Nebu.Admin.Router do
+     post "/config/sso-schemes", ConfigController, :save_sso_schemes
+     post "/config/sso-origins", ConfigController, :save_sso_origins
+     post "/config/oauth-switch", ConfigController, :save_oauth_switch
++    post "/config/session-lifetime", ConfigController, :save_session_lifetime
+ 
+     # Logs configuration (enhanced-logging/admin-logs-retention-settings)
+     get "/logs/config", LogsController, :index
+diff --git a/server/lib/nebu/admin/templates/config/index.html.heex b/server/lib/nebu/admin/templates/config/index.html.heex
+index c314d3ed..141dde84 100644
+--- a/server/lib/nebu/admin/templates/config/index.html.heex
++++ b/server/lib/nebu/admin/templates/config/index.html.heex
+@@ -293,6 +293,54 @@
+   </form>
+ </section>
+ 
++<%!-- Matrix session lifetime (story session-lifetime-setting): the ceiling a NEW Matrix session (OAuth and legacy login) gets at sign-in. A marker-gated form
++      (the same gate and button flow as the forms above), ONE audit row per change; existing sessions keep their ceiling. --%>
++<section id="session-lifetime" aria-labelledby="session-lifetime-heading" class="mb-6">
++  <h2 id="session-lifetime-heading" class="text-heading font-semibold mb-2">Matrix session lifetime</h2>
++  <p class="text-text-secondary mb-2">
++    How long a signed-in Matrix session lasts, counted from the sign-in. It applies to the OAuth and the legacy login alike.
++  </p>
++  <p id="session-lifetime-current" class="mb-2">Current lifetime: <strong>{@lifetime_text}</strong></p>
++
++  <form id="session-lifetime-form" method="post" action="/admin/config/session-lifetime">
++    <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
++    <input type="hidden" name="_click_proof" value="" data-click-proof />
++
++    <div class="form-control mt-2">
++      <label for="session-lifetime-input" class="label-text">Session lifetime in seconds</label>
++      <input
++        type="text"
++        id="session-lifetime-input"
++        name="matrix_session_ttl_seconds"
++        value={@lifetime_value}
++        autocomplete="off"
++        spellcheck="false"
++        inputmode="numeric"
++        aria-describedby={if @lifetime_error, do: "session-lifetime-help session-lifetime-error", else: "session-lifetime-help"}
++        aria-invalid={if @lifetime_error, do: "true"}
++        class="input input-bordered w-full max-w-xs"
++      />
++      <p :if={@lifetime_error} id="session-lifetime-error" role="alert" class="mt-1 text-error">
++        {@lifetime_error}
++      </p>
++      <div id="session-lifetime-help" class="label-text-alt mt-1 text-base-content/70">
++        <p>
++          Whole seconds, from 3600 (1 hour) to 7776000 (90 days). Without a saved value the environment value
++          <code>NEBU_MATRIX_SESSION_TTL_SECONDS</code> applies, else 8 hours.
++        </p>
++        <p>
++          The lifetime is an absolute ceiling from the sign-in: a refresh does not extend it. A change applies to the next sign-in;
++          existing OAuth sessions keep the ceiling they were issued with. Legacy sessions have no stored ceiling and follow the current
++          setting when they are extended.
++        </p>
++      </div>
++    </div>
++
++    <.reauth_hint id="session-lifetime-reauth-hint" reauth={@reauth} />
++    <.reauth_control reauth={@reauth} class="btn btn-primary mt-3" describedby="session-lifetime-reauth-hint">Save session lifetime</.reauth_control>
++  </form>
++</section>
++
+ <div class="overflow-x-auto">
+   <table class="table table-zebra">
+     <thead>
+diff --git a/server/lib/nebu/compliance/audit_writer.ex b/server/lib/nebu/compliance/audit_writer.ex
+index 84016dba..402b0944 100644
+--- a/server/lib/nebu/compliance/audit_writer.ex
++++ b/server/lib/nebu/compliance/audit_writer.ex
+@@ -157,6 +157,10 @@ defmodule Nebu.Compliance.AuditWriter do
+   # oidc_scopes_changed, oidc_refresh_mode_changed (SEC review L-3) -- the saves of the extra OIDC scopes and of the refresh modes (metadata: the
+   # saved scope strings / modes) change which claims the IdP issues and how long the tokens live: audited after the save like the three above.
+   # Without these entries the real writer answers :audit_unknown_action and the change is never audited.
++  # session_lifetime_changed added for oauth-session-and-consent/session-lifetime-setting -- the Admin UI save of the Matrix session lifetime
++  # (`POST /admin/config/session-lifetime`) writes exactly ONE row per change INSIDE the transaction of the `server_config` upsert (target_type "server_config",
++  # target_id "matrix_session_ttl_seconds", metadata: before_seconds / after_seconds, numbers only). Without this entry the real writer answers
++  # :audit_unknown_action, the transaction rolls back and the lifetime could never be changed from the Admin UI.
+   # space_name_changed, space_topic_changed, space_child_added, space_child_removed added for oauth-broker/space-edit-audit (follow-up dj) -- the Admin UI
+   # edits of a Space (`Nebu.Matrix.set_space_state/5`: name, topic, child add, child unlink) write exactly ONE row each after the successful state event (target_type "room",
+   # target_id = the space room id, metadata: name / topic truncated to 256 characters or child_room_id, plus the event_id of the `events` record). Not atomic with the
+@@ -239,6 +243,7 @@ defmodule Nebu.Compliance.AuditWriter do
+     oidc_scopes_changed
+     oidc_refresh_mode_changed
+     log_settings_changed
++    session_lifetime_changed
+   )
+ 
+   # Configurable repo for test injection. Production uses Nebu.Repo.
+diff --git a/server/lib/nebu/oauth.ex b/server/lib/nebu/oauth.ex
+index f41c0b80..dea7750e 100644
+--- a/server/lib/nebu/oauth.ex
++++ b/server/lib/nebu/oauth.ex
+@@ -203,6 +203,21 @@ defmodule Nebu.OAuth do
+   @spec config_cache_ms() :: 0..5000
+   defdelegate config_cache_ms(), to: Nebu.OAuth.Config, as: :cache_ms
+ 
++  @doc """
++  The Admin-saved Matrix session lifetime in seconds (`server_config.matrix_session_ttl_seconds`, `3600..7_776_000`), or `nil` when none is saved or the
++  value is damaged / unreadable (story session-lifetime-setting). Read through the per-node switch cache; `Nebu.Web.SessionConfig` falls back to the env / 8 hours.
++  """
++  @spec matrix_session_ttl_seconds() :: pos_integer() | nil
++  defdelegate matrix_session_ttl_seconds(), to: Nebu.OAuth.Config
++
++  @doc "The bounds of the saved Matrix session lifetime in seconds, `{3600, 7_776_000}`: the Admin form validates with the same numbers as the reader."
++  @spec matrix_session_ttl_bounds() :: {pos_integer(), pos_integer()}
++  defdelegate matrix_session_ttl_bounds(), to: Nebu.OAuth.Config
++
++  @doc "Drops this node's cache entry of the config read (after an Admin write of `matrix_session_ttl_seconds`); other nodes follow within the cache TTL."
++  @spec invalidate_config_cache() :: :ok
++  defdelegate invalidate_config_cache(), to: Nebu.OAuth.Config, as: :invalidate_cache
++
+   @doc """
+   Persists the OAuth switch for the Admin UI (story admin-oauth-switch, ADR-033 "Admin UI switch"): `changes` is
+   `%{"oauth_enabled" => "true" | "false", "oauth_issuer_url" => binary}`. Both `server_config` upserts and the caller's `:audit`
+diff --git a/server/lib/nebu/oauth/config.ex b/server/lib/nebu/oauth/config.ex
+index ce9956f9..0d853955 100644
+--- a/server/lib/nebu/oauth/config.ex
++++ b/server/lib/nebu/oauth/config.ex
+@@ -76,7 +76,7 @@ defmodule Nebu.OAuth.Config do
+   require Logger
+ 
+   @type state :: :enabled | :disabled | :unknown
+-  @type t :: %{enabled: boolean(), issuer_url: String.t() | nil, state: state()}
++  @type t :: %{enabled: boolean(), issuer_url: String.t() | nil, state: state(), matrix_session_ttl_seconds: pos_integer() | nil}
+   @type pending_limits :: %{ttl_days: pos_integer(), cap: pos_integer(), host_cap: pos_integer()}
+   @type token_settings :: %{access_token_ttl_seconds: 60..3600, idp_revalidation: :per_refresh | :off}
+ 
+@@ -90,12 +90,47 @@ defmodule Nebu.OAuth.Config do
+   @min_access_token_ttl_seconds 60
+   @max_access_token_ttl_seconds 3600
+ 
++  # story session-lifetime-setting: the Admin-saved Matrix session lifetime (whole seconds), read with the switch state through the same cache
++  @min_matrix_session_ttl_seconds 3600
++  @max_matrix_session_ttl_seconds 7_776_000
++
+   @sql """
+   SELECT key, value FROM server_config
+   WHERE key IN ('oauth_enabled', 'oauth_issuer_url', 'oauth_pending_ttl_days', 'oauth_pending_cap',
+-                'oauth_pending_host_cap', 'oauth_access_token_ttl_seconds', 'oauth_idp_revalidation')
++                'oauth_pending_host_cap', 'oauth_access_token_ttl_seconds', 'oauth_idp_revalidation',
++                'matrix_session_ttl_seconds')
+   """
+ 
++  @doc "The bounds of the saved Matrix session lifetime in seconds: `{3600, 7_776_000}` (1 hour .. 90 days)."
++  @spec matrix_session_ttl_bounds() :: {pos_integer(), pos_integer()}
++  def matrix_session_ttl_bounds, do: {@min_matrix_session_ttl_seconds, @max_matrix_session_ttl_seconds}
++
++  @doc """
++  The saved Matrix session lifetime (`server_config.matrix_session_ttl_seconds`, whole seconds `3600..7_776_000`) or `nil` when none is saved, the
++  value is damaged / out of range (ignored with one warning that never names the value) or `server_config` cannot be read. Served from the
++  per-node cache of `get/1` (at most one `server_config` query per TTL window). Never raises.
++  """
++  @spec matrix_session_ttl_seconds() :: pos_integer() | nil
++  def matrix_session_ttl_seconds, do: get().matrix_session_ttl_seconds
++
++  defp session_ttl(nil), do: nil
++
++  defp session_ttl(value) when is_integer(value) and value >= @min_matrix_session_ttl_seconds and value <= @max_matrix_session_ttl_seconds, do: value
++
++  defp session_ttl(value) when is_binary(value) do
++    case Integer.parse(String.trim(value)) do
++      {n, ""} when n >= @min_matrix_session_ttl_seconds and n <= @max_matrix_session_ttl_seconds -> n
++      _ -> damaged_session_ttl()
++    end
++  end
++
++  defp session_ttl(_value), do: damaged_session_ttl()
++
++  defp damaged_session_ttl do
++    Logger.warning("OAuth.Config: server_config matrix_session_ttl_seconds is not a whole number of seconds between 3600 and 7776000: ignored, the env value / default applies")
++    nil
++  end
++
+   @doc "Returns `%{enabled: boolean, issuer_url: binary | nil, state: :enabled | :disabled | :unknown}`. Never raises."
+   @spec get(keyword()) :: t()
+   def get(opts \\ []) do
+@@ -379,7 +414,12 @@ defmodule Nebu.OAuth.Config do
+   defp load_from_db(opts) do
+     case load_raw(opts) do
+       {:ok, map} ->
+-        {:cache, normalize(%{enabled: map["oauth_enabled"] == "true", issuer_url: map["oauth_issuer_url"]})}
++        {:cache,
++         normalize(%{
++           enabled: map["oauth_enabled"] == "true",
++           issuer_url: map["oauth_issuer_url"],
++           matrix_session_ttl_seconds: map["matrix_session_ttl_seconds"]
++         })}
+ 
+       :error ->
+         {:nocache, unknown()}
+@@ -445,14 +485,15 @@ defmodule Nebu.OAuth.Config do
+     %{
+       enabled: enabled,
+       issuer_url: nilify(Map.get(raw, :issuer_url)),
+-      state: if(enabled, do: :enabled, else: :disabled)
++      state: if(enabled, do: :enabled, else: :disabled),
++      matrix_session_ttl_seconds: session_ttl(Map.get(raw, :matrix_session_ttl_seconds))
+     }
+   end
+ 
+   defp normalize(_other), do: disabled()
+ 
+-  defp disabled, do: %{enabled: false, issuer_url: nil, state: :disabled}
+-  defp unknown, do: %{enabled: false, issuer_url: nil, state: :unknown}
++  defp disabled, do: %{enabled: false, issuer_url: nil, state: :disabled, matrix_session_ttl_seconds: nil}
++  defp unknown, do: %{enabled: false, issuer_url: nil, state: :unknown, matrix_session_ttl_seconds: nil}
+ 
+   defp nilify(v) when is_binary(v) do
+     case String.trim(v) do
+diff --git a/server/lib/nebu/web/session_config.ex b/server/lib/nebu/web/session_config.ex
+index 3b4ab913..47d6c60a 100644
+--- a/server/lib/nebu/web/session_config.ex
++++ b/server/lib/nebu/web/session_config.ex
+@@ -16,10 +16,16 @@ defmodule Nebu.Web.SessionConfig do
+   @default_matrix_ttl_seconds 8 * 3600
+   @default_admin_ttl_seconds 8 * 60 * 60
+ 
+-  @doc "Live Matrix opaque-session ceiling in seconds (default 8h)."
++  @doc """
++  Live Matrix session ceiling in seconds: the value saved in the Admin UI (`server_config.matrix_session_ttl_seconds`, story session-lifetime-setting;
++  read through the per-node cache of `Nebu.OAuth`), else `NEBU_MATRIX_SESSION_TTL_SECONDS`, else 8h. A damaged or unreadable saved value is ignored.
++  """
+   @spec matrix_session_ttl_seconds() :: pos_integer()
+   def matrix_session_ttl_seconds do
+-    Application.get_env(:nebu_http, :matrix_session_ttl_seconds, @default_matrix_ttl_seconds)
++    case Nebu.OAuth.matrix_session_ttl_seconds() do
++      seconds when is_integer(seconds) -> seconds
++      _ -> Application.get_env(:nebu_http, :matrix_session_ttl_seconds, @default_matrix_ttl_seconds)
++    end
+   end
+ 
+   @doc "Live admin session ceiling in seconds (default 8h)."
+diff --git a/server/priv/migrations/000056_config_session_lifetime_mutable.down.sql b/server/priv/migrations/000056_config_session_lifetime_mutable.down.sql
+new file mode 100644
+index 00000000..cf9f36b1
+--- /dev/null
++++ b/server/priv/migrations/000056_config_session_lifetime_mutable.down.sql
+@@ -0,0 +1,29 @@
++-- Reverses 000056_config_session_lifetime_mutable.up.sql: restores the policy of 000049 verbatim.
++-- An existing matrix_session_ttl_seconds row stays and is write-once again (a second save of the session lifetime fails with an RLS error, as before 000056).
++
++DROP POLICY IF EXISTS config_update_mutable ON server_config;
++CREATE POLICY config_update_mutable ON server_config
++    FOR UPDATE
++    USING (
++        key IN (
++            'max_users', 'registration_enabled', 'default_room_visibility',
++            'default_max_members', 'bootstrap_completed',
++            'oidc_user_id_claim', 'oidc_displayname_claim', 'oidc_email_claim',
++            'oidc_directory_enabled', 'oidc_directory_endpoint',
++            'gdpr_retention_days', 'signing_key_id', 'compliance_mode_enabled',
++            'scim_token_hash',
++            'matrix_oidc_refresh_mode', 'admin_oidc_refresh_mode',
++            'matrix_oidc_extra_scopes', 'admin_oidc_extra_scopes',
++            'admin_group_claim', 'admin_group_claim_path',
++            'log_collect_info', 'log_retention_info_days',
++            'log_collect_debug', 'log_retention_debug_days',
++            'log_retention_debug_max_count',
++            'log_retention_info_max_count',
++            'oauth_enabled', 'oauth_issuer_url',
++            'oauth_pending_ttl_days', 'oauth_pending_cap', 'oauth_pending_host_cap',
++            'oauth_access_token_ttl_seconds', 'oauth_idp_revalidation',
++            'sso_extra_redirect_schemes', 'sso_redirect_allowed_origins'
++        )
++        OR key LIKE 'log\_min\_level\_%'
++        OR key LIKE 'log\_retention\_days\_%'
++    );
+diff --git a/server/priv/migrations/000056_config_session_lifetime_mutable.up.sql b/server/priv/migrations/000056_config_session_lifetime_mutable.up.sql
+new file mode 100644
+index 00000000..63ab7740
+--- /dev/null
++++ b/server/priv/migrations/000056_config_session_lifetime_mutable.up.sql
+@@ -0,0 +1,42 @@
++-- 000056_config_session_lifetime_mutable.up.sql
++-- Story session-lifetime-setting (epic oauth-session-and-consent).
++--
++-- Re-creates the server_config `config_update_mutable` RLS policy (the allowlist of keys the runtime role nebu_app may UPDATE; every other
++-- key is write-once) with the list of 000049 VERBATIM plus ONE key:
++--
++--   * matrix_session_ttl_seconds: the Admin-configurable lifetime of a signed-in Matrix session (whole seconds, 3600 .. 7776000). Saved through
++--     Nebu.Admin.DB.upsert / save_config_audited (INSERT ... ON CONFLICT DO UPDATE): the FIRST save inserts the row, the SECOND save updates the
++--     EXISTING row, which fails the UPDATE USING check and PostgreSQL raises it as an RLS (row-level security) error unless the key is listed.
++--
++-- No values are inserted: an absent row means "the env value NEBU_MATRIX_SESSION_TTL_SECONDS, else 8 hours". Rolling-deploy safe: old nodes only
++-- gain the ability to update the key and never read it. The statements are transaction-safe (no BEGIN / COMMIT, no CONCURRENTLY).
++-- Throwaway test database: after adding or editing this migration reset it (`docker rm -f` of the throwaway Postgres container) so the
++-- migration runs again.
++
++DROP POLICY IF EXISTS config_update_mutable ON server_config;
++CREATE POLICY config_update_mutable ON server_config
++    FOR UPDATE
++    USING (
++        key IN (
++            'max_users', 'registration_enabled', 'default_room_visibility',
++            'default_max_members', 'bootstrap_completed',
++            'oidc_user_id_claim', 'oidc_displayname_claim', 'oidc_email_claim',
++            'oidc_directory_enabled', 'oidc_directory_endpoint',
++            'gdpr_retention_days', 'signing_key_id', 'compliance_mode_enabled',
++            'scim_token_hash',
++            'matrix_oidc_refresh_mode', 'admin_oidc_refresh_mode',
++            'matrix_oidc_extra_scopes', 'admin_oidc_extra_scopes',
++            'admin_group_claim', 'admin_group_claim_path',
++            'log_collect_info', 'log_retention_info_days',
++            'log_collect_debug', 'log_retention_debug_days',
++            'log_retention_debug_max_count',
++            'log_retention_info_max_count',
++            'oauth_enabled', 'oauth_issuer_url',
++            'oauth_pending_ttl_days', 'oauth_pending_cap', 'oauth_pending_host_cap',
++            'oauth_access_token_ttl_seconds', 'oauth_idp_revalidation',
++            'sso_extra_redirect_schemes', 'sso_redirect_allowed_origins',
++            'matrix_session_ttl_seconds'
++        )
++        OR key LIKE 'log\_min\_level\_%'
++        OR key LIKE 'log\_retention\_days\_%'
++    );

@@ -1,0 +1,861 @@
+Mutation results - story session-lifetime-setting (epic oauth-session-and-consent), after the test-review fix pass
+================================================================================
+
+Method: the throwaway reference implementation (reference-impl.diff) was applied to the worktree, one mutant at a time was applied on top of it, the story
+tests were run (`.session-ci/quick.sh "mix test <13 files> --include integration"`: the 9 new test files + admin_reauth_button_flow_config / _cross_page,
+oauth_config_cache / oauth_config tests as regression guards of the shared cache) and the file was restored. KILLED = at least one test failed.
+Runner: scratchpad mutants.py (throwaway, not committed). Result: 65 mutants, 65 KILLED, 0 SURVIVED / ERROR.
+
+New in the fix pass (N01-N12): require_admin removed (N01), validation before the gate (N02), "no change" compared with the value in effect instead of the saved
+one (N03), cache table gone drops the saved value (N04), admin session ceiling reads the new key (N05) / Nebu.Admin.Auth reads it (N06), legacy extension bound
+ignores the setting (N07, characterisation test), a GET route reaches the action (N08), docs without the legacy / unreadable-config decisions (N09, N12),
+hint without the legacy note (N10), field prefill clamped to the minimum (N11). Existing mutants M16 (no-change), M18d (hint text) and M28 were re-targeted at
+the changed code.
+
+Notes
+  * M20a-M20c and N09 / N12 (migration 000056, docs) are killed by STATIC tests (the throwaway database is migrated once from the correct file and is not
+    re-migrated per mutant, so the :integration RLS tests did not take part there).
+  * No equivalent mutants were left standing. Cross-NODE propagation is not mutable in one VM: it is proven through the TTL-expiry test
+    (session_lifetime_cache_test.exs "at now - loaded_at = TTL ...").
+
+=== M01 [KILLED] accessor ignores the saved value
+    260/281 passed
+    killed by: test a lowered setting bounds the extension of an existing legacy session at created_at + the new lifetime (Nebu.OAuth.SessionLifetimeLegacyFollowTest)
+    killed by: test a raised setting lets the worker extend an existing legacy session up to the new bound; a later lowering never shortens it (Nebu.OAuth.SessionLifetimeLegacyFollowTest)
+    killed by: test scenario 2 - a saved lifetime applies the bounds are in: 3600 and 7_776_000 (90 days), as text and as an integer (Nebu.Web.SessionConfigLifetimeTest)
+    killed by: test scenario 2 - a saved lifetime applies a saved value (text as stored, or an integer) is the ceiling (Nebu.Web.SessionConfigLifetimeTest)
+    killed by: test the legacy login ceiling (HttpPublic.session_expires_at/1) reads the same accessor far IdP expiry: now + saved lifetime, shorter and longer than 8 hours (Nebu.Web.SessionConfigLifetimeTest)
+    killed by: test the legacy login ceiling (HttpPublic.session_expires_at/1) reads the same accessor no usable exp claim: the ceiling (Nebu.Web.SessionConfigLifetimeTest)
+    ... and 15 more
+=== M02 [KILLED] env value wins over the saved value
+    278/281 passed
+    killed by: test scenario 2 - a saved lifetime applies a saved value wins over the env value, longer or shorter (Nebu.Web.SessionConfigLifetimeTest)
+    killed by: test scenario 2 - a saved lifetime applies to the next login a saved value wins over the env value; deleting the row falls back to the env value (Nebu.OAuth.SessionLifetimeLoginTest)
+    killed by: test fail safe: an unreadable or damaged setting never breaks the login path an unreadable server_config answers the env value / 8 hours and is not cached (Nebu.OAuth.SessionLifetimeCacheTest)
+=== M03 [KILLED] out-of-range text is clamped instead of ignored
+    277/281 passed
+    killed by: test a damaged, out-of-range or unreadable saved value is ignored: the env value, else 8 hours, never a crash no env: 8 hours (Nebu.Web.SessionConfigLifetimeTest)
+    killed by: test a damaged, out-of-range or unreadable saved value is ignored: the env value, else 8 hours, never a crash with an env value: the env value (Nebu.Web.SessionConfigLifetimeTest)
+    killed by: test fail safe: an unreadable or damaged setting never breaks the login path a damaged row (text, out of range, blank) is ignored with a warning that names the key and never the raw value (Nebu.OAuth.SessionLifetimeCacheTest)
+    killed by: test scenario 2 - a saved lifetime applies to the next login a damaged row never breaks the login: the default (or env) ceiling is stamped (Nebu.OAuth.SessionLifetimeLoginTest)
+=== M04a [KILLED] lower bound off by one (text)
+    274/281 passed
+    killed by: test a raised setting lets the worker extend an existing legacy session up to the new bound; a later lowering never shortens it (Nebu.OAuth.SessionLifetimeLegacyFollowTest)
+    killed by: test a lowered setting bounds the extension of an existing legacy session at created_at + the new lifetime (Nebu.OAuth.SessionLifetimeLegacyFollowTest)
+    killed by: test scenario 2 - a saved lifetime applies a saved value wins over the env value, longer or shorter (Nebu.Web.SessionConfigLifetimeTest)
+    killed by: test scenario 2 - a saved lifetime applies the bounds are in: 3600 and 7_776_000 (90 days), as text and as an integer (Nebu.Web.SessionConfigLifetimeTest)
+    killed by: test hot path: no query per call with the cache off (0) every call reads: the saved value is live (Nebu.OAuth.SessionLifetimeCacheTest)
+    killed by: test fail safe: an unreadable or damaged setting never breaks the login path the cache table is gone (its owner is stopped): the saved value is still served, not the 8 hour fallback, and the caller never creates the table (Nebu.OAuth.SessionLifetimeCacheTest)
+    ... and 1 more
+=== M04b [KILLED] upper bound off by one (text)
+    279/281 passed
+    killed by: test scenario 2 - a saved lifetime applies the bounds are in: 3600 and 7_776_000 (90 days), as text and as an integer (Nebu.Web.SessionConfigLifetimeTest)
+    killed by: test scenario 2 - a saved lifetime applies to the next login the bounds: 1 hour and 90 days (Nebu.OAuth.SessionLifetimeLoginTest)
+=== M04c [KILLED] lower bound off by one (integer)
+    280/281 passed
+    killed by: test scenario 2 - a saved lifetime applies the bounds are in: 3600 and 7_776_000 (90 days), as text and as an integer (Nebu.Web.SessionConfigLifetimeTest)
+=== M04d [KILLED] upper bound off by one (integer)
+    280/281 passed
+    killed by: test scenario 2 - a saved lifetime applies the bounds are in: 3600 and 7_776_000 (90 days), as text and as an integer (Nebu.Web.SessionConfigLifetimeTest)
+=== M05 [KILLED] accessor bypasses the cache (one query per call)
+    278/281 passed
+    killed by: test hot path: no query per call nothing saved is a successful read too: it is cached (no query per login for an instance that never set it) (Nebu.OAuth.SessionLifetimeCacheTest)
+    killed by: test hot path: no query per call at now - loaded_at = TTL the entry is stale: the next call reads again and picks up a change made by another node (Nebu.OAuth.SessionLifetimeCacheTest)
+    killed by: test hot path: no query per call many calls inside the TTL window issue ONE server_config query; the value is right (Nebu.OAuth.SessionLifetimeCacheTest)
+=== M06 [KILLED] admin write does not drop the node cache
+    280/281 passed
+    killed by: test propagation the saving node serves the new value at once: the admin save drops this node's cache entry (Nebu.OAuth.SessionLifetimeCacheTest)
+=== M07 [KILLED] legacy login ignores the saved value
+    278/281 passed
+    killed by: test the legacy login ceiling (HttpPublic.session_expires_at/1) reads the same accessor far IdP expiry: now + saved lifetime, shorter and longer than 8 hours (Nebu.Web.SessionConfigLifetimeTest)
+    killed by: test the legacy login ceiling (HttpPublic.session_expires_at/1) reads the same accessor no usable exp claim: the ceiling (Nebu.Web.SessionConfigLifetimeTest)
+    killed by: test scenario 2 - a saved lifetime applies to the next login the legacy login ceiling (HttpPublic.session_expires_at/1) follows the row too (Nebu.OAuth.SessionLifetimeLoginTest)
+=== M08 [KILLED] OAuth login ignores the saved value
+    276/281 passed
+    killed by: test scenario 2 - a saved lifetime applies to the next login the bounds: 1 hour and 90 days (Nebu.OAuth.SessionLifetimeLoginTest)
+    killed by: test scenario 4 - sessions issued before the change keep their ceiling the next login after the change gets the new ceiling while the old session keeps its own (Nebu.OAuth.SessionLifetimeLoginTest)
+    killed by: test scenario 2 - a saved lifetime applies to the next login a saved value wins over the env value; deleting the row falls back to the env value (Nebu.OAuth.SessionLifetimeLoginTest)
+    killed by: test scenario 2 - a saved lifetime applies to the next login 2 hours saved through the admin form: the next login's session_expires_at is 2 hours after it (Nebu.OAuth.SessionLifetimeLoginTest)
+    killed by: test scenario 2 - a saved lifetime applies to the next login a lifetime longer than the default applies as well (24 hours) (Nebu.OAuth.SessionLifetimeLoginTest)
+=== M09 [KILLED] audit is optional (retry without it)
+    277/281 passed
+    killed by: test an audit writer that fails leaves the stored value as it was and writes no row (one transaction); the mandatory audit applies to a shorter and a longer lifetime (Nebu.Admin.ConfigSessionLifetimeDbTest)
+    killed by: test an audit writer that fails with nothing stored does not create the row (Nebu.Admin.ConfigSessionLifetimeDbTest)
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction a failing audit writer: nothing is saved, no retry without the audit, an error flash, the marker is kept (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction a raising audit writer counts as a failed audit (Nebu.Admin.ConfigSessionLifetimeTest)
+=== M10 [KILLED] audit metadata carries a string value
+    276/281 passed
+    killed by: test propagation the saving node serves the new value at once: the admin save drops this node's cache entry (Nebu.OAuth.SessionLifetimeCacheTest)
+    killed by: test 'no change' means the SAVED value: with nothing saved the default (28800) entered is persisted and audited (Nebu.Admin.ConfigSessionLifetimeDbTest)
+    killed by: test scenario 6: 8 hours saved, 2 hours entered: the row is 7200 and exactly ONE audit row holds the admin, the setting and the two numbers (Nebu.Admin.ConfigSessionLifetimeDbTest)
+    killed by: test nothing saved yet: the first save INSERTs the row (old number = the 8 hour default), the second UPDATEs it (the RLS allowlist of migration 000056) (Nebu.Admin.ConfigSessionLifetimeDbTest)
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction 2 hours from 8 hours: one transaction with the canonical value and an audit function, flash, redirect, marker consumed, one audit row with numbers only (Nebu.Admin.ConfigSessionLifetimeTest)
+=== M11 [KILLED] marker not consumed after a save
+    279/281 passed
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction after the save the sign-in link is back on the next page (real cookie round trip) (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction 2 hours from 8 hours: one transaction with the canonical value and an audit function, flash, redirect, marker consumed, one audit row with numbers only (Nebu.Admin.ConfigSessionLifetimeTest)
+=== M12 [KILLED] marker consumed by a refused value
+    280/281 passed
+    killed by: test scenario 3 - refused values a refusal keeps the fresh sign-in (the admin corrects the value with the same marker) and the re-render still shows the Save button (Nebu.Admin.ConfigSessionLifetimeTest)
+=== M15 [KILLED] stored text is not canonical
+    269/281 passed
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction an env value below the form's minimum (30 seconds, the e2e stack): shown as it is, refused when posted back, an allowed value is saved over it (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction 2 hours from 8 hours: one transaction with the canonical value and an audit function, flash, redirect, marker consumed, one audit row with numbers only (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction both bounds are saved (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction 'no change' compares with the SAVED value only: nothing saved and the default entered is saved and audited (an explicit 8 hours can be persisted) (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction the value is stored as canonical decimal text: surrounding white space is trimmed (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction a damaged saved value is no saved value: entering the value in effect saves it (Nebu.Admin.ConfigSessionLifetimeTest)
+    ... and 1 more
+=== M16 [KILLED] no 'no change' detection
+    279/281 passed
+    killed by: test the same value again is no change: no write, no audit row (Nebu.Admin.ConfigSessionLifetimeDbTest)
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction the same value as the SAVED one: no change, no transaction, no audit entry, the marker is kept (Nebu.Admin.ConfigSessionLifetimeTest)
+=== M17 [KILLED] no fresh sign-in needed (click level only)
+    277/281 passed
+    killed by: test without a fresh sign-in nothing is written and nothing is audited (Nebu.Admin.ConfigSessionLifetimeDbTest)
+    killed by: test scenario 5 - submitting without a fresh sign-in does not save an expired marker, a marker of another page and one of another admin: the same (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test scenario 5 - submitting without a fresh sign-in does not save no marker: redirect to the sign-in of /admin/config, nothing written, nothing audited (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test access and order of checks the gate comes BEFORE the validation: an invalid value without strict fetch metadata is the 403, without a marker the redirect, never the 200 re-render (Nebu.Admin.ConfigSessionLifetimeTest)
+=== M22 [KILLED] a save rewrites the ceiling of existing sessions
+    278/281 passed
+    killed by: test scenario 4 - sessions issued before the change keep their ceiling a refresh after the change copies the ceiling verbatim: neither shortened to the new lifetime nor extended (Nebu.OAuth.SessionLifetimeLoginTest)
+    killed by: test scenario 4 - sessions issued before the change keep their ceiling the next login after the change gets the new ceiling while the old session keeps its own (Nebu.OAuth.SessionLifetimeLoginTest)
+    killed by: test scenario 4 - sessions issued before the change keep their ceiling an 8 hour session still expires at its original session_expires_at after 2 hours are saved (Nebu.OAuth.SessionLifetimeLoginTest)
+=== M28 [KILLED] audit 'before' ignores the env value
+    279/281 passed
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction an env value below the form's minimum (30 seconds, the e2e stack): shown as it is, refused when posted back, an allowed value is saved over it (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction nothing saved before, an env value in effect: the old number is the env value (Nebu.Admin.ConfigSessionLifetimeTest)
+=== M30 [KILLED] form read from conn.params (query string)
+    280/281 passed
+    killed by: test scenario 5 - submitting without a fresh sign-in does not save the form is read from the BODY: a value in the query string saves nothing (Nebu.Admin.ConfigSessionLifetimeTest)
+=== M31 [KILLED] audit before/after swapped
+    272/281 passed
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction a damaged saved value is not 'the old value': the value in effect is (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction nothing saved before, an env value in effect: the old number is the env value (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction a longer lifetime than before is saved the same way (the audit row is not only for shortening) (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction an env value below the form's minimum (30 seconds, the e2e stack): shown as it is, refused when posted back, an allowed value is saved over it (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction 2 hours from 8 hours: one transaction with the canonical value and an audit function, flash, redirect, marker consumed, one audit row with numbers only (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction nothing saved before: the old number is the 8 hour default (Nebu.Admin.ConfigSessionLifetimeTest)
+=== M13a [KILLED] no upper bound in the form validation
+    273/281 passed
+    killed by: test validate_session_lifetime/1 below the minimum or above the maximum is refused (100 days is above the 90 day maximum) (Nebu.Admin.SessionLifetimeValidationTest)
+    killed by: test validate_session_lifetime/1 the message names both bounds in seconds and says whole numbers, without echoing the submitted text (Nebu.Admin.SessionLifetimeValidationTest)
+    killed by: test propagation a refused save (out of range) leaves the cache and the row alone (Nebu.OAuth.SessionLifetimeCacheTest)
+    killed by: test scenario 3 with nothing stored: a refused value stores nothing at all (Nebu.Admin.ConfigSessionLifetimeDbTest)
+    killed by: test scenario 3: a refused value (100 days, text, blank) changes nothing and audits nothing; the stored value is unchanged (Nebu.Admin.ConfigSessionLifetimeDbTest)
+    killed by: test scenario 3 - refused values every kind of refused value: 200, error, nothing written (Nebu.Admin.ConfigSessionLifetimeTest)
+    ... and 2 more
+=== M13b [KILLED] lower bound 1 in the form validation
+    277/281 passed
+    killed by: test validate_session_lifetime/1 below the minimum or above the maximum is refused (100 days is above the 90 day maximum) (Nebu.Admin.SessionLifetimeValidationTest)
+    killed by: test scenario 3: a refused value (100 days, text, blank) changes nothing and audits nothing; the stored value is unchanged (Nebu.Admin.ConfigSessionLifetimeDbTest)
+    killed by: test scenario 3 - refused values every kind of refused value: 200, error, nothing written (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction an env value below the form's minimum (30 seconds, the e2e stack): shown as it is, refused when posted back, an allowed value is saved over it (Nebu.Admin.ConfigSessionLifetimeTest)
+=== M14 [KILLED] form validation accepts trailing junk
+    277/281 passed
+    killed by: test validate_session_lifetime/1 blank, signs, decimals, exponents, units, separators and other text are refused (Nebu.Admin.SessionLifetimeValidationTest)
+    killed by: test scenario 3: a refused value (100 days, text, blank) changes nothing and audits nothing; the stored value is unchanged (Nebu.Admin.ConfigSessionLifetimeDbTest)
+    killed by: test scenario 3 - refused values every kind of refused value: 200, error, nothing written (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test the section and the form a damaged or out-of-range saved value is not shown as the lifetime: the value in effect is (Nebu.Admin.ConfigSessionLifetimeTest)
+=== M33 [KILLED] error message echoes the submitted text
+    280/281 passed
+    killed by: test validate_session_lifetime/1 the message names both bounds in seconds and says whole numbers, without echoing the submitted text (Nebu.Admin.SessionLifetimeValidationTest)
+=== M27 [KILLED] page shows a damaged saved value as the current one
+    280/281 passed
+    killed by: test the section and the form a damaged or out-of-range saved value is not shown as the lifetime: the value in effect is (Nebu.Admin.ConfigSessionLifetimeTest)
+=== M26 [KILLED] human text: days wrong
+    279/281 passed
+    killed by: test lifetime_text/1 whole hours and days (Nebu.Admin.SessionLifetimeValidationTest)
+    killed by: test the section and the form a saved value is shown, in seconds and as text (Nebu.Admin.ConfigSessionLifetimeTest)
+=== M43 [KILLED] human text: no singular
+    280/281 passed
+    killed by: test lifetime_text/1 whole hours and days (Nebu.Admin.SessionLifetimeValidationTest)
+=== M42 [KILLED] form validation does not trim
+    279/281 passed
+    killed by: test validate_session_lifetime/1 white space around the number is trimmed (Nebu.Admin.SessionLifetimeValidationTest)
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction the value is stored as canonical decimal text: surrounding white space is trimmed (Nebu.Admin.ConfigSessionLifetimeTest)
+=== M41 [KILLED] stored value is not trimmed
+    280/281 passed
+    killed by: test scenario 2 - a saved lifetime applies a saved value (text as stored, or an integer) is the ceiling (Nebu.Web.SessionConfigLifetimeTest)
+=== M24 [KILLED] warning names the raw value
+    279/281 passed
+    killed by: test a damaged, out-of-range or unreadable saved value is ignored: the env value, else 8 hours, never a crash the damaged text never reaches the log (no sensitive value in logs, only the number or nothing) (Nebu.Web.SessionConfigLifetimeTest)
+    killed by: test fail safe: an unreadable or damaged setting never breaks the login path a damaged row (text, out of range, blank) is ignored with a warning that names the key and never the raw value (Nebu.OAuth.SessionLifetimeCacheTest)
+=== M25 [KILLED] no warning for a damaged value
+    280/281 passed
+    killed by: test fail safe: an unreadable or damaged setting never breaks the login path a damaged row (text, out of range, blank) is ignored with a warning that names the key and never the raw value (Nebu.OAuth.SessionLifetimeCacheTest)
+=== M35 [KILLED] a successful read of 'nothing saved' is not cached
+    261/281 passed
+    killed by: test hot path: no query per call nothing saved is a successful read too: it is cached (no query per login for an instance that never set it) (Nebu.OAuth.SessionLifetimeCacheTest)
+    killed by: test AC2.1 — /versions a warm cache answers v1.1-v1.15 with ZERO DB queries (Nebu.OAuth.OAuthConfigCacheTest)
+    killed by: test AC2.2 — every surface observes the SAME cached state within one TTL window /versions: flip via DB => old answer before the TTL, new answer after (Nebu.OAuth.OAuthConfigCacheTest)
+    killed by: test AC1.1 — one server_config read per TTL window the entry is {:config, map, loaded_at_ms} in :nebu_oauth_config_cache (Nebu.OAuth.OAuthConfigCacheTest)
+    killed by: test AC2.2 — every surface observes the SAME cached state within one TTL window the surfaces read ONE shared entry: a single query serves a whole round of requests (Nebu.OAuth.OAuthConfigCacheTest)
+    killed by: test AC1.1 — one server_config read per TTL window two get/0 calls within the TTL issue ONE query; the call at now - loaded_at = TTL reads again (Nebu.OAuth.OAuthConfigCacheTest)
+    ... and 14 more
+=== M46 [KILLED] fallback ignores the env value
+    270/281 passed
+    killed by: test scenario 1 - nothing saved: the 8 hour ceiling the env value is the fallback below a saved value, and is not range checked (the e2e stack uses 30 seconds) (Nebu.Web.SessionConfigLifetimeTest)
+    killed by: test a damaged, out-of-range or unreadable saved value is ignored: the env value, else 8 hours, never a crash an unreadable server_config (the unknown state of the config source) answers the env value / 8 hours (Nebu.Web.SessionConfigLifetimeTest)
+    killed by: test a damaged, out-of-range or unreadable saved value is ignored: the env value, else 8 hours, never a crash with an env value: the env value (Nebu.Web.SessionConfigLifetimeTest)
+    killed by: test the legacy login ceiling (HttpPublic.session_expires_at/1) reads the same accessor a damaged saved value: the env value is the ceiling (Nebu.Web.SessionConfigLifetimeTest)
+    killed by: test scenario 1 - without a saved value a login keeps the 8 hour ceiling no row, an env value (NEBU_MATRIX_SESSION_TTL_SECONDS): the env value is the ceiling (Nebu.OAuth.SessionLifetimeLoginTest)
+    killed by: test scenario 2 - a saved lifetime applies to the next login a saved value wins over the env value; deleting the row falls back to the env value (Nebu.OAuth.SessionLifetimeLoginTest)
+    ... and 5 more
+=== M18a [KILLED] error paragraph has no role=alert
+    278/281 passed
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction an env value below the form's minimum (30 seconds, the e2e stack): shown as it is, refused when posted back, an allowed value is saved over it (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test scenario 3 - refused values 100 days: 200 re-render, the error next to the field (aria-invalid, aria-describedby, role=alert inside the section), nothing saved or audited (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test scenario 3 - refused values every kind of refused value: 200, error, nothing written (Nebu.Admin.ConfigSessionLifetimeTest)
+=== M18b [KILLED] no aria-invalid on the field
+    279/281 passed
+    killed by: test scenario 3 - refused values every kind of refused value: 200, error, nothing written (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test scenario 3 - refused values 100 days: 200 re-render, the error next to the field (aria-invalid, aria-describedby, role=alert inside the section), nothing saved or audited (Nebu.Admin.ConfigSessionLifetimeTest)
+=== M18c [KILLED] field not described by the error
+    280/281 passed
+    killed by: test scenario 3 - refused values 100 days: 200 re-render, the error next to the field (aria-invalid, aria-describedby, role=alert inside the section), nothing saved or audited (Nebu.Admin.ConfigSessionLifetimeTest)
+=== M18d [KILLED] hint does not say existing sessions keep their ceiling
+    280/281 passed
+    killed by: test the section and the form the hint says what the bounds are, that existing sessions keep their ceiling and where the env fallback is; the field is described by it (Nebu.Admin.ConfigSessionLifetimeTest)
+=== M18e [KILLED] current value element renamed
+    274/281 passed
+    killed by: test the page of the real database shows the saved value (Nebu.Admin.ConfigSessionLifetimeDbTest)
+    killed by: test the section and the form the field shows the effective value in seconds and the current value as human text: nothing saved = 8 hours (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test the section and the form a saved value is shown, in seconds and as text (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test scenario 3 - refused values 100 days: 200 re-render, the error next to the field (aria-invalid, aria-describedby, role=alert inside the section), nothing saved or audited (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test the section and the form a damaged or out-of-range saved value is not shown as the lifetime: the value in effect is (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test the section and the form nothing saved: the env value is what is in effect and what is shown (Nebu.Admin.ConfigSessionLifetimeTest)
+    ... and 1 more
+=== M18f [KILLED] hint omits the env fallback
+    280/281 passed
+    killed by: test the section and the form the hint says what the bounds are, that existing sessions keep their ceiling and where the env fallback is; the field is described by it (Nebu.Admin.ConfigSessionLifetimeTest)
+=== M19 [KILLED] route not in the unframed segments
+    280/281 passed
+    killed by: test scenario 5 - submitting without a fresh sign-in does not save the response of every kind is not frameable and not cacheable, also under the other spellings of the path (Nebu.Admin.ConfigSessionLifetimeTest)
+=== M21 [KILLED] audit action not known to the writer
+    270/281 passed
+    killed by: test scenario 2 - a saved lifetime applies to the next login the bounds: 1 hour and 90 days (Nebu.OAuth.SessionLifetimeLoginTest)
+    killed by: test scenario 2 - a saved lifetime applies to the next login 2 hours saved through the admin form: the next login's session_expires_at is 2 hours after it (Nebu.OAuth.SessionLifetimeLoginTest)
+    killed by: test scenario 4 - sessions issued before the change keep their ceiling the next login after the change gets the new ceiling while the old session keeps its own (Nebu.OAuth.SessionLifetimeLoginTest)
+    killed by: test scenario 2 - a saved lifetime applies to the next login the legacy login ceiling (HttpPublic.session_expires_at/1) follows the row too (Nebu.OAuth.SessionLifetimeLoginTest)
+    killed by: test scenario 2 - a saved lifetime applies to the next login a lifetime longer than the default applies as well (24 hours) (Nebu.OAuth.SessionLifetimeLoginTest)
+    killed by: test scenario 2 - a saved lifetime applies to the next login a saved value wins over the env value; deleting the row falls back to the env value (Nebu.OAuth.SessionLifetimeLoginTest)
+    ... and 5 more
+=== M20a [KILLED] migration up: new key missing
+    280/281 passed
+    killed by: test static the up policy keeps EVERY key and LIKE family of 000049 plus matrix_session_ttl_seconds only (no silent widening) (Nebu.Migration.Migration000056ConfigSessionLifetimeMutableTest)
+=== M20b [KILLED] migration up: an old key dropped
+    280/281 passed
+    killed by: test static the up policy keeps EVERY key and LIKE family of 000049 plus matrix_session_ttl_seconds only (no silent widening) (Nebu.Migration.Migration000056ConfigSessionLifetimeMutableTest)
+=== M20c [KILLED] migration down keeps the new key
+    280/281 passed
+    killed by: test static down restores 000049's policy verbatim and removes the key (Nebu.Migration.Migration000056ConfigSessionLifetimeMutableTest)
+=== M40 [KILLED] Phoenix parameter filter does not mask the field
+    279/281 passed
+    killed by: test scenario 3 - refused values the refused text is escaped when it is shown again, and never reaches the log (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test scenario 3 - refused values Phoenix's parameter logging masks the field (like the field of every other marker-gated form): a pasted value is not logged at debug (Nebu.Admin.ConfigSessionLifetimeTest)
+=== M23a [KILLED] a refresh re-derives (extends) the OAuth session ceiling
+    280/281 passed
+    killed by: test scenario 4 - sessions issued before the change keep their ceiling a refresh after the change copies the ceiling verbatim: neither shortened to the new lifetime nor extended (Nebu.OAuth.SessionLifetimeLoginTest)
+=== M48 [KILLED] default changed to 7 hours
+    258/281 passed
+    killed by: test scenario 1 - nothing saved: the 8 hour ceiling no saved value and no env: 8 hours (Nebu.Web.SessionConfigLifetimeTest)
+    killed by: test scenario 2 - a saved lifetime applies the saved value is read on every call (no value is frozen at boot) (Nebu.Web.SessionConfigLifetimeTest)
+    killed by: test fail safe: an unreadable or damaged setting never breaks the login path a damaged row (text, out of range, blank) is ignored with a warning that names the key and never the raw value (Nebu.OAuth.SessionLifetimeCacheTest)
+    killed by: test fail safe: an unreadable or damaged setting never breaks the login path an unreadable server_config answers the env value / 8 hours and is not cached (Nebu.OAuth.SessionLifetimeCacheTest)
+    killed by: test hot path: no query per call nothing saved is a successful read too: it is cached (no query per login for an instance that never set it) (Nebu.OAuth.SessionLifetimeCacheTest)
+    killed by: test scenario 4 - sessions issued before the change keep their ceiling an 8 hour session still expires at its original session_expires_at after 2 hours are saved (Nebu.OAuth.SessionLifetimeLoginTest)
+    ... and 10 more
+=== M49a [KILLED] maximum raised (reader and form share it)
+    274/281 passed
+    killed by: test validate_session_lifetime/1 the message names both bounds in seconds and says whole numbers, without echoing the submitted text (Nebu.Admin.SessionLifetimeValidationTest)
+    killed by: test validate_session_lifetime/1 below the minimum or above the maximum is refused (100 days is above the 90 day maximum) (Nebu.Admin.SessionLifetimeValidationTest)
+    killed by: test a damaged, out-of-range or unreadable saved value is ignored: the env value, else 8 hours, never a crash no env: 8 hours (Nebu.Web.SessionConfigLifetimeTest)
+    killed by: test a damaged, out-of-range or unreadable saved value is ignored: the env value, else 8 hours, never a crash values that are not text or a number (nil, an atom, a list, a map, a float) are ignored (Nebu.Web.SessionConfigLifetimeTest)
+    killed by: test a damaged, out-of-range or unreadable saved value is ignored: the env value, else 8 hours, never a crash with an env value: the env value (Nebu.Web.SessionConfigLifetimeTest)
+    killed by: test scenario 3 - refused values 100 days: 200 re-render, the error next to the field (aria-invalid, aria-describedby, role=alert inside the section), nothing saved or audited (Nebu.Admin.ConfigSessionLifetimeTest)
+    ... and 1 more
+=== M49b [KILLED] minimum lowered (reader and form share it)
+    272/281 passed
+    killed by: test validate_session_lifetime/1 below the minimum or above the maximum is refused (100 days is above the 90 day maximum) (Nebu.Admin.SessionLifetimeValidationTest)
+    killed by: test validate_session_lifetime/1 the message names both bounds in seconds and says whole numbers, without echoing the submitted text (Nebu.Admin.SessionLifetimeValidationTest)
+    killed by: test a damaged, out-of-range or unreadable saved value is ignored: the env value, else 8 hours, never a crash values that are not text or a number (nil, an atom, a list, a map, a float) are ignored (Nebu.Web.SessionConfigLifetimeTest)
+    killed by: test a damaged, out-of-range or unreadable saved value is ignored: the env value, else 8 hours, never a crash with an env value: the env value (Nebu.Web.SessionConfigLifetimeTest)
+    killed by: test a damaged, out-of-range or unreadable saved value is ignored: the env value, else 8 hours, never a crash no env: 8 hours (Nebu.Web.SessionConfigLifetimeTest)
+    killed by: test scenario 3: a refused value (100 days, text, blank) changes nothing and audits nothing; the stored value is unchanged (Nebu.Admin.ConfigSessionLifetimeDbTest)
+    ... and 3 more
+=== M51 [KILLED] field renamed
+    280/281 passed
+    killed by: test the section and the form section, heading, form, field and label carry the contract (Nebu.Admin.ConfigSessionLifetimeTest)
+=== M52 [KILLED] form posts to the OAuth switch action
+    280/281 passed
+    killed by: test the section and the form section, heading, form, field and label carry the contract (Nebu.Admin.ConfigSessionLifetimeTest)
+=== N01 [KILLED] require_admin removed from the config controller
+    280/281 passed
+    killed by: test access and order of checks require_admin first: no session at all, a non-admin session and an admin flag of false never reach the form (Nebu.Admin.ConfigSessionLifetimeTest)
+=== N02 [KILLED] validation before the gate (a refused value gets the re-render without a marker)
+    280/281 passed
+    killed by: test access and order of checks the gate comes BEFORE the validation: an invalid value without strict fetch metadata is the 403, without a marker the redirect, never the 200 re-render (Nebu.Admin.ConfigSessionLifetimeTest)
+=== N03 [KILLED] 'no change' compared with the value in effect instead of the saved one
+    278/281 passed
+    killed by: test 'no change' means the SAVED value: with nothing saved the default (28800) entered is persisted and audited (Nebu.Admin.ConfigSessionLifetimeDbTest)
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction a damaged saved value is no saved value: entering the value in effect saves it (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction 'no change' compares with the SAVED value only: nothing saved and the default entered is saved and audited (an explicit 8 hours can be persisted) (Nebu.Admin.ConfigSessionLifetimeTest)
+=== N04 [KILLED] no cache table: the saved value is dropped (8 hour fallback)
+    258/281 passed
+    killed by: test a raised setting lets the worker extend an existing legacy session up to the new bound; a later lowering never shortens it (Nebu.OAuth.SessionLifetimeLegacyFollowTest)
+    killed by: test a lowered setting bounds the extension of an existing legacy session at created_at + the new lifetime (Nebu.OAuth.SessionLifetimeLegacyFollowTest)
+    killed by: test the legacy login ceiling (HttpPublic.session_expires_at/1) reads the same accessor far IdP expiry: now + saved lifetime, shorter and longer than 8 hours (Nebu.Web.SessionConfigLifetimeTest)
+    killed by: test scenario 2 - a saved lifetime applies the saved value is read on every call (no value is frozen at boot) (Nebu.Web.SessionConfigLifetimeTest)
+    killed by: test scenario 2 - a saved lifetime applies the bounds are in: 3600 and 7_776_000 (90 days), as text and as an integer (Nebu.Web.SessionConfigLifetimeTest)
+    killed by: test scenario 2 - a saved lifetime applies a saved value wins over the env value, longer or shorter (Nebu.Web.SessionConfigLifetimeTest)
+    ... and 17 more
+=== N05 [KILLED] admin session ceiling reads the new key
+    280/281 passed
+    killed by: test the admin session ceiling is not part of this story a saved Matrix lifetime does not change Nebu.Web.SessionConfig.admin_session_ttl_seconds/0 (Nebu.Web.SessionConfigLifetimeTest)
+=== N06 [KILLED] Nebu.Admin.Auth reads the saved lifetime
+    280/281 passed
+    killed by: test the admin session ceiling is not part of this story Nebu.Admin.Auth (the admin session) does not read the saved lifetime (Nebu.Web.SessionConfigLifetimeTest)
+=== N07 [KILLED] legacy extension bound ignores the setting
+    279/281 passed
+    killed by: test a raised setting lets the worker extend an existing legacy session up to the new bound; a later lowering never shortens it (Nebu.OAuth.SessionLifetimeLegacyFollowTest)
+    killed by: test a lowered setting bounds the extension of an existing legacy session at created_at + the new lifetime (Nebu.OAuth.SessionLifetimeLegacyFollowTest)
+=== N08 [KILLED] a GET route reaches the save action
+    280/281 passed
+    killed by: test access and order of checks other methods on the path are not routed and write nothing (Nebu.Admin.ConfigSessionLifetimeTest)
+=== N09 [KILLED] docs: legacy sessions sentence removed
+    280/281 passed
+    killed by: test 07-deployment: the section 'Matrix session lifetime' names the key, bounds, default, env fallback, absolute ceiling, existing sessions and the audit action (Nebu.OAuth.SessionLifetimeDocsTest)
+=== N10 [KILLED] hint without the legacy note
+    280/281 passed
+    killed by: test the section and the form the hint says what the bounds are, that existing sessions keep their ceiling and where the env fallback is; the field is described by it (Nebu.Admin.ConfigSessionLifetimeTest)
+=== N11 [KILLED] field prefill clamped to the minimum
+    280/281 passed
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction an env value below the form's minimum (30 seconds, the e2e stack): shown as it is, refused when posted back, an allowed value is saved over it (Nebu.Admin.ConfigSessionLifetimeTest)
+=== N12 [KILLED] docs: unreadable-config decision removed
+    280/281 passed
+    killed by: test 07-deployment: the section 'Matrix session lifetime' names the key, bounds, default, env fallback, absolute ceiling, existing sessions and the audit action (Nebu.OAuth.SessionLifetimeDocsTest)
+
+
+================================================================================
+CYCLE 1 (security / code / UX review findings A-F): mutation run against reference-impl-cycle1.diff
+================================================================================
+Runner: scratchpad mutants_c1.py, same method as above, 16 test files (the cycle 0 files + session_lifetime_last_good / warning_rate / parser,
+config_session_lifetime_concurrency, oauth_versions_static as guard). Result: 95 mutants, 95 KILLED, 0 SURVIVED, plus 1 EQUIVALENT mutant (C11, below).
+Cycle 0 mutants whose target code was rewritten by the cycle 1 reference (the single parser in Nebu.OAuth.Config, the locked save in the controller) were re-pointed
+at the new code (M03, M04a-d, M06, M13a, M14, M33, M27, M42, M24, M18c, M18a: killed, listed at the end); M41, N10, N12 were dropped as duplicates of M42 / C25 / C27.
+
+Equivalent mutant (justified): C11 "before / no-change read outside the transaction (stale page read)": the controller reads its config INSIDE the function that runs
+after the row lock was granted (`with_locked_config/2`), so the read of `load_config()` happens after A committed (READ COMMITTED) and returns the same value as the
+locked read. A real defect (before read BEFORE the lock) is the shape the concurrency tests catch: C12 (no FOR UPDATE) is killed by them.
+
+New mutants of this cycle (C01-C35): last-known-good (C01-C07, C35), the legacy bound callers (C08), rate limited warning (C09, C10), in-transaction before / lock (C12),
+one parser (C13-C15), UX markup and wording (C16-C26), docs (C27-C34).
+
+=== M01 [KILLED] accessor ignores the saved value
+    294/327 passed
+    killed by: test scenario 2 - a saved lifetime applies to the next login 2 hours saved through the admin form: the next login's session_expires_at is 2 hours after it (Nebu.OAuth.SessionLifetimeLoginTest)
+    killed by: test scenario 2 - a saved lifetime applies to the next login the bounds: 1 hour and 90 days (Nebu.OAuth.SessionLifetimeLoginTest)
+    killed by: test scenario 4 - sessions issued before the change keep their ceiling the next login after the change gets the new ceiling while the old session keeps its own (Nebu.OAuth.SessionLifetimeLoginTest)
+    killed by: test a failed read keeps the last good value legacy bound callers get the same value: MatrixSessionStore.extend_in_place/3 is capped at created_at + the last good lifetime (Nebu.OAuth.SessionLifetimeLastGoodTest)
+    killed by: test a deliberate change by this node replaces it invalidating the cache does NOT forget it (invalidate_cache/0 only drops the TTL entry): a failed read after it still answers the last good value (Nebu.OAuth.SessionLifetimeLastGoodTest)
+    killed by: test a failed read keeps the last good value also with an env value that is LONGER (and with a longer saved value: the saved one wins either way) (Nebu.OAuth.SessionLifetimeLastGoodTest)
+    ... and 22 more
+=== M02 [KILLED] env value wins over the saved value
+    323/327 passed
+    killed by: test fail safe: an unreadable or damaged setting never breaks the login path an unreadable server_config answers the env value / 8 hours and is not cached (Nebu.OAuth.SessionLifetimeCacheTest)
+    killed by: test a failed read keeps the last good value also with an env value that is LONGER (and with a longer saved value: the saved one wins either way) (Nebu.OAuth.SessionLifetimeLastGoodTest)
+    killed by: test scenario 2 - a saved lifetime applies a saved value wins over the env value, longer or shorter (Nebu.Web.SessionConfigLifetimeTest)
+    killed by: test scenario 2 - a saved lifetime applies to the next login a saved value wins over the env value; deleting the row falls back to the env value (Nebu.OAuth.SessionLifetimeLoginTest)
+=== M05 [KILLED] accessor bypasses the cache (one query per call)
+    324/327 passed
+    killed by: test hot path: no query per call at now - loaded_at = TTL the entry is stale: the next call reads again and picks up a change made by another node (Nebu.OAuth.SessionLifetimeCacheTest)
+    killed by: test hot path: no query per call nothing saved is a successful read too: it is cached (no query per login for an instance that never set it) (Nebu.OAuth.SessionLifetimeCacheTest)
+    killed by: test hot path: no query per call many calls inside the TTL window issue ONE server_config query; the value is right (Nebu.OAuth.SessionLifetimeCacheTest)
+=== M07 [KILLED] legacy login ignores the saved value
+    324/327 passed
+    killed by: test the legacy login ceiling (HttpPublic.session_expires_at/1) reads the same accessor no usable exp claim: the ceiling (Nebu.Web.SessionConfigLifetimeTest)
+    killed by: test the legacy login ceiling (HttpPublic.session_expires_at/1) reads the same accessor far IdP expiry: now + saved lifetime, shorter and longer than 8 hours (Nebu.Web.SessionConfigLifetimeTest)
+    killed by: test scenario 2 - a saved lifetime applies to the next login the legacy login ceiling (HttpPublic.session_expires_at/1) follows the row too (Nebu.OAuth.SessionLifetimeLoginTest)
+=== M08 [KILLED] OAuth login ignores the saved value
+    322/327 passed
+    killed by: test scenario 4 - sessions issued before the change keep their ceiling the next login after the change gets the new ceiling while the old session keeps its own (Nebu.OAuth.SessionLifetimeLoginTest)
+    killed by: test scenario 2 - a saved lifetime applies to the next login the bounds: 1 hour and 90 days (Nebu.OAuth.SessionLifetimeLoginTest)
+    killed by: test scenario 2 - a saved lifetime applies to the next login 2 hours saved through the admin form: the next login's session_expires_at is 2 hours after it (Nebu.OAuth.SessionLifetimeLoginTest)
+    killed by: test scenario 2 - a saved lifetime applies to the next login a saved value wins over the env value; deleting the row falls back to the env value (Nebu.OAuth.SessionLifetimeLoginTest)
+    killed by: test scenario 2 - a saved lifetime applies to the next login a lifetime longer than the default applies as well (24 hours) (Nebu.OAuth.SessionLifetimeLoginTest)
+=== M09 [KILLED] audit is optional (retry without it)
+    325/327 passed
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction a failing audit writer: nothing is saved, no retry without the audit, an error flash, the marker is kept (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction a raising audit writer counts as a failed audit (Nebu.Admin.ConfigSessionLifetimeTest)
+=== M10 [KILLED] audit metadata carries a string value
+    320/327 passed
+    killed by: test a concurrent save of the SAME value is 'no change' when it commits: one audit row, one write (Nebu.Admin.ConfigSessionLifetimeConcurrencyTest)
+    killed by: test two concurrent saves chain: the audit row of the second has the first one's after_seconds as before_seconds (Nebu.Admin.ConfigSessionLifetimeConcurrencyTest)
+    killed by: test propagation the saving node serves the new value at once: the admin save drops this node's cache entry (Nebu.OAuth.SessionLifetimeCacheTest)
+    killed by: test scenario 6: 8 hours saved, 2 hours entered: the row is 7200 and exactly ONE audit row holds the admin, the setting and the two numbers (Nebu.Admin.ConfigSessionLifetimeDbTest)
+    killed by: test nothing saved yet: the first save INSERTs the row (old number = the 8 hour default), the second UPDATEs it (the RLS allowlist of migration 000056) (Nebu.Admin.ConfigSessionLifetimeDbTest)
+    killed by: test 'no change' means the SAVED value: with nothing saved the default (28800) entered is persisted and audited (Nebu.Admin.ConfigSessionLifetimeDbTest)
+    ... and 1 more
+=== M11 [KILLED] marker not consumed after a save
+    325/327 passed
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction after the save the sign-in link is back on the next page (real cookie round trip) (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction 2 hours from 8 hours: one transaction with the canonical value and an audit function, flash, redirect, marker consumed, one audit row with numbers only (Nebu.Admin.ConfigSessionLifetimeTest)
+=== M12 [KILLED] marker consumed by a refused value
+    326/327 passed
+    killed by: test scenario 3 - refused values a refusal keeps the fresh sign-in (the admin corrects the value with the same marker) and the re-render still shows the Save button (Nebu.Admin.ConfigSessionLifetimeTest)
+=== M15 [KILLED] stored text is not canonical
+    312/327 passed
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction 2 hours from 8 hours: one transaction with the canonical value and an audit function, flash, redirect, marker consumed, one audit row with numbers only (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction a damaged saved value is no saved value: entering the value in effect saves it (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction both bounds are saved (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction a longer lifetime than before is saved the same way (the audit row is not only for shortening) (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction an env value below the form's minimum (30 seconds, the e2e stack): shown as it is, refused when posted back, an allowed value is saved over it (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction the value is stored as canonical decimal text: surrounding white space is trimmed (Nebu.Admin.ConfigSessionLifetimeTest)
+    ... and 1 more
+=== M16 [KILLED] no 'no change' detection
+    324/327 passed
+    killed by: test a concurrent save of the SAME value is 'no change' when it commits: one audit row, one write (Nebu.Admin.ConfigSessionLifetimeConcurrencyTest)
+    killed by: test the same value again is no change: no write, no audit row (Nebu.Admin.ConfigSessionLifetimeDbTest)
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction the same value as the SAVED one: no change, no transaction, no audit entry, the marker is kept (Nebu.Admin.ConfigSessionLifetimeTest)
+=== M17 [KILLED] no fresh sign-in needed (click level only)
+    323/327 passed
+    killed by: test without a fresh sign-in nothing is written and nothing is audited (Nebu.Admin.ConfigSessionLifetimeDbTest)
+    killed by: test scenario 5 - submitting without a fresh sign-in does not save an expired marker, a marker of another page and one of another admin: the same (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test access and order of checks the gate comes BEFORE the validation: an invalid value without strict fetch metadata is the 403, without a marker the redirect, never the 200 re-render (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test scenario 5 - submitting without a fresh sign-in does not save no marker: redirect to the sign-in of /admin/config, nothing written, nothing audited (Nebu.Admin.ConfigSessionLifetimeTest)
+=== M22 [KILLED] a save rewrites the ceiling of existing sessions
+    324/327 passed
+    killed by: test scenario 4 - sessions issued before the change keep their ceiling an 8 hour session still expires at its original session_expires_at after 2 hours are saved (Nebu.OAuth.SessionLifetimeLoginTest)
+    killed by: test scenario 4 - sessions issued before the change keep their ceiling a refresh after the change copies the ceiling verbatim: neither shortened to the new lifetime nor extended (Nebu.OAuth.SessionLifetimeLoginTest)
+    killed by: test scenario 4 - sessions issued before the change keep their ceiling the next login after the change gets the new ceiling while the old session keeps its own (Nebu.OAuth.SessionLifetimeLoginTest)
+=== M28 [KILLED] audit 'before' ignores the env value
+    325/327 passed
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction an env value below the form's minimum (30 seconds, the e2e stack): shown as it is, refused when posted back, an allowed value is saved over it (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction nothing saved before, an env value in effect: the old number is the env value (Nebu.Admin.ConfigSessionLifetimeTest)
+=== M30 [KILLED] form read from conn.params (query string)
+    326/327 passed
+    killed by: test scenario 5 - submitting without a fresh sign-in does not save the form is read from the BODY: a value in the query string saves nothing (Nebu.Admin.ConfigSessionLifetimeTest)
+=== M31 [KILLED] audit before/after swapped
+    316/327 passed
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction nothing saved before, an env value in effect: the old number is the env value (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction a damaged saved value is not 'the old value': the value in effect is (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction nothing saved before: the old number is the 8 hour default (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction a longer lifetime than before is saved the same way (the audit row is not only for shortening) (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction 2 hours from 8 hours: one transaction with the canonical value and an audit function, flash, redirect, marker consumed, one audit row with numbers only (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction an env value below the form's minimum (30 seconds, the e2e stack): shown as it is, refused when posted back, an allowed value is saved over it (Nebu.Admin.ConfigSessionLifetimeTest)
+=== M26 [KILLED] human text: days wrong
+    324/327 passed
+    killed by: test lifetime_text/1 whole hours and days (Nebu.Admin.SessionLifetimeValidationTest)
+    killed by: test the section and the form the help block (the description of the field) holds range, units and the env fallback; it is described by it and wraps long words (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test the section and the form a saved value is shown, in seconds and as text (Nebu.Admin.ConfigSessionLifetimeTest)
+=== M43 [KILLED] human text: no singular
+    326/327 passed
+    killed by: test lifetime_text/1 whole hours and days (Nebu.Admin.SessionLifetimeValidationTest)
+=== M25 [KILLED] no warning for a damaged value
+    322/327 passed
+    killed by: test a minute later the next damaged read warns again (once) (Nebu.OAuth.SessionLifetimeWarningRateTest)
+    killed by: test different damaged values do not each get a warning: the limit is per node, not per value (Nebu.OAuth.SessionLifetimeWarningRateTest)
+    killed by: test many reads of a damaged value within a minute log ONE warning, naming the key and never the value (Nebu.OAuth.SessionLifetimeWarningRateTest)
+    killed by: test fail safe: an unreadable or damaged setting never breaks the login path a damaged row (text, out of range, blank) is ignored with a warning that names the key and never the raw value (Nebu.OAuth.SessionLifetimeCacheTest)
+    killed by: test a damaged row after a good one keeps the last good value (and still logs its warning that names the key and never the value) (Nebu.OAuth.SessionLifetimeLastGoodTest)
+=== M35 [KILLED] a successful read of 'nothing saved' is not cached
+    307/327 passed
+    killed by: test hot path: no query per call nothing saved is a successful read too: it is cached (no query per login for an instance that never set it) (Nebu.OAuth.SessionLifetimeCacheTest)
+    killed by: test AC2.2 — every surface observes the SAME cached state within one TTL window unstable auth_metadata alias: flip via DB => old answer before the TTL, new answer after (Nebu.OAuth.OAuthConfigCacheTest)
+    killed by: test AC2.1 — /versions a cold-cache bounded read fills the cache for the next request (hit without a query) (Nebu.OAuth.OAuthConfigCacheTest)
+    killed by: test AC2.2 — every surface observes the SAME cached state within one TTL window account: flip via DB => old answer before the TTL, new answer after (Nebu.OAuth.OAuthConfigCacheTest)
+    killed by: test AC1.2 — an operator write becomes visible after the TTL, not before an issuer change is visible after the TTL (Nebu.OAuth.OAuthConfigCacheTest)
+    killed by: test AC1.1 — one server_config read per TTL window the entry is {:config, map, loaded_at_ms} in :nebu_oauth_config_cache (Nebu.OAuth.OAuthConfigCacheTest)
+    ... and 14 more
+=== M46 [KILLED] fallback ignores the env value
+    314/327 passed
+    killed by: test scenario 1 - nothing saved: the 8 hour ceiling the env value is the fallback below a saved value, and is not range checked (the e2e stack uses 30 seconds) (Nebu.Web.SessionConfigLifetimeTest)
+    killed by: test the legacy login ceiling (HttpPublic.session_expires_at/1) reads the same accessor a damaged saved value: the env value is the ceiling (Nebu.Web.SessionConfigLifetimeTest)
+    killed by: test a damaged, out-of-range or unreadable saved value is ignored: the env value, else 8 hours, never a crash with an env value: the env value (Nebu.Web.SessionConfigLifetimeTest)
+    killed by: test a damaged, out-of-range or unreadable saved value is ignored: the env value, else 8 hours, never a crash an unreadable server_config (the unknown state of the config source) answers the env value / 8 hours (Nebu.Web.SessionConfigLifetimeTest)
+    killed by: test fail safe: an unreadable or damaged setting never breaks the login path an unreadable server_config answers the env value / 8 hours and is not cached (Nebu.OAuth.SessionLifetimeCacheTest)
+    killed by: test fail safe: an unreadable or damaged setting never breaks the login path a damaged row falls back to the ENV value when one is set (Nebu.OAuth.SessionLifetimeCacheTest)
+    ... and 7 more
+=== M18b [KILLED] no aria-invalid on the field
+    325/327 passed
+    killed by: test scenario 3 - refused values every kind of refused value: 200, error, nothing written (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test scenario 3 - refused values 100 days: 200 re-render, the error next to the field (aria-invalid, aria-describedby, role=alert inside the section), nothing saved or audited (Nebu.Admin.ConfigSessionLifetimeTest)
+=== M18d [KILLED] hint does not say existing sessions keep their ceiling
+    326/327 passed
+    killed by: test the section and the form the note about existing sessions is OUTSIDE the describedby block, inside the section, in the wording of the UX review (UX M3 / M5, CR-6) (Nebu.Admin.ConfigSessionLifetimeTest)
+=== M18e [KILLED] current value element renamed
+    320/327 passed
+    killed by: test the page of the real database shows the saved value (Nebu.Admin.ConfigSessionLifetimeDbTest)
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction an env value below the form's minimum (30 seconds, the e2e stack): shown as it is, refused when posted back, an allowed value is saved over it (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test the section and the form nothing saved: the env value is what is in effect and what is shown (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test the section and the form the field shows the effective value in seconds and the current value as human text: nothing saved = 8 hours (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test the section and the form a saved value is shown, in seconds and as text (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test scenario 3 - refused values 100 days: 200 re-render, the error next to the field (aria-invalid, aria-describedby, role=alert inside the section), nothing saved or audited (Nebu.Admin.ConfigSessionLifetimeTest)
+    ... and 1 more
+=== M18f [KILLED] hint omits the env fallback
+    326/327 passed
+    killed by: test the section and the form the help block (the description of the field) holds range, units and the env fallback; it is described by it and wraps long words (Nebu.Admin.ConfigSessionLifetimeTest)
+=== M19 [KILLED] route not in the unframed segments
+    326/327 passed
+    killed by: test scenario 5 - submitting without a fresh sign-in does not save the response of every kind is not frameable and not cacheable, also under the other spellings of the path (Nebu.Admin.ConfigSessionLifetimeTest)
+=== M21 [KILLED] audit action not known to the writer
+    313/327 passed
+    killed by: test a concurrent save of the SAME value is 'no change' when it commits: one audit row, one write (Nebu.Admin.ConfigSessionLifetimeConcurrencyTest)
+    killed by: test two concurrent saves chain: the audit row of the second has the first one's after_seconds as before_seconds (Nebu.Admin.ConfigSessionLifetimeConcurrencyTest)
+    killed by: test scenario 2 - a saved lifetime applies to the next login a lifetime longer than the default applies as well (24 hours) (Nebu.OAuth.SessionLifetimeLoginTest)
+    killed by: test scenario 2 - a saved lifetime applies to the next login the bounds: 1 hour and 90 days (Nebu.OAuth.SessionLifetimeLoginTest)
+    killed by: test scenario 2 - a saved lifetime applies to the next login a saved value wins over the env value; deleting the row falls back to the env value (Nebu.OAuth.SessionLifetimeLoginTest)
+    killed by: test scenario 2 - a saved lifetime applies to the next login 2 hours saved through the admin form: the next login's session_expires_at is 2 hours after it (Nebu.OAuth.SessionLifetimeLoginTest)
+    ... and 8 more
+=== M20a [KILLED] migration up: new key missing
+    326/327 passed
+    killed by: test static the up policy keeps EVERY key and LIKE family of 000049 plus matrix_session_ttl_seconds only (no silent widening) (Nebu.Migration.Migration000056ConfigSessionLifetimeMutableTest)
+=== M20b [KILLED] migration up: an old key dropped
+    326/327 passed
+    killed by: test static the up policy keeps EVERY key and LIKE family of 000049 plus matrix_session_ttl_seconds only (no silent widening) (Nebu.Migration.Migration000056ConfigSessionLifetimeMutableTest)
+=== M20c [KILLED] migration down keeps the new key
+    326/327 passed
+    killed by: test static down restores 000049's policy verbatim and removes the key (Nebu.Migration.Migration000056ConfigSessionLifetimeMutableTest)
+=== M40 [KILLED] Phoenix parameter filter does not mask the field
+    325/327 passed
+    killed by: test scenario 3 - refused values the refused text is escaped when it is shown again, and never reaches the log (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test scenario 3 - refused values Phoenix's parameter logging masks the field (like the field of every other marker-gated form): a pasted value is not logged at debug (Nebu.Admin.ConfigSessionLifetimeTest)
+=== M23a [KILLED] a refresh re-derives (extends) the OAuth session ceiling
+    326/327 passed
+    killed by: test scenario 4 - sessions issued before the change keep their ceiling a refresh after the change copies the ceiling verbatim: neither shortened to the new lifetime nor extended (Nebu.OAuth.SessionLifetimeLoginTest)
+=== M48 [KILLED] default changed to 7 hours
+    300/327 passed
+    killed by: test scenario 4 - sessions issued before the change keep their ceiling the next login after the change gets the new ceiling while the old session keeps its own (Nebu.OAuth.SessionLifetimeLoginTest)
+    killed by: test scenario 2 - a saved lifetime applies to the next login a damaged row never breaks the login: the default (or env) ceiling is stamped (Nebu.OAuth.SessionLifetimeLoginTest)
+    killed by: test scenario 1 - without a saved value a login keeps the 8 hour ceiling no row, no env: session_expires_at is 8 hours after the login (Nebu.OAuth.SessionLifetimeLoginTest)
+    killed by: test 'no change' means the SAVED value: with nothing saved the default (28800) entered is persisted and audited (Nebu.Admin.ConfigSessionLifetimeDbTest)
+    killed by: test nothing saved yet: the first save INSERTs the row (old number = the 8 hour default), the second UPDATEs it (the RLS allowlist of migration 000056) (Nebu.Admin.ConfigSessionLifetimeDbTest)
+    killed by: test a damaged row after a good one with no good value ever read the damaged row falls back to the env value / 8 hours (nothing to keep) (Nebu.OAuth.SessionLifetimeLastGoodTest)
+    ... and 11 more
+=== M49a [KILLED] maximum raised (reader and form share it)
+    317/327 passed
+    killed by: test validate_session_lifetime/1 the message names both bounds in seconds and says whole numbers, without echoing the submitted text (Nebu.Admin.SessionLifetimeValidationTest)
+    killed by: test validate_session_lifetime/1 below the minimum or above the maximum is refused (100 days is above the 90 day maximum) (Nebu.Admin.SessionLifetimeValidationTest)
+    killed by: test a damaged, out-of-range or unreadable saved value is ignored: the env value, else 8 hours, never a crash with an env value: the env value (Nebu.Web.SessionConfigLifetimeTest)
+    killed by: test a damaged, out-of-range or unreadable saved value is ignored: the env value, else 8 hours, never a crash no env: 8 hours (Nebu.Web.SessionConfigLifetimeTest)
+    killed by: test a damaged, out-of-range or unreadable saved value is ignored: the env value, else 8 hours, never a crash values that are not text or a number (nil, an atom, a list, a map, a float) are ignored (Nebu.Web.SessionConfigLifetimeTest)
+    killed by: test values that are not valid are refused by the parser and the form and IGNORED by the reader (Nebu.Admin.SessionLifetimeParserTest)
+    ... and 4 more
+=== M49b [KILLED] minimum lowered (reader and form share it)
+    316/327 passed
+    killed by: test validate_session_lifetime/1 below the minimum or above the maximum is refused (100 days is above the 90 day maximum) (Nebu.Admin.SessionLifetimeValidationTest)
+    killed by: test validate_session_lifetime/1 the message names both bounds in seconds and says whole numbers, without echoing the submitted text (Nebu.Admin.SessionLifetimeValidationTest)
+    killed by: test values that are not valid are refused by the parser and the form and IGNORED by the reader (Nebu.Admin.SessionLifetimeParserTest)
+    killed by: test an integer is read by the reader and the parser the same way (inside the bounds only) (Nebu.Admin.SessionLifetimeParserTest)
+    killed by: test scenario 3: a refused value (100 days, text, blank) changes nothing and audits nothing; the stored value is unchanged (Nebu.Admin.ConfigSessionLifetimeDbTest)
+    killed by: test a damaged, out-of-range or unreadable saved value is ignored: the env value, else 8 hours, never a crash values that are not text or a number (nil, an atom, a list, a map, a float) are ignored (Nebu.Web.SessionConfigLifetimeTest)
+    ... and 5 more
+=== M51 [KILLED] field renamed
+    326/327 passed
+    killed by: test the section and the form section, heading, form, field and label carry the contract (Nebu.Admin.ConfigSessionLifetimeTest)
+=== M52 [KILLED] form posts to the OAuth switch action
+    326/327 passed
+    killed by: test the section and the form section, heading, form, field and label carry the contract (Nebu.Admin.ConfigSessionLifetimeTest)
+=== N01 [KILLED] require_admin removed from the config controller
+    326/327 passed
+    killed by: test access and order of checks require_admin first: no session at all, a non-admin session and an admin flag of false never reach the form (Nebu.Admin.ConfigSessionLifetimeTest)
+=== N02 [KILLED] validation before the gate (a refused value gets the re-render without a marker)
+    326/327 passed
+    killed by: test access and order of checks the gate comes BEFORE the validation: an invalid value without strict fetch metadata is the 403, without a marker the redirect, never the 200 re-render (Nebu.Admin.ConfigSessionLifetimeTest)
+=== N03 [KILLED] 'no change' compared with the value in effect instead of the saved one
+    324/327 passed
+    killed by: test 'no change' means the SAVED value: with nothing saved the default (28800) entered is persisted and audited (Nebu.Admin.ConfigSessionLifetimeDbTest)
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction 'no change' compares with the SAVED value only: nothing saved and the default entered is saved and audited (an explicit 8 hours can be persisted) (Nebu.Admin.ConfigSessionLifetimeTest)
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction a damaged saved value is no saved value: entering the value in effect saves it (Nebu.Admin.ConfigSessionLifetimeTest)
+=== N04 [KILLED] no cache table: the saved value is dropped (8 hour fallback)
+    285/327 passed
+    killed by: test scenario 2 - a saved lifetime applies to the next login a saved value wins over the env value; deleting the row falls back to the env value (Nebu.OAuth.SessionLifetimeLoginTest)
+    killed by: test a damaged row after a good one keeps the last good value (and still logs its warning that names the key and never the value) (Nebu.OAuth.SessionLifetimeLastGoodTest)
+    killed by: test a failed read keeps the last good value also with an env value that is LONGER (and with a longer saved value: the saved one wins either way) (Nebu.OAuth.SessionLifetimeLastGoodTest)
+    killed by: test a failed read keeps the last good value the failed read is not cached: the next call after the repo healed reads the row again (Nebu.OAuth.SessionLifetimeLastGoodTest)
+    killed by: test a failed read keeps the last good value legacy bound callers: RefreshWorker.candidates/0 (the reuse / extension window) uses it too: a row older than the last good lifetime is no candidate (Nebu.OAuth.SessionLifetimeLastGoodTest)
+    killed by: test a failed read keeps the last good value cache on: the value read hours ago is served when the read fails (the TTL cache is gone, the last good value has no TTL) (Nebu.OAuth.SessionLifetimeLastGoodTest)
+    ... and 22 more
+=== N05 [KILLED] admin session ceiling reads the new key
+    326/327 passed
+    killed by: test the admin session ceiling is not part of this story a saved Matrix lifetime does not change Nebu.Web.SessionConfig.admin_session_ttl_seconds/0 (Nebu.Web.SessionConfigLifetimeTest)
+=== N06 [KILLED] Nebu.Admin.Auth reads the saved lifetime
+    326/327 passed
+    killed by: test the admin session ceiling is not part of this story Nebu.Admin.Auth (the admin session) does not read the saved lifetime (Nebu.Web.SessionConfigLifetimeTest)
+=== N07 [KILLED] legacy extension bound ignores the setting
+    324/327 passed
+    killed by: test a raised setting lets the worker extend an existing legacy session up to the new bound; a later lowering never shortens it (Nebu.OAuth.SessionLifetimeLegacyFollowTest)
+    killed by: test a lowered setting bounds the extension of an existing legacy session at created_at + the new lifetime (Nebu.OAuth.SessionLifetimeLegacyFollowTest)
+    killed by: test a failed read keeps the last good value legacy bound callers get the same value: MatrixSessionStore.extend_in_place/3 is capped at created_at + the last good lifetime (Nebu.OAuth.SessionLifetimeLastGoodTest)
+=== N08 [KILLED] a GET route reaches the save action
+    326/327 passed
+    killed by: test access and order of checks other methods on the path are not routed and write nothing (Nebu.Admin.ConfigSessionLifetimeTest)
+=== N09 [KILLED] docs: legacy sessions sentence removed
+    326/327 passed
+    killed by: test 07-deployment: the section 'Matrix session lifetime' names the key, bounds, default, env fallback, absolute ceiling, existing sessions and the audit action (Nebu.OAuth.SessionLifetimeDocsTest)
+=== N11 [KILLED] field prefill clamped to the minimum
+    326/327 passed
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction an env value below the form's minimum (30 seconds, the e2e stack): shown as it is, refused when posted back, an allowed value is saved over it (Nebu.Admin.ConfigSessionLifetimeTest)
+=== C01 [KILLED] no last-known-good on a failed read
+    318/327 passed
+    killed by: test a failed read keeps the last good value also with an env value that is LONGER (and with a longer saved value: the saved one wins either way) (Nebu.OAuth.SessionLifetimeLastGoodTest)
+    killed by: test a failed read keeps the last good value the failed read is not cached: the next call after the repo healed reads the row again (Nebu.OAuth.SessionLifetimeLastGoodTest)
+    killed by: test a failed read keeps the last good value a successful read of a NEW valid value replaces it: the next failure serves the new one (Nebu.OAuth.SessionLifetimeLastGoodTest)
+    killed by: test a deliberate change by this node replaces it invalidating the cache does NOT forget it (invalidate_cache/0 only drops the TTL entry): a failed read after it still answers the last good value (Nebu.OAuth.SessionLifetimeLastGoodTest)
+    killed by: test a failed read keeps the last good value legacy bound callers: RefreshWorker.candidates/0 (the reuse / extension window) uses it too: a row older than the last good lifetime is no candidate (Nebu.OAuth.SessionLifetimeLastGoodTest)
+    killed by: test a deliberate change by this node replaces it the admin save of 7200 is the last good value at once: a failed read right after it answers 7200, not the old 3600 (Nebu.OAuth.SessionLifetimeLastGoodTest)
+    ... and 3 more
+=== C02 [KILLED] a damaged row ignores the last good value
+    326/327 passed
+    killed by: test a damaged row after a good one keeps the last good value (and still logs its warning that names the key and never the value) (Nebu.OAuth.SessionLifetimeLastGoodTest)
+=== C03 [KILLED] a successful read without a row keeps the last good value
+    325/327 passed
+    killed by: test when the last good value is NOT used a SUCCESSFUL read that finds no row is the new truth: the row removed on purpose ends the saved value (env / 8 hours apply) (Nebu.OAuth.SessionLifetimeLastGoodTest)
+    killed by: test scenario 2 - a saved lifetime applies to the next login a saved value wins over the env value; deleting the row falls back to the env value (Nebu.OAuth.SessionLifetimeLoginTest)
+=== C04 [KILLED] a successful read does not update the last good value
+    318/327 passed
+    killed by: test a failed read keeps the last good value cache off: the same (Nebu.OAuth.SessionLifetimeLastGoodTest)
+    killed by: test a failed read keeps the last good value legacy bound callers: RefreshWorker.candidates/0 (the reuse / extension window) uses it too: a row older than the last good lifetime is no candidate (Nebu.OAuth.SessionLifetimeLastGoodTest)
+    killed by: test a failed read keeps the last good value also with an env value that is LONGER (and with a longer saved value: the saved one wins either way) (Nebu.OAuth.SessionLifetimeLastGoodTest)
+    killed by: test a deliberate change by this node replaces it invalidating the cache does NOT forget it (invalidate_cache/0 only drops the TTL entry): a failed read after it still answers the last good value (Nebu.OAuth.SessionLifetimeLastGoodTest)
+    killed by: test a failed read keeps the last good value cache on: the value read hours ago is served when the read fails (the TTL cache is gone, the last good value has no TTL) (Nebu.OAuth.SessionLifetimeLastGoodTest)
+    killed by: test a failed read keeps the last good value a successful read of a NEW valid value replaces it: the next failure serves the new one (Nebu.OAuth.SessionLifetimeLastGoodTest)
+    ... and 3 more
+=== C05 [KILLED] an admin save does not record the new last good value
+    326/327 passed
+    killed by: test a deliberate change by this node replaces it the admin save of 7200 is the last good value at once: a failed read right after it answers 7200, not the old 3600 (Nebu.OAuth.SessionLifetimeLastGoodTest)
+=== C06 [KILLED] invalidating the cache forgets the last good value
+    325/327 passed
+    killed by: test a deliberate change by this node replaces it the admin save of 7200 is the last good value at once: a failed read right after it answers 7200, not the old 3600 (Nebu.OAuth.SessionLifetimeLastGoodTest)
+    killed by: test a deliberate change by this node replaces it invalidating the cache does NOT forget it (invalidate_cache/0 only drops the TTL entry): a failed read after it still answers the last good value (Nebu.OAuth.SessionLifetimeLastGoodTest)
+=== C07 [KILLED] a failed read is no longer fail closed for the OAuth switch
+    320/327 passed
+    killed by: test a failed read keeps the last good value Nebu.OAuth.Config.get/0 stays FAIL CLOSED for the OAuth switch: only the lifetime is sticky (Nebu.OAuth.SessionLifetimeLastGoodTest)
+    killed by: test N-4 — three states: enabled / disabled / unknown discovery answers 503 (no IdP passthrough) while the config is unreadable (Nebu.OAuth.OAuthConfigTest)
+    killed by: test N-4 — three states: enabled / disabled / unknown a server_config read that FAILS is :unknown (not :disabled), still fail closed (enabled: false) (Nebu.OAuth.OAuthConfigTest)
+    killed by: test AC1.3 — :unknown and :no_repo are never cached an expired :enabled entry followed by a read error => :unknown, not the stale value (Nebu.OAuth.OAuthConfigCacheTest)
+    killed by: test AC1.3 — :unknown and :no_repo are never cached repo error => :unknown (fail closed); the next call with a healthy repo reads fresh (Nebu.OAuth.OAuthConfigCacheTest)
+    killed by: test AC1.3 — :unknown and :no_repo are never cached every call during an outage re-reads (nothing cached) (Nebu.OAuth.OAuthConfigCacheTest)
+    ... and 1 more
+=== C08 [KILLED] RefreshWorker.candidates ignores the setting
+    326/327 passed
+    killed by: test a failed read keeps the last good value legacy bound callers: RefreshWorker.candidates/0 (the reuse / extension window) uses it too: a row older than the last good lifetime is no candidate (Nebu.OAuth.SessionLifetimeLastGoodTest)
+=== C09 [KILLED] the damaged-value warning is not rate limited
+    324/327 passed
+    killed by: test a minute later the next damaged read warns again (once) (Nebu.OAuth.SessionLifetimeWarningRateTest)
+    killed by: test different damaged values do not each get a warning: the limit is per node, not per value (Nebu.OAuth.SessionLifetimeWarningRateTest)
+    killed by: test many reads of a damaged value within a minute log ONE warning, naming the key and never the value (Nebu.OAuth.SessionLifetimeWarningRateTest)
+=== C10 [KILLED] the damaged-value warning bucket allows 3 per minute
+    324/327 passed
+    killed by: test different damaged values do not each get a warning: the limit is per node, not per value (Nebu.OAuth.SessionLifetimeWarningRateTest)
+    killed by: test many reads of a damaged value within a minute log ONE warning, naming the key and never the value (Nebu.OAuth.SessionLifetimeWarningRateTest)
+    killed by: test a minute later the next damaged read warns again (once) (Nebu.OAuth.SessionLifetimeWarningRateTest)
+=== C12 [KILLED] no row lock in with_locked_config
+    325/327 passed
+    killed by: test a concurrent save of the SAME value is 'no change' when it commits: one audit row, one write (Nebu.Admin.ConfigSessionLifetimeConcurrencyTest)
+    killed by: test two concurrent saves chain: the audit row of the second has the first one's after_seconds as before_seconds (Nebu.Admin.ConfigSessionLifetimeConcurrencyTest)
+=== C13 [KILLED] the form has its own parser (accepts a leading +)
+    323/327 passed
+    killed by: test validate_session_lifetime/1 blank, signs, decimals, exponents, units, separators and other text are refused (Nebu.Admin.SessionLifetimeValidationTest)
+    killed by: test the three entry points never disagree, whatever the text (Nebu.Admin.SessionLifetimeParserTest)
+    killed by: test the reader that reads the REAL row (not the seam) judges like the form and the parser every text of the lists above: same verdict from the parser, the form and the reader of the saved row (Nebu.Admin.SessionLifetimeParserTest)
+    killed by: test values that are not valid are refused by the parser and the form and IGNORED by the reader (Nebu.Admin.SessionLifetimeParserTest)
+=== C14 [KILLED] the row reader has its own parser (Integer.parse)
+    326/327 passed
+    killed by: test the reader that reads the REAL row (not the seam) judges like the form and the parser every text of the lists above: same verdict from the parser, the form and the reader of the saved row (Nebu.Admin.SessionLifetimeParserTest)
+=== C15 [KILLED] the seam reader has its own parser (Integer.parse)
+    324/327 passed
+    killed by: test values that are not valid are refused by the parser and the form and IGNORED by the reader (Nebu.Admin.SessionLifetimeParserTest)
+    killed by: test the three entry points never disagree, whatever the text (Nebu.Admin.SessionLifetimeParserTest)
+    killed by: test a damaged, out-of-range or unreadable saved value is ignored: the env value, else 8 hours, never a crash values that are not text or a number (nil, an atom, a list, a map, a float) are ignored (Nebu.Web.SessionConfigLifetimeTest)
+=== C16 [KILLED] autofocus always on
+    326/327 passed
+    killed by: test the section and the form autofocus: only a refused value puts the focus on the field (UX M1) (Nebu.Admin.ConfigSessionLifetimeTest)
+=== C17 [KILLED] describedby lists the help first
+    326/327 passed
+    killed by: test the section and the form aria-describedby lists the error FIRST, then the help (UX M2); without an error only the help (Nebu.Admin.ConfigSessionLifetimeTest)
+=== C18 [KILLED] the existing-sessions explanation is inside the help block
+    326/327 passed
+    killed by: test the section and the form the help block (the description of the field) holds range, units and the env fallback; it is described by it and wraps long words (Nebu.Admin.ConfigSessionLifetimeTest)
+=== C19 [KILLED] no 'Common values' sentence
+    326/327 passed
+    killed by: test the section and the form a 'Common values' sentence names 3600, 28800, 86400, 604800 and 2592000 (the field takes seconds only; UX M4) (Nebu.Admin.ConfigSessionLifetimeTest)
+=== C20 [KILLED] no break-words on the help block
+    326/327 passed
+    killed by: test the section and the form the help block (the description of the field) holds range, units and the env fallback; it is described by it and wraps long words (Nebu.Admin.ConfigSessionLifetimeTest)
+=== C21 [KILLED] maximum hard-coded in the template
+    326/327 passed
+    killed by: test the section and the form the bounds shown are those of Nebu.OAuth.matrix_session_ttl_bounds/0 (the template has no copy of them that can drift) (Nebu.Admin.ConfigSessionLifetimeTest)
+=== C22 [KILLED] note: old wording
+    326/327 passed
+    killed by: test the section and the form the note about existing sessions is OUTSIDE the describedby block, inside the section, in the wording of the UX review (UX M3 / M5, CR-6) (Nebu.Admin.ConfigSessionLifetimeTest)
+=== C23 [KILLED] success flash promises 'existing sessions' in general
+    326/327 passed
+    killed by: test scenarios 2 and 6 - a valid value is saved and audited in one transaction 2 hours from 8 hours: one transaction with the canonical value and an audit function, flash, redirect, marker consumed, one audit row with numbers only (Nebu.Admin.ConfigSessionLifetimeTest)
+=== C24 [KILLED] note without the identity provider caveat
+    326/327 passed
+    killed by: test the section and the form the note about existing sessions is OUTSIDE the describedby block, inside the section, in the wording of the UX review (UX M3 / M5, CR-6) (Nebu.Admin.ConfigSessionLifetimeTest)
+=== C25 [KILLED] note does not say legacy sessions follow the setting
+    326/327 passed
+    killed by: test the section and the form the note about existing sessions is OUTSIDE the describedby block, inside the section, in the wording of the UX review (UX M3 / M5, CR-6) (Nebu.Admin.ConfigSessionLifetimeTest)
+=== C26 [KILLED] note outside the section's note id (renamed)
+    326/327 passed
+    killed by: test the section and the form the note about existing sessions is OUTSIDE the describedby block, inside the section, in the wording of the UX review (UX M3 / M5, CR-6) (Nebu.Admin.ConfigSessionLifetimeTest)
+=== C28 [KILLED] docs: in-flight refill race removed
+    326/327 passed
+    killed by: test 07-deployment (cycle 1): last-known-good, the in-flight refill race, the cache-off query per login and the legacy IdP expiry cap are described (Nebu.OAuth.SessionLifetimeDocsTest)
+=== C29 [KILLED] docs: cache-off cost removed
+    326/327 passed
+    killed by: test 07-deployment (cycle 1): last-known-good, the in-flight refill race, the cache-off query per login and the legacy IdP expiry cap are described (Nebu.OAuth.SessionLifetimeDocsTest)
+=== C31 [KILLED] docs: cache paragraph without the session lifetime
+    326/327 passed
+    killed by: test 07-deployment (cycle 1): the description of NEBU_OAUTH_CONFIG_CACHE_MS says that the cache holds the session lifetime too, and the last-known-good rule (Nebu.OAuth.SessionLifetimeDocsTest)
+=== C32 [KILLED] 08-concepts: 'inert in production' is back
+    326/327 passed
+    killed by: test 08-concepts (cycle 1): the session-lifetime ceiling is no longer 'inert in production' / 'primarily a test seam' and names the Admin setting (Nebu.OAuth.SessionLifetimeDocsTest)
+=== C33 [KILLED] CHANGELOG without last-known-good
+    326/327 passed
+    killed by: test CHANGELOG: [Unreleased] describes the setting, the audit action and migration 000056 (Nebu.OAuth.SessionLifetimeDocsTest)
+=== C34 [KILLED] Config moduledoc without last-known-good
+    326/327 passed
+    killed by: test the module docs of Nebu.OAuth.Config and Nebu.Web.SessionConfig name the saved lifetime and the last-known-good rule (code review MINOR 1) (Nebu.OAuth.SessionLifetimeDocsTest)
+=== C35 [KILLED] last good value stored in a TTL cache (cleared by invalidate through the same table)
+    317/327 passed
+    killed by: test a failed read keeps the last good value legacy bound callers get the same value: MatrixSessionStore.extend_in_place/3 is capped at created_at + the last good lifetime (Nebu.OAuth.SessionLifetimeLastGoodTest)
+    killed by: test a failed read keeps the last good value legacy bound callers: RefreshWorker.candidates/0 (the reuse / extension window) uses it too: a row older than the last good lifetime is no candidate (Nebu.OAuth.SessionLifetimeLastGoodTest)
+    killed by: test a failed read keeps the last good value also with an env value that is LONGER (and with a longer saved value: the saved one wins either way) (Nebu.OAuth.SessionLifetimeLastGoodTest)
+    killed by: test a failed read keeps the last good value the failed read is not cached: the next call after the repo healed reads the row again (Nebu.OAuth.SessionLifetimeLastGoodTest)
+    killed by: test a failed read keeps the last good value a successful read of a NEW valid value replaces it: the next failure serves the new one (Nebu.OAuth.SessionLifetimeLastGoodTest)
+    killed by: test a failed read keeps the last good value cache off: the same (Nebu.OAuth.SessionLifetimeLastGoodTest)
+    ... and 4 more
+
+--- re-pointed cycle 0 mutants ---
+=== M18a [KILLED] error paragraph has no role=alert
+    (re-run after re-pointing; killed by the parser / form / page tests, see atdd-report.md)
+=== M03 [KILLED] parser: out-of-range text is clamped instead of refused
+    (re-run after re-pointing; killed by the parser / form / page tests, see atdd-report.md)
+=== M04a [KILLED] parser: lower bound off by one (text)
+    (re-run after re-pointing; killed by the parser / form / page tests, see atdd-report.md)
+=== M04b [KILLED] parser: upper bound off by one (text)
+    (re-run after re-pointing; killed by the parser / form / page tests, see atdd-report.md)
+=== M04c [KILLED] parser: lower bound off by one (integer)
+    (re-run after re-pointing; killed by the parser / form / page tests, see atdd-report.md)
+=== M04d [KILLED] parser: upper bound off by one (integer)
+    (re-run after re-pointing; killed by the parser / form / page tests, see atdd-report.md)
+=== M06 [KILLED] admin write does not record / drop the node cache
+    (re-run after re-pointing; killed by the parser / form / page tests, see atdd-report.md)
+=== M13a [KILLED] form: own digits-only check, no bounds
+    (re-run after re-pointing; killed by the parser / form / page tests, see atdd-report.md)
+=== M14 [KILLED] form: accepts trailing junk (no end anchor)
+    (re-run after re-pointing; killed by the parser / form / page tests, see atdd-report.md)
+=== M33 [KILLED] form: error message echoes the submitted text
+    (re-run after re-pointing; killed by the parser / form / page tests, see atdd-report.md)
+=== M27 [KILLED] page shows a damaged saved value as the current one
+    (re-run after re-pointing; killed by the parser / form / page tests, see atdd-report.md)
+=== M42 [KILLED] parser: does not trim
+    (re-run after re-pointing; killed by the parser / form / page tests, see atdd-report.md)
+=== M24 [KILLED] warning names the raw value
+    (re-run after re-pointing; killed by the parser / form / page tests, see atdd-report.md)
+=== M18c [KILLED] field not described by the error
+    (re-run after re-pointing; killed by the parser / form / page tests, see atdd-report.md)
+=== C27 [KILLED] docs: last-known-good rule removed (whole bullet text)
+    (re-run after re-pointing; killed by the parser / form / page tests, see atdd-report.md)
+=== C30 [KILLED] docs: legacy IdP exp cap removed (whole bullet text)
+    (re-run after re-pointing; killed by the parser / form / page tests, see atdd-report.md)
+
+
+================================================================================
+CYCLE 2 (delta reviews: stale in-flight refill, :no_repo, with_locked_config queue, locked failure log, docs): mutation run against reference-impl-cycle2.diff
+================================================================================
+Runner: scratchpad mutants_c2.py, 9 test files (stale_refill, last_good, admin_db_locked_config, docs, concurrency, db, cache, login, oauth_versions_static).
+Result: 25 mutants, 25 KILLED, 0 SURVIVED. Two first-run survivors were test gaps, fixed and re-run: D12 (effect order was checked with selective assert_received: now one ordered list) and D24 (a flaky run with no result line; killed on re-run).
+
+=== D01 [KILLED] stale read overwrites the last good value (no compare-and-set on put)
+    89/91 passed
+    killed by: test the last-known-good slot a stale read of the OLD, longer value (28800) does not overwrite the value saved meanwhile (3600) (Nebu.OAuth.SessionLifetimeStaleRefillTest)
+    killed by: test fail safe: an unreadable or damaged setting never breaks the login path the cache table is gone (its owner is stopped): the saved value is still served, not the 8 hour fallback, and the caller never creates the table (Nebu.OAuth.SessionLifetimeCacheTest)
+=== D02 [KILLED] stale 'no row' read clears the last good value (no compare-and-set on clear)
+    90/91 passed
+    killed by: test the last-known-good slot a stale 'no row' answer does not clear the value saved meanwhile (Nebu.OAuth.SessionLifetimeStaleRefillTest)
+=== D03 [KILLED] stale read refills the cache the save dropped
+    89/91 passed
+    killed by: test the TTL cache a stale refill does not put the old config (28800) back into the cache entry the save just dropped (Nebu.OAuth.SessionLifetimeStaleRefillTest)
+    killed by: test the TTL cache the same for a stale 'no row' answer (the old config carried no saved value) (Nebu.OAuth.SessionLifetimeStaleRefillTest)
+=== D04 [KILLED] a deliberate save does not bump the generation
+    89/91 passed
+    killed by: test the TTL cache the same for a stale 'no row' answer (the old config carried no saved value) (Nebu.OAuth.SessionLifetimeStaleRefillTest)
+    killed by: test the last-known-good slot a stale 'no row' answer does not clear the value saved meanwhile (Nebu.OAuth.SessionLifetimeStaleRefillTest)
+=== D05 [KILLED] the :no_repo branch ignores the last good value
+    89/91 passed
+    killed by: test the :no_repo branch answers last-known-good too (cycle 2, Kassandra delta LOW #2) the OAuth switch stays what it was without a repository (disabled, fail closed): only the lifetime is sticky (Nebu.OAuth.SessionLifetimeLastGoodTest)
+    killed by: test the :no_repo branch answers last-known-good too (cycle 2, Kassandra delta LOW #2) saved 3600 seen, then no repository process at all (a Repo restart): 3600, also with a longer env value (Nebu.OAuth.SessionLifetimeLastGoodTest)
+=== D06 [KILLED] generation captured AFTER the query
+    89/91 passed
+    killed by: test the last-known-good slot a stale 'no row' answer does not clear the value saved meanwhile (Nebu.OAuth.SessionLifetimeStaleRefillTest)
+    killed by: test the last-known-good slot a stale read of the OLD, longer value (28800) does not overwrite the value saved meanwhile (3600) (Nebu.OAuth.SessionLifetimeStaleRefillTest)
+=== D07 [KILLED] a rollback decision runs the queued effects
+    89/91 passed
+    killed by: test queue semantics (real database) after a nested attempt, a commit and a rollback in the same process, the next call starts with an empty queue (Nebu.Admin.AdminDbLockedConfigTest)
+    killed by: test queue semantics (real database) a rollback decision runs NO effect, changes nothing and answers the result of fun; the queue is gone (Nebu.Admin.AdminDbLockedConfigTest)
+=== D08 [KILLED] the queue key is not deleted afterwards
+    78/91 passed
+    killed by: test scenario 2 - a saved lifetime applies to the next login the legacy login ceiling (HttpPublic.session_expires_at/1) follows the row too (Nebu.OAuth.SessionLifetimeLoginTest)
+    killed by: test scenario 4 - sessions issued before the change keep their ceiling a refresh after the change copies the ceiling verbatim: neither shortened to the new lifetime nor extended (Nebu.OAuth.SessionLifetimeLoginTest)
+    killed by: test scenario 2 - a saved lifetime applies to the next login the bounds: 1 hour and 90 days (Nebu.OAuth.SessionLifetimeLoginTest)
+    killed by: test an audit writer that fails leaves the stored value as it was and writes no row (one transaction); the mandatory audit applies to a shorter and a longer lifetime (Nebu.Admin.ConfigSessionLifetimeDbTest)
+    killed by: test nothing saved yet: the first save INSERTs the row (old number = the 8 hour default), the second UPDATEs it (the RLS allowlist of migration 000056) (Nebu.Admin.ConfigSessionLifetimeDbTest)
+    killed by: test queue semantics (real database) nesting is refused with ArgumentError; the outer transaction is rolled back, its queue dropped, the key gone (Nebu.Admin.AdminDbLockedConfigTest)
+    ... and 7 more
+=== D09 [KILLED] nesting is allowed (no ArgumentError)
+    90/91 passed
+    killed by: test queue semantics (real database) nesting is refused with ArgumentError; the outer transaction is rolled back, its queue dropped, the key gone (Nebu.Admin.AdminDbLockedConfigTest)
+=== D10 [KILLED] an exception of fun is swallowed into {:error, :db}
+    89/91 passed
+    killed by: test queue semantics (real database) an exception of fun is re-raised (not turned into {:error, :db}), the transaction is rolled back, the queue is gone, later saves are not deferred (Nebu.Admin.AdminDbLockedConfigTest)
+    killed by: test queue semantics (real database) nesting is refused with ArgumentError; the outer transaction is rolled back, its queue dropped, the key gone (Nebu.Admin.AdminDbLockedConfigTest)
+=== D11 [KILLED] a raising effect aborts the remaining effects
+    90/91 passed
+    killed by: test queue semantics (real database) an effect that raises does not skip the remaining ones: all run in order, ONE value-free error line, the result of fun is returned (Nebu.Admin.AdminDbLockedConfigTest)
+=== D12 [KILLED] effects run in reverse order
+    killed by (after tightening the order check): several saves / an effect that raises (Nebu.Admin.AdminDbLockedConfigTest)
+=== D13 [KILLED] no log line for a failed locked transaction
+    90/91 passed
+    killed by: test the locked transaction fails (real database) a Postgrex.Error from the lock query is {:error, :db} with ONE value-free log line, fun is not called, nothing leaks (Nebu.Admin.AdminDbLockedConfigTest)
+=== D14 [KILLED] the log line carries the exception message instead of the type
+    90/91 passed
+    killed by: test the locked transaction fails (real database) a Postgrex.Error from the lock query is {:error, :db} with ONE value-free log line, fun is not called, nothing leaks (Nebu.Admin.AdminDbLockedConfigTest)
+=== D15 [KILLED] Postgrex.Error from the lock query is not rescued
+    89/91 passed
+    killed by: test the locked transaction fails (real database) a Postgrex.Error from the lock query is {:error, :db} with ONE value-free log line, fun is not called, nothing leaks (Nebu.Admin.AdminDbLockedConfigTest)
+    killed by: test the locked transaction fails (real database) after the failure the process is clean: the next locked call works (Nebu.Admin.AdminDbLockedConfigTest)
+=== D16 [KILLED] the :unlocked branch leaves a queue behind
+    90/91 passed
+    killed by: test the :unlocked seam branch (no database) fun gets :unlocked, the effects of its saves run immediately (no queue), the answer is the result of fun (Nebu.Admin.AdminDbLockedConfigTest)
+=== D17 [KILLED] the lock transaction commits when fun asks for a rollback
+    89/91 passed
+    killed by: test queue semantics (real database) after a nested attempt, a commit and a rollback in the same process, the next call starts with an empty queue (Nebu.Admin.AdminDbLockedConfigTest)
+    killed by: test queue semantics (real database) a rollback decision runs NO effect, changes nothing and answers the result of fun; the queue is gone (Nebu.Admin.AdminDbLockedConfigTest)
+=== D19 [KILLED] docs: before_seconds sentence reverted
+    90/91 passed
+    killed by: test 07-deployment (cycle 2): before_seconds is the saved value read inside the transaction, else the value this node had in effect (Nebu.OAuth.SessionLifetimeDocsTest)
+=== D20 [KILLED] docs: oauth_access_token_ttl_seconds row claims env-only again
+    90/91 passed
+    killed by: test 07-deployment (cycle 2): the oauth_access_token_ttl_seconds row no longer claims that the session ceiling stays env-only (Nebu.OAuth.SessionLifetimeDocsTest)
+=== D21 [KILLED] ADR-033 pointer removed
+    90/91 passed
+    killed by: test ADR-033 carries a pointer sentence to the Admin session lifetime setting (the decision text stays) (Nebu.OAuth.SessionLifetimeDocsTest)
+=== D22 [KILLED] oauth_issue_session @doc names only the env var
+    90/91 passed
+    killed by: test the @doc of oauth_issue_session (lib/nebu/matrix.ex), the runtime.exs comment and 08-concepts T3 name the Admin setting (Nebu.OAuth.SessionLifetimeDocsTest)
+=== D23 [KILLED] runtime.exs comment without the Admin setting
+    90/91 passed
+    killed by: test the @doc of oauth_issue_session (lib/nebu/matrix.ex), the runtime.exs comment and 08-concepts T3 name the Admin setting (Nebu.OAuth.SessionLifetimeDocsTest)
+=== D24 [KILLED] 08-concepts expires_at line says 8 hours again
+    killed by: the @doc of oauth_issue_session, the runtime.exs comment and 08-concepts name the Admin setting (Nebu.OAuth.SessionLifetimeDocsTest)
+=== D25 [KILLED] story decision without the per-minute warning
+    90/91 passed
+    killed by: test the story's decision on an unreadable configuration matches the code: last-known-good, one warning per minute (no more 'fail safe: env value') (Nebu.OAuth.SessionLifetimeDocsTest)
+=== D26 [KILLED] story decision without last-known-good
+    90/91 passed
+    killed by: test the story's decision on an unreadable configuration matches the code: last-known-good, one warning per minute (no more 'fail safe: env value') (Nebu.OAuth.SessionLifetimeDocsTest)

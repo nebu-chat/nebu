@@ -27,7 +27,7 @@ defmodule Nebu.Compliance.UserDeletionTestSupport do
 
   @expected_erased ~w(
     account_data cross_signing_keys device_keys device_one_time_keys device_fallback_keys user_room_account_data
-    forgotten_rooms auto_join_opt_outs read_receipts uia_sessions oauth_account_sessions oauth_consent_requests oauth_codes
+    forgotten_rooms auto_join_opt_outs read_receipts uia_sessions oauth_account_sessions oauth_consent_requests oauth_consent_grants oauth_codes
   )
 
   @teardown_tables ~w(devices matrix_sessions jwt_device_bindings sessions oauth_idp_refresh_leases sync_tokens sync_room_cursors)
@@ -174,6 +174,14 @@ defmodule Nebu.Compliance.UserDeletionTestSupport do
     _sid = T.uia_session!(uid)
     _acc = T.account_session!(uid)
     _consent = T.insert_consent!(cid, user_id: uid, idp_rt: "idp-rt-consent-#{canary}")
+
+    # story persistent-consent-grants (REQ-2026-003): a remembered consent grant of the user (plain SQL: the seed does not depend on the store's API)
+    T.sql!(
+      "INSERT INTO oauth_consent_grants (user_id, client_id, scope, redirect_uri, client_approved_at) " <>
+        "SELECT $1, client_id, $3, $4, approved_at FROM oauth_clients WHERE client_id = $2",
+      [uid, cid, "openid urn:matrix:org.matrix.msc2967.client:api:*", @https]
+    )
+
     grant = T.insert_code!(cid, user_id: uid, device_id: dev, idp_rt: "idp-rt-code-#{canary}")
 
     :ok = Nebu.Compliance.AuditWriter.log(admin(), "user_deactivated", "user", uid, %{"reason" => "seed-#{canary}"}, "success")

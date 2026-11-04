@@ -105,3 +105,15 @@ ExUnit.configure(exclude: [:cluster | Keyword.get(ExUnit.configuration(), :exclu
 # story admin-reauth-button-flow: shared helpers (the nine forms, requests with a marker, the stale / fresh assertions) of the admin_reauth_button_flow_* suites. Loaded once,
 # after the OAuth helpers it builds on. The file name ends with `oauth_test_support.exs` on purpose (mix.exs ignores that suffix, see the note above).
 Code.require_file("nebu/admin/reauth_button_flow_oauth_test_support.exs", __DIR__)
+
+# story oauth-session-and-consent/session-lifetime-setting: helpers of the session lifetime tests (the `matrix_session_ttl_seconds` row, the config seam, the audit
+# rows). The file name ends with `oauth_test_support.exs` on purpose (mix.exs ignores that suffix, see the note above).
+Code.require_file("nebu/oauth/session_lifetime_oauth_test_support.exs", __DIR__)
+
+# story oauth-session-and-consent/persistent-consent-grants: helpers of the remembered consent grant tests (the real flow with a chosen scope / device /
+# prompt, grant rows, the re-approval override, the account page POST). The file name ends with `oauth_test_support.exs` on purpose (see above).
+Code.require_file("nebu/oauth/consent_grant_oauth_test_support.exs", __DIR__)
+
+# story oauth-session-and-consent/oauth-device-default-display-name: helpers of the default device display name tests (the real flow on a chosen device id, the device
+# rows and the Matrix device API, the legacy login with a device name). The file name ends with `oauth_test_support.exs` on purpose (see above).
+Code.require_file("nebu/oauth/device_name_oauth_test_support.exs", __DIR__)

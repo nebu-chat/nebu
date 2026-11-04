@@ -310,6 +310,22 @@ export function queryServerConfigValue(key: string): string | null {
 }
 
 /**
+ * Put one server_config row back as `queryServerConfigValue` found it: the original value, or NO row when there was none (story session-lifetime-setting:
+ * a leftover `matrix_session_ttl_seconds` row would override `NEBU_MATRIX_SESSION_TTL_SECONDS` of a reused database, also for the short-TTL refresh suites).
+ * Direct SQL as the privileged role; it sends no invalidation (the server reads the lifetime through a per-node cache of at most a few seconds).
+ */
+export function restoreServerConfigRow(key: string, original: string | null): void {
+  if (original === null) {
+    runSql(`DELETE FROM server_config WHERE key = ${sqlLiteral(key)}`);
+  } else {
+    runSql(
+      `INSERT INTO server_config (key, value, set_at) VALUES (${sqlLiteral(key)}, ${sqlLiteral(original)}, extract(epoch from now())::bigint) ` +
+        'ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, set_at = EXCLUDED.set_at',
+    );
+  }
+}
+
+/**
  * Seed one admin_temporary_captures row (expected migration:
  * 000020_admin_temporary_captures.up.sql — endpoint TEXT PRIMARY KEY,
  * enabled_at/expires_at TIMESTAMPTZ, started_by TEXT). `expiresInSeconds`
@@ -863,6 +879,20 @@ export function clearOAuthClientsByIdPrefix(prefix: string): void {
  */
 export function clearOAuthConsentRequestsByClientPrefix(prefix: string): void {
   runSql(`DELETE FROM oauth_consent_requests WHERE client_id LIKE ${sqlLiteral(prefix + '%')}`);
+}
+
+/**
+ * story persistent-consent-grants (REQ-2026-003): the remembered consent grants (`oauth_consent_grants`, migration 000057) of every client whose id
+ * starts with `prefix`. Scenario hygiene next to clearOAuthClientsByIdPrefix (whose FK cascade would also remove them): a failed scenario must not
+ * leave a grant behind that makes the next run skip the consent screen. Privileged role, never swallowed.
+ */
+export function clearOAuthConsentGrantsByClientPrefix(prefix: string): void {
+  runSql(`DELETE FROM oauth_consent_grants WHERE client_id LIKE ${sqlLiteral(prefix + '%')}`);
+}
+
+/** The number of remembered consent grants of one client (`oauth_consent_grants`), over every user. */
+export function countOAuthConsentGrants(clientId: string): number {
+  return Number(runSqlQuery(`SELECT count(*) FROM oauth_consent_grants WHERE client_id = ${sqlLiteral(clientId)}`));
 }
 
 /** Delete every account-page browser session (`oauth_account_sessions`, migration 000043) of a user. */

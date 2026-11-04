@@ -204,6 +204,36 @@ defmodule Nebu.OAuth do
   defdelegate config_cache_ms(), to: Nebu.OAuth.Config, as: :cache_ms
 
   @doc """
+  The Admin-saved Matrix session lifetime in seconds (`server_config.matrix_session_ttl_seconds`, `3600..7_776_000`), or `nil` when none is saved (story
+  session-lifetime-setting). Read through the per-node switch cache; a failed read or a damaged row answers the node's last known good value, never a longer
+  one. This is the SAVED value only; `Nebu.Web.SessionConfig.matrix_session_ttl_seconds/0` is the EFFECTIVE lifetime (this value, else the env value / 8 hours).
+  """
+  @spec matrix_session_ttl_seconds() :: pos_integer() | nil
+  defdelegate matrix_session_ttl_seconds(), to: Nebu.OAuth.Config
+
+  @doc "The bounds of the saved Matrix session lifetime in seconds, `{3600, 7_776_000}`: the Admin form validates with the same numbers as the reader."
+  @spec matrix_session_ttl_bounds() :: {pos_integer(), pos_integer()}
+  defdelegate matrix_session_ttl_bounds(), to: Nebu.OAuth.Config
+
+  @doc """
+  The ONE parser of the bounded Matrix session lifetime (story session-lifetime-setting): text (trimmed, plain decimal digits) or an integer inside
+  `matrix_session_ttl_bounds/0` -> `{:ok, seconds}`, else `:error`. The Admin form and the runtime reader both use it, so they never disagree.
+  """
+  @spec parse_matrix_session_ttl(term()) :: {:ok, pos_integer()} | :error
+  defdelegate parse_matrix_session_ttl(value), to: Nebu.OAuth.Config
+
+  @doc """
+  A deliberate Admin save of the lifetime on THIS node, called AFTER the commit: `value` becomes the node's last known good lifetime at once and the cache
+  entry is dropped (other nodes follow within the cache TTL).
+  """
+  @spec note_saved_matrix_session_ttl(term()) :: :ok
+  defdelegate note_saved_matrix_session_ttl(value), to: Nebu.OAuth.Config
+
+  @doc "Drops this node's cache entry of the config read; other nodes follow within the cache TTL. The last known good lifetime is NOT forgotten."
+  @spec invalidate_config_cache() :: :ok
+  defdelegate invalidate_config_cache(), to: Nebu.OAuth.Config, as: :invalidate_cache
+
+  @doc """
   Persists the OAuth switch for the Admin UI (story admin-oauth-switch, ADR-033 "Admin UI switch"): `changes` is
   `%{"oauth_enabled" => "true" | "false", "oauth_issuer_url" => binary}`. Both `server_config` upserts and the caller's `:audit`
   function (0-arity, `:ok | {:error, reason}`) run in ONE transaction, so a change is unaudited ONLY through `:unaudited_ok` (the

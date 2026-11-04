@@ -154,6 +154,8 @@ defmodule Nebu.OAuth.ClientStore do
   @sql_delete_requests "DELETE FROM oauth_authz_requests WHERE client_id = $1"
   # P3 (migration 000045): the FK cascades only a client DELETE, which never happens to a revoked row
   @sql_delete_consents "DELETE FROM oauth_consent_requests WHERE client_id = $1"
+  # story persistent-consent-grants (migration 000057): the remembered grants of every user die with the revocation, in the same transaction
+  @sql_delete_grants "DELETE FROM oauth_consent_grants WHERE client_id = $1"
 
   @sql_approved_count "SELECT count(*) FROM oauth_clients WHERE status = 'approved'"
   @sql_approved_page """
@@ -846,7 +848,8 @@ defmodule Nebu.OAuth.ClientStore do
        matrix_sessions, and conflicts with the `FOR SHARE` of session issuance and rotation);
     2. `Nebu.Matrix.oauth_end_client_sessions/2`: every session / device of the client in the same transaction;
     3. `oauth_codes.used_at` of the client's unused codes;
-    4. DELETE of the client's `oauth_authz_requests` and `oauth_consent_requests`;
+    4. DELETE of the client's `oauth_authz_requests`, `oauth_consent_requests` and the remembered consent grants of
+       every user (`oauth_consent_grants`, story persistent-consent-grants);
     5. the caller's `:audit` function (1-arity, receives the torn-down `{user_id, device_id}` pairs, returns `:ok |
        {:error, reason}`; a raise counts as failed): a failed audit rolls EVERYTHING back.
 
@@ -896,6 +899,7 @@ defmodule Nebu.OAuth.ClientStore do
                {:ok, _} <- query(@sql_use_codes, [client_id]),
                {:ok, _} <- query(@sql_delete_requests, [client_id]),
                {:ok, _} <- query(@sql_delete_consents, [client_id]),
+               {:ok, _} <- query(@sql_delete_grants, [client_id]),
                :ok <- run_revoke_audit(audit, pairs) do
             pairs
           else

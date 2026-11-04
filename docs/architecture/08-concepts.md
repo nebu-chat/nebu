@@ -386,9 +386,12 @@ login and the `/v3/refresh` re-mint) and the admin session cap — defaults to *
 `Nebu.Web.SessionConfig.{matrix,admin}_session_ttl_seconds/0`. Operators may shorten it at boot via
 `NEBU_MATRIX_SESSION_TTL_SECONDS` / `NEBU_ADMIN_SESSION_TTL_SECONDS` (parsed by
 `SessionConfig.parse_ttl/1`: only a strictly-positive integer applies; unset/junk/≤0 → the 8h
-default, never crashes the login path). This is primarily a **test seam** — `make test-e2e-refresh`
-sets a short TTL so the silent-refresh loop fires within a browser-test window — and is inert in
-production unless explicitly set. The login ceiling stays bounded by the OIDC `exp`; the `/v3/refresh`
+default, never crashes the login path). The Matrix ceiling can also be SAVED in the Admin UI
+(`/admin/config`, `server_config.matrix_session_ttl_seconds`, 1 hour to 90 days; it wins over the env
+value; story session-lifetime-setting) and is read through the per-node config cache with a
+last-known-good rule (a failed read never lengthens it). The env value stays the fallback and the
+test seam: `make test-e2e-refresh` sets a short TTL so the silent-refresh loop fires within a
+browser-test window. The login ceiling stays bounded by the OIDC `exp`; the `/v3/refresh`
 re-mint remains `now + ceiling` (the pre-existing trade-off, now configurable). Migration `000007`
 adds `matrix_oidc_refresh_mode` / `admin_oidc_refresh_mode` to the `server_config`
 `config_update_mutable` RLS allowlist so the refresh-mode runtime change (above) actually persists
@@ -734,7 +737,7 @@ are redacted from request/response logs via the existing `Nebu.Web.RequestLogger
 - **Rate-limit buckets.** `Nebu.Web.ClientIP.bucket/1` keys every per-IP `RateLimit` bucket (IPv4 per address, IPv6 per /64); per-source CAPS on live rows (authorize, account login, consent, pending registrations) use the hashed `Nebu.OAuth.SourceKey` and are refuse-only (nothing is evicted). Discovery limits exist only where the Matrix spec allows a `429` (`GET /login`, live `openid-configuration`); `auth_metadata`, `auth_issuer` and `/versions` rely on the cache. Idle buckets are swept per node every 10 minutes.
 - **Config cache exception to ADR-020.** The switch state (`oauth_enabled`, issuer) is cached per node in ETS for at most `NEBU_OAUTH_CONFIG_CACHE_MS` (default 2 s, max 5 s); only successful reads are cached (an outage still fails closed); the owner is the supervised `Nebu.OAuth.CacheOwner`. This is bounded staleness like `OidcConfig` and the 60 s JWT denylist cache; single-use codes, rotation and revocation stay atomic SQL.
 - **Fetch metadata / `BrowserPost`.** State-changing browser POSTs (consent, `/account`, admin approve / reject / revoke / bulk removal) check `Origin`, `Sec-Fetch-Site`, `Mode: navigate`, `Dest: document`, `User: ?1` and a CSRF token BEFORE anything is consumed; admin actions also need a fresh IdP re-authentication bound to one client and one action (single-use marker). Residual SO7: a script on the shared origin that waits for a user click is not stopped; the class is removed only by serving Element Web on its own origin. The consent page adds a hash-pinned arming script (double clickjacking) and `Cross-Origin-Opener-Policy: same-origin`.
-- **Freshness.** Server-owned and fail closed: only the raw `auth_time` claim counts, absent means not fresh; consent on every authorization compensates at login, `/account` destructive actions stay unavailable without `auth_time`.
+- **Freshness.** Server-owned and fail closed: only the raw `auth_time` claim counts, absent means not fresh; consent on every authorization (unless the user's remembered Allow applies, see persistent-consent-grants) compensates at login, `/account` destructive actions stay unavailable without `auth_time`.
 - **Revocation and teardown.** Every device-ending path (revoke, logout, `/logout/all`, device delete, client revocation, legacy logout) uses the SAME locked per-device teardown (lock order clients -> devices -> sessions); a revoked client registration is final for its metadata hash.
 - **Signing keys and secrets.** ES256 id_token keys rotate in two calls with a database-enforced 900 s pre-publication; one internal secret still protects all secrets at rest (SecretBox v2 design deferred, HY17).
 
@@ -793,7 +796,7 @@ cross-cutting controls are:
 
 **Solution:** Nebu now manages Matrix sessions server-side using opaque access tokens + refresh tokens
 (Matrix Client-Server API v1.3), decoupled from OIDC token lifetime. The session lifetime is bounded at
-`min(oidc_exp, now + 8h)`.
+`min(oidc_exp, now + 8h)` (8h: the default of the Admin-configurable session lifetime, see "Configurable Nebu session-lifetime ceiling" above).
 
 **Dual session model (backward compatible):** `POST /login` issues opaque tokens **only when the client
 sends `refresh_token: true`** in the request body; otherwise the raw OIDC JWT is still returned as
@@ -811,7 +814,7 @@ refresh_token_hash ← UNIQUE NOT NULL. Lowercase hex SHA-256 of the opaque refr
 oidc_refresh_token ← AES-256-GCM encrypted OIDC RT from Keycloak (via Nebu.Web.SecretBox; optional, for future OIDC refresh)
 user_id            ← Matrix user ID (@user:server.name)
 device_id          ← From JWT "did" claim or SSO device registration
-expires_at         ← Absolute wall-clock time (Nebu controls expiry: NOW() + 8 hours)
+expires_at         ← Absolute wall-clock time (Nebu controls expiry: NOW() + the Matrix session lifetime, 8 hours by default; Admin setting `matrix_session_ttl_seconds`)
 revoked_at         ← Set when a client /refresh rotates the row away (old half of a rotation); logout/invalidations DELETE rows
 grace_until        ← NULL on a rotated-away row = PENDING (old RT valid until the new AT/RT is used); set to NOW() = CONSUMED
 created_at         ← Session creation timestamp
@@ -1063,7 +1066,7 @@ admin-deactivated user's opaque sessions are invalidated immediately.
 | Storage | Signed Phoenix session cookie (no DB row) | `matrix_sessions` table |
 | Token format | Encrypted claims/RT in the signed cookie | Opaque hex (64-hex, no dots) |
 | Encrypted OIDC RT | Yes — AES-256-GCM (`Nebu.Web.SecretBox`) in the cookie; used for active refresh | Yes (future: allows Keycloak session binding) |
-| Lifetime control | `session_exp = min(id_token.exp, now + 8h)` | `min(oidc_exp, now + 8h)` for all Matrix clients |
+| Lifetime control | `session_exp = min(id_token.exp, now + 8h)` | `min(oidc_exp, now + lifetime)` for all Matrix clients (lifetime: 8h default, Admin-configurable) |
 | Refresh pattern | When `admin_oidc_refresh_mode = offline`: silent OIDC RT exchange on HTTP requests within a 120 s pre-expiry window, admin-group gate re-evaluated each refresh. Default `online` → no `offline_access`, no silent refresh (see refresh-mode config below) | On-demand via `/refresh` endpoint; `matrix_oidc_refresh_mode` (default `offline`) controls whether `offline_access` is requested |
 | Grace period | None (refresh failure / lost group → clear session, redirect `/admin/login`) | No fixed window: the old refresh token stays PENDING (`grace_until IS NULL`) until the new access token is used or the new refresh token is redeemed, then CONSUMED (`grace_until` set); reuse of a consumed token deletes that device's session |
 
@@ -1392,7 +1395,7 @@ GDPR erasure (`Nebu.Compliance.UserDeletion.delete_user_keys/3`) physically dele
 
 **The erasure is terminal for authentication.** The last step also sets `users.is_active = false` and NULLs the `users` PII columns (display name, avatar and email ciphertexts: the display name and avatar are encrypted with the server-wide key, so the key deletion does not shred them; also `last_seen_at` and `deactivation_reason`, admin free text that may describe the person). Every authentication gate (`TokenValidator`, `OAuthSessionStore.user_active/1`, `Nebu.Matrix.active?/1`, the account pages, `invitable_local_users`) treats `deletion_status IS NOT NULL` as deactivated, so neither a fresh IdP token, an SSO login, an OAuth authorization nor an admin reactivation revives the account, and `Profile.DB.upsert_profile/3` writes nothing for an erased user. A bearer (an unbound raw IdP JWT included) that the node-local provisioning cache of the OIDC plug (60 s TTL) already confirmed is still accepted on that node until the entry expires: new requests, not only one in flight, for up to 60 s, the same bound as for an admin deactivation. In that window it can still write the tables WITHOUT a guard (device keys, receipts, room account data, the lazy device row with its IP); the profile PUT, global account data, cross-signing, the signature merge and the sync persist are refused. The eviction of the cache entry on every node (a broadcast over `:pg` on erasure and deactivation) is the proper fix, recorded in follow-up `gn`. Admin UI access of an erased administrator follows the IdP admin group claim, not the erasure: remove the person from the IdP admin group. `Nebu.Admin.DB.set_is_active/2` refuses to reactivate an erased user (`:erased`, answered as a failed precondition) and the admin user suggestions never offer one.
 
-**Erased by the transaction** (`UserDeletion.erased_tables/0`, the list the deleting code and the guard test share): `user_room_account_data`, `account_data`, `cross_signing_keys`, `device_keys`, `device_one_time_keys`, `device_fallback_keys`, `forgotten_rooms`, `auto_join_opt_outs`, `read_receipts`, `uia_sessions`, `oauth_account_sessions`, `oauth_consent_requests`, `oauth_codes`. (`oauth_codes` needs the delete policy of migration 000055.)
+**Erased by the transaction** (`UserDeletion.erased_tables/0`, the list the deleting code and the guard test share): `user_room_account_data`, `account_data`, `cross_signing_keys`, `device_keys`, `device_one_time_keys`, `device_fallback_keys`, `forgotten_rooms`, `auto_join_opt_outs`, `read_receipts`, `uia_sessions`, `oauth_account_sessions`, `oauth_consent_requests`, `oauth_consent_grants`, `oauth_codes`. (`oauth_codes` needs the delete policy of migration 000055.)
 
 **Ended after the commit by the session teardown** (best effort, outside the transaction): `devices`, `matrix_sessions`, `jwt_device_bindings`, `sessions`, `oauth_idp_refresh_leases`, `sync_tokens`, `sync_room_cursors` (the dispatcher also removes the `devices` rows of legacy devices).
 
@@ -1502,6 +1505,24 @@ cross-device session/token transfer. The binding stores the access token only as
 (no cleartext bearer token at rest). Cluster-correct (PostgreSQL is the source of truth, per ADR-020);
 inline SQL (ADR-018). Still **orthogonal to E2EE** (ADR-011) — the device-key directory is a public-key
 directory, not encryption. No new ADR.
+
+### Default display name of OAuth devices (story oauth-device-default-display-name)
+
+An OAuth login creates its device at the token endpoint, and most clients never name it (`PUT /devices/{id}` is optional), so users saw many unnamed devices. The token
+endpoint therefore gives a new device a default display name, `"<base> (<suffix>)"`, for example `FluffyChat (ABCD1234)`. `Nebu.OAuth.DeviceName` (OAuth domain) builds it and
+`Nebu.Matrix.oauth_issue_session/1` carries it to `OAuthSessionStore.insert_replacing_device/1` (ADR-020), which writes it in the issuance transaction with
+`UPDATE devices SET display_name = $3 WHERE user_id = $1 AND device_id = $2 AND display_name IS NULL`.
+
+- **Never overwrites.** The default fills an unset name only: a name the client chose (`PUT /devices/{id}`), a legacy login's `initial_device_display_name`, a re-login of the same
+  device id and a refresh all keep what is stored. The client's own `PUT` after the login replaces the default. An empty string is a name the client chose and is kept; a device
+  that exists with no name (`NULL`) is named at its next OAuth login. Existing devices are not renamed in bulk (no backfill) and there is no migration or schema change.
+- **Base.** The `client_name` of the `approved` client record, sanitised: markup tags and angle brackets removed, control characters, format characters (bidi overrides, zero width),
+  line and paragraph separators dropped, whitespace collapsed, bounded to 64 code points. A revoked, pending, rejected or unknown client, a missing or empty name or an unreadable
+  database give the plain `OAuth client`. The name is plain text: a client that renders it as HTML must escape it, like any display name.
+- **Suffix.** The last 8 characters of the device id after dropping every character outside `[A-Za-z0-9._-]` (a device id may legally contain markup characters), so two logins of one
+  client show two distinguishable names; with nothing left, 8 hex characters of the SHA-256 of the id.
+- **Unchanged.** Legacy and SSO logins (`POST /login`) keep `initial_device_display_name` (on first creation only) or no name. The new code does not log it (the debug request logger still captures the `GET /devices` response body, which shows device names; see `docs/stories/oauth-session-and-consent/follow-ups.md`), it carries nothing of the user and
+  lives in `devices.display_name`, so the GDPR erasure needs no change.
 
 ### Device management endpoints, UIA step-up, and the per-device JWT kill-switch (Story s3-matrix-device-endpoints)
 

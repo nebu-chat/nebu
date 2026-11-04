@@ -39,7 +39,7 @@ defmodule Nebu.Compliance.UserDeletionGlobalDataTest do
   end
 
   @scenario_1 ~w(account_data cross_signing_keys device_keys device_one_time_keys device_fallback_keys user_room_account_data)
-  @scenario_2 ~w(forgotten_rooms auto_join_opt_outs read_receipts uia_sessions oauth_account_sessions oauth_consent_requests)
+  @scenario_2 ~w(forgotten_rooms auto_join_opt_outs read_receipts uia_sessions oauth_account_sessions oauth_consent_requests oauth_consent_grants)
 
   # ═══ Scenario 1 ════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
@@ -344,7 +344,7 @@ defmodule Nebu.Compliance.UserDeletionGlobalDataTest do
     # every table the transaction deletes from (oauth_codes through the policy of migration 000055, D11), plus the profile anonymisation (an UPDATE)
     faults =
       for t <- ~w(user_room_account_data account_data cross_signing_keys device_keys device_one_time_keys device_fallback_keys
-                  forgotten_rooms auto_join_opt_outs read_receipts uia_sessions oauth_account_sessions oauth_consent_requests oauth_codes),
+                  forgotten_rooms auto_join_opt_outs read_receipts uia_sessions oauth_account_sessions oauth_consent_requests oauth_consent_grants oauth_codes),
           do: {t, "DELETE"}
 
     for {table, event} <- faults ++ [{"profiles", "UPDATE"}] do

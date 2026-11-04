@@ -48,7 +48,7 @@ defmodule Nebu.OAuth.Config do
   ## Per-node TTL cache (story oauth-hardening-hygiene, HY1 / HY2)
 
   `get/1` (and with it `live_state/1`, `enabled?/0`, `Nebu.OAuth.oauth_aware?/1`) serves the normalized
-  `%{enabled, issuer_url, state}` from a per-node ETS entry `{:config, map, loaded_at_ms}` (table
+  `%{enabled, issuer_url, state, matrix_session_ttl_seconds}` from a per-node ETS entry `{:config, map, loaded_at_ms}` (table
   `:nebu_oauth_config_cache`, owned by `Nebu.OAuth.CacheOwner`) while `now - loaded_at < ttl`. The TTL is
   `:nebu_http, :oauth_config_cache_ms` (`NEBU_OAUTH_CONFIG_CACHE_MS`, integer `0..5000`, default 2000, `0` =
   cache off; `config/test.exs` sets `0`). ONLY a successful read (`:enabled` / `:disabled`) is cached:
@@ -61,6 +61,16 @@ defmodule Nebu.OAuth.Config do
   as `Nebu.Web.OidcConfig` and the JWT denylist cache; no correctness property (single-use codes, rotation,
   revocation) depends on it, those stay atomic SQL. `pending_limits/0` and `token_settings/0` stay
   UNCACHED (rate limited / authenticated callers; their values must apply on the next registration / refresh).
+
+  ## The saved Matrix session lifetime (story session-lifetime-setting)
+
+  The same read (one SQL, one cache entry) also carries `matrix_session_ttl_seconds`, the Admin-saved lifetime of a Matrix session (whole seconds,
+  `3600..7_776_000`; ONE parser, `parse_matrix_session_ttl/1`, shared with the Admin form). It is read at every login, `/refresh` and background refresh row,
+  so with the cache off (`NEBU_OAUTH_CONFIG_CACHE_MS=0`) that is one query per call. A saved value must never turn LONGER because a read failed: the
+  **last-known-good** rule keeps, per node and without a TTL (`Nebu.OAuth.LastGood`), the last successfully read valid value. A failed read or a damaged /
+  out of range row answers it; the env value / 8 hours apply only when no good value was ever loaded on this node or after a successful read that found no
+  row (removed on purpose). A deliberate Admin save on this node replaces it at once (`note_saved_matrix_session_ttl/1`, after the commit). The warning for a
+  damaged row is rate limited (one per minute per node) and never names the value. `get/1` itself stays fail closed for the OAuth switch (`state: :unknown`).
 
   ## Test seam (same idiom as `Nebu.Web.OidcConfig` / `:oidc_config_source`)
 
@@ -76,7 +86,7 @@ defmodule Nebu.OAuth.Config do
   require Logger
 
   @type state :: :enabled | :disabled | :unknown
-  @type t :: %{enabled: boolean(), issuer_url: String.t() | nil, state: state()}
+  @type t :: %{enabled: boolean(), issuer_url: String.t() | nil, state: state(), matrix_session_ttl_seconds: pos_integer() | nil}
   @type pending_limits :: %{ttl_days: pos_integer(), cap: pos_integer(), host_cap: pos_integer()}
   @type token_settings :: %{access_token_ttl_seconds: 60..3600, idp_revalidation: :per_refresh | :off}
 
@@ -90,13 +100,118 @@ defmodule Nebu.OAuth.Config do
   @min_access_token_ttl_seconds 60
   @max_access_token_ttl_seconds 3600
 
+  # at most one WARNING per minute per node on the bounded (health check) path and for a damaged saved lifetime
+  @bounded_warning_per_min 1
+
+  # story session-lifetime-setting: the Admin-saved Matrix session lifetime (whole seconds), read with the switch state through the same cache
+  @min_matrix_session_ttl_seconds 3600
+  @max_matrix_session_ttl_seconds 7_776_000
+
   @sql """
   SELECT key, value FROM server_config
   WHERE key IN ('oauth_enabled', 'oauth_issuer_url', 'oauth_pending_ttl_days', 'oauth_pending_cap',
-                'oauth_pending_host_cap', 'oauth_access_token_ttl_seconds', 'oauth_idp_revalidation')
+                'oauth_pending_host_cap', 'oauth_access_token_ttl_seconds', 'oauth_idp_revalidation',
+                'matrix_session_ttl_seconds')
   """
 
-  @doc "Returns `%{enabled: boolean, issuer_url: binary | nil, state: :enabled | :disabled | :unknown}`. Never raises."
+  @doc "The bounds of the saved Matrix session lifetime in seconds: `{3600, 7_776_000}` (1 hour .. 90 days)."
+  @spec matrix_session_ttl_bounds() :: {pos_integer(), pos_integer()}
+  def matrix_session_ttl_bounds, do: {@min_matrix_session_ttl_seconds, @max_matrix_session_ttl_seconds}
+
+  @doc """
+  The saved Matrix session lifetime (`server_config.matrix_session_ttl_seconds`, whole seconds `3600..7_776_000`) or `nil` when none is saved and none was
+  ever loaded on this node. A failed read of `server_config` or a damaged / out of range row answers the last known good value of this node
+  (`Nebu.OAuth.LastGood`), never a longer fallback. Served from the per-node cache of `get/1` (at most one `server_config` query per TTL window). Never raises.
+  """
+  @spec matrix_session_ttl_seconds() :: pos_integer() | nil
+  def matrix_session_ttl_seconds, do: get().matrix_session_ttl_seconds
+
+  @doc """
+  The ONE parser of the bounded lifetime (used by the Admin form and by the reader, so they never disagree): text (white space trimmed, plain decimal
+  digits) or an integer inside `matrix_session_ttl_bounds/0` -> `{:ok, seconds}`, everything else `:error`. Never raises.
+  """
+  @spec parse_matrix_session_ttl(term()) :: {:ok, pos_integer()} | :error
+  def parse_matrix_session_ttl(value) when is_integer(value) and value >= @min_matrix_session_ttl_seconds and value <= @max_matrix_session_ttl_seconds, do: {:ok, value}
+
+  def parse_matrix_session_ttl(value) when is_binary(value) do
+    trimmed = String.trim(value)
+
+    with true <- Regex.match?(~r/\A[0-9]{1,12}\z/, trimmed),
+         n = String.to_integer(trimmed),
+         true <- n >= @min_matrix_session_ttl_seconds and n <= @max_matrix_session_ttl_seconds do
+      {:ok, n}
+    else
+      _ -> :error
+    end
+  end
+
+  def parse_matrix_session_ttl(_other), do: :error
+
+  # the raw value of the config SEAM (no database, no last known good): a damaged one is ignored with the rate limited warning
+  defp seam_session_ttl(nil), do: nil
+
+  defp seam_session_ttl(raw) do
+    case parse_matrix_session_ttl(raw) do
+      {:ok, n} ->
+        n
+
+      :error ->
+        warn_damaged_session_ttl()
+        nil
+    end
+  end
+
+  # at most one WARNING per minute per node (abuse / log-volume control only): the cache refills about every 2 s, with the cache off on every call
+  defp warn_damaged_session_ttl do
+    if Nebu.Web.Plugs.RateLimit.take({"oauth_config_read_warning", :matrix_session_ttl}, @bounded_warning_per_min, 1) == :ok do
+      Logger.warning("OAuth.Config: server_config matrix_session_ttl_seconds is not a whole number of seconds between 3600 and 7776000: ignored, the last good value / env value / default applies")
+    end
+
+    :ok
+  end
+
+  # The value of a SUCCESSFUL read of the row: valid -> it becomes the last good one; no row -> the saved value ended on purpose (env / 8 hours apply);
+  # damaged -> ignored, the last good one stays.
+  defp resolve_saved_ttl(nil, gen), do: Nebu.OAuth.LastGood.clear_if(gen)
+
+  defp resolve_saved_ttl(raw, gen) do
+    case parse_matrix_session_ttl(raw) do
+      {:ok, n} ->
+        Nebu.OAuth.LastGood.put_if(gen, n)
+
+      :error ->
+        warn_damaged_session_ttl()
+        Nebu.OAuth.LastGood.get()
+    end
+  end
+
+  @doc """
+  A deliberate Admin save on THIS node (called after the commit): `value` (the saved text) becomes the last known good lifetime at once, without a read in
+  between, and the cache entry is dropped. Never raises.
+  """
+  @spec note_saved_matrix_session_ttl(term()) :: :ok
+  def note_saved_matrix_session_ttl(value) do
+    case parse_matrix_session_ttl(value) do
+      {:ok, n} -> Nebu.OAuth.LastGood.put_saved(n)
+      :error -> nil
+    end
+
+    invalidate_cache()
+  end
+
+  if Mix.env() == :test do
+    @doc false
+    def reset_last_good_for_test do
+      Nebu.OAuth.LastGood.reset()
+      :ok
+    end
+  end
+
+  @doc """
+  Returns `%{enabled: boolean, issuer_url: binary | nil, state: :enabled | :disabled | :unknown, matrix_session_ttl_seconds: pos_integer | nil}`. The OAuth switch
+  fails closed (an unreadable `server_config` is `state: :unknown`, `enabled: false`); `matrix_session_ttl_seconds` is the saved lifetime with the
+  last-known-good rule (see the moduledoc). Never raises.
+  """
   @spec get(keyword()) :: t()
   def get(opts \\ []) do
     case seam(:oauth_config_source, nil) do
@@ -168,7 +283,7 @@ defmodule Nebu.OAuth.Config do
   defp cached_load(opts) do
     case cache_ttl_ms() do
       0 ->
-        {_kind, config} = load_from_db(opts)
+        {_kind, config} = load_from_db(opts, Nebu.OAuth.LastGood.generation())
         config
 
       ttl ->
@@ -179,9 +294,13 @@ defmodule Nebu.OAuth.Config do
             config
 
           :miss ->
-            case load_from_db(opts) do
+            # the generation is captured BEFORE the query: a save that commits while this read is in flight bumps it, and the (older) answer is then
+            # neither remembered as last good nor written into the cache entry the save dropped (cycle 2, Kassandra delta LOW #1)
+            gen = Nebu.OAuth.LastGood.generation()
+
+            case load_from_db(opts, gen) do
               {:cache, config} ->
-                cache_store(config, now)
+                if Nebu.OAuth.LastGood.generation() == gen, do: cache_store(config, now)
                 config
 
               {:nocache, config} ->
@@ -376,24 +495,29 @@ defmodule Nebu.OAuth.Config do
 
   defp positive(_value, default, _max), do: default
 
-  defp load_from_db(opts) do
+  defp load_from_db(opts, gen) do
     case load_raw(opts) do
       {:ok, map} ->
-        {:cache, normalize(%{enabled: map["oauth_enabled"] == "true", issuer_url: map["oauth_issuer_url"]})}
+        {:cache,
+         normalize(%{
+           enabled: map["oauth_enabled"] == "true",
+           issuer_url: map["oauth_issuer_url"],
+           matrix_session_ttl_seconds: resolve_saved_ttl(map["matrix_session_ttl_seconds"], gen)
+         })}
 
       :error ->
-        {:nocache, unknown()}
+        # a failed read is never cached; the lifetime keeps its last known good value (the OAuth switch stays fail closed: state :unknown)
+        {:nocache, %{unknown() | matrix_session_ttl_seconds: Nebu.OAuth.LastGood.get()}}
 
       :no_repo ->
-        {:nocache, disabled()}
+        # no repository process (a Repo restart): still the last known good lifetime, the OAuth switch stays disabled (fail closed)
+        {:nocache, %{disabled() | matrix_session_ttl_seconds: Nebu.OAuth.LastGood.get()}}
     end
   end
 
   # `{:ok, %{key => value}}` for the oauth_* server_config keys, `:error` when they cannot be read,
   # `:no_repo` when there is no repository process at all.
   @bounded_timeout_ms 500
-  # at most one WARNING per minute per node on the bounded (health check) path
-  @bounded_warning_per_min 1
 
   defp load_raw(opts \\ []) do
     repo = seam(:oauth_config_repo, Nebu.Repo)
@@ -445,14 +569,15 @@ defmodule Nebu.OAuth.Config do
     %{
       enabled: enabled,
       issuer_url: nilify(Map.get(raw, :issuer_url)),
-      state: if(enabled, do: :enabled, else: :disabled)
+      state: if(enabled, do: :enabled, else: :disabled),
+      matrix_session_ttl_seconds: seam_session_ttl(Map.get(raw, :matrix_session_ttl_seconds))
     }
   end
 
   defp normalize(_other), do: disabled()
 
-  defp disabled, do: %{enabled: false, issuer_url: nil, state: :disabled}
-  defp unknown, do: %{enabled: false, issuer_url: nil, state: :unknown}
+  defp disabled, do: %{enabled: false, issuer_url: nil, state: :disabled, matrix_session_ttl_seconds: nil}
+  defp unknown, do: %{enabled: false, issuer_url: nil, state: :unknown, matrix_session_ttl_seconds: nil}
 
   defp nilify(v) when is_binary(v) do
     case String.trim(v) do

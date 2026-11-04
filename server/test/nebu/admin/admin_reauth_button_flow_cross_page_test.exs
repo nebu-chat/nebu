@@ -57,11 +57,11 @@ defmodule Nebu.Admin.AdminReauthButtonFlowCrossPageTest do
   end
 
   describe "the shared-marker pages change as ONE unit" do
-    test "/admin/config: all three forms fresh together, all three stale together" do
+    test "/admin/config: all four marker forms fresh together, all four stale together" do
       fresh = S.get(S.config_path(), ago: 30) |> S.doc()
       stale = S.get(S.config_path()) |> S.doc()
       forms = S.forms_of(S.config_path())
-      assert length(forms) == 3
+      assert length(forms) == 4
       for form <- forms, do: S.assert_fresh!(fresh, form, 4)
       for form <- forms, do: S.assert_stale!(stale, form)
     end

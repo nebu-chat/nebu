@@ -157,6 +157,10 @@ defmodule Nebu.Compliance.AuditWriter do
   # oidc_scopes_changed, oidc_refresh_mode_changed (SEC review L-3) -- the saves of the extra OIDC scopes and of the refresh modes (metadata: the
   # saved scope strings / modes) change which claims the IdP issues and how long the tokens live: audited after the save like the three above.
   # Without these entries the real writer answers :audit_unknown_action and the change is never audited.
+  # session_lifetime_changed added for oauth-session-and-consent/session-lifetime-setting -- the Admin UI save of the Matrix session lifetime
+  # (`POST /admin/config/session-lifetime`) writes exactly ONE row per change INSIDE the transaction of the `server_config` upsert (target_type "server_config",
+  # target_id "matrix_session_ttl_seconds", metadata: before_seconds / after_seconds, numbers only). Without this entry the real writer answers
+  # :audit_unknown_action, the transaction rolls back and the lifetime could never be changed from the Admin UI.
   # space_name_changed, space_topic_changed, space_child_added, space_child_removed added for oauth-broker/space-edit-audit (follow-up dj) -- the Admin UI
   # edits of a Space (`Nebu.Matrix.set_space_state/5`: name, topic, child add, child unlink) write exactly ONE row each after the successful state event (target_type "room",
   # target_id = the space room id, metadata: name / topic truncated to 256 characters or child_room_id, plus the event_id of the `events` record). Not atomic with the
@@ -239,6 +243,7 @@ defmodule Nebu.Compliance.AuditWriter do
     oidc_scopes_changed
     oidc_refresh_mode_changed
     log_settings_changed
+    session_lifetime_changed
   )
 
   # Configurable repo for test injection. Production uses Nebu.Repo.

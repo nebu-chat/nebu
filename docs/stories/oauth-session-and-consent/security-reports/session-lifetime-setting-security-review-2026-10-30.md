@@ -1,0 +1,17 @@
+# Security Review: session-lifetime-setting (Kassandra, cycle 0)
+
+Date: 2026-10-30. Scope: staged worktree `open-chat-oauth-session`, branch `bugfix/oauth-session-lifetime-and-consent`.
+**Verdict: APPROVED (CLEAN: 0 CRITICAL, 0 HIGH).** 1 MEDIUM (fix within this epic), 3 LOW.
+
+| # | Severity | Location | Finding | Remediation |
+|---|----------|----------|---------|-------------|
+| 1 | MEDIUM | `server/lib/nebu/oauth/config.ex` (`{:nocache, unknown()}`, ~129-131, ~425); `server/lib/nebu/web/session_config.ex:24-28` | CWE-636 fail-open in the "longer session" direction: if the admin saved a ceiling stricter than env/default (e.g. 1 h) and the `server_config` read fails or the value is damaged, new OAuth sessions get the env/8 h ceiling stored permanently, and legacy extension/reuse/RefreshWorker bounds use the longer value meanwhile. The "session INSERT needs the DB anyway" argument does not hold (separate queries, pool/statement timeouts). | Keep the last successfully parsed value (separate ETS slot, no TTL) and use it on a failed read; fall back to env/default only when never loaded on this node. Test: saved 3600, DB read fails => 3600. |
+| 2 | LOW | `config_controller.ex:495-498, :523` | Audit `before_seconds` and the "no change" check are read outside the write transaction; concurrent admin saves can record a stale "before". Every change is still audited. | Read inside the `save_config_audited` transaction, or document as accepted. |
+| 3 | LOW | `oauth/config.ex:129-131` | Warning for a damaged row is logged once per cache refill (~30/min/node; per call with cache 0). No value in the text. | Rate-limit like the existing `warn(true, ...)` path (1/min/node). |
+| 4 | LOW | `session_config.ex:24-28` (callers `matrix_session_store.ex:216/:533`, `refresh_worker.ex:246`) | Legacy `/refresh` and RefreshWorker now also read `server_config` (even with OAuth off); on DB outage the unsuccessful read is not cached, one extra serial query per call. | Fixed by #1 (serve last-good on error) or bounded timeouts. |
+
+Verified clean: route inside `:browser` pipeline with CSRF and `:require_admin`, gate (strict fetch metadata + fresh marker) BEFORE validation, marker consumed only after success, replay hits the consumed marker; validation `\A[0-9]{1,12}\z` + range 3600..7_776_000, normalised before storing, reader re-checks and ignores (never clamps); migration 000056 diffed against 000049 (only the one key added, no GRANT change), down migration byte-identical to 000049; audit in the same transaction, known action, integers only, actor from session; cache invalidated by the saving node after commit, others stale at most NEBU_OAUTH_CONFIG_CACHE_MS; log hygiene on both paths (Phoenix filter_parameters + RequestLogger never captures /admin bodies; static warning without value); HEEx escaping; OIDC scopes law untouched; test seams compiled only under `Mix.env() == :test`.
+
+INFO (accepted): raising the value retroactively lets RefreshWorker extend legacy rows up to `created_at + new ttl` but each extension needs a successful IdP refresh and is bounded by the IdP exp (no separate cap needed; documented in UI/07-deployment/characterisation test). Lowering the setting is not revocation (existing OAuth sessions keep their ceiling; operators must revoke sessions). 90 days with `oauth_idp_revalidation: off` is an explicit admin choice (OAuth refresh still checks `users.is_active`).
+
+Pattern for memory: a config read failure must never fall back to a LONGER bound than the last known good value.

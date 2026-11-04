@@ -18,8 +18,11 @@ defmodule Nebu.OAuth.Account do
       `org.matrix.cross_signing_reset`; an absent / unknown action (also the not advertised
       `org.matrix.account_deactivate`) is the default page (profile summary + device list)
     * `GET /account/reauth` — starts an IdP (re-)authentication for a return target (A10)
+    * `GET /account/apps` — the apps the user has allowed (remembered consent, story persistent-consent-grants); the sign-in
+      started there returns there (return action `apps`)
     * `POST /account/devices/delete`, `/account/cross_signing_reset/approve`, `.../decline`,
-      `/account/logout` — state changes (A9, A10, A11)
+      `/account/logout` — state changes (A9, A10, A11); `POST /account/apps/withdraw` withdraws one remembered consent (no fresh
+      sign-in needed, existing sessions untouched)
     * anything else => 404 page; a wrong method (also `OPTIONS`) => 405 page with `Allow`
 
   ## Order of every request (A3, A19)
@@ -76,7 +79,7 @@ defmodule Nebu.OAuth.Account do
   import Plug.Conn
   require Logger
 
-  alias Nebu.OAuth.{AccountPages, AccountStore, AuthorizeRequest, BrowserPost, ClientStore, Config, Freshness, FormPost, SourceKey}
+  alias Nebu.OAuth.{AccountPages, AccountStore, AuthorizeRequest, BrowserPost, ClientStore, Config, ConsentGrantStore, Freshness, FormPost, SourceKey}
   alias Nebu.Web.ClientIP
   alias Nebu.Web.Plugs.RateLimit
 
@@ -116,8 +119,8 @@ defmodule Nebu.OAuth.Account do
     "session_end" => @device_delete
   }
 
-  @get_paths [[], ["reauth"]]
-  @post_paths [["devices", "delete"], ["cross_signing_reset", "approve"], ["cross_signing_reset", "decline"], ["logout"]]
+  @get_paths [[], ["reauth"], ["apps"]]
+  @post_paths [["devices", "delete"], ["cross_signing_reset", "approve"], ["cross_signing_reset", "decline"], ["logout"], ["apps", "withdraw"]]
 
   # ════════════════════════════════════════════════════════════════════════════
   # entry point of /account*
@@ -145,6 +148,7 @@ defmodule Nebu.OAuth.Account do
 
   defp route(%Plug.Conn{method: "GET", path_info: []} = conn, issuer), do: show(conn, issuer)
   defp route(%Plug.Conn{method: "GET", path_info: ["reauth"]} = conn, issuer), do: reauth(conn, issuer)
+  defp route(%Plug.Conn{method: "GET", path_info: ["apps"]} = conn, issuer), do: apps(conn, issuer)
   defp route(%Plug.Conn{method: "POST", path_info: path} = conn, issuer) when path in @post_paths, do: post(conn, issuer, path)
 
   defp route(%Plug.Conn{path_info: path} = conn, _issuer) when path in @get_paths,
@@ -166,6 +170,34 @@ defmodule Nebu.OAuth.Account do
       {:ok, session} -> render(conn, session, request)
       :none -> start_login(conn, issuer, return_target(request), [session_hash(conn)])
       {:error, reason} -> session_error(conn, reason)
+    end
+  end
+
+  # story persistent-consent-grants: the apps the user has allowed (own grants only, approved clients only), each with a withdraw form
+  defp apps(conn, issuer) do
+    request = parse_request(conn)
+
+    case current_session(conn) do
+      {:ok, session} -> apps_page(conn, session, request)
+      :none -> start_login(conn, issuer, {"apps", nil}, [session_hash(conn)])
+      {:error, reason} -> session_error(conn, reason)
+    end
+  end
+
+  defp apps_page(conn, session, request) do
+    case ConsentGrantStore.list_for_user(session.user_id) do
+      {:ok, grants} ->
+        AccountPages.send_page(conn, 200, :apps, %{
+          user_id: session.user_id,
+          display_name: session.display_name,
+          csrf_token: session.csrf_token,
+          notice: request.notice,
+          action: "apps",
+          grants: grants
+        })
+
+      {:error, :storage} ->
+        session_error(conn, :storage)
     end
   end
 
@@ -680,6 +712,7 @@ defmodule Nebu.OAuth.Account do
     "/account?" <> URI.encode_query(pairs)
   end
 
+  defp return_location(%{return_action: "apps"}), do: "/account/apps"
   defp return_location(_row), do: "/account"
 
   # story oauth-hardening-hygiene (HY9): `__Host-nebu_acct_<16 hex>` (`Path=/; Secure`) on an https request, the
@@ -753,6 +786,7 @@ defmodule Nebu.OAuth.Account do
 
   defp dispatch(conn, ["logout"], _params, session), do: logout(conn, session)
   defp dispatch(conn, ["devices", "delete"], params, session), do: delete_device(conn, params, session)
+  defp dispatch(conn, ["apps", "withdraw"], params, session), do: withdraw_grant(conn, params, session)
   defp dispatch(conn, ["cross_signing_reset", verb], params, session), do: decide_reset(conn, verb, params, session)
 
   defp logout(conn, session) do
@@ -769,6 +803,35 @@ defmodule Nebu.OAuth.Account do
         unavailable(conn)
     end
   end
+
+  # story persistent-consent-grants: the user takes back the permission of ONE app. Own grant only (the row is selected by the session's user
+  # id AND the client id; a foreign / unknown id is `grant_not_found`). Not gated on a fresh sign-in (it only removes a convenience) and it
+  # does NOT end existing sessions (the Devices page does that).
+  defp withdraw_grant(conn, params, session) do
+    client_id = params["client_id"]
+
+    result = if valid_client_id?(client_id), do: ConsentGrantStore.withdraw(session.user_id, client_id), else: {:ok, :not_found}
+
+    case result do
+      {:ok, :withdrawn} ->
+        Logger.info("OAuth account: consent grant withdrawn user_id=#{session.user_id} client_id=#{client_id}")
+        apps_redirect(conn, "grant_withdrawn")
+
+      {:ok, :not_found} ->
+        apps_redirect(conn, "grant_not_found")
+
+      {:error, :storage} ->
+        Logger.error("OAuth account: the consent grant could not be withdrawn")
+        unavailable(conn)
+    end
+  end
+
+  defp valid_client_id?(id) when is_binary(id),
+    do: byte_size(id) in 1..256 and String.valid?(id) and not Regex.match?(~r/\p{Cc}/u, id)
+
+  defp valid_client_id?(_id), do: false
+
+  defp apps_redirect(conn, notice), do: redirect(conn, "/account/apps?" <> URI.encode_query([{"notice", notice}]), 303)
 
   defp delete_device(conn, params, session) do
     device_id = params["device_id"]

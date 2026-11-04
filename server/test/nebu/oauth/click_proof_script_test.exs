@@ -149,7 +149,8 @@ defmodule Nebu.OAuth.ClickProofScriptTest do
           {"admin/templates/oauth_registrations/index.html.heex", 1},
           {"admin/templates/oauth_registrations/bulk_preview.html.heex", 1},
           {"admin/templates/oauth_clients/revoke_confirm.html.heex", 1},
-          {"admin/templates/config/index.html.heex", 5},
+          # sso schemes, sso origins, refresh mode, scopes, OAuth switch and (story session-lifetime-setting) the session lifetime form
+          {"admin/templates/config/index.html.heex", 6},
           {"admin/templates/claim_mapping/index.html.heex", 1},
           {"admin/templates/role_mapping/index.html.heex", 1},
           {"oauth/account_templates/reset.html.eex", 1}

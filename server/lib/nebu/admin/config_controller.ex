@@ -478,6 +478,88 @@ defmodule Nebu.Admin.ConfigController do
     %{enabled: stored.enabled, issuer: suggestion || stored.issuer, ack: false, suggested?: suggestion != nil}
   end
 
+  # Story session-lifetime-setting: the Matrix session lifetime (`matrix_session_ttl_seconds`, whole seconds 3600..7_776_000). The same gate as the OAuth
+  # switch (strict fetch metadata, then a fresh admin sign-in bound to /admin/config; both BEFORE anything is validated or written), validation
+  # (`Nebu.Admin.OAuthSwitch.validate_session_lifetime/1`), then ONE transaction (`save_config_audited`: the upsert and the audit row, which is ALWAYS required:
+  # no way-back exemption). The marker is consumed after a SUCCESSFUL write only. The form is read from the BODY.
+  def save_session_lifetime(conn, _params) do
+    with {:ok, conn, _kind} <- Nebu.Admin.OAuthAdminHelpers.gate(conn, :marker, @config_path) do
+      do_save_session_lifetime(conn, conn.body_params)
+    else
+      {:halt, conn} -> conn
+    end
+  end
+
+  defp do_save_session_lifetime(conn, params) do
+    submitted = params["matrix_session_ttl_seconds"]
+
+    case Nebu.Admin.OAuthSwitch.validate_session_lifetime(submitted) do
+      {:error, message} ->
+        conn
+        |> put_status(200)
+        |> assign(:lifetime_value, if(is_binary(submitted), do: submitted, else: ""))
+        |> assign(:lifetime_error, message)
+        |> render_config()
+
+      {:ok, seconds} ->
+        save_session_lifetime_change(conn, seconds)
+    end
+  end
+
+  # The audit's "before" (the value in effect: saved, else env, else 8 hours) and the "no change" decision (against the SAVED value only) are taken INSIDE the
+  # transaction, under the row lock of the key (`Nebu.Admin.DB.with_locked_config/2`), so concurrent saves chain instead of recording a stale "before".
+  defp save_session_lifetime_change(conn, seconds) do
+    outcome =
+      Nebu.Admin.DB.with_locked_config(["matrix_session_ttl_seconds"], fn locked ->
+        stored = if locked == :unlocked, do: Map.new(load_config()), else: locked
+        saved = Nebu.Admin.OAuthSwitch.stored_session_lifetime(stored)
+
+        if seconds == saved do
+          {:rollback, {:no_change, saved}}
+        else
+          before_seconds = Nebu.Admin.OAuthSwitch.session_lifetime_in_effect(stored)
+
+          result =
+            H.save_config_audited(conn, %{"matrix_session_ttl_seconds" => Integer.to_string(seconds)},
+              action: "session_lifetime_changed",
+              target_id: "matrix_session_ttl_seconds",
+              metadata: %{"before_seconds" => before_seconds, "after_seconds" => seconds},
+              label: "Matrix session lifetime",
+              form: :session_lifetime,
+              unaudited_ok: false
+            )
+
+          {if(match?({:ok, _}, result), do: :commit, else: :rollback), result}
+        end
+      end)
+
+    case outcome do
+      {:no_change, saved} ->
+        conn
+        |> put_flash(:info, "No change: the session lifetime already is #{Nebu.Admin.OAuthSwitch.lifetime_text(saved)}.")
+        |> redirect(to: "/admin/config#session-lifetime")
+
+      {:ok, _audited} ->
+        conn
+        |> Nebu.Admin.Auth.consume_reauth()
+        |> put_flash(
+          :info,
+          "Session lifetime saved: #{Nebu.Admin.OAuthSwitch.lifetime_text(seconds)}. New sign-ins use it. Existing OAuth sessions keep their lifetime. " <> oauth_propagation_sentence()
+        )
+        |> redirect(to: "/admin/config#session-lifetime")
+
+      {:error, :audit} ->
+        conn
+        |> put_flash(:error, H.audit_refused_flash("Session lifetime"))
+        |> redirect(to: "/admin/config#session-lifetime")
+
+      {:error, :db} ->
+        conn
+        |> put_flash(:error, "Failed to save the session lifetime.")
+        |> redirect(to: "/admin/config#session-lifetime")
+    end
+  end
+
   # AC5: each comma-separated token must (a) be non-empty/non-whitespace, (b) match
   # RFC 3986 scheme syntax, (c) not case-insensitively collide with the hardcoded
   # denylist. An empty overall string is valid input (operator clearing custom
@@ -525,6 +607,18 @@ defmodule Nebu.Admin.ConfigController do
     end
   end
 
+  # the lifetime section: the value in effect (shown as text), the field value (the rejected text again after a refused save) and the error
+  defp assign_session_lifetime(conn, cfg) do
+    in_effect = Nebu.Admin.OAuthSwitch.session_lifetime_in_effect(cfg)
+    {min, max} = Nebu.OAuth.matrix_session_ttl_bounds()
+
+    conn
+    |> assign(:lifetime_bounds, %{min: min, min_text: Nebu.Admin.OAuthSwitch.lifetime_text(min), max: max, max_text: Nebu.Admin.OAuthSwitch.lifetime_text(max)})
+    |> assign(:lifetime_text, Nebu.Admin.OAuthSwitch.lifetime_text(in_effect))
+    |> assign(:lifetime_value, conn.assigns[:lifetime_value] || Integer.to_string(in_effect))
+    |> assign(:lifetime_error, conn.assigns[:lifetime_error])
+  end
+
   defp render_config(conn) do
     cfg = load_config()
     env = Nebu.Admin.OAuthSwitch.current_env()
@@ -538,6 +632,7 @@ defmodule Nebu.Admin.ConfigController do
       |> assign(:oauth_form, conn.assigns[:oauth_form] || default_oauth_form(cfg, env))
       |> assign(:oauth_errors, conn.assigns[:oauth_errors] || %{})
     end)
+    |> assign_session_lifetime(cfg)
     |> Nebu.Admin.OAuthAdminHelpers.assign_reauth(@config_path)
     |> assign(:page_title, "Configuration")
     # admin-sidebar-nesting coordination contract (UX gate V1): the parent

@@ -768,6 +768,9 @@ defmodule Nebu.Admin.DB do
   # What follows a committed write of server_config keys (shared by `upsert_server_config/1` and the audited save below): the node-local /
   # cluster caches of the keys that have one are refreshed.
   defp after_config_write(changes) do
+    keys = stringify_keys(changes)
+    after_config_write_hook(changes)
+
     # story oidc-claim-boot-cache: this is the SINGLE central write point for
     # server_config.oidc_user_id_claim (claim_mapping_live, bootstrap save, and the
     # gRPC SetServerConfig path all route through here). When the change touches
@@ -775,7 +778,7 @@ defmodule Nebu.Admin.DB do
     # cluster (ADR-020) through the Matrix Public API — never reaching into the
     # Matrix-domain cache module directly. A change that does not touch the key is
     # a no-op (no stale-claim risk, no needless re-read).
-    if Map.has_key?(stringify_keys(changes), "oidc_user_id_claim") do
+    if Map.has_key?(keys, "oidc_user_id_claim") do
       Nebu.Matrix.invalidate_oidc_claim_cache()
     end
 
@@ -787,7 +790,7 @@ defmodule Nebu.Admin.DB do
     # change) so an Admin-Config edit is visible on the VERY NEXT read — no
     # node-local-only staleness window. A change that touches none of them is a
     # no-op (no needless re-read).
-    if Enum.any?(@scope_cache_keys, &Map.has_key?(stringify_keys(changes), &1)) do
+    if Enum.any?(@scope_cache_keys, &Map.has_key?(keys, &1)) do
       refresh_oidc_scope_cache()
     end
 
@@ -798,11 +801,155 @@ defmodule Nebu.Admin.DB do
     # connection-pool deadlock — see PolicyCache's moduledoc). Force a
     # synchronous cache refresh here so a policy flip takes effect on the
     # VERY NEXT Logger.* call, mirroring the OIDC scope-cache pattern above.
-    if Enum.any?(@log_policy_cache_keys, &Map.has_key?(stringify_keys(changes), &1)) do
+    if Enum.any?(@log_policy_cache_keys, &Map.has_key?(keys, &1)) do
       Nebu.Web.LogStore.refresh_policy_cache()
     end
 
+    # story session-lifetime-setting: the Matrix session lifetime is read at every login through the per-node cache of `Nebu.OAuth.Config` (ADR-020: through the
+    # OAuth facade). The saving node records the saved value as its last known good one and drops its cache entry so the next login uses the new value at once;
+    # other nodes follow within `NEBU_OAUTH_CONFIG_CACHE_MS`. Runs after the COMMIT only (see `run_after_commit/1`): a rolled back value is never remembered.
+    case Map.fetch(keys, "matrix_session_ttl_seconds") do
+      {:ok, value} -> Nebu.OAuth.note_saved_matrix_session_ttl(value)
+      :error -> :ok
+    end
+
     :ok
+  end
+
+  # test seam (test builds only): `:nebu_http, :admin_after_config_write`, a 1-arity fun called with `changes` at the start of every `after_config_write/1`
+  if Mix.env() == :test do
+    defp after_config_write_hook(changes) do
+      case Application.get_env(:nebu_http, :admin_after_config_write) do
+        fun when is_function(fun, 1) -> fun.(changes)
+        _ -> :ok
+      end
+    end
+  else
+    defp after_config_write_hook(_changes), do: :ok
+  end
+
+  @deferred_after_commit {__MODULE__, :deferred_after_commit}
+
+  # `after_config_write/1` of a save that runs inside `with_locked_config/2` waits for the COMMIT of the outer transaction (the nested save's own transaction
+  # commits nothing by itself): queued here, run by `with_locked_config/2` after the commit, dropped on a rollback. Everywhere else it runs at once.
+  defp run_after_commit(changes) do
+    case Process.get(@deferred_after_commit) do
+      queue when is_list(queue) ->
+        Process.put(@deferred_after_commit, [changes | queue])
+        :ok
+
+      _ ->
+        after_config_write(changes)
+    end
+  end
+
+  @doc """
+  Runs `fun` inside ONE transaction that holds the row locks of `keys` (`SELECT ... FOR UPDATE`), so a decision made on the stored values cannot go stale:
+  `fun.(stored)` gets the stored `%{key => value}` as they are at that moment (a key without a row is absent; a first save has no row to lock and still races).
+  A `save_config_audited/2` called inside it joins the same transaction (use `unaudited_ok: false`: after a failed audit the retry without it cannot work inside
+  the aborted outer transaction), and its `after_config_write` effects (caches) run after the OUTER commit, in the order of the saves; an effect that raises is
+  logged (exception type only) and does not skip the others.
+
+  `fun` returns `{:commit, result}` (commit, the answer is `result`) or `{:rollback, result}` (roll back, e.g. a refused or unchanged value; the answer is
+  `result`, no effect runs). An exception of `fun` rolls back and is RE-RAISED. Calls must not be nested (`ArgumentError`). `{:error, :db}` plus one value-free log
+  line when the transaction itself cannot run. With the `:admin_config_tx` test seam, or without a repository, `fun.(:unlocked)` is called instead, its effects run
+  at once and its result is returned (the caller reads its own configuration; nothing is locked).
+  """
+  @spec with_locked_config([String.t()], (map() | :unlocked -> {:commit, term()} | {:rollback, term()})) :: term()
+  def with_locked_config(keys, fun) when is_list(keys) and is_function(fun, 1) do
+    if is_list(Process.get(@deferred_after_commit)) do
+      raise ArgumentError, "Nebu.Admin.DB.with_locked_config/2 must not be nested"
+    end
+
+    if locked_config_unavailable?() do
+      {_decision, result} = fun.(:unlocked)
+      result
+    else
+      run_locked_config(keys, fun)
+    end
+  end
+
+  defp run_locked_config(keys, fun) do
+    Process.put(@deferred_after_commit, [])
+
+    try do
+      case locked_config_transaction(keys, fun) do
+        {:committed, result} ->
+          run_queued_effects(Enum.reverse(Process.get(@deferred_after_commit, [])))
+          result
+
+        {:rolled_back, result} ->
+          result
+
+        {:raised, kind, reason, stacktrace} ->
+          :erlang.raise(kind, reason, stacktrace)
+
+        :error ->
+          {:error, :db}
+      end
+    after
+      Process.delete(@deferred_after_commit)
+    end
+  end
+
+  defp run_queued_effects(queue) do
+    Enum.each(queue, fn changes ->
+      try do
+        after_config_write(changes)
+      rescue
+        e -> Logger.error("Admin.DB: an after-commit effect of a server_config change failed: #{inspect(e.__struct__)}")
+      end
+    end)
+  end
+
+  defp locked_config_transaction(keys, fun) do
+    repo = Nebu.Repo
+
+    result =
+      repo.transaction(fn ->
+        %{rows: rows} = Ecto.Adapters.SQL.query!(repo, "SELECT key, value FROM server_config WHERE key = ANY($1) FOR UPDATE", [keys])
+
+        decision =
+          try do
+            fun.(Map.new(rows, fn [k, v] -> {k, v} end))
+          catch
+            kind, reason -> {:raised, kind, reason, __STACKTRACE__}
+          end
+
+        case decision do
+          {:commit, result} -> result
+          {:rollback, result} -> repo.rollback({:answer, result})
+          {:raised, _kind, _reason, _stack} = raised -> repo.rollback(raised)
+        end
+      end)
+
+    case result do
+      {:ok, result} -> {:committed, result}
+      {:error, {:answer, result}} -> {:rolled_back, result}
+      {:error, {:raised, _kind, _reason, _stack} = raised} -> raised
+      {:error, reason} -> log_locked_failure(reason)
+    end
+  rescue
+    e in [RuntimeError, DBConnection.ConnectionError, UndefinedFunctionError, Postgrex.Error] -> log_locked_failure(e)
+  catch
+    :exit, _ -> log_locked_failure(:exit)
+  end
+
+  # value-free: the error TYPE only, never a message, a key or a value
+  defp log_locked_failure(reason) do
+    Logger.error("Admin.DB: the locked server_config transaction failed: #{locked_error_type(reason)}")
+    :error
+  end
+
+  defp locked_error_type(%Postgrex.Error{postgres: %{code: code}}), do: "postgres #{code}"
+  defp locked_error_type(%{__struct__: struct}), do: inspect(struct)
+  defp locked_error_type(reason) when is_atom(reason), do: inspect(reason)
+  defp locked_error_type(_reason), do: "unexpected error"
+
+  if Mix.env() == :test do
+    defp locked_config_unavailable?, do: is_function(Application.get_env(:nebu_http, :admin_config_tx), 2) or Process.whereis(Nebu.Repo) == nil
+  else
+    defp locked_config_unavailable?, do: Process.whereis(Nebu.Repo) == nil
   end
 
   @doc """
@@ -859,7 +1006,7 @@ defmodule Nebu.Admin.DB do
   defp persist_config(changes, audit, unaudited_ok?, opts) do
     case run_config_tx(changes, audit, opts) do
       :ok ->
-        after_config_write(changes)
+        run_after_commit(changes)
         {:ok, %{audited: true}}
 
       {:error, {:audit, _reason}} when unaudited_ok? ->
@@ -870,7 +1017,7 @@ defmodule Nebu.Admin.DB do
 
         case run_config_tx(changes, nil, opts) do
           :ok ->
-            after_config_write(changes)
+            run_after_commit(changes)
             {:ok, %{audited: false}}
 
           {:error, _reason} = error ->

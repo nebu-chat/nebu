@@ -42,7 +42,7 @@ defmodule Nebu.Compliance.UserDeletion do
     user_room_account_data account_data cross_signing_keys
     device_keys device_one_time_keys device_fallback_keys
     forgotten_rooms auto_join_opt_outs read_receipts
-    uia_sessions oauth_account_sessions oauth_consent_requests oauth_codes
+    uia_sessions oauth_account_sessions oauth_consent_requests oauth_consent_grants oauth_codes
   )
 
   # the step name of each DELETE, fixed at compile time (the attempted audit and the log name the failing step)

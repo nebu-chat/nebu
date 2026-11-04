@@ -469,9 +469,8 @@ defmodule Nebu.Matrix.HttpPublic do
   # Nebu-controlled session lifetime: bounded at min(oidc_exp, now + ceiling). The
   # ceiling keeps sessions short even when Keycloak issues long-lived tokens; the
   # oidc_exp floor means a Nebu session never outlives the OIDC token's own expiry.
-  # The Nebu session ceiling (default 8h) is read via
-  # Nebu.Web.SessionConfig.matrix_session_ttl_seconds/0 so it can be shortened for tests
-  # (NEBU_MATRIX_SESSION_TTL_SECONDS, validated in runtime.exs). Both the login and the
+  # The Nebu session ceiling (default 8h; saved in the Admin UI, else NEBU_MATRIX_SESSION_TTL_SECONDS, validated in runtime.exs) is read via
+  # Nebu.Web.SessionConfig.matrix_session_ttl_seconds/0 (story session-lifetime-setting). Both the login and the
   # /v3/refresh re-mint paths read it through the accessor — no hardcoded ceiling remains.
   defp provision_and_respond(conn, claims, token, refresh_requested, oidc_refresh_token, opts) do
     server = Application.get_env(:nebu_http, :server_name, "localhost")
@@ -635,9 +634,9 @@ defmodule Nebu.Matrix.HttpPublic do
     end
   end
 
-  # Nebu session expiry = min(oidc_exp, now + 8h). oidc_exp is the verified `exp`
+  # Nebu session expiry = min(oidc_exp, now + lifetime), the lifetime being the configurable ceiling (default 8h, see above). oidc_exp is the verified `exp`
   # claim (always an integer post-verification — OidcPlug.check_exp rejects a
-  # missing/non-integer exp); the 8h ceiling is the hard upper bound.
+  # missing/non-integer exp); the ceiling is the hard upper bound, and a legacy login never outlives the IdP token's `exp`.
   #
   # `def` (not `defp`): reused verbatim by `Nebu.Matrix.Session.RefreshWorker`
   # (server-paced-session-refresh) so the background refresh path computes the

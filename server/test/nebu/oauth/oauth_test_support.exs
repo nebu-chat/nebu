@@ -1041,8 +1041,37 @@ defmodule Nebu.OAuth.TestSupport do
 
   defp finish_consent(flow, priv_jwk, decision, opts) do
     cb = finish_flow(flow, priv_jwk, opts)
-    assert_consent_redirect(cb)
-    consent!(cb, decision, Keyword.take(opts, [:https]))
+
+    # story persistent-consent-grants: a user who already allowed this client (same sub, same client, same redirect URI, a covered scope) is not asked
+    # again: the callback itself redirects to the client with the code, which is what an Allow would have answered. Tests that need the consent screen
+    # of a second login use a fresh `sub`, or `prompt=consent`. A skip is accepted ONLY when a grant row exists for (sub, client), or when the caller
+    # opts in with `allow_skip: true`: a FIRST login that skips would be a bug that must not pass unnoticed in the hundreds of tests that use this helper.
+    if decision == :allow and code_redirect?(cb) and (Keyword.get(opts, :allow_skip, false) or grant_exists?(flow, opts)) do
+      cb
+    else
+      assert_consent_redirect(cb)
+      consent!(cb, decision, Keyword.take(opts, [:https]))
+    end
+  end
+
+  defp grant_exists?(flow, opts) do
+    with sub when is_binary(sub) <- opts |> Keyword.get(:claims, %{}) |> Map.get("sub"),
+         client_id when is_binary(client_id) <- flow.pairs |> List.keyfind("client_id", 0) |> then(&(&1 && elem(&1, 1))) do
+      %{rows: [[n]]} =
+        sql!("SELECT count(*) FROM oauth_consent_grants WHERE user_id = $1 AND client_id = $2", [user_id_for(%{"sub" => sub}), client_id])
+
+      n > 0
+    else
+      _ -> false
+    end
+  end
+
+  # a redirect to the client that carries a `code` (and is not the consent page)
+  defp code_redirect?(conn) do
+    loc = location(conn)
+
+    conn.status in [302, 303] and is_binary(loc) and loc != @consent_path and
+      match?({_base, _mode, %{"code" => _}, _names}, client_redirect(loc))
   end
 
   @doc "The callback answered `303 Location: /oauth2/consent` with a consent cookie, no code, the flow headers."

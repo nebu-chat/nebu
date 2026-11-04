@@ -1,0 +1,366 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index a5808ccd..32d84417 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -11,7 +11,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
+ 
+ ### Added
+ 
+-- **Remembered OAuth consent (story persistent-consent-grants, epic oauth-session-and-consent, REQ-2026-003; migration 000057, table `oauth_consent_grants`)**: after a user has allowed an OAuth client once, the next sign-in with the same client skips the consent screen and the IdP callback issues the authorization code directly. A grant is one row per user and client (normalised scope without the per-login device id, the exact redirect URI, the client's approval time as identity binding); the screen is skipped only for an approved client, an equal redirect URI, a requested scope that is a subset of the remembered one and no `prompt=consent` (also inside `prompt=login consent`); everything else, including an unreadable table, asks again. The sign-in at the identity provider, freshness, gate l, the device-holder rule and the PKCE / state / nonce / device binding of the code are unchanged. A revocation of the client deletes the grants of every user in the same transaction (a client that is approved again does not inherit one), GDPR erasure deletes the user's grants, and users see and withdraw them on the new account page `/account/apps` ("Apps"; own grants only, existing sessions stay signed in). Migration 000057 also adds `oauth_authz_requests.force_consent` (carries `prompt=consent` to the callback). Nodes of the previous release keep asking on every login until all nodes are upgraded. ADR-033 FR1 is relaxed accordingly; see `docs/architecture/07-deployment.md`, "Remembered consent grants".
++- **Remembered OAuth consent (story persistent-consent-grants, epic oauth-session-and-consent, REQ-2026-003; migration 000057, table `oauth_consent_grants`)**: after a user has allowed an OAuth client once, the next sign-in with the same client skips the consent screen and the IdP callback issues the authorization code directly. A grant is one row per user and client (normalised scope without the per-login device id, the exact redirect URI, the client's approval time as identity binding); the screen is skipped only for an approved client, an equal redirect URI, a requested scope that is a subset of the remembered one no `prompt=consent` and no `prompt=login` (also inside a list such as `login consent`), and a device that is new or held by the same app (a device that would replace another session, for example a legacy session on the requested device id, still shows the consent screen); everything else, including an unreadable table, asks again. The sign-in at the identity provider, freshness, gate l, the device-holder rule and the PKCE / state / nonce / device binding of the code are unchanged. A revocation of the client deletes the grants of every user in the same transaction (a client that is approved again does not inherit one), GDPR erasure deletes the user's grants, and users see and withdraw them on the new account page `/account/apps` ("Apps"; own grants only, existing sessions stay signed in). Migration 000057 also adds `oauth_authz_requests.force_consent` (carries `prompt=consent` to the callback). Nodes of the previous release keep asking on every login until all nodes are upgraded; during that deploy window a `prompt=consent` / `prompt=login` request started on an old node may be skipped by a new node. The sign-in started at `/account/apps` returns there (migration 000057 widens the action CHECK of the account login requests). ADR-033 FR1 is relaxed accordingly; see `docs/architecture/07-deployment.md`, "Remembered consent grants".
+ - **Admin-configurable Matrix session lifetime (story session-lifetime-setting, epic oauth-session-and-consent; migration 000056, audit action `session_lifetime_changed`)**: the section "Matrix session lifetime" on `/admin/config` sets how long a new Matrix session (OAuth and legacy login) lasts, in whole seconds from 3600 to 7776000 (1 hour to 90 days), stored as `server_config.matrix_session_ttl_seconds`. Without a saved value `NEBU_MATRIX_SESSION_TTL_SECONDS` applies, else 8 hours (unchanged default). The lifetime stays an absolute ceiling from the sign-in; a change applies to the next sign-in and existing OAuth sessions keep the ceiling they were issued with (legacy sessions follow the current setting when they are extended, lowered or raised, because they have no stored ceiling; their `expires_at` is never shortened). The form is gated like the OAuth switch (fresh sign-in, "Sign in again to save"), refuses out-of-range values next to the field, and writes one audit row with the old and new number in the same transaction. The value is read through the per-node config cache (the saving node at once, other nodes within `NEBU_OAUTH_CONFIG_CACHE_MS`) with a last-known-good rule: a failed read or a damaged row keeps the last valid saved value of the node instead of falling back to a longer env / 8 hour ceiling. A legacy login is still capped by the expiry of the identity provider's token. Migration 000056 adds the key to the `server_config` update allowlist (the second save would fail without it). See `docs/architecture/07-deployment.md`, "Matrix session lifetime".
+ - **`PUT /_matrix/client/v3/rooms/{roomId}/redact/{eventId}/{txnId}` and applied `m.room.redaction` events, audit action `room_event_redacted`, migration 000051 (story state-writer-redaction; follow-ups `fw`, `fv`, `fz`, `fx` closed)**: Element's "Remove" and "Remove recent messages" work. A redaction is decided and written by the room process (own event: `events["m.room.redaction"]`; another user's event: also the `redact` level), stored with a top-level `redacts` (new column `events.redacts`, migration 000051) and served with `redacts` and `content.redacts`; the redacted event is served pruned (`content: {}`, `unsigned.redacted_because`) on every read path while its content stays in the database (Compliance Mode); a redaction of another user's event writes the audit row `room_event_redacted`. Operator query **Q-rd** (07-deployment) lists legacy unchecked redactions.
+ - **`PUT /_matrix/client/v3/rooms/{roomId}/state/m.room.power_levels` (story power-levels-enforcement; follow-ups `eq`, `er`, `fr` closed)**: power levels can be changed after the room was created (Element's Roles & Permissions, `/op`, `/deop`) under the room version 10 change rules, decided and written in the room process in one transaction; new audit action `room_power_levels_changed`; the PUT is charged to the `moderation` tier; operator query Q-pl in `docs/architecture/07-deployment.md`.
+diff --git a/docs/architecture/05-building-blocks.md b/docs/architecture/05-building-blocks.md
+index d7979127..b013fc39 100644
+--- a/docs/architecture/05-building-blocks.md
++++ b/docs/architecture/05-building-blocks.md
+@@ -2137,7 +2137,7 @@ Delta to the `oauth/` tree above; all modules are in the single OTP app, cross-d
+ | `Nebu.Workers.ClientIPCheckWorker` (`workers/client_ip_check_worker.ex`), `Nebu.Matrix.device_address_spread/1` -> `Nebu.Matrix.DeviceKeyStore.address_spread/1` | W2: Oban cron `37 */6 * * *` (`config/config.exs`, `Oban.Plugins.Cron`; existing limit-1 queue `oauth_cleanup`, `max_attempts: 1`, read-only despite the queue name). The worker calls ONLY the facade (ADR-020; plus `Nebu.OAuth.oauth_aware?/0` for the log text); `address_spread/1` runs one count-only aggregate over `devices` (`count(*)`, `count(DISTINCT user_id)`, `count(DISTINCT last_seen_ip)` since `since_ms`, never selecting an address) under `SET LOCAL statement_timeout = '5s'`, no index, no migration; returns `{:ok, %{devices, users, addresses}}` or `{:error, reason}`, never raises. Pure `assess/1` (`@doc false`): `:collapsed` iff at least 10 devices, at least 5 users and 1..2 addresses; then ONE WARNING `client IP: all <n> devices of <u> users ...` (three integers and `oauth_offered`, no address). Informational only, it never blocks `oauth_enabled` | client-ip-misconfiguration-warnings (W2, D2, D8) |
+ | `deploy/tofu/examples/{upcloud,stackit}/client_ip_check.tf` | W3: one OpenTofu `check "client_ip_resolution"` block per reference template (warning on `plan` / `apply`, never an error; variables / locals only): `alb` / `dynamic` with an empty `lb_real_ip_cidrs` (both templates) and, UpCloud only, the TCP-mode frontends (`none` / `acme`, no PROXY protocol, ap3). No assert for Stackit `acme` / `none` (NLB source preservation unverified, ap7). A non-empty list silences it without proving correctness | client-ip-misconfiguration-warnings (W3, D3) |
+ | `Nebu.OAuth.SourceKey`, `Nebu.OAuth.PublicSuffix` | hashed per-source key (/64) for the per-source caps on live authorize / login / consent requests and pending registrations; built-in public-suffix list (registrable domain as the per-host cap key, shared-hosting badge) | oauth-dcr-abuse-hardening (AH) |
+-| `Nebu.OAuth.Consent`, `ConsentStore`, `ConsentPage`, `Freshness` | consent on every authorization: the IdP callback stores a consent row (`oauth_consent_requests`, TTL <= 5 min) and 303s to `/oauth2/consent`; only `Consent` calls `CodeStore.insert`; `Freshness` evaluates the raw `auth_time` claim (absent = not fresh, fail closed); `ConsentPage` embeds `Nebu.Web.ArmScript.script()` (Allow is `aria-disabled`, armed after real interaction, FR21) and keeps COOP `same-origin` | oauth-authorize-freshness (FR) |
++| `Nebu.OAuth.Consent`, `ConsentStore`, `ConsentPage`, `Freshness` | consent for every authorization except a remembered Allow (persistent-consent-grants): the IdP callback stores a consent row (`oauth_consent_requests`, TTL <= 5 min) and 303s to `/oauth2/consent`, or, for a remembered Allow, calls `Consent.issue_remembered/4`; only `Consent` calls `CodeStore.insert`; `Freshness` evaluates the raw `auth_time` claim (absent = not fresh, fail closed); `ConsentPage` embeds `Nebu.Web.ArmScript.script()` (Allow is `aria-disabled`, armed after real interaction, FR21) and keeps COOP `same-origin` | oauth-authorize-freshness (FR) |
+ | `Nebu.OAuth.ConsentGrantStore` | remembered consent: `oauth_consent_grants` (one row per user and client: normalised scope without the device token, exact redirect URI, `client_approved_at` binding); ONE statement joins the client row for the skip decision, an Allow upserts, the account page (`/account/apps`) lists and withdraws, revocation and GDPR erasure delete; the code of a skip is minted by `Consent` (still the only caller of `CodeStore.insert`) | persistent-consent-grants (REQ-2026-003) |
+ | `Nebu.OAuth.BrowserPost` | shared strict browser-POST checks (`Origin`, `Sec-Fetch-Site`, navigation metadata incl. `Sec-Fetch-User`, CSRF) for consent, account page, admin approve / revoke; for WebKit (no `Sec-Fetch-User`) the click proof `_click_proof` (`check_fetch_metadata/3`) | FR8, SO1-SO6, SO9 |
+ | `Nebu.Web.ClickProofScript` | the ONE shared click-proof script (sets the hidden `_click_proof` field on a trusted click; byte-identical in `app.js`, CSP-pinned inline on the `/account` reset page) | SO9 |
+diff --git a/docs/architecture/06-runtime.md b/docs/architecture/06-runtime.md
+index c9aeade1..83a39505 100644
+--- a/docs/architecture/06-runtime.md
++++ b/docs/architecture/06-runtime.md
+@@ -1901,7 +1901,10 @@ Browser                 Nebu (Authorize / Consent)
+   │ ... IdP login ...                                                                                                    │
+   │ GET callback ──────────►│ consume request, binding, recheck client, IdP login; gate l (refresh token present?), provisioning,
+   │                         │ Freshness.evaluate(auth_time) (absent/stale => login_fresh=false, never login_required), device holder
+-  │                         │ (another app's live device => 403 device_in_use); INSERT oauth_consent_requests (binding_hash, TTL<=5 min) ►│
++  │                         │ (another app's live device => 403 device_in_use); skip_consent? (ONE statement joining the client row): a
++  │                         │ remembered Allow (oauth_consent_grants), no prompt=consent|login, device new or same app => Consent.issue_remembered
++  │◄───────────────────────│ 303 to the client's redirect_uri?code&state (no consent row, no cookie) -- or, without a remembered Allow:
++  │                         │ INSERT oauth_consent_requests (binding_hash, TTL<=5 min) ►│
+   │◄───────────────────────│ 303 /oauth2/consent + cookie __Host-nebu_oauth_consent
+   │ GET /oauth2/consent ───►│ renders from the live row (no mutation): app, claimed host, redirect target, session line, notice if not fresh
+   │ POST /oauth2/consent ──►│ BrowserPost checks (Origin, Sec-Fetch-*, CSRF) BEFORE consumption; ONE DELETE ... RETURNING; Allow:
+@@ -1916,7 +1919,7 @@ Client revocation (admin UI or `bin/nebu rpc`), one transaction, lock order `oau
+ Admin (fresh re-auth, typed host) ─► Nebu.OAuth.revoke_client/3 ──► BEGIN
+    UPDATE oauth_clients SET status='revoked' WHERE status='approved'   (0 rows => :not_approved)
+    for each (user, device) of the client: locked per-device teardown (devices FOR UPDATE, all session rows, device + E2EE key tables)
+-   oauth_codes.used_at (unused codes); DELETE oauth_authz_requests, oauth_consent_requests of the client
++   oauth_codes.used_at (unused codes); DELETE oauth_authz_requests, oauth_consent_requests, oauth_consent_grants of the client
+    audit row oauth_client_revoked (a failed audit rolls everything back)                          COMMIT
+    post-commit, best effort: JWT denylist + bindings, legacy per-device cleanup
+ Concurrent issuance / rotation: SELECT status ... FOR SHARE (2 s lock_timeout) first => either the revoke's teardown removes the new
+diff --git a/docs/architecture/07-deployment.md b/docs/architecture/07-deployment.md
+index d7acdd84..6c500ac7 100644
+--- a/docs/architecture/07-deployment.md
++++ b/docs/architecture/07-deployment.md
+@@ -224,11 +224,11 @@ How long a signed-in Matrix session lasts is set on the **Configuration** page o
+ Nebu remembers a user's "Allow" for an OAuth client (REQ-2026-003, migration 000057, table `oauth_consent_grants`): the next sign-in with the same client skips the consent screen and the callback issues the authorization code itself. This relaxes FR1 of ADR-033 ("consent on every authorization"); see the addendum there.
+ 
+ - **What is remembered.** One grant per user and client: the normalised scope (sorted unique tokens, without the per-login `<prefix>device:<id>` token: the device id is not part of the remembered scope, matrix-js-sdk and FluffyChat use a new one for every login), the exact redirect URI the user allowed and `client_approved_at`, the `approved_at` of the client registration at that time (the identity binding). Nothing per login is stored (no code, state, nonce, challenge, device or token). An Allow replaces scope and redirect URI with what was just allowed (a narrower Allow narrows the grant); `created_at` is the first Allow, `granted_at` the latest.
+-- **When the screen is skipped.** Only when the client is `approved`, a grant exists for this user, the redirect URI is exactly equal to the remembered one, the requested scope (after the existing narrowing: `profile`, `email` and other unknown tokens are ignored and never granted) is a subset of the remembered one, `client_approved_at` equals the client's current `approved_at`, and the request does not carry `prompt=consent` (`consent` among the space separated values; `prompt=login consent` asks). All of it is read in ONE statement that joins the client row, so a revocation that has committed can never be missed. A narrower request skips and gets only the narrower scope; a broader one (for example `openid` added) or another Matrix prefix asks again.
++- **When the screen is skipped.** Only when the client is `approved`, a grant exists for this user, the redirect URI is exactly equal to the remembered one, the requested scope (after the existing narrowing: `profile`, `email` and other unknown tokens are ignored and never granted) is a subset of the remembered one, `client_approved_at` equals the client's current `approved_at`, the request does not carry `prompt=consent` or `prompt=login` (`consent` or `login` among the space separated values, case sensitive: a request for re-authentication always shows the screen), and the device state is new or held by the same app. A device that would replace another session (a legacy session or a device row on the requested device id, which a client can name) shows the consent screen: the user decides, nothing is signed out without a click. The grant, the client status and the binding are read in ONE statement that joins the client row, so a revocation that has committed can never be missed. A narrower request skips and gets only the narrower scope; a broader one (for example `openid` added) or another Matrix prefix asks again.
+ - **What a skip does NOT change.** The sign-in at the identity provider still happens (a skip is not a login skip), the freshness verdict, gate l (a missing IdP refresh token), the device holder rule (another app's device is refused with `device_in_use`) and the PKCE challenge, `state`, `nonce`, device id and redirect URI binding of the code are exactly as after an Allow; the code row is the same. The skip applies whatever the freshness verdict is (it only drives a notice on the consent screen today). Rate limits are unchanged; the skip needs no consent row and sets no consent cookie.
+-- **When a grant ends.** Revocation of the client (`Nebu.OAuth.ClientStore.revoke/3`) deletes the grants of every user in the same transaction (a failing audit or a failing delete rolls the revocation back). A client that is approved again later (only possible through the owner override of the revocation story) does not inherit a grant: its `approved_at` is new and a surviving row no longer matches. The user can withdraw a grant on the account page (`/account/apps`, "Apps"): own grants only, CSRF and the same browser-POST checks as the device sign-out, no fresh sign-in needed, and it does not end existing sessions or refresh tokens (signing a device out is the Devices page). GDPR erasure deletes the user's grants (`oauth_consent_grants` is in `UserDeletion.erased_tables/0`). A grant has no expiry: withdrawal, revocation and erasure end it.
++- **When a grant ends.** Revocation of the client (`Nebu.OAuth.ClientStore.revoke/3`) deletes the grants of every user in the same transaction (a failing audit or a failing delete rolls the revocation back). A client that is approved again later (only possible through the owner override of the revocation story) does not inherit a grant: its `approved_at` is new and a surviving row no longer matches. The user can withdraw a grant on the account page (`/account/apps`, "Apps"; the sign-in started there returns to `/account/apps`; the Website column shows the stored `client_host` of the registration, never the app-claimed `client_uri`): own grants only, CSRF and the same browser-POST checks as the device sign-out, no fresh sign-in needed, and it does not end existing sessions or refresh tokens (signing a device out is the Devices page). GDPR erasure deletes the user's grants (`oauth_consent_grants` is in `UserDeletion.erased_tables/0`). A grant has no expiry: withdrawal, revocation and erasure end it.
+ - **Fail towards asking.** If the grant table cannot be read, the consent screen is shown; if an Allow cannot be remembered (unreadable table) the code is still issued and one value-free warning is logged, the user is simply asked again next time. The revoke transaction does fail closed when its delete of the grants fails.
+-- **Migration 000057** creates `oauth_consent_grants` (grants `SELECT, INSERT, DELETE` plus a column level `UPDATE (scope, redirect_uri, client_approved_at, granted_at)`; RLS enabled and forced) and adds `oauth_authz_requests.force_consent BOOLEAN NOT NULL DEFAULT false` (carries `prompt=consent` to the callback). Rolling deploy: a node of the previous release never reads a grant, it keeps asking on every login; grants written by new nodes are not used there. *Rollback:* the down migration drops the table and the column (every user is asked again); roll the code back together with it.
++- **Migration 000057** creates `oauth_consent_grants` (grants `SELECT, INSERT, DELETE` plus a column level `UPDATE (scope, redirect_uri, client_approved_at, granted_at)`; RLS enabled and forced) and adds `oauth_authz_requests.force_consent BOOLEAN NOT NULL DEFAULT false` (carries `prompt=consent` and `prompt=login` to the callback; the name is historic) and lets the account sign-in request of 000043 return to the apps page (its action CHECK gains `apps`). Rolling deploy: a node of the previous release never reads a grant, it keeps asking on every login; grants written by new nodes are not used there. *Deploy window:* an authorize request with `prompt=consent` or `prompt=login` that was started on a node of the previous release (which writes no `force_consent`, the default is false) may be skipped by a new node's callback while both releases run; the window ends when every node runs this release. Cut every node over before relying on the prompt, or accept it for the duration of the rollout. *Rollback:* the down migration drops the table and the column (every user is asked again); roll the code back together with it.
+ - **Operator queries.** Who allowed which client: `SELECT user_id, client_id, scope, redirect_uri, granted_at FROM oauth_consent_grants ORDER BY granted_at DESC;`. Force everybody to be asked again for one client (without revoking it): `DELETE FROM oauth_consent_grants WHERE client_id = '<client id>';`.
+ 
+ ### Admin configuration forms and their protection (story admin-config-privileged-forms-sweep)
+@@ -676,7 +676,7 @@ Status values are derived from `docs/stories/oauth-broker/follow-ups.md` and the
+ | 3 | Public-suffix check (built-in list; suffix hosts refused; warning badge) | closed (story oauth-dcr-abuse-hardening) in the server; the list is hand-picked (follow-up ar), a miss means coarser grouping, never a weaker check | server |
+ | 4 | Per-host pending cap keyed on (registrable domain, client source) | closed (story oauth-dcr-abuse-hardening); effective only with item 1 configured; MANUAL: 21st registration from one source answers `503`, another source `201` (group A) | server |
+ | h | Per-source caps on live `oauth_authz_requests` (300 per source, /64) and `oauth_account_login_requests` | closed (story oauth-dcr-abuse-hardening); effective only with item 1 configured; MANUAL: 300 abandoned authorizes from one network do not block a real login (group A) | server |
+-| i | Interactive login / `auth_time` freshness at the authorize callback (or a consent screen) | closed (story oauth-authorize-freshness): consent on every authorization; MANUAL: consent flow in the real clients (group C) | server |
++| i | Interactive login / `auth_time` freshness at the authorize callback (or a consent screen) | closed (story oauth-authorize-freshness): consent on every authorization (relaxed by persistent-consent-grants), see "Remembered consent grants"; MANUAL: consent flow in the real clients (group C) | server |
+ | l | Detect a missing IdP refresh token at the IdP callback (`per_refresh`) | closed (story oauth-authorize-freshness): `server_error` before provisioning + one WARNING; MANUAL: an IdP client that issues no refresh token (group B) | server |
+ | m | Reverse-proxy routes (see below), also `/account*`; templates also set `NEBU_TRUSTED_PROXY_CIDRS` and log without query strings | closed in deploy templates (story P5); MANUAL VERIFICATION REQUIRED after deploy: routes, negative XFF test (group A). Operators with their own proxy must configure all of it themselves | operator / deploy |
+ | k | Strip query strings of `/oauth2/authorize`, the SSO callback and `/account` in reverse-proxy access logs | closed in deploy templates (story P5: `log_format nebu_noquery`, `error_log crit`); residuals: certbot's port-80 block and the default `access.log` of `acme`, nginx `error_log` diagnostics at `crit` (follow-up ap8). Own proxies: operator | operator / deploy |
+@@ -686,8 +686,8 @@ Status values are derived from `docs/stories/oauth-broker/follow-ups.md` and the
+ | x | Legacy `rotate_tokens/1` took no `devices` lock (a refresh could survive a device deletion) | closed by bugfix legacy-logout-per-device (LL9) | server |
+ | s | `device_lists.changed` on every device deletion (legacy and OAuth `/logout`, `/logout/all`, `/oauth2/revoke`, `DELETE /devices`, account page, admin, take-over, client revocation): peers do not learn that a device was deleted | **open, deferred and re-scoped (decision 2026-10-13)**: NOT implemented in this phase and no longer an activation gate, because Nebu refuses encrypted rooms (ADR-011), so no peer encrypts to a device, and the design (a new change-log table, a `/sync` token change) is risky. The gate is now: before encrypted rooms are allowed (ADR-011 lifted) and before any release that claims E2EE. Story `device-lists-changed-on-deletion` stays in the backlog (reserved ids bv, bw, bm-bo). Acknowledge it in the release notes | server (backlog) |
+ | w | OAuth sessions could not delete devices | closed by story 6 (account page) | - |
+-| y | Login no longer needs `auth_time` (consent on every authorization); without it `/account` destructive actions are unavailable (fail closed); release note aw (planned as aq before oauth-dcr-abuse-hardening took that id); Dex reportedly ignores `max_age` and omits `auth_time` | closed (story oauth-authorize-freshness); MANUAL: record what Dex and the production IdP really emit (group B) | server (done) |
+-| i / y (server-owned) | Interactive login and freshness must be enforced SERVER-side, fail closed (absent `auth_time` = not fresh) or a consent screen: not an IdP prerequisite (epic SEC gate E-2) | closed (story oauth-authorize-freshness): consent on every authorization (FR1) and a fail-closed account page (FR14); also E-2 | server |
++| y | Login no longer needs `auth_time` (consent on every authorization (relaxed by persistent-consent-grants)); without it `/account` destructive actions are unavailable (fail closed); release note aw (planned as aq before oauth-dcr-abuse-hardening took that id); Dex reportedly ignores `max_age` and omits `auth_time` | closed (story oauth-authorize-freshness); MANUAL: record what Dex and the production IdP really emit (group B) | server (done) |
++| i / y (server-owned) | Interactive login and freshness must be enforced SERVER-side, fail closed (absent `auth_time` = not fresh) or a consent screen: not an IdP prerequisite (epic SEC gate E-2) | closed (story oauth-authorize-freshness): consent on every authorization (FR1) (relaxed by persistent-consent-grants) and a fail-closed account page (FR14); also E-2 | server |
+ | E-2 | Epic SEC gate E-2 "(i)/(y) sharpened" (device takeover chain through a silent IdP SSO) | closed (story oauth-authorize-freshness, FR1-FR3 / FR11 / FR14), same evidence as i / y | server |
+ | ac | `GET /_matrix/client/v1/room_summary/{roomIdOrAlias}` is CORE in Matrix v1.15 and absent (GATE before `oauth_enabled` and before a release claiming v1.15; (af) `M_UNRECOGNIZED` for unrouted paths ships with it) | closed (story oauth-room-summary-unrecognized, with af): local-only summary, per-user rate limit, 404 for every hidden room; MANUAL: room preview in Element Web / FluffyChat (group C) | server |
+ | af | Unrouted endpoints and unsupported methods answer `M_UNRECOGNIZED` (404 / 405), unauthenticated | closed (story oauth-room-summary-unrecognized, RU9-RU16; `GET /rooms/{id}/state[/...]` keeps `404 M_NOT_FOUND`, follow-up bf); MANUAL: no new client errors (group C) | server |
+diff --git a/docs/architecture/adr/ADR-033-authorization-server-broker-model.md b/docs/architecture/adr/ADR-033-authorization-server-broker-model.md
+index 82eae98b..2a554c6b 100644
+--- a/docs/architecture/adr/ADR-033-authorization-server-broker-model.md
++++ b/docs/architecture/adr/ADR-033-authorization-server-broker-model.md
+@@ -1861,9 +1861,9 @@ Context. Legacy `m.login.sso` accepted ANY https `redirectUrl` and handed the `l
+ FR1 judged remembered consent a fail-open risk (a table plus a lifecycle). The risk is accepted for a user who already allowed THIS client, under these rules, each pinned by a test:
+ 
+ - **Table `oauth_consent_grants`** (migration 000057), one row per (user, client): the normalised scope without the device token, the exact redirect URI, and `client_approved_at` (the client's `approved_at` at the Allow: the identity binding, so a client that is approved again does not inherit a grant). Written by an Allow AFTER the code was issued; a failing write never fails the Allow.
+-- **Skip rule** (decided in the IdP callback, where the user is known, after the IdP login, gate l, provisioning, freshness and the device-holder check have run): the client is `approved`, a grant exists, the redirect URI is exactly equal, the requested scope after the existing narrowing is a subset of the remembered one, the binding equals the client's current `approved_at`, and the request has no `prompt=consent`. One statement joins the client row (the revoke wins). Anything else, including an unreadable table, shows the consent screen. The code is minted by `Nebu.OAuth.Consent` (still the only caller of `CodeStore.insert`) with exactly the attributes of an Allow; the skip never widens the requested scope and never stores anything.
++- **Skip rule** (decided in the IdP callback, where the user is known, after the IdP login, gate l, provisioning, freshness and the device-holder check have run): the client is `approved`, a grant exists, the redirect URI is exactly equal, the requested scope after the existing narrowing is a subset of the remembered one, the binding equals the client's current `approved_at`, the request has no `prompt=consent` / `prompt=login`, and the device state is new or held by the same app (a device that would REPLACE another session, for example a legacy session on the requested device id, shows the screen: Kassandra MEDIUM #1). One statement joins the client row (the revoke wins). Anything else, including an unreadable table, shows the consent screen. The code is minted by `Nebu.OAuth.Consent` (still the only caller of `CodeStore.insert`) with exactly the attributes of an Allow; the skip never widens the requested scope and never stores anything.
+ - **Deletion paths:** revocation of the client deletes every user's grant in the revoke transaction (fail closed); the user withdraws a grant on `/account/apps` (own grants only, no fresh sign-in, existing sessions untouched); GDPR erasure (`UserDeletion.erased_tables/0`); an owner-role client delete cascades.
+-- **`prompt=consent`** (also inside `prompt=login consent`) always shows the screen and an Allow replaces the grant; it travels from `/oauth2/authorize` in `oauth_authz_requests.force_consent`.
++- **`prompt=consent` and `prompt=login`** (also inside a list such as `login consent`) always show the screen (a request for re-authentication must meet a guard; Kassandra LOW #2) and an Allow replaces the grant; it travels from `/oauth2/authorize` in `oauth_authz_requests.force_consent`.
+ - **Not changed:** the IdP login, freshness (a skip applies whatever the verdict is, as the verdict only drives a notice today), PKCE, state, nonce, the device id binding, rate limits, the legacy flow.
+ 
+ ## Operations note: migration 000040 was edited in place
+diff --git a/server/lib/nebu/oauth/account.ex b/server/lib/nebu/oauth/account.ex
+index 7361de41..7b9ddf2c 100644
+--- a/server/lib/nebu/oauth/account.ex
++++ b/server/lib/nebu/oauth/account.ex
+@@ -18,8 +18,11 @@ defmodule Nebu.OAuth.Account do
+       `org.matrix.cross_signing_reset`; an absent / unknown action (also the not advertised
+       `org.matrix.account_deactivate`) is the default page (profile summary + device list)
+     * `GET /account/reauth` — starts an IdP (re-)authentication for a return target (A10)
++    * `GET /account/apps` — the apps the user has allowed (remembered consent, story persistent-consent-grants); the sign-in
++      started there returns there (return action `apps`)
+     * `POST /account/devices/delete`, `/account/cross_signing_reset/approve`, `.../decline`,
+-      `/account/logout` — state changes (A9, A10, A11)
++      `/account/logout` — state changes (A9, A10, A11); `POST /account/apps/withdraw` withdraws one remembered consent (no fresh
++      sign-in needed, existing sessions untouched)
+     * anything else => 404 page; a wrong method (also `OPTIONS`) => 405 page with `Allow`
+ 
+   ## Order of every request (A3, A19)
+@@ -176,7 +179,7 @@ defmodule Nebu.OAuth.Account do
+ 
+     case current_session(conn) do
+       {:ok, session} -> apps_page(conn, session, request)
+-      :none -> start_login(conn, issuer, {nil, nil}, [session_hash(conn)])
++      :none -> start_login(conn, issuer, {"apps", nil}, [session_hash(conn)])
+       {:error, reason} -> session_error(conn, reason)
+     end
+   end
+@@ -709,6 +712,7 @@ defmodule Nebu.OAuth.Account do
+     "/account?" <> URI.encode_query(pairs)
+   end
+ 
++  defp return_location(%{return_action: "apps"}), do: "/account/apps"
+   defp return_location(_row), do: "/account"
+ 
+   # story oauth-hardening-hygiene (HY9): `__Host-nebu_acct_<16 hex>` (`Path=/; Secure`) on an https request, the
+diff --git a/server/lib/nebu/oauth/account_pages.ex b/server/lib/nebu/oauth/account_pages.ex
+index f4dcdff0..030cb10a 100644
+--- a/server/lib/nebu/oauth/account_pages.ex
++++ b/server/lib/nebu/oauth/account_pages.ex
+@@ -159,7 +159,7 @@ defmodule Nebu.OAuth.AccountPages do
+     device: "Device details",
+     delete: "Sign out a device",
+     reset: "Reset your identity",
+-    apps: "Allowed apps",
++    apps: "Apps you have allowed",
+     signed_out: "Signed out"
+   }
+ 
+@@ -396,6 +396,10 @@ defmodule Nebu.OAuth.AccountPages do
+   defp grant_name(%{client_name: name}) when is_binary(name) and name != "", do: name
+   defp grant_name(_grant), do: "Unnamed app"
+ 
++  # the STORED, verified host of the registration (never the app-claimed website)
++  defp grant_host(%{client_host: host}) when is_binary(host) and host != "", do: host
++  defp grant_host(_grant), do: "unknown website"
++
+   defp grant_time(%DateTime{} = dt), do: time_tag(DateTime.to_unix(dt, :millisecond), "Unknown")
+   defp grant_time(_other), do: "Unknown"
+ 
+diff --git a/server/lib/nebu/oauth/account_templates/apps.html.eex b/server/lib/nebu/oauth/account_templates/apps.html.eex
+index a6e5be3f..1d46f550 100644
+--- a/server/lib/nebu/oauth/account_templates/apps.html.eex
++++ b/server/lib/nebu/oauth/account_templates/apps.html.eex
+@@ -1,6 +1,6 @@
+-<p data-role="grants-note">These are the apps you have allowed to sign you in. Nebu does not ask you again for them. Withdrawing the permission of an app does not sign out devices that are already signed in: use <a href="/account?action=org.matrix.devices_list">Devices</a> for that. The app asks for your permission again the next time it wants to sign you in.</p>
++<p data-role="grants-note">These are the apps you have allowed to use your Matrix account. Nebu does not ask you again for them. Withdrawing the permission of an app does not sign out devices that are already signed in: use <a href="/account?action=org.matrix.devices_list">Devices</a> for that. The app asks for your permission again the next time it wants to sign you in.</p>
+ <%= if @grants == [] do %>
+-<p data-role="no-grants">There are no allowed apps on your account.</p>
++<p data-role="no-grants">There are no allowed apps on your account. An app appears here after you allow it when you sign in.</p>
+ <% else %>
+ <div class="table-wrap" role="region" aria-label="Allowed apps table" tabindex="0">
+ <table>
+@@ -23,7 +23,7 @@
+ <form method="post" action="/account/apps/withdraw">
+ <input type="hidden" name="csrf_token" value="<%= @csrf_token %>">
+ <input type="hidden" name="client_id" value="<%= g.client_id %>">
+-<button type="submit" class="danger" data-role="withdraw-grant" aria-label="Withdraw the permission of <%= grant_name(g) %>">Withdraw</button>
++<button type="submit" class="danger" data-role="withdraw-grant" aria-label="Withdraw the permission of <%= grant_name(g) %> (<%= grant_host(g) %>)">Withdraw</button>
+ </form>
+ </td>
+ </tr>
+diff --git a/server/lib/nebu/oauth/authorize.ex b/server/lib/nebu/oauth/authorize.ex
+index 3a843bef..6905d0df 100644
+--- a/server/lib/nebu/oauth/authorize.ex
++++ b/server/lib/nebu/oauth/authorize.ex
+@@ -37,13 +37,18 @@ defmodule Nebu.OAuth.Authorize do
+   comes ONLY from the consumed row (open-redirect safe): IdP errors, verification failures,
+   deactivated users and storage failures are error redirects (`302`).
+ 
+-  A successful IdP login does NOT issue a code (story oauth-authorize-freshness, FR1, FR5): after gate l
++  A successful IdP login issues a code only for a remembered Allow (story oauth-authorize-freshness, FR1, FR5;
++  relaxed by story persistent-consent-grants): after gate l
+   (`per_refresh` without an IdP refresh token is a `server_error`, BEFORE provisioning), provisioning, the
+   freshness verdict (`Nebu.OAuth.Freshness`, FR2-FR4), the device-holder check (a device used by another app
+-  is the `403 device_in_use` page, FR11) and the encryption of the IdP refresh token, it persists a consent
+-  row (`Nebu.OAuth.ConsentStore`, 5 min) and answers `303 Location: /oauth2/consent` with the consent cookie.
+-  The authorization code (`Nebu.OAuth.CodeStore`, 60 s, hash only) is minted by `Nebu.OAuth.Consent` only
+-  after the user clicks Allow, and the client redirect follows from there (`code`, `state`, `iss`).
++  is the `403 device_in_use` page, FR11) and the encryption of the IdP refresh token, the callback asks
++  `Nebu.OAuth.ConsentGrantStore.skip_consent?/4`. Without a remembered Allow (no grant, another scope or redirect
++  URI, `prompt=consent` / `prompt=login`, a device that would REPLACE another session, an unreadable table) it
++  persists a consent row (`Nebu.OAuth.ConsentStore`, 5 min) and answers `303 Location: /oauth2/consent` with the
++  consent cookie; the authorization code (`Nebu.OAuth.CodeStore`, 60 s, hash only) is then minted by
++  `Nebu.OAuth.Consent` after the user clicks Allow. With a remembered Allow the callback calls
++  `Nebu.OAuth.Consent.issue_remembered/4`, which mints the same code at once. The client redirect follows from
++  there (`code`, `state`, `iss`).
+ 
+   ## Headers, logging
+ 
+@@ -381,8 +386,9 @@ defmodule Nebu.OAuth.Authorize do
+   defp map_idp_error(_other), do: "server_error"
+ 
+   # FR5 order after the IdP login: (a) gate l, (b) provisioning, (c) freshness, (d) device holder, (e) encrypt
+-  # the IdP refresh token, (f) the consent row, (g) 303 to the consent page. The code is minted by
+-  # `Nebu.OAuth.Consent` after the user's Allow, never here.
++  # the IdP refresh token, (e2) the remembered-Allow decision (story persistent-consent-grants), then either
++  # (f) the consent row and (g) 303 to the consent page, or the remembered branch. The code is always minted by
++  # `Nebu.OAuth.Consent` (after the user's Allow, or `issue_remembered/4` for a remembered Allow), never by this module.
+   defp request_consent(conn, idp_code, row, issuer, fail) do
+     with {:verifier, {:ok, verifier}} <- {:verifier, decrypt(row.idp_code_verifier_enc)},
+          {:idp, {:ok, %{claims: claims, idp_refresh_token: idp_rt}}} <-
+@@ -397,7 +403,7 @@ defmodule Nebu.OAuth.Authorize do
+          # device holder) has run as always
+          {:remembered, :ask} <-
+            {:remembered,
+-            if(remembered?(user_id, row),
++            if(remembered?(user_id, row, device),
+               do:
+                 {:issue,
+                  %{
+@@ -468,10 +474,13 @@ defmodule Nebu.OAuth.Authorize do
+     end
+   end
+ 
+-  # Not asked again: `prompt=consent` forces the screen; an unreadable grant table (`{:error, :storage}`) asks too (fail towards asking).
+-  defp remembered?(_user_id, %{force_consent: true}), do: false
++  # Not asked again: `prompt=consent` / `prompt=login` force the screen (`force_consent`); a device that would REPLACE another session (`{:replace, _}`: a
++  # legacy session or a device row on the requested id) is never taken over without a click; an unreadable grant table (`{:error, :storage}`) asks too
++  # (fail towards asking).
++  defp remembered?(_user_id, %{force_consent: true}, _device), do: false
++  defp remembered?(_user_id, _row, {:replace, _holder}), do: false
+ 
+-  defp remembered?(user_id, row),
++  defp remembered?(user_id, row, _device),
+     do: ConsentGrantStore.skip_consent?(user_id, row.client_id, row.scope, row.redirect_uri) == {:ok, true}
+ 
+   # FR13, gate l: with `oauth_idp_revalidation = per_refresh` (also the fail-closed reading of an unknown value
+diff --git a/server/lib/nebu/oauth/authorize_request.ex b/server/lib/nebu/oauth/authorize_request.ex
+index d09692cd..61ade403 100644
+--- a/server/lib/nebu/oauth/authorize_request.ex
++++ b/server/lib/nebu/oauth/authorize_request.ex
+@@ -245,7 +245,8 @@ defmodule Nebu.OAuth.AuthorizeRequest do
+   end
+ 
+   # story persistent-consent-grants: `consent` among the space separated (case sensitive, OIDC Core 3.1.2.1) `prompt` values always shows the consent screen
+-  defp force_consent?(pairs), do: "consent" in String.split(first(pairs, "prompt") || "", " ", trim: true)
++  # `login` (a request for re-authentication) forces the screen as well: with a remembered Allow nothing else would guard it (Kassandra LOW #2)
++  defp force_consent?(pairs), do: Enum.any?(String.split(first(pairs, "prompt") || "", " ", trim: true), &(&1 in ["consent", "login"]))
+ 
+   defp valid_text?(value) do
+     byte_size(value) <= @max_text_bytes and String.valid?(value) and not Regex.match?(~r/\p{Cc}/u, value)
+diff --git a/server/lib/nebu/oauth/client_store.ex b/server/lib/nebu/oauth/client_store.ex
+index 5b44e9e3..a7f9b078 100644
+--- a/server/lib/nebu/oauth/client_store.ex
++++ b/server/lib/nebu/oauth/client_store.ex
+@@ -848,7 +848,8 @@ defmodule Nebu.OAuth.ClientStore do
+        matrix_sessions, and conflicts with the `FOR SHARE` of session issuance and rotation);
+     2. `Nebu.Matrix.oauth_end_client_sessions/2`: every session / device of the client in the same transaction;
+     3. `oauth_codes.used_at` of the client's unused codes;
+-    4. DELETE of the client's `oauth_authz_requests` and `oauth_consent_requests`;
++    4. DELETE of the client's `oauth_authz_requests`, `oauth_consent_requests` and the remembered consent grants of
++       every user (`oauth_consent_grants`, story persistent-consent-grants);
+     5. the caller's `:audit` function (1-arity, receives the torn-down `{user_id, device_id}` pairs, returns `:ok |
+        {:error, reason}`; a raise counts as failed): a failed audit rolls EVERYTHING back.
+ 
+diff --git a/server/lib/nebu/oauth/consent.ex b/server/lib/nebu/oauth/consent.ex
+index 66312879..6d4b1549 100644
+--- a/server/lib/nebu/oauth/consent.ex
++++ b/server/lib/nebu/oauth/consent.ex
+@@ -2,11 +2,13 @@ defmodule Nebu.OAuth.Consent do
+   @moduledoc """
+   The consent step of the authorization code flow (epic oauth-broker, story oauth-authorize-freshness,
+   ADR-033 "Consent, freshness and refresh serialization", FR1, FR5-FR8, FR11, FR12, FR17, FR18): the user's
+-  decision, taken on a Nebu page BEFORE any authorization code exists.
++  decision, taken on a Nebu page (or remembered from an earlier Allow, story persistent-consent-grants).
+ 
+   After the verified IdP login `Nebu.OAuth.Authorize` persists a consent row (`Nebu.OAuth.ConsentStore`)
+   and answers `303 Location: /oauth2/consent` with the consent cookie; this module serves that route. It
+-  is the ONLY caller of `Nebu.OAuth.CodeStore.insert/1`: no code exists without the user's click.
++  is the ONLY caller of `Nebu.OAuth.CodeStore.insert/1`: no code exists without an Allow, either the user's
++  click here or a remembered Allow (`issue_remembered/4`, called by the callback when
++  `Nebu.OAuth.ConsentGrantStore` knows the same user, client, scope and redirect URI).
+ 
+   ## Routes (`Nebu.Web.Router` -> `Nebu.OAuth.Http`, action `:consent`; handled by `handle/1`)
+ 
+diff --git a/server/lib/nebu/oauth/consent_grant_store.ex b/server/lib/nebu/oauth/consent_grant_store.ex
+index afaf5f4b..d5eefac2 100644
+--- a/server/lib/nebu/oauth/consent_grant_store.ex
++++ b/server/lib/nebu/oauth/consent_grant_store.ex
+@@ -96,7 +96,7 @@ defmodule Nebu.OAuth.ConsentGrantStore do
+       {:ok, %{rows: rows}} ->
+         {:ok,
+          for [client_id, metadata, scope, redirect_uri, granted_at, host] <- rows do
+-           %{client_id: client_id, client_name: name(metadata), client_host: host(metadata) || host, scope: scope, redirect_uri: redirect_uri, granted_at: granted_at}
++           %{client_id: client_id, client_name: name(metadata), client_host: host, scope: scope, redirect_uri: redirect_uri, granted_at: granted_at}
+          end}
+ 
+       {:error, reason} ->
+@@ -116,14 +116,7 @@ defmodule Nebu.OAuth.ConsentGrantStore do
+   defp name(%{"client_name" => n}) when is_binary(n) and n != "", do: n
+   defp name(_metadata), do: nil
+ 
+-  defp host(%{"client_uri" => uri}) when is_binary(uri) do
+-    case URI.parse(uri) do
+-      %URI{host: host} when is_binary(host) and host != "" -> host
+-      _ -> nil
+-    end
+-  end
+-
+-  defp host(_metadata), do: nil
++  # `client_host` is the STORED, verified host of the registration (never the app-claimed `client_uri`: Kassandra INFO #4)
+ 
+   # value-free: the error TYPE only, never the row
+   defp storage_error(what, reason) do
+diff --git a/server/priv/migrations/000057_oauth_consent_grants.down.sql b/server/priv/migrations/000057_oauth_consent_grants.down.sql
+index deb6a67e..8ccfd470 100644
+--- a/server/priv/migrations/000057_oauth_consent_grants.down.sql
++++ b/server/priv/migrations/000057_oauth_consent_grants.down.sql
+@@ -1,5 +1,13 @@
+ -- Reverses 000057_oauth_consent_grants.up.sql.
+ -- WARNING: discards every remembered consent grant (the users are asked for consent again on their next login) and the force_consent flag of the
+ -- authorization requests in flight (a request with prompt=consent that is still waiting for the IdP callback is then treated like any other).
++-- login requests that return to the apps page are short-lived (10 minutes): they go BEFORE the CHECK of 000043 is restored
++DELETE FROM oauth_account_login_requests WHERE return_action = 'apps';
++ALTER TABLE oauth_account_login_requests DROP CONSTRAINT IF EXISTS oauth_account_login_requests_action_check;
++ALTER TABLE oauth_account_login_requests
++    ADD CONSTRAINT oauth_account_login_requests_action_check
++        CHECK (return_action IS NULL OR return_action IN (
++            'org.matrix.profile', 'org.matrix.devices_list', 'org.matrix.device_view',
++            'org.matrix.device_delete', 'org.matrix.cross_signing_reset'));
+ ALTER TABLE oauth_authz_requests DROP COLUMN IF EXISTS force_consent;
+ DROP TABLE IF EXISTS oauth_consent_grants;   -- also drops its policies and index
+diff --git a/server/priv/migrations/000057_oauth_consent_grants.up.sql b/server/priv/migrations/000057_oauth_consent_grants.up.sql
+index 3d31f494..41f0f450 100644
+--- a/server/priv/migrations/000057_oauth_consent_grants.up.sql
++++ b/server/priv/migrations/000057_oauth_consent_grants.up.sql
+@@ -31,6 +31,14 @@ CREATE INDEX IF NOT EXISTS oauth_consent_grants_client_idx ON oauth_consent_gran
+ 
+ ALTER TABLE oauth_authz_requests ADD COLUMN IF NOT EXISTS force_consent BOOLEAN NOT NULL DEFAULT false;
+ 
++-- 3. The account sign-in started at /account/apps returns to /account/apps: the return action CHECK of 000043 gains 'apps'.
++ALTER TABLE oauth_account_login_requests DROP CONSTRAINT IF EXISTS oauth_account_login_requests_action_check;
++ALTER TABLE oauth_account_login_requests
++    ADD CONSTRAINT oauth_account_login_requests_action_check
++        CHECK (return_action IS NULL OR return_action IN (
++            'org.matrix.profile', 'org.matrix.devices_list', 'org.matrix.device_view',
++            'org.matrix.device_delete', 'org.matrix.cross_signing_reset', 'apps'));
++
+ -- UpCloud managed Postgres has no ALTER DEFAULT PRIVILEGES for the migrate role, so the runtime role gets its grants here (same as 000040-000045).
+ GRANT SELECT, INSERT, DELETE ON oauth_consent_grants TO nebu_app;
+ -- A development database may carry ALTER DEFAULT PRIVILEGES (dev/postgres/init/01-roles.sql) that already granted nebu_app UPDATE on every new table:

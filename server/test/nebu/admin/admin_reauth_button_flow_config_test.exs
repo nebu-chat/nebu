@@ -102,9 +102,11 @@ defmodule Nebu.Admin.AdminReauthButtonFlowConfigTest do
       end
     end
 
-    test "the three forms share the ONE marker path /admin/config: the three links carry the same href" do
+    test "the marker forms share the ONE marker path /admin/config: their links carry the same href" do
       hrefs = S.get(@page) |> S.doc() |> S.signin_hrefs()
-      assert hrefs == List.duplicate(Auth.reauth_start_path("/admin/config"), 3)
+      # the OAuth switch and (story session-lifetime-setting) the session lifetime form are marker forms of this page: four links
+      assert length(@config_forms) == 4
+      assert hrefs == List.duplicate(Auth.reauth_start_path("/admin/config"), length(@config_forms))
       assert Auth.reauth_start_path("/admin/config") == "/admin/login/start?mode=reauth&return_to=%2Fadmin%2Fconfig"
     end
 
@@ -119,7 +121,7 @@ defmodule Nebu.Admin.AdminReauthButtonFlowConfigTest do
     test "the link is built from the page path: no query string parameter reaches it" do
       conn = S.get("/admin/config?return_to=%2Fadmin%2Fdashboard&mode=reauth&leak=secret-qs-77&sso_extra_redirect_schemes=secret-qs-78")
       doc = S.doc(conn)
-      assert S.signin_hrefs(doc) == List.duplicate(Auth.reauth_start_path("/admin/config"), 3)
+      assert S.signin_hrefs(doc) == List.duplicate(Auth.reauth_start_path("/admin/config"), length(@config_forms))
       refute conn.resp_body =~ "secret-qs-7"
     end
 
@@ -327,7 +329,7 @@ defmodule Nebu.Admin.AdminReauthButtonFlowConfigTest do
       for marker <- [nil, [path: "/admin/config/claim-mapping"], [path: "/admin/media/settings"], [ago: 400]] do
         doc = S.get(@page, marker) |> S.doc()
         S.assert_clean_links!(doc, ["/admin/config"])
-        assert length(S.signin_hrefs(doc)) == 3, "stale: three links, not none (a vacuous check proves nothing)"
+        assert length(S.signin_hrefs(doc)) == length(@config_forms), "stale: one link per marker form, not none (a vacuous check proves nothing)"
       end
     end
   end

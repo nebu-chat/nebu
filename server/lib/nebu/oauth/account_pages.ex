@@ -131,6 +131,11 @@ defmodule Nebu.OAuth.AccountPages do
     "invalid_request" => {"Problem:", "alert", "problem", "Part of the link was not understood, so here is the overview."},
     "reset_not_found" => {"Problem:", "alert", "problem", "This reset request was not found or has expired. Nothing was changed."},
     "stale" => {"Problem:", "alert", "problem", "Please confirm that it is you first. Nothing was changed."},
+    # story persistent-consent-grants: withdrawing a remembered consent
+    "grant_withdrawn" =>
+      {"Done:", "status", "success",
+       "The permission of the app was withdrawn. It asks you again the next time it wants to sign you in. Devices that are already signed in stay signed in."},
+    "grant_not_found" => {"Problem:", "alert", "problem", "This app was not found in your list of allowed apps. Nothing was changed."},
     # story safari-fetch-metadata-compat: a WebKit browser sent no proof that the button was pressed by the user (script blocked,
     # stale page): a note, not an error, nothing was changed
     "activation_unproven" =>
@@ -154,6 +159,7 @@ defmodule Nebu.OAuth.AccountPages do
     device: "Device details",
     delete: "Sign out a device",
     reset: "Reset your identity",
+    apps: "Apps you have allowed",
     signed_out: "Signed out"
   }
 
@@ -174,6 +180,7 @@ defmodule Nebu.OAuth.AccountPages do
   )
 
   EEx.function_from_file(:defp, :render_reset, Path.join(@templates, "reset.html.eex"), [:assigns], engine: Phoenix.HTML.Engine)
+  EEx.function_from_file(:defp, :render_apps, Path.join(@templates, "apps.html.eex"), [:assigns], engine: Phoenix.HTML.Engine)
 
   # Static content (no assigns): a template would only compile with an unused-variable warning.
   defp render_signed_out(_assigns),
@@ -299,6 +306,9 @@ defmodule Nebu.OAuth.AccountPages do
              script?: reset_script?(:reset, a)
            })}
 
+        :apps ->
+          {@titles.apps, "Apps you have allowed", :apps, true, render_apps(%{grants: a.grants, csrf_token: a.csrf_token})}
+
         :signed_out ->
           {@titles.signed_out, "You are signed out", nil, false, render_signed_out(%{})}
       end
@@ -381,6 +391,17 @@ defmodule Nebu.OAuth.AccountPages do
   defp request_device(%{device_display_name: name, device_id: id}) when is_binary(name) and is_binary(id), do: name <> " (" <> id <> ")"
   defp request_device(%{device_id: id}) when is_binary(id), do: id
   defp request_device(_request), do: "an unknown device"
+
+  # the app's OWN claimed name (HTML-escaped by the engine), never a trusted label
+  defp grant_name(%{client_name: name}) when is_binary(name) and name != "", do: name
+  defp grant_name(_grant), do: "Unnamed app"
+
+  # the STORED, verified host of the registration (never the app-claimed website)
+  defp grant_host(%{client_host: host}) when is_binary(host) and host != "", do: host
+  defp grant_host(_grant), do: "unknown website"
+
+  defp grant_time(%DateTime{} = dt), do: time_tag(DateTime.to_unix(dt, :millisecond), "Unknown")
+  defp grant_time(_other), do: "Unknown"
 
   defp device_href(action, device_id), do: "/account?" <> URI.encode_query([{"action", action}, {"device_id", device_id}])
 end

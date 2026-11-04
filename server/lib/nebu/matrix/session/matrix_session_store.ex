@@ -29,7 +29,7 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
   token was captured during SSO, login mints an opaque access token + refresh
   token (32 random bytes → 64 lowercase hex chars, no `.`, so distinguishable
   from a JWT) and persists them here together with the AES-256-GCM-encrypted OIDC
-  refresh token and a Nebu-controlled `expires_at = min(oidc_exp, now + 8h)`.
+  refresh token and a Nebu-controlled `expires_at = min(oidc_exp, now + lifetime)` (the lifetime: 8h default, Admin-configurable, `Nebu.Web.SessionConfig`).
 
   ## Token rotation + "valid until used" (Matrix CS API v1.18 §refreshing-access-tokens)
 

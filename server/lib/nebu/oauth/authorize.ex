@@ -37,13 +37,18 @@ defmodule Nebu.OAuth.Authorize do
   comes ONLY from the consumed row (open-redirect safe): IdP errors, verification failures,
   deactivated users and storage failures are error redirects (`302`).
 
-  A successful IdP login does NOT issue a code (story oauth-authorize-freshness, FR1, FR5): after gate l
+  A successful IdP login issues a code only for a remembered Allow (story oauth-authorize-freshness, FR1, FR5;
+  relaxed by story persistent-consent-grants): after gate l
   (`per_refresh` without an IdP refresh token is a `server_error`, BEFORE provisioning), provisioning, the
   freshness verdict (`Nebu.OAuth.Freshness`, FR2-FR4), the device-holder check (a device used by another app
-  is the `403 device_in_use` page, FR11) and the encryption of the IdP refresh token, it persists a consent
-  row (`Nebu.OAuth.ConsentStore`, 5 min) and answers `303 Location: /oauth2/consent` with the consent cookie.
-  The authorization code (`Nebu.OAuth.CodeStore`, 60 s, hash only) is minted by `Nebu.OAuth.Consent` only
-  after the user clicks Allow, and the client redirect follows from there (`code`, `state`, `iss`).
+  is the `403 device_in_use` page, FR11) and the encryption of the IdP refresh token, the callback asks
+  `Nebu.OAuth.ConsentGrantStore.skip_consent?/4`. Without a remembered Allow (no grant, another scope or redirect
+  URI, `prompt=consent` / `prompt=login`, a device that would REPLACE another session, an unreadable table) it
+  persists a consent row (`Nebu.OAuth.ConsentStore`, 5 min) and answers `303 Location: /oauth2/consent` with the
+  consent cookie; the authorization code (`Nebu.OAuth.CodeStore`, 60 s, hash only) is then minted by
+  `Nebu.OAuth.Consent` after the user clicks Allow. With a remembered Allow the callback calls
+  `Nebu.OAuth.Consent.issue_remembered/4`, which mints the same code at once. The client redirect follows from
+  there (`code`, `state`, `iss`).
 
   ## Headers, logging
 
@@ -56,7 +61,7 @@ defmodule Nebu.OAuth.Authorize do
   import Plug.Conn
   require Logger
 
-  alias Nebu.OAuth.{AuthorizeRequest, AuthzStore, ClientStore, Config, Consent, ConsentStore, Freshness, Pages, SourceKey}
+  alias Nebu.OAuth.{AuthorizeRequest, AuthzStore, ClientStore, Config, Consent, ConsentGrantStore, ConsentStore, Freshness, Pages, SourceKey}
   alias Nebu.Web.ClientIP
   alias Nebu.Web.Plugs.RateLimit
 
@@ -247,6 +252,8 @@ defmodule Nebu.OAuth.Authorize do
               idp_code_verifier_enc: verifier_enc,
               idp_nonce: idp.nonce,
               browser_binding_hash: AuthzStore.hash(binding),
+              # `prompt=consent` has to reach the callback, where the user is known (story persistent-consent-grants)
+              force_consent: request.force_consent,
               # per-source cap of live requests (AH10); the source is the resolved client address
               source_key: source_key
             })} do
@@ -370,7 +377,7 @@ defmodule Nebu.OAuth.Authorize do
         fail.("server_error", nil)
 
       true ->
-        request_consent(conn, code, row, fail)
+        request_consent(conn, code, row, issuer, fail)
     end
   end
 
@@ -379,9 +386,10 @@ defmodule Nebu.OAuth.Authorize do
   defp map_idp_error(_other), do: "server_error"
 
   # FR5 order after the IdP login: (a) gate l, (b) provisioning, (c) freshness, (d) device holder, (e) encrypt
-  # the IdP refresh token, (f) the consent row, (g) 303 to the consent page. The code is minted by
-  # `Nebu.OAuth.Consent` after the user's Allow, never here.
-  defp request_consent(conn, idp_code, row, fail) do
+  # the IdP refresh token, (e2) the remembered-Allow decision (story persistent-consent-grants), then either
+  # (f) the consent row and (g) 303 to the consent page, or the remembered branch. The code is always minted by
+  # `Nebu.OAuth.Consent` (after the user's Allow, or `issue_remembered/4` for a remembered Allow), never by this module.
+  defp request_consent(conn, idp_code, row, issuer, fail) do
     with {:verifier, {:ok, verifier}} <- {:verifier, decrypt(row.idp_code_verifier_enc)},
          {:idp, {:ok, %{claims: claims, idp_refresh_token: idp_rt}}} <-
            {:idp, Nebu.Matrix.idp_complete_login(conn, idp_code, verifier, row.idp_nonce)},
@@ -390,6 +398,31 @@ defmodule Nebu.OAuth.Authorize do
          {login_fresh, auth_time} = freshness(claims, row.created_at),
          {:device, {:ok, device}} <- {:device, Consent.device_check(user_id, row.device_id, row.client_id)},
          {:rt, {:ok, idp_rt_enc}} <- {:rt, encrypt_optional(idp_rt)},
+         # story persistent-consent-grants: a remembered Allow for this user, client, scope and redirect URI (and no `prompt=consent` / `prompt=login`,
+         # and a device state that is not `{:replace, _}`) issues the code here, through `Nebu.OAuth.Consent` (the only caller of CodeStore.insert);
+         # everything above (IdP login, gate l, provisioning, freshness, device holder) has run as always
+         {:remembered, :ask} <-
+           {:remembered,
+            if(remembered?(user_id, row, device),
+              do:
+                {:issue,
+                 %{
+                   client_id: row.client_id,
+                   redirect_uri: row.redirect_uri,
+                   code_challenge: row.code_challenge,
+                   device_id: row.device_id,
+                   user_id: user_id,
+                   scope: row.scope,
+                   scope_prefix: row.scope_prefix,
+                   response_mode: row.response_mode,
+                   client_state: row.client_state,
+                   client_nonce: row.client_nonce,
+                   openid_requested: row.openid_requested,
+                   idp_rt_enc: idp_rt_enc,
+                   auth_time: auth_time
+                 }, device},
+              else: :ask
+            )},
          cookie = Consent.new_cookie_value(),
          {:consent, :ok} <-
            {:consent,
@@ -432,6 +465,7 @@ defmodule Nebu.OAuth.Authorize do
       {:device, :refused} -> refuse_device(conn, row)
       {:device, :unavailable} -> fail.("temporarily_unavailable", nil)
       {:rt, _} -> fail.("server_error", nil)
+      {:remembered, {:issue, code_row, device}} -> Consent.issue_remembered(conn, issuer, code_row, device)
       {:consent, {:error, :capacity}} ->
         log_consent_capacity(row.client_id)
         fail.("temporarily_unavailable", nil)
@@ -439,6 +473,15 @@ defmodule Nebu.OAuth.Authorize do
       {:consent, _} -> fail.("server_error", nil)
     end
   end
+
+  # Not asked again: `prompt=consent` / `prompt=login` force the screen (`force_consent`); a device that would REPLACE another session (`{:replace, _}`: a
+  # legacy session or a device row on the requested id) is never taken over without a click; an unreadable grant table (`{:error, :storage}`) asks too
+  # (fail towards asking).
+  defp remembered?(_user_id, %{force_consent: true}, _device), do: false
+  defp remembered?(_user_id, _row, {:replace, _holder}), do: false
+
+  defp remembered?(user_id, row, _device),
+    do: ConsentGrantStore.skip_consent?(user_id, row.client_id, row.scope, row.redirect_uri) == {:ok, true}
 
   # FR13, gate l: with `oauth_idp_revalidation = per_refresh` (also the fail-closed reading of an unknown value
   # or an unreadable config) every refresh redeems the stored IdP refresh token, so a login WITHOUT one could
