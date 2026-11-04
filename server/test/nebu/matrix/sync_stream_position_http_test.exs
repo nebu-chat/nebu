@@ -227,7 +227,8 @@ defmodule Nebu.Matrix.SyncStreamPositionHttpTest do
       b2 = S.sync(f.a, next(b1))
 
       for token <- [f.ta, next(b1), next(b2)] do
-        assert token =~ ~r/\As2_[A-Za-z0-9_-]{22}\.\d+\z/, "#{inspect(token)}"
+        # story device-key-directory (D11): the device-list group `.d<n>` is appended LAST to EVERY next_batch; `<core>.<pos>` is what precedes it.
+        assert token =~ ~r/\As2_[A-Za-z0-9_-]{22}\.\d+\.d\d+\z/, "#{inspect(token)}"
         assert {:ok, nonce} = token |> core() |> String.replace_prefix("s2_", "") |> Base.url_decode64(padding: false)
         assert byte_size(nonce) == 16, "16 random bytes: no user id, no event id, no position in the core"
       end

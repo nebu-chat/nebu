@@ -337,11 +337,18 @@ defmodule Nebu.Web.RoomAccountDataHardeningTest do
   describe "since token position" do
     @describetag :integration
 
+    # story device-key-directory (D11) appends the device-list group `.d<n>` as the LAST group of EVERY next_batch; these tests are about `<core>.<pos>`
+    # before it, so they look at the token without that group (a forged since token below carries no group, which the server accepts).
+    defp strip_dl(token) do
+      assert token =~ ~r/\.d[0-9]+\z/, "the device-list group is present and last: #{inspect(token)}"
+      Regex.replace(~r/\.d[0-9]+\z/, token, "")
+    end
+
     test "oversized position (> int8) is treated as position 0 (everything redelivered)",
          %{uid: uid, token: t, room: room} do
       assert put_room_ad(uid, t, room, "m.tok.a", %{"v" => 1}).status == 200
       first = sync(t)
-      [core, _pos] = String.split(first["next_batch"], ".")
+      [core, _pos] = first["next_batch"] |> strip_dl() |> String.split(".")
 
       for suffix <- ["99999999999999999999", "9223372036854775808", "0000000000000000000000001"] do
         body = sync(t, core <> "." <> suffix)
@@ -353,11 +360,11 @@ defmodule Nebu.Web.RoomAccountDataHardeningTest do
          %{uid: uid, token: t, room: room} do
       assert put_room_ad(uid, t, room, "m.tok.a", %{"v" => 1}).status == 200
       first = sync(t)
-      [core, pos] = String.split(first["next_batch"], ".")
+      [core, pos] = first["next_batch"] |> strip_dl() |> String.split(".")
       forged = core <> "." <> Integer.to_string(String.to_integer(pos) + 1_000_000)
 
       resp = sync(t, forged)
-      [_c, echoed] = String.split(resp["next_batch"], ".")
+      [_c, echoed] = resp["next_batch"] |> strip_dl() |> String.split(".")
       assert String.to_integer(echoed) == String.to_integer(pos)
 
       assert put_room_ad(uid, t, room, "m.tok.b", %{"v" => 2}).status == 200
@@ -367,7 +374,7 @@ defmodule Nebu.Web.RoomAccountDataHardeningTest do
     test "signed / malformed suffixes are not parsed as a position", %{uid: uid, token: t, room: room} do
       assert put_room_ad(uid, t, room, "m.tok.a", %{"v" => 1}).status == 200
       first = sync(t)
-      [core, pos] = String.split(first["next_batch"], ".")
+      [core, pos] = first["next_batch"] |> strip_dl() |> String.split(".")
 
       # `+<pos>` used to be accepted as a position (suppressing the row); now the whole
       # token is the (unknown) core → fallback to a full initial sync

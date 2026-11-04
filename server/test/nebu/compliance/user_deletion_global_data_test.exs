@@ -28,6 +28,16 @@ defmodule Nebu.Compliance.UserDeletionGlobalDataTest do
   @moduletag :integration
 
   setup do
+    prior_server_name = Application.fetch_env(:event_dispatcher, :server_name)
+    Application.put_env(:event_dispatcher, :server_name, "test.local")
+
+    on_exit(fn ->
+      case prior_server_name do
+        {:ok, value} -> Application.put_env(:event_dispatcher, :server_name, value)
+        :error -> Application.delete_env(:event_dispatcher, :server_name)
+      end
+    end)
+
     {:ok, E.setup_env!()}
   end
 
@@ -217,7 +227,9 @@ defmodule Nebu.Compliance.UserDeletionGlobalDataTest do
       b = E.seed_user!(cid, "b")
       never = T.provision_user!()
       a_session = E.seed_sessions!(a)
-      b_session = T.legacy_session!(b.uid, b.dev)
+      b_session = T.legacy_session!(b.uid, b.dev) |> Map.put(:uid, b.uid)
+      # story key-query-hardening (D1): /keys/query serves the keys of a user to peers who share a joined room with it only: B shares a room with A
+      Nebu.Matrix.ModerationTestSupport.invite_room(b_session, [%{uid: a.uid, at: a_session.at}])
 
       before = keys_query(b_session.at, [a.uid, never])
       assert before.status == 200

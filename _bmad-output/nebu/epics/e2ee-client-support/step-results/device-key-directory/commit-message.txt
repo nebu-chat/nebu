@@ -1,0 +1,24 @@
+feat(e2ee): device-key directory (keys/claim, keys/changes, device_lists in /sync)
+
+Adds POST /_matrix/client/v3/keys/claim and GET /_matrix/client/v3/keys/changes and
+the E2E fields of /sync (device_lists, device_one_time_keys_count,
+device_unused_fallback_key_types), so E2EE clients can start Olm sessions and track
+device lists. Table device_list_changes (migration 000060), inline SQL per ADR-018.
+
+Positions are assigned at commit under one advisory lock (a pending marker keeps one
+key change at one position) and travel as a third token group `.d<n>` on every
+next_batch, bounded by the position read before the stream queries. A claim consumes
+a one-time key exactly once (FOR UPDATE SKIP LOCKED), falls back to the fallback key,
+and reaches only the caller's own devices and users who share a joined room. Limits:
+1000 targets per request, caller buckets plus a per-target budget keyed on a SHA-256
+digest, a keys_changes read tier. GDPR erasure covers device_list_changes. The key
+lock order is devices -> device_keys -> stream row.
+
+Security review (Kassandra): the first pass found a HIGH (per-target rate buckets
+keyed on request-derived ids pinned whole request bodies in ETS) and three LOW
+(left-room leak in `left`, unthrottled /keys/changes, global lock); all fixed or
+documented in 11-risks, the delta pass is CLEAN. Existing sync pins were re-pinned
+for the .d<n> token group and the new statement counts.
+
+Pipeline: ATDD, 5 fix cycles, code review MINOR items fixed, Kassandra CLEAN.
+Refs: REQ-2026-013

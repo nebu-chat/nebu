@@ -47,15 +47,38 @@ description:
 
 
       **Sicherheit und Compliance:**
-      OIDC-only-Authentifizierung (Keycloak, Azure AD, Google Workspace, Dex),
+      Authentifizierung ausschließlich über den firmeneigenen OIDC-Provider (Keycloak, Azure AD,
+      Google Workspace, Dex), keine eigene Passwortverwaltung,
       Ed25519-Nachrichtensignaturen für Authentizität und Nicht-Abstreitbarkeit,
       Audit-Logging, Legal-Export und Vier-Augen-Prinzip für privilegierten Zugriff.
 
 
+      **OAuth 2.0 (Matrix v1.15):**
+      Optional tritt Nebu als OAuth-2.0-Authorization-Server (Broker-Modell) vor den OIDC-Provider.
+      Aktuelle Matrix-Clients (Element Web, FluffyChat) registrieren sich per Dynamic Client
+      Registration, ein Administrator gibt neue Clients frei, Matrix-Access- und Refresh-Tokens
+      stellt allein Nebu aus und sie lassen sich widerrufen. Der Provider authentifiziert nur den
+      Menschen. Die Funktion ist standardmäßig ausgeschaltet und wird im Admin-UI geschaltet; solange
+      sie aus ist, bleibt der bisherige OIDC-Login unverändert.
+
+
+      **Ende-zu-Ende-Verschlüsselung (Client-Infrastruktur, Räume bleiben unverschlüsselt):**
+      Nebu unterstützt die clientseitige E2EE-Infrastruktur der Matrix-Clients: serverseitiges
+      Schlüssel-Backup (room_keys), To-Device-Nachrichten, Geräte-Schlüsselverzeichnis (keys/upload,
+      query, claim, changes, device_lists im Sync) sowie Cross-Signing mit serverseitig geprüften
+      Ed25519-Signaturen für die Geräteverifikation. Der Server speichert nur öffentliche Schlüssel
+      und opake Blobs, entschlüsselt nichts und loggt kein Schlüsselmaterial.
+      Räume bleiben bewusst unverschlüsselt: m.room.encryption und m.room.encrypted werden
+      abgelehnt, damit Archiv, Audit-Log und Legal-Export vollständig bleiben. To-Device-Nachrichten
+      sind auf eine feste Liste von Typen begrenzt und mengenbegrenzt. Nicht unterstützt:
+      Ende-zu-Ende-verschlüsselte Element-Call-Anrufe.
+
+
       **Implementierter Matrix-Scope:**
       Login, Logout, Sync, Send, Messages, CreateRoom, Join, Typing, Receipts,
-      Profile, Presence, Media-Upload/-Download/-Thumbnail, Key-Stubs (E2EE-Unterdrückung).
-      Bewusst ausgeschlossen: Federation, Identity Server, E2EE (by design).
+      Profile, Presence, Media-Upload/-Download/-Thumbnail, Schlüssel-Backup, To-Device,
+      Schlüsselverzeichnis und Cross-Signing, OAuth-2.0-API (optional).
+      Bewusst ausgeschlossen: Federation, Identity Server, verschlüsselte Räume.
 
 
       **Technologie-Stack:**
@@ -63,10 +86,12 @@ description:
     features:
       - Matrix Client-Server API kompatibel (Element, Cinny, FluffyChat)
       - OIDC-Authentifizierung (Keycloak, Azure AD, Dex)
+      - Optional OAuth-2.0-Authorization-Server (Broker-Modell, Matrix v1.15, Client-Freigabe durch Admins)
+      - E2EE-Client-Infrastruktur (Schlüssel-Backup, To-Device, Geräteverifikation) bei unverschlüsselten, archivierbaren Räumen
       - Horizontal skalierbar (stateless Gateway + Elixir-Cluster via libcluster/Horde)
       - Ed25519-Nachrichtensignaturen
       - Audit-Logging und Legal-Export
-      - Compliance-ready (kein E2EE by design)
+      - Compliance-ready (Räume bleiben unverschlüsselt und vollständig archiviert)
       - Minimale Abhängigkeiten - kein Redis, kein NATS, kein Kafka
       - Apache 2.0 - kommerziell nutzbar, kein Copyleft
 
@@ -93,15 +118,38 @@ description:
 
 
       **Security and Compliance:**
-      OIDC-only authentication (Keycloak, Azure AD, Google Workspace, Dex),
+      Authentication exclusively through the organisation's own OIDC provider (Keycloak, Azure AD,
+      Google Workspace, Dex), no password management of its own,
       Ed25519 message signatures for authenticity and non-repudiation,
       audit logging, legal export, and four-eyes principle for privileged access.
 
 
+      **OAuth 2.0 (Matrix v1.15):**
+      Optionally Nebu acts as an OAuth 2.0 authorization server (broker model) in front of the OIDC
+      provider. Current Matrix clients (Element Web, FluffyChat) register themselves with Dynamic
+      Client Registration, an administrator approves new clients, and Matrix access and refresh
+      tokens are issued by Nebu alone and can be revoked. The provider only authenticates the human.
+      The feature is off by default and is switched in the Admin UI; while it is off, the existing
+      OIDC login is unchanged.
+
+
+      **End-to-end encryption (client infrastructure, rooms stay unencrypted):**
+      Nebu supports the client-side E2EE infrastructure of Matrix clients: server-side key backup
+      (room_keys), to-device messages, a device key directory (keys/upload, query, claim, changes,
+      device_lists in sync) and cross-signing with server-verified Ed25519 signatures for device
+      verification. The server stores only public keys and opaque blobs, decrypts nothing and
+      logs no key material.
+      Rooms are deliberately kept unencrypted: m.room.encryption and m.room.encrypted are refused
+      so that the archive, audit log and legal export stay complete. To-device messages are limited
+      to a fixed list of types and are rate and size limited. Not supported: end-to-end encrypted
+      Element Call calls.
+
+
       **Implemented Matrix Scope:**
       Login, logout, sync, send, messages, createRoom, join, typing, receipts,
-      profile, presence, media upload/download/thumbnail, key stubs (E2EE suppression).
-      Intentionally excluded: federation, identity server, E2EE (by design).
+      profile, presence, media upload/download/thumbnail, key backup, to-device,
+      key directory and cross-signing, OAuth 2.0 API (optional).
+      Intentionally excluded: federation, identity server, encrypted rooms.
 
 
       **Tech Stack:**
@@ -109,10 +157,12 @@ description:
     features:
       - Matrix Client-Server API compatible (Element, Cinny, FluffyChat)
       - OIDC authentication (Keycloak, Azure AD, Dex)
+      - Optional OAuth 2.0 authorization server (broker model, Matrix v1.15, client approval by admins)
+      - E2EE client infrastructure (key backup, to-device, device verification) with unencrypted, archivable rooms
       - Horizontally scalable (stateless gateway + Elixir cluster via libcluster/Horde)
       - Ed25519 message signatures
       - Audit logging and legal export
-      - Compliance-ready (no E2EE by design)
+      - Compliance-ready (rooms stay unencrypted and fully archived)
       - Minimal dependencies - no Redis, no NATS, no Kafka
       - Apache 2.0 - commercial use welcome, no copyleft
 

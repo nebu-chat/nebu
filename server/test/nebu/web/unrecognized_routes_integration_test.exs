@@ -137,7 +137,13 @@ defmodule Nebu.Web.UnrecognizedRoutesIntegrationTest do
         {"unimplemented GET state/{type}/ (RU11a)", "/_matrix/client/v3/rooms/#{r}/state/m.room.name/", "Unrecognized request"},
         {"unimplemented GET state (RU11a)", "/_matrix/client/v3/rooms/#{r}/state", "Unrecognized request"},
         {"unknown device", "/_matrix/client/v3/devices/UNKNOWN", "Unknown device"},
+        # story server-side-key-backup: the key backup is a real store now; a user without a backup keeps the answer of the former stub
+        # ("No backup found"), and the new routes answer handler-level M_NOT_FOUND (an unknown version), never the M_UNRECOGNIZED fall-through
         {"room_keys/version", "/_matrix/client/v3/room_keys/version", "No backup found"},
+        {"room_keys/version/{unknown}", "/_matrix/client/v3/room_keys/version/424242", nil},
+        {"room_keys/keys?version={unknown}", "/_matrix/client/v3/room_keys/keys?version=424242", nil},
+        {"room_keys/keys/{room}?version={unknown}", "/_matrix/client/v3/room_keys/keys/#{r}?version=424242", nil},
+        {"room_keys/keys/{room}/{session}?version={unknown}", "/_matrix/client/v3/room_keys/keys/#{r}/s?version=424242", nil},
         {"voip/turnServer", "/_matrix/client/v3/voip/turnServer", "No TURN server configured"},
         {"unknown v1 media", "/_matrix/client/v1/media/download/test.local/nothere#{T.rand(5)}", "Media not found"},
         {"unknown profile", "/_matrix/client/v3/profile/#{URI.encode_www_form("@nobody#{T.rand(5)}:test.local")}", "Profile not found"}

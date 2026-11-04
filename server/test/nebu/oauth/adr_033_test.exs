@@ -521,7 +521,8 @@ defmodule Nebu.OAuth.Adr033Test do
     for part <- ["v1.15", "v1.11", "no-store", "msc2666", "auth_metadata"], do: assert(row =~ part, "versions row lacks #{part}")
     assert row =~ ~r/authenticat/i, "answer independent of authentication"
 
-    for ep <- ["/user_directory/search", "/publicRooms", "/keys/claim"] do
+    # story device-key-directory (DELIBERATE re-pin, old -> new): `/keys/claim` is a real route now and its scope row is no longer 🔲 / (ad); the other two stay unrouted
+    for ep <- ["/user_directory/search", "/publicRooms"] do
       rows = Regex.scan(Regex.compile!("^\\|[^\\n]*`[^`]*" <> Regex.escape(ep) <> "`[^\\n]*$", "m"), scope) |> List.flatten()
       assert rows != [], "the scope doc must keep a row for #{ep}"
       for r <- rows, do: assert(r =~ "🔲" and r =~ "(ad)", "#{ep} row must be 🔲 with follow-up (ad): #{r}")

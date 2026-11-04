@@ -86,7 +86,11 @@ defmodule Nebu.Web.LogStore.RouteNormalizer do
     "redact" => %{2 => @txn_id_placeholder},
     "devices" => %{1 => @device_id_placeholder},
     "account_data" => %{1 => @account_data_type_placeholder},
-    "tags" => %{1 => @tag_placeholder}
+    "tags" => %{1 => @tag_placeholder},
+    # story to-device-messaging: `/sendToDevice/{eventType}/{txnId}`: both are client-chosen
+    "sendToDevice" => %{1 => @event_type_placeholder, 2 => @txn_id_placeholder},
+    # server-side key backup: `/room_keys/keys/{roomId}/{sessionId}`: both ids are client-chosen (a room id need not carry a `!`, a session id never does)
+    "room_keys" => %{2 => @room_id_placeholder, 3 => ":session_id"}
   }
 
   # A conservative, ADDITIONAL heuristic for opaque hex/UUID-shaped segments
@@ -169,6 +173,13 @@ defmodule Nebu.Web.LogStore.RouteNormalizer do
           acc
 
         {:ok, offsets} ->
+          # `/room_keys/version/{n}`: the number is a version, not a room id
+          offsets =
+            case {decoded, Enum.at(routed, pos + 1)} do
+              {"room_keys", {_idx, "version"}} -> %{2 => ":version"}
+              _ -> offsets
+            end
+
           Enum.reduce(offsets, acc, fn {offset, placeholder}, acc2 ->
             target = pos + offset
 

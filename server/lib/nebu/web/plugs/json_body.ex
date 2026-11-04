@@ -54,6 +54,26 @@ defmodule Nebu.Web.Plugs.JsonBody do
                           pass: ["*/*"]
                         )
 
+  # Server-side key backup (story server-side-key-backup): a batch upload of room keys (up to ~600 sessions of 8 KiB) is far above the 1 MB default, so the
+  # `room_keys` routes get a cap of 5 MiB (the story's limit). The body is read by `parse_room_keys/1` from the route, AFTER the authentication (never here).
+  @room_keys_parser_opts Plug.Parsers.init(
+                           parsers: [:json],
+                           json_decoder: Jason,
+                           length: 5_242_880,
+                           body_reader: {Nebu.Web.Plugs.RawBodyReader, :read_body, []},
+                           pass: ["*/*"]
+                         )
+
+  # To-device messaging (story to-device-messaging): the body of `PUT .../sendToDevice/{eventType}/{txnId}` is capped at 64 KiB and read by
+  # `parse_to_device/1` from the route, AFTER the authentication and the per-user rate limit (never here: this plug runs before both).
+  @to_device_parser_opts Plug.Parsers.init(
+                          parsers: [:json],
+                          json_decoder: Jason,
+                          length: 65_536,
+                          body_reader: {Nebu.Web.Plugs.RawBodyReader, :read_body, []},
+                          pass: ["*/*"]
+                        )
+
   @impl Plug
   def init(opts), do: opts
 
@@ -100,7 +120,68 @@ defmodule Nebu.Web.Plugs.JsonBody do
   def call(%Plug.Conn{path_info: ["oauth2", "register" | _]} = conn, _opts),
     do: parse(conn, @register_parser_opts)
 
-  def call(conn, _opts), do: parse(conn, @parser_opts)
+  # The key backup (story server-side-key-backup): the bodies of `v3/room_keys/**` stay UNFETCHED here. This plug runs before the authentication, so
+  # any read or parse of a body here would be a pre-auth cost (a 5 MiB body for every anonymous or junk-credential request). The authenticated route
+  # (`Nebu.Web.Router.Protected`) reads the body with `parse_room_keys/1` after the authentication and the write rate limit.
+  def call(%Plug.Conn{path_info: path_info} = conn, _opts) do
+    if room_keys_path?(path_info) or to_device_path?(path_info), do: conn, else: parse(conn, @parser_opts)
+  end
+
+  # same rule for the to-device send: the decoded segments decide (`sendTo%44evice`, `%5Fmatrix`, `//` reach the route as well)
+  defp to_device_path?(path_info) do
+    case path_info |> Enum.reject(&(&1 == "")) |> Enum.take(4) |> Enum.map(&decode_segment/1) do
+      ["_matrix", "client", _version, "sendToDevice"] -> true
+      _ -> false
+    end
+  end
+
+  # `Plug.Router` matches on the DECODED segments (`room%5Fkeys`, `v%33`, `%5Fmatrix` reach the room_keys routes), so the skip decodes them too: an
+  # encoded spelling must not get the pre-auth parse back
+  defp room_keys_path?(path_info) do
+    Enum.map(Enum.take(path_info, 4), &decode_segment/1) == ["_matrix", "client", "v3", "room_keys"]
+  end
+
+  defp decode_segment(segment) do
+    URI.decode(segment)
+  rescue
+    ArgumentError -> segment
+  end
+
+  @doc """
+  Reads and parses the JSON body of an AUTHENTICATED `room_keys` request with the 5 MiB limit (called by the route after the authentication and the write
+  rate limit). A body above the limit is answered `413 M_TOO_LARGE` (halted, like every `/_matrix/*` route), malformed JSON is flagged
+  (`conn.assigns[:json_parse_error]`) like on every route.
+  """
+  @spec parse_room_keys(Plug.Conn.t()) :: Plug.Conn.t()
+  def parse_room_keys(conn) do
+    Plug.Parsers.call(conn, @room_keys_parser_opts)
+  rescue
+    # (`conn.path_info` no longer starts with `_matrix` inside the forwarded router, so this cannot go through `parse/2`'s `matrix_route?/1`)
+    Plug.Parsers.RequestTooLargeError -> request_too_large(conn)
+    Plug.Parsers.ParseError -> %{conn | body_params: %{}} |> Plug.Conn.assign(:json_parse_error, true)
+  end
+
+  @doc """
+  Reads and parses the JSON body of an AUTHENTICATED `sendToDevice` request with the 64 KiB limit (called by the route after the authentication and
+  the rate limit). A body above the limit is answered `413 M_TOO_LARGE` (halted), malformed JSON is flagged (`conn.assigns[:json_parse_error]`).
+  """
+  @spec parse_to_device(Plug.Conn.t()) :: Plug.Conn.t()
+  def parse_to_device(conn) do
+    Plug.Parsers.call(conn, @to_device_parser_opts)
+  rescue
+    Plug.Parsers.RequestTooLargeError -> request_too_large(conn)
+    Plug.Parsers.ParseError -> %{conn | body_params: %{}} |> Plug.Conn.assign(:json_parse_error, true)
+  end
+
+  # the Matrix 413 envelope of a body above the cap (the CORS headers set by the `:cors` plug stay on the response); halts, so no route runs
+  defp request_too_large(conn) do
+    conn
+    |> Plug.Conn.put_resp_content_type("application/json")
+    # the unread rest of the body is not drained: close the connection after the answer (what Bandit's own bodiless 413 does)
+    |> Plug.Conn.put_resp_header("connection", "close")
+    |> Plug.Conn.send_resp(413, Jason.encode!(%{"errcode" => "M_TOO_LARGE", "error" => "Request body is too large"}))
+    |> Plug.Conn.halt()
+  end
 
   defp parse(conn, parser_opts) do
     Plug.Parsers.call(conn, parser_opts)
@@ -118,12 +199,7 @@ defmodule Nebu.Web.Plugs.JsonBody do
           |> Plug.Conn.assign(:body_too_large, true)
 
         matrix_route?(conn) ->
-          conn
-          |> Plug.Conn.put_resp_content_type("application/json")
-          # the unread rest of the body is not drained: close the connection after the answer (what Bandit's own bodiless 413 does)
-          |> Plug.Conn.put_resp_header("connection", "close")
-          |> Plug.Conn.send_resp(413, Jason.encode!(%{"errcode" => "M_TOO_LARGE", "error" => "Request body is too large"}))
-          |> Plug.Conn.halt()
+          request_too_large(conn)
 
         true ->
           reraise e, __STACKTRACE__

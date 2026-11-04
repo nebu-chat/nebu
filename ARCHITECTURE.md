@@ -107,7 +107,7 @@ other homeservers. A deliberate simplification for closed enterprise environment
 ## Principle 5: Compliance-Native
 
 - Audit log in PostgreSQL (`Nebu.Compliance`), with row-level security.
-- No E2EE in the current version — messages are organizational property (ADR-011 roadmap).
+- Client-side E2EE infrastructure yes (key backup, to-device, device verification), encrypted rooms no — messages are organizational property and stay archivable (ADR-011).
 - OIDC-first via Keycloak/Dex — no standalone password management.
 
 ---

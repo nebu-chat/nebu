@@ -9,9 +9,13 @@ defmodule Nebu.Compliance.UserDeletion do
     3. UPDATE user_keys SET private_key = NULL, deleted_at = <now_ms> WHERE key_type = 'signing'
     4. UPDATE user_keys SET private_key = NULL, deleted_at = <now_ms> WHERE key_type = 'encryption'
     4a. row locks (uia_sessions, cross_signing_keys) + the per-user `sync_global|` advisory lock: serialises
-        the erasure with the account data / cross-signing writers (story gdpr-erasure-global-data, D1)
+        the erasure with the account data / cross-signing writers (story gdpr-erasure-global-data, D1);
+        then the EXCLUSIVE `to_device_erasure|<user>` advisory lock, the fence of the to-device sends (story
+        to-device-messaging: its own key, so a recipient's `sync_global|` writer never makes a message skip;
+        the sends take it SHARED as a try-lock)
     4b. DELETE FROM <every table of erased_tables/0> WHERE user_id = <target> (room and global account data,
-        cross-signing keys, device keys, the other per-user tables: follow-up `ck`, D2); then a check that no
+        cross-signing keys, device keys, the other per-user tables: follow-up `ck`, D2; the signatures the user made on
+        other users' master keys: story key-query-hardening, D9, plus one statement for the signatures made ON its keys); then a check that no
         `oauth_codes` row of the user is left (fail closed without migration 000055, D18 (e): step
         `oauth_codes_not_erased`; a failing count query is the step `oauth_codes_check`)
     4c. UPDATE profiles SET displayname = 'Deleted User', avatar_url = NULL (D9)
@@ -43,6 +47,10 @@ defmodule Nebu.Compliance.UserDeletion do
     device_keys device_one_time_keys device_fallback_keys
     forgotten_rooms auto_join_opt_outs read_receipts
     uia_sessions oauth_account_sessions oauth_consent_requests oauth_consent_grants oauth_codes
+    room_key_backup_sessions room_key_backup_versions
+    to_device_messages to_device_txns
+    device_list_changes
+    cross_signing_user_signatures
   )
 
   # the step name of each DELETE, fixed at compile time (the attempted audit and the log name the failing step)
@@ -244,7 +252,11 @@ defmodule Nebu.Compliance.UserDeletion do
     end
   end
 
-  # ─── Step 4a: serialise with the writers of the per-user global data (D1) ────
+  # ─── Step 4a: serialise with the writers of the per-user global data (D1; the locks of Step 4a) ────
+  #
+  # Step 4a takes TWO advisory locks, both exclusive: `sync_global|<user>` (below) and, last, `to_device_erasure|<user>`, the fence of the to-device sends (story
+  # to-device-messaging): a send takes the fence SHARED as a try-lock, so a send in flight commits before the DELETEs run and a later one skips or answers 429; the
+  # fence is its own key because the `sync_global|` writers of a RECIPIENT (account data, cross-signing, key backup) must not make a message skip.
   #
   # AccountDataStore.put/3 and CrossSigningKeyStore.put_keys/2 write under the advisory lock
   # `sync_global|<user>`: a write in flight commits before the DELETEs below run (and is erased), a later one
@@ -272,7 +284,10 @@ defmodule Nebu.Compliance.UserDeletion do
     [
       "SELECT 1 FROM uia_sessions WHERE user_id = $1 FOR UPDATE",
       "SELECT 1 FROM cross_signing_keys WHERE user_id = $1 FOR UPDATE",
-      "SELECT pg_advisory_xact_lock(hashtextextended('sync_global|' || $1::text, 0))"
+      "SELECT pg_advisory_xact_lock(hashtextextended('sync_global|' || $1::text, 0))",
+      # story to-device-messaging: the fence of the to-device sends has its OWN key (a recipient's account data / cross-signing / key backup writer holds `sync_global`
+      # and must not make a message skip); the sends take it SHARED as a try-lock
+      "SELECT pg_advisory_xact_lock(hashtextextended('to_device_erasure|' || $1::text, 0))"
     ]
     |> Enum.reduce_while(:ok, fn sql, :ok ->
       case repo().query(sql, [target_user_id]) do
@@ -300,6 +315,28 @@ defmodule Nebu.Compliance.UserDeletion do
         {:error, reason} -> step(:oauth_codes_check, {:error, reason})
       end
     end)
+
+    # story to-device-messaging: the messages the erased user SENT are queued in other users' devices (`to_device_messages.sender`): authored
+    # content and the user id, deleted as well
+    step(:delete_to_device_sent, run_delete_sent(target_user_id))
+
+    # story key-query-hardening (D9): the cross-user signatures the erased user MADE are deleted by `user_id` (the signer, @erased_tables above); the ones made ON
+    # its master key by other users name its user id in `target_user_id` and are deleted here
+    step(:delete_cross_signing_user_signatures_target, run_delete_signed_on(target_user_id))
+  end
+
+  defp run_delete_signed_on(target_user_id) do
+    case repo().query("DELETE FROM cross_signing_user_signatures WHERE target_user_id = $1", [target_user_id]) do
+      {:ok, _} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp run_delete_sent(target_user_id) do
+    case repo().query("DELETE FROM to_device_messages WHERE sender = $1", [target_user_id]) do
+      {:ok, _} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   defp run_delete(table, target_user_id) do

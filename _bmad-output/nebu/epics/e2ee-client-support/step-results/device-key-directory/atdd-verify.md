@@ -1,0 +1,2 @@
+# atdd-verify — device-key-directory: 5 scenarios, 5 ExUnit tests (0 placeholders), 0 feature files; rc=2 tests=None failures=None log=/Users/philippbeyerlein/dev/01_gitlab/1200_philippb/open-chat-e2ee/.claude/test-logs/atdd-verify.log
+MAJOR | run | no ExUnit summary — test run failed before executing tests | see /Users/philippbeyerlein/dev/01_gitlab/1200_philippb/open-chat-e2ee/.claude/test-logs/atdd-verify.log

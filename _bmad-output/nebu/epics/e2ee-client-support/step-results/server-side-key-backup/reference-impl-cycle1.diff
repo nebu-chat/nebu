@@ -1,0 +1,504 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index c5c85bcb..c59cade7 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -11,7 +11,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
+ 
+ ### Added
+ 
+-- **Server-side key backup `/_matrix/client/v3/room_keys/**` (story server-side-key-backup, epic e2ee-client-support; migration 000056)**: Element's "chat recovery" and secret-storage bootstrap work. `POST|GET /room_keys/version`, `GET|PUT|DELETE /room_keys/version/{version}` and `PUT|GET|DELETE /room_keys/keys[/{roomId}[/{sessionId}]]` replace the former acceptance stub (a constant `200 {"version":"1"}` that stored nothing): an OPAQUE per-user store (tables `room_key_backup_versions` and `room_key_backup_sessions`; the server never decrypts or logs a blob, ADR-011 stays: no E2EE room is enabled), the spec's merge rule for a re-uploaded session, `etag` and `count` from the database, `403 M_WRONG_ROOM_KEYS_VERSION` with `current_version`, idempotent `DELETE` with a soft-delete marker (versions are never reused). Limits: 10 versions per user (the 11th is `403 M_FORBIDDEN`), 100 000 sessions per version, 8 KiB per `session_data`, 16 KiB per `auth_data`, 5 MiB per request body on these routes; writes are rate limited per user (60 per minute, burst 30; reads are not). The GDPR erasure deletes all versions and sessions of the user. Operators: run the migration with the release; rolling back discards every user's key backup.
++- **Server-side key backup `/_matrix/client/v3/room_keys/**` (story server-side-key-backup, epic e2ee-client-support; migration 000058)**: Element's "chat recovery" and secret-storage bootstrap work. `POST|GET /room_keys/version`, `GET|PUT|DELETE /room_keys/version/{version}` and `PUT|GET|DELETE /room_keys/keys[/{roomId}[/{sessionId}]]` replace the former acceptance stub (a constant `200 {"version":"1"}` that stored nothing): an OPAQUE per-user store (tables `room_key_backup_versions` and `room_key_backup_sessions`; the server never decrypts or logs a blob, ADR-011 stays: no E2EE room is enabled), the spec's merge rule for a re-uploaded session, `etag` and `count` from the database, `403 M_WRONG_ROOM_KEYS_VERSION` with `current_version`, idempotent `DELETE` with a soft-delete marker (versions are never reused). Limits: 10 versions per user (the 11th is `403 M_FORBIDDEN`), 1000 version rows per user including the markers, 100 000 sessions per version, 8 KiB per `session_data`, 16 KiB per `auth_data`, 5 MiB per request body (read only after the authentication), a per-user storage budget of 256 MiB over all live versions (`403 M_FORBIDDEN`); writes are rate limited per user (60 per minute, burst 30), the two bulk reads (`GET /keys`, `GET /keys/{room}`) have their own bucket (30 per minute, burst 10), a writer that cannot get the per-user lock within 2 s answers `429 M_LIMIT_EXCEEDED`. The GDPR erasure deletes all versions and sessions of the user. Operators: run migration 000058 with the release; rolling back discards every user's key backup.
+ 
+ - **`PUT /_matrix/client/v3/rooms/{roomId}/redact/{eventId}/{txnId}` and applied `m.room.redaction` events, audit action `room_event_redacted`, migration 000051 (story state-writer-redaction; follow-ups `fw`, `fv`, `fz`, `fx` closed)**: Element's "Remove" and "Remove recent messages" work. A redaction is decided and written by the room process (own event: `events["m.room.redaction"]`; another user's event: also the `redact` level), stored with a top-level `redacts` (new column `events.redacts`, migration 000051) and served with `redacts` and `content.redacts`; the redacted event is served pruned (`content: {}`, `unsigned.redacted_because`) on every read path while its content stays in the database (Compliance Mode); a redaction of another user's event writes the audit row `room_event_redacted`. Operator query **Q-rd** (07-deployment) lists legacy unchecked redactions.
+ - **`PUT /_matrix/client/v3/rooms/{roomId}/state/m.room.power_levels` (story power-levels-enforcement; follow-ups `eq`, `er`, `fr` closed)**: power levels can be changed after the room was created (Element's Roles & Permissions, `/op`, `/deop`) under the room version 10 change rules, decided and written in the room process in one transaction; new audit action `room_power_levels_changed`; the PUT is charged to the `moderation` tier; operator query Q-pl in `docs/architecture/07-deployment.md`.
+diff --git a/docs/architecture/05-building-blocks.md b/docs/architecture/05-building-blocks.md
+index 72c6be64..9562599a 100644
+--- a/docs/architecture/05-building-blocks.md
++++ b/docs/architecture/05-building-blocks.md
+@@ -2314,7 +2314,7 @@ Response: `Event event` - the full event proto (same `Event` message used by syn
+ > **Server-side key backup (story `server-side-key-backup`, epic e2ee-client-support):** `Nebu.Matrix.HttpRoomKeys` (validation, answers) and
+ > `Nebu.Matrix.RoomKeyBackupStore` (SQL) serve `/_matrix/client/v3/room_keys/version[/{version}]` and
+ > `/room_keys/keys[/{roomId}[/{sessionId}]]` (14 route clauses in `Nebu.Web.Router.Protected`) as an OPAQUE per-user store in the tables
+-> `room_key_backup_versions` and `room_key_backup_sessions` (migration 000056, SQL inline per ADR-018). `etag` and `count` come from the database (cluster-safe); the writers take the per-user
++> `room_key_backup_versions` and `room_key_backup_sessions` (migration 000058, SQL inline per ADR-018). `etag` and `count` come from the database (cluster-safe); the writers take the per-user
+ > `sync_global` advisory lock; the GDPR erasure deletes both tables (`UserDeletion.erased_tables/0`). See 08-concepts "Server-side key backup".
+ 
+ _Source: `_bmad-output/planning-artifacts/architecture.md`, §Project Structure & Boundaries, §Complete Project Directory Structure; Story 9-19 (room_moderation.go, sync.go, event_dispatcher/server.ex, forgotten_rooms migration); Story 9-22 (per-device sync tokens, device_id in proto); Story 9-24 (GlobalAccountDataDB interface, ListGlobalAccountData, top-level account_data in syncResponse); Story 9-25 (syntheticNextBatch helper, syntheticBatchSeq atomic counter, sinceToken param removed from buildResponseFromBufferedEvents); Story 9-27 (upgrade_room/2 full Matrix §11.35.1 flow, GRPC.RPCError error handling, archive_room_atomic, terminate_child, try/rescue failure audit); Story 9-28 (GetRelations RPC, unsigned_relations field on Event, attach_thread_aggregations, fetch_events_by_relation, count_thread_children, event_in_room?, migration 000042); Story 9-29 (base /relations/{eventId} route, three-segment /{relType}/{eventType} route, dir/event_type/recurse/from query params, prev_batch in response, fetch_events_by_relation/5 dynamic WHERE builder); Story 11-3 (SearchMessages gRPC handler, proto extension, delegated search_db_module pattern, offset-cap security fix); Story 11-4 (search.go Gateway handler, SearchCoreClient consumer interface, §11.14.1 response shape, gRPC error mapping); Story 11-5 (NewUserRateLimiter middleware, per-user 10 req/min for /search, retry_after_ms in body); Story 11-8 (GetEvent RPC, event.go Go handler, fetch_event/2 DB function, core_grpc.pb.ex rpc :GetEvent + rpc :GetRelations bug fix); Story 11-9 (health/info.go NewInfoHandler, Nebu.BuildInfo module, GET /info on pubMux + health server, Admin UI footer via page_data.go SetBuildInfo/newPageData, ErrorMode on PageData, Dockerfile ARG/ldflags injection, docker-compose.yml build args); Story 11-10 (ClaimMappingHandler + ClaimMappingPageData + ClaimMappingConfig in claim_mapping.go, claim-mapping.html template, ClaimSelectionHandler atomic claim persistence in auth.go, ServerConfigReader LoadClaimMapping/SaveClaimMapping extension, FormatUserIDFromClaims signature refactor in grpc/metadata.go, JWTMiddleware userIDClaimLoader param, LoginHandler per-request claim resolution, migration 000044 claim mapping defaults seed); Story 12.16 (media/internal/auth middleware - TokenVerifier interface + fail-closed nil guard; media/internal/config handler; CSP + Cross-Origin-Resource-Policy headers on download/thumbnail; v1 authenticated routes in main.go); oidc-middleware-migration (nebu_http: NebuHttp.Plugs.OidcPlug Bearer-token validation, NebuHttp.JwksCache GenServer with TTL refresh + last-known-good, NebuHttp.Router.Protected /_matrix sub-router — built + unit-tested, NOT yet on the live request path; live cutover owned by matrix-api-migration); media-gateway-migration (nebu_http: NebuHttp.Media + Crypto/DB/Membership/Storage/HttpFetch/SSRF submodules + NebuHttp.Router.Media serving /_matrix/media/v3/* behind OidcPlug; media access-control now a local room_members SQL call replacing the gRPC CheckMembership RPC; ExAws.S3/MinIO storage with Finch pool in NebuHttp.Application; AES-256-GCM at-rest encryption per ADR-011; SSRF-guarded + rate-limited preview_url fetch; inline SQL per ADR-018; replaces the standalone Go media service)_
+diff --git a/docs/architecture/07-deployment.md b/docs/architecture/07-deployment.md
+index 466df7ae..ade6be66 100644
+--- a/docs/architecture/07-deployment.md
++++ b/docs/architecture/07-deployment.md
+@@ -1026,10 +1026,10 @@ SELECT tableowner FROM pg_tables WHERE tablename = 'matrix_sessions';
+ The result must be the migration role (or that role must have been granted `TRUNCATE`).
+ 
+ **User impact (E2EE):** this release logs out EVERY device of EVERY user at once; clients receive 401 without
+-`soft_logout` and discard their local E2EE state. Nebu has no server-side key backup (`GET room_keys/version` returns 404; `POST room_keys/version` is only an
+-acceptance stub that answers `{"version":"1"}` and stores nothing, so that Element Web's first-login key setup does not end in
+-"Unable to set up keys": Element then shows a recovery key although NO room key is ever backed up on the server, and
+-`PUT room_keys/keys` stays `M_UNRECOGNIZED`; ADR-011 is only Proposed). If encrypted rooms are in use, announce a maintenance window, ask users to export their room
++`soft_logout` and discard their local E2EE state. HISTORICAL note (releases before story `server-side-key-backup`): Nebu had no server-side key backup then (`POST room_keys/version` was only an
++acceptance stub, replaced by story server-side-key-backup, which answered a constant version and stored nothing: Element showed a recovery key although NO room key was ever backed up on the server, and
++`PUT room_keys/keys` was `M_UNRECOGNIZED`). Since that story `/room_keys/**` is a real, database-backed opaque store (08-concepts, "Server-side key backup"); a backup that clients created there is
++lost by a mass logout only if they did not store their recovery key. If encrypted rooms are in use, announce a maintenance window, ask users to export their room
+ keys beforehand and re-import them after re-login; otherwise encrypted history becomes unreadable.
+ 
+ ### Squashed Seed Migration
+diff --git a/docs/architecture/08-concepts.md b/docs/architecture/08-concepts.md
+index beeff30e..a6462a22 100644
+--- a/docs/architecture/08-concepts.md
++++ b/docs/architecture/08-concepts.md
+@@ -1388,21 +1388,24 @@ applies when the event grows, so a tag can still be deleted after an operator lo
+ 
+ ### Server-side key backup (story server-side-key-backup)
+ 
+-`/_matrix/client/v3/room_keys/**` (Matrix CS v1.18 "Server-side key backups") is an OPAQUE per-user store: `auth_data` and the `session_data` blobs are kept verbatim as JSON text, never decrypted and never parsed beyond well-formedness and size, and never logged (the `RequestLogger` captures no body of these routes; a failing write logs its error kind only). ADR-011 stays: this enables no E2EE room, `m.room.encryption` is still rejected. SQL is inline in the handler (ADR-018); the state lives only in `room_key_backup_versions` and `room_key_backup_sessions` (migration 000056, runtime-role grants, row level security enabled and forced), so `count` and `etag` are the same on every node (ADR-020).
++`/_matrix/client/v3/room_keys/**` (Matrix CS v1.18 "Server-side key backups") is an OPAQUE per-user store: `auth_data` and the `session_data` blobs are kept as opaque JSON text (the server re-encodes them canonically; it never interprets them), never decrypted and never parsed beyond well-formedness and size, and never logged (the `RequestLogger` captures no body of these routes; a failing write logs its error kind only). ADR-011 stays: this enables no E2EE room, `m.room.encryption` is still rejected. SQL is inline in the handler (ADR-018); the state lives only in `room_key_backup_versions` and `room_key_backup_sessions` (migration 000058, runtime-role grants, row level security enabled and forced), so `count` and `etag` are the same on every node (ADR-020).
+ 
+ - *Versions:* a version is a decimal string, a per-user counter (the first version of every user is `1`, strictly increasing; the session rows have a foreign key to their version without a cascade, so sessions are deleted before their version); the newest non-deleted one is the current one (after deleting it the newest remaining one, else `404 M_NOT_FOUND`). `DELETE /version/{version}` deletes the info and all its keys at once and leaves a soft-delete marker (no `auth_data`), so a number is never reused and a repeated DELETE is idempotent (`404` only for a number that never existed). At most 10 backup versions per user: the 11th is `403 M_FORBIDDEN` (never `M_LIMIT_EXCEEDED`, which clients retry; nothing is deleted silently); deleted versions do not count.
+ - *Writes* go to the current version only: any other version (older, deleted, unknown, another user's) is `403 M_WRONG_ROOM_KEYS_VERSION` with the top-level `current_version`, or `404 M_NOT_FOUND` when the user has no backup. Reads and deletes work on every own non-deleted version and answer `404` for anything else; another user's version looks unknown. The `version` query parameter is required (`400 M_MISSING_PARAM`). Missing members are `M_MISSING_PARAM`, mistyped ones `M_INVALID_PARAM`, malformed JSON `M_NOT_JSON`, a non-object body `M_BAD_JSON`; a request is stored whole or not at all.
+ - *Merge rule* of a re-uploaded session (spec order): if `is_verified` differs the verified one is kept; else the lower `first_message_index`; if equal the lower `forwarded_count`; on a full tie the stored session is kept. A replace does not change `count`; `etag` changes whenever the stored set changes. The merge is decided in one SQL statement under the per-user lock, so concurrent uploads of one session never double count and the best one wins.
+-- *Limits:* 100 000 sessions per version (`403 M_FORBIDDEN` for a batch that would pass it, as a whole; the seam `:nebu, :room_keys_max_sessions_per_version`), 8 KiB per `session_data` and 16 KiB per `auth_data` (canonical JSON bytes, `413 M_TOO_LARGE`), 5 MiB per request body on these routes for requests that carry an `Authorization: Bearer` credential (`JsonBody` parses before the authentication, so anonymous requests, and a query-string `access_token`, keep the 1 MB default; every other route keeps 1 MB). Writes are rate limited per user (tier `room_keys`: 60 per minute, burst 30, like the `account_data` tier); reads are not limited (a divergence from the spec's "rate-limited": a restoring client reads one session per undecryptable event).
++- *Limits:* 100 000 sessions per version (`403 M_FORBIDDEN` for a batch that would pass it, as a whole; the seam `:nebu, :room_keys_max_sessions_per_version`), 8 KiB per `session_data` and 16 KiB per `auth_data` (canonical JSON bytes, `413 M_TOO_LARGE`), 5 MiB per request body on these routes. The body is read only after the authentication: `JsonBody` leaves the bodies of these routes unfetched, the route authenticates first (an anonymous or junk-bearer request is 401 without its body being read, whatever its size), then charges the write rate limit (a 429 comes before the body is read), and only then parses the body with the 5 MiB limit; every other route keeps its 1 MB pre-router parse. Writes are rate limited per user (tier `room_keys`: 60 per minute, burst 30, like the `account_data` tier). The two bulk reads (`GET /keys`, `GET /keys/{room}`) have a bucket of their own (30 per minute, burst 10 per user, 429 `M_LIMIT_EXCEEDED` with `retry_after_ms`); the single-session GET and the version GETs are not limited (a divergence from the spec's "rate-limited": a restoring client reads one session per undecryptable event). The bulk response is spliced from the stored JSON text, not decoded and re-encoded per blob.
++- *Storage quotas:* a per-user aggregate byte budget over all live versions (the canonical bytes of every `session_data` plus every live version's `auth_data`; default 256 MiB, seam `:nebu, :room_keys_max_bytes_per_user`), decided under the advisory lock and net of replacements (a replace counts only the size delta), freed by deleting sessions or a version; exceeded is `403 M_FORBIDDEN` and nothing is stored. The total version rows per user, soft-delete markers included, are capped at 1000 (seam `:nebu, :room_keys_max_version_rows_per_user`; the 1001st create is `403 M_FORBIDDEN`): the markers are never pruned (needed for never-reused numbers and the idempotent DELETE), their growth is bounded by that cap and accepted (a partial index on the live versions keeps the lookups cheap).
++- *Lock timeout:* every writer runs `SET LOCAL lock_timeout` (seam `:nebu, :room_keys_lock_timeout_ms`, default 2000, i.e. 2 s) before it takes the `sync_global` lock; a lock that is not granted in time (SQLSTATE 55P03) is `429 M_LIMIT_EXCEEDED` with `retry_after_ms` and stores nothing, so waiters cannot exhaust the shared pool of 10 connections. Reads take no lock.
++- *Logging:* the route normalizer replaces the client-chosen room and session id segments of `room_keys/keys/**`.
+ - *Erasure:* both tables are in `UserDeletion.erased_tables/0` (sessions first, the soft-delete markers too); the creating writers (POST /version, PUT /keys) take the `sync_global` lock and refuse a user whose erasure is under way (`403 M_USER_DEACTIVATED`).
+ 
+ ### GDPR erasure inventory (story gdpr-erasure-global-data)
+ 
+-GDPR erasure (`Nebu.Compliance.UserDeletion.delete_user_keys/3`) physically deletes every row of personal data that is stored under the user in a per-user table, in the SAME transaction, in this order: the `deletion_in_progress` marker, the private keys set to NULL, the row locks and the advisory lock (below), the per-user deletes (then a check that no `oauth_codes` row is left), the profile anonymisation, and `keys_deleted`; one failing step rolls everything back and writes the `user_keys_deletion_attempted` audit row, whose `error_detail` names the failing step (`step=<name>`, a code atom, never data). *Lock order:* the transaction first locks the user's `uia_sessions` rows and `cross_signing_keys` row (`FOR UPDATE`) and only THEN takes the per-user `sync_global` advisory lock of `AccountDataStore.put/3`, `CrossSigningKeyStore.put_keys/2` and the signature merge: the order of the cross-signing reset writer (uia row, cross-signing row, advisory lock), so a writer in flight is serialised with the erasure and the two do not deadlock (one narrow exception, below). Those three writers refuse a user whose `deletion_status` is set (`{:error, :user_erased}`, answered `403 M_USER_DEACTIVATED`). The cross-signing writers (both branches of `device_signing/upload` and the signature merge) decide on the stored keys only through `CrossSigningKeyStore.lock_keys/1`, in the same order: the `cross_signing_keys` row lock, then the `sync_global` advisory lock, and only THEN the read (row -> advisory -> read; story cross-signing-upload-races), so two concurrent first uploads store one key set and a signature merge never writes back a stale merge base. The exception is the absent-then-present window (accepted residual): when the row lock of a signature merge found no row and a first upload commits the row before the merge gets the advisory lock, an erasure that locks the new row and waits for the advisory lock can form a cycle with the merge's write, which only now waits for that row; PostgreSQL aborts one side (`40P01`: the erasure fails closed, or the merge answers 500). A first upload has the same window when the row committed in between has a NULL master (a partial upload): its read sees no master and its upsert takes the row lock only after the advisory lock (pre-existing; the erasure fails closed, or the upload answers 500). Three actors of one user within milliseconds; closing it would need the advisory lock first everywhere, which the story rejected. Events authored by the user are retained (room history preservation, recital 65; immutable signed event log, the sender is the pseudonym); the profile is anonymised (`displayname = 'Deleted User'`, `avatar_url = NULL`, `users.anonymized_at`); admin deactivation keeps all of it (reversible). A second erasure answers `:conflict` and changes nothing.
++GDPR erasure (`Nebu.Compliance.UserDeletion.delete_user_keys/3`) physically deletes every row of personal data that is stored under the user in a per-user table, in the SAME transaction, in this order: the `deletion_in_progress` marker, the private keys set to NULL, the row locks and the advisory lock (below), the per-user deletes (then a check that no `oauth_codes` row is left), the profile anonymisation, and `keys_deleted`; one failing step rolls everything back and writes the `user_keys_deletion_attempted` audit row, whose `error_detail` names the failing step (`step=<name>`, a code atom, never data). *Lock order:* the transaction first locks the user's `uia_sessions` rows and `cross_signing_keys` row (`FOR UPDATE`) and only THEN takes the per-user `sync_global` advisory lock of `AccountDataStore.put/3`, `CrossSigningKeyStore.put_keys/2` and the signature merge: the order of the cross-signing reset writer (uia row, cross-signing row, advisory lock), so a writer in flight is serialised with the erasure and the two do not deadlock (one narrow exception, below). Those three writers refuse a user whose `deletion_status` is set (`{:error, :user_erased}`, answered `403 M_USER_DEACTIVATED`). The key backup writers `RoomKeyBackupStore.create_version/3` and `RoomKeyBackupStore.put_sessions/3` take the same per-user `sync_global` lock and refuse an erased user the same way (they run after the lock, so a write in flight is serialised with the erasure; the lock has a timeout, see "Server-side key backup"). The cross-signing writers (both branches of `device_signing/upload` and the signature merge) decide on the stored keys only through `CrossSigningKeyStore.lock_keys/1`, in the same order: the `cross_signing_keys` row lock, then the `sync_global` advisory lock, and only THEN the read (row -> advisory -> read; story cross-signing-upload-races), so two concurrent first uploads store one key set and a signature merge never writes back a stale merge base. The exception is the absent-then-present window (accepted residual): when the row lock of a signature merge found no row and a first upload commits the row before the merge gets the advisory lock, an erasure that locks the new row and waits for the advisory lock can form a cycle with the merge's write, which only now waits for that row; PostgreSQL aborts one side (`40P01`: the erasure fails closed, or the merge answers 500). A first upload has the same window when the row committed in between has a NULL master (a partial upload): its read sees no master and its upsert takes the row lock only after the advisory lock (pre-existing; the erasure fails closed, or the upload answers 500). Three actors of one user within milliseconds; closing it would need the advisory lock first everywhere, which the story rejected. Events authored by the user are retained (room history preservation, recital 65; immutable signed event log, the sender is the pseudonym); the profile is anonymised (`displayname = 'Deleted User'`, `avatar_url = NULL`, `users.anonymized_at`); admin deactivation keeps all of it (reversible). A second erasure answers `:conflict` and changes nothing.
+ 
+ **The erasure is terminal for authentication.** The last step also sets `users.is_active = false` and NULLs the `users` PII columns (display name, avatar and email ciphertexts: the display name and avatar are encrypted with the server-wide key, so the key deletion does not shred them; also `last_seen_at` and `deactivation_reason`, admin free text that may describe the person). Every authentication gate (`TokenValidator`, `OAuthSessionStore.user_active/1`, `Nebu.Matrix.active?/1`, the account pages, `invitable_local_users`) treats `deletion_status IS NOT NULL` as deactivated, so neither a fresh IdP token, an SSO login, an OAuth authorization nor an admin reactivation revives the account, and `Profile.DB.upsert_profile/3` writes nothing for an erased user. A bearer (an unbound raw IdP JWT included) that the node-local provisioning cache of the OIDC plug (60 s TTL) already confirmed is still accepted on that node until the entry expires: new requests, not only one in flight, for up to 60 s, the same bound as for an admin deactivation. In that window it can still write the tables WITHOUT a guard (device keys, receipts, room account data, the lazy device row with its IP); the profile PUT, global account data, cross-signing, the signature merge and the sync persist are refused. The eviction of the cache entry on every node (a broadcast over `:pg` on erasure and deactivation) is the proper fix, recorded in follow-up `gn`. Admin UI access of an erased administrator follows the IdP admin group claim, not the erasure: remove the person from the IdP admin group. `Nebu.Admin.DB.set_is_active/2` refuses to reactivate an erased user (`:erased`, answered as a failed precondition) and the admin user suggestions never offer one.
+ 
+-**Erased by the transaction** (`UserDeletion.erased_tables/0`, the list the deleting code and the guard test share): `user_room_account_data`, `account_data`, `cross_signing_keys`, `device_keys`, `device_one_time_keys`, `device_fallback_keys`, `forgotten_rooms`, `auto_join_opt_outs`, `read_receipts`, `uia_sessions`, `oauth_account_sessions`, `oauth_consent_requests`, `oauth_codes`, `room_key_backup_sessions`, `room_key_backup_versions` (the server-side key backup of story server-side-key-backup, migration 000056: every version row, the soft-delete markers included, and every session row). (`oauth_codes` needs the delete policy of migration 000055.)
++**Erased by the transaction** (`UserDeletion.erased_tables/0`, the list the deleting code and the guard test share): `user_room_account_data`, `account_data`, `cross_signing_keys`, `device_keys`, `device_one_time_keys`, `device_fallback_keys`, `forgotten_rooms`, `auto_join_opt_outs`, `read_receipts`, `uia_sessions`, `oauth_account_sessions`, `oauth_consent_requests`, `oauth_codes`, `room_key_backup_sessions`, `room_key_backup_versions` (the server-side key backup of story server-side-key-backup, migration 000058: every version row, the soft-delete markers included, and every session row). (`oauth_codes` needs the delete policy of migration 000055.)
+ 
+ **Ended after the commit by the session teardown** (best effort, outside the transaction): `devices`, `matrix_sessions`, `jwt_device_bindings`, `sessions`, `oauth_idp_refresh_leases`, `sync_tokens`, `sync_room_cursors` (the dispatcher also removes the `devices` rows of legacy devices).
+ 
+diff --git a/docs/architecture/11-risks.md b/docs/architecture/11-risks.md
+index 53de2ec2..ee32e890 100644
+--- a/docs/architecture/11-risks.md
++++ b/docs/architecture/11-risks.md
+@@ -28,6 +28,7 @@
+ | Admin route source classification could leak email into operational logs (fixed pre-ship) | Resolved | Story `war-room-mode`, security-review-driven fix |
+ | Bootstrap-mode OIDC scope ignored the operator's Step 3 config — providers needing a non-`openid` scope to expose the admin claim could never complete bootstrap | Resolved | `bugfix-bootstrap-scope-ignored`, 2026-07-09 |
+ | Admin-logs source-classification: 1 MEDIUM accepted non-blocking after a fix attempt was reverted for an architecture conflict | Accepted risk | Story `admin-logs-monitoring-view`, Kassandra review |
++| Server-side key backup (`/room_keys/**`, Kassandra review of story `server-side-key-backup`): resource exhaustion (CWE-400/770). Resolved by design: the request body is read only after the authentication (no pre-auth parse; an anonymous or junk-bearer request is 401 without its body being read) and after the write rate limit; a per-user aggregate byte budget of 256 MiB over all live versions (net of replacements, decided under the advisory lock); the bulk reads (`GET /keys`, `GET /keys/{room}`) have their own rate-limit bucket and are spliced from the stored JSON text; every writer has a lock timeout (2 s, 429) so lock waiters cannot exhaust the shared pool of 10 connections; the total version rows per user are capped at 1000. Accepted: the soft-delete markers are never pruned (needed for never-reused numbers and the idempotent DELETE), their growth is bounded by the row cap; the rate-limit buckets are per node; the RLS policies are `USING (true)` like the sibling tables (isolation rests on the `user_id` predicate of every statement) | Resolved / accepted (markers, per-node buckets, RLS pattern) | Story `server-side-key-backup`, `docs/stories/e2ee-client-support/security-reports/server-side-key-backup-security-review-2026-10-30.md` |
+ | State-event forgery (pre-existing, FIXED 2026-10-07) | **CLOSED** | bugfix-unsigned-replaces-state: `Room.Server.do_send_event/7` now persists `state_key` as NULL instead of `""`, preventing any joined member from forging state events via PUT /send/{eventType}. Migration 000036 backfills `m.room.message` rows empirically. Follow-up data remediation query documented; query-filter hardening (F-3/F-4/F-6) deferred. |
+ | Search-pipeline encryption exclusion still matches post-fix `state_key = NULL` forged encryption rows (pre-existing, related to above) | Medium | bugfix-unsigned-replaces-state security review F-2: `search/db.ex` predicates must be tightened to `enc.state_key = ''` (not `IS NULL`) after state-forgery path is closed + m.room.encryption guard added to non-state send_event/2 path. Separate /nebu-pipeline bugfix required (not blocking this story). |
+ | **OAuth broker gate items (from story oauth-metadata-dcr-admin-approval, Kassandra SEC Gate 1, 2026-10-09)** | In progress | ADR-033, "Gate items before `oauth_enabled` / story 2 merge"; Tracked in `docs/stories/oauth-broker/follow-ups.md` |
+diff --git a/docs/architecture/adr/ADR-011-managed-e2ee-key-escrow.md b/docs/architecture/adr/ADR-011-managed-e2ee-key-escrow.md
+index 3d1d8ed8..b7fe1c15 100644
+--- a/docs/architecture/adr/ADR-011-managed-e2ee-key-escrow.md
++++ b/docs/architecture/adr/ADR-011-managed-e2ee-key-escrow.md
+@@ -17,7 +17,7 @@ um Client-Fehlerdialoge zu verhindern (siehe die Updates unten: sie sind keine r
+ > **Update 2026-10-30 (story `server-side-key-backup`, epic e2ee-client-support):** `room_keys/*`
+ > (Matrix CS v1.18 "Server-side key backups") ist **kein Stub mehr**, sondern ein **opaker,
+ > PostgreSQL-gestützter Schlüssel-Backup-Speicher** pro Nutzer (Tabellen `room_key_backup_versions`,
+-> `room_key_backup_sessions`; Migration `000056`). Der Server speichert `auth_data` und die
++> `room_key_backup_sessions`; Migration `000058`). Der Server speichert `auth_data` und die
+ > `session_data`-Blobs unverändert als JSON, **entschlüsselt sie nie** und parst sie nicht über
+ > Wohlgeformtheit und Größe hinaus; sie werden nie geloggt und beim GDPR-Erase mit gelöscht. Das
+ > schaltet **keinen** E2EE-Raum ein: `m.room.encryption` wird weiterhin in jedem Schreibpfad
+diff --git a/e2e/KNOWN-FAILURES.md b/e2e/KNOWN-FAILURES.md
+index 53d79570..4605f42c 100644
+--- a/e2e/KNOWN-FAILURES.md
++++ b/e2e/KNOWN-FAILURES.md
+@@ -36,7 +36,7 @@ both next to `replaces_state` (one batched predecessor lookup); the scenario is
+ - **"Unable to set up keys" at the first Element login (34 failures in the first run were attributed to it): a SERVER gap.** `POST /_matrix/client/v3/room_keys/version` (Element creates a key backup right after the
+   cross-signing bootstrap of a user's first login) answered 404 on `main` and 405 M_UNRECOGNIZED on this branch; the Go gateway had an acceptance stub that the Elixir migration dropped. Fixed in the server (story
+   `room-keys-version-post-stub`, an acceptance stub: a constant `200 {"version":"1"}` that stored nothing). Since story `server-side-key-backup` (epic e2ee-client-support) the stub is gone: `/room_keys/**` is a real
+-  per-user key backup store (migration 000056), so every Element e2e login now creates a REAL backup and the Element e2e job is a merge gate for that story. K7 (`crypto/recovery-setup`) is the place for an API
++  per-user key backup store (migration 000058), so every Element e2e login now creates a REAL backup and the Element e2e job is a merge gate for that story. K7 (`crypto/recovery-setup`) is the place for an API
+   read-back of `GET /room_keys/version` once its test step is fixed.
+ - **Matrix users alex / marie / kai did not exist: an e2e SETUP gap.** Without the OIDC scope `profile` the IdP token carries no `name`, Nebu derives the Matrix localpart from the opaque `sub`
+   (`@ciqw...:localhost`) instead of `@alex:localhost` (OIDC Scopes Law: nothing is requested unless configured). The bootstrap fixture now sets the Matrix client scopes `profile email`,
+diff --git a/server/lib/nebu/matrix/http_room_keys.ex b/server/lib/nebu/matrix/http_room_keys.ex
+index 7053f93b..a24abe96 100644
+--- a/server/lib/nebu/matrix/http_room_keys.ex
++++ b/server/lib/nebu/matrix/http_room_keys.ex
+@@ -113,8 +113,8 @@ defmodule Nebu.Matrix.HttpRoomKeys do
+   def get_keys(conn, scope) do
+     with {:ok, version} <- version_param(conn),
+          :ok <- scope_ids(scope),
+-         {:ok, data} <- Store.get_sessions(user(conn), version, scope) do
+-      send_json(conn, 200, key_data_body(scope, data))
++         {:ok, iodata} <- Store.get_sessions(user(conn), version, scope) do
++      conn |> Plug.Conn.put_resp_content_type("application/json") |> Plug.Conn.send_resp(200, iodata)
+     else
+       {:error, :not_found} -> error(conn, 404, "M_NOT_FOUND", "No backup found")
+       {:error, :session_not_found} -> error(conn, 404, "M_NOT_FOUND", "Unknown key")
+@@ -122,10 +122,6 @@ defmodule Nebu.Matrix.HttpRoomKeys do
+     end
+   end
+ 
+-  defp key_data_body(:all, rooms), do: %{"rooms" => Map.new(rooms, fn {room, sessions} -> {room, %{"sessions" => sessions}} end)}
+-  defp key_data_body({:room, _}, sessions), do: %{"sessions" => sessions}
+-  defp key_data_body({:session, _, _}, key_backup_data), do: key_backup_data
+-
+   @doc "`DELETE /room_keys/keys[/{room}[/{session}]]`"
+   @spec delete_keys(Plug.Conn.t(), Store.scope()) :: Plug.Conn.t()
+   def delete_keys(conn, scope) do
+@@ -151,6 +147,15 @@ defmodule Nebu.Matrix.HttpRoomKeys do
+     do: error(conn, 403, "M_FORBIDDEN", "Too many key backup versions (at most #{Store.max_versions()}); delete one first")
+ 
+   defp reply_error(conn, :session_quota), do: error(conn, 403, "M_FORBIDDEN", "Too many sessions in this backup version")
++  defp reply_error(conn, :bytes_quota), do: error(conn, 403, "M_FORBIDDEN", "The key backup of this account is full (storage budget exceeded)")
++  defp reply_error(conn, :version_rows_quota), do: error(conn, 403, "M_FORBIDDEN", "Too many key backup versions were created (deleted ones count): contact the server administrator")
++
++  # the writer could not get the per-user lock in time: a time-based condition, the client may retry
++  defp reply_error(conn, :lock_timeout) do
++    conn
++    |> Plug.Conn.put_resp_header("retry-after", "1")
++    |> send_json(429, %{"errcode" => "M_LIMIT_EXCEEDED", "error" => "Too many concurrent key backup requests, try again", "retry_after_ms" => 1000})
++  end
+ 
+   defp reply_error(conn, {:wrong_version, current}) do
+     send_json(conn, 403, %{
+diff --git a/server/lib/nebu/matrix/room_key_backup_store.ex b/server/lib/nebu/matrix/room_key_backup_store.ex
+index df2da9d3..506f8599 100644
+--- a/server/lib/nebu/matrix/room_key_backup_store.ex
++++ b/server/lib/nebu/matrix/room_key_backup_store.ex
+@@ -46,6 +46,10 @@ defmodule Nebu.Matrix.RoomKeyBackupStore do
+ 
+   @max_versions 10
+   @default_max_sessions 100_000
++  # cycle 1: aggregate bytes per user (256 MiB), version rows per user incl. markers, and the lock timeout of the writers
++  @default_max_bytes 256 * 1024 * 1024
++  @default_max_version_rows 1000
++  @default_lock_timeout_ms 2000
+ 
+   @type scope :: :all | {:room, String.t()} | {:session, String.t(), String.t()}
+   @type entry :: %{
+@@ -74,6 +78,8 @@ defmodule Nebu.Matrix.RoomKeyBackupStore do
+     transact(fn ->
+       with {:ok, _} <- lock_user(user_id),
+            :ok <- ensure_not_erased(user_id),
++           {:ok, %{rows: [[rows]]}} <- query("SELECT count(*) FROM room_key_backup_versions WHERE user_id = $1", [user_id]),
++           :ok <- if(rows >= max_version_rows(), do: {:error, :version_rows_quota}, else: :ok),
+            {:ok, %{rows: [[live]]}} <-
+              query("SELECT count(*) FROM room_key_backup_versions WHERE user_id = $1 AND deleted_at IS NULL", [user_id]),
+            :ok <- if(live >= @max_versions, do: {:error, :version_quota}, else: :ok),
+@@ -88,7 +94,8 @@ defmodule Nebu.Matrix.RoomKeyBackupStore do
+                RETURNING version
+                """,
+                [user_id, algorithm, Jason.encode!(auth_data), now]
+-             ) do
++             ),
++           :ok <- ensure_byte_budget(user_id) do
+         {:ok, Integer.to_string(version)}
+       end
+     end)
+@@ -157,6 +164,7 @@ defmodule Nebu.Matrix.RoomKeyBackupStore do
+                             "UPDATE room_key_backup_versions SET auth_data = $3, updated_at = $4 WHERE user_id = $1 AND version = $2",
+                             [user_id, v, Jason.encode!(auth_data), now_ms()]
+                           ),
++                        :ok <- ensure_byte_budget(user_id),
+                         do: {:ok, :ok}
+ 
+                  [[_other]] ->
+@@ -230,7 +238,8 @@ defmodule Nebu.Matrix.RoomKeyBackupStore do
+            :ok <- ensure_not_erased(user_id),
+            {:ok, current} <- current_version(user_id),
+            :ok <- ensure_current(version, current),
+-           :ok <- store_entries(user_id, current, entries) do
++           :ok <- store_entries(user_id, current, entries),
++           :ok <- ensure_byte_budget(user_id) do
+         count_etag(user_id, current)
+       end
+     end)
+@@ -264,6 +273,7 @@ defmodule Nebu.Matrix.RoomKeyBackupStore do
+       FROM room_key_backup_versions v
+       LEFT JOIN room_key_backup_sessions s ON s.user_id = v.user_id AND s.version = v.version
+       WHERE v.user_id = $1 AND v.version = $2 AND v.deleted_at IS NULL
++      ORDER BY s.room_id, s.session_id
+       """,
+       [user_id, v]
+     )
+@@ -299,25 +309,38 @@ defmodule Nebu.Matrix.RoomKeyBackupStore do
+   defp require_version_row({:ok, %{rows: []}}), do: {:error, :not_found}
+   defp require_version_row(other), do: other
+ 
++  # The response body as IODATA: the stored `session_data` JSON text is SPLICED in, never decoded and re-encoded (one copy in memory, not three)
+   defp shape_sessions(:all, rows) do
+-    {:ok,
+-     Enum.reduce(rows, %{}, fn [room_id, session_id | data], acc ->
+-       Map.update(acc, room_id, %{session_id => key_backup_data(data)}, &Map.put(&1, session_id, key_backup_data(data)))
+-     end)}
++    rooms =
++      rows
++      |> Enum.chunk_by(fn [room_id | _] -> room_id end)
++      |> Enum.map(fn [[room_id | _] | _] = group -> [Jason.encode!(room_id), ~s(:{"sessions":{), sessions_iodata(group), "}}"] end)
++      |> Enum.intersperse(",")
++
++    {:ok, ["{\"rooms\":{", rooms, "}}"]}
+   end
+ 
+-  defp shape_sessions({:room, _}, rows), do: {:ok, Map.new(rows, fn [_, session_id | data] -> {session_id, key_backup_data(data)} end)}
++  defp shape_sessions({:room, _}, rows), do: {:ok, ["{\"sessions\":{", sessions_iodata(rows), "}}"]}
+ 
+-  defp shape_sessions({:session, _, _}, [[_, _ | data]]), do: {:ok, key_backup_data(data)}
++  defp shape_sessions({:session, _, _}, [[_, _ | data]]), do: {:ok, key_backup_data_iodata(data)}
+   defp shape_sessions({:session, _, _}, []), do: {:error, :session_not_found}
+ 
+-  defp key_backup_data([first_message_index, forwarded_count, is_verified, session_data]) do
+-    %{
+-      "first_message_index" => first_message_index,
+-      "forwarded_count" => forwarded_count,
+-      "is_verified" => is_verified,
+-      "session_data" => Jason.decode!(session_data)
+-    }
++  defp sessions_iodata(rows) do
++    rows |> Enum.map(fn [_, session_id | data] -> [Jason.encode!(session_id), ":", key_backup_data_iodata(data)] end) |> Enum.intersperse(",")
++  end
++
++  defp key_backup_data_iodata([first_message_index, forwarded_count, is_verified, session_data]) do
++    [
++      ~s({"first_message_index":),
++      Integer.to_string(first_message_index),
++      ~s(,"forwarded_count":),
++      Integer.to_string(forwarded_count),
++      ~s(,"is_verified":),
++      to_string(is_verified),
++      ~s(,"session_data":),
++      session_data,
++      "}"
++    ]
+   end
+ 
+   @doc """
+@@ -474,7 +497,37 @@ defmodule Nebu.Matrix.RoomKeyBackupStore do
+ 
+   # ── plumbing ────────────────────────────────────────────────────────────────
+ 
+-  defp lock_user(user_id), do: query("SELECT pg_advisory_xact_lock(hashtextextended('sync_global|' || $1::text, 0))", [user_id])
++  # The waiter of the lock holds a pooled connection: the lock is requested with a TIMEOUT (`lock_timeout`, SQLSTATE 55P03 = `{:error, :lock_timeout}`, answered 429)
++  defp lock_user(user_id) do
++    with {:ok, _} <- query("SELECT set_config('lock_timeout', $1::text, true)", ["#{lock_timeout_ms()}ms"]) do
++      case query("SELECT pg_advisory_xact_lock(hashtextextended('sync_global|' || $1::text, 0))", [user_id]) do
++        {:error, %Postgrex.Error{postgres: %{code: :lock_not_available}}} -> {:error, :lock_timeout}
++        other -> other
++      end
++    end
++  end
++
++  defp lock_timeout_ms, do: positive_env(:room_keys_lock_timeout_ms, @default_lock_timeout_ms)
++  defp max_bytes, do: positive_env(:room_keys_max_bytes_per_user, @default_max_bytes)
++  defp max_version_rows, do: positive_env(:room_keys_max_version_rows_per_user, @default_max_version_rows)
++
++  defp positive_env(key, default) do
++    case Application.get_env(:nebu, key, default) do
++      n when is_integer(n) and n > 0 -> n
++      _ -> default
++    end
++  end
++
++  # the canonical bytes of every stored session_data plus the auth_data of every live version of the user, decided on the locked state AFTER the write of the
++  # request (so a replace counts only its delta); over the budget the transaction rolls back and nothing is stored
++  defp ensure_byte_budget(user_id) do
++    with {:ok, %{rows: [[sessions]]}} <-
++           query("SELECT COALESCE(sum(octet_length(session_data)), 0)::bigint FROM room_key_backup_sessions WHERE user_id = $1", [user_id]),
++         {:ok, %{rows: [[auth]]}} <-
++           query("SELECT COALESCE(sum(octet_length(auth_data)), 0)::bigint FROM room_key_backup_versions WHERE user_id = $1 AND deleted_at IS NULL", [user_id]) do
++      if sessions + auth > max_bytes(), do: {:error, :bytes_quota}, else: :ok
++    end
++  end
+ 
+   # a user whose erasure is under way (or done) writes nothing (story gdpr-erasure-global-data: the same rule as the account data)
+   defp ensure_not_erased(user_id) do
+diff --git a/server/lib/nebu/web/log_store/route_normalizer.ex b/server/lib/nebu/web/log_store/route_normalizer.ex
+index ff37cfa1..866f412b 100644
+--- a/server/lib/nebu/web/log_store/route_normalizer.ex
++++ b/server/lib/nebu/web/log_store/route_normalizer.ex
+@@ -86,7 +86,9 @@ defmodule Nebu.Web.LogStore.RouteNormalizer do
+     "redact" => %{2 => @txn_id_placeholder},
+     "devices" => %{1 => @device_id_placeholder},
+     "account_data" => %{1 => @account_data_type_placeholder},
+-    "tags" => %{1 => @tag_placeholder}
++    "tags" => %{1 => @tag_placeholder},
++    # server-side key backup: `/room_keys/keys/{roomId}/{sessionId}`: both ids are client-chosen (a room id need not carry a `!`, a session id never does)
++    "room_keys" => %{2 => @room_id_placeholder, 3 => ":session_id"}
+   }
+ 
+   # A conservative, ADDITIONAL heuristic for opaque hex/UUID-shaped segments
+diff --git a/server/lib/nebu/web/plugs/json_body.ex b/server/lib/nebu/web/plugs/json_body.ex
+index 01bbdfb4..5b94c085 100644
+--- a/server/lib/nebu/web/plugs/json_body.ex
++++ b/server/lib/nebu/web/plugs/json_body.ex
+@@ -112,15 +112,31 @@ defmodule Nebu.Web.Plugs.JsonBody do
+ 
+   # the 5 MiB cap applies only to a request that CARRIES credentials (an `Authorization: Bearer <token>` header, the only form `OidcPlug` accepts):
+   # the body is parsed before the authentication, so an anonymous request keeps the 1 MB default
+-  def call(%Plug.Conn{path_info: ["_matrix", "client", "v3", "room_keys" | _]} = conn, _opts) do
+-    case Plug.Conn.get_req_header(conn, "authorization") do
+-      ["Bearer " <> token | _] when token != "" -> parse(conn, @room_keys_parser_opts)
+-      _ -> parse(conn, @parser_opts)
+-    end
+-  end
++  # cycle 1: NO pre-auth parse. The bodies of `v3/room_keys/**` stay UNFETCHED here; the authenticated route reads them with `parse_room_keys/1` after the authentication
++  # and the write rate limit.
++  def call(%Plug.Conn{path_info: ["_matrix", "client", "v3", "room_keys" | _]} = conn, _opts), do: conn
+ 
+   def call(conn, _opts), do: parse(conn, @parser_opts)
+ 
++  @doc """
++  Reads and parses the JSON body of an AUTHENTICATED `room_keys` request with the 5 MiB limit (called by the route after the authentication and the write
++  rate limit). A body above the limit is answered `413 M_TOO_LARGE` (halted), malformed JSON is flagged like on every route.
++  """
++  @spec parse_room_keys(Plug.Conn.t()) :: Plug.Conn.t()
++  def parse_room_keys(conn) do
++    Plug.Parsers.call(conn, @room_keys_parser_opts)
++  rescue
++    _ in Plug.Parsers.RequestTooLargeError ->
++      conn
++      |> Plug.Conn.put_resp_content_type("application/json")
++      |> Plug.Conn.put_resp_header("connection", "close")
++      |> Plug.Conn.send_resp(413, Jason.encode!(%{"errcode" => "M_TOO_LARGE", "error" => "Request body is too large"}))
++      |> Plug.Conn.halt()
++
++    Plug.Parsers.ParseError ->
++      %{conn | body_params: %{}} |> Plug.Conn.assign(:json_parse_error, true)
++  end
++
+   defp parse(conn, parser_opts) do
+     Plug.Parsers.call(conn, parser_opts)
+   rescue
+diff --git a/server/lib/nebu/web/router/protected.ex b/server/lib/nebu/web/router/protected.ex
+index fa42e038..83596d3f 100644
+--- a/server/lib/nebu/web/router/protected.ex
++++ b/server/lib/nebu/web/router/protected.ex
+@@ -602,13 +602,15 @@ defmodule Nebu.Web.Router.Protected do
+   # tier of their own (60 per minute, burst 30, like the sibling account_data tier); reads are not limited (a client restoring
+   # a backup reads one session per undecryptable event).
+   @room_keys_write_rate_limit Nebu.Web.Plugs.RateLimit.init(rate_per_min: 60, burst: 30, tier: "room_keys", key: :user)
++  # cycle 1: the two BULK reads (GET /keys, GET /keys/{room}) load a whole version: a bucket of their own (30 per minute, burst 10 per user)
++  @room_keys_bulk_read_rate_limit Nebu.Web.Plugs.RateLimit.init(rate_per_min: 30, burst: 10, tier: "room_keys_bulk_read", key: :user)
+ 
+   get "/client/v3/room_keys/version" do
+     HttpRoomKeys.get_version(conn)
+   end
+ 
+   post "/client/v3/room_keys/version" do
+-    room_keys_write(conn, fn -> HttpRoomKeys.create_version(conn) end)
++    room_keys_write(conn, fn conn -> HttpRoomKeys.create_version(conn) end)
+   end
+ 
+   get "/client/v3/room_keys/version/:version" do
+@@ -616,35 +618,35 @@ defmodule Nebu.Web.Router.Protected do
+   end
+ 
+   put "/client/v3/room_keys/version/:version" do
+-    room_keys_write(conn, fn -> HttpRoomKeys.update_version(conn, version) end)
++    room_keys_write(conn, fn conn -> HttpRoomKeys.update_version(conn, version) end)
+   end
+ 
+   delete "/client/v3/room_keys/version/:version" do
+-    room_keys_write(conn, fn -> HttpRoomKeys.delete_version(conn, version) end)
++    room_keys_write(conn, fn conn -> HttpRoomKeys.delete_version(conn, version) end)
+   end
+ 
+   get "/client/v3/room_keys/keys" do
+-    HttpRoomKeys.get_keys(conn, :all)
++    room_keys_bulk_read(conn, fn -> HttpRoomKeys.get_keys(conn, :all) end)
+   end
+ 
+   put "/client/v3/room_keys/keys" do
+-    room_keys_write(conn, fn -> HttpRoomKeys.put_keys(conn, :all) end)
++    room_keys_write(conn, fn conn -> HttpRoomKeys.put_keys(conn, :all) end)
+   end
+ 
+   delete "/client/v3/room_keys/keys" do
+-    room_keys_write(conn, fn -> HttpRoomKeys.delete_keys(conn, :all) end)
++    room_keys_write(conn, fn conn -> HttpRoomKeys.delete_keys(conn, :all) end)
+   end
+ 
+   get "/client/v3/room_keys/keys/:room_id" do
+-    HttpRoomKeys.get_keys(conn, {:room, room_id})
++    room_keys_bulk_read(conn, fn -> HttpRoomKeys.get_keys(conn, {:room, room_id}) end)
+   end
+ 
+   put "/client/v3/room_keys/keys/:room_id" do
+-    room_keys_write(conn, fn -> HttpRoomKeys.put_keys(conn, {:room, room_id}) end)
++    room_keys_write(conn, fn conn -> HttpRoomKeys.put_keys(conn, {:room, room_id}) end)
+   end
+ 
+   delete "/client/v3/room_keys/keys/:room_id" do
+-    room_keys_write(conn, fn -> HttpRoomKeys.delete_keys(conn, {:room, room_id}) end)
++    room_keys_write(conn, fn conn -> HttpRoomKeys.delete_keys(conn, {:room, room_id}) end)
+   end
+ 
+   get "/client/v3/room_keys/keys/:room_id/:session_id" do
+@@ -652,16 +654,28 @@ defmodule Nebu.Web.Router.Protected do
+   end
+ 
+   put "/client/v3/room_keys/keys/:room_id/:session_id" do
+-    room_keys_write(conn, fn -> HttpRoomKeys.put_keys(conn, {:session, room_id, session_id}) end)
++    room_keys_write(conn, fn conn -> HttpRoomKeys.put_keys(conn, {:session, room_id, session_id}) end)
+   end
+ 
+   delete "/client/v3/room_keys/keys/:room_id/:session_id" do
+-    room_keys_write(conn, fn -> HttpRoomKeys.delete_keys(conn, {:session, room_id, session_id}) end)
++    room_keys_write(conn, fn conn -> HttpRoomKeys.delete_keys(conn, {:session, room_id, session_id}) end)
+   end
+ 
+   # the rate limit of the room_keys writes runs BEFORE the body is looked at
++  # cycle 1: the order is authentication (the `:authenticate` plug of this router), the write rate limit, and only THEN the body is read and parsed (5 MiB limit)
+   defp room_keys_write(conn, fun) do
+     conn = Nebu.Web.Plugs.RateLimit.call(conn, @room_keys_write_rate_limit)
++
++    if conn.halted do
++      conn
++    else
++      conn = Nebu.Web.Plugs.JsonBody.parse_room_keys(conn)
++      if conn.halted, do: conn, else: fun.(conn)
++    end
++  end
++
++  defp room_keys_bulk_read(conn, fun) do
++    conn = Nebu.Web.Plugs.RateLimit.call(conn, @room_keys_bulk_read_rate_limit)
+     if conn.halted, do: conn, else: fun.()
+   end
+ 
+diff --git a/server/priv/migrations/000056_room_key_backup.down.sql b/server/priv/migrations/000058_room_key_backup.down.sql
+similarity index 85%
+rename from server/priv/migrations/000056_room_key_backup.down.sql
+rename to server/priv/migrations/000058_room_key_backup.down.sql
+index 849b4734..b1f014d9 100644
+--- a/server/priv/migrations/000056_room_key_backup.down.sql
++++ b/server/priv/migrations/000058_room_key_backup.down.sql
+@@ -1,5 +1,5 @@
+--- 000056_room_key_backup.down.sql
+--- Reverses 000056_room_key_backup.up.sql.
++-- 000058_room_key_backup.down.sql
++-- Reverses 000058_room_key_backup.up.sql.
+ -- WARNING: dropping these tables DISCARDS every user's server-side key backup (all versions and all stored sessions). After a down + up
+ -- cycle clients find "no backup" (404 on GET /room_keys/version) and must create a new backup from their own device keys; chat history that
+ -- was only recoverable from the backup stays unreadable for devices that no longer hold the keys.
+diff --git a/server/priv/migrations/000056_room_key_backup.up.sql b/server/priv/migrations/000058_room_key_backup.up.sql
+similarity index 91%
+rename from server/priv/migrations/000056_room_key_backup.up.sql
+rename to server/priv/migrations/000058_room_key_backup.up.sql
+index 83a57cee..81d4b41c 100644
+--- a/server/priv/migrations/000056_room_key_backup.up.sql
++++ b/server/priv/migrations/000058_room_key_backup.up.sql
+@@ -1,6 +1,6 @@
+--- 000056_room_key_backup.up.sql
++-- 000058_room_key_backup.up.sql
+ -- Story server-side-key-backup (epic e2ee-client-support, REQ-2026-011): the Matrix CS v1.18 "Server-side key backups" store
+--- (/_matrix/client/v3/room_keys/**). OPAQUE per user: the server stores `auth_data` and the `session_data` blobs verbatim as JSON text,
++-- (/_matrix/client/v3/room_keys/**). OPAQUE per user: the server stores `auth_data` and the `session_data` blobs as opaque JSON text,
+ -- never decrypts and never parses them beyond well-formedness and size (ADR-011 stays: this enables no E2EE room).
+ --
+ -- room_key_backup_versions: one row per backup version of a user. `version` is a per-user counter (the newest non-deleted version is the
+@@ -45,6 +45,10 @@ CREATE TABLE IF NOT EXISTS room_key_backup_sessions (
+         CHECK (first_message_index BETWEEN 0 AND 4294967295 AND forwarded_count BETWEEN 0 AND 4294967295)
+ );
+ 
++-- the live versions (the markers are never pruned: accepted growth, bounded by the per-user row cap): the lookups of the current version and of a live version
++-- must not scan them
++CREATE INDEX IF NOT EXISTS room_key_backup_versions_live_idx ON room_key_backup_versions (user_id, version) WHERE deleted_at IS NULL;
++
+ GRANT SELECT, INSERT, UPDATE, DELETE ON room_key_backup_versions TO nebu_app;
+ GRANT SELECT, INSERT, UPDATE, DELETE ON room_key_backup_sessions TO nebu_app;
+ 

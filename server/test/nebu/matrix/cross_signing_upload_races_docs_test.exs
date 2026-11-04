@@ -246,7 +246,8 @@ defmodule Nebu.Matrix.CrossSigningUploadRacesDocsTest do
     test "pin: every log line of the cross-signing handlers interpolates the error KIND only" do
       src = read(@protected)
       [_, from] = String.split(src, "defp do_device_signing_upload(conn) do", parts: 2)
-      [region, _] = String.split(from, "defp deep_merge_sig_map(existing, new)", parts: 2)
+      # story key-query-hardening: the signature merge moved out of the router (`Nebu.Matrix.KeySignatureStore`, logs the error kind only); the region ends at `keys_digest/1`
+      [region, _] = String.split(from, "defp keys_digest(supplied)", parts: 2)
       logs = Regex.scan(~r/Logger\.\w+\((?:"[^\n]*"|[^\n]*)\)/, region) |> Enum.map(&hd/1)
       assert logs != [], "the handlers log failures (the pin must see them)"
 

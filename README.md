@@ -46,12 +46,13 @@ Existing Matrix servers each have a trade-off that makes them hard to adopt in e
 - **Matrix Client-Server API compatible** — standard clients, no fork required
 - **No federation** — ~40% less protocol complexity, optimized for single-org deployments
 - **Minimal dependencies** — Elixir/OTP + PostgreSQL. No Redis, no NATS, no Kafka
-- **OIDC-first auth** — Keycloak, Azure AD, Google Workspace, Dex out of the box
+- **OIDC-first auth** — Keycloak, Azure AD, Google Workspace, Dex out of the box; optional **OAuth 2.0 authorization server** (Matrix v1.15) in front of your IdP
+- **E2EE client infrastructure** — key backup, to-device, device verification; rooms stay unencrypted and archivable
 - **Ed25519 message signatures** — authenticity and non-repudiation built in
 - **Compliance-ready** — audit logging, legal export, four-eyes principle for privileged access
 - **Horizontally scalable** — clustered Elixir/OTP application (libcluster + Horde + `pg`)
 
-**Intentional non-goals:** federation, end-to-end encryption (by design — see [Current Limitations](#current-limitations)).
+**Intentional non-goals:** federation and end-to-end encrypted rooms (by design — see [Current Limitations](#current-limitations)).
 
 ---
 
@@ -92,13 +93,15 @@ Deep dives: [`docs/architecture/`](docs/architecture/) · ADRs: [`docs/architect
 <!-- markdownlint-disable MD013 -->
 These are **deliberate design decisions**, not oversights. Open an issue only if you believe a limitation should be reconsidered — not to ask when it will be "fixed."
 
-### No End-to-End Encryption
+### No End-to-End Encrypted Rooms
 
-Nebu does **not** implement E2EE. Message content is encrypted in transit (TLS 1.3) and at rest (AES-256-GCM for media), but the server can read all messages.
+Nebu supports the **client-side E2EE infrastructure** (server-side key backup, to-device messages, device key directory, cross-signing and device verification), but it does **not** encrypt rooms. Room messages are encrypted in transit (TLS 1.3) and media at rest (AES-256-GCM), and the server can read them. The server stores only public keys and opaque blobs, decrypts nothing and logs no key material.
 
-**Why this is intentional:** Nebu targets organizations that require compliance access — audit logging, legal export, four-eyes-principle review of privileged content (Epic 5). True E2EE makes server-side compliance access impossible. A future "Managed E2EE" model (client encrypts, server holds escrow keys) is on the roadmap but not yet designed. See [ADR-007](docs/architecture/adr/ADR-007-ed25519-x25519-keypairs.md).
+**Why this is intentional:** Nebu targets organizations that require compliance access — audit logging, legal export, four-eyes-principle review of privileged content (Epic 5). End-to-end encrypted rooms make server-side compliance access impossible. `m.room.encryption` and `m.room.encrypted` are therefore refused (`403 M_FORBIDDEN`) on every write path, and `sendToDevice` accepts only a fixed allowlist of event types. See [ADR-011](docs/architecture/adr/ADR-011-managed-e2ee-key-escrow.md); a "Managed E2EE" model (client encrypts, server holds escrow keys) stays a roadmap item and would need a new decision.
 
-**Practical impact for client users:** The Matrix E2EE setup dialogs in Element Web are silenced via stubs (`keys/upload`, `keys/query`). You will not see "Unable to set up keys" errors, but messages are not end-to-end encrypted.
+**Accepted residual:** to-device messages (Olm-wrapped key exchange and verification) are an opaque, non-archived user-to-user channel, bounded by size, count and rate limits and recorded in the risk register ([`docs/architecture/11-risks.md`](docs/architecture/11-risks.md)). End-to-end encrypted Element Call calls are not supported.
+
+**Practical impact for client users:** Element Web and FluffyChat can set up key backup, a recovery key and device verification. Rooms stay unencrypted, so keep your recovery key safe: Nebu cannot recover it.
 
 ### No Federation
 
@@ -189,9 +192,9 @@ Full setup walkthrough: [`docs/getting-started.md`](docs/getting-started.md)
 
 Nebu implements the core of the Matrix Client-Server API. Clients that rely only on these endpoints work without modification.
 
-**Implemented:** login, logout, sync, send, messages, createRoom, join, typing, receipts, profile, presence, media upload/download/thumbnail, `keys/upload`, `keys/query`.
+**Implemented:** login, logout, sync, send, messages, createRoom, join, typing, receipts, profile, presence, media upload/download/thumbnail, and the E2EE client infrastructure: `keys/upload`, `keys/query`, `keys/claim`, `keys/changes`, `keys/device_signing/upload`, `keys/signatures/upload`, `room_keys/*` (key backup), `sendToDevice`.
 
-**Intentionally excluded:** `/_matrix/federation/*`, `/_matrix/identity/*`, `/_matrix/client/v3/keys/claim` (no E2EE).
+**Intentionally excluded:** `/_matrix/federation/*`, `/_matrix/identity/*`, encrypted rooms (`m.room.encryption` and `m.room.encrypted` are refused).
 
 **OAuth 2.0 API (opt-in, Matrix v1.15):** Nebu can act as an OAuth 2.0 authorization server in front of the corporate IdP; it is off by default (`oauth_enabled = false`) and `/_matrix/client/versions` lists v1.15 only while it is enabled. An administrator switches it on and off on the Configuration page of the Admin UI (`/admin/config`, "OAuth 2.0 authorization server") or with SQL. Preconditions, activation checklist and rollback: [`docs/architecture/07-deployment.md`](docs/architecture/07-deployment.md) ("Activating OAuth").
 
@@ -231,7 +234,7 @@ All dependencies are Apache 2.0, MIT, BSD, or PostgreSQL License. No AGPLv3, no 
 | 8     | Public open-source release (GitHub/GitLab, CI, docs scaffold)                    | Done     |
 | 9     | Post-MVP API completeness, full-text search, OIDC user directory (SCIM 2.0)      | Done     |
 | 10    | Production deployment (Stackit/AWS/K8s), Element Web integration, certbot TLS    | Done     |
-| 11    | Managed E2EE key escrow (ADR-011 required)                                        | Planned  |
+| 11    | E2EE client infrastructure (key backup, to-device, verification) — done; Managed E2EE key escrow (ADR-011) — planned | Partly done |
 | 12    | Matrix Spaces + room moderator feature completeness                               | Planned  |
 | 13    | Object storage (MinIO S3), clustering & horizontal scale                          | Planned  |
 <!-- markdownlint-enable MD013 MD060 -->

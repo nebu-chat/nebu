@@ -35,7 +35,9 @@ both next to `replaces_state` (one batched predecessor lookup); the scenario is 
 
 - **"Unable to set up keys" at the first Element login (34 failures in the first run were attributed to it): a SERVER gap.** `POST /_matrix/client/v3/room_keys/version` (Element creates a key backup right after the
   cross-signing bootstrap of a user's first login) answered 404 on `main` and 405 M_UNRECOGNIZED on this branch; the Go gateway had an acceptance stub that the Elixir migration dropped. Fixed in the server (story
-  `room-keys-version-post-stub`).
+  `room-keys-version-post-stub`, an acceptance stub: a constant `200 {"version":"1"}` that stored nothing). Since story `server-side-key-backup` (epic e2ee-client-support) the stub is gone: `/room_keys/**` is a real
+  per-user key backup store (migration 000058), so every Element e2e login now creates a REAL backup and the Element e2e job is a merge gate for that story. K7 (`crypto/recovery-setup`) is the place for an API
+  read-back of `GET /room_keys/version` once its test step is fixed.
 - **Matrix users alex / marie / kai did not exist: an e2e SETUP gap.** Without the OIDC scope `profile` the IdP token carries no `name`, Nebu derives the Matrix localpart from the opaque `sub`
   (`@ciqw...:localhost`) instead of `@alex:localhost` (OIDC Scopes Law: nothing is requested unless configured). The bootstrap fixture now sets the Matrix client scopes `profile email`,
   `global-setup.ts` sets them on an already bootstrapped stack that has none.

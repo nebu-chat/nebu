@@ -347,4 +347,86 @@ defmodule Nebu.Web.LogStore.RouteNormalizerTest do
                "/user/:user_id/rooms/:room_id/tags/:tag/"
     end
   end
+
+  # story server-side-key-backup, cycle 1 (Kassandra LOW 5, CWE-532): the room and session id segments of `/room_keys/keys/{roomId}/{sessionId}` are client-chosen; a room id
+  # need not carry the `!` sigil and a session id never does. They must not reach the request log (which prints the route template), exactly like the tag name and the state key.
+  describe "room_keys: client-chosen room and session ids never appear in the template" do
+    @rk "/_matrix/client/v3/room_keys"
+
+    test "a non-sigil room id and a client-chosen session id are replaced; the fixed segments stay" do
+      t = RouteNormalizer.normalize_route(@rk <> "/keys/plain-room-secret/client-session-secret")
+      refute t =~ "plain-room-secret"
+      refute t =~ "client-session-secret"
+      assert t =~ "/_matrix/client/v3/room_keys/keys/"
+    end
+
+    test "a sigil room id (raw and percent-encoded) and a session id are replaced" do
+      for room <- ["!r:b", "%21r%3Ab"] do
+        t = RouteNormalizer.normalize_route(@rk <> "/keys/#{room}/sess-secret")
+        refute t =~ "sess-secret"
+        refute t =~ "!r:b"
+        refute t =~ "%21r"
+      end
+    end
+
+    test "the room level (no session id) does not leak a non-sigil room id either" do
+      t = RouteNormalizer.normalize_route(@rk <> "/keys/plain-room-secret")
+      refute t =~ "plain-room-secret"
+      assert t =~ "/room_keys/keys/"
+    end
+
+    for {label, path} <- [
+          {"empty segment before the room", "/room_keys/keys//room-secret/sess-secret"},
+          {"empty segment before the anchor", "/room_keys//keys/room-secret/sess-secret"},
+          {"trailing slash", "/room_keys/keys/room-secret/sess-secret/"},
+          {"percent-encoded anchor", "/%72oom_keys/keys/room-secret/sess-secret"},
+          {"percent-encoded slash inside the session id", "/room_keys/keys/room-secret/sess%2Fsecret"}
+        ] do
+      test "#{label} does not leak" do
+        t = RouteNormalizer.normalize_route(unquote("/_matrix/client/v3" <> path))
+        refute t =~ "room-secret"
+        refute t =~ "sess-secret"
+        refute t =~ "sess%2Fsecret"
+      end
+    end
+
+    # cycle 2 (INFO-2 of the delta review; supersedes the cycle-1 test whose `=~ "/room_keys/version"` also passed for the mislabelled `/version/:room_id`): the version number of
+    # `/room_keys/version/{n}` is a VERSION, not a room id, and its template must say so (`:version`, bounded cardinality: one template for every number)
+    test "the version routes keep an identifiable template: /version/{n} is /version/:version, not :room_id" do
+      assert RouteNormalizer.normalize_route(@rk <> "/version") == @rk <> "/version"
+      assert RouteNormalizer.normalize_route(@rk <> "/version/3") == @rk <> "/version/:version"
+      assert RouteNormalizer.normalize_route(@rk <> "/version/987654321") == @rk <> "/version/:version"
+      refute RouteNormalizer.normalize_route(@rk <> "/version/3") =~ ":room_id"
+    end
+
+    test "the version placeholder holds for the other spellings of the path (encoded anchor, empty segments, trailing slash)" do
+      for path <- [
+            "/_matrix/client/v3/room_keys/%76ersion/3",
+            "/_matrix/client/v3/%72oom_keys/version/3",
+            "/_matrix/client/v3/room_keys//version//3",
+            "/_matrix/client/v3/room_keys/version/3/"
+          ] do
+        t = RouteNormalizer.normalize_route(path)
+        assert t =~ ":version", "#{path} -> #{t}"
+        refute t =~ ":room_id", "#{path} -> #{t}"
+        refute t =~ "/3", "#{path} -> #{t}: the number must not stay in the template"
+      end
+    end
+
+    test "the keys routes are unchanged: /keys/{room}/{session} keeps :room_id and :session_id, also for ids named version" do
+      assert RouteNormalizer.normalize_route(@rk <> "/keys/!r:b/sess-secret") == @rk <> "/keys/:room_id/:session_id"
+      assert RouteNormalizer.normalize_route(@rk <> "/keys/version/sess-secret") == @rk <> "/keys/:room_id/:session_id"
+      assert RouteNormalizer.normalize_route(@rk <> "/keys/version") == @rk <> "/keys/:room_id"
+      assert RouteNormalizer.normalize_route(@rk <> "/keys/room-secret/version") == @rk <> "/keys/:room_id/:session_id"
+    end
+
+    test "a path segment named version elsewhere is not touched" do
+      assert RouteNormalizer.normalize_route("/_matrix/client/versions") == "/_matrix/client/versions"
+    end
+
+    test "other routes are not touched by the new rule: a room named room_keys elsewhere keeps the old template" do
+      assert RouteNormalizer.normalize_route("/_matrix/client/v3/rooms/!r:b/state/m.room.topic/key") ==
+               "/_matrix/client/v3/rooms/:room_id/state/:event_type/:state_key"
+    end
+  end
 end

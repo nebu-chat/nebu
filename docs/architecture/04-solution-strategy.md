@@ -52,6 +52,21 @@ Matrix sessions are opaque tokens stored server-side (decoupled from OIDC token 
 objects are AES-256-GCM encrypted at rest with per-object keys stored in PostgreSQL (managed E2EE
 key escrow, ADR-011).
 
+**5a. To-device queue (story to-device-messaging)**
+
+Matrix "send-to-device" messages (device verification, key requests) are queued as opaque rows in PostgreSQL
+per recipient device, delivered by `/sync` and deleted only when the client's next sync presents the
+`since` token that covers them (a retry delivers again, nothing is lost); a new message wakes the long
+poll of its target device through the `pg` Process Groups. No Redis, no broker; ADR-011 stays.
+
+**5b. Device-key directory and device-list stream (story device-key-directory)**
+
+`POST /keys/claim` hands one-time keys out exactly once with a single set based `UPDATE ... FOR UPDATE SKIP LOCKED` statement and returns the
+fallback key without consuming it; `GET /keys/changes` and the `device_lists` of `/sync` read a PostgreSQL change stream
+(`device_list_changes`) whose positions are drawn at commit from the existing `sync_global_pos_seq` and travel as the last group
+of the sync token. The restriction (own devices and users who share a joined room) is evaluated inside the statement, so unknown and
+unreachable targets are indistinguishable (no oracle). No Redis, no broker; the rate buckets are node-local; ADR-011 stays.
+
 **6. BEAM-native clustering**
 
 Horizontal scaling uses libcluster + Horde + `pg` Process Groups — no Redis, no NATS, no Kafka.

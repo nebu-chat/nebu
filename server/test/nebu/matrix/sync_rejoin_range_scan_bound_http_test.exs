@@ -346,7 +346,10 @@ defmodule Nebu.Matrix.SyncRejoinRangeScanBoundHttpTest do
       marked = fn statements -> Enum.filter(statements, &(String.contains?(&1, "/* history_visibility */") and not String.contains?(&1, "/* state_predecessors */"))) end
       assert length(marked.(small)) == 1 and length(marked.(big)) == 1, "exactly one visibility-judged room read per moved room\n#{listing(marked.(small))}\n---\n#{listing(small)}"
       assert length(small) == length(big), "20 hidden events: #{length(small)} statements, 400: #{length(big)}\n--- 20 ---\n#{listing(small)}\n--- 400 ---\n#{listing(big)}"
-      refute Enum.any?(small ++ big, &(&1 =~ "statement_timeout")), "the /sync reads have NO statement timeout (follow-up gk (4), story D1 (3))"
+      # The room reads have NO statement timeout (follow-up gk (4), story D1 (3)). Since story to-device-messaging (cycle 1, Decision 19) the to-device DELIVERY of a sync runs in a
+      # transaction of its own that sets a transaction-local timeout (`SET LOCAL` / `set_config(.., true)`): that setting statement is the only one that may name it.
+      sets_timeout? = &Regex.match?(~r/\A\s*(SET\s+LOCAL\s+statement_timeout|SELECT\s+set_config\()/i, &1)
+      refute Enum.any?(small ++ big, &(&1 =~ "statement_timeout" and not sets_timeout?.(&1))), "the /sync room reads have NO statement timeout (follow-up gk (4), story D1 (3))"
       norm = fn statements -> statements |> Enum.map(&String.replace(&1, ~r/\s+/, " ")) |> Enum.sort() end
       assert norm.(small) == norm.(big), "the same statements (texts), whatever the number of hidden events"
     end

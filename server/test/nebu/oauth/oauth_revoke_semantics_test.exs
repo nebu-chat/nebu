@@ -28,6 +28,16 @@ defmodule Nebu.OAuth.OAuthRevokeSemanticsTest do
   @https "https://app.example.com/cb"
 
   setup do
+    prior_server_name = Application.fetch_env(:event_dispatcher, :server_name)
+    Application.put_env(:event_dispatcher, :server_name, "test.local")
+
+    on_exit(fn ->
+      case prior_server_name do
+        {:ok, value} -> Application.put_env(:event_dispatcher, :server_name, value)
+        :error -> Application.delete_env(:event_dispatcher, :server_name)
+      end
+    end)
+
     T.enable_oauth()
     T.reset_rate_limits()
     priv = T.setup_idp!()
@@ -330,7 +340,9 @@ defmodule Nebu.OAuth.OAuthRevokeSemanticsTest do
       T.seed_cross_signing!(s.user_id)
       legacy = T.legacy_session!(s.user_id, dev())
       peer_uid = T.provision_user!()
-      peer = T.legacy_session!(peer_uid, dev())
+      peer = T.legacy_session!(peer_uid, dev()) |> Map.put(:uid, peer_uid)
+      # story key-query-hardening (D1): /keys/query serves the keys of a user to peers who share a joined room with it only: the peer shares a room with the user
+      Nebu.Matrix.ModerationTestSupport.invite_room(peer, [%{uid: s.user_id, at: s.at}])
 
       query = fn ->
         conn = T.matrix_request(:post, "/_matrix/client/v3/keys/query", peer.at, body: %{"device_keys" => %{s.user_id => []}})

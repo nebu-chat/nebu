@@ -27,6 +27,7 @@ defmodule Nebu.Web.Router.Protected do
 
   alias Nebu.Matrix.DeviceKeyStore
   alias Nebu.Matrix.CrossSigningKeyStore
+  alias Nebu.Matrix.HttpRoomKeys
 
   # Server-managed account data types: clients MUST NOT set them (405 M_BAD_JSON), global
   # and room scope (Matrix CS, Client Config). Reading them is allowed.
@@ -100,7 +101,9 @@ defmodule Nebu.Web.Router.Protected do
     # `stream_pos` up to which this client has received ROOM account data (per DEVICE,
     # because it lives in the client's own token). A token without a suffix (issued
     # before this feature) means position 0 = "all room account data" (delivered once).
-    {core_since, since_pos} = split_since_token(since)
+    # story device-key-directory: an optional LAST token group `.d<digits>` is the device-list stream position (nil = unknown: an old token)
+    {since, since_dl} = Nebu.Matrix.DeviceListStore.strip_position(since)
+    {core_since, since_pos, since_td} = split_since_token(since)
     has_since? = is_binary(core_since) and core_since != ""
 
     # S2 AC5: advance the device's last_seen_ts/last_seen_ip on this authenticated
@@ -122,9 +125,14 @@ defmodule Nebu.Web.Router.Protected do
     # wakes the core through `{:account_data_changed, nil}`). A device-less request has no position and no pre-check.
     timeout_ms =
       if has_since? and
-           (Nebu.Matrix.RoomAccountDataStore.pending?(user, since_pos) or global_account_data_pending?(user, positions)),
+           (Nebu.Matrix.RoomAccountDataStore.pending?(user, since_pos) or global_account_data_pending?(user, positions) or
+              Nebu.Matrix.ToDeviceStore.pending?(user, device_id, since_td)),
          do: 0,
          else: timeout_ms
+
+    # story device-key-directory: the device-list changes (and the position the answer carries) are read BEFORE the long poll; a pending change ends the wait
+    dl_pre = device_list_pre(user, has_since?, since_dl)
+    timeout_ms = if device_list_pending?(dl_pre), do: 0, else: timeout_ms
 
     # Story sync-membership-partition (D14): only the literal "true" asks for the full state; with a `since` the core then
     # returns at once (the spec ignores `timeout`) with every joined room's full state. Without a `since` it changes nothing.
@@ -132,7 +140,7 @@ defmodule Nebu.Web.Router.Protected do
 
     # A failed membership read is a 503 M_UNAVAILABLE (D10, fail closed) with no token saved: the client retries.
     case Nebu.Matrix.Http.call_core(fn -> core_sync(user, device_id, has_since?, core_since, timeout_ms, full_state?) end) do
-      {:ok, sync} -> finish_sync(conn, user, {device_id, positions}, since_pos, has_since?, sync)
+      {:ok, sync} -> finish_sync(conn, user, {device_id, positions}, {since_pos, since_td}, has_since?, sync, {since_dl, dl_pre})
       {:error, err} -> send_error(conn, err)
     end
   end
@@ -181,9 +189,66 @@ defmodule Nebu.Web.Router.Protected do
     }
   end
 
-  defp finish_sync(conn, user, key, since_pos, has_since?, sync) do
+  # `{since position, the pre-read}`: no `since` -> `{:position, pos | nil}`; a `since` -> `{:changes, %{changed, left, pos}}` or `:error`
+  defp device_list_pre(_user, false, _since_dl), do: {:position, position_or_nil()}
+
+  defp device_list_pre(user, true, nil) do
+    with {:ok, pos} <- Nebu.Matrix.DeviceListStore.position(),
+         {:ok, result} <- Nebu.Matrix.DeviceListStore.changes(user, nil, nil) do
+      {:changes, %{result | pos: pos}}
+    else
+      _ -> :error
+    end
+  end
+
+  defp device_list_pre(user, true, since_dl) do
+    case Nebu.Matrix.DeviceListStore.changes(user, since_dl, nil) do
+      {:ok, result} -> {:changes, result}
+      _ -> :error
+    end
+  end
+
+  defp position_or_nil do
+    case Nebu.Matrix.DeviceListStore.position() do
+      {:ok, pos} -> pos
+      _ -> nil
+    end
+  end
+
+  defp device_list_pending?({:changes, %{changed: changed, left: left}}), do: changed != [] or left != []
+  defp device_list_pending?(_), do: false
+
+  # `{changed, left, position}` of the answer: a pure initial sync lists no peer; a fallback of a request that carried a `since` lists every shared user
+  # (the client cannot know it got an initial-shaped answer); an incremental answer lists the pre-read. A failed read lists nobody and keeps the presented
+  # position (nothing is lost: the next sync reads again).
+  defp device_lists_of_answer(_user, {:position, pos}, _has_since?, _fallback?, _since_dl), do: {[], [], pos}
+
+  defp device_lists_of_answer(user, _pre, true, true, _since_dl) do
+    with {:ok, pos} <- Nebu.Matrix.DeviceListStore.position(),
+         {:ok, shared} <- Nebu.Matrix.DeviceListStore.shared_users(user) do
+      {shared, [], pos}
+    else
+      _ -> {[], [], nil}
+    end
+  end
+
+  defp device_lists_of_answer(_user, {:changes, %{changed: changed, left: left, pos: pos}}, _has_since?, _fallback?, _since_dl), do: {changed, left, pos}
+  defp device_lists_of_answer(_user, :error, _has_since?, _fallback?, since_dl), do: {[], [], since_dl}
+
+  defp put_device_lists(response, user, changed, left) do
+    response
+    |> update_in(["device_lists", "changed"], fn own -> Enum.uniq((own || []) ++ changed) end)
+    |> update_in(["device_lists", "left"], fn _ -> Enum.reject(left, &(&1 == user)) end)
+  end
+
+  defp finish_sync(conn, user, key, {since_pos, since_td}, has_since?, sync, {since_dl, dl_pre}) do
     rooms = sync.rooms
     fallback? = sync.fallback_to_initial
+
+    # story to-device-messaging: acknowledge what the presented token covers (only a token that continues THIS device's row: an initial or fallback
+    # answer acknowledges nothing) and deliver the pending messages of the device. A failed delivery is an EMPTY `to_device` at the presented position (see below).
+    ack = if has_since? and not fallback?, do: since_td
+    td_delivery = Nebu.Matrix.ToDeviceStore.deliver(user, elem(key, 0), ack)
 
     # Rooms the user newly joined in this delta: the client has never seen their
     # account data, so deliver ALL of it (not only changes after the position).
@@ -222,21 +287,40 @@ defmodule Nebu.Web.Router.Protected do
         fn {_rid, t, c} -> %{"type" => t, "content" => c} end
       )
 
+    # A failing delivery (a lock or statement timeout, a database fault) never fails the sync: the answer carries an EMPTY `to_device` and keeps the presented
+    # position (nothing is acknowledged, nothing is lost, the next sync delivers); the rooms and the account data are unaffected. The log names the KIND only.
+    {td_events, td_pos} =
+      case td_delivery do
+        {:ok, %{events: td_events, position: td_pos}} ->
+          {td_events, td_pos}
+
+        {:error, reason} ->
+          # the KIND of the failure only: a database error message can quote a row (the content of a message)
+          Logger.error("sync: the to-device messages could not be read (#{to_device_error_kind(reason)})")
+          {[], if(ack, do: ack, else: 0)}
+      end
+
+    {dl_changed, dl_left, dl_pos} = device_lists_of_answer(user, dl_pre, has_since?, fallback?, since_dl)
+
+    token =
+      (sync.since_token <> "." <> Integer.to_string(latest_pos) <> if(td_pos > 0, do: "." <> Integer.to_string(td_pos), else: ""))
+      |> Nebu.Matrix.DeviceListStore.put_position(dl_pos)
+
     response =
-      sync_response(
-        sync.since_token <> "." <> Integer.to_string(latest_pos),
-        rooms ++ extra_rooms,
-        room_ad,
-        sync.invite_rooms,
-        sync.leave_rooms
-      )
+      sync_response(token, rooms ++ extra_rooms, room_ad, sync.invite_rooms, sync.leave_rooms)
       |> put_device_e2e_counts(conn)
       |> put_global_deliveries(user, key, has_since?, fallback?, sync.since_token)
+      |> put_device_lists(user, dl_changed, dl_left)
+      |> Map.put("to_device", %{"events" => td_events})
 
     send_json(conn, 200, response)
   end
 
-  # `<core>[.<pos>]` → {core, pos}; nil → {nil, 0}.
+  defp to_device_error_kind(%{__struct__: module}), do: inspect(module)
+  defp to_device_error_kind(reason) when is_atom(reason), do: Atom.to_string(reason)
+  defp to_device_error_kind(_), do: "error"
+
+  # `<core>[.<pos>[.<to-device pos>]]` → {core, pos, to_device_pos}; nil → {nil, 0, 0}.
   #
   # The position suffix is recognised ONLY as a trailing `.` + ASCII digits (so `+5`, `-1`,
   # `5x`, an empty suffix or `a.b.c` are NOT positions: the whole token stays the core and
@@ -248,18 +332,26 @@ defmodule Nebu.Web.Router.Protected do
   # is clamped by `RoomAccountDataStore.list_for_sync/3` (it returns the real latest).
   @max_token_pos 9_223_372_036_854_775_807
 
+  # story to-device-messaging: an optional second trailing `.<digits>` is the to-device position of the response (`<core>.<ad pos>.<to-device pos>`;
+  # absent = 0, the token of a device that never received a to-device message keeps its two-part shape).
   defp split_since_token(since) when is_binary(since) do
-    case Regex.run(~r/\A(.+)\.([0-9]+)\z/s, since) do
-      [_, core, digits] ->
-        pos = if byte_size(digits) <= 19, do: String.to_integer(digits), else: 0
-        {core, if(pos <= @max_token_pos, do: pos, else: 0)}
+    case Regex.run(~r/\A(.+?)\.([0-9]+)(?:\.([0-9]+))?\z/s, since) do
+      [_, core, digits | rest] ->
+        {core, clamp_pos(digits), clamp_pos(List.first(rest, ""))}
 
       _ ->
-        {since, 0}
+        {since, 0, 0}
     end
   end
 
-  defp split_since_token(_), do: {nil, 0}
+  defp split_since_token(_), do: {nil, 0, 0}
+
+  defp clamp_pos(""), do: 0
+
+  defp clamp_pos(digits) do
+    pos = if byte_size(digits) <= 19, do: String.to_integer(digits), else: 0
+    if pos <= @max_token_pos, do: pos, else: 0
+  end
 
   # Top-level `account_data.events` (Matrix CS §GET /sync) and the user's OWN id in `device_lists.changed` after a
   # cross-signing key change (CS §Cross-signing). Global account data is durable (PostgreSQL, story account-data-durability)
@@ -344,15 +436,20 @@ defmodule Nebu.Web.Router.Protected do
   defp put_device_e2e_counts(response, conn) do
     user = conn.assigns[:current_user]
 
-    otk_counts =
+    # story device-key-directory: PER DEVICE (the spec), `signed_curve25519` is ALWAYS present (0 when none) and the fallback types are ALWAYS a list;
+    # a device-LESS request (an unbound raw IdP JWT) keeps the legacy per-user aggregates (documented: oracle D3)
+    {otk_counts, fallback_types} =
       case conn.assigns[:device_id] do
-        did when is_binary(did) and did != "" -> DeviceKeyStore.otk_counts(user, did)
-        _ -> DeviceKeyStore.otk_counts_for_user(user)
+        did when is_binary(did) and did != "" ->
+          {DeviceKeyStore.otk_counts(user, did), DeviceKeyStore.unused_fallback_key_types(user, did)}
+
+        _ ->
+          {DeviceKeyStore.otk_counts_for_user(user), DeviceKeyStore.unused_fallback_key_types_for_user(user)}
       end
 
     response
-    |> Map.put("device_one_time_keys_count", otk_counts)
-    |> Map.put("device_unused_fallback_key_types", DeviceKeyStore.unused_fallback_key_types_for_user(user))
+    |> Map.put("device_one_time_keys_count", Map.put_new(otk_counts, "signed_curve25519", 0))
+    |> Map.put("device_unused_fallback_key_types", fallback_types)
   end
 
   # ── POST /_matrix/client/v3/logout ────────────────────────────────────────
@@ -596,20 +693,129 @@ defmodule Nebu.Web.Router.Protected do
     error(conn, 404, "M_NOT_FOUND", "No TURN server configured")
   end
 
-  # GET /room_keys/version — no key backup configured. 404 M_NOT_FOUND is the
-  # spec-defined response (Matrix CS §Server-side key backups).
+  # Server-side key backups (Matrix CS v1.18, story server-side-key-backup): an OPAQUE per-user store (ADR-011 stays: this
+  # enables no E2EE room), handled by Nebu.Matrix.HttpRoomKeys on top of Nebu.Matrix.RoomKeyBackupStore. The WRITES (POST / PUT / DELETE) are charged to a per-user
+  # tier of their own (60 per minute, burst 5: a write parses up to 5 MiB). The two BULK reads (GET /keys, GET /keys/{room}) load a whole version: a bucket
+  # of their own (30 per minute, burst 3 per user) plus a slot (one in flight per user, two per node, `RoomKeysReadGate`). GET /version and GET /version/{v}
+  # (a count over up to 100 000 rows) share a light bucket (120 per minute, burst 30). The single-session read is not limited (a client restoring a backup
+  # reads one session per undecryptable event). All independent of each other; node-local like every rate tier.
+  @room_keys_write_rate_limit Nebu.Web.Plugs.RateLimit.init(rate_per_min: 60, burst: 5, tier: "room_keys", key: :user)
+  @room_keys_bulk_read_rate_limit Nebu.Web.Plugs.RateLimit.init(rate_per_min: 30, burst: 3, tier: "room_keys_bulk_read", key: :user)
+  @room_keys_version_read_rate_limit Nebu.Web.Plugs.RateLimit.init(rate_per_min: 120, burst: 30, tier: "room_keys_version_read", key: :user)
+
   get "/client/v3/room_keys/version" do
-    error(conn, 404, "M_NOT_FOUND", "No backup found")
+    room_keys_version_read(conn, fn conn -> HttpRoomKeys.get_version(conn) end)
   end
 
-  # POST /room_keys/version — key backup creation ACCEPTANCE STUB (story room-keys-version-post-stub).
-  # Element Web creates a key backup right after the cross-signing bootstrap of a user's first login;
-  # without a 2xx it shows "Unable to set up keys". The Go gateway had exactly this stub (dropped by the
-  # Elixir migration). Nebu has no server-side key backup (ADR-011: no E2EE rooms, nothing to back up):
-  # the body is ignored, NOTHING is stored (no DB access), the GET above keeps answering "no backup".
-  # Every other room_keys/* route stays M_UNRECOGNIZED.
   post "/client/v3/room_keys/version" do
-    send_json(conn, 200, %{"version" => "1"})
+    room_keys_write(conn, fn conn -> HttpRoomKeys.create_version(conn) end)
+  end
+
+  get "/client/v3/room_keys/version/:version" do
+    room_keys_version_read(conn, fn conn -> HttpRoomKeys.get_version(conn, version) end)
+  end
+
+  put "/client/v3/room_keys/version/:version" do
+    room_keys_write(conn, fn conn -> HttpRoomKeys.update_version(conn, version) end)
+  end
+
+  delete "/client/v3/room_keys/version/:version" do
+    room_keys_write(conn, fn conn -> HttpRoomKeys.delete_version(conn, version) end)
+  end
+
+  get "/client/v3/room_keys/keys" do
+    room_keys_bulk_read(conn, fn conn -> HttpRoomKeys.get_keys(conn, :all) end)
+  end
+
+  put "/client/v3/room_keys/keys" do
+    room_keys_write(conn, fn conn -> HttpRoomKeys.put_keys(conn, :all) end)
+  end
+
+  delete "/client/v3/room_keys/keys" do
+    room_keys_write(conn, fn conn -> HttpRoomKeys.delete_keys(conn, :all) end)
+  end
+
+  get "/client/v3/room_keys/keys/:room_id" do
+    room_keys_bulk_read(conn, fn conn -> HttpRoomKeys.get_keys(conn, {:room, room_id}) end)
+  end
+
+  put "/client/v3/room_keys/keys/:room_id" do
+    room_keys_write(conn, fn conn -> HttpRoomKeys.put_keys(conn, {:room, room_id}) end)
+  end
+
+  delete "/client/v3/room_keys/keys/:room_id" do
+    room_keys_write(conn, fn conn -> HttpRoomKeys.delete_keys(conn, {:room, room_id}) end)
+  end
+
+  get "/client/v3/room_keys/keys/:room_id/:session_id" do
+    HttpRoomKeys.get_keys(conn, {:session, room_id, session_id})
+  end
+
+  put "/client/v3/room_keys/keys/:room_id/:session_id" do
+    room_keys_write(conn, fn conn -> HttpRoomKeys.put_keys(conn, {:session, room_id, session_id}) end)
+  end
+
+  delete "/client/v3/room_keys/keys/:room_id/:session_id" do
+    room_keys_write(conn, fn conn -> HttpRoomKeys.delete_keys(conn, {:session, room_id, session_id}) end)
+  end
+
+  # A room_keys write: the authentication already ran (the `:authenticate` plug of this router), then the write rate limit, and only THEN the body is read
+  # and parsed (5 MiB limit; `JsonBody` leaves these bodies unfetched). An anonymous, junk-credential or rate-limited request never has its body read.
+  defp room_keys_write(conn, fun) do
+    conn = Nebu.Web.Plugs.RateLimit.call(conn, @room_keys_write_rate_limit)
+
+    if conn.halted do
+      conn
+    else
+      conn = Nebu.Web.Plugs.JsonBody.parse_room_keys(conn)
+      if conn.halted, do: conn, else: fun.(conn)
+    end
+  end
+
+  # ── PUT /_matrix/client/v3/sendToDevice/{eventType}/{txnId} (story to-device-messaging) ─────────────────────────────────────────────────────
+  # Order: authentication (the `:authenticate` plug of this router), the event-type allowlist (D2), the per-USER rate limit (60 / min, burst 30, own tier), and only THEN the body is read
+  # (64 KiB cap, `JsonBody` leaves it unfetched) and validated. An anonymous, junk-credential or rate-limited request never has its body read.
+  @to_device_rate_limit Nebu.Web.Plugs.RateLimit.init(rate_per_min: 60, burst: 30, tier: "to_device", key: :user)
+
+  put "/client/v3/sendToDevice/:event_type/:txn_id" do
+    # story e2ee-compliance-channel-guard (D2): the allowlist check is FIRST (after authentication): a refused type consumes no token, no slot, no byte budget
+    refused = Nebu.Matrix.HttpToDevice.refuse_unlisted_type(conn, event_type)
+    conn = if refused, do: refused, else: Nebu.Web.Plugs.RateLimit.call(conn, @to_device_rate_limit)
+
+    if refused || conn.halted do
+      conn
+    else
+      # a rate limit is not a concurrency limit: a slot per user and per node, answered 429 BEFORE the body is read when none is free
+      result =
+        Nebu.Matrix.ToDeviceSendGate.run(conn.assigns[:current_user], fn ->
+          conn = Nebu.Web.Plugs.JsonBody.parse_to_device(conn)
+          if conn.halted, do: conn, else: Nebu.Matrix.HttpToDevice.send_to_device(conn, event_type, txn_id)
+        end)
+
+      case result do
+        {:ok, conn} -> conn
+        :overflow -> Nebu.Web.Plugs.RateLimit.respond_limited(conn, 1)
+      end
+    end
+  end
+
+  defp room_keys_version_read(conn, fun) do
+    conn = Nebu.Web.Plugs.RateLimit.call(conn, @room_keys_version_read_rate_limit)
+    if conn.halted, do: conn, else: fun.(conn)
+  end
+
+  # a bulk read: the rate limit, then the slot (at most one in flight per user, two per node), answered 429 before any database work when taken
+  defp room_keys_bulk_read(conn, fun) do
+    conn = Nebu.Web.Plugs.RateLimit.call(conn, @room_keys_bulk_read_rate_limit)
+
+    if conn.halted do
+      conn
+    else
+      case Nebu.Matrix.RoomKeysReadGate.run(conn.assigns[:current_user], fn -> fun.(conn) end) do
+        {:ok, conn} -> conn
+        :overflow -> Nebu.Web.Plugs.RateLimit.respond_limited(conn, 1)
+      end
+    end
   end
 
   # GET MSC3814 dehydrated_device — not in CS API v1.18; unstable proposal only.
@@ -667,44 +873,38 @@ defmodule Nebu.Web.Router.Protected do
     send_json(conn, 200, @empty_pushrules)
   end
 
-  # POST /keys/query — device-key + cross-signing lookup (Matrix CS §/keys/query).
-  # Echoes back the device_keys objects published via /keys/upload AND the
-  # cross-signing keys published via /keys/device_signing/upload, so a client (incl.
-  # Element querying its OWN user) sees its device registered and its cross-signing
-  # state set up. Users without cross-signing keys get empty maps. This is the key
-  # DIRECTORY only — it does not enable E2EE (ADR-011).
+  # POST /keys/query — device-key + cross-signing lookup (Matrix CS §/keys/query), story key-query-hardening (REQ-2026-014): the caller and the users who share a
+  # room with the caller (both sides joined) are served, every other user is left out byte-identically to an unknown user; `user_signing_keys` for the owner only; the
+  # master key carries the own signatures of its owner and the ones made by the caller. This is the key DIRECTORY only — it does not enable E2EE (ADR-011).
+  # See Nebu.Matrix.HttpKeyQuery / Nebu.Matrix.KeyQueryStore.
   post "/client/v3/keys/query" do
-    requested = body_params(conn)["device_keys"]
-
-    {device_keys, cross_signing} =
-      if is_map(requested) and map_size(requested) > 0 do
-        {query_device_keys(requested),
-         CrossSigningKeyStore.query_cross_signing(Map.keys(requested))}
-      else
-        {%{}, %{}}
-      end
-
-    master_keys = collect_cross_signing(cross_signing, "master")
-    self_signing_keys = collect_cross_signing(cross_signing, "self_signing")
-    user_signing_keys = collect_cross_signing(cross_signing, "user_signing")
-
-    send_json(conn, 200, %{
-      "device_keys" => device_keys,
-      "master_keys" => master_keys,
-      "self_signing_keys" => self_signing_keys,
-      "user_signing_keys" => user_signing_keys,
-      "failures" => %{}
-    })
+    Nebu.Matrix.HttpKeyQuery.query(conn)
   end
 
-  # POST /keys/signatures/upload — merge cross-signing / device signatures (Matrix CS
-  # §/keys/signatures/upload). Each (user_id, key_id, signedObject) carries new signatures
-  # to merge into the stored key object (a device key or a cross-signing key). On a match
-  # the new signatures are merged and persisted; on a mismatch (the non-signatures parts
-  # differ, or no stored key) a per-(user,key) M_INVALID_SIGNATURE goes into `failures`.
-  # Always 200 with {"failures": …}. Directory only — does not enable E2EE (ADR-011).
+  # POST /keys/claim (story device-key-directory): one-time keys exactly once, the fallback key without consuming it; the caller's own devices and users who
+  # share a joined room only, everything else is left out (no oracle); rate buckets before the consuming statement. See Nebu.Matrix.HttpKeyDirectory.
+  post "/client/v3/keys/claim" do
+    Nebu.Matrix.HttpKeyDirectory.claim(conn)
+  end
+
+  # GET /keys/changes (story device-key-directory): the users whose device lists changed between two sync tokens (the position is the `.d<n>` token group).
+  # Per-user tier "keys_changes" (60 per minute, burst 20), charged before any database work.
+  @keys_changes_rate_limit Nebu.Web.Plugs.RateLimit.init(rate_per_min: 60, burst: 20, tier: "keys_changes", key: :user)
+
+  get "/client/v3/keys/changes" do
+    conn = Nebu.Web.Plugs.RateLimit.call(conn, @keys_changes_rate_limit)
+    if conn.halted, do: conn, else: Nebu.Matrix.HttpKeyDirectory.changes(conn)
+  end
+
+  # POST /keys/signatures/upload (Matrix CS §/keys/signatures/upload), story key-query-hardening (REQ-2026-014): who may sign what (own device by the own self-signing
+  # key, own master key by an own device, another user's master key by the caller's user-signing key when both share a joined room), every signature verified with
+  # Ed25519 over the canonical JSON, per-entry `failures` inside a 200. Per-user tier "keys_signatures" (60 per minute, burst 20), charged before any work. Directory
+  # only — does not enable E2EE (ADR-011). See Nebu.Matrix.HttpKeyQuery / Nebu.Matrix.KeySignatureStore.
+  @keys_signatures_rate_limit Nebu.Web.Plugs.RateLimit.init(rate_per_min: 60, burst: 20, tier: "keys_signatures", key: :user)
+
   post "/client/v3/keys/signatures/upload" do
-    do_signatures_upload(conn)
+    conn = Nebu.Web.Plugs.RateLimit.call(conn, @keys_signatures_rate_limit)
+    if conn.halted, do: conn, else: Nebu.Matrix.HttpKeyQuery.signatures_upload(conn)
   end
 
   # POST /keys/upload — publish device identity keys, one-time keys, and fallback keys
@@ -1632,6 +1832,11 @@ defmodule Nebu.Web.Router.Protected do
     key_check = Nebu.Matrix.EventSize.check_keys(event_type, nil, user)
 
     cond do
+      # story e2ee-compliance-channel-guard (D1): m.room.encrypted is refused FIRST (decoded type, exact match): before the room lookup, the
+      # txn-dedup entry and any DB work; the same answer for every room, nothing echoed
+      Nebu.Matrix.EventDispatcher.Server.encrypted_room_event?(event_type) ->
+        error(conn, 403, "M_FORBIDDEN", Nebu.Matrix.EventDispatcher.Server.e2ee_refusal_message())
+
       conn.assigns[:json_parse_error] == true ->
         error(conn, 400, "M_BAD_JSON", "Request body is not valid JSON")
 
@@ -3106,182 +3311,6 @@ defmodule Nebu.Web.Router.Protected do
 
   defp keys_digest(supplied), do: Nebu.Matrix.CanonicalJson.sha256_hex(supplied)
 
-  # signatures/upload: merge each supplied signature into the targeted stored key
-  # object (device key or cross-signing key); build a per-(user,key) failures map.
-  defp do_signatures_upload(conn) do
-    body = body_params(conn)
-    caller = conn.assigns[:current_user]
-
-    failures =
-      Enum.reduce(body, %{}, fn {user_id, keyed}, acc ->
-        merge_user_signatures(caller, user_id, keyed, acc)
-      end)
-
-    send_json(conn, 200, %{"failures" => failures})
-  end
-
-  # MINOR-1: a user may only upload signatures attached to their OWN keys in this
-  # story scope (cross-user signing is out of scope per the story guardrail). For a
-  # body keyed under another user, mark every one of that user's keys M_FORBIDDEN
-  # and touch NO storage.
-  defp merge_user_signatures(caller, user_id, keyed, acc)
-       when is_map(keyed) and user_id != caller do
-    Enum.reduce(keyed, acc, fn {key_id, _signed_object}, inner ->
-      put_forbidden_failure(inner, user_id, key_id)
-    end)
-  end
-
-  defp merge_user_signatures(_caller, user_id, keyed, acc) when is_map(keyed) do
-    Enum.reduce(keyed, acc, fn {key_id, signed_object}, inner ->
-      case merge_one_signature(user_id, key_id, signed_object) do
-        :ok -> inner
-        :invalid -> put_signature_failure(inner, user_id, key_id)
-      end
-    end)
-  end
-
-  defp merge_user_signatures(_caller, _user_id, _keyed, acc), do: acc
-
-  # The signed_object MUST match the stored key object for that key_id EXCEPT its
-  # `signatures` (which carries the new sigs to merge). Try device key first, then
-  # cross-signing key. Both paths are validate-THEN-persist: a mismatch (or no
-  # stored key) writes NOTHING.
-  #
-  # story cross-signing-upload-races (code review MINOR-1, Kassandra F-1): the SHAPE of `signatures` is validated first.
-  # `signatures` must be a map (an absent one is an empty map) whose every per-signer value is a map; anything else
-  # (null, a string, a list, a non-map per-signer value) is a failure entry in the 200, never a crash: the stores guard
-  # on maps, and a crash report would carry the call arguments (key id, submitted object) into the error log.
-  defp merge_one_signature(user_id, key_id, signed_object) when is_map(signed_object) do
-    new_sigs = Map.get(signed_object, "signatures", %{})
-
-    if valid_signatures_shape?(new_sigs) do
-      case merge_device_key_signature(user_id, key_id, signed_object, new_sigs) do
-        :ok ->
-          :ok
-
-        :not_found ->
-          merge_cross_signing_signature(user_id, key_id, signed_object, new_sigs)
-
-        :mismatch ->
-          :invalid
-      end
-    else
-      :invalid
-    end
-  end
-
-  defp merge_one_signature(_user_id, _key_id, _signed_object), do: :invalid
-
-  defp valid_signatures_shape?(sigs) when is_map(sigs), do: Enum.all?(sigs, fn {_signer, per_signer} -> is_map(per_signer) end)
-  defp valid_signatures_shape?(_sigs), do: false
-
-  # A device-key signature merge. Returns :ok | :not_found | :mismatch.
-  defp merge_device_key_signature(user_id, key_id, signed_object, new_sigs) do
-    case DeviceKeyStore.query_devices([user_id]) do
-      %{^user_id => devices} ->
-        case Map.get(devices, key_id) do
-          nil ->
-            :not_found
-
-          stored ->
-            stored_clean = stored |> Map.delete("signatures") |> Map.delete("unsigned")
-            # MINOR-2: drop `unsigned` from the submitted object too, so a client that
-            # includes `unsigned` does not falsely mismatch (symmetric with stored_clean).
-            submitted_clean = signed_object |> Map.delete("signatures") |> Map.delete("unsigned")
-
-            if stored_clean == submitted_clean do
-              merged_sigs = deep_merge_sig_map(Map.get(stored, "signatures", %{}), new_sigs)
-              # Persist the device key with merged signatures (drop the read-only `unsigned`).
-              to_store =
-                stored
-                |> Map.delete("unsigned")
-                |> Map.put("signatures", merged_sigs)
-
-              DeviceKeyStore.put_device_keys(user_id, key_id, to_store)
-              :ok
-            else
-              :mismatch
-            end
-        end
-
-      _ ->
-        :not_found
-    end
-  end
-
-  # MAJOR-1: a cross-signing signature merge, mirroring the device-key path: validate FIRST, persist ONLY on a
-  # match (the parts other than `signatures` / `unsigned` of the stored and the submitted object are equal). Returns
-  # :ok | :invalid.
-  #
-  # story cross-signing-upload-races (D4, D5, D-A1): the check and the write run in ONE transaction under the per-user
-  # lock, in the store (`CrossSigningKeyStore.merge_signatures/4`: `lock_keys/1`, the key found by its id in that read,
-  # the object comparison against the LOCKED object, the merge, all three columns written from that read). There is
-  # deliberately no unlocked pre-check here: an error-blind early read would turn a failed read into a failure entry of
-  # a 200, while the locked read lets a failed read crash the request (500), like a failed write. `:not_found` (-> a
-  # failure entry): no such cross-signing key, a different object under the same key id, or an erased user; nothing is
-  # stored then.
-  defp merge_cross_signing_signature(user_id, key_id, signed_object, new_sigs) do
-    case CrossSigningKeyStore.merge_signatures(user_id, key_id, new_sigs, signed_object) do
-      :ok -> :ok
-      :not_found -> :invalid
-    end
-  end
-
-  # story cross-signing-upload-races (fix cycle 2, Kassandra D-1): the STORED device-key `signatures` may be malformed (the key upload does
-  # not validate their shape). A stored value or a stored per-signer value that is not a map counts as no signatures (dropped), so the
-  # merge never crashes (the crash report would log the submitted signatures) and the result is always a map of maps.
-  defp deep_merge_sig_map(existing, new) do
-    Map.merge(sig_map(existing), sig_map(new), fn _signer, old_map, new_map -> Map.merge(old_map, new_map) end)
-  end
-
-  defp sig_map(sigs) when is_map(sigs), do: for({signer, per_signer} <- sigs, is_map(per_signer), into: %{}, do: {signer, per_signer})
-  defp sig_map(_sigs), do: %{}
-
-  defp put_signature_failure(failures, user_id, key_id) do
-    entry = %{"errcode" => "M_INVALID_SIGNATURE", "error" => "Signature does not match stored key"}
-    Map.update(failures, user_id, %{key_id => entry}, &Map.put(&1, key_id, entry))
-  end
-
-  # MINOR-1: caller-identity guard failure — uploading signatures for another user.
-  defp put_forbidden_failure(failures, user_id, key_id) do
-    entry = %{"errcode" => "M_FORBIDDEN", "error" => "Cannot upload signatures for another user"}
-    Map.update(failures, user_id, %{key_id => entry}, &Map.put(&1, key_id, entry))
-  end
-
-  # Builds a /keys/query cross-signing map (master_keys/self_signing_keys/user_signing_keys)
-  # from CrossSigningKeyStore.query_cross_signing/1 output, selecting the given short key.
-  defp collect_cross_signing(cross_signing, short_key) do
-    Enum.reduce(cross_signing, %{}, fn {uid, entry}, acc ->
-      case Map.get(entry, short_key) do
-        nil -> acc
-        obj -> Map.put(acc, uid, obj)
-      end
-    end)
-  end
-
-  # Resolves a /keys/query `device_keys` request (`%{user_id => [device_ids]}`) against
-  # the directory. An empty device list selects all of that user's devices (per spec);
-  # users/devices with no published keys are omitted (no `failures` entry).
-  defp query_device_keys(requested) do
-    all = DeviceKeyStore.query_devices(Map.keys(requested))
-
-    Enum.reduce(requested, %{}, fn {user_id, device_list}, acc ->
-      case Map.get(all, user_id) do
-        nil ->
-          acc
-
-        devices ->
-          selected =
-            case device_list do
-              list when is_list(list) and list != [] -> Map.take(devices, list)
-              _ -> devices
-            end
-
-          if map_size(selected) > 0, do: Map.put(acc, user_id, selected), else: acc
-      end
-    end)
-  end
-
   # Story history-visibility-enforcement (security cycle 1, HIGH #1 (b)): the PUT of m.room.history_visibility,
   # m.room.guest_access and m.room.join_rules is charged like the power levels (the access settings of a room; the history
   # visibility events are the cost input of every member's reads, follow-up `gk`).
@@ -3316,6 +3345,10 @@ defmodule Nebu.Web.Router.Protected do
       # functional — it is orthogonal to encryption.
       event_type == "m.room.encryption" ->
         error(conn, 403, "M_FORBIDDEN", "End-to-end encryption is not supported on this server")
+
+      # story e2ee-compliance-channel-guard (D1): an opaque m.room.encrypted event is refused like m.room.encryption (same text, any room)
+      Nebu.Matrix.EventDispatcher.Server.encrypted_room_event?(event_type) ->
+        error(conn, 403, "M_FORBIDDEN", Nebu.Matrix.EventDispatcher.Server.e2ee_refusal_message())
 
       conn.assigns[:json_parse_error] == true ->
         error(conn, 400, "M_BAD_JSON", "Request body is not valid JSON")

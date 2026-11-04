@@ -25,9 +25,24 @@ defmodule Nebu.Compliance.UserDeletionTestSupport do
 
   @https "https://app.example.com/cb"
 
+  # story server-side-key-backup (epic e2ee-client-support): the two tables of the server-side key backup (`room_key_backup_sessions`, `room_key_backup_versions`; the
+  # sessions first: the order is the order of the deletes of the erasure) are per-user data and are ERASED with the user: all versions (the soft-delete markers
+  # included) and all session rows.
+  # story to-device-messaging (epic e2ee-client-support): the queue (`to_device_messages`: user_id = the recipient; the messages the user SENT are deleted by `sender`, an extra statement of the
+  # erasure) and the idempotency records (`to_device_txns`: user_id = the sender) are per-user data and ERASED with the user (no foreign key between them, no order).
+  # story device-key-directory (epic e2ee-client-support): the device-list change stream (`device_list_changes`: the key changes and the membership changes of the user, written by
+  # `DeviceKeyStore.put_device_keys/4`, `CrossSigningKeyStore.put_keys/2` and the trigger on `room_members`, so `seed_user!/2` seeds it through the REAL writers) is per-user data and
+  # ERASED with the user (`user_id` is the key; no foreign key, no order).
+  # story key-query-hardening (epic e2ee-client-support): the cross-user signatures (`cross_signing_user_signatures`: `user_id` = the SIGNER, `target_user_id` = the user whose master key
+  # was signed; migration 000061) are per-user data and ERASED with the user: the rows the user made by `user_id`, the rows made ON its master key by one more statement on
+  # `target_user_id` (`seed_user!/2` seeds one row of each direction, plain SQL: the real writer needs two users who share a room).
   @expected_erased ~w(
     account_data cross_signing_keys device_keys device_one_time_keys device_fallback_keys user_room_account_data
     forgotten_rooms auto_join_opt_outs read_receipts uia_sessions oauth_account_sessions oauth_consent_requests oauth_consent_grants oauth_codes
+    room_key_backup_sessions room_key_backup_versions
+    to_device_messages to_device_txns
+    device_list_changes
+    cross_signing_user_signatures
   )
 
   @teardown_tables ~w(devices matrix_sessions jwt_device_bindings sessions oauth_idp_refresh_leases sync_tokens sync_room_cursors)
@@ -184,9 +199,27 @@ defmodule Nebu.Compliance.UserDeletionTestSupport do
 
     grant = T.insert_code!(cid, user_id: uid, device_id: dev, idp_rt: "idp-rt-code-#{canary}")
 
+    # story server-side-key-backup: the key backup (two live versions with sessions and a deleted one = the soft-delete marker), written through the REAL routes
+    backup = Nebu.Matrix.RoomKeysTestSupport.seed_backup!(uid, dev, canary)
+
+    # story to-device-messaging: two messages of the user to a second device of its own, through the REAL route (queue rows as recipient AND sender, two idempotency records)
+    to_device = Nebu.Matrix.ToDeviceTestSupport.seed_to_device!(uid, dev, canary)
+
+    # story key-query-hardening: a cross-user signature of the user (as signer) and one made on its master key by the partner (as target)
+    for {signer, target} <- [{uid, partner}, {partner, uid}] do
+      T.sql!(
+        "INSERT INTO cross_signing_user_signatures (user_id, target_user_id, target_key_id, target_key, signing_key_id, signature, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        # target_key is the public key value of the master key `T.cross_signing_keys/2` stores (id and value are both "MSK<canary>")
+        [signer, target, "MSK#{canary}", "MSK#{canary}", "ed25519:USK#{canary}", "sig-#{canary}", now]
+      )
+    end
+
     :ok = Nebu.Compliance.AuditWriter.log(admin(), "user_deactivated", "user", uid, %{"reason" => "seed-#{canary}"}, "success")
 
     secrets = %{
+      to_device: "td-1-#{canary}",
+      backup_session: "ct-c1-#{canary}",
+      backup_auth_data: "pk-cur-#{canary}",
       display: display,
       avatar: avatar,
       default_key: "defkey-#{canary}",
@@ -204,7 +237,7 @@ defmodule Nebu.Compliance.UserDeletionTestSupport do
       device_ip: device_ip
     }
 
-    %{uid: uid, dev: dev, ghost: ghost, room: room, canary: canary, secrets: secrets, grant: grant, partner: partner}
+    %{uid: uid, dev: dev, ghost: ghost, room: room, canary: canary, secrets: secrets, grant: grant, partner: partner, backup: backup, to_device: to_device}
   end
 
   @doc """

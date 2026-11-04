@@ -220,7 +220,10 @@ config :nebu, Oban,
        # client address; logs ONE warning with counts only. The signal needs 24 h of traffic anyway, and a
        # real single-NAT deployment would get 24 unsilenceable lines a day at an hourly cadence (4 a day is
        # loud enough). Existing limit-1 `oauth_cleanup` housekeeping queue, no new queue.
-       {"37 */6 * * *", Nebu.Workers.ClientIPCheckWorker}
+       {"37 */6 * * *", Nebu.Workers.ClientIPCheckWorker},
+       # story to-device-messaging (epic e2ee-client-support): hourly purge of to-device messages older than the TTL (7 days) and of idempotency records
+       # older than 24 h. Housekeeping only (delivery checks the TTL itself); existing limit-1 `oauth_cleanup` housekeeping queue.
+       {"41 * * * *", Nebu.Workers.ToDevicePurgeWorker}
      ]}
   ],
   # media-security-admin-control/4b-media-scan-worker (AC2): media_scan is

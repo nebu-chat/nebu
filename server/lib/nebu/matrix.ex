@@ -976,6 +976,13 @@ defmodule Nebu.Matrix do
   @spec purge_expired_uia_sessions() :: non_neg_integer()
   def purge_expired_uia_sessions, do: Nebu.Matrix.Uia.cleanup_expired()
 
+  @doc """
+  Deletes the to-device messages older than their TTL and the idempotency records older than theirs (the periodic `Nebu.Workers.ToDevicePurgeWorker`, story
+  to-device-messaging; ADR-020: the worker does not reach into `Nebu.Matrix.ToDeviceStore`). `{:ok, %{messages: n, txns: n}}` or `{:error, reason}`.
+  """
+  @spec purge_expired_to_device() :: {:ok, %{messages: non_neg_integer(), txns: non_neg_integer()}} | {:error, term()}
+  def purge_expired_to_device, do: Nebu.Matrix.ToDeviceStore.purge_expired()
+
   # The dispatcher reads the acting identity from the request-context map
   # (Nebu.Matrix.RequestMetadata). In-process callers (HTTP/Admin) pass a minimal
   # context map carrying the trusted identity — same shape as Nebu.Matrix.Http.stream/1.

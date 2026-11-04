@@ -1,0 +1,11 @@
+# Fix brief — Kassandra findings of e2ee-compliance-channel-guard (cycle 2, user decided: fix the small things)
+
+Report: `docs/stories/e2ee-client-support/security-reports/e2ee-compliance-channel-guard-security-review-2026-11-03.md` (read the two LOW details first). Verdict was CLEAN; scope: ONLY these two.
+
+## L1 — the room-upgrade copy is the one write path the guard misses
+`copy_state_events/3` (event_dispatcher/server.ex) excludes `m.room.encryption` but not `m.room.encrypted`, and `emit_state_event_at/6` has no type check, so an old `m.room.encrypted` STATE event (stored by createRoom `initial_state` before this story) is copied into the new room on upgrade. Fix at the lowest common place: ONE check in `emit_state_event_at/6` using the same named guard (`encrypted_room_event?/1`) so that no caller can emit one, and also exclude the type in `copy_state_events/3` (skip, do not fail the upgrade; the upgrade stays 200 and the other state is copied). Test (add to `server/test/nebu/matrix/e2ee_compliance_channel_guard_test.exs`, tagged to the scenario "No other write path takes an encrypted room event"): seed an `m.room.encrypted` state event in the old room with direct SQL/the store (the guard now refuses the API paths, so the legacy row must be inserted below the API like other legacy-state tests do; look for a seam), upgrade the room, assert the new room has NO `m.room.encrypted` state while the other state (name/topic) is copied and the upgrade answers 200. The test must FAIL on the current code.
+
+## L2 — docs must say "type filter, not content filter"
+The allowlist filters the event TYPE only: any content up to 64 KiB still passes under `m.dummy`, `m.key.verification.*`, `m.room_key_request`, `m.secret.request`, `m.room_key.withheld`. Say so in ADR-011 (the update 2026-11-03, accepted-residual item), in the 11-risks row of this story and in `http_to_device.ex`'s Allowlist doc section: "the guard narrows which types may be used, it does not inspect or limit content below the existing budgets; the channel is as large as before for the allowed types". Keep every token the docs pins in `e2ee_compliance_channel_guard_test.exs` need, and keep to-device selections free of 000056/000057/000058 (to_device_docs_test.exs pin).
+
+Do not touch anything else. You cannot run mix/Docker: say so; the orchestrator verifies with quick.sh.

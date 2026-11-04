@@ -112,7 +112,9 @@ defmodule Nebu.Admin.AdminStaleRoomsTest do
     end
 
     test "returns exactly the active + 0-member room" do
-      {rooms, _next} = DB.list_rooms(50, "", "stale", "")
+      # the shared database may hold more than 50 stale rooms of other suites that sort before the seeded ids (ORDER BY room_id, LIMIT 51):
+      # start the page right before them. The cursor `room_id > $C` is a prefix of every seeded id, so it sorts before all of them.
+      {rooms, _next} = DB.list_rooms(50, "!#{@run_id}", "stale", "")
 
       ids = MapSet.new(rooms, & &1.room_id)
 

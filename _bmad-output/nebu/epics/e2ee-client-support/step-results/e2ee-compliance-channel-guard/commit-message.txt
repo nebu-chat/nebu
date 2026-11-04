@@ -1,0 +1,38 @@
+feat(e2ee): compliance channel guard (no encrypted room events, to-device type allowlist)
+
+Closes the HIGH of the epic security review (SEC Gate 2): the E2EE client
+infrastructure gave clients an opaque channel next to the archived rooms.
+
+Room events: an event of type m.room.encrypted is refused with 403 M_FORBIDDEN (the
+text of the m.room.encryption refusal) on every write path: the room send route
+before the room lookup and the txn-dedup entry, the state PUT, and the dispatcher's
+emit/send paths; createRoom initial_state skips it and the room upgrade copy leaves it
+out. The match is on the decoded exact type; in-room verification events and
+redactions are unaffected.
+
+To-device: PUT /sendToDevice accepts only an exact, case-sensitive allowlist of event
+types (m.room.encrypted as the Olm wrapper, m.room_key_request, m.room_key.withheld,
+m.secret.request, m.dummy and the eight m.key.verification.* types). The type check is
+the first thing after authentication, before the rate limit, the byte budget, the
+send slot, the body and any database work; the refusal is a fixed 400 M_INVALID_PARAM
+without echo, identical for every recipient. m.room_key, m.forwarded_room_key and
+m.secret.send (inner-only payloads), the unstable withheld alias and the Element Call
+to-device key transport are refused (Element Call E2EE calls are not supported).
+
+keys/device_signing/upload joins the key-material request-body exclusion. ADR-011
+(update 2026-11-03), 11-risks, 07-deployment and the CHANGELOG state the accepted
+residual truthfully: to-device stays a non-archived, server-opaque user-to-user
+channel, the allowlist is a type filter and not a content filter, there is no audit
+of to-device sends; plus the migration-order precondition (000056/000057 before
+000058-000061) and the other epic residuals.
+
+Existing to-device tests that sent made-up types were adapted to allowlisted types;
+the limiter-first assertion for a malformed type became 400 because the type check now
+precedes the limiter. A stale docs pin of the previous story (key-query-hardening
+status) accepts ready or done.
+
+Security review (Kassandra): CLEAN with 2 LOW (room-upgrade copy path, docs wording),
+both fixed; the delta pass is CLEAN.
+
+Pipeline: ATDD, 2 fix cycles, code review CLEAN, Kassandra CLEAN.
+Refs: REQ-2026-015

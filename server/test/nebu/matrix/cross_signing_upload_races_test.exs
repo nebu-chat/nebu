@@ -65,6 +65,7 @@ defmodule Nebu.Matrix.CrossSigningUploadRacesTest do
     uid = s.user_id
     old = T.cross_signing_keys(uid, "OLD")
     assert T.device_signing_upload(s.at, old).status == 200, "precondition: the first upload needs no UIA"
+    register_sig_devices!(uid)
     %{s: s, uid: uid, old: old}
   end
 
@@ -81,8 +82,38 @@ defmodule Nebu.Matrix.CrossSigningUploadRacesTest do
   defp signatures_upload(token, body), do: T.matrix_request(:post, "/_matrix/client/v3/keys/signatures/upload", token, body: body)
 
   defp key_id(obj), do: obj["keys"] |> Map.keys() |> hd() |> String.split(":", parts: 2) |> List.last()
-  defp sig_for(uid, tag), do: %{uid => %{"ed25519:SG#{tag}" => "sig-#{tag}"}}
-  defp sig_body(uid, obj, tag), do: %{uid => %{key_id(obj) => Map.put(obj, "signatures", sig_for(uid, tag))}}
+
+  # story key-query-hardening (D5, D6): a signature on the own master key is verified with the Ed25519 key of one of the caller's DEVICES. Every tag is a device
+  # `SG<tag>` of the user with a deterministic key pair (seed = sha256(user id | tag)), registered by `register_sig_devices!/1` BEFORE a test takes any lock,
+  # so `sig_body/3` is a pure function (it runs inside the request tasks) and a different tag is a different signature.
+  @sig_tags ~w(M A B P F E LATE D R U)
+
+  defp tag_key(uid, tag) do
+    {pub, priv} = :crypto.generate_key(:eddsa, :ed25519, :crypto.hash(:sha256, uid <> "|" <> tag))
+    %{pub: Base.encode64(pub, padding: false), priv: priv}
+  end
+
+  defp register_sig_devices!(uid) do
+    for tag <- @sig_tags do
+      dev = "SG" <> tag
+
+      :ok =
+        Nebu.Matrix.DeviceKeyStore.put_device_keys(uid, dev, %{
+          "user_id" => uid,
+          "device_id" => dev,
+          "algorithms" => ["m.olm.v1.curve25519-aes-sha2"],
+          "keys" => %{("ed25519:" <> dev) => tag_key(uid, tag).pub, ("curve25519:" <> dev) => tag_key(uid, tag).pub}
+        })
+    end
+  end
+
+  defp sig_value(uid, obj, tag) do
+    message = obj |> Map.drop(["signatures", "unsigned"]) |> Nebu.Matrix.CanonicalJson.encode!()
+    Base.encode64(:crypto.sign(:eddsa, :none, message, [tag_key(uid, tag).priv, :ed25519]), padding: false)
+  end
+
+  defp sig_for(uid, obj, tag), do: %{uid => %{("ed25519:SG" <> tag) => sig_value(uid, obj, tag)}}
+  defp sig_body(uid, obj, tag), do: %{uid => %{key_id(obj) => Map.put(obj, "signatures", sig_for(uid, obj, tag))}}
 
   defp stored(uid), do: Store.get_keys(uid)
 
@@ -469,7 +500,7 @@ defmodule Nebu.Matrix.CrossSigningUploadRacesTest do
       keys = stored(w.uid)
       assert keys["self_signing_key"] == new_ssk, "the merge wrote back the stale self-signing key and undid the reset"
       assert keys["user_signing_key"] == w.old["user_signing_key"]
-      assert keys["master_key"] == Map.put(w.old["master_key"], "signatures", sig_for(w.uid, "M"))
+      assert keys["master_key"] == Map.put(w.old["master_key"], "signatures", sig_for(w.uid, w.old["master_key"], "M"))
     end
 
     defp reset_master_vs_merge!(kind, ctx) do
@@ -540,10 +571,11 @@ defmodule Nebu.Matrix.CrossSigningUploadRacesTest do
       assert Enum.map(answers, &status!/1) == [200, 200]
       assert Enum.all?(answers, &(T.json(&1) == %{"failures" => %{}}))
       signatures = stored(w.uid)["master_key"]["signatures"]
-      assert signatures[w.uid]["ed25519:SGA"] == "sig-A" and signatures[w.uid]["ed25519:SGB"] == "sig-B", "a lost update: got #{inspect(signatures)}"
+      assert signatures[w.uid]["ed25519:SGA"] == sig_value(w.uid, master, "A") and signatures[w.uid]["ed25519:SGB"] == sig_value(w.uid, master, "B"),
+             "a lost update: got #{inspect(signatures)}"
     end
 
-    test "pin: a plain merge adds the signature, keeps the other keys, and moves neither cross_signing_changed nor changed_pos", ctx do
+    test "pin: a plain merge adds the signature, keeps the other keys, and moves neither cross_signing_changed nor cross_signing_keys.changed_pos (it draws only the D10 stream position)", ctx do
       w = oauth_world!(ctx)
       T.sql!("UPDATE cross_signing_keys SET cross_signing_changed = FALSE WHERE user_id = $1", [w.uid])
       [_, _, _, pos, false] = cs_row(w.uid)
@@ -553,10 +585,10 @@ defmodule Nebu.Matrix.CrossSigningUploadRacesTest do
 
       assert conn.status == 200 and T.json(conn) == %{"failures" => %{}}
       keys = stored(w.uid)
-      assert keys["master_key"]["signatures"] == sig_for(w.uid, "P")
+      assert keys["master_key"]["signatures"] == sig_for(w.uid, w.old["master_key"], "P")
       assert keys["self_signing_key"] == w.old["self_signing_key"] and keys["user_signing_key"] == w.old["user_signing_key"]
       assert [_, _, _, ^pos, false] = cs_row(w.uid), "a merge does not touch cross_signing_changed / changed_pos"
-      assert seq() == before, "a merge draws no position"
+      assert seq() == before + 1, "the merge draws exactly one stream position: the D10 stamp of the signer's own key row"
     end
 
     test "pin: a submitted object that differs from the stored one writes nothing and reports the failure entry", ctx do
@@ -581,6 +613,7 @@ defmodule Nebu.Matrix.CrossSigningUploadRacesTest do
       s = legacy!(a.uid)
       master = stored(a.uid)["master_key"]
       assert master != nil, "precondition: the seeded user has cross-signing keys"
+      register_sig_devices!(a.uid)
 
       # the erasure takes its locks (uia rows, cross_signing_keys row, advisory lock) and then waits for this account_data row
       x = E.hold(fn -> T.sql!("SELECT 1 FROM account_data WHERE user_id = $1 ORDER BY type FOR UPDATE", [a.uid]) end)
@@ -621,6 +654,7 @@ defmodule Nebu.Matrix.CrossSigningUploadRacesTest do
       s = legacy!(uid)
       keys = T.cross_signing_keys(uid, "KEPT")
       assert :ok = Store.put_keys(uid, keys)
+      register_sig_devices!(uid)
       T.sql!("UPDATE users SET deletion_status = 'keys_deleted' WHERE user_id = $1", [uid])
       before = E.fp("cross_signing_keys", uid)
 
@@ -880,7 +914,7 @@ defmodule Nebu.Matrix.CrossSigningUploadRacesTest do
       end
 
       assert E.fp("cross_signing_keys", w.uid) == before, "nothing is stored"
-      refute_material!(log, key_strings(w.old) ++ ["sig-R", "ed25519:SGR"])
+      refute_material!(log, key_strings(w.old) ++ [sig_value(w.uid, w.old["master_key"], "R"), "ed25519:SGR"])
     end
 
     # The column fault above makes the SQL statement fail (and aborts the transaction, so a swallowed error would still end in a 500). A row whose

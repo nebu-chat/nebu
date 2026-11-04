@@ -4,8 +4,8 @@ defmodule Nebu.Matrix.CrossSigningSignatureShapeTest do
   validates the SHAPE of a submitted object's `signatures` before any store call.
 
   `signatures` must be a map (absent = empty map) whose every per-signer value is a map. Anything else (`null`, a string, a list, a per-signer value
-  that is not a map) is a failure entry `M_INVALID_SIGNATURE` in a `200`, for a key id that matches no stored key AND for the key id of the stored
-  master key, and nothing is written. It is never a crash: the store guards on maps, and a crash report would carry the call arguments (the key id,
+  that is not a map) is a failure entry `M_INVALID_PARAM` in a `200` (story key-query-hardening, D6: a malformed `signatures` member is a parameter
+  error, no longer an invalid signature), for a key id that matches no stored key AND for the key id of the stored master key, and nothing is written. It is never a crash: the store guards on maps, and a crash report would carry the call arguments (the key id,
   the submitted object) into the error log. The log check runs at :debug and leaves out only the existing per-request lines of
   `Nebu.Web.Plugs.RequestLogger` (they print the redacted body of every route; see `cross_signing_upload_races_test.exs`).
 
@@ -26,10 +26,37 @@ defmodule Nebu.Matrix.CrossSigningSignatureShapeTest do
   end
 
   defp world!(%{priv: priv, cid: cid}) do
-    s = T.oauth_device!(cid, @https, priv, T.unique_sub(), "SH" <> String.upcase(T.rand(4)))
+    dev = "SH" <> String.upcase(T.rand(4))
+    s = T.oauth_device!(cid, @https, priv, T.unique_sub(), dev)
     keys = T.cross_signing_keys(s.user_id, "SHAPE")
     assert T.device_signing_upload(s.at, keys).status == 200, "precondition: the first upload"
-    %{s: s, uid: s.user_id, master: Store.get_keys(s.user_id)["master_key"]}
+    %{s: s, uid: s.user_id, dev: dev, master: Store.get_keys(s.user_id)["master_key"]}
+  end
+
+  # story key-query-hardening (D6): a signature is verified with Ed25519 over the canonical JSON of the object without `signatures` and `unsigned`
+  defp keypair do
+    {pub, priv} = :crypto.generate_key(:eddsa, :ed25519)
+    %{priv: priv, b64: Base.encode64(pub, padding: false)}
+  end
+
+  defp real_sig(obj, kp) do
+    msg = obj |> Map.drop(["signatures", "unsigned"]) |> Nebu.Matrix.CanonicalJson.encode!()
+    Base.encode64(:crypto.sign(:eddsa, :none, msg, [kp.priv, :ed25519]), padding: false)
+  end
+
+  # the device of the world gets REAL identity keys (the verifying key of the signatures of its owner on the master key)
+  defp upload_real_device_keys!(s, dev) do
+    kp = keypair()
+
+    device_keys = %{
+      "user_id" => s.user_id,
+      "device_id" => dev,
+      "algorithms" => ["m.olm.v1.curve25519-aes-sha2"],
+      "keys" => %{"ed25519:#{dev}" => kp.b64, "curve25519:#{dev}" => Base.encode64(:crypto.strong_rand_bytes(32), padding: false)}
+    }
+
+    assert T.matrix_request(:post, "/_matrix/client/v3/keys/upload", s.at, body: %{"device_keys" => device_keys}).status == 200
+    kp
   end
 
   defp key_id(obj), do: obj["keys"] |> Map.keys() |> hd() |> String.split(":", parts: 2) |> List.last()
@@ -85,7 +112,7 @@ defmodule Nebu.Matrix.CrossSigningSignatureShapeTest do
 
       assert_received {:shape_result, result}
       assert %Plug.Conn{status: 200} = conn = result, "the request must answer 200 with a failure entry, got #{inspect(result, limit: 5)}"
-      assert T.json(conn)["failures"][w.uid][kid]["errcode"] == "M_INVALID_SIGNATURE"
+      assert T.json(conn)["failures"][w.uid][kid]["errcode"] == "M_INVALID_PARAM"
       assert E.fp("cross_signing_keys", w.uid) == before, "nothing is written for a malformed signatures value"
 
       own = own_entries(log)
@@ -96,9 +123,10 @@ defmodule Nebu.Matrix.CrossSigningSignatureShapeTest do
     end
   end
 
-  test "control: a well-formed signatures map on the stored key id is merged (the validation does not refuse valid input)", ctx do
+  test "control: a well-formed, REAL signature of an own device on the stored master key id is merged (the validation does not refuse valid input)", ctx do
     w = world!(ctx)
-    sigs = %{w.uid => %{"ed25519:SGOK" => "sig-ok"}}
+    dkp = upload_real_device_keys!(w.s, w.dev)
+    sigs = %{w.uid => %{("ed25519:" <> w.dev) => real_sig(w.master, dkp)}}
 
     conn = T.matrix_request(:post, "/_matrix/client/v3/keys/signatures/upload", w.s.at, body: %{w.uid => %{key_id(w.master) => Map.put(w.master, "signatures", sigs)}})
 
@@ -106,10 +134,14 @@ defmodule Nebu.Matrix.CrossSigningSignatureShapeTest do
     assert Store.get_keys(w.uid)["master_key"]["signatures"] == sigs
   end
 
-  test "control: an object without a signatures key is a valid empty merge (absent = empty map)", ctx do
+  test "an object without a signatures key is an M_INVALID_PARAM failure (no signature by the caller, story key-query-hardening D6)", ctx do
     w = world!(ctx)
-    conn = T.matrix_request(:post, "/_matrix/client/v3/keys/signatures/upload", w.s.at, body: %{w.uid => %{key_id(w.master) => Map.delete(w.master, "signatures")}})
-    assert conn.status == 200 and T.json(conn) == %{"failures" => %{}}
+    kid = key_id(w.master)
+    before = E.fp("cross_signing_keys", w.uid)
+    conn = T.matrix_request(:post, "/_matrix/client/v3/keys/signatures/upload", w.s.at, body: %{w.uid => %{kid => Map.delete(w.master, "signatures")}})
+    assert conn.status == 200
+    assert T.json(conn)["failures"][w.uid][kid]["errcode"] == "M_INVALID_PARAM"
+    assert E.fp("cross_signing_keys", w.uid) == before
   end
 
   # ─── fix cycle 2 (Kassandra D-1): MALFORMED STORED signatures ────────────────────────────────────────────────────────────────────────
@@ -147,35 +179,67 @@ defmodule Nebu.Matrix.CrossSigningSignatureShapeTest do
     for m <- material, do: refute(checked =~ m, "submitted or stored material reached a log line: #{String.slice(m, 0, 12)}")
   end
 
-  for body_key <- ["master_key", "self_signing_key"], stored <- [:string, :per_signer_string] do
-    test "stored #{body_key} with signatures #{stored}: a matching signatures/upload merges cleanly, 200, no crash, nothing in a log line", ctx do
-      {s, _dev} = session!(ctx)
+  # story key-query-hardening (D5, D6): the signature of an own device on the master key is verified with the stored device key (REAL Ed25519), and an own
+  # self-signing key can not be signed through this endpoint at all (M_FORBIDDEN): the malformed stored part stays untouched then
+  for stored <- [:string, :per_signer_string] do
+    test "stored master_key with signatures #{stored}: a matching REAL device signature merges cleanly, 200, no crash, nothing in a log line", ctx do
+      {s, dev} = session!(ctx)
       uid = s.user_id
       marker = "stored-marker-" <> T.rand(10)
       keys = T.cross_signing_keys(uid, "MAL")
-      keys = Map.update!(keys, unquote(body_key), &Map.put(&1, "signatures", malformed(unquote(stored), uid, marker)))
+      keys = Map.update!(keys, "master_key", &Map.put(&1, "signatures", malformed(unquote(stored), uid, marker)))
       assert T.device_signing_upload(s.at, keys).status == 200, "precondition: the first upload stores the malformed signatures as they are"
-      stored_obj = Store.get_keys(uid)[unquote(body_key)]
+      stored_obj = Store.get_keys(uid)["master_key"]
       assert stored_obj["signatures"] == malformed(unquote(stored), uid, marker), "precondition: the malformed value is stored"
+      dkp = upload_real_device_keys!(s, dev)
 
       kid = key_id(stored_obj)
-      sig_value = "sig-ok-" <> T.rand(10)
-      sigs = %{uid => %{"ed25519:SGOK" => sig_value}}
+      sig_value = real_sig(stored_obj, dkp)
+      sigs = %{uid => %{("ed25519:" <> dev) => sig_value}}
 
       {result, log} = request_logged(fn -> upload_signatures(s.at, %{uid => %{kid => Map.put(stored_obj, "signatures", sigs)}}) end)
 
       assert %Plug.Conn{status: 200} = conn = result, "the request must answer 200, got #{inspect(result, limit: 5)}"
       assert T.json(conn) == %{"failures" => %{}}
-      assert Store.get_keys(uid)[unquote(body_key)]["signatures"] == sigs, "the malformed stored part is dropped, the new signature is merged"
+      assert Store.get_keys(uid)["master_key"]["signatures"] == sigs, "the malformed stored part is dropped, the new signature is merged"
+      refute_logged!(log, [kid, marker, sig_value])
+    end
+
+    test "stored self_signing_key with signatures #{stored}: the own self-signing key through this endpoint is M_FORBIDDEN, 200, no crash, stored value untouched", ctx do
+      {s, dev} = session!(ctx)
+      uid = s.user_id
+      marker = "stored-marker-" <> T.rand(10)
+      keys = T.cross_signing_keys(uid, "MAL")
+      keys = Map.update!(keys, "self_signing_key", &Map.put(&1, "signatures", malformed(unquote(stored), uid, marker)))
+      assert T.device_signing_upload(s.at, keys).status == 200, "precondition: the first upload stores the malformed signatures as they are"
+      stored_obj = Store.get_keys(uid)["self_signing_key"]
+      assert stored_obj["signatures"] == malformed(unquote(stored), uid, marker), "precondition: the malformed value is stored"
+      dkp = upload_real_device_keys!(s, dev)
+      before = E.fp("cross_signing_keys", uid)
+
+      kid = key_id(stored_obj)
+      sig_value = real_sig(stored_obj, dkp)
+      sigs = %{uid => %{("ed25519:" <> dev) => sig_value}}
+
+      {result, log} = request_logged(fn -> upload_signatures(s.at, %{uid => %{kid => Map.put(stored_obj, "signatures", sigs)}}) end)
+
+      assert %Plug.Conn{status: 200} = conn = result, "the request must answer 200, got #{inspect(result, limit: 5)}"
+      assert T.json(conn)["failures"][uid][kid]["errcode"] == "M_FORBIDDEN"
+      assert E.fp("cross_signing_keys", uid) == before, "nothing is stored"
       refute_logged!(log, [kid, marker, sig_value])
     end
   end
 
+  # story key-query-hardening (D6): the signature of the self-signing key on the device key is REAL too (the device key itself needs no real key material)
   for stored <- [:string, :per_signer_string] do
-    test "stored device key with signatures #{stored}: a matching signatures/upload merges cleanly, 200, no crash, nothing in a log line", ctx do
+    test "stored device key with signatures #{stored}: a matching REAL self-signing signature merges cleanly, 200, no crash, nothing in a log line", ctx do
       {s, dev} = session!(ctx)
       uid = s.user_id
       marker = "stored-marker-" <> T.rand(10)
+      ssk = keypair()
+      keys = T.cross_signing_keys(uid, "MALDEV")
+      keys = Map.put(keys, "self_signing_key", %{"user_id" => uid, "usage" => ["self_signing"], "keys" => %{("ed25519:" <> ssk.b64) => ssk.b64}})
+      assert T.device_signing_upload(s.at, keys).status == 200, "precondition: the cross-signing keys with a real self-signing key"
 
       device_keys = %{
         "user_id" => uid,
@@ -189,8 +253,8 @@ defmodule Nebu.Matrix.CrossSigningSignatureShapeTest do
       stored_obj = Nebu.Matrix.DeviceKeyStore.query_devices([uid])[uid][dev]
       assert stored_obj["signatures"] == malformed(unquote(stored), uid, marker), "precondition: the device key upload stores the malformed signatures"
 
-      sig_value = "sig-ok-" <> T.rand(10)
-      sigs = %{uid => %{"ed25519:SGOK" => sig_value}}
+      sig_value = real_sig(stored_obj, ssk)
+      sigs = %{uid => %{("ed25519:" <> ssk.b64) => sig_value}}
       submitted = stored_obj |> Map.delete("unsigned") |> Map.put("signatures", sigs)
 
       {result, log} = request_logged(fn -> upload_signatures(s.at, %{uid => %{dev => submitted}}) end)

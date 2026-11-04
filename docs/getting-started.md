@@ -213,11 +213,19 @@ make dev
 
 ---
 
-### "Unable to set up keys" or E2EE warnings in Element
+### Element asks to set up keys, secure backup or device verification
 
-**Expected behavior.** Nebu does not implement E2EE. The `keys/upload` and `keys/device_signing/upload`
-endpoints return stubs that silence the dialog. If you see the dialog, try refreshing the page.
-The UIA flow (m.login.dummy) should dismiss it automatically.
+**Expected behavior.** Nebu supports the client-side E2EE infrastructure: device keys, cross-signing
+keys, server-side key backup (`room_keys`), to-device messages and device verification. Element and
+FluffyChat may therefore ask you to set up a recovery key or verify a device; that works. The server stores
+only public keys and opaque blobs, so **keep your recovery key safe: Nebu cannot recover it**.
+
+**Rooms are not end-to-end encrypted** and cannot be: Nebu refuses `m.room.encryption` and
+`m.room.encrypted` so that archive, audit log and legal export stay complete (ADR-011). Do not
+turn on "Enable end-to-end encryption" in room settings; the server answers `403 M_FORBIDDEN`.
+End-to-end encrypted Element Call calls are not supported either.
+
+If a setup dialog does not close, reload the page and try again.
 
 ---
 

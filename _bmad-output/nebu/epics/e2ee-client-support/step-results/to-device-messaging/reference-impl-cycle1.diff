@@ -1,0 +1,658 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index e841a14e..e64ce39e 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -11,7 +11,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
+ 
+ ### Added
+ 
+-- **To-device messaging `PUT /_matrix/client/v3/sendToDevice/{eventType}/{txnId}` and `to_device.events` in `/sync` (story to-device-messaging, epic e2ee-client-support; migration 000059)**: device verification (SAS between your own devices) and key requests work. An OPAQUE per-device queue in `to_device_messages` / `to_device_txns` (the server never decrypts, interprets or logs a content; both tables are deleted by the GDPR erasure, which also deletes the messages the erased user SENT), acknowledged by the `since` token of the next sync (a retry with the older token delivers again, nothing is lost), idempotent per (user, device, event type, txn id) in the database, a new message wakes the long poll of exactly its target device (`pg`, cluster wide). **Client-visible consequence:** the recipients are the sender's own devices and users the sender shares a JOINED room with (both sides `join`; an invitation opens no send path); every other target (no shared joined room, unknown user or device, remote user) is skipped silently with the same `200 {}` (no existence oracle), so a user you share no joined room with cannot be reached (Element and FluffyChat verify other users in the room, not through to-device messages). Limits: 64 KiB body and 50 recipient entries per request (`413 M_TOO_LARGE`), 100 targets and 1 MiB of rows per request, 500 messages / 8 MiB per device, 2000 messages / 32 MiB per user, per sender 100 per device and 200 messages / 4 MiB per recipient user, 100 messages / 1 MiB per sync response, 7 days TTL (Oban cron `Nebu.Workers.ToDevicePurgeWorker`); a full queue evicts the OLDEST messages (fairly: the sender with the largest share first) and never tells the sender; 60 requests per minute (burst 30) per user, at most 4 sends per user and 32 per node in flight (node-local, `429` before the body is read). Rooms stay unencrypted (ADR-011). Operators: run migration 000059 with the release; rolling back discards every queued, not yet acknowledged message.
++- **To-device messaging `PUT /_matrix/client/v3/sendToDevice/{eventType}/{txnId}` and `to_device.events` in `/sync` (story to-device-messaging, epic e2ee-client-support; migration 000059)**: device verification (SAS between your own devices) and key requests work. An OPAQUE per-device queue in `to_device_messages` / `to_device_txns` (the server never decrypts, interprets or logs a content; both tables are deleted by the GDPR erasure, which also deletes the messages the erased user SENT), acknowledged by the `since` token of the next sync (a retry with the older token delivers again, nothing is lost), idempotent per (user, device, event type, txn id) in the database, a new message wakes the long poll of exactly its target device (`pg`, cluster wide). **Client-visible consequence:** the recipients are the sender's own devices and users the sender shares a JOINED room with (both sides `join`; an invitation opens no send path); every other target (no shared joined room, unknown user or device, remote user) is skipped silently with the same `200 {}` (no existence oracle), so a user you share no joined room with cannot be reached (Element and FluffyChat verify other users in the room, not through to-device messages). Limits: 64 KiB body and 50 recipient entries per request (`413 M_TOO_LARGE`), 100 targets and 1 MiB of rows per request, 500 messages / 8 MiB per device, 2000 messages / 32 MiB per user, per sender 100 per device and 200 messages / 4 MiB per recipient user, 100 messages / 1 MiB per sync response, 7 days TTL (Oban cron `Nebu.Workers.ToDevicePurgeWorker`); a full queue evicts the OLDEST messages (fairly: the sender with the largest share first) and never tells the sender; 60 requests per minute (burst 30) per user, a byte-cost bucket of 4 MiB per minute (burst 8 MiB) per sender, per sender 4000 messages / 16 MiB over all recipients and 1 MiB per recipient device, at most 4 sends per user and 6 per node in flight, 2 s statement timeout (node-local, `429` before the body is read); a delivery fault answers `/sync` with an empty `to_device` instead of an error. Rooms stay unencrypted (ADR-011). Operators: run migration 000059 with the release; rolling back discards every queued, not yet acknowledged message.
+ 
+ - **Server-side key backup `/_matrix/client/v3/room_keys/**` (story server-side-key-backup, epic e2ee-client-support; migration 000058)**: Element's "chat recovery" and secret-storage bootstrap work. `POST|GET /room_keys/version`, `GET|PUT|DELETE /room_keys/version/{version}` and `PUT|GET|DELETE /room_keys/keys[/{roomId}[/{sessionId}]]` replace the former acceptance stub (a constant `200 {"version":"1"}` that stored nothing): an OPAQUE per-user store (tables `room_key_backup_versions` and `room_key_backup_sessions`; the server never decrypts or logs a blob, ADR-011 stays: no E2EE room is enabled), the spec's merge rule for a re-uploaded session, `etag` and `count` from the database, `403 M_WRONG_ROOM_KEYS_VERSION` with `current_version`, idempotent `DELETE` with a soft-delete marker (versions are never reused). Limits: 10 versions per user (the 11th is `403 M_FORBIDDEN`), 1000 version rows per user including the markers, 100 000 sessions per version, 8 KiB per `session_data`, 16 KiB per `auth_data`, 5 MiB per request body (read only after the authentication), a per-user storage budget of 64 MiB over all live versions (every session row costs its ids and 128 bytes besides its data; `403 M_FORBIDDEN`); writes are rate limited per user (60 per minute, burst 5), the two bulk reads (`GET /keys`, `GET /keys/{room}`) have their own bucket (30 per minute, burst 3) and at most one is in flight per user and two per node, `GET /version` has a light bucket (120 per minute, burst 30), a writer that finds the per-user lock busy answers `429 M_LIMIT_EXCEEDED` at once. The GDPR erasure deletes all versions and sessions of the user. Operators: run migration 000058 with the release; rolling back discards every user's key backup.
+ 
+diff --git a/docs/architecture/07-deployment.md b/docs/architecture/07-deployment.md
+index 45ef5982..10284829 100644
+--- a/docs/architecture/07-deployment.md
++++ b/docs/architecture/07-deployment.md
+@@ -2075,5 +2075,5 @@ _Source: Story 13-11 staged changes - `.gitlab-ci.yml`, `Makefile`, `deploy/helm
+ 
+ ### To-device messaging operations (story to-device-messaging, epic e2ee-client-support; migration 000059)
+ 
+-`PUT /_matrix/client/v3/sendToDevice/{eventType}/{txnId}` and `to_device.events` of `/sync` queue opaque message contents per (user, device) in the tables `to_device_messages` and `to_device_txns`. Nothing to configure: the migration creates the tables, the runtime role gets its grants there. Operator facts: (1) the queue is database state (every node answers the same, a restart or a rolling deploy loses no message; a message that was delivered but not yet acknowledged by the next `since` token is delivered again); (2) the Oban cron job `Nebu.Workers.ToDevicePurgeWorker` (hourly, queue `oauth_cleanup`) deletes messages older than 7 days and idempotency records older than 24 hours; delivery never returns an expired message, so a stopped job only keeps rows longer; (3) a device removal (`DELETE /devices`, `/delete_devices`, logout, logout-all, the Admin UI revoke) deletes the queue and the records of the device, so a mass logout (for example the maintenance procedure above) discards every queued message and clients simply retry; (4) the per-user rate limit of the send (60 per minute, burst 30) is node-local (it lives in the memory of each node): with N nodes the effective limit is up to N x the documented limit; (5) the GDPR sweep above deletes the queue, the records and the messages SENT by erased users; the same statement for one user is `DELETE FROM to_device_messages WHERE sender IN (...)` (the messages are queued in other users' devices). The limits (500 messages and 8 MiB per device, 2000 messages and 32 MiB per user, 100 messages per sender and device, 100 targets per request) are application settings `:nebu, :to_device_*` (defaults in 08-concepts "To-device messaging"); a full queue evicts its oldest messages and logs the number only.
++`PUT /_matrix/client/v3/sendToDevice/{eventType}/{txnId}` and `to_device.events` of `/sync` queue opaque message contents per (user, device) in the tables `to_device_messages` and `to_device_txns`. Nothing to configure: the migration creates the tables, the runtime role gets its grants there. Operator facts: (1) the queue is database state (every node answers the same, a restart or a rolling deploy loses no message; a message that was delivered but not yet acknowledged by the next `since` token is delivered again); (2) the Oban cron job `Nebu.Workers.ToDevicePurgeWorker` (hourly, queue `oauth_cleanup`) deletes messages older than 7 days and idempotency records older than 24 hours; delivery never returns an expired message, so a stopped job only keeps rows longer; (3) a device removal (`DELETE /devices`, `/delete_devices`, logout, logout-all, the Admin UI revoke) deletes the queue and the records of the device, so a mass logout (for example the maintenance procedure above) discards every queued message and clients simply retry; (4) the per-user rate limit of the send (60 per minute, burst 30) and the byte-cost bucket (4 MiB per minute, burst 8 MiB per sender) are node-local (they live in the memory of each node): with N nodes the effective limit is up to N x the documented limit; at most 6 sends per node are in flight and every statement of a send or delivery is cut after 2 s; (5) the GDPR sweep above deletes the queue, the records and the messages SENT by erased users; the same statement for one user is `DELETE FROM to_device_messages WHERE sender IN (...)` (the messages are queued in other users' devices). The limits (500 messages and 8 MiB per device, 2000 messages and 32 MiB per user, 100 messages per sender and device, 100 targets per request) are application settings `:nebu, :to_device_*` (defaults in 08-concepts "To-device messaging"); a full queue evicts its oldest messages and logs the number only. Worst-case database footprint: a sender holds at most 16 MiB (4000 messages) over all its recipients, a recipient user at most 32 MiB, so the queue is bounded by (users that share a joined room with a sender) x 32 MiB per recipient and 16 MiB per sender, whichever is smaller per pair; plan the database for the per-sender bound times the number of active senders. Operator notes: the queue positions come from identity / sequence columns, after a restore or a manual sequence reset set `to_device_delivery_seq` and the `stream_pos` identity above their maximum or a client presents positions from the future; the purge job scans by `ctid` batches (housekeeping, delivery never returns an expired message) and shares the Oban queue `oauth_cleanup` with the OAuth cleanup jobs.
+ 
+diff --git a/docs/architecture/08-concepts.md b/docs/architecture/08-concepts.md
+index 977c4955..7d47d13b 100644
+--- a/docs/architecture/08-concepts.md
++++ b/docs/architecture/08-concepts.md
+@@ -1407,25 +1407,25 @@ applies when the event grows, so a tag can still be deleted after an operator lo
+ 
+ `PUT /_matrix/client/v3/sendToDevice/{eventType}/{txnId}` and the `to_device` member of `GET /sync` (Matrix CS v1.18 "Send-to-Device messaging") are an OPAQUE per-device queue: the content of a message is never decrypted, interpreted or logged (the `RequestLogger` captures no body of the route and redacts the content of sync responses; the `RouteNormalizer` replaces the event type and the txn id of the path; a failing statement logs its error kind only). ADR-011 stays: this enables no E2EE room, `m.room.encryption` is still rejected. SQL is inline in the handler (ADR-018); the state lives only in `to_device_messages` (the queue; `user_id` is the recipient, `sender`, `device_id`, `created_at`) and `to_device_txns` (the idempotency records: `user_id` is the sender, `device_id` the sending device, `event_type`, `txn_id`) (migration 000059, runtime-role grants, row level security enabled and forced) in `Nebu.Matrix.ToDeviceStore`, so the queue, the idempotency and the acknowledgement position are the same on every node and survive a restart (ADR-020).
+ 
+-*Errors.* `400 M_NOT_JSON` (malformed JSON), `400 M_BAD_JSON` (`messages` missing or not an object, a user or device entry that is not an object, a body that is not an object), `400 M_INVALID_PARAM` (an event type outside `^[a-zA-Z0-9._-]{1,255}$`, a txn id of 0 or more than 255 bytes), `413 M_TOO_LARGE` (a body above 64 KiB, more than 50 recipient entries; the request is refused whole, never truncated, and its txn id is not burnt), `429 M_LIMIT_EXCEEDED` with `retry_after_ms` (the sender's rate limit, a transaction that is in flight, a sender whose erasure holds its lock), `403 M_USER_DEACTIVATED` (a sender whose erasure is under way), `500 M_UNKNOWN` (generic text). Everything about WHO can be reached is a silent `200 {}`.
++*Errors.* `400 M_NOT_JSON` (malformed JSON), `400 M_BAD_JSON` (`messages` missing or not an object, a user or device entry that is not an object, a body that is not an object), `400 M_INVALID_PARAM` (an event type outside `^[a-zA-Z0-9._-]{1,255}$`, a txn id of 0 or more than 255 bytes), `413 M_TOO_LARGE` (a body above 64 KiB, more than 50 recipient entries; the request is refused whole, never truncated, and its txn id is not burnt), `429 M_LIMIT_EXCEEDED` with `retry_after_ms` (the sender's rate limit, the byte-cost bucket, a transaction that is in flight, a statement over its 2 s timeout, a sender whose erasure holds its lock), `403 M_USER_DEACTIVATED` (a sender whose erasure is under way), `500 M_UNKNOWN` (generic text). Everything about WHO can be reached is a silent `200 {}`.
+ 
+-*Order of a request.* Authentication, then the per-user rate limit, and only THEN the body is read (the body is read only after the authentication, with a 64 KiB cap; `JsonBody` leaves the body of the route unfetched): an anonymous or junk-credential request is 401 without its body being read, an exhausted bucket is 429 before the body is parsed or validated (a refused request still costs its token). The limit is 60 per minute, burst 30, per USER (own tier `to_device`, not per IP, a `*` request costs one token); the buckets are node-local, so in a cluster the effective limit is up to N x the documented limit.
++*Order of a request.* Authentication, then the per-user rate limit, and only THEN the body is read (the body is read only after the authentication, with a 64 KiB cap; `JsonBody` leaves the body of the route unfetched): an anonymous or junk-credential request is 401 without its body being read, an exhausted bucket is 429 before the body is parsed or validated (a refused request still costs its token). The limit is 60 per minute, burst 30, per USER (own tier `to_device`, not per IP, a `*` request costs one token); the buckets are node-local, so in a cluster the effective limit is up to N x the documented limit. A SECOND bucket, the byte-cost bucket (4 MiB per minute, burst 8 MiB per sender, the same node-local N x rule), is charged AFTER the parse with the bytes the request ASKS to fan out (an explicit device: the content bytes plus 128; a `*`: what it could reach, at most the targets cap and never above the 1 MiB fan-out budget), never with the accepted bytes: an accepted-bytes cost would tell a delivered recipient from a skipped one by the 429, so the cost is state independent (no oracle). A refusal is `429` with `retry_after_ms`, the transaction is rolled back (its txn id is not burnt), a cost above the burst is charged as the burst (a request is never unsatisfiable).
+ 
+-*Limits and budgets (every per-item cap has an aggregate cap).* Per request: 64 KiB body, 50 recipient entries (`*` counts as one entry; an unknown or unreachable recipient counts too), at most 100 targets after the `*` expansion (silently truncated, deterministic). Per recipient device: 500 messages and 8 MiB. Per recipient user: 2000 messages and 32 MiB over all devices. Per sender and recipient device: 100 messages, per sender and recipient user: 200 messages and 4 MiB (one sender cannot fill another user's queue; beyond its share the sender's own oldest go first). The byte budgets count the canonical content bytes plus 128 per row. Per sending device: 1000 idempotency records (the oldest is forgotten). A sync response carries at most 100 messages and 1 MiB (the first message is always carried); the rest comes with the next sync without waiting for `timeout`. Messages are kept 7 days (the TTL is decided by the delivery itself, the purge job is housekeeping), idempotency records 24 hours. All are application settings `:nebu, :to_device_<name>` read at request time (`ToDeviceStore.limits/0`).
++*Limits and budgets (every per-item cap has an aggregate cap).* Per request: 64 KiB body, 50 recipient entries (`*` counts as one entry; an unknown or unreachable recipient counts too), at most 100 targets after the `*` expansion (silently truncated, deterministic). Per recipient device: 500 messages and 8 MiB. Per recipient user: 2000 messages and 32 MiB over all devices. Per sender and recipient device: 100 messages, per sender and recipient user: 200 messages and 4 MiB (one sender cannot fill another user's queue; beyond its share the sender's own oldest go first). Per sender and recipient device also 1 MiB (the count share of 100 stays). Per sender over ALL its recipients: a total budget of 4000 messages and 16 MiB (the sender's own oldest go first, whichever recipient they are queued for; another sender is unaffected): without it one account could store its per-recipient shares times the number of users it shares a joined room with. The byte budgets count the canonical content bytes plus 128 per row. Per sending device: 1000 idempotency records (the oldest is forgotten). A sync response carries at most 100 messages and 1 MiB (the first message is always carried); the rest comes with the next sync without waiting for `timeout`. Messages are kept 7 days (the TTL is decided by the delivery itself, the purge job is housekeeping), idempotency records 24 hours. All are application settings `:nebu, :to_device_<name>` read at request time (`ToDeviceStore.limits/0`).
+ 
+-*A full queue evicts the oldest.* When a budget is exceeded the OLDEST messages of that device (or of the sender share) are evicted; at the USER level the eviction is fair: the oldest message of the sender with the largest share goes first, so a flooding co-member never evicts the older messages of a sender below its share; the sender is never told (the same `200 {}`, no 429: a 429 would reveal the recipient's state and let one sender's flood block the others), and the count is logged without content.
++*A full queue evicts the oldest.* When a budget is exceeded the OLDEST messages of that device (or of the sender share) are evicted; at the DEVICE and at the USER level the eviction is fair: the oldest message of the sender with the largest share goes first, so flooding co-members (two colluding ones included) never evict the older messages of a sender below its shares from a victim device; the sender is never told (the same `200 {}`, no 429: a 429 would reveal the recipient's state and let one sender's flood block the others), and the count is logged without content.
+ 
+ *Recipients and no oracle.* Recipients are the sender's own devices (no room needed) and the devices of users who share a room with the sender where BOTH sides are `join` (evaluated at send time, not at delivery); an invitation opens no send path (it needs no consent, and in-room verification does not use to-device messages). Every other recipient (no shared joined room, only invited, unknown user or device, a remote user, a malformed id, a deactivated user) is skipped silently: the answer is identical to a delivered one. `*` expands at send time to the devices that exist then (a device created later does not receive it); for the sender's own user the sending device is excluded; an explicit device entry of the same user wins over `*` (one copy per device). A deactivated user receives nothing new, its queue is kept (reversible).
+ 
+ *Transaction ids.* Scoped to (user, device, event type, txn id), persisted in `to_device_txns` and unique in the database, so a retry after a restart or on another node queues nothing again; the token is irrelevant (a new access token of the same device is the same transaction), another device, user, event type and the room `send` endpoint are independent transactions. A concurrent identical transaction is answered 429 at once (no waiting lock).
+ 
+-*Acknowledgement on the NEXT token.* A sync response only delivers: its messages are deleted when a LATER sync presents the `since` token of that response (never on delivery). The to-device position travels in the token (`<core>.<position>[.<to-device position>]`, a device without traffic keeps its two-part token); a retry with an older token delivers the batch again, an initial sync, an unknown or garbage token and a token of another device (or user) acknowledge nothing and deliver everything pending. The acknowledgement is a position: two syncs of the same device in flight at once (a client does not do that) can acknowledge what the other response carried. An acknowledgement covers exactly the batch a response carried: a message that committed late (a lower queue position than a delivered one) is neither deleted by it nor missed. `to_device` is always emitted, as `{"events": []}` when nothing is pending.
++*Acknowledgement on the NEXT token.* A sync response only delivers: its messages are deleted when a LATER sync presents the `since` token of that response (never on delivery). The to-device position travels in the token (`<core>.<position>[.<to-device position>]`, a device without traffic keeps its two-part token); a retry with an older token delivers the batch again, an initial sync, an unknown or garbage token and a token of another device (or user) acknowledge nothing and deliver everything pending. The acknowledgement is a position: two syncs of the same device in flight at once (a client does not do that) can acknowledge what the other response carried. An acknowledgement covers exactly the messages the responses stamped up to that position: a message that committed late (a lower queue position than a delivered one) is neither deleted by it nor missed. When the stamp of a response loses a race with an overlapping sync of the same `since` (it stamps nothing because the other one was faster), the response carries only what it stamped or what was stamped already and its position never exceeds its own stamps (else the `since` position), so the lost response of the other sync loses no message. `to_device` is always emitted, as `{"events": []}` when nothing is pending.
+ 
+ *Wake-up.* A new message wakes the long poll of exactly its target device (a `{:to_device, device_id}` message to the `:pg` group of the user, cluster wide; the other devices of the user keep waiting); a message already queued that the presented token does not cover makes the sync return at once, one it covers does not.
+ 
+-*Concurrency bounds.* A rate limit is not a concurrency limit: the rows of ONE request cost at most 1 MiB of fan-out (content + 128 per row; the targets beyond that are dropped silently like an unreachable one, the first target is always kept), so a 64 KiB content reaches at most 16 devices; at most 4 sends per user and 32 per node are in flight (`Nebu.Matrix.ToDeviceSendGate`, settings `to_device_max_concurrent_sends_per_user` and `to_device_max_concurrent_sends_per_node`; monitor based slots freed on `:DOWN`, node-local like the rate buckets), a send that finds no slot is answered 429 before its body is read.
++*Concurrency bounds.* A rate limit is not a concurrency limit: the rows of ONE request cost at most 1 MiB of fan-out (content + 128 per row; the targets beyond that are dropped silently like an unreachable one, the first target is always kept), so a 64 KiB content reaches about 16 devices (15 when the content fills the whole body); at most 4 sends per user and 6 per node are in flight (`Nebu.Matrix.ToDeviceSendGate`, settings `to_device_max_concurrent_sends_per_user` and `to_device_max_concurrent_sends_per_node`; monitor based slots freed on `:DOWN`, node-local like the rate buckets), a send that finds no slot is answered 429 before its body is read (6 per node: each running send holds a pooled connection for its statements, so the slots stay well below the pool). Every statement of a send and of a delivery runs under `SET LOCAL statement_timeout` of 2 s (over it: 429 for a send, nothing stored and the txn id not burnt; an empty `to_device` for a sync).
+ 
+-*Concurrency.* A request never waits for a lock while holding a pooled connection: the send takes the per-user `sync_global` advisory lock of the sender SHARED as a try-lock (the erasure takes it exclusively), the transaction has a short `lock_timeout`, a conflict is a 429; a send is a constant number of set-based statements however many recipients it names.
++*Concurrency.* A request never waits for a lock while holding a pooled connection: the send takes the advisory lock `to_device_erasure|<user>` of the sender SHARED as a try-lock (the GDPR erasure takes that key exclusively; it is its OWN key, so a recipient's account data, cross-signing or key backup writer that holds `sync_global|<user>` never makes a message skip), the transaction has a short `lock_timeout`, a conflict is a 429; only the recipients that passed the shared-room join are locked (never one lock per requested id); the eviction, the acknowledgement and the stamp take `FOR UPDATE SKIP LOCKED` (a row another request holds is skipped, never waited for), and a delivery error (a lock, a statement timeout) never fails `/sync`: the answer is 200 with `to_device: {"events": []}`, the position is kept (nothing acknowledged or lost), the log names the kind only; a send takes `FOR KEY SHARE` on the target `devices` rows and a device delete locks the device row first, so a send racing a device delete never leaves rows for a recreated device of the same id; a send is a constant number of set-based statements however many recipients it names.
+ 
+ *Lifecycle.* A device removal (`DELETE /devices`, `/delete_devices`, logout, logout-all, the Admin UI revoke, the OAuth logout) deletes the queue and the idempotency records of the device (`DeviceKeyStore.delete_device`, one place); revoking only the sessions of a device (the device and its keys stay) does not purge its queue, an admin deactivation keeps it (reversible), the messages a removed device SENT stay in the recipients' queues. The GDPR erasure deletes the queue and records of the user and the messages the user sent. The TTL job `Nebu.Workers.ToDevicePurgeWorker` is an Oban cron job (the leader enqueues, the purge is batched atomic SQL with `FOR UPDATE SKIP LOCKED` that concurrent runs split between them), no node-local state.
+ 
+@@ -1437,7 +1437,7 @@ GDPR erasure (`Nebu.Compliance.UserDeletion.delete_user_keys/3`) physically dele
+ 
+ **The erasure is terminal for authentication.** The last step also sets `users.is_active = false` and NULLs the `users` PII columns (display name, avatar and email ciphertexts: the display name and avatar are encrypted with the server-wide key, so the key deletion does not shred them; also `last_seen_at` and `deactivation_reason`, admin free text that may describe the person). Every authentication gate (`TokenValidator`, `OAuthSessionStore.user_active/1`, `Nebu.Matrix.active?/1`, the account pages, `invitable_local_users`) treats `deletion_status IS NOT NULL` as deactivated, so neither a fresh IdP token, an SSO login, an OAuth authorization nor an admin reactivation revives the account, and `Profile.DB.upsert_profile/3` writes nothing for an erased user. A bearer (an unbound raw IdP JWT included) that the node-local provisioning cache of the OIDC plug (60 s TTL) already confirmed is still accepted on that node until the entry expires: new requests, not only one in flight, for up to 60 s, the same bound as for an admin deactivation. In that window it can still write the tables WITHOUT a guard (device keys, receipts, room account data, the lazy device row with its IP); the profile PUT, global account data, cross-signing, the signature merge and the sync persist are refused. The eviction of the cache entry on every node (a broadcast over `:pg` on erasure and deactivation) is the proper fix, recorded in follow-up `gn`. Admin UI access of an erased administrator follows the IdP admin group claim, not the erasure: remove the person from the IdP admin group. `Nebu.Admin.DB.set_is_active/2` refuses to reactivate an erased user (`:erased`, answered as a failed precondition) and the admin user suggestions never offer one.
+ 
+-**Erased by the transaction** (`UserDeletion.erased_tables/0`, the list the deleting code and the guard test share): `user_room_account_data`, `account_data`, `cross_signing_keys`, `device_keys`, `device_one_time_keys`, `device_fallback_keys`, `forgotten_rooms`, `auto_join_opt_outs`, `read_receipts`, `uia_sessions`, `oauth_account_sessions`, `oauth_consent_requests`, `oauth_codes`, `room_key_backup_sessions`, `room_key_backup_versions` (the server-side key backup of story server-side-key-backup, migration 000058: every version row, the soft-delete markers included, and every session row). `to_device_messages`, `to_device_txns` (the to-device queue and its idempotency records of story to-device-messaging, migration 000059: every message queued FOR the user, every record, and, by one more statement on `sender`, every message the user SENT that waits in another user's queue). `ToDeviceStore.send` is a `sync_global` user like the key backup writers: it takes the user's lock SHARED as a try-lock (a busy lock is a 429 for the sender and a silent skip for a recipient) and refuses an erased sender with `403 M_USER_DEACTIVATED`, so a send in flight never re-creates rows after the erasure. (`oauth_codes` needs the delete policy of migration 000055.)
++**Erased by the transaction** (`UserDeletion.erased_tables/0`, the list the deleting code and the guard test share): `user_room_account_data`, `account_data`, `cross_signing_keys`, `device_keys`, `device_one_time_keys`, `device_fallback_keys`, `forgotten_rooms`, `auto_join_opt_outs`, `read_receipts`, `uia_sessions`, `oauth_account_sessions`, `oauth_consent_requests`, `oauth_codes`, `room_key_backup_sessions`, `room_key_backup_versions` (the server-side key backup of story server-side-key-backup, migration 000058: every version row, the soft-delete markers included, and every session row). `to_device_messages`, `to_device_txns` (the to-device queue and its idempotency records of story to-device-messaging, migration 000059: every message queued FOR the user, every record, and, by one more statement on `sender`, every message the user SENT that waits in another user's queue). `ToDeviceStore.send` takes its OWN fence key `to_device_erasure|<user>` (the erasure takes it exclusively inside the `sync_global` writers' lock set; it is not the `sync_global` key itself, so those writers do not make a message skip): it takes the user's lock SHARED as a try-lock (a busy lock is a 429 for the sender and a silent skip for a recipient) and refuses an erased sender with `403 M_USER_DEACTIVATED`, so a send in flight never re-creates rows after the erasure. (`oauth_codes` needs the delete policy of migration 000055.)
+ 
+ **Ended after the commit by the session teardown** (best effort, outside the transaction): `devices`, `matrix_sessions`, `jwt_device_bindings`, `sessions`, `oauth_idp_refresh_leases`, `sync_tokens`, `sync_room_cursors` (the dispatcher also removes the `devices` rows of legacy devices).
+ 
+diff --git a/docs/architecture/11-risks.md b/docs/architecture/11-risks.md
+index e7d21d1b..97663175 100644
+--- a/docs/architecture/11-risks.md
++++ b/docs/architecture/11-risks.md
+@@ -28,7 +28,7 @@
+ | Admin route source classification could leak email into operational logs (fixed pre-ship) | Resolved | Story `war-room-mode`, security-review-driven fix |
+ | Bootstrap-mode OIDC scope ignored the operator's Step 3 config — providers needing a non-`openid` scope to expose the admin claim could never complete bootstrap | Resolved | `bugfix-bootstrap-scope-ignored`, 2026-07-09 |
+ | Admin-logs source-classification: 1 MEDIUM accepted non-blocking after a fix attempt was reverted for an architecture conflict | Accepted risk | Story `admin-logs-monitoring-view`, Kassandra review |
+-| To-device messaging (`/sendToDevice`, Kassandra review of story `to-device-messaging`), accepted residuals: (1) a full queue evicts its OLDEST messages silently (the sender is never told, no 429), so a flooded device can lose old verification messages; bounded by the per-device, per-user and per-sender budgets, the loss is the intended price of not letting one sender block others; (2) the rate limit buckets are node-local: N x the documented limit in a cluster; (3) the recipient restriction (a shared JOINED room or an own device) is a client compatibility cost: a user you share no joined room with cannot be reached by to-device messages (Element and FluffyChat verify in the room); (3a) many colluding senders, each below its share, can still evict a victim's older messages (fair user-level eviction, per-sender shares 100 per device and 200 / 4 MiB per user); (4) the `*` fan-out is truncated silently at 100 targets and 1 MiB of rows per request (the targets beyond are dropped like an unreachable one); (4a) one request can wake (and make rebuild its sync) up to 100 long polls of a victim's devices (bounded by the fan-out cap, the budgets and the rate limit; only users who share a joined room can do it); (4b) the node-wide send slots (32) can be held by colluding accounts (4 per user): a recipient-independent starvation of sends on that node, accepted, retried with 429; (5) RLS on both tables is `USING (true)` (accepted, as the sibling tables: isolation rests on the `user_id` predicates); (6) E2EE rooms stay disabled (ADR-011), the queue is transport only; (7) no browser / Element end-to-end test in the story (the verification flow needs Dex, Element Web and two devices; the API level is covered through the full router with real sessions and rooms): a MANUAL Element Web <-> FluffyChat self-verification (SAS) check and a `/sync` long-poll latency check with a real client are a release checkbox; (8) the acknowledgement is a position in the token: two syncs of the SAME device in flight at once (a client does not do that) can acknowledge a message the other response carried, and a lost response is then not redelivered. | Low | Accepted |
++| To-device messaging (`/sendToDevice`, Kassandra review of story `to-device-messaging`), accepted residuals: (1) a full queue evicts its OLDEST messages silently (the sender is never told, no 429), so a flooded device can lose old verification messages; bounded by the per-device, per-user and per-sender budgets, the loss is the intended price of not letting one sender block others; (2) the rate limit buckets are node-local: N x the documented limit in a cluster; (3) the recipient restriction (a shared JOINED room or an own device) is a client compatibility cost: a user you share no joined room with cannot be reached by to-device messages (Element and FluffyChat verify in the room); (3a) only MANY senders, each below its share, can still evict a victim's older messages once the shares add up beyond the queue (fair device- and user-level eviction, per-sender shares 100 messages / 1 MiB per device and 200 / 4 MiB per user, 4000 / 16 MiB over all recipients): a single flooder or two colluding co-members cannot; the worst-case database footprint is bounded per sender (16 MiB) and per recipient (32 MiB), so (users sharing a room) x 32 MiB in total, documented in 07-deployment; (4) the `*` fan-out is truncated silently at 100 targets and 1 MiB of rows per request (the targets beyond are dropped like an unreachable one); (4a) one request can wake (and make rebuild its sync) up to 100 long polls of a victim's devices (bounded by the fan-out cap, the budgets and the rate limit; only users who share a joined room can do it); (4b) the node-wide send slots (6) can be held by colluding accounts (4 per user): a recipient-independent starvation of sends on that node, accepted, retried with 429 (a statement is cut after 2 s, so a slot is never held for long); the byte-cost bucket is node-local like the rate limit (N x in a cluster); (5) RLS on both tables is `USING (true)` (accepted, as the sibling tables: isolation rests on the `user_id` predicates); (6) E2EE rooms stay disabled (ADR-011), the queue is transport only; (7) no browser / Element end-to-end test in the story (the verification flow needs Dex, Element Web and two devices; the API level is covered through the full router with real sessions and rooms): a MANUAL Element Web <-> FluffyChat self-verification (SAS) check and a `/sync` long-poll latency check with a real client are a release checkbox; (8) the acknowledgement is a position in the token: two syncs of the SAME device in flight at once (a client does not do that) can acknowledge a message the other response carried, and a lost response is then not redelivered (a sync that lost the stamp race claims no position beyond its own stamps, see 08-concepts); (9) follow-ups, not part of this story: a sync decodes up to 1 MiB of stored JSON and encodes it again (inserting the stored canonical JSON with `Jason.Fragment` is the follow-up; the only writer is the send), and the per-queue counts and bytes of the eviction are re-aggregated per send (a running counter per queue would remove that cost); (10) accepted notes: the TTL purge walks `ctid` batches, the purge job shares the `oauth_cleanup` Oban queue, and the token position is a compare-and-set free read (no CAS on the token). | Low | Accepted |
+ | Server-side key backup (`/room_keys/**`, Kassandra review of story `server-side-key-backup`): resource exhaustion (CWE-400/770). Resolved by design: the request body is read only after the authentication (no pre-auth parse; an anonymous or junk-bearer request is 401 without its body being read) and after the write rate limit; a per-user aggregate byte budget of 64 MiB over all live versions (every row costs its room and session id bytes + 128 bytes besides `session_data`; net of replacements, decided under the advisory lock); the bulk reads (`GET /keys`, `GET /keys/{room}`) have their own rate-limit bucket (30 per minute, burst 3), at most ONE in flight per user and TWO per node (`:room_keys_max_concurrent_bulk_reads_per_node`, a monitor based slot, 429 before any database work), and are spliced from the stored JSON text; `GET /version` has a light bucket (120 per minute, burst 30); every writer takes the per-user lock with a try-lock (a busy lock is a 429 at once, `lock_timeout` stays as the safety net of row locks) so lock waiters cannot exhaust the shared pool of 10 connections; the total version rows per user are capped at 1000 (an operator prunes old markers with the SQL of the GDPR runbook). Honest peak memory: one bulk read peaked at about 300-350 MiB for a version at the former 256 MiB budget (the spliced iodata copy, the rows, and +0.75x with gzip); at the 64 MiB budget it is about 64 MiB x 2.5, and at most two run per node; streaming the response is the recorded follow-up. Accepted: the soft-delete markers are never pruned automatically (needed for never-reused numbers and the idempotent DELETE), their growth is bounded by the row cap; the rate-limit buckets and the slots are node-local (a cluster of N nodes allows N x the limit); the RLS policies are `USING (true)` like the sibling tables (accepted: isolation rests on the `user_id` predicate of every statement); the byte check is O(scan) of the user's rows on every write (follow-up: an O(1) counter column) | Resolved / accepted (markers, node-local buckets, RLS pattern, O(scan) per write) | Story `server-side-key-backup`, `docs/stories/e2ee-client-support/security-reports/server-side-key-backup-security-review-2026-10-30.md` |
+ | Server-side key backup, accepted residuals of the cycle-2 review (`server-side-key-backup-security-review-2026-10-30-cycle2.md`, code review cycle 2): (1) WRITE-side peak: the per-user lock is taken after the body is parsed, so a 5 MiB body costs about 25 MiB of decoded heap and the burst of 5 writes about 125 MiB per account, with NO node-wide cap on the parses; about 3 colluding accounts can strain a 1Gi node and about 8-10 a 2g node (follow-ups: a node-wide gate for the `room_keys` body parsing in the style of `RoomKeysReadGate`, or a body cap of 1-2 MiB). (2) The two node slots of the bulk reads cover the database read, the gzip and the send: two accounts with full budgets or slow readers can hold both until Bandit's send timeout (about 30 s; ingress-nginx defaults to `proxy-buffering: off`, so the drip reaches Bandit), and other users' restores on that node answer 429 meanwhile: with open registration a cross-user availability coupling on a recovery path (cap 2), no data impact (follow-ups: byte-weighted admission, streaming the read, `proxy-buffering on` for the Kubernetes ingress). (3) The try-lock shares the `sync_global` key with the blocking `AccountDataStore.put/3` and `CrossSigningKeyStore.put_keys/2`: a concurrent Element setup can get a `429` on a `PUT /room_keys/*` with the fixed `retry_after_ms` of 1000; clients retry. (4) The fixed 128 bytes per row of the byte budget do not model the real row overhead (about 0.3-0.5 KiB per row, nor gzip): the "64 MiB x 2.5" peak above is an order of magnitude, not a bound | Accepted risk | Story `server-side-key-backup`, security review cycle 2 (APPROVED, 2 accepted MEDIUM) |
+ | State-event forgery (pre-existing, FIXED 2026-10-07) | **CLOSED** | bugfix-unsigned-replaces-state: `Room.Server.do_send_event/7` now persists `state_key` as NULL instead of `""`, preventing any joined member from forging state events via PUT /send/{eventType}. Migration 000036 backfills `m.room.message` rows empirically. Follow-up data remediation query documented; query-filter hardening (F-3/F-4/F-6) deferred. |
+diff --git a/server/lib/nebu/compliance/user_deletion.ex b/server/lib/nebu/compliance/user_deletion.ex
+index 5d5845eb..b4c27c46 100644
+--- a/server/lib/nebu/compliance/user_deletion.ex
++++ b/server/lib/nebu/compliance/user_deletion.ex
+@@ -274,7 +274,10 @@ defmodule Nebu.Compliance.UserDeletion do
+     [
+       "SELECT 1 FROM uia_sessions WHERE user_id = $1 FOR UPDATE",
+       "SELECT 1 FROM cross_signing_keys WHERE user_id = $1 FOR UPDATE",
+-      "SELECT pg_advisory_xact_lock(hashtextextended('sync_global|' || $1::text, 0))"
++      "SELECT pg_advisory_xact_lock(hashtextextended('sync_global|' || $1::text, 0))",
++      # story to-device-messaging: the fence of the to-device sends has its OWN key (a recipient's account data / cross-signing / key backup writer holds `sync_global`
++      # and must not make a message skip); the sends take it SHARED as a try-lock
++      "SELECT pg_advisory_xact_lock(hashtextextended('to_device_erasure|' || $1::text, 0))"
+     ]
+     |> Enum.reduce_while(:ok, fn sql, :ok ->
+       case repo().query(sql, [target_user_id]) do
+diff --git a/server/lib/nebu/matrix.ex b/server/lib/nebu/matrix.ex
+index 30099c94..8f7e947a 100644
+--- a/server/lib/nebu/matrix.ex
++++ b/server/lib/nebu/matrix.ex
+@@ -975,6 +975,13 @@ defmodule Nebu.Matrix do
+   @spec purge_expired_uia_sessions() :: non_neg_integer()
+   def purge_expired_uia_sessions, do: Nebu.Matrix.Uia.cleanup_expired()
+ 
++  @doc """
++  Deletes the to-device messages older than their TTL and the idempotency records older than theirs (the periodic `Nebu.Workers.ToDevicePurgeWorker`, story
++  to-device-messaging; ADR-020: the worker does not reach into `Nebu.Matrix.ToDeviceStore`). `{:ok, %{messages: n, txns: n}}` or `{:error, reason}`.
++  """
++  @spec purge_expired_to_device() :: {:ok, %{messages: non_neg_integer(), txns: non_neg_integer()}} | {:error, term()}
++  def purge_expired_to_device, do: Nebu.Matrix.ToDeviceStore.purge_expired()
++
+   # The dispatcher reads the acting identity from the request-context map
+   # (Nebu.Matrix.RequestMetadata). In-process callers (HTTP/Admin) pass a minimal
+   # context map carrying the trusted identity — same shape as Nebu.Matrix.Http.stream/1.
+diff --git a/server/lib/nebu/matrix/device_key_store.ex b/server/lib/nebu/matrix/device_key_store.ex
+index 4b13f2ed..d5c444f4 100644
+--- a/server/lib/nebu/matrix/device_key_store.ex
++++ b/server/lib/nebu/matrix/device_key_store.ex
+@@ -402,17 +402,36 @@ defmodule Nebu.Matrix.DeviceKeyStore do
+   @spec delete_device(String.t(), String.t()) :: :ok
+   def delete_device(user_id, device_id)
+       when is_binary(user_id) and is_binary(device_id) do
+-    for table <- @device_tables do
+-      _ =
+-        safe_query(
+-          "DELETE FROM #{table} WHERE user_id = $1 AND device_id = $2",
+-          [user_id, device_id]
+-        )
+-    end
++    # story to-device-messaging (Kassandra #6): ONE transaction that locks the device row FIRST (`FOR UPDATE`; a to-device send holds `FOR KEY SHARE` on the rows it
++    # targets, so a send in flight finishes before the queue is deleted and no row for a gone device is left behind). Best-effort: never raises.
++    _ =
++      try do
++        Nebu.Repo.transaction(fn ->
++          lock_device_row!(Nebu.Repo, user_id, device_id)
++
++          for table <- @device_tables do
++            case Ecto.Adapters.SQL.query(Nebu.Repo, "DELETE FROM #{table} WHERE user_id = $1 AND device_id = $2", [user_id, device_id]) do
++              {:ok, _} -> :ok
++              {:error, error} -> raise error
++            end
++          end
++        end)
++      rescue
++        _ -> :error
++      catch
++        :exit, _ -> :error
++      end
+ 
+     :ok
+   end
+ 
++  defp lock_device_row!(repo, user_id, device_id) do
++    case Ecto.Adapters.SQL.query(repo, "SELECT 1 FROM devices WHERE user_id = $1 AND device_id = $2 FOR UPDATE", [user_id, device_id]) do
++      {:ok, _} -> :ok
++      {:error, error} -> raise error
++    end
++  end
++
+   @doc """
+   The raising variant of `delete_device/2` for use INSIDE a database transaction (story
+   oauth-token-revocation-logout, R2 / Trap 3): same tables, same order (`@device_tables`), but a
+@@ -424,6 +443,8 @@ defmodule Nebu.Matrix.DeviceKeyStore do
+   @spec delete_device!(String.t(), String.t(), module()) :: :ok
+   def delete_device!(user_id, device_id, repo \\ Nebu.Repo)
+       when is_binary(user_id) and is_binary(device_id) do
++    :ok = lock_device_row!(repo, user_id, device_id)
++
+     for table <- @device_tables do
+       case Ecto.Adapters.SQL.query(repo, "DELETE FROM #{table} WHERE user_id = $1 AND device_id = $2", [user_id, device_id]) do
+         {:ok, _} -> :ok
+diff --git a/server/lib/nebu/matrix/http_to_device.ex b/server/lib/nebu/matrix/http_to_device.ex
+index 59615341..14558a18 100644
+--- a/server/lib/nebu/matrix/http_to_device.ex
++++ b/server/lib/nebu/matrix/http_to_device.ex
+@@ -13,7 +13,8 @@ defmodule Nebu.Matrix.HttpToDevice do
+     * `400 M_INVALID_PARAM` an event type outside `^[a-zA-Z0-9._-]{1,255}$`, a txn id of 0 or more than 255 bytes;
+     * `413 M_TOO_LARGE` a body above 64 KiB, more than 50 recipient entries (`*` counts as one);
+     * `403 M_USER_DEACTIVATED` a sender whose erasure is under way;
+-    * `429 M_LIMIT_EXCEEDED` the sender's rate limit, no free send slot, a concurrent identical transaction, a sender whose erasure holds its lock;
++    * `429 M_LIMIT_EXCEEDED` the sender's rate limit, its byte-cost bucket, no free send slot, a concurrent identical transaction, a statement over the 2 s timeout,
++      a sender whose erasure holds its fence;
+     * `500 M_UNKNOWN` a failed database operation (generic text).
+   """
+   import Nebu.Matrix.Http, only: [send_json: 3, error: 4]
+@@ -38,7 +39,8 @@ defmodule Nebu.Matrix.HttpToDevice do
+ 
+       case Store.send(sender, device, event_type, txn_id, Enum.filter(entries, &storable?/1)) do
+         :ok -> send_json(conn, 200, %{})
+-        {:error, busy} when busy in [:lock_timeout, :lock_busy] -> Nebu.Web.Plugs.RateLimit.respond_limited(conn, 1)
++        {:error, busy} when busy in [:lock_timeout, :lock_busy, :statement_timeout] -> Nebu.Web.Plugs.RateLimit.respond_limited(conn, 1)
++        {:error, {:bytes_rate, seconds}} -> Nebu.Web.Plugs.RateLimit.respond_limited(conn, seconds)
+         {:error, :user_erased} -> error(conn, 403, "M_USER_DEACTIVATED", "This account has been deactivated")
+         {:error, reason} -> failed(conn, reason)
+       end
+diff --git a/server/lib/nebu/matrix/to_device_send_gate.ex b/server/lib/nebu/matrix/to_device_send_gate.ex
+index a1367514..7368ad67 100644
+--- a/server/lib/nebu/matrix/to_device_send_gate.ex
++++ b/server/lib/nebu/matrix/to_device_send_gate.ex
+@@ -1,7 +1,7 @@
+ defmodule Nebu.Matrix.ToDeviceSendGate do
+   @moduledoc """
+   The slots of the to-device SENDS (`PUT /sendToDevice/{eventType}/{txnId}`; story to-device-messaging): at most `max_per_user/0` sends in flight per user (default 4,
+-  `config :nebu, :to_device_max_concurrent_sends_per_user`) and at most `max_per_node/0` on this node (default 32, `:to_device_max_concurrent_sends_per_node`), both read
++  `config :nebu, :to_device_max_concurrent_sends_per_user`) and at most `max_per_node/0` on this node (default 6, below the pool of 10 connections, `:to_device_max_concurrent_sends_per_node`), both read
+   per admission. A rate limit is not a concurrency limit: this bounds the memory of the bodies being parsed and fanned out and the pooled connections a burst of
+   accounts can occupy at once, and no single user can take the node's slots (cross-user starvation).
+ 
+@@ -11,7 +11,7 @@ defmodule Nebu.Matrix.ToDeviceSendGate do
+   use GenServer
+ 
+   @default_per_user 4
+-  @default_per_node 32
++  @default_per_node 6
+ 
+   def start_link(_opts), do: GenServer.start_link(__MODULE__, :ok, name: __MODULE__)
+ 
+diff --git a/server/lib/nebu/matrix/to_device_store.ex b/server/lib/nebu/matrix/to_device_store.ex
+index e6b7aa75..572d9137 100644
+--- a/server/lib/nebu/matrix/to_device_store.ex
++++ b/server/lib/nebu/matrix/to_device_store.ex
+@@ -20,14 +20,19 @@ defmodule Nebu.Matrix.ToDeviceStore do
+ 
+   ## Budgets (every per-item cap has an aggregate cap; all seams are read at request time, defaults in `limits/0`)
+ 
+-  Per device 500 messages / 8 MiB, per user 2000 messages / 32 MiB, per sender and device 100 messages, 100 targets and 1 MiB of rows per request, 1000
+-  idempotency records per device, 100 messages / 1 MiB per sync response. A full queue evicts its OLDEST messages (the sender is never told;
+-  the count is logged without content). The row cost of the byte budgets is the content bytes plus 128.
++  Per request: 64 KiB body, 50 entries, 100 targets and 1 MiB of rows. Per recipient device 500 messages / 8 MiB, per recipient user 2000 messages / 32 MiB,
++  per SENDER and recipient device 100 messages / 1 MiB, per sender and recipient user 200 messages / 4 MiB, per SENDER over ALL recipients 4000 messages /
++  16 MiB (the sender's own oldest go first), 1000 idempotency records per device, 100 messages / 1 MiB per sync response. A byte-cost rate bucket
++  (4 MiB per minute, burst 8 MiB per sender, node-local) is charged with the bytes the request ASKS to fan out (state independent: no oracle), a refusal is a 429.
++  A full queue evicts: the sender's own oldest beyond its shares, and at the DEVICE and USER level FAIRLY (the oldest message of the sender with the LARGEST share
++  goes first), the sender is never told, the count is logged without content. The row cost of the byte budgets is the content bytes plus 128.
+ 
+   ## No waiting locks
+ 
+-  The transaction of a send and of a delivery runs with a short `lock_timeout`: a statement that would wait for a row lock is
+-  `{:error, :lock_timeout}` (answered 429 / 503), no waiter holds a pooled connection. The purge uses `FOR UPDATE SKIP LOCKED`.
++  The transaction of a send and of a delivery runs with a short `lock_timeout` and a `statement_timeout` of 2 s: a statement that would wait for a row lock is
++  `{:error, :lock_timeout}`, one that runs too long `{:error, :statement_timeout}` (a send answers 429, a delivery answers the sync with an EMPTY `to_device`
++  and keeps the position: nothing is acknowledged or lost). The eviction, the acknowledgement, the stamp and the purge take `FOR UPDATE SKIP LOCKED`: a row
++  another transaction holds is skipped, never waited for. The erasure fence is its own advisory key (`to_device_erasure|<user>`), the send takes it SHARED as a try-lock.
+   """
+   require Logger
+ 
+@@ -40,6 +45,12 @@ defmodule Nebu.Matrix.ToDeviceStore do
+     max_per_user: 2000,
+     max_bytes_per_user: 32 * 1024 * 1024,
+     max_per_sender_device: 100,
++    max_bytes_per_sender_device: 1024 * 1024,
++    max_per_sender_total: 4000,
++    max_bytes_per_sender_total: 16 * 1024 * 1024,
++    rate_bytes_per_min: 4 * 1024 * 1024,
++    rate_bytes_burst: 8 * 1024 * 1024,
++    statement_timeout_ms: 2000,
+     max_per_sender_user: 200,
+     max_bytes_per_sender_user: 4 * 1024 * 1024,
+     max_targets_per_request: 100,
+@@ -76,7 +87,7 @@ defmodule Nebu.Matrix.ToDeviceStore do
+   def send(sender, sender_device, event_type, txn_id, entries) do
+     result =
+       transact(fn ->
+-        with {:ok, _} <- query("SELECT set_config('lock_timeout', $1::text, true)", ["#{@lock_timeout_ms}ms"]),
++        with {:ok, _} <- set_timeouts(),
+              :ok <- lock_sender(sender),
+              {:ok, fresh?} <- record_txn(sender, sender_device, event_type, txn_id) do
+           if fresh?, do: enqueue(sender, sender_device, event_type, entries), else: {:ok, []}
+@@ -93,11 +104,17 @@ defmodule Nebu.Matrix.ToDeviceStore do
+     end
+   end
+ 
+-  # the GDPR erasure takes the per-user `sync_global` advisory lock EXCLUSIVELY (the same key as the account data and the key backup writers); a send takes it
+-  # SHARED and only as a TRY-lock (no waiter holds a connection): a sender whose own erasure is under way is answered 429 at once, and a send never re-creates
+-  # rows (as sender or as recipient) after the erasure deleted them: the status is read AFTER the lock
++  # `lock_timeout` and `statement_timeout` of a transaction, in ONE statement (a delivery on an idle queue stays at its statement count)
++  defp set_timeouts do
++    query("SELECT set_config('lock_timeout', $1::text, true), set_config('statement_timeout', $2::text, true)", ["#{@lock_timeout_ms}ms", "#{limits().statement_timeout_ms}ms"])
++  end
++
++  # The GDPR erasure takes the advisory lock `to_device_erasure|<user>` EXCLUSIVELY (its OWN key: the account data, cross-signing and key backup writers hold
++  # `sync_global|<user>` and must not make a message skip); a send takes it SHARED and only as a TRY-lock (no waiter holds a connection): a sender whose own
++  # erasure is under way is answered 429 at once, and a send never re-creates rows (as sender or as recipient) after the erasure deleted them: the status is read
++  # AFTER the lock
+   defp lock_sender(sender) do
+-    with {:ok, %{rows: [[locked?]]}} <- query("SELECT pg_try_advisory_xact_lock_shared(hashtextextended('sync_global|' || $1::text, 0))", [sender]) do
++    with {:ok, %{rows: [[locked?]]}} <- query("SELECT pg_try_advisory_xact_lock_shared(hashtextextended('to_device_erasure|' || $1::text, 0))", [sender]) do
+       if locked?, do: ensure_not_erased(sender), else: {:error, :lock_busy}
+     end
+   end
+@@ -139,7 +156,8 @@ defmodule Nebu.Matrix.ToDeviceStore do
+   defp enqueue(sender, sender_device, event_type, entries) do
+     users = entries |> Enum.map(& &1.user_id) |> Enum.uniq()
+ 
+-    with {:ok, allowed} <- allowed_users(sender, users),
++    with :ok <- charge_bytes(sender, entries),
++         {:ok, allowed} <- allowed_users(sender, users),
+          {:ok, targets} <- resolve_targets(sender, sender_device, Enum.filter(entries, &MapSet.member?(allowed, &1.user_id))) do
+       {us, ds, cs} = {Enum.map(targets, &elem(&1, 0)), Enum.map(targets, &elem(&1, 1)), Enum.map(targets, &elem(&1, 2))}
+ 
+@@ -158,6 +176,28 @@ defmodule Nebu.Matrix.ToDeviceStore do
+     end
+   end
+ 
++  # The byte-cost rate bucket (per SENDER, node-local like every rate tier: N x the limit in a cluster): charged with the bytes the request ASKS to fan out, not with the
++  # bytes that were accepted (an accepted-bytes cost would tell a delivered recipient from a skipped one by the 429): an explicit device costs content + 128, a `*` the
++  # most it could reach (`max_targets` rows, never above the fan-out budget). A refusal rolls the transaction back (the txn id is not burnt) and is a 429.
++  defp charge_bytes(sender, entries) do
++    l = limits()
++
++    cost =
++      Enum.reduce(entries, 0, fn %{device: device, content: content}, acc ->
++        row = byte_size(content) + @row_overhead
++        acc + if(device == "*", do: min(row * l.max_targets_per_request, l.max_fanout_bytes_per_request), else: row)
++      end)
++
++    if cost == 0 do
++      :ok
++    else
++      case Nebu.Web.Plugs.RateLimit.take_all([{{"to_device_bytes", sender}, cost, l.rate_bytes_per_min, l.rate_bytes_burst}]) do
++        :ok -> :ok
++        {:deny, seconds} -> {:error, {:bytes_rate, seconds}}
++      end
++    end
++  end
++
+   # the sender itself, plus every user who shares a room with the sender where BOTH sides are `join` (an invitation opens no send path: no consent, and in-room
+   # verification does not use to-device messages); the statement runs even when there is no other user
+   defp allowed_users(sender, users) do
+@@ -177,13 +217,15 @@ defmodule Nebu.Matrix.ToDeviceStore do
+   end
+ 
+   # a deactivated (or erased) user receives nothing new: its queue is kept (a deactivation is reversible) but not extended
+-  # (a recipient whose erasure holds its lock is skipped like an unknown one: no oracle, and no row is created behind the erasure)
++  # (a recipient whose erasure holds its fence is skipped like an unknown one: no oracle, and no row is created behind the erasure). Only the ids that PASSED the
++  # shared-room join are locked (`cand` is materialised, the volatile lock function runs once per candidate row, never inside the scan of `users`).
+   defp active_users(users) do
+     with {:ok, %{rows: rows}} <-
+            query(
+              """
+-             SELECT u.user_id FROM users u WHERE u.user_id = ANY($1::text[]) AND u.is_active AND u.deletion_status IS NULL
+-               AND pg_try_advisory_xact_lock_shared(hashtextextended('sync_global|' || u.user_id, 0))
++             WITH cand AS MATERIALIZED (SELECT DISTINCT unnest($1::text[]) AS user_id),
++                  locked AS MATERIALIZED (SELECT user_id FROM cand WHERE pg_try_advisory_xact_lock_shared(hashtextextended('to_device_erasure|' || user_id, 0)))
++             SELECT u.user_id FROM users u JOIN locked l ON l.user_id = u.user_id WHERE u.is_active AND u.deletion_status IS NULL
+              """,
+              [users]
+            ) do
+@@ -230,7 +272,7 @@ defmodule Nebu.Matrix.ToDeviceStore do
+   defp existing_devices(explicit) do
+     with {:ok, %{rows: rows}} <-
+            query(
+-             "SELECT user_id, device_id FROM devices WHERE (user_id, device_id) IN (SELECT * FROM unnest($1::text[], $2::text[]))",
++             "SELECT user_id, device_id FROM devices WHERE (user_id, device_id) IN (SELECT * FROM unnest($1::text[], $2::text[])) FOR KEY SHARE",
+              [Enum.map(explicit, & &1.user_id), Enum.map(explicit, & &1.device)]
+            ) do
+       {:ok, MapSet.new(rows, fn [u, d] -> {u, d} end)}
+@@ -242,7 +284,7 @@ defmodule Nebu.Matrix.ToDeviceStore do
+            query(
+              """
+              SELECT u.user_id, d.device_id FROM unnest($1::text[]) AS u(user_id)
+-             CROSS JOIN LATERAL (SELECT device_id FROM devices WHERE user_id = u.user_id ORDER BY COALESCE(last_seen_ts, 0) DESC, device_id LIMIT $2) d
++             CROSS JOIN LATERAL (SELECT device_id FROM devices WHERE user_id = u.user_id ORDER BY COALESCE(last_seen_ts, 0) DESC, device_id LIMIT $2 FOR KEY SHARE) d
+              """,
+              [stars |> Enum.map(& &1.user_id) |> Enum.uniq(), cap]
+            ) do
+@@ -250,38 +292,43 @@ defmodule Nebu.Matrix.ToDeviceStore do
+     end
+   end
+ 
+-  # the budgets of the touched queues, set based (a constant number of statements however many recipients): (1) the sender's share of a device queue, (2) the sender's
+-  # share of a recipient USER's queues (200 messages / 4 MiB: its own oldest go first), (3) the device queue (count and bytes, oldest first), (4) the recipient user
+-  # (count and bytes) EVICTED FAIRLY: the oldest message of the sender with the LARGEST share goes first (a row's rank is its position counted from the newest message
+-  # of its sender; the highest ranks go first, older first on a tie), so a flooding co-member never evicts the older messages of a sender below its share.
+-  # Returns the number of evicted rows.
++  # The budgets of the touched queues, set based (a constant number of statements however many recipients):
++  #   (1) the sender's share of a device queue (100 messages / 1 MiB): its own oldest go first,
++  #   (2) the sender's share of a recipient USER's queues (200 messages / 4 MiB): its own oldest,
++  #   (3) the sender's TOTAL over all recipients (4000 messages / 16 MiB): its own oldest, any recipient,
++  #   (4) the device queue (500 / 8 MiB) and (5) the user (2000 / 32 MiB), count and bytes, evicted FAIRLY: the oldest message of the sender with the LARGEST share
++  #       goes first (a row's rank is its position counted from the newest message of its sender; the highest ranks go first, older first on a tie), so a flooding
++  #       co-member never evicts the older messages of a sender below its share.
++  # Every DELETE takes `FOR UPDATE SKIP LOCKED` on the rows it removes: a row another transaction holds is skipped (the cap catches up with the next send), a victim's
++  # sync never makes a send wait and a send never makes a sync wait. Returns the number of evicted rows.
+   defp evict(sender, us, ds) do
+     l = limits()
+     users = Enum.uniq(us)
++    pairs = "(user_id, device_id) IN (SELECT * FROM unnest($1::text[], $2::text[]))"
+ 
+     statements = [
+-      {"""
+-       DELETE FROM to_device_messages WHERE stream_pos IN (SELECT stream_pos FROM (
+-         SELECT stream_pos, row_number() OVER (PARTITION BY user_id, device_id ORDER BY stream_pos DESC) AS rn
+-         FROM to_device_messages WHERE sender = $1 AND (user_id, device_id) IN (SELECT * FROM unnest($2::text[], $3::text[]))) s WHERE rn > $4)
+-       """, [sender, us, ds, l.max_per_sender_device]},
+-      {"""
+-       DELETE FROM to_device_messages WHERE stream_pos IN (SELECT stream_pos FROM (
++      {skip_locked("""
++       SELECT stream_pos FROM (
++         SELECT stream_pos, row_number() OVER w AS rn, sum(bytes + $5) OVER w AS total
++         FROM to_device_messages WHERE sender = $1 AND (user_id, device_id) IN (SELECT * FROM unnest($2::text[], $3::text[]))
++         WINDOW w AS (PARTITION BY user_id, device_id ORDER BY stream_pos DESC)) s WHERE rn > $4 OR total > $6
++       """), [sender, us, ds, l.max_per_sender_device, @row_overhead, l.max_bytes_per_sender_device]},
++      {skip_locked("""
++       SELECT stream_pos FROM (
+          SELECT stream_pos, row_number() OVER w AS rn, sum(bytes + $4) OVER w AS total
+          FROM to_device_messages WHERE sender = $1 AND user_id = ANY($2::text[])
+-         WINDOW w AS (PARTITION BY user_id ORDER BY stream_pos DESC)) s WHERE rn > $3 OR total > $5)
+-       """, [sender, users, l.max_per_sender_user, @row_overhead, l.max_bytes_per_sender_user]},
+-      {"""
+-       WITH overfull AS (
+-         SELECT user_id, device_id FROM to_device_messages WHERE (user_id, device_id) IN (SELECT * FROM unnest($1::text[], $2::text[]))
+-         GROUP BY user_id, device_id HAVING count(*) > $3 OR sum(bytes + $4) > $5)
+-       DELETE FROM to_device_messages WHERE stream_pos IN (SELECT stream_pos FROM (
+-         SELECT stream_pos, row_number() OVER w AS rn, sum(bytes + $4) OVER w AS total
+-         FROM to_device_messages WHERE (user_id, device_id) IN (SELECT user_id, device_id FROM overfull)
+-         WINDOW w AS (PARTITION BY user_id, device_id ORDER BY stream_pos DESC)) s WHERE rn > $3 OR total > $5)
+-       """, [us, ds, l.max_per_device, @row_overhead, l.max_bytes_per_device]},
+-      {fair_user_count_sql(), [users, l.max_per_user]},
+-      {fair_user_bytes_sql(), [users, l.max_bytes_per_user, @row_overhead]}
++         WINDOW w AS (PARTITION BY user_id ORDER BY stream_pos DESC)) s WHERE rn > $3 OR total > $5
++       """), [sender, users, l.max_per_sender_user, @row_overhead, l.max_bytes_per_sender_user]},
++      {skip_locked("""
++       SELECT stream_pos FROM (
++         SELECT stream_pos, row_number() OVER w AS rn, sum(bytes + $3) OVER w AS total
++         FROM to_device_messages WHERE sender = $1
++         WINDOW w AS (ORDER BY stream_pos DESC)) s WHERE rn > $2 OR total > $4
++       """), [sender, l.max_per_sender_total, @row_overhead, l.max_bytes_per_sender_total]},
++      {skip_locked(fair_count_sql("user_id, device_id", pairs, "$3")), [us, ds, l.max_per_device]},
++      {skip_locked(fair_bytes_sql("user_id, device_id", pairs, "$3", "$4")), [us, ds, l.max_bytes_per_device, @row_overhead]},
++      {skip_locked(fair_count_sql("user_id", "user_id = ANY($1::text[])", "$2")), [users, l.max_per_user]},
++      {skip_locked(fair_bytes_sql("user_id", "user_id = ANY($1::text[])", "$2", "$3")), [users, l.max_bytes_per_user, @row_overhead]}
+     ]
+ 
+     Enum.reduce_while(statements, {:ok, 0}, fn {sql, params}, {:ok, acc} ->
+@@ -292,25 +339,35 @@ defmodule Nebu.Matrix.ToDeviceStore do
+     end)
+   end
+ 
+-  # the rows of a user beyond the message cap: the rows of the highest rank (largest share) first, the older first on a tie; the first `total - cap` of that order go
+-  defp fair_user_count_sql do
++  # deletes the rows `doomed_select` names, but only those no other transaction holds (`FOR UPDATE SKIP LOCKED`; a window function and a row lock cannot share a select)
++  defp skip_locked(doomed_select) do
+     """
+-    WITH overfull AS (SELECT user_id FROM to_device_messages WHERE user_id = ANY($1::text[]) GROUP BY user_id HAVING count(*) > $2)
+-    DELETE FROM to_device_messages WHERE stream_pos IN (SELECT stream_pos FROM (
+-      SELECT stream_pos, row_number() OVER (PARTITION BY user_id ORDER BY rank DESC, stream_pos ASC) AS ord, count(*) OVER (PARTITION BY user_id) AS n
+-      FROM (SELECT stream_pos, user_id, row_number() OVER (PARTITION BY user_id, sender ORDER BY stream_pos DESC) AS rank
+-            FROM to_device_messages WHERE user_id IN (SELECT user_id FROM overfull)) r) s WHERE ord <= n - $2)
++    WITH doomed AS (#{doomed_select}),
++         locked AS (SELECT stream_pos FROM to_device_messages WHERE stream_pos IN (SELECT stream_pos FROM doomed) FOR UPDATE SKIP LOCKED)
++    DELETE FROM to_device_messages WHERE stream_pos IN (SELECT stream_pos FROM locked)
++    """
++  end
++
++  # the rows of a queue (`cols`: the user or the device) beyond the message cap in the FAIR order: the highest rank (largest share) first, older first on a tie; the first
++  # `total - cap` rows of that order go. Only the over-full queues are read in full (the HAVING prefilter).
++  defp fair_count_sql(cols, filter, cap) do
++    """
++    WITH overfull AS (SELECT #{cols} FROM to_device_messages WHERE #{filter} GROUP BY #{cols} HAVING count(*) > #{cap})
++    SELECT stream_pos FROM (
++      SELECT stream_pos, row_number() OVER (PARTITION BY #{cols} ORDER BY rank DESC, stream_pos ASC) AS ord, count(*) OVER (PARTITION BY #{cols}) AS n
++      FROM (SELECT stream_pos, #{cols}, row_number() OVER (PARTITION BY #{cols}, sender ORDER BY stream_pos DESC) AS rank
++            FROM to_device_messages WHERE (#{cols}) IN (SELECT #{cols} FROM overfull)) r) s WHERE ord <= n - #{cap}
+     """
+   end
+ 
+   # the same for the byte budget (a row costs `bytes + overhead`): the rows are taken in the fair order while the bytes still above the budget are not freed
+-  defp fair_user_bytes_sql do
++  defp fair_bytes_sql(cols, filter, cap, overhead) do
+     """
+-    WITH overfull AS (SELECT user_id FROM to_device_messages WHERE user_id = ANY($1::text[]) GROUP BY user_id HAVING sum(bytes + $3) > $2::bigint)
+-    DELETE FROM to_device_messages WHERE stream_pos IN (SELECT stream_pos FROM (
+-      SELECT stream_pos, sum(cost) OVER (PARTITION BY user_id ORDER BY rank DESC, stream_pos ASC) - cost AS before, sum(cost) OVER (PARTITION BY user_id) - $2::bigint AS excess
+-      FROM (SELECT stream_pos, user_id, bytes + $3 AS cost, row_number() OVER (PARTITION BY user_id, sender ORDER BY stream_pos DESC) AS rank
+-            FROM to_device_messages WHERE user_id IN (SELECT user_id FROM overfull)) r) s WHERE excess > 0 AND before < excess)
++    WITH overfull AS (SELECT #{cols} FROM to_device_messages WHERE #{filter} GROUP BY #{cols} HAVING sum(bytes + #{overhead}) > #{cap}::bigint)
++    SELECT stream_pos FROM (
++      SELECT stream_pos, sum(cost) OVER (PARTITION BY #{cols} ORDER BY rank DESC, stream_pos ASC) - cost AS before, sum(cost) OVER (PARTITION BY #{cols}) - #{cap}::bigint AS excess
++      FROM (SELECT stream_pos, #{cols}, bytes + #{overhead} AS cost, row_number() OVER (PARTITION BY #{cols}, sender ORDER BY stream_pos DESC) AS rank
++            FROM to_device_messages WHERE (#{cols}) IN (SELECT #{cols} FROM overfull)) r) s WHERE excess > 0 AND before < excess
+     """
+   end
+ 
+@@ -336,7 +393,7 @@ defmodule Nebu.Matrix.ToDeviceStore do
+ 
+     result =
+       transact(fn ->
+-        with {:ok, _} <- query("SELECT set_config('lock_timeout', $1::text, true)", ["#{@lock_timeout_ms}ms"]),
++        with {:ok, _} <- set_timeouts(),
+              {:ok, _} <- acknowledge(user, device, ack),
+              {:ok, %{rows: rows}} <-
+                query(
+@@ -357,6 +414,13 @@ defmodule Nebu.Matrix.ToDeviceStore do
+                  [user, device, l.ttl_seconds * 1.0, since, l.sync_batch_size, @row_overhead, l.sync_batch_bytes]
+                ) do
+           batch = take_within_bytes(rows, l.sync_batch_bytes)
++
++          # test seam (ATDD, the lost-race trace): runs between the read and the stamp
++          case Application.get_env(:nebu, :atdd_to_device_before_stamp) do
++            hook when is_function(hook, 0) -> hook.()
++            _ -> :ok
++          end
++
+           stamp(batch, since)
+         end
+       end)
+@@ -370,7 +434,14 @@ defmodule Nebu.Matrix.ToDeviceStore do
+   defp acknowledge(_user, _device, ack) when ack in [nil, 0], do: {:ok, nil}
+ 
+   defp acknowledge(user, device, ack),
+-    do: query("DELETE FROM to_device_messages WHERE user_id = $1 AND device_id = $2 AND delivery_seq IS NOT NULL AND delivery_seq <= $3", [user, device, ack])
++    do:
++      query(
++        """
++        DELETE FROM to_device_messages WHERE stream_pos IN
++          (SELECT stream_pos FROM to_device_messages WHERE user_id = $1 AND device_id = $2 AND delivery_seq IS NOT NULL AND delivery_seq <= $3 FOR UPDATE SKIP LOCKED)
++        """,
++        [user, device, ack]
++      )
+ 
+   defp take_within_bytes(rows, max_bytes) do
+     {taken, _} =
+@@ -382,26 +453,38 @@ defmodule Nebu.Matrix.ToDeviceStore do
+     Enum.reverse(taken)
+   end
+ 
++  # The response carries the messages that are stamped (by an earlier response, or by THIS one just now). A row this response could not stamp (another response of the
++  # same device stamped it first, or its row is locked) is NOT carried: its stamp belongs to the other response, so the position of this token must not cover it.
++  # The position is the highest stamp of the carried rows, or the presented position (`since`) when there is none.
+   defp stamp([], since), do: {:ok, {[], since}}
+ 
+   defp stamp(batch, since) do
+     unstamped = for [pos, _, _, _, _, nil] <- batch, do: pos
+ 
+-    with {:ok, seq} <- stamp_new(unstamped) do
+-      stamped = for [_, _, _, _, _, s] when is_integer(s) <- batch, do: s
+-      position = Enum.max([since, seq | stamped])
++    with {:ok, seq, stamped_now} <- stamp_new(unstamped) do
++      carried = Enum.filter(batch, fn [pos, _, _, _, _, s] -> is_integer(s) or MapSet.member?(stamped_now, pos) end)
++      earlier = for [_, _, _, _, _, s] <- carried, is_integer(s), do: s
++      position = Enum.max([since | if(MapSet.size(stamped_now) > 0, do: [seq | earlier], else: earlier)])
+ 
+-      events = for [_pos, sender, type, content, _bytes, _seq] <- batch, do: %{"sender" => sender, "type" => type, "content" => Jason.decode!(content)}
++      events = for [_pos, sender, type, content, _bytes, _seq] <- carried, do: %{"sender" => sender, "type" => type, "content" => Jason.decode!(content)}
+       {:ok, {events, position}}
+     end
+   end
+ 
+-  defp stamp_new([]), do: {:ok, 0}
++  defp stamp_new([]), do: {:ok, 0, MapSet.new()}
+ 
+   defp stamp_new(positions) do
+     with {:ok, %{rows: [[seq]]}} <- query("SELECT nextval('to_device_delivery_seq')", []),
+-         {:ok, _} <- query("UPDATE to_device_messages SET delivery_seq = $1 WHERE stream_pos = ANY($2::bigint[]) AND delivery_seq IS NULL", [seq, positions]) do
+-      {:ok, seq}
++         {:ok, %{rows: rows}} <-
++           query(
++             """
++             UPDATE to_device_messages SET delivery_seq = $1 WHERE stream_pos IN
++               (SELECT stream_pos FROM to_device_messages WHERE stream_pos = ANY($2::bigint[]) AND delivery_seq IS NULL FOR UPDATE SKIP LOCKED)
++             RETURNING stream_pos
++             """,
++             [seq, positions]
++           ) do
++      {:ok, seq, MapSet.new(List.flatten(rows))}
+     end
+   end
+ 
+@@ -479,6 +562,7 @@ defmodule Nebu.Matrix.ToDeviceStore do
+   defp query(sql, params) do
+     case Ecto.Adapters.SQL.query(Nebu.Repo, sql, params) do
+       {:error, %Postgrex.Error{postgres: %{code: :lock_not_available}}} -> {:error, :lock_timeout}
++      {:error, %Postgrex.Error{postgres: %{code: :query_canceled}}} -> {:error, :statement_timeout}
+       other -> other
+     end
+   end
+diff --git a/server/lib/nebu/web/router/protected.ex b/server/lib/nebu/web/router/protected.ex
+index 7abe6491..40730e64 100644
+--- a/server/lib/nebu/web/router/protected.ex
++++ b/server/lib/nebu/web/router/protected.ex
+@@ -188,7 +188,7 @@ defmodule Nebu.Web.Router.Protected do
+     fallback? = sync.fallback_to_initial
+ 
+     # story to-device-messaging: acknowledge what the presented token covers (only a token that continues THIS device's row: an initial or fallback
+-    # answer acknowledges nothing) and deliver the pending messages of the device. A failed read is a 503 (the client retries with the same token).
++    # answer acknowledges nothing) and deliver the pending messages of the device. A failed delivery is an EMPTY `to_device` at the presented position (see below).
+     ack = if has_since? and not fallback?, do: since_td
+     td_delivery = Nebu.Matrix.ToDeviceStore.deliver(user, elem(key, 0), ack)
+ 
+@@ -229,23 +229,28 @@ defmodule Nebu.Web.Router.Protected do
+         fn {_rid, t, c} -> %{"type" => t, "content" => c} end
+       )
+ 
+-    case td_delivery do
+-      {:ok, %{events: td_events, position: td_pos}} ->
+-        token = sync.since_token <> "." <> Integer.to_string(latest_pos) <> if(td_pos > 0, do: "." <> Integer.to_string(td_pos), else: "")
++    # A failing delivery (a lock or statement timeout, a database fault) never fails the sync: the answer carries an EMPTY `to_device` and keeps the presented
++    # position (nothing is acknowledged, nothing is lost, the next sync delivers); the rooms and the account data are unaffected. The log names the KIND only.
++    {td_events, td_pos} =
++      case td_delivery do
++        {:ok, %{events: td_events, position: td_pos}} ->
++          {td_events, td_pos}
++
++        {:error, reason} ->
++          # the KIND of the failure only: a database error message can quote a row (the content of a message)
++          Logger.error("sync: the to-device messages could not be read (#{to_device_error_kind(reason)})")
++          {[], if(ack, do: ack, else: 0)}
++      end
+ 
+-        response =
+-          sync_response(token, rooms ++ extra_rooms, room_ad, sync.invite_rooms, sync.leave_rooms)
+-          |> put_device_e2e_counts(conn)
+-          |> put_global_deliveries(user, key, has_since?, fallback?, sync.since_token)
+-          |> Map.put("to_device", %{"events" => td_events})
++    token = sync.since_token <> "." <> Integer.to_string(latest_pos) <> if(td_pos > 0, do: "." <> Integer.to_string(td_pos), else: "")
+ 
+-        send_json(conn, 200, response)
++    response =
++      sync_response(token, rooms ++ extra_rooms, room_ad, sync.invite_rooms, sync.leave_rooms)
++      |> put_device_e2e_counts(conn)
++      |> put_global_deliveries(user, key, has_since?, fallback?, sync.since_token)
++      |> Map.put("to_device", %{"events" => td_events})
+ 
+-      {:error, reason} ->
+-        # the KIND of the failure only: a database error message can quote a row (the content of a message)
+-        Logger.error("sync: the to-device messages could not be read (#{to_device_error_kind(reason)})")
+-        error(conn, 503, "M_UNAVAILABLE", "Core is temporarily unavailable")
+-    end
++    send_json(conn, 200, response)
+   end
+ 
+   defp to_device_error_kind(%{__struct__: module}), do: inspect(module)
+diff --git a/server/lib/nebu/workers/to_device_purge_worker.ex b/server/lib/nebu/workers/to_device_purge_worker.ex
+index c9cd57d2..46ed48d8 100644
+--- a/server/lib/nebu/workers/to_device_purge_worker.ex
++++ b/server/lib/nebu/workers/to_device_purge_worker.ex
+@@ -1,7 +1,7 @@
+ defmodule Nebu.Workers.ToDevicePurgeWorker do
+   @moduledoc """
+   Oban-cron job (story to-device-messaging, epic e2ee-client-support) that deletes to-device messages older than the TTL (7 days, seam
+-  `:nebu, :to_device_ttl_seconds`) and idempotency records older than 24 hours through `Nebu.Matrix.ToDeviceStore.purge_expired/0`.
++  `:nebu, :to_device_ttl_seconds`) and idempotency records older than 24 hours through the facade `Nebu.Matrix.purge_expired_to_device/0` (ADR-020).
+ 
+   Housekeeping only: delivery never returns an expired message. Cluster safe like `OAuthFlowPurgeWorker`: Cron enqueues from the Oban leader only and the
+   purge is batched atomic SQL (`FOR UPDATE SKIP LOCKED`) that concurrent runs split between them; no node-local state. Logs counts only.
+@@ -12,7 +12,7 @@ defmodule Nebu.Workers.ToDevicePurgeWorker do
+ 
+   @impl Oban.Worker
+   def perform(%Oban.Job{}) do
+-    case Nebu.Matrix.ToDeviceStore.purge_expired() do
++    case Nebu.Matrix.purge_expired_to_device() do
+       {:ok, %{messages: 0, txns: 0}} ->
+         :ok
+ 
