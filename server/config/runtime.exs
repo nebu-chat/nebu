@@ -32,7 +32,9 @@ config :nebu_http, [{:admin_reauth_allow_missing_auth_time, System.get_env("NEBU
 # /v3/refresh) and admin-session ceilings so the silent-refresh loop fires within a
 # test window. SessionConfig.parse_ttl/1 is defensive: only a strictly positive
 # integer is applied; unset / junk / <= 0 leaves the 8h default untouched. Never
-# raises — must not break the login path.
+# raises — must not break the login path. The Matrix ceiling can also be SAVED in the
+# Admin UI (server_config.matrix_session_ttl_seconds, story session-lifetime-setting):
+# the saved value wins over NEBU_MATRIX_SESSION_TTL_SECONDS, which stays the fallback.
 for {env_name, cfg_key} <- [
       {"NEBU_MATRIX_SESSION_TTL_SECONDS", :matrix_session_ttl_seconds},
       {"NEBU_ADMIN_SESSION_TTL_SECONDS", :admin_session_ttl_seconds}

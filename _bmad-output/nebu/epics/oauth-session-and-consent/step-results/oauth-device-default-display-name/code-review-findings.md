@@ -1,0 +1,11 @@
+# Code review (cycle 0): oauth-device-default-display-name
+
+Reviewer: nebu-code-reviewer (read-only, static). 0 MAJOR, 3 MINOR, 6 INFO. All 5 scenarios + Decisions implemented. Verified clean: atomicity (UPDATE inside `insert_replacing_device/1` transaction after `lock_client!` and the upsert; failure/holder-check rolls back), rename race (client's PUT wins either way), revoked client, hot paths/other flows (no log lines, ADR-018/020, legacy/SSO/refresh untouched, GDPR, rolling deploy), sanitising order and suffix.
+
+## MINOR
+1. Redundant second client SELECT: device_name.ex:45 (`ClientStore.fetch_by_client_id`) called from token.ex:334; `authenticate/3` already fetched the approved client (token.ex:157). Thread `client.metadata["client_name"]` through check_grant_type -> redeem -> issue_session, then `for_client/2` and its rescue/catch are unnecessary. (Orchestrator: accepted as is, one cheap SELECT per code exchange, tests pin `for_client/2`; follow-up.)
+2. Docs overclaim "not logged": 08-concepts "Unchanged" bullet and CHANGELOG say "The name is not logged" without the caveat that the debug request logger writes the `GET /devices` body; write "the new code does not log it" and register the redact-device-names follow-up outside the story file.
+3. Invisible-but-not-empty names (device_name.ex:63): U+3164, U+FFA0, U+115F/U+1160, U+2800, U+034F and lone variation selectors pass the empty check and give a visually blank base (" (ABCD1234)") instead of "OAuth client". Drop/treat as space or require a visible character; add a test row. (Same as Kassandra LOW #1.)
+
+## INFO
+ZWJ (Cf) dropped so ZWJ emoji sequences split into separate emoji; the 64 code-point cut can split a combining sequence / flag pair: name it in the moduledoc. No NFC normalisation; VT/FF/NEL dropped not turned into a space. `fallback_base/0` and `max_base_length/0` only used by tests. `default_name/2` (public) sits after a private function: reorder (siblings group public first). `name != ""` clause in oauth_session_store.ex:200 unreachable (harmless). `reference-impl.diff` (183 lines) and `mutation-results.txt` are staged and will go stale after review fixes: unstage/delete the diff before the merge.

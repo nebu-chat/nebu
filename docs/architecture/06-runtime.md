@@ -1901,7 +1901,10 @@ Browser                 Nebu (Authorize / Consent)                              
   │ ... IdP login ...                                                                                                    │
   │ GET callback ──────────►│ consume request, binding, recheck client, IdP login; gate l (refresh token present?), provisioning,
   │                         │ Freshness.evaluate(auth_time) (absent/stale => login_fresh=false, never login_required), device holder
-  │                         │ (another app's live device => 403 device_in_use); INSERT oauth_consent_requests (binding_hash, TTL<=5 min) ►│
+  │                         │ (another app's live device => 403 device_in_use); skip_consent? (ONE statement joining the client row): a
+  │                         │ remembered Allow (oauth_consent_grants), no prompt=consent|login, device new or same app => Consent.issue_remembered
+  │◄───────────────────────│ 303 to the client's redirect_uri?code&state (no consent row, no cookie) -- or, without a remembered Allow:
+  │                         │ INSERT oauth_consent_requests (binding_hash, TTL<=5 min) ►│
   │◄───────────────────────│ 303 /oauth2/consent + cookie __Host-nebu_oauth_consent
   │ GET /oauth2/consent ───►│ renders from the live row (no mutation): app, claimed host, redirect target, session line, notice if not fresh
   │ POST /oauth2/consent ──►│ BrowserPost checks (Origin, Sec-Fetch-*, CSRF) BEFORE consumption; ONE DELETE ... RETURNING; Allow:
@@ -1916,7 +1919,7 @@ Client revocation (admin UI or `bin/nebu rpc`), one transaction, lock order `oau
 Admin (fresh re-auth, typed host) ─► Nebu.OAuth.revoke_client/3 ──► BEGIN
    UPDATE oauth_clients SET status='revoked' WHERE status='approved'   (0 rows => :not_approved)
    for each (user, device) of the client: locked per-device teardown (devices FOR UPDATE, all session rows, device + E2EE key tables)
-   oauth_codes.used_at (unused codes); DELETE oauth_authz_requests, oauth_consent_requests of the client
+   oauth_codes.used_at (unused codes); DELETE oauth_authz_requests, oauth_consent_requests, oauth_consent_grants of the client
    audit row oauth_client_revoked (a failed audit rolls everything back)                          COMMIT
    post-commit, best effort: JWT denylist + bindings, legacy per-device cleanup
 Concurrent issuance / rotation: SELECT status ... FOR SHARE (2 s lock_timeout) first => either the revoke's teardown removes the new

@@ -15,6 +15,7 @@
 <ul>
 <li><a href="/account?action=org.matrix.profile"<%= if @nav == :profile do %> aria-current="page"<% end %>>Profile</a></li>
 <li><a href="/account?action=org.matrix.devices_list"<%= if @nav == :devices do %> aria-current="page"<% end %>>Devices</a></li>
+<li><a href="/account/apps"<%= if @nav == :apps do %> aria-current="page"<% end %>>Apps</a></li>
 <li><a href="/account?action=org.matrix.cross_signing_reset"<%= if @nav == :reset do %> aria-current="page"<% end %>>Reset identity</a></li>
 </ul>
 </nav>

@@ -2,10 +2,12 @@ defmodule Nebu.OAuth.CacheOwner do
   @moduledoc """
   Supervised owner of the per-node OAuth ETS caches (story oauth-hardening-hygiene, HY4).
 
-  Creates both named, public tables in `init/1`:
+  Creates the named, public tables in `init/1`:
 
     * `:nebu_oauth_config_cache` (`read_concurrency: true`) — the TTL cache of `Nebu.OAuth.Config.get/1`
       (HY1, entry `{:config, map, loaded_at_ms}`);
+    * `:nebu_oauth_last_good` — the last known good saved Matrix session lifetime of `Nebu.OAuth.LastGood` (entry
+      `{:matrix_session_ttl, seconds}`, NO TTL: it must outlive the cache TTL and failed reads; per node, starts empty with the owner);
     * `:nebu_oauth_signing_key_cache` — the DECODED id_token signing keys of `Nebu.OAuth.SigningKeyStore`
       (keyed by `kid` + ciphertext, immutable rows).
 
@@ -20,6 +22,7 @@ defmodule Nebu.OAuth.CacheOwner do
 
   @tables [
     {:nebu_oauth_config_cache, [:set, :public, :named_table, read_concurrency: true]},
+    {:nebu_oauth_last_good, [:set, :public, :named_table, read_concurrency: true]},
     {:nebu_oauth_signing_key_cache, [:set, :public, :named_table, read_concurrency: true]}
   ]
 

@@ -545,7 +545,8 @@ defmodule Nebu.OAuth.OAuthConsentFlowTest do
     test "the holder the user SAW (the same app) continues to be replaceable; a legacy session too", %{cid: cid, priv: priv} do
       sub = T.unique_sub()
       old = T.session!(cid, @https, priv, sub: sub)
-      c = to_consent(cid, @https, %{}, priv, sub: sub)
+      # persistent-consent-grants: the first session remembered the Allow; prompt=consent shows the screen again (what this test is about)
+      c = to_consent(cid, @https, %{"prompt" => "consent"}, priv, sub: sub)
       params = T.consent!(c.cb, :allow) |> T.assert_allow_redirect(@https, "fragment", T.param(c.flow.pairs, "state"), issuer())
       body = T.redeem!(grant(c, params))
       assert T.whoami(body["access_token"]).status == 200
@@ -555,7 +556,8 @@ defmodule Nebu.OAuth.OAuthConsentFlowTest do
     test "the minted code records that the holder was checked and which app held the device", %{cid: cid, priv: priv} do
       sub = T.unique_sub()
       _old = T.session!(cid, @https, priv, sub: sub)
-      c = to_consent(cid, @https, %{}, priv, sub: sub)
+      # persistent-consent-grants: prompt=consent shows the screen although the first session remembered the Allow
+      c = to_consent(cid, @https, %{"prompt" => "consent"}, priv, sub: sub)
       params = T.consent!(c.cb, :allow) |> T.assert_allow_redirect(@https, "fragment", T.param(c.flow.pairs, "state"), issuer())
       row = code_row(params["code"])
       assert row["device_holder_checked"] == true
@@ -638,7 +640,8 @@ defmodule Nebu.OAuth.OAuthConsentFlowTest do
       sub = T.unique_sub()
       old = T.session!(cid, @https, priv, sub: sub)
 
-      c = to_consent(cid, @https, %{}, priv, sub: sub)
+      # persistent-consent-grants: prompt=consent shows the screen although the first session remembered the Allow
+      c = to_consent(cid, @https, %{"prompt" => "consent"}, priv, sub: sub)
       page = T.consent_get(T.consent_cookie(c.cb) |> then(fn {n, v, _} -> {n, v} end))
       assert page.resp_body =~ ~s(data-device="same_client")
 

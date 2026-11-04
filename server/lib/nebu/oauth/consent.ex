@@ -2,11 +2,13 @@ defmodule Nebu.OAuth.Consent do
   @moduledoc """
   The consent step of the authorization code flow (epic oauth-broker, story oauth-authorize-freshness,
   ADR-033 "Consent, freshness and refresh serialization", FR1, FR5-FR8, FR11, FR12, FR17, FR18): the user's
-  decision, taken on a Nebu page BEFORE any authorization code exists.
+  decision, taken on a Nebu page (or remembered from an earlier Allow, story persistent-consent-grants).
 
   After the verified IdP login `Nebu.OAuth.Authorize` persists a consent row (`Nebu.OAuth.ConsentStore`)
   and answers `303 Location: /oauth2/consent` with the consent cookie; this module serves that route. It
-  is the ONLY caller of `Nebu.OAuth.CodeStore.insert/1`: no code exists without the user's click.
+  is the ONLY caller of `Nebu.OAuth.CodeStore.insert/1`: no code exists without an Allow, either the user's
+  click here or a remembered Allow (`issue_remembered/4`, called by the callback when
+  `Nebu.OAuth.ConsentGrantStore` knows the same user, client, scope and redirect URI).
 
   ## Routes (`Nebu.Web.Router` -> `Nebu.OAuth.Http`, action `:consent`; handled by `handle/1`)
 
@@ -62,7 +64,7 @@ defmodule Nebu.OAuth.Consent do
   import Plug.Conn
   require Logger
 
-  alias Nebu.OAuth.{Authorize, AuthorizeRequest, BrowserPost, ClientStore, CodeStore, Config, ConsentPage, ConsentStore, FormPost, Pages}
+  alias Nebu.OAuth.{Authorize, AuthorizeRequest, BrowserPost, ClientStore, CodeStore, Config, ConsentGrantStore, ConsentPage, ConsentStore, FormPost, Pages}
   alias Nebu.Web.ClientIP
   alias Nebu.Web.Plugs.RateLimit
 
@@ -247,7 +249,21 @@ defmodule Nebu.OAuth.Consent do
     Pages.send_page(conn, 403, "device_in_use")
   end
 
-  defp mint(conn, issuer, row, device) do
+  @doc """
+  Story persistent-consent-grants: the code of a REMEMBERED Allow, issued by the IdP callback itself (`Nebu.OAuth.Authorize`) without the consent
+  screen. `row` has the keys of a consent row (the callback builds it from the consumed authorization request and the verified login); `device` is the
+  result of `device_check/3` the callback ran. The same code attrs, the same device-holder record and the same redirect as after an Allow; nothing is
+  written to the grant table (a skip does not touch the grant).
+  """
+  @spec issue_remembered(Plug.Conn.t(), String.t(), map(), term()) :: Plug.Conn.t()
+  def issue_remembered(conn, issuer, row, device) do
+    case usable_target(row) do
+      {:ok, _target} -> mint(conn, issuer, row, device, :remembered)
+      {:page, status, code} -> Pages.send_page(conn, status, code)
+    end
+  end
+
+  defp mint(conn, issuer, row, device, outcome \\ :allowed) do
     attrs =
       Map.take(row, [:client_id, :redirect_uri, :code_challenge, :device_id, :user_id, :scope, :scope_prefix, :response_mode])
       |> Map.merge(%{
@@ -262,13 +278,23 @@ defmodule Nebu.OAuth.Consent do
 
     case CodeStore.insert(attrs) do
       {:ok, code} ->
-        Logger.info("OAuth consent: allowed client_id=#{row.client_id} user_id=#{row.user_id} device_id=#{row.device_id}")
+        Logger.info("OAuth consent: #{outcome} client_id=#{row.client_id} user_id=#{row.user_id} device_id=#{row.device_id}")
+        if outcome == :allowed, do: remember(row)
         params = [{"code", code}] ++ state_param(row.client_state) ++ [{"iss", issuer}]
         redirect(conn, AuthorizeRequest.redirect_location(row.redirect_uri, row.response_mode, params))
 
       {:error, reason} ->
         Logger.error("OAuth consent: could not issue the authorization code client_id=#{row.client_id}: #{log_reason(reason)}")
         error_redirect(conn, issuer, row, "server_error")
+    end
+  end
+
+  # Remember what the user just allowed, AFTER the code exists (no grant without an issued code). A failing write never fails the Allow: the
+  # user is simply asked again next time (value-free warning).
+  defp remember(row) do
+    case ConsentGrantStore.upsert(%{user_id: row.user_id, client_id: row.client_id, scope: row.scope, redirect_uri: row.redirect_uri}) do
+      :ok -> :ok
+      {:error, reason} -> Logger.warning("OAuth consent: the decision was not remembered client_id=#{row.client_id}: #{log_reason(reason)}")
     end
   end
 

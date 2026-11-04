@@ -48,7 +48,8 @@ config :phoenix,
     "oidc_user_id_claim",
     "oidc_displayname_claim",
     "oidc_email_claim",
-    "admin_group_claim"
+    "admin_group_claim",
+    "matrix_session_ttl_seconds"
   ]
 
 # ── admin-ui-migration: Phoenix LiveView Admin UI endpoint (compile-time base) ──

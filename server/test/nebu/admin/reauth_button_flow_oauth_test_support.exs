@@ -54,12 +54,13 @@ defmodule Nebu.Admin.ReauthButtonFlowSupport do
 
   # ── the nine forms ────────────────────────────────────────────────────────
 
-  @doc "The seven forms on the four pages that need no database (id, selector, marker path, normal submit text, hint, ids the control must be described by)."
+  @doc "The eight forms on the four pages that need no database (id, selector, marker path, normal submit text, hint, ids the control must be described by)."
   def forms do
     [
       %{key: :sso_schemes, page: @config, selector: "form#sso-schemes-form", path: @config, normal: "Save SSO schemes", link: "Sign in again to save", hint: "sso-schemes-reauth-hint", describedby: ["sso-schemes-reauth-hint"], keep: []},
       %{key: :sso_origins, page: @config, selector: "form#sso-origins-form", path: @config, normal: "Save SSO origins", link: "Sign in again to save", hint: "sso-origins-reauth-hint", describedby: ["sso-origins-reauth-hint"], keep: []},
       %{key: :oauth_switch, page: @config, selector: "form#oauth-switch-form", path: @config, normal: "Save OAuth settings", link: "Sign in again to save", hint: "oauth-switch-reauth-hint", describedby: ["oauth-switch-reauth-hint"], keep: []},
+      %{key: :session_lifetime, page: @config, selector: "form#session-lifetime-form", path: @config, normal: "Save session lifetime", link: "Sign in again to save", hint: "session-lifetime-reauth-hint", describedby: ["session-lifetime-reauth-hint"], keep: []},
       %{
         key: :claim_mapping,
         page: @claim,

@@ -1,0 +1,24 @@
+# Nebu Pipeline State
+# last_updated: 2026-11-02
+# [oauth-device-default-display-name] 2026-11-02T07:24Z commit
+# [oauth-device-default-display-name] 2026-11-02T07:24Z security → Kassandra cycle 0 APPROVED (LOW invisible letters fixed, LOW homoglyphs accepted)
+# [oauth-device-default-display-name] 2026-11-02T07:24Z code-review → cycle 0: 0 MAJOR 3 MINOR; invisible-characters MINOR fixed in cycle 1
+# [oauth-device-default-display-name] 2026-11-02T07:24Z ci-gate → integration 24 failures, all known shared-state/flaky families (RoomsFallbackName 12, TemporaryCapture 3, TraceMapNodeControls 3, SyncStreamPositionConcurrency 2 + MemberSliceGate 1 + HistoryVisibilitySecurityCycle1 1 (all pass alone: 39/39), LogStore Retention 1, WarRoom 1), e2e 150 passed 2 failed: thread_messages relations (known flaky) + oauth-consent-grants scenario 2/9 (need the https stack, excluded in scripts/e2e-ci.sh)
+# [persistent-consent-grants] 2026-10-30T20:25Z commit
+# [persistent-consent-grants] 2026-10-30T20:20Z ux-review → 0 blocking, 4 MINOR fixed
+# [persistent-consent-grants] 2026-10-30T20:15Z security → Kassandra cycle 0 APPROVED (MEDIUM device-replace skip fixed); delta cycle 1 APPROVED (LOW prompt=login not forwarded to IdP accepted)
+# [persistent-consent-grants] 2026-10-30T20:10Z code-review → cycle 0: 0 MAJOR 5 MINOR; delta: 0 MAJOR 4 MINOR
+# [persistent-consent-grants] 2026-10-30T20:00Z ci-gate → integration 31 failures, all known shared-state/flaky families (RoomsFallbackName 12, SyncStreamPositionDispatcher 9 (pass alone), AdminOidcLogin 3, TraceMapNodeControls 3, TemporaryCapture 2, SsoLogin 1 (known), WarRoom 1), e2e 150 passed 3 failed: thread_messages relations (known flaky, passes alone) + oauth-consent-grants scenario 2 and 9 (need the https stack, now excluded from plain admin e2e via scripts/e2e-ci.sh)
+# [session-lifetime-setting] 2026-10-30T15:45Z commit
+# [session-lifetime-setting] 2026-10-30T15:40Z ci-gate → integration 30 failures in known/shared-state families (ModerationRoutes + SyncMembershipPartition pass alone), e2e 150 passed 0 failed
+# [session-lifetime-setting] 2026-10-30T11:00Z cycle 2 done: no-DB 7000/0, DB set 292/0; reviews cycle 1: kassandra CLEAN, code-review 0 MAJOR; CI gate started
+# [session-lifetime-setting] 2026-10-30T09:00Z cycle 1 dev → last-good, one parser, in-lock before value + after-commit hooks, UX M1-M5; no-DB 6993/0, DB set 267/0
+# [session-lifetime-setting] 2026-10-30T06:10Z dev-story → done (cycle 0): no-DB 6973/0, DB set 221/0
+# [session-lifetime-setting] 2026-10-30T05:10Z atdd+test-review → 119 tests (98 red), 65 mutants killed; 3 MAJOR + 8 MINOR fixed in fix pass
+# [session-lifetime-setting] 2026-10-30T03:20Z create-story → 5 scenarios (+ persistent-consent-grants 9 scenarios, run second)
+story: null
+current_step: null
+completed: []
+cycle_count: 0
+blocked_reason: null
+last_updated: "2026-11-02T07:24Z"

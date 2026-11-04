@@ -1,0 +1,93 @@
+Mutation results - story persistent-consent-grants (epic oauth-session-and-consent)
+================================================================================
+
+Method: the throwaway reference implementation (reference-impl.diff) was applied, ONE mutant at a time on top of it, the story tests were run
+(`.session-ci/quick.sh "mix test <8 story files> --include integration"`; the erasure mutant also user_deletion_global_data / _sweep) and the file was restored.
+KILLED = at least one test failed. Runner: scratchpad mutants.py (throwaway, not committed).
+Result: 68 mutants, 68 KILLED, 0 SURVIVED / ERROR.
+
+Notes
+  * M60-M64 (migration 000057) and the docs mutants M65-M68 are killed by STATIC tests (the throwaway DB is migrated once from the correct file, not per mutant).
+  * First run: M67 (ADR FR1 pointer removed) SURVIVED because the old FR1 text itself contains 'remembered grants'; the docs test was tightened to require the
+    story id inside FR1 and M67 was re-run: KILLED.
+
+id    status   failing  description  |  first failing test
+M01   KILLED      15    force_consent never true  |  AuthorizeRequest.validate/2 carries force_consent (scenario 7) prompt "login consent" => force_consent true (N
+M02   KILLED       3    force_consent: substring match (consentx)  |  AuthorizeRequest.validate/2 carries force_consent (scenario 7) prompt "xconsent" => force_consent false (Nebu.
+M03   KILLED       9    force_consent only for prompt == consent  |  AuthorizeRequest.validate/2 carries force_consent (scenario 7) prompt "consent login" => force_consent true (N
+M04   KILLED       3    force_consent case-insensitive  |  AuthorizeRequest.validate/2 carries force_consent (scenario 7) prompt "CONSENT" => force_consent false (Nebu.O
+M05   KILLED      10    authz_store: flag never persisted  |  scenario 3 - a broader scope asks for consent again an Allow that is NARROWER than the grant narrows it: the b
+M06   KILLED      10    authorize: delegate drops the flag  |  scenario 1 - first login with a client asks for consent Deny leaves an EXISTING grant alone (withdrawal is exp
+M07   KILLED       9    authorize: remembered? ignores force_consent  |  scenario 3 - a broader scope asks for consent again an Allow that is NARROWER than the grant narrows it: the b
+M08   KILLED       1    authorize: storage error treated as remembered  |  fail towards asking the grant table cannot be read at the callback: the consent screen is shown (never a skip,
+M09   KILLED       2    authorize: code row loses auth_time  |  scenario 2 - the second login with the same client skips the consent screen the code is bound to THIS request:
+M10   KILLED      28    authorize: code row loses client_state  |  the revoke transaction a code minted by the skip path just before the revocation cannot be redeemed afterwards
+M11   KILLED       1    authorize: code row openid always requested  |  scenario 3 - a broader scope asks for consent again grant with openid, request WITHOUT openid: a narrower requ
+M12   KILLED       2    authorize: code row scope widened  |  scenario 2 - the second login with the same client skips the consent screen the code is bound to THIS request:
+M13   KILLED       1    authorize: holder lost on skip  |  scenario 2 - the second login with the same client skips the consent screen the same app on the same device co
+M14   KILLED       4    authorize: code row loses the IdP refresh token  |  scenario 2 - the second login with the same client skips the consent screen the same app on the same device co
+M15   KILLED       3    authorize: code row response_mode forced to query  |  scenario 4 - a changed redirect URI asks for consent again the redirect URI of the skipped redirect is the req
+M16   KILLED       1    consent: skip also rewrites the grant  |  scenario 2 - the second login with the same client skips the consent screen the skip does not touch the grant 
+M17   KILLED      56    consent: Allow does not remember  |  the revoke transaction a failing audit rolls the revocation back: the client stays approved and the grants sta
+M18   KILLED       1    consent: remember BEFORE the code exists  |  scenario 1 - first login with a client asks for consent no grant without an issued code: when the code cannot 
+M19   KILLED       1    consent: skip path ignores the unusable redirect target  |  scenario 2 - the second login with the same client skips the consent screen a redirect target that can never b
+M20   KILLED       1    consent: log leaks the redirect URI  |  log hygiene skip and Allow log ids only: no code, state, nonce, challenge, verifier, IdP refresh token, scope 
+M21   KILLED       6    store: covers? any token  |  covers?/2 a different Matrix prefix is NOT covered (Nebu.OAuth.ConsentGrantScopeTest)
+M22   KILLED       2    store: covers? empty request  |  covers?/2 a request that is only a device token is not covered (nothing to grant) (Nebu.OAuth.ConsentGrantScop
+M23   KILLED       4    store: tokens not sorted  |  normalize_scope/1 unknown tokens are kept (the function never invents a narrowing; the request parser already 
+M24   KILLED       2    store: tokens not unique  |  normalize_scope/1 duplicates collapse (Nebu.OAuth.ConsentGrantScopeTest)
+M25   KILLED      54    store: device token kept  |  normalize_scope/1 duplicates collapse (Nebu.OAuth.ConsentGrantScopeTest)
+M26   KILLED      53    store: only the stable device token dropped  |  covers?/2 order and device do not matter (Nebu.OAuth.ConsentGrantScopeTest)
+M27   KILLED       4    store: skip ignores the user  |  scenario 8: alice allowed the app (real flow); alice is erased; no consent grant of alice remains, bob's grant
+M28   KILLED       6    store: skip ignores the client  |  skip_consent?/4 false for a rejected or pending client row with a grant row (a grant never authorises an unapp
+M29   KILLED       4    store: skip ignores the redirect URI  |  skip_consent?/4 false for another redirect URI (exact comparison, no normalisation) (Nebu.OAuth.ConsentGrantSt
+M30   KILLED       1    store: skip ignores the client status  |  skip_consent?/4 false for a revoked client although the grant row still exists (the revocation wins, no second
+M31   KILLED       3    store: skip ignores the binding  |  scenario 6 - a revoked client asks for consent again after re-approval even a SURVIVING grant row (written for
+M32   KILLED       5    store: skip reads the grant without the client row  |  scenario 6 - a revoked client asks for consent again after re-approval even a SURVIVING grant row (written for
+M33   KILLED       4    store: covers? arguments reversed  |  skip_consent?/4 true for a narrower scope, false for a broader one or another Matrix prefix (Nebu.OAuth.Consen
+M34   KILLED       1    store: read error answers false  |  skip_consent?/4 {:error, :storage} when the table cannot be read; never a raise, never true (Nebu.OAuth.Consen
+M35   KILLED       6    store: upsert DO NOTHING  |  upsert/1 a second Allow REPLACES scope and redirect URI (narrower, then broader, then another URI); still one 
+M36   KILLED       3    store: upsert keeps the old scope  |  upsert/1 a second Allow REPLACES scope and redirect URI (narrower, then broader, then another URI); still one 
+M37   KILLED       2    store: upsert keeps the old redirect URI  |  upsert/1 a second Allow REPLACES scope and redirect URI (narrower, then broader, then another URI); still one 
+M38   KILLED       1    store: upsert for any client status  |  upsert/1 writes NOTHING for a pending, rejected, revoked or unknown client, and never raises (Nebu.OAuth.Conse
+M39   KILLED      44    store: upsert binding = now()  |  the revoke transaction deletes the grants of EVERY user of the client and nobody else's (Nebu.OAuth.ConsentGra
+M40   KILLED       2    store: granted_at not advanced  |  upsert/1 a second Allow REPLACES scope and redirect URI (narrower, then broader, then another URI); still one 
+M41   KILLED      10    store: upsert stores the raw scope  |  upsert/1 24 concurrent Allows of the same user and client end in ONE row, every call answers :ok (ON CONFLICT,
+M42   KILLED       2    store: list ignores the user  |  list_for_user/1 returns the user's own, currently valid grants with the claimed client name; nobody else's (Ne
+M43   KILLED       2    store: list ignores the client status  |  list_for_user/1 does not list a grant of a revoked client or a stale binding (Nebu.OAuth.ConsentGrantStoreTest
+M44   KILLED       2    store: list ignores the binding  |  list_for_user/1 does not list a grant of a revoked client or a stale binding (Nebu.OAuth.ConsentGrantStoreTest
+M45   KILLED       3    store: withdraw ignores the user  |  withdraw/2 deletes exactly the user's grant for that client: {:ok, :withdrawn} once, then {:ok, :not_found} (N
+M46   KILLED       5    store: withdraw always reports withdrawn  |  withdraw/2 deletes exactly the user's grant for that client: {:ok, :withdrawn} once, then {:ok, :not_found} (N
+M47   KILLED       3    account: not found shown as withdrawn  |  scenario 9 - the user withdraws the grant on the OAuth account page a user can only withdraw their OWN grant: 
+M48   KILLED       1    account: withdrawal needs a fresh sign-in  |  scenario 9 - the user withdraws the grant on the OAuth account page DECISION: a withdrawal does not need a fre
+M49   KILLED       1    account: withdrawal ends the user's OAuth sessions  |  scenario 9 - the user withdraws the grant on the OAuth account page DECISION: it does NOT end existing session
+M50   KILLED       1    account: unreadable grants render an empty list  |  GET /account/apps the page is unavailable (503, unavailable page) when the grants cannot be read: never an emp
+M51   KILLED       1    pages: app name not escaped  |  GET /account/apps the app name is shown escaped (claimed by the app: never trusted markup) (Nebu.OAuth.Consent
+M52   KILLED       2    layout: no Apps link  |  GET /account/apps the nav of the OTHER account pages links to it as well (Nebu.OAuth.ConsentGrantAccountTest)
+M53   KILLED       1    account: GET /account/apps is not a known path  |  GET /account/apps methods: POST /account/apps => 405 (Allow GET); GET /account/apps/withdraw => 405 (Allow POS
+M54   KILLED      17    account: POST withdraw is not a known path  |  POST /account/apps/withdraw hardening no session cookie: 303 to /account (sign in first), nothing deleted (Neb
+M55   KILLED       1    template: withdraw button without the app name  |  GET /account/apps lists the user's allowed apps with a withdraw form each; page contract, nav link, headers, o
+M56   KILLED       1    template: note without the sessions statement  |  GET /account/apps the note says that withdrawing does not sign out devices that are already signed in (Nebu.OA
+M57   KILLED       1    template: withdraw form without the client id  |  GET /account/apps lists the user's allowed apps with a withdraw form each; page contract, nav link, headers, o
+M58   KILLED       4    client_store: revoke keeps the grants  |  the revoke transaction a grant table that cannot be written fails the revocation closed: nothing is revoked, n
+M59   KILLED      23    user_deletion: grants not erased  |  a failing delete of the grants rolls the whole erasure back and names the step; a retry succeeds (Nebu.OAuth.C
+M60   KILLED       1    migration: FK without cascade  |  migration files (static) columns, composite PK, NOT NULLs, FK cascade, the size CHECKs (Nebu.Migration.Migrati
+M61   KILLED       1    migration: table level UPDATE  |  migration files (static) grants: SELECT / INSERT / DELETE on the table, UPDATE only per column, the table leve
+M62   KILLED       1    migration: RLS not forced  |  migration files (static) RLS enabled AND forced; exactly one policy per command, nothing else (Nebu.Migration.
+M63   KILLED       1    migration: force_consent defaults to true  |  migration files (static) oauth_authz_requests gains force_consent BOOLEAN NOT NULL DEFAULT false, nothing else
+M64   KILLED       1    migration: no size check on the scope  |  migration files (static) columns, composite PK, NOT NULLs, FK cascade, the size CHECKs (Nebu.Migration.Migrati
+M65   KILLED       1    docs: sweep without the grants table  |  07-deployment: the operator's erasure sweep deletes the table too (built from erased_tables/0) (Nebu.OAuth.Con
+M66   KILLED       1    docs: CHANGELOG without the account page  |  CHANGELOG [Unreleased]: the entry names the story, the migration, the skip rule, prompt=consent, the account p
+M67   KILLED       1    docs: ADR FR1 without the pointer  |  ADR-033: an addendum records that FR1 (consent on every authorization) is relaxed by remembered grants, with t
+M69   KILLED       2    authorize: skip decided before the user gate (deactivated user not refused)  |  new test "a DEACTIVATED user with a live grant ..." and the erasure test (fix pass, total 69 / 69 killed)
+M68   KILLED       1    docs: section without the no-expiry decision  |  07-deployment: the section 'Remembered consent grants' names the table, migration, binding, skip rule, deletio
+
+Cycle 1 (on top of the staged dev tree + reference-impl-cycle1.diff): 22 mutants, 22 KILLED (91 / 91 in total). Runner: same mutants.py, edits C01-C22.
+  C01 skip ignores the device state ({:replace,_} not refused) / C02 prompt=login no longer forces / C03 substring match of consent|login /
+  C04 claimed client_uri host as Website fallback / C05 Withdraw name without host / C06 'unknown website' wording / C07 title back to 'Allowed apps' /
+  C08 intro wording back / C09 terse empty state / C10 no return target for /account/apps / C11 return_location ignores apps /
+  C12 action CHECK without 'apps' (static) / C13 down migration keeps 'apps' rows (static) / C14 no deploy window note / C15 gate row y without the note /
+  C16 06-runtime revoke step without grants / C17 05-building-blocks 'consent on every authorization' back / C18 authorize moduledoc stale claim /
+  C19 consent moduledoc stale claim / C20 client_store revoke doc without grants / C21 account moduledoc without the apps route / C22 CHANGELOG without prompt=login.
+  Test gaps found and closed by the first run: C22 SURVIVED (the deploy-window sentence also mentions prompt=login: the pin now requires "no `prompt=login`"),
+  C19 was a wrong mutant pattern (fixed, KILLED).

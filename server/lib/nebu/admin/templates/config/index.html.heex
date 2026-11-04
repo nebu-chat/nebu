@@ -293,6 +293,62 @@
   </form>
 </section>
 
+<%!-- Matrix session lifetime (story session-lifetime-setting): the ceiling a NEW Matrix session (OAuth and legacy login) gets at sign-in. A marker-gated form
+      (the same gate and button flow as the forms above), ONE audit row per change; existing sessions keep their ceiling. --%>
+<section id="session-lifetime" aria-labelledby="session-lifetime-heading" class="mb-6">
+  <h2 id="session-lifetime-heading" class="text-heading font-semibold mb-2">Matrix session lifetime</h2>
+  <p class="text-text-secondary mb-2">
+    How long a signed-in Matrix session lasts, counted from the sign-in. It applies to the OAuth and the legacy login alike.
+  </p>
+  <p id="session-lifetime-current" class="mb-2">Current lifetime: <strong>{@lifetime_text}</strong></p>
+
+  <form id="session-lifetime-form" method="post" action="/admin/config/session-lifetime">
+    <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+    <input type="hidden" name="_click_proof" value="" data-click-proof />
+
+    <div class="form-control mt-2">
+      <label for="session-lifetime-input" class="label-text">Session lifetime in seconds</label>
+      <input
+        type="text"
+        id="session-lifetime-input"
+        name="matrix_session_ttl_seconds"
+        value={@lifetime_value}
+        autocomplete="off"
+        spellcheck="false"
+        inputmode="numeric"
+        aria-describedby={if @lifetime_error, do: "session-lifetime-error session-lifetime-help", else: "session-lifetime-help"}
+        autofocus={@lifetime_error != nil}
+        aria-invalid={if @lifetime_error, do: "true"}
+        class="input input-bordered w-full max-w-xs"
+      />
+      <p :if={@lifetime_error} id="session-lifetime-error" role="alert" class="mt-1 text-error">
+        {@lifetime_error}
+      </p>
+      <div id="session-lifetime-help" class="label-text-alt mt-1 text-base-content/70 break-words">
+        <p>
+          Whole seconds, from {@lifetime_bounds.min} ({@lifetime_bounds.min_text}) to {@lifetime_bounds.max} ({@lifetime_bounds.max_text}). Without a saved value
+          the environment value <code>NEBU_MATRIX_SESSION_TTL_SECONDS</code> applies, else 8 hours.
+        </p>
+        <p>Common values: 3600 (1 hour), 28800 (8 hours), 86400 (1 day), 604800 (7 days), 2592000 (30 days).</p>
+      </div>
+      <div id="session-lifetime-note" class="mt-2 text-sm text-base-content/70 break-words">
+        <p>
+          A session ends this long after sign-in, even if it is still in use. Renewing the token does not make it longer. A change applies to new
+          sign-ins only. Sessions created through the OAuth login keep the lifetime they started with. Sessions from the legacy login store no end
+          date. They use the current setting when they are renewed, so a shorter value can end them earlier than before.
+        </p>
+        <p>
+          A legacy login is also capped by the identity provider: its session never outlives the expiry of the identity provider's own token,
+          whatever this setting says.
+        </p>
+      </div>
+    </div>
+
+    <.reauth_hint id="session-lifetime-reauth-hint" reauth={@reauth} />
+    <.reauth_control reauth={@reauth} class="btn btn-primary mt-3" describedby="session-lifetime-reauth-hint">Save session lifetime</.reauth_control>
+  </form>
+</section>
+
 <div class="overflow-x-auto">
   <table class="table table-zebra">
     <thead>

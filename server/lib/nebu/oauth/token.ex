@@ -334,7 +334,9 @@ defmodule Nebu.OAuth.Token do
       # story oauth-authorize-freshness L-1: the device holder the user accepted at Allow, re-checked by the
       # Matrix domain under the devices row lock (a code of an older node carries `false`: no re-check)
       device_holder_checked: Map.get(row, :device_holder_checked, false) == true,
-      expected_holder_client_id: Map.get(row, :device_holder_client_id)
+      expected_holder_client_id: Map.get(row, :device_holder_client_id),
+      # story oauth-device-default-display-name: the Matrix domain writes it for a device whose name is unset only
+      default_device_display_name: Nebu.OAuth.DeviceName.for_client(client_id, row.device_id)
     })
   end
 

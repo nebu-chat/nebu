@@ -1,0 +1,309 @@
+Mutation results - story oauth-device-default-display-name (epic oauth-session-and-consent, REQ-2026-004), after the test-review fix pass
+================================================================================
+
+Method: the throwaway reference implementation (reference-impl.diff, unchanged by the fix pass) was applied to the worktree, one mutant at a time was applied on top
+of it, the 4 story test files were run (`.session-ci/quick.sh "mix test test/nebu/oauth/device_name_{test,flow_test,erasure_test,docs_test}.exs --include integration"`,
+62 tests) and the file was restored from memory (never `git checkout`, the reference was uncommitted). KILLED = at least one test failed or the mutant did not compile.
+Runner: scratchpad mutants.py (throwaway, not committed). Result: 45 mutants, 45 KILLED, 0 SURVIVED / ERROR.
+
+Fix pass: the static pins were reduced (test-review MINOR 1-4), so the mutants that only the removed static tests could kill were dropped: M40 (a migration 000058
+appears: no test any more, 000058 is reserved for another story), M42 / M43 / M45 (prose tokens of 08-concepts). Added: M47 (the section heading is gone), M48 (the
+section lost the never-overwrite statement). The guard mutants M30 (no IS NULL), M33 (name through the upsert) and M34 / M46 are now killed by BEHAVIOUR tests of the
+flow file (M46 by both NULL-name tests, incl. the new "cleared through the API" test).
+
+Notes
+  * M41 (the guard `name != ""` before the UPDATE) was dropped as an EQUIVALENT mutant: `default_name/2` never returns an empty string, the clause is defensive only.
+  * M35 (a refresh clears the name) and M46 (an existing unnamed device is not filled) pin behaviours that the Gherkin does not spell out (see the story Decisions).
+  * M29 (the token endpoint does not hand the name over) is killed by the flow tests that expect a name as well as the static ADR-020 test.
+  * The database is migrated once; no mutant changes a migration.
+
+=== M01 [KILLED] for_client ignores the client status (a revoked / pending client lends its name)
+    61/62 passed
+    killed by: for_client/2 - only an approved client lends its name revoked, pending and rejected clients and an unknown client id give the plain 'OAuth client' (Nebu.OAuth.DeviceNameFlowTest)
+=== M02 [KILLED] for_client does not rescue (raises on garbage / unreadable database)
+    61/62 passed
+    killed by: for_client/2 - only an approved client lends its name garbage ids never raise (Nebu.OAuth.DeviceNameFlowTest)
+=== M03 [KILLED] no suffix
+    21/62 passed
+    killed by: scenario 3 - markup and control characters tab, newline and carriage return become one space; other control characters, bidi overrides, zero width, separators and private use are dropped (Nebu.OAuth.DeviceNameTest)
+    killed by: scenario 1 - client name plus a short suffix of the device id a plain client name and the device id of the story (Nebu.OAuth.DeviceNameTest)
+    killed by: scenario 3 - markup and control characters Unicode space separators count as a space; runs collapse; the ends are trimmed (Nebu.OAuth.DeviceNameTest)
+    killed by: empty, unusable and absent client names fall back to the plain base not a string at all, or not valid UTF-8 (Nebu.OAuth.DeviceNameTest)
+    ... and 30 more
+=== M04 [KILLED] suffix = FIRST 8 characters
+    49/62 passed
+    killed by: scenario 1 - client name plus a short suffix of the device id device ids that differ only in the front part (a structured id) are still told apart by the end (Nebu.OAuth.DeviceNameTest)
+    killed by: scenario 1 - client name plus a short suffix of the device id a longer device id contributes its LAST 8 characters, a shorter one is used whole (Nebu.OAuth.DeviceNameTest)
+    killed by: alice is erased: her OAuth-named devices are gone, bob's device (same client, same device id) is untouched (Nebu.OAuth.DeviceNameErasureTest)
+    killed by: scenario 2 - an existing device name is kept on re-login with the same device id a name cleared through the API (PUT without display_name = NULL) gets the default again at the next login (Nebu.OAuth.DeviceNameFlowTest)
+    ... and 9 more
+=== M05 [KILLED] suffix = the whole (safe) device id
+    48/62 passed
+    killed by: scenario 1 - client name plus a short suffix of the device id a longer device id contributes its LAST 8 characters, a shorter one is used whole (Nebu.OAuth.DeviceNameTest)
+    killed by: the suffix is always safe text the suffix never contains markup, quotes, ampersands or parentheses of its own, for a spread of hostile ids (Nebu.OAuth.DeviceNameTest)
+    killed by: scenario 4 - the base is bounded the whole name is bounded (base <= 64 code points plus the suffix) (Nebu.OAuth.DeviceNameTest)
+    killed by: alice is erased: her OAuth-named devices are gone, bob's device (same client, same device id) is untouched (Nebu.OAuth.DeviceNameErasureTest)
+    ... and 10 more
+=== M06 [KILLED] suffix is not filtered (raw last 8 bytes)
+    58/62 passed
+    killed by: the suffix is always safe text the suffix never contains markup, quotes, ampersands or parentheses of its own, for a spread of hostile ids (Nebu.OAuth.DeviceNameTest)
+    killed by: the suffix is always safe text an id without any safe character gets a deterministic 8 character hex suffix, different ids differ (Nebu.OAuth.DeviceNameTest)
+    killed by: the suffix is always safe text characters a device id may legally contain are dropped from the suffix (Nebu.OAuth.DeviceNameTest)
+    killed by: scenario 3 - a client name with markup and control characters is sanitised a device id with markup characters (the scope charset admits them) gives a safe suffix (Nebu.OAuth.DeviceNameFlowTest)
+=== M07 [KILLED] no hex fallback (empty suffix)
+    60/62 passed
+    killed by: the suffix is always safe text an id without any safe character gets a deterministic 8 character hex suffix, different ids differ (Nebu.OAuth.DeviceNameTest)
+    killed by: the suffix is always safe text the suffix never contains markup, quotes, ampersands or parentheses of its own, for a spread of hostile ids (Nebu.OAuth.DeviceNameTest)
+=== M08 [KILLED] suffix length 10
+    47/62 passed
+    killed by: scenario 4 - the base is bounded the whole name is bounded (base <= 64 code points plus the suffix) (Nebu.OAuth.DeviceNameTest)
+    killed by: the suffix is always safe text the suffix never contains markup, quotes, ampersands or parentheses of its own, for a spread of hostile ids (Nebu.OAuth.DeviceNameTest)
+    killed by: scenario 1 - client name plus a short suffix of the device id a longer device id contributes its LAST 8 characters, a shorter one is used whole (Nebu.OAuth.DeviceNameTest)
+    killed by: the suffix is always safe text an id without any safe character gets a deterministic 8 character hex suffix, different ids differ (Nebu.OAuth.DeviceNameTest)
+    ... and 11 more
+=== M09 [KILLED] tags are not removed, only the brackets
+    55/62 passed
+    killed by: scenario 3 - markup and control characters a script element loses its tags (its text is harmless plain text), no angle bracket survives anywhere (Nebu.OAuth.DeviceNameTest)
+    killed by: empty, unusable and absent client names fall back to the plain base nil, an empty string, blanks, markup only, control characters only (Nebu.OAuth.DeviceNameTest)
+    killed by: scenario 3 - markup and control characters the story's example: tags go, the control character goes, the text stays (Nebu.OAuth.DeviceNameTest)
+    killed by: scenario 4 - the base is bounded the cut happens AFTER the sanitising: markup does not eat the budget (Nebu.OAuth.DeviceNameTest)
+    ... and 3 more
+=== M10 [KILLED] angle brackets that are left are kept
+    60/62 passed
+    killed by: empty, unusable and absent client names fall back to the plain base nil, an empty string, blanks, markup only, control characters only (Nebu.OAuth.DeviceNameTest)
+    killed by: scenario 3 - markup and control characters a script element loses its tags (its text is harmless plain text), no angle bracket survives anywhere (Nebu.OAuth.DeviceNameTest)
+=== M11 [KILLED] control characters are kept
+    54/62 passed
+    killed by: scenario 3 - markup and control characters nothing hostile survives in any of these, whatever the mix (Nebu.OAuth.DeviceNameTest)
+    killed by: scenario 3 - markup and control characters the story's example: tags go, the control character goes, the text stays (Nebu.OAuth.DeviceNameTest)
+    killed by: empty, unusable and absent client names fall back to the plain base nil, an empty string, blanks, markup only, control characters only (Nebu.OAuth.DeviceNameTest)
+    killed by: scenario 3 - markup and control characters tab, newline and carriage return become one space; other control characters, bidi overrides, zero width, separators and private use are dropped (Nebu.OAuth.DeviceNameTest)
+    ... and 4 more
+=== M12 [KILLED] format characters (bidi, zero width) are kept
+    58/62 passed
+    killed by: empty, unusable and absent client names fall back to the plain base nil, an empty string, blanks, markup only, control characters only (Nebu.OAuth.DeviceNameTest)
+    killed by: scenario 3 - markup and control characters tab, newline and carriage return become one space; other control characters, bidi overrides, zero width, separators and private use are dropped (Nebu.OAuth.DeviceNameTest)
+    killed by: scenario 3 - markup and control characters nothing hostile survives in any of these, whatever the mix (Nebu.OAuth.DeviceNameTest)
+    killed by: scenario 3 - a client name with markup and control characters is sanitised a spread of hostile client names never reaches the device row as markup or control text (Nebu.OAuth.DeviceNameFlowTest)
+=== M13 [KILLED] line / paragraph separators are kept
+    59/62 passed
+    killed by: scenario 3 - markup and control characters nothing hostile survives in any of these, whatever the mix (Nebu.OAuth.DeviceNameTest)
+    killed by: scenario 3 - markup and control characters tab, newline and carriage return become one space; other control characters, bidi overrides, zero width, separators and private use are dropped (Nebu.OAuth.DeviceNameTest)
+    killed by: scenario 3 - a client name with markup and control characters is sanitised a spread of hostile client names never reaches the device row as markup or control text (Nebu.OAuth.DeviceNameFlowTest)
+=== M14 [KILLED] tab / newline / CR are not turned into spaces
+    61/62 passed
+    killed by: scenario 3 - markup and control characters tab, newline and carriage return become one space; other control characters, bidi overrides, zero width, separators and private use are dropped (Nebu.OAuth.DeviceNameTest)
+=== M15 [KILLED] runs of spaces are not collapsed
+    59/62 passed
+    killed by: scenario 3 - markup and control characters tab, newline and carriage return become one space; other control characters, bidi overrides, zero width, separators and private use are dropped (Nebu.OAuth.DeviceNameTest)
+    killed by: scenario 3 - markup and control characters Unicode space separators count as a space; runs collapse; the ends are trimmed (Nebu.OAuth.DeviceNameTest)
+    killed by: scenario 3 - markup and control characters a script element loses its tags (its text is harmless plain text), no angle bracket survives anywhere (Nebu.OAuth.DeviceNameTest)
+=== M16 [KILLED] no trim after the cut
+    61/62 passed
+    killed by: scenario 4 - the base is bounded a name of exactly the maximum is untouched; one more is cut; a cut never leaves a trailing space (Nebu.OAuth.DeviceNameTest)
+=== M17a [KILLED] bound 63
+    54/62 passed
+    killed by: scenario 4 - the base is bounded the bound counts code points: multi-byte characters and a run of combining marks are bounded as well (Nebu.OAuth.DeviceNameTest)
+    killed by: scenario 4 - the base is bounded the cut happens AFTER the sanitising: markup does not eat the budget (Nebu.OAuth.DeviceNameTest)
+    killed by: the contract exists the module exports default_name/2, for_client/2, max_base_length/0 and fallback_base/0; the numbers are pinned (Nebu.OAuth.DeviceNameTest)
+    killed by: scenario 4 - the base is bounded an overlong ASCII name is cut to the maximum, the suffix is kept (Nebu.OAuth.DeviceNameTest)
+    ... and 4 more
+=== M17b [KILLED] bound 65
+    54/62 passed
+    killed by: the contract exists the module exports default_name/2, for_client/2, max_base_length/0 and fallback_base/0; the numbers are pinned (Nebu.OAuth.DeviceNameTest)
+    killed by: scenario 4 - the base is bounded the whole name is bounded (base <= 64 code points plus the suffix) (Nebu.OAuth.DeviceNameTest)
+    killed by: scenario 4 - the base is bounded an overlong ASCII name is cut to the maximum, the suffix is kept (Nebu.OAuth.DeviceNameTest)
+    killed by: scenario 4 - the base is bounded a name of exactly the maximum is untouched; one more is cut; a cut never leaves a trailing space (Nebu.OAuth.DeviceNameTest)
+    ... and 4 more
+=== M17c [KILLED] bound 128
+    54/62 passed
+    killed by: scenario 4 - the base is bounded the whole name is bounded (base <= 64 code points plus the suffix) (Nebu.OAuth.DeviceNameTest)
+    killed by: scenario 4 - the base is bounded the bound counts code points: multi-byte characters and a run of combining marks are bounded as well (Nebu.OAuth.DeviceNameTest)
+    killed by: scenario 4 - the base is bounded an overlong ASCII name is cut to the maximum, the suffix is kept (Nebu.OAuth.DeviceNameTest)
+    killed by: scenario 4 - the base is bounded a name of exactly the maximum is untouched; one more is cut; a cut never leaves a trailing space (Nebu.OAuth.DeviceNameTest)
+    ... and 4 more
+=== M18 [KILLED] bound counts graphemes (String.slice) instead of code points
+    61/62 passed
+    killed by: scenario 4 - the base is bounded the bound counts code points: multi-byte characters and a run of combining marks are bounded as well (Nebu.OAuth.DeviceNameTest)
+=== M19 [KILLED] empty base gives an empty string instead of the fallback
+    60/62 passed
+    killed by: empty, unusable and absent client names fall back to the plain base nil, an empty string, blanks, markup only, control characters only (Nebu.OAuth.DeviceNameTest)
+    killed by: a client without a usable name gets the plain base no client_name, an empty, a blank, a markup-only name => 'OAuth client (ABCD1234)' (Nebu.OAuth.DeviceNameFlowTest)
+=== M20 [KILLED] invalid UTF-8 is not detected
+    60/62 passed
+    killed by: empty, unusable and absent client names fall back to the plain base not a string at all, or not valid UTF-8 (Nebu.OAuth.DeviceNameTest)
+    killed by: never raises any combination of terms answers a string (Nebu.OAuth.DeviceNameTest)
+=== M21 [KILLED] other fallback text
+    56/62 passed
+    killed by: empty, unusable and absent client names fall back to the plain base nil, an empty string, blanks, markup only, control characters only (Nebu.OAuth.DeviceNameTest)
+    killed by: the contract exists the module exports default_name/2, for_client/2, max_base_length/0 and fallback_base/0; the numbers are pinned (Nebu.OAuth.DeviceNameTest)
+    killed by: empty, unusable and absent client names fall back to the plain base not a string at all, or not valid UTF-8 (Nebu.OAuth.DeviceNameTest)
+    killed by: for_client/2 - only an approved client lends its name revoked, pending and rejected clients and an unknown client id give the plain 'OAuth client' (Nebu.OAuth.DeviceNameFlowTest)
+    ... and 2 more
+=== M22 [KILLED] non-breaking and other space separators are kept
+    61/62 passed
+    killed by: scenario 3 - markup and control characters Unicode space separators count as a space; runs collapse; the ends are trimmed (Nebu.OAuth.DeviceNameTest)
+=== M23 [KILLED] ampersand is stripped
+    61/62 passed
+    killed by: scenario 1 - client name plus a short suffix of the device id legitimate names are kept: spaces inside, accents, other scripts, emoji, ampersand and quotes (Nebu.OAuth.DeviceNameTest)
+=== M24 [KILLED] private use characters are kept
+    60/62 passed
+    killed by: scenario 3 - markup and control characters tab, newline and carriage return become one space; other control characters, bidi overrides, zero width, separators and private use are dropped (Nebu.OAuth.DeviceNameTest)
+    killed by: scenario 3 - markup and control characters nothing hostile survives in any of these, whatever the mix (Nebu.OAuth.DeviceNameTest)
+=== M25 [KILLED] tag regex is greedy (eats the text between two tags)
+    57/62 passed
+    killed by: scenario 3 - markup and control characters a script element loses its tags (its text is harmless plain text), no angle bracket survives anywhere (Nebu.OAuth.DeviceNameTest)
+    killed by: scenario 4 - the base is bounded the cut happens AFTER the sanitising: markup does not eat the budget (Nebu.OAuth.DeviceNameTest)
+    killed by: scenario 3 - markup and control characters the story's example: tags go, the control character goes, the text stays (Nebu.OAuth.DeviceNameTest)
+    killed by: scenario 3 - a client name with markup and control characters is sanitised the story's example '<b>Evil\u0007Client</b>' => 'EvilClient (ABCD1234)' (Nebu.OAuth.DeviceNameFlowTest)
+    ... and 1 more
+=== M26 [KILLED] the whole name is cut to the bound, the suffix can be lost
+    55/62 passed
+    killed by: scenario 4 - the base is bounded the cut happens AFTER the sanitising: markup does not eat the budget (Nebu.OAuth.DeviceNameTest)
+    killed by: scenario 4 - the base is bounded an overlong ASCII name is cut to the maximum, the suffix is kept (Nebu.OAuth.DeviceNameTest)
+    killed by: scenario 4 - the base is bounded the bound counts code points: multi-byte characters and a run of combining marks are bounded as well (Nebu.OAuth.DeviceNameTest)
+    killed by: scenario 4 - the base is bounded a name of exactly the maximum is untouched; one more is cut; a cut never leaves a trailing space (Nebu.OAuth.DeviceNameTest)
+    ... and 3 more
+=== M27 [KILLED] suffix keeps parentheses
+    60/62 passed
+    killed by: the suffix is always safe text characters a device id may legally contain are dropped from the suffix (Nebu.OAuth.DeviceNameTest)
+    killed by: the suffix is always safe text the suffix never contains markup, quotes, ampersands or parentheses of its own, for a spread of hostile ids (Nebu.OAuth.DeviceNameTest)
+=== M28 [KILLED] hex fallback in lower case
+    61/62 passed
+    killed by: the suffix is always safe text an id without any safe character gets a deterministic 8 character hex suffix, different ids differ (Nebu.OAuth.DeviceNameTest)
+=== M29 [KILLED] token endpoint does not pass the name
+    34/62 passed
+    killed by: ADR-020: the Matrix domain never builds the name; the OAuth domain hands it over (Nebu.OAuth.DeviceNameDocsTest)
+    killed by: alice is erased: her OAuth-named devices are gone, bob's device (same client, same device id) is untouched (Nebu.OAuth.DeviceNameErasureTest)
+    killed by: scenario 2 - an existing device name is kept on re-login with the same device id the client's PUT after the login replaces the default and survives a refresh (Nebu.OAuth.DeviceNameFlowTest)
+    killed by: scenario 3 - a client name with markup and control characters is sanitised a device id with markup characters (the scope charset admits them) gives a safe suffix (Nebu.OAuth.DeviceNameFlowTest)
+    ... and 24 more
+=== M30 [KILLED] store overwrites an existing name (no IS NULL guard)
+    58/62 passed
+    killed by: the Matrix store fills an UNSET name only (the guard is also pinned by behaviour in the flow tests) (Nebu.OAuth.DeviceNameDocsTest)
+    killed by: scenario 2 - an existing device name is kept on re-login with the same device id the client named the device 'My phone' (PUT /devices); a new OAuth login with the same device id keeps it (Nebu.OAuth.DeviceNameFlowTest)
+    killed by: scenario 2 - an existing device name is kept on re-login with the same device id a name the client set to the empty string is a choice and is kept (Nebu.OAuth.DeviceNameFlowTest)
+    killed by: scenario 2 - an existing device name is kept on re-login with the same device id a device created by a legacy login with a name keeps that name when the same device id logs in through OAuth (Nebu.OAuth.DeviceNameFlowTest)
+=== M31 [KILLED] store write not scoped to the user
+    61/62 passed
+    killed by: scenario 2 - an existing device name is kept on re-login with the same device id another user's device with the same id is never touched (the write is scoped to the user) (Nebu.OAuth.DeviceNameFlowTest)
+=== M32 [KILLED] store write not scoped to the device (every unnamed device of the user)
+    61/62 passed
+    killed by: scenario 2 - an existing device name is kept on re-login with the same device id the other devices of the same user keep their names when a new OAuth device appears (Nebu.OAuth.DeviceNameFlowTest)
+=== M33 [KILLED] store passes the name through the upsert (COALESCE lets it overwrite)
+    59/62 passed
+    killed by: scenario 2 - an existing device name is kept on re-login with the same device id a device created by a legacy login with a name keeps that name when the same device id logs in through OAuth (Nebu.OAuth.DeviceNameFlowTest)
+    killed by: scenario 2 - an existing device name is kept on re-login with the same device id the client named the device 'My phone' (PUT /devices); a new OAuth login with the same device id keeps it (Nebu.OAuth.DeviceNameFlowTest)
+    killed by: scenario 2 - an existing device name is kept on re-login with the same device id a name the client set to the empty string is a choice and is kept (Nebu.OAuth.DeviceNameFlowTest)
+=== M34 [KILLED] store also fills an empty-string name
+    61/62 passed
+    killed by: scenario 2 - an existing device name is kept on re-login with the same device id a name the client set to the empty string is a choice and is kept (Nebu.OAuth.DeviceNameFlowTest)
+=== M35 [KILLED] a refresh clears the name
+    60/62 passed
+    killed by: scenario 2 - an existing device name is kept on re-login with the same device id the client's PUT after the login replaces the default and survives a refresh (Nebu.OAuth.DeviceNameFlowTest)
+    killed by: scenario 1 - a new OAuth device without a client-supplied name gets the client name with a device suffix a refresh never touches the name (default stays, no second suffix, no rewrite) (Nebu.OAuth.DeviceNameFlowTest)
+=== M36 [KILLED] the client name is logged at issuance
+    61/62 passed
+    killed by: no sensitive data in logs neither the client's name nor the made-up device name appears in any log line of the login, the issuance, the refresh and the re-login (Nebu.OAuth.DeviceNameFlowTest)
+=== M37 [KILLED] the new module logs
+    60/62 passed
+    killed by: the module exists, documents itself, and has no log call (code only: comments and docs are not looked at) (Nebu.OAuth.DeviceNameDocsTest)
+    killed by: no sensitive data in logs neither the client's name nor the made-up device name appears in any log line of the login, the issuance, the refresh and the re-login (Nebu.OAuth.DeviceNameFlowTest)
+=== M38 [KILLED] a legacy login without a name gets an OAuth style default
+    61/62 passed
+    killed by: scenario 5 - legacy password / SSO login device names are unaffected a legacy login without a name leaves the name unset: the OAuth default is never applied to it (Nebu.OAuth.DeviceNameFlowTest)
+=== M39 [KILLED] the Matrix domain builds the name itself
+    61/62 passed
+    killed by: ADR-020: the Matrix domain never builds the name; the OAuth domain hands it over (Nebu.OAuth.DeviceNameDocsTest)
+=== M44 [KILLED] docs: the CHANGELOG entry is gone
+    61/62 passed
+    killed by: CHANGELOG [Unreleased]: an entry for the story that says what a user sees (Nebu.OAuth.DeviceNameDocsTest)
+=== M46 [KILLED] store: name written only for a device row that was just created (an existing unnamed device is not filled)
+    60/62 passed
+    killed by: scenario 2 - an existing device name is kept on re-login with the same device id an existing device WITHOUT a name (NULL: a legacy login that sent none) is named at its next OAuth login (Nebu.OAuth.DeviceNameFlowTest)
+    killed by: scenario 2 - an existing device name is kept on re-login with the same device id a name cleared through the API (PUT without display_name = NULL) gets the default again at the next login (Nebu.OAuth.DeviceNameFlowTest)
+=== M47 [KILLED] docs: the section heading is gone
+    61/62 passed
+    killed by: 08-concepts: a section for the story names the client name, the fallback, the never-overwrite rule and the module (Nebu.OAuth.DeviceNameDocsTest)
+=== M48 [KILLED] docs: the section lost the never-overwrite statement
+    61/62 passed
+    killed by: 08-concepts: a section for the story names the client name, the fallback, the never-overwrite rule and the module (Nebu.OAuth.DeviceNameDocsTest)
+
+
+================================================================================
+Cycle 1 (code review MINOR 3 + 2, Kassandra LOW 1): mutants C01-C19 on top of reference-impl-cycle1.diff (the staged dev tree plus the cycle 1 reference)
+================================================================================
+Same method, 71 tests (4 files). Result: 19 mutants, 19 KILLED. C07 first SURVIVED (U+FE0F kept: a lone one is a mark and falls to the "mark without a base" rule,
+so only a selector between letters shows the gap); the test "every variation selector U+FE00..U+FE0F is dropped, also between letters" was added and now kills it.
+C01-C07 characters / range, C08-C10 marks-without-base rule (removed, start only, all marks dropped), C11-C15 docs wording, C16-C19 follow-ups.md.
+
+=== C01 [KILLED] U+3164 is kept
+    66/70 passed
+    killed by: cycle 1 - invisible but not empty names (U+3164, U+FFA0, U+115F, U+1160, U+2800, U+034F, variation selectors, marks without a base) combining marks without a base letter only: the plain base (Nebu.OAuth.DeviceNameTest)
+    killed by: cycle 1 - invisible but not empty names (U+3164, U+FFA0, U+115F, U+1160, U+2800, U+034F, variation selectors, marks without a base) a name made only of such a character (alone, repeated, mixed with spaces) falls back to the plain base (Nebu.OAuth.DeviceNameTest)
+    killed by: cycle 1 - invisible but not empty names (U+3164, U+FFA0, U+115F, U+1160, U+2800, U+034F, variation selectors, marks without a base) visible letters mixed with them keep the letters (and only the letters) (Nebu.OAuth.DeviceNameTest)
+    killed by: cycle 1 - invisible but not empty client names a client name made only of invisible characters / marks without a base falls back to 'OAuth client'; letters mixed with them are kept (Nebu.OAuth.DeviceNameFlowTest)
+=== C02 [KILLED] U+FFA0 is kept
+    67/70 passed
+    killed by: cycle 1 - invisible but not empty names (U+3164, U+FFA0, U+115F, U+1160, U+2800, U+034F, variation selectors, marks without a base) visible letters mixed with them keep the letters (and only the letters) (Nebu.OAuth.DeviceNameTest)
+    killed by: cycle 1 - invisible but not empty names (U+3164, U+FFA0, U+115F, U+1160, U+2800, U+034F, variation selectors, marks without a base) a name made only of such a character (alone, repeated, mixed with spaces) falls back to the plain base (Nebu.OAuth.DeviceNameTest)
+    killed by: cycle 1 - invisible but not empty client names a client name made only of invisible characters / marks without a base falls back to 'OAuth client'; letters mixed with them are kept (Nebu.OAuth.DeviceNameFlowTest)
+=== C03 [KILLED] U+115F is kept
+    68/70 passed
+    killed by: cycle 1 - invisible but not empty names (U+3164, U+FFA0, U+115F, U+1160, U+2800, U+034F, variation selectors, marks without a base) visible letters mixed with them keep the letters (and only the letters) (Nebu.OAuth.DeviceNameTest)
+    killed by: cycle 1 - invisible but not empty names (U+3164, U+FFA0, U+115F, U+1160, U+2800, U+034F, variation selectors, marks without a base) a name made only of such a character (alone, repeated, mixed with spaces) falls back to the plain base (Nebu.OAuth.DeviceNameTest)
+=== C04 [KILLED] U+1160 is kept
+    68/70 passed
+    killed by: cycle 1 - invisible but not empty names (U+3164, U+FFA0, U+115F, U+1160, U+2800, U+034F, variation selectors, marks without a base) a name made only of such a character (alone, repeated, mixed with spaces) falls back to the plain base (Nebu.OAuth.DeviceNameTest)
+    killed by: cycle 1 - invisible but not empty names (U+3164, U+FFA0, U+115F, U+1160, U+2800, U+034F, variation selectors, marks without a base) visible letters mixed with them keep the letters (and only the letters) (Nebu.OAuth.DeviceNameTest)
+=== C05 [KILLED] U+2800 (Braille blank) is kept
+    67/70 passed
+    killed by: cycle 1 - invisible but not empty names (U+3164, U+FFA0, U+115F, U+1160, U+2800, U+034F, variation selectors, marks without a base) a name made only of such a character (alone, repeated, mixed with spaces) falls back to the plain base (Nebu.OAuth.DeviceNameTest)
+    killed by: cycle 1 - invisible but not empty names (U+3164, U+FFA0, U+115F, U+1160, U+2800, U+034F, variation selectors, marks without a base) visible letters mixed with them keep the letters (and only the letters) (Nebu.OAuth.DeviceNameTest)
+    killed by: cycle 1 - invisible but not empty client names a client name made only of invisible characters / marks without a base falls back to 'OAuth client'; letters mixed with them are kept (Nebu.OAuth.DeviceNameFlowTest)
+=== C06 [KILLED] U+034F (combining grapheme joiner) is kept
+    69/70 passed
+    killed by: cycle 1 - invisible but not empty names (U+3164, U+FFA0, U+115F, U+1160, U+2800, U+034F, variation selectors, marks without a base) visible letters mixed with them keep the letters (and only the letters) (Nebu.OAuth.DeviceNameTest)
+=== C07 [KILLED] variation selector U+FE0F is kept
+    70/71 passed
+    killed by: cycle 1 - invisible but not empty names (U+3164, U+FFA0, U+115F, U+1160, U+2800, U+034F, variation selectors, marks without a base) every variation selector U+FE00..U+FE0F is dropped, also between letters (a text letter has no variation) (Nebu.OAuth.DeviceNameTest)
+=== C08 [KILLED] marks without a base are kept
+    66/70 passed
+    killed by: cycle 1 - invisible but not empty names (U+3164, U+FFA0, U+115F, U+1160, U+2800, U+034F, variation selectors, marks without a base) every output has a visible character in its base, whatever the mix (Nebu.OAuth.DeviceNameTest)
+    killed by: cycle 1 - invisible but not empty names (U+3164, U+FFA0, U+115F, U+1160, U+2800, U+034F, variation selectors, marks without a base) combining marks without a base letter only: the plain base (Nebu.OAuth.DeviceNameTest)
+    killed by: cycle 1 - invisible but not empty names (U+3164, U+FFA0, U+115F, U+1160, U+2800, U+034F, variation selectors, marks without a base) a combining mark without a base letter is dropped (at the start, after a space); a mark after a letter is kept (Nebu.OAuth.DeviceNameTest)
+    killed by: cycle 1 - invisible but not empty client names a client name made only of invisible characters / marks without a base falls back to 'OAuth client'; letters mixed with them are kept (Nebu.OAuth.DeviceNameFlowTest)
+=== C09 [KILLED] marks without a base are dropped at the start only, not after a space
+    68/70 passed
+    killed by: cycle 1 - invisible but not empty names (U+3164, U+FFA0, U+115F, U+1160, U+2800, U+034F, variation selectors, marks without a base) a combining mark without a base letter is dropped (at the start, after a space); a mark after a letter is kept (Nebu.OAuth.DeviceNameTest)
+    killed by: cycle 1 - invisible but not empty names (U+3164, U+FFA0, U+115F, U+1160, U+2800, U+034F, variation selectors, marks without a base) combining marks without a base letter only: the plain base (Nebu.OAuth.DeviceNameTest)
+=== C10 [KILLED] every combining mark is dropped (decomposed accents lose their accent)
+    69/70 passed
+    killed by: cycle 1 - invisible but not empty names (U+3164, U+FFA0, U+115F, U+1160, U+2800, U+034F, variation selectors, marks without a base) a combining mark without a base letter is dropped (at the start, after a space); a mark after a letter is kept (Nebu.OAuth.DeviceNameTest)
+=== C11 [KILLED] docs: 08-concepts claims the name is not logged again
+    69/70 passed
+    killed by: cycle 1 - 08-concepts and CHANGELOG do not claim 'not logged' without the caveat: the new code does not log it, the debug request logger's GET /devices capture shows it (Nebu.OAuth.DeviceNameDocsTest)
+=== C12 [KILLED] docs: 08-concepts lost the debug request logger caveat
+    69/70 passed
+    killed by: cycle 1 - 08-concepts and CHANGELOG do not claim 'not logged' without the caveat: the new code does not log it, the debug request logger's GET /devices capture shows it (Nebu.OAuth.DeviceNameDocsTest)
+=== C13 [KILLED] docs: CHANGELOG lost the wording 'the new code does not log'
+    69/70 passed
+    killed by: cycle 1 - 08-concepts and CHANGELOG do not claim 'not logged' without the caveat: the new code does not log it, the debug request logger's GET /devices capture shows it (Nebu.OAuth.DeviceNameDocsTest)
+=== C14 [KILLED] docs: CHANGELOG lost the debug request logger caveat
+    69/70 passed
+    killed by: cycle 1 - 08-concepts and CHANGELOG do not claim 'not logged' without the caveat: the new code does not log it, the debug request logger's GET /devices capture shows it (Nebu.OAuth.DeviceNameDocsTest)
+=== C15 [KILLED] docs: CHANGELOG caveat does not name GET /devices
+    69/70 passed
+    killed by: cycle 1 - 08-concepts and CHANGELOG do not claim 'not logged' without the caveat: the new code does not log it, the debug request logger's GET /devices capture shows it (Nebu.OAuth.DeviceNameDocsTest)
+=== C16 [KILLED] follow-ups: entry 'redact device names' missing
+    69/70 passed
+    killed by: cycle 1 - the follow-up register of the epic exists and holds the three entries of the review (Nebu.OAuth.DeviceNameDocsTest)
+=== C17 [KILLED] follow-ups: entry 'thread client_name' missing
+    69/70 passed
+    killed by: cycle 1 - the follow-up register of the epic exists and holds the three entries of the review (Nebu.OAuth.DeviceNameDocsTest)
+=== C18 [KILLED] follow-ups: entry 'confusable' missing
+    69/70 passed
+    killed by: cycle 1 - the follow-up register of the epic exists and holds the three entries of the review (Nebu.OAuth.DeviceNameDocsTest)
+=== C19 [KILLED] follow-ups.md does not exist
+    69/70 passed
+    killed by: cycle 1 - the follow-up register of the epic exists and holds the three entries of the review (Nebu.OAuth.DeviceNameDocsTest)

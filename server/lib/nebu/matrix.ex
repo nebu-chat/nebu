@@ -251,7 +251,8 @@ defmodule Nebu.Matrix do
   (kept with its E2EE keys when the id is reused), EVERY earlier `matrix_sessions` row of
   `(user_id, device_id)` (legacy and OAuth) is deleted and the new row inserted (`expires_at =
   LEAST(now() + ttl, session_expires_at)`, `session_expires_at = now() +
-  NEBU_MATRIX_SESSION_TTL_SECONDS`). Afterwards raw IdP JWTs bound to the device are denylisted.
+  the Matrix session lifetime`: the lifetime saved in the Admin UI (`server_config.matrix_session_ttl_seconds`), else `NEBU_MATRIX_SESSION_TTL_SECONDS`, else 8 hours,
+  see `Nebu.Web.SessionConfig.matrix_session_ttl_seconds/0`). Afterwards raw IdP JWTs bound to the device are denylisted.
 
   `{:ok, %{access_token:, refresh_token:, expires_in:, user_id:, device_id:, scope:, auth_time:}}`,
   `{:error, :inactive}` (deactivated or unknown user) or `{:error, :unavailable}` (transient).

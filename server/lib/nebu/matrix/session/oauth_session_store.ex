@@ -175,7 +175,9 @@ defmodule Nebu.Matrix.Session.OAuthSessionStore do
 
   `attrs`: `access_token`, `refresh_token` (plaintext; only hashes are stored), `user_id`,
   `device_id`, `client_id`, `scope`, `oauth_code_hash`, `idp_rt_enc` (ciphertext or nil),
-  `auth_time` (unix seconds or nil), `access_ttl_seconds`, `session_ttl_seconds`.
+  `auth_time` (unix seconds or nil), `access_ttl_seconds`, `session_ttl_seconds`, optional
+  `default_device_display_name` (written to the device only while its `display_name` is NULL: a name that
+  exists is never overwritten; story oauth-device-default-display-name).
   """
   @spec insert_replacing_device(map()) :: {:ok, pos_integer()} | {:error, term()}
   def insert_replacing_device(attrs) do
@@ -194,6 +196,23 @@ defmodule Nebu.Matrix.Session.OAuthSessionStore do
           last_seen_ts: System.system_time(:millisecond),
           last_seen_ip: nil
         )
+
+      # story oauth-device-default-display-name: fills an UNSET name only (the upsert above passes no name: its COALESCE would let a
+      # non-nil name overwrite an existing one)
+      case Map.get(attrs, :default_device_display_name) do
+        name when is_binary(name) and name != "" ->
+          {:ok, _} =
+            query!(
+              """
+              UPDATE devices SET display_name = $3
+               WHERE user_id = $1 AND device_id = $2 AND display_name IS NULL
+              """,
+              [attrs.user_id, attrs.device_id, name]
+            )
+
+        _ ->
+          :ok
+      end
 
       # story oauth-authorize-freshness L-1: UNDER the devices row lock (the upsert above), a live session of
       # ANOTHER app than the one the user accepted at consent refuses the issuance (the whole transaction rolls back)

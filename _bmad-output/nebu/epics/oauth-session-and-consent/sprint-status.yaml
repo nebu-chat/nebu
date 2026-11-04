@@ -1,0 +1,8 @@
+# generated: 2026-10-30
+# story session-lifetime-setting done (pipeline: admin-configurable Matrix session lifetime on /admin/config; separate form + route + migration 000056 + audit session_lifetime_changed; read via Nebu.OAuth.Config with per-node cache and last-known-good; in-lock audit before-value; one parser; UX M1-M5; 3 cycles, test-review 0 MAJOR, code-review 0 MAJOR, Kassandra CLEAN (cycle 0 MEDIUM fixed); no-DB 7000/0, DB set 292/0, integration 30 known flaky/shared-state (ModerationRoutes/SyncMembershipPartition pass alone), e2e 150 passed 0 failed)
+# story oauth-device-default-display-name done (pipeline: OAuth devices get a readable default name (sanitised client_name + last 8 of device id, only for NULL names; no migration); test-review ok, code-review 0 MAJOR, Kassandra APPROVED (LOW invisible letters fixed, LOW homoglyphs accepted); integration 24 known flaky/shared-state, e2e 150 passed 2 failed (1 known flaky, 1 needs the https stack)): 2026-11-02
+# story persistent-consent-grants done (pipeline: persistent consent grants: a user's Allow is remembered per client (migration 000057, /account/apps withdrawal, skip rules, device-replace and prompt=consent|login force the screen); test-review ok, code-review 0 MAJOR, Kassandra APPROVED (MEDIUM fixed), UX 0 blocking; integration 31 known flaky/shared-state, e2e 150 passed 3 failed (1 known flaky, 2 need the https stack)): 2026-10-30
+development_status:
+  session-lifetime-setting: done
+  persistent-consent-grants: done
+  oauth-device-default-display-name: done

@@ -163,7 +163,7 @@ that earlier revisions referenced is gone. The implementation is `Nebu.Matrix.Se
 (opaque = no `.`) and at-rest encryption of the OIDC refresh token via `Nebu.Web.SecretBox` (AES-256-GCM).
 
 Opaque access + refresh tokens (Matrix CS API v1.3, `POST /_matrix/client/v3/refresh`) are decoupled
-from the OIDC provider's token lifetime: the Nebu session expires at `min(oidc_exp, now + 8h)`, so a
+from the OIDC provider's token lifetime: the Nebu session expires at `min(oidc_exp, now + 8h)` (8h is the default of the Admin-configurable session lifetime, story session-lifetime-setting), so a
 Matrix client keeps a working session even when the OIDC `id_token` expires in minutes (Keycloak
 default: 5 minutes) — this fixes the "force-logout every 5 min" regression.
 

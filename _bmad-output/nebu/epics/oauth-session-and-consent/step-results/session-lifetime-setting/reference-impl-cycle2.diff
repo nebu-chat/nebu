@@ -1,0 +1,429 @@
+diff --git a/docs/architecture/07-deployment.md b/docs/architecture/07-deployment.md
+index 6bc9496b..a2c49a5f 100644
+--- a/docs/architecture/07-deployment.md
++++ b/docs/architecture/07-deployment.md
+@@ -112,7 +112,7 @@ Nebu can act as an OAuth 2.0 authorization server (broker model) in front of the
+ | `oauth_pending_ttl_days` | integer | `30` | TTL in days for `pending` registrations (cron purge via Oban worker). Approved and rejected registrations are never purged. |
+ | `oauth_pending_cap` | integer | `5000` | Maximum number of `pending` registrations globally. New registrations above this cap are refused with `503 temporarily_unavailable`; dedup hits (known metadata hash) bypass the cap. |
+ | `oauth_pending_host_cap` | integer | `20` | Maximum number of `pending` registrations per (registrable domain of the `client_uri` host, client source); the source is the resolved client IP (`NEBU_TRUSTED_PROXY_CIDRS`), IPv6 per /64. A source is also limited to 100 pending registrations over all domains (built-in). Same response as the global cap. A `client_uri` host that is a public suffix (`github.io`, `co.uk`) is refused at registration. |
+-| `oauth_access_token_ttl_seconds` | integer | `900` | Access-token lifetime of OAuth sessions (story oauth-token-endpoint, migration 000042 allowlist). Valid 60..3600; absent/invalid/unreadable => 900. Not a session maximum: that stays `NEBU_MATRIX_SESSION_TTL_SECONDS` (copied into `session_expires_at`, never extended). |
++| `oauth_access_token_ttl_seconds` | integer | `900` | Access-token lifetime of OAuth sessions (story oauth-token-endpoint, migration 000042 allowlist). Valid 60..3600; absent/invalid/unreadable => 900. Not a session maximum: that is the Matrix session lifetime (Admin setting `matrix_session_ttl_seconds`, else `NEBU_MATRIX_SESSION_TTL_SECONDS`, else 8 hours; copied into `session_expires_at`, never extended). |
+ | `oauth_idp_revalidation` | string | `per_refresh` | `per_refresh`: every Nebu refresh redeems the stored IdP refresh token (a user disabled at the IdP loses the session at the next refresh). `off`: only `users.is_active` is re-checked. Unknown values behave as `per_refresh` (fail safe). Requires `matrix_oidc_refresh_mode=offline` (IdP refresh token) when `per_refresh`. Operator note: switching `off` -> `per_refresh` revokes OAuth sessions without an IdP refresh token at their next refresh (follow-up q). |
+ 
+ **Environment variable `NEBU_OAUTH_CONFIG_CACHE_MS`** (story oauth-hardening-hygiene, HY1; read in `config/runtime.exs`): per-node TTL cache of the switch state (`oauth_enabled`, `oauth_issuer_url`) and of the saved Matrix session lifetime (`matrix_session_ttl_seconds`, read at every login, `/refresh` and background refresh row) in milliseconds, integer `0..5000`, default `2000`, `0` = off (every request reads `server_config`); absent, junk or out of range = 2000. An operator write takes effect on every node within this time (bounded staleness, ADR-020 note HY2); only successful reads are cached, an unreadable `server_config` is never cached (fail closed as before for the switch; the session lifetime keeps its last-known-good value, see "Matrix session lifetime"). Scripts that flip the switch and probe at once must wait or poll `GET /_matrix/client/v1/auth_metadata` (the e2e fixtures do).
+@@ -214,7 +214,7 @@ How long a signed-in Matrix session lasts is set on the **Configuration** page o
+ - **Existing OAuth sessions keep their ceiling.** A change applies to the NEXT sign-in; OAuth sessions issued before keep the `session_expires_at` they were issued with, also across refreshes. To end them earlier use the revoke paths of the activation checklist.
+ - **Legacy sessions follow the setting (accepted).** A legacy (non-OAuth) session has no stored ceiling: the bound of its extension by the background refresh worker and of the refresh-token reuse window is `created_at` plus the CURRENT lifetime. A lowered value therefore stops the extension of existing legacy sessions earlier, a raised value lets the worker extend them up to the new bound; their `expires_at` is never shortened. The absolute guarantee above is for OAuth sessions only.
+ - **Unreadable configuration: last-known-good.** A saved lifetime stricter than the environment value / 8 hours must never turn longer because a read failed. Each node therefore keeps the last successfully read valid value, without a TTL; if `server_config` cannot be read, or the saved row is damaged or out of range (ignored, never clamped), the last-known-good value is used. The environment value / 8 hours apply only when no good value was ever loaded on this node, or after a successful read that found no row (you removed it on purpose); a save on this node replaces the value at once. The failed read itself is not cached, the next call reads again. The `WARNING` for a damaged row is limited to one per minute per node and names the key, never the value.
+-- **Protection and audit.** The same as the OAuth switch: admin role, CSRF, strict fetch metadata and a fresh sign-in (marker bound to `/admin/config`; the form shows "Sign in again to save" until you have signed in, then "Save session lifetime"). One `audit_log` row `session_lifetime_changed` per change (actor, `before_seconds`, `after_seconds`: numbers only), written in the same transaction as the value, under the row lock of the key, so concurrent saves chain (`before_seconds` is the value in effect inside the transaction; two FIRST saves have no row to lock and can still race); if the row cannot be written nothing is saved (a shorter lifetime is not exempt). A value outside the bounds is refused with a message next to the field and nothing is saved or audited.
++- **Protection and audit.** The same as the OAuth switch: admin role, CSRF, strict fetch metadata and a fresh sign-in (marker bound to `/admin/config`; the form shows "Sign in again to save" until you have signed in, then "Save session lifetime"). One `audit_log` row `session_lifetime_changed` per change (actor, `before_seconds`, `after_seconds`: numbers only), written in the same transaction as the value, under the row lock of the key, so concurrent saves chain (`before_seconds` is the saved value read inside the transaction, else the value this node had in effect; two FIRST saves have no row to lock and can still race); if the row cannot be written nothing is saved (a shorter lifetime is not exempt). A value outside the bounds is refused with a message next to the field and nothing is saved or audited.
+ - **Effect and cache.** The saving node drops its cache entry and uses the new value at once, except for a read that was already in flight and can refill the cache with the old value for at most one TTL (the in-flight refill race); every other node follows within `NEBU_OAUTH_CONFIG_CACHE_MS` (default 2 s, at most 5 s), because the value is read through the same per-node cache as the OAuth switch (one `server_config` query per TTL window, not per login). With the cache switched off (`NEBU_OAUTH_CONFIG_CACHE_MS=0`) every login, `/refresh` and worker row costs one query per call.
+ - **Legacy login and the identity provider.** A legacy login is bounded by `min(exp of the IdP token, now + lifetime)`: raising the setting does not lengthen a legacy login beyond the expiry (`exp`) of the identity provider's own token; the OAuth login ceiling is not capped by it.
+ - **Migration 000056** adds `matrix_session_ttl_seconds` to the `config_update_mutable` row-level-security allowlist of `server_config`. Without it the first save works and the second fails with an RLS error. Rolling-deploy safe: old nodes never read the key.
+diff --git a/docs/architecture/08-concepts.md b/docs/architecture/08-concepts.md
+index 81a8ac2a..7d141fef 100644
+--- a/docs/architecture/08-concepts.md
++++ b/docs/architecture/08-concepts.md
+@@ -814,7 +814,7 @@ refresh_token_hash ← UNIQUE NOT NULL. Lowercase hex SHA-256 of the opaque refr
+ oidc_refresh_token ← AES-256-GCM encrypted OIDC RT from Keycloak (via Nebu.Web.SecretBox; optional, for future OIDC refresh)
+ user_id            ← Matrix user ID (@user:server.name)
+ device_id          ← From JWT "did" claim or SSO device registration
+-expires_at         ← Absolute wall-clock time (Nebu controls expiry: NOW() + 8 hours)
++expires_at         ← Absolute wall-clock time (Nebu controls expiry: NOW() + the Matrix session lifetime, 8 hours by default; Admin setting `matrix_session_ttl_seconds`)
+ revoked_at         ← Set when a client /refresh rotates the row away (old half of a rotation); logout/invalidations DELETE rows
+ grace_until        ← NULL on a rotated-away row = PENDING (old RT valid until the new AT/RT is used); set to NOW() = CONSUMED
+ created_at         ← Session creation timestamp
+diff --git a/docs/architecture/adr/ADR-033-authorization-server-broker-model.md b/docs/architecture/adr/ADR-033-authorization-server-broker-model.md
+index 5dc0c6c8..0c3a3b79 100644
+--- a/docs/architecture/adr/ADR-033-authorization-server-broker-model.md
++++ b/docs/architecture/adr/ADR-033-authorization-server-broker-model.md
+@@ -351,7 +351,9 @@ so `oauth_enabled` stays false. Decisions (prefix `T`, so they never collide wit
+ - **T3 Two expiries.** OAuth rows: `expires_at` = ACCESS-token expiry
+   (`LEAST(now() + ttl, session_expires_at)`), `session_expires_at` = the absolute session maximum
+   (`now() + NEBU_MATRIX_SESSION_TTL_SECONDS` at code redemption, copied verbatim on every rotation,
+-  never extended). A refresh is allowed while `session_expires_at > now()`.
++  never extended). A refresh is allowed while `session_expires_at > now()`. *Pointer (story session-lifetime-setting):* the session maximum
++  can now be saved in the Admin UI (`server_config.matrix_session_ttl_seconds`, 1 hour to 90 days; it wins over the env value
++  `NEBU_MATRIX_SESSION_TTL_SECONDS`, which stays the fallback), see `docs/architecture/07-deployment.md`, "Matrix session lifetime".
+ - **T4 Access-token TTL** `oauth_access_token_ttl_seconds` (server_config), 60..3600, default 900;
+   tokens are 64 lowercase hex (opaque, no `.`), stored only as SHA-256 hashes.
+ - **T5 `oauth_idp_revalidation`** = `per_refresh` (default, also for unknown values: fail safe) or
+diff --git a/server/config/runtime.exs b/server/config/runtime.exs
+index 3869a487..738e6d27 100644
+--- a/server/config/runtime.exs
++++ b/server/config/runtime.exs
+@@ -32,7 +32,9 @@ config :nebu_http, [{:admin_reauth_allow_missing_auth_time, System.get_env("NEBU
+ # /v3/refresh) and admin-session ceilings so the silent-refresh loop fires within a
+ # test window. SessionConfig.parse_ttl/1 is defensive: only a strictly positive
+ # integer is applied; unset / junk / <= 0 leaves the 8h default untouched. Never
+-# raises — must not break the login path.
++# raises — must not break the login path. The Matrix ceiling can also be SAVED in the
++# Admin UI (server_config.matrix_session_ttl_seconds, story session-lifetime-setting):
++# the saved value wins over NEBU_MATRIX_SESSION_TTL_SECONDS, which stays the fallback.
+ for {env_name, cfg_key} <- [
+       {"NEBU_MATRIX_SESSION_TTL_SECONDS", :matrix_session_ttl_seconds},
+       {"NEBU_ADMIN_SESSION_TTL_SECONDS", :admin_session_ttl_seconds}
+diff --git a/server/lib/nebu/admin/db.ex b/server/lib/nebu/admin/db.ex
+index aa1be30c..7b3591fa 100644
+--- a/server/lib/nebu/admin/db.ex
++++ b/server/lib/nebu/admin/db.ex
+@@ -768,6 +768,9 @@ defmodule Nebu.Admin.DB do
+   # What follows a committed write of server_config keys (shared by `upsert_server_config/1` and the audited save below): the node-local /
+   # cluster caches of the keys that have one are refreshed.
+   defp after_config_write(changes) do
++    keys = stringify_keys(changes)
++    after_config_write_hook(changes)
++
+     # story oidc-claim-boot-cache: this is the SINGLE central write point for
+     # server_config.oidc_user_id_claim (claim_mapping_live, bootstrap save, and the
+     # gRPC SetServerConfig path all route through here). When the change touches
+@@ -775,7 +778,7 @@ defmodule Nebu.Admin.DB do
+     # cluster (ADR-020) through the Matrix Public API — never reaching into the
+     # Matrix-domain cache module directly. A change that does not touch the key is
+     # a no-op (no stale-claim risk, no needless re-read).
+-    if Map.has_key?(stringify_keys(changes), "oidc_user_id_claim") do
++    if Map.has_key?(keys, "oidc_user_id_claim") do
+       Nebu.Matrix.invalidate_oidc_claim_cache()
+     end
+ 
+@@ -787,7 +790,7 @@ defmodule Nebu.Admin.DB do
+     # change) so an Admin-Config edit is visible on the VERY NEXT read — no
+     # node-local-only staleness window. A change that touches none of them is a
+     # no-op (no needless re-read).
+-    if Enum.any?(@scope_cache_keys, &Map.has_key?(stringify_keys(changes), &1)) do
++    if Enum.any?(@scope_cache_keys, &Map.has_key?(keys, &1)) do
+       refresh_oidc_scope_cache()
+     end
+ 
+@@ -798,14 +801,14 @@ defmodule Nebu.Admin.DB do
+     # connection-pool deadlock — see PolicyCache's moduledoc). Force a
+     # synchronous cache refresh here so a policy flip takes effect on the
+     # VERY NEXT Logger.* call, mirroring the OIDC scope-cache pattern above.
+-    if Enum.any?(@log_policy_cache_keys, &Map.has_key?(stringify_keys(changes), &1)) do
++    if Enum.any?(@log_policy_cache_keys, &Map.has_key?(keys, &1)) do
+       Nebu.Web.LogStore.refresh_policy_cache()
+     end
+ 
+     # story session-lifetime-setting: the Matrix session lifetime is read at every login through the per-node cache of `Nebu.OAuth.Config` (ADR-020: through the
+     # OAuth facade). The saving node records the saved value as its last known good one and drops its cache entry so the next login uses the new value at once;
+     # other nodes follow within `NEBU_OAUTH_CONFIG_CACHE_MS`. Runs after the COMMIT only (see `run_after_commit/1`): a rolled back value is never remembered.
+-    case Map.fetch(stringify_keys(changes), "matrix_session_ttl_seconds") do
++    case Map.fetch(keys, "matrix_session_ttl_seconds") do
+       {:ok, value} -> Nebu.OAuth.note_saved_matrix_session_ttl(value)
+       :error -> :ok
+     end
+@@ -813,6 +816,18 @@ defmodule Nebu.Admin.DB do
+     :ok
+   end
+ 
++  # test seam (test builds only): `:nebu_http, :admin_after_config_write`, a 1-arity fun called with `changes` at the start of every `after_config_write/1`
++  if Mix.env() == :test do
++    defp after_config_write_hook(changes) do
++      case Application.get_env(:nebu_http, :admin_after_config_write) do
++        fun when is_function(fun, 1) -> fun.(changes)
++        _ -> :ok
++      end
++    end
++  else
++    defp after_config_write_hook(_changes), do: :ok
++  end
++
+   @deferred_after_commit {__MODULE__, :deferred_after_commit}
+ 
+   # `after_config_write/1` of a save that runs inside `with_locked_config/2` waits for the COMMIT of the outer transaction (the nested save's own transaction
+@@ -831,14 +846,21 @@ defmodule Nebu.Admin.DB do
+   @doc """
+   Runs `fun` inside ONE transaction that holds the row locks of `keys` (`SELECT ... FOR UPDATE`), so a decision made on the stored values cannot go stale:
+   `fun.(stored)` gets the stored `%{key => value}` as they are at that moment (a key without a row is absent; a first save has no row to lock and still races).
+-  A `save_config_audited/2` called inside it joins the same transaction, and its `after_config_write` effects (caches) run after the OUTER commit.
++  A `save_config_audited/2` called inside it joins the same transaction (use `unaudited_ok: false`: after a failed audit the retry without it cannot work inside
++  the aborted outer transaction), and its `after_config_write` effects (caches) run after the OUTER commit, in the order of the saves; an effect that raises is
++  logged (exception type only) and does not skip the others.
+ 
+   `fun` returns `{:commit, result}` (commit, the answer is `result`) or `{:rollback, result}` (roll back, e.g. a refused or unchanged value; the answer is
+-  `result`). `{:error, :db}` when the transaction itself cannot run. With the `:admin_config_tx` test seam, or without a repository, `fun.(:unlocked)` is
+-  called instead and its result returned (the caller reads its own configuration; nothing is locked).
++  `result`, no effect runs). An exception of `fun` rolls back and is RE-RAISED. Calls must not be nested (`ArgumentError`). `{:error, :db}` plus one value-free log
++  line when the transaction itself cannot run. With the `:admin_config_tx` test seam, or without a repository, `fun.(:unlocked)` is called instead, its effects run
++  at once and its result is returned (the caller reads its own configuration; nothing is locked).
+   """
+   @spec with_locked_config([String.t()], (map() | :unlocked -> {:commit, term()} | {:rollback, term()})) :: term()
+   def with_locked_config(keys, fun) when is_list(keys) and is_function(fun, 1) do
++    if is_list(Process.get(@deferred_after_commit)) do
++      raise ArgumentError, "Nebu.Admin.DB.with_locked_config/2 must not be nested"
++    end
++
+     if locked_config_unavailable?() do
+       {_decision, result} = fun.(:unlocked)
+       result
+@@ -853,12 +875,15 @@ defmodule Nebu.Admin.DB do
+     try do
+       case locked_config_transaction(keys, fun) do
+         {:committed, result} ->
+-          for changes <- Enum.reverse(Process.get(@deferred_after_commit, [])), do: after_config_write(changes)
++          run_queued_effects(Enum.reverse(Process.get(@deferred_after_commit, [])))
+           result
+ 
+         {:rolled_back, result} ->
+           result
+ 
++        {:raised, kind, reason, stacktrace} ->
++          :erlang.raise(kind, reason, stacktrace)
++
+         :error ->
+           {:error, :db}
+       end
+@@ -867,6 +892,16 @@ defmodule Nebu.Admin.DB do
+     end
+   end
+ 
++  defp run_queued_effects(queue) do
++    Enum.each(queue, fn changes ->
++      try do
++        after_config_write(changes)
++      rescue
++        e -> Logger.error("Admin.DB: an after-commit effect of a server_config change failed: #{inspect(e.__struct__)}")
++      end
++    end)
++  end
++
+   defp locked_config_transaction(keys, fun) do
+     repo = Nebu.Repo
+ 
+@@ -874,24 +909,43 @@ defmodule Nebu.Admin.DB do
+       repo.transaction(fn ->
+         %{rows: rows} = Ecto.Adapters.SQL.query!(repo, "SELECT key, value FROM server_config WHERE key = ANY($1) FOR UPDATE", [keys])
+ 
+-        case fun.(Map.new(rows, fn [k, v] -> {k, v} end)) do
++        decision =
++          try do
++            fun.(Map.new(rows, fn [k, v] -> {k, v} end))
++          catch
++            kind, reason -> {:raised, kind, reason, __STACKTRACE__}
++          end
++
++        case decision do
+           {:commit, result} -> result
+           {:rollback, result} -> repo.rollback({:answer, result})
++          {:raised, _kind, _reason, _stack} = raised -> repo.rollback(raised)
+         end
+       end)
+ 
+     case result do
+       {:ok, result} -> {:committed, result}
+       {:error, {:answer, result}} -> {:rolled_back, result}
+-      {:error, _reason} -> :error
++      {:error, {:raised, _kind, _reason, _stack} = raised} -> raised
++      {:error, reason} -> log_locked_failure(reason)
+     end
+   rescue
+-    # repo down / not started
+-    _e in [RuntimeError, DBConnection.ConnectionError, UndefinedFunctionError] -> :error
++    e in [RuntimeError, DBConnection.ConnectionError, UndefinedFunctionError, Postgrex.Error] -> log_locked_failure(e)
+   catch
+-    :exit, _ -> :error
++    :exit, _ -> log_locked_failure(:exit)
+   end
+ 
++  # value-free: the error TYPE only, never a message, a key or a value
++  defp log_locked_failure(reason) do
++    Logger.error("Admin.DB: the locked server_config transaction failed: #{locked_error_type(reason)}")
++    :error
++  end
++
++  defp locked_error_type(%Postgrex.Error{postgres: %{code: code}}), do: "postgres #{code}"
++  defp locked_error_type(%{__struct__: struct}), do: inspect(struct)
++  defp locked_error_type(reason) when is_atom(reason), do: inspect(reason)
++  defp locked_error_type(_reason), do: "unexpected error"
++
+   if Mix.env() == :test do
+     defp locked_config_unavailable?, do: is_function(Application.get_env(:nebu_http, :admin_config_tx), 2) or Process.whereis(Nebu.Repo) == nil
+   else
+diff --git a/server/lib/nebu/matrix.ex b/server/lib/nebu/matrix.ex
+index 30099c94..13013119 100644
+--- a/server/lib/nebu/matrix.ex
++++ b/server/lib/nebu/matrix.ex
+@@ -251,7 +251,8 @@ defmodule Nebu.Matrix do
+   (kept with its E2EE keys when the id is reused), EVERY earlier `matrix_sessions` row of
+   `(user_id, device_id)` (legacy and OAuth) is deleted and the new row inserted (`expires_at =
+   LEAST(now() + ttl, session_expires_at)`, `session_expires_at = now() +
+-  NEBU_MATRIX_SESSION_TTL_SECONDS`). Afterwards raw IdP JWTs bound to the device are denylisted.
++  the Matrix session lifetime`: the lifetime saved in the Admin UI (`server_config.matrix_session_ttl_seconds`), else `NEBU_MATRIX_SESSION_TTL_SECONDS`, else 8 hours,
++  see `Nebu.Web.SessionConfig.matrix_session_ttl_seconds/0`). Afterwards raw IdP JWTs bound to the device are denylisted.
+ 
+   `{:ok, %{access_token:, refresh_token:, expires_in:, user_id:, device_id:, scope:, auth_time:}}`,
+   `{:error, :inactive}` (deactivated or unknown user) or `{:error, :unavailable}` (transient).
+diff --git a/server/lib/nebu/oauth/config.ex b/server/lib/nebu/oauth/config.ex
+index 66de1354..68914ad2 100644
+--- a/server/lib/nebu/oauth/config.ex
++++ b/server/lib/nebu/oauth/config.ex
+@@ -172,12 +172,12 @@ defmodule Nebu.OAuth.Config do
+ 
+   # The value of a SUCCESSFUL read of the row: valid -> it becomes the last good one; no row -> the saved value ended on purpose (env / 8 hours apply);
+   # damaged -> ignored, the last good one stays.
+-  defp resolve_saved_ttl(nil), do: Nebu.OAuth.LastGood.clear()
++  defp resolve_saved_ttl(nil, gen), do: Nebu.OAuth.LastGood.clear_if(gen)
+ 
+-  defp resolve_saved_ttl(raw) do
++  defp resolve_saved_ttl(raw, gen) do
+     case parse_matrix_session_ttl(raw) do
+       {:ok, n} ->
+-        Nebu.OAuth.LastGood.put(n)
++        Nebu.OAuth.LastGood.put_if(gen, n)
+ 
+       :error ->
+         warn_damaged_session_ttl()
+@@ -192,7 +192,7 @@ defmodule Nebu.OAuth.Config do
+   @spec note_saved_matrix_session_ttl(term()) :: :ok
+   def note_saved_matrix_session_ttl(value) do
+     case parse_matrix_session_ttl(value) do
+-      {:ok, n} -> Nebu.OAuth.LastGood.put(n)
++      {:ok, n} -> Nebu.OAuth.LastGood.put_saved(n)
+       :error -> nil
+     end
+ 
+@@ -202,7 +202,7 @@ defmodule Nebu.OAuth.Config do
+   if Mix.env() == :test do
+     @doc false
+     def reset_last_good_for_test do
+-      Nebu.OAuth.LastGood.clear()
++      Nebu.OAuth.LastGood.reset()
+       :ok
+     end
+   end
+@@ -283,7 +283,7 @@ defmodule Nebu.OAuth.Config do
+   defp cached_load(opts) do
+     case cache_ttl_ms() do
+       0 ->
+-        {_kind, config} = load_from_db(opts)
++        {_kind, config} = load_from_db(opts, Nebu.OAuth.LastGood.generation())
+         config
+ 
+       ttl ->
+@@ -294,9 +294,13 @@ defmodule Nebu.OAuth.Config do
+             config
+ 
+           :miss ->
+-            case load_from_db(opts) do
++            # the generation is captured BEFORE the query: a save that commits while this read is in flight bumps it, and the (older) answer is then
++            # neither remembered as last good nor written into the cache entry the save dropped (cycle 2, Kassandra delta LOW #1)
++            gen = Nebu.OAuth.LastGood.generation()
++
++            case load_from_db(opts, gen) do
+               {:cache, config} ->
+-                cache_store(config, now)
++                if Nebu.OAuth.LastGood.generation() == gen, do: cache_store(config, now)
+                 config
+ 
+               {:nocache, config} ->
+@@ -491,14 +495,14 @@ defmodule Nebu.OAuth.Config do
+ 
+   defp positive(_value, default, _max), do: default
+ 
+-  defp load_from_db(opts) do
++  defp load_from_db(opts, gen) do
+     case load_raw(opts) do
+       {:ok, map} ->
+         {:cache,
+          normalize(%{
+            enabled: map["oauth_enabled"] == "true",
+            issuer_url: map["oauth_issuer_url"],
+-           matrix_session_ttl_seconds: resolve_saved_ttl(map["matrix_session_ttl_seconds"])
++           matrix_session_ttl_seconds: resolve_saved_ttl(map["matrix_session_ttl_seconds"], gen)
+          })}
+ 
+       :error ->
+@@ -506,7 +510,8 @@ defmodule Nebu.OAuth.Config do
+         {:nocache, %{unknown() | matrix_session_ttl_seconds: Nebu.OAuth.LastGood.get()}}
+ 
+       :no_repo ->
+-        {:nocache, disabled()}
++        # no repository process (a Repo restart): still the last known good lifetime, the OAuth switch stays disabled (fail closed)
++        {:nocache, %{disabled() | matrix_session_ttl_seconds: Nebu.OAuth.LastGood.get()}}
+     end
+   end
+ 
+diff --git a/server/lib/nebu/oauth/last_good.ex b/server/lib/nebu/oauth/last_good.ex
+index b0fc1896..e7c83fd2 100644
+--- a/server/lib/nebu/oauth/last_good.ex
++++ b/server/lib/nebu/oauth/last_good.ex
+@@ -15,32 +15,68 @@ defmodule Nebu.OAuth.LastGood do
+   @table :nebu_oauth_last_good
+   @key :matrix_session_ttl
+ 
++  # One object `{@key, value | nil, generation}`. A DELIBERATE change (`put_saved/1`, an Admin save on this node) bumps the generation; a reader captures
++  # `generation/0` BEFORE its query and may write its answer (`put_if/2`, `clear_if/1`) only while the generation is unchanged (compare-and-set with
++  # `:ets.select_replace/2`): a read that was in flight while a save committed can never overwrite the newer value (cycle 2, Kassandra delta LOW #1).
++
+   @doc "The last good value, or nil when none was loaded on this node (or it was cleared by a successful read that found no row). Never raises."
+   @spec get() :: pos_integer() | nil
+   def get do
+     case :ets.lookup(@table, @key) do
+-      [{@key, seconds}] -> seconds
++      [{@key, seconds, _gen}] -> seconds
+       _ -> nil
+     end
+   rescue
+     ArgumentError -> nil
+   end
+ 
+-  @doc "Remembers `seconds`; returns it. A missing table is a skipped write. Never raises."
+-  @spec put(pos_integer()) :: pos_integer()
+-  def put(seconds) when is_integer(seconds) do
+-    :ets.insert(@table, {@key, seconds})
+-    seconds
++  @doc "The current generation (0 before the first deliberate change). Capture it BEFORE a read of `server_config`. Never raises."
++  @spec generation() :: non_neg_integer()
++  def generation do
++    case :ets.lookup(@table, @key) do
++      [{@key, _seconds, gen}] -> gen
++      _ -> 0
++    end
++  rescue
++    ArgumentError -> 0
++  end
++
++  @doc "Remembers `seconds` as the answer of a read that started at generation `gen`, only while the generation is unchanged. Returns `seconds`. Never raises."
++  @spec put_if(non_neg_integer(), pos_integer()) :: pos_integer()
++  def put_if(gen, seconds) when is_integer(seconds), do: cas(gen, seconds)
++
++  @doc "Forgets the value (a read that started at generation `gen` found no row), only while the generation is unchanged. Returns nil. Never raises."
++  @spec clear_if(non_neg_integer()) :: nil
++  def clear_if(gen), do: cas(gen, nil) && nil
++
++  @doc "A deliberate change on this node: `seconds` becomes the value and the generation is bumped, so every read in flight is discarded. Returns `seconds`. Never raises."
++  @spec put_saved(pos_integer()) :: pos_integer()
++  def put_saved(seconds) when is_integer(seconds) do
++    gen = generation()
++
++    if :ets.select_replace(@table, [{{@key, :_, gen}, [], [{{@key, seconds, gen + 1}}]}]) == 1 or :ets.insert_new(@table, {@key, seconds, gen + 1}) do
++      seconds
++    else
++      put_saved(seconds)
++    end
+   rescue
+     ArgumentError -> seconds
+   end
+ 
+-  @doc "Forgets it (a successful read found no row: the saved value ended on purpose). Returns nil. Never raises."
+-  @spec clear() :: nil
+-  def clear do
++  @doc "Forgets everything including the generation (test builds use it between tests). Never raises."
++  @spec reset() :: :ok
++  def reset do
+     :ets.delete(@table, @key)
+-    nil
++    :ok
+   rescue
+-    ArgumentError -> nil
++    ArgumentError -> :ok
++  end
++
++  defp cas(gen, value) do
++    replaced = :ets.select_replace(@table, [{{@key, :_, gen}, [], [{{@key, value, gen}}]}])
++    if replaced == 0 and gen == 0, do: :ets.insert_new(@table, {@key, value, 0})
++    value
++  rescue
++    ArgumentError -> value
+   end
+ end

@@ -1,0 +1,34 @@
+<p data-role="grants-note">These are the apps you have allowed to use your Matrix account. Nebu does not ask you again for them. Withdrawing the permission of an app does not sign out devices that are already signed in: use <a href="/account?action=org.matrix.devices_list">Devices</a> for that. The app asks for your permission again the next time it wants to sign you in.</p>
+<%= if @grants == [] do %>
+<p data-role="no-grants">There are no allowed apps on your account. An app appears here after you allow it when you sign in.</p>
+<% else %>
+<div class="table-wrap" role="region" aria-label="Allowed apps table" tabindex="0">
+<table>
+<caption>Apps you have allowed</caption>
+<thead>
+<tr>
+<th scope="col">App (name claimed by the app)</th>
+<th scope="col">Website</th>
+<th scope="col">Allowed on</th>
+<th scope="col">Actions</th>
+</tr>
+</thead>
+<tbody>
+<%= for g <- @grants do %>
+<tr data-role="consent-grant" data-client-id="<%= g.client_id %>">
+<th scope="row" data-label="App (name claimed by the app)"><%= grant_name(g) %></th>
+<td data-label="Website"><%= if g.client_host in [nil, ""], do: "Unknown", else: g.client_host %></td>
+<td data-label="Allowed on"><%= grant_time(g.granted_at) %></td>
+<td data-label="Actions">
+<form method="post" action="/account/apps/withdraw">
+<input type="hidden" name="csrf_token" value="<%= @csrf_token %>">
+<input type="hidden" name="client_id" value="<%= g.client_id %>">
+<button type="submit" class="danger" data-role="withdraw-grant" aria-label="Withdraw the permission of <%= grant_name(g) %> (<%= grant_host(g) %>)">Withdraw</button>
+</form>
+</td>
+</tr>
+<% end %>
+</tbody>
+</table>
+</div>
+<% end %>

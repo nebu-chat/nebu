@@ -124,7 +124,10 @@ defmodule Nebu.OAuth.AuthorizeRequest do
   order; first failure wins).
 
   `{:ok, %{response_mode:, code_challenge:, state:, nonce:, scope:, scope_prefix:, device_id:,
-  openid_requested:, prompt: "create" | nil}}` or `{:error, error_code, error_context(pairs, uri)}`.
+  openid_requested:, prompt: "create" | nil, force_consent: boolean}}` or `{:error, error_code, error_context(pairs, uri)}`.
+
+  `force_consent:` is true when `consent` or `login` is among the space separated `prompt` values (case sensitive): the callback then always
+  shows the consent screen, whatever remembered Allow exists (story persistent-consent-grants).
   """
   @spec validate(pairs(), String.t()) :: {:ok, map()} | {:error, String.t(), error_context()}
   def validate(pairs, redirect_uri) do
@@ -148,7 +151,8 @@ defmodule Nebu.OAuth.AuthorizeRequest do
          scope_prefix: scope.prefix,
          device_id: scope.device_id,
          openid_requested: scope.openid,
-         prompt: prompt
+         prompt: prompt,
+         force_consent: force_consent?(pairs)
        }}
     else
       {:error, code} -> {:error, code, ctx}
@@ -242,6 +246,10 @@ defmodule Nebu.OAuth.AuthorizeRequest do
       true -> {:ok, nil}
     end
   end
+
+  # story persistent-consent-grants: `consent` among the space separated (case sensitive, OIDC Core 3.1.2.1) `prompt` values always shows the consent screen
+  # `login` (a request for re-authentication) forces the screen as well: with a remembered Allow nothing else would guard it (Kassandra LOW #2)
+  defp force_consent?(pairs), do: Enum.any?(String.split(first(pairs, "prompt") || "", " ", trim: true), &(&1 in ["consent", "login"]))
 
   defp valid_text?(value) do
     byte_size(value) <= @max_text_bytes and String.valid?(value) and not Regex.match?(~r/\p{Cc}/u, value)

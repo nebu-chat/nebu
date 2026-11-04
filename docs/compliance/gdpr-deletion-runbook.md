@@ -102,6 +102,7 @@ SELECT COUNT(*) FROM read_receipts WHERE user_id = '@alice:example.com';
 SELECT COUNT(*) FROM uia_sessions WHERE user_id = '@alice:example.com';
 SELECT COUNT(*) FROM oauth_account_sessions WHERE user_id = '@alice:example.com';
 SELECT COUNT(*) FROM oauth_consent_requests WHERE user_id = '@alice:example.com';
+SELECT COUNT(*) FROM oauth_consent_grants WHERE user_id = '@alice:example.com';
 SELECT COUNT(*) FROM oauth_codes WHERE user_id = '@alice:example.com';
 -- Expected: 0 for each table above
 
@@ -180,6 +181,7 @@ DELETE FROM auto_join_opt_outs WHERE user_id IN (SELECT user_id FROM users WHERE
 DELETE FROM read_receipts WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
 DELETE FROM oauth_account_sessions WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
 DELETE FROM oauth_consent_requests WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
+DELETE FROM oauth_consent_grants WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
 DELETE FROM oauth_codes WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');
 -- the post-commit session teardown tables (a teardown that failed after the commit left them; the tokens are dead, the rows are not)
 DELETE FROM sync_room_cursors WHERE user_id IN (SELECT user_id FROM users WHERE deletion_status = 'keys_deleted');

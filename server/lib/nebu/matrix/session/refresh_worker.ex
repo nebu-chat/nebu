@@ -6,7 +6,7 @@ defmodule Nebu.Matrix.Session.RefreshWorker do
   Element Web's legacy SSO redirect + token-login flow never calls
   `POST /_matrix/client/v3/refresh` — the opaque access token it receives at
   login is otherwise fire-and-forget and simply expires at the bound
-  `matrix_sessions.expires_at` (`min(oidc_exp, now + 8h)`, computed by
+  `matrix_sessions.expires_at` (`min(oidc_exp, now + lifetime)`, the configurable session lifetime (8h default), computed by
   `Nebu.Matrix.HttpPublic.session_expires_at/1`). This worker proactively
   redeems each device's stored, encrypted upstream OIDC refresh token shortly
   before that bound is reached, so the client never needs to call `/refresh`

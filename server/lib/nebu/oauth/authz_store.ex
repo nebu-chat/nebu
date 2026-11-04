@@ -41,10 +41,10 @@ defmodule Nebu.OAuth.AuthzStore do
   INSERT INTO oauth_authz_requests
     (state_hash, client_id, redirect_uri, code_challenge, device_id, scope, scope_prefix,
      response_mode, client_state, client_nonce, openid_requested, idp_code_verifier_enc, idp_nonce,
-     browser_binding_hash, expires_at, source_key)
+     browser_binding_hash, expires_at, source_key, force_consent)
   SELECT $1::text, $2::text, $3::text, $4::text, $5::text, $6::text, $7::text, $8::text, $9::text,
          $10::text, $11::boolean, $12::text, $13::text, $14::text,
-         now() + ($15::int * interval '1 second'), $17::text
+         now() + ($15::int * interval '1 second'), $17::text, $19::boolean
   WHERE (SELECT count(*) FROM oauth_authz_requests WHERE expires_at > now()) < $16::bigint
     AND ($17::text IS NULL
          OR (SELECT count(*) FROM oauth_authz_requests
@@ -57,7 +57,7 @@ defmodule Nebu.OAuth.AuthzStore do
   DELETE FROM oauth_authz_requests WHERE state_hash = $1
   RETURNING client_id, redirect_uri, code_challenge, device_id, scope, scope_prefix, response_mode,
             client_state, client_nonce, openid_requested, idp_code_verifier_enc, idp_nonce,
-            browser_binding_hash, extract(epoch FROM created_at)::bigint, (expires_at > now()) AS live
+            browser_binding_hash, force_consent, extract(epoch FROM created_at)::bigint, (expires_at > now()) AS live
   """
 
   # No `FOR UPDATE SKIP LOCKED` here (unlike the code purge): the runtime role has no UPDATE
@@ -96,7 +96,8 @@ defmodule Nebu.OAuth.AuthzStore do
           @ttl_seconds,
           Map.get(attrs, :cap, @live_cap),
           Map.get(attrs, :source_key),
-          Map.get(attrs, :source_cap, @source_live_cap)
+          Map.get(attrs, :source_cap, @source_live_cap),
+          Map.get(attrs, :force_consent, false) == true
         ]
 
     case query(@sql_insert, params) do
@@ -134,8 +135,8 @@ defmodule Nebu.OAuth.AuthzStore do
   def consume(state) when is_binary(state) do
     case query(@sql_consume, [hash(state)]) do
       {:ok, %{rows: [row]}} ->
-        {values, [live]} = Enum.split(row, length(@columns) + 1)
-        if live, do: {:ok, (@columns ++ [:created_at]) |> Enum.zip(values) |> Map.new()}, else: {:error, :expired}
+        {values, [live]} = Enum.split(row, length(@columns) + 2)
+        if live, do: {:ok, (@columns ++ [:force_consent, :created_at]) |> Enum.zip(values) |> Map.new()}, else: {:error, :expired}
 
       {:ok, %{rows: []}} ->
         {:error, :not_found}

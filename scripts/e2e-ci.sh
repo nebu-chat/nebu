@@ -98,7 +98,7 @@ if [[ "${SUITE}" == "element" || "${SUITE}" == "admin" ]]; then
     PW_ARGS="--project=element-web"
   else
     # every scenario of the admin-ui project except the OAuth groups (they need the https stack: suite `oauth`)
-    ENVS+=(-e NEBU_E2E_TAGS="not @pending-feature and not @short-ttl and not @known-failure and not @legacy-sso-confirm and not @oauth-account and not @oauth-authorize and not @oauth-consent and not @oauth-approvals and not @oauth-revocation and not @oauth-switch")
+    ENVS+=(-e NEBU_E2E_TAGS="not @pending-feature and not @short-ttl and not @known-failure and not @legacy-sso-confirm and not @oauth-account and not @oauth-authorize and not @oauth-consent and not @oauth-consent-grants and not @oauth-approvals and not @oauth-revocation and not @oauth-switch")
     PW_ARGS="--project=admin-ui"
   fi
 else

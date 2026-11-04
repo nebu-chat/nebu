@@ -123,7 +123,7 @@ defmodule Nebu.Admin.Router do
   # Decided on `conn.path_info` (the segment list the routing uses; empty segments are already dropped), NOT on
   # `request_path`: `/admin/config/`, `/admin//config` or `/admin/oauth//registrations` reach the same actions and must
   # get the same headers (review cycle 1, Kassandra Y-1).
-  @config_unframed_segments ["refresh-mode", "scopes", "sso-schemes", "sso-origins", "oauth-switch", "claim-mapping", "role-mapping"]
+  @config_unframed_segments ["refresh-mode", "scopes", "sso-schemes", "sso-origins", "oauth-switch", "session-lifetime", "claim-mapping", "role-mapping"]
 
   defp unframed_path?(["admin", "oauth" | _]), do: true
   defp unframed_path?(["admin", "config"]), do: true
@@ -242,6 +242,7 @@ defmodule Nebu.Admin.Router do
     post "/config/sso-schemes", ConfigController, :save_sso_schemes
     post "/config/sso-origins", ConfigController, :save_sso_origins
     post "/config/oauth-switch", ConfigController, :save_oauth_switch
+    post "/config/session-lifetime", ConfigController, :save_session_lifetime
 
     # Logs configuration (enhanced-logging/admin-logs-retention-settings)
     get "/logs/config", LogsController, :index

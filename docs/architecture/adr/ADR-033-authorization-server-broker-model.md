@@ -351,7 +351,9 @@ so `oauth_enabled` stays false. Decisions (prefix `T`, so they never collide wit
 - **T3 Two expiries.** OAuth rows: `expires_at` = ACCESS-token expiry
   (`LEAST(now() + ttl, session_expires_at)`), `session_expires_at` = the absolute session maximum
   (`now() + NEBU_MATRIX_SESSION_TTL_SECONDS` at code redemption, copied verbatim on every rotation,
-  never extended). A refresh is allowed while `session_expires_at > now()`.
+  never extended). A refresh is allowed while `session_expires_at > now()`. *Pointer (story session-lifetime-setting):* the session maximum
+  can now be saved in the Admin UI (`server_config.matrix_session_ttl_seconds`, 1 hour to 90 days; it wins over the env value
+  `NEBU_MATRIX_SESSION_TTL_SECONDS`, which stays the fallback), see `docs/architecture/07-deployment.md`, "Matrix session lifetime".
 - **T4 Access-token TTL** `oauth_access_token_ttl_seconds` (server_config), 60..3600, default 900;
   tokens are 64 lowercase hex (opaque, no `.`), stored only as SHA-256 hashes.
 - **T5 `oauth_idp_revalidation`** = `per_refresh` (default, also for unknown values: fail safe) or
@@ -785,7 +787,9 @@ E-2 (a user who logs in after following the link still authorizes the attacker's
 
 - **FR1 Consent on EVERY authorization (safe variant).** A server-rendered consent screen is shown after
   the verified IdP login and provisioning, before any code exists; no remembered grants, no skip, not even
-  with a fresh `auth_time`. RFC 6749 10.2 and RFC 8252 8.6 forbid automatic processing for clients the AS
+  with a fresh `auth_time`. **Relaxed by story persistent-consent-grants (REQ-2026-003): a user's Allow is
+  remembered under strict rules, see "Remembered consent" below; the rest of FR1 (no code without a decision,
+  the screen for every other case) stands.** RFC 6749 10.2 and RFC 8252 8.6 forbid automatic processing for clients the AS
   cannot authenticate (all Matrix clients are public; loopback / private-use redirects are
   unattributable); a fresh IdP login proves presence, not which app (the IdP page names only Nebu); Matrix
   v1.15 "Scope" encourages consent; remembered consent needs a table plus a lifecycle (revocation, scope
@@ -1851,6 +1855,16 @@ Context. Legacy `m.login.sso` accepted ANY https `redirectUrl` and handed the `l
   `429` / `400 invalid_request` / `403` first); a POST with a live cookie keeps parse -> decision -> Origin + fetch metadata -> CSRF -> pop. Residual: a flood of well-formed random cookies still
   reaches the node-local `SsoStore` (an O(1) lookup, bounded call timeout; the miss bucket throttles the ANSWER, not that lookup, which must run first to tell a hit from a miss; an unreachable store counts as a miss) and fills its source's miss bucket; a signed binding cookie would avoid the lookup (follow-up `di`).
 - **L8 Residuals (D18, D19).** Loopback and custom-scheme targets stay unconfirmed (a local process or app on the user's device); the page is a warning, not proof; `https://<server_name>` must be operator controlled (`.well-known` delegation); approving an OAuth client also trusts its registered https redirect URIs (and the paths below them; a path containing `;` or `%25` never matches) for the legacy flow; no pre-redirect browser binding (login CSRF, `ca`); Continue needs JavaScript; the 30 s `loginToken` lifetime exceeds the spec's "around five seconds" (native protocol handlers need it); an unknown `{idpId}` is redirected, not `404`.
+
+## Remembered consent (story persistent-consent-grants, REQ-2026-003; relaxes FR1)
+
+FR1 judged remembered consent a fail-open risk (a table plus a lifecycle). The risk is accepted for a user who already allowed THIS client, under these rules, each pinned by a test:
+
+- **Table `oauth_consent_grants`** (migration 000057), one row per (user, client): the normalised scope without the device token, the exact redirect URI, and `client_approved_at` (the client's `approved_at` at the Allow: the identity binding, so a client that is approved again does not inherit a grant). Written by an Allow AFTER the code was issued; a failing write never fails the Allow.
+- **Skip rule** (decided in the IdP callback, where the user is known, after the IdP login, gate l, provisioning, freshness and the device-holder check have run): the client is `approved`, a grant exists, the redirect URI is exactly equal, the requested scope after the existing narrowing is a subset of the remembered one, the binding equals the client's current `approved_at`, the request has no `prompt=consent` / `prompt=login`, and the device state is new or held by the same app (a device that would REPLACE another session, for example a legacy session on the requested device id, shows the screen: Kassandra MEDIUM #1). One statement joins the client row (the revoke wins). Anything else, including an unreadable table, shows the consent screen. The code is minted by `Nebu.OAuth.Consent` (still the only caller of `CodeStore.insert`) with exactly the attributes of an Allow; the skip never widens the requested scope and never stores anything.
+- **Deletion paths:** revocation of the client deletes every user's grant in the revoke transaction (fail closed); the user withdraws a grant on `/account/apps` (own grants only, no fresh sign-in, existing sessions untouched); GDPR erasure (`UserDeletion.erased_tables/0`); an owner-role client delete cascades.
+- **`prompt=consent` and `prompt=login`** (also inside a list such as `login consent`) always show the screen (a request for re-authentication must meet a guard; Kassandra LOW #2) and an Allow replaces the grant; it travels from `/oauth2/authorize` in `oauth_authz_requests.force_consent`.
+- **Not changed:** the IdP login, freshness (a skip applies whatever the verdict is, as the verdict only drives a notice today), PKCE, state, nonce, the device id binding, rate limits, the legacy flow.
 
 ## Operations note: migration 000040 was edited in place
 
