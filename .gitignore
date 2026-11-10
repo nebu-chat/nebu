@@ -58,7 +58,9 @@ erl_crash.dump
 *.ez
 # Override global gitignore: Elixir source lives in lib/
 !lib/
-/.claude/
+/.claude/*
+# Shared, team-wide Claude Code settings are tracked; everything else (local settings, worktrees, caches) stays ignored.
+!/.claude/settings.json
 /e2e/node_modules/
 /e2e/test-results/
 .playwright-mcp/
