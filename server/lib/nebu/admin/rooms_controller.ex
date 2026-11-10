@@ -30,16 +30,19 @@ defmodule Nebu.Admin.RoomsController do
   """
 
   @valid_filters ~w(all active archived stale)
+  @max_search_length 100
 
   # ── GET /admin/rooms ──────────────────────────────────────────────────────────
 
   def index(conn, params) do
     status = if params["status"] in @valid_filters, do: params["status"], else: "all"
-    rooms = load_rooms(status)
+    search = normalize_search(params["q"])
+    rooms = load_rooms(status, search)
 
     conn
     |> assign(:rooms, rooms)
     |> assign(:status_filter, status)
+    |> assign(:search, search || "")
     |> assign(:page_title, "Rooms")
     |> assign(:active_nav, "rooms")
     |> assign(:bootstrap_completed, Nebu.Admin.Auth.bootstrap_completed?())
@@ -61,7 +64,7 @@ defmodule Nebu.Admin.RoomsController do
     |> assign(:actor_id, actor_id(conn))
     |> assign(:detail_error, nil)
     |> assign(:member_error, nil)
-    |> assign(:page_title, if(room, do: (if room.name == "", do: room.room_id, else: room.name), else: "Room"))
+    |> assign(:page_title, if(room, do: Nebu.Admin.RoomNames.display_name(room), else: "Room"))
     |> assign(:active_nav, "rooms")
     |> assign(:bootstrap_completed, Nebu.Admin.Auth.bootstrap_completed?())
     |> put_layout(html: {Nebu.Admin.Layouts, :live})
@@ -375,13 +378,15 @@ defmodule Nebu.Admin.RoomsController do
 
   # ── Data loading ──────────────────────────────────────────────────────────────
 
-  defp load_rooms(status_filter) do
+  defp load_rooms(status_filter, search \\ nil) do
     if running?(Nebu.Repo) do
-      sql = String.replace(@sql_list_rooms_template, "__WHERE__", filter_clause(status_filter))
+      {where, params} = where_clause(status_filter, search)
+      sql = String.replace(@sql_list_rooms_template, "__WHERE__", where)
 
-      case Ecto.Adapters.SQL.query(Nebu.Repo, sql, []) do
+      case Ecto.Adapters.SQL.query(Nebu.Repo, sql, params) do
         {:ok, %{rows: rows}} ->
-          Enum.map(rows, fn [room_id, name, is_auto_join, status, member_count] ->
+          rows
+          |> Enum.map(fn [room_id, name, is_auto_join, status, member_count] ->
             count = member_count || 0
 
             %{
@@ -392,6 +397,8 @@ defmodule Nebu.Admin.RoomsController do
               status: Nebu.Admin.DB.room_effective_status(status || "active", count)
             }
           end)
+          # story admin-rooms-fallback-name: fallback names of the unnamed rooms, one batched query for the whole list
+          |> Nebu.Admin.RoomNames.attach_member_names()
 
         _ ->
           []
@@ -401,20 +408,57 @@ defmodule Nebu.Admin.RoomsController do
     end
   end
 
-  defp filter_clause("active"), do: "WHERE status = 'active'"
-  defp filter_clause("archived"), do: "WHERE status = 'archived'"
+  # WHERE clause + bind parameters of the list query: status filter and optional search term
+  # (case-insensitive substring of the room id or the explicit name; LIKE wildcards are literal).
+  defp where_clause(status_filter, search) do
+    {conds, params} =
+      case search do
+        nil ->
+          {[], []}
 
-  defp filter_clause("stale"),
-    do:
-      "WHERE status = 'active' AND " <>
-        "(SELECT COUNT(*) FROM room_members m WHERE m.room_id = r.room_id AND m.left_at IS NULL) = 0"
+        term ->
+          {["(r.room_id ILIKE $1 OR COALESCE(r.name, '') ILIKE $1)"], [like_pattern(term)]}
+      end
 
-  defp filter_clause(_), do: ""
+    conds = status_condition(status_filter) ++ conds
+
+    case conds do
+      [] -> {"", params}
+      _ -> {"WHERE " <> Enum.join(conds, " AND "), params}
+    end
+  end
+
+  defp status_condition("active"), do: ["r.status = 'active'"]
+  defp status_condition("archived"), do: ["r.status = 'archived'"]
+
+  defp status_condition("stale"),
+    do: [
+      "r.status = 'active'",
+      "(SELECT COUNT(*) FROM room_members m WHERE m.room_id = r.room_id AND m.left_at IS NULL) = 0"
+    ]
+
+  defp status_condition(_), do: []
+
+  # Search term from the query string: NUL bytes dropped (PostgreSQL rejects them in text, the failed query
+  # would show as an empty list), trimmed, capped, blank / non-string -> nil.
+  defp normalize_search(term) when is_binary(term) do
+    case term |> String.replace(<<0>>, "") |> String.trim() |> String.slice(0, @max_search_length) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp normalize_search(_), do: nil
+
+  defp like_pattern(term) do
+    escaped = String.replace(term, ["\\", "%", "_"], fn c -> "\\" <> c end)
+    "%" <> escaped <> "%"
+  end
 
   defp real_get_room(room_id) do
     if running?(Nebu.Repo) do
       case Nebu.Admin.DB.get_room(room_id) do
-        {:ok, room} -> room
+        {:ok, room} -> hd(Nebu.Admin.RoomNames.attach_member_names([room]))
         _ -> nil
       end
     else

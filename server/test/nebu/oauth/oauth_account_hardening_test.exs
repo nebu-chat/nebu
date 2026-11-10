@@ -506,7 +506,7 @@ defmodule Nebu.OAuth.OAuthAccountHardeningTest do
   # ════════════════════════════════════════════════════════════════════════════
 
   describe "MINOR — accessibility hooks on action pages (A20)" do
-    test "lang/viewport, nav aria-label, th scope=row, accessible names with the device name, role=status / role=alert notices", %{priv: priv, cid: cid} do
+    test "lang/viewport, nav aria-label, list cards, accessible names with the device name, role=status / role=alert notices", %{priv: priv, cid: cid} do
       sub = T.unique_sub()
       s = T.oauth_device!(cid, @https, priv, sub, dev())
       Nebu.Matrix.DeviceKeyStore.rename_device(s.user_id, s.device_id, "Work Phone")
@@ -515,7 +515,7 @@ defmodule Nebu.OAuth.OAuthAccountHardeningTest do
       list = T.account_get(q([{"action", "org.matrix.devices_list"}]), cookie: acct.cookie).resp_body
       assert list =~ ~r/<html[^>]*lang="en"/ and list =~ ~r/name="viewport"/
       assert list =~ ~r/<nav[^>]*aria-label="Account"/
-      assert list =~ ~s(scope="row")
+      assert list =~ ~s(data-role="device-list")
       assert list =~ ~r/Sign out Work Phone/
 
       confirm = T.account_get(q([{"action", "org.matrix.device_delete"}, {"device_id", s.device_id}]), cookie: acct.cookie).resp_body
@@ -544,7 +544,7 @@ defmodule Nebu.OAuth.OAuthAccountHardeningTest do
       assert body =~ "Never"
       assert body =~ "198.51.100.7"
       assert body =~ "Added"
-      assert body =~ "App (name claimed by the app)"
+      assert body =~ "App (name given by the app, not verified)"
       ids = Regex.scan(~r/data-role="account-device"[^>]*data-device-id="([^"]+)"/, body) |> Enum.map(&List.last/1)
       assert List.last(ids) == never, "NULLS LAST"
     end

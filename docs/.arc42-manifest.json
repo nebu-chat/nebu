@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-11-02T13:41:13Z",
+  "generated_at": "2026-11-05T13:17:15Z",
   "generator": "bmad-maintain-arc42 skill (delta update for the phase-2 gate-closing stories of epic oauth-broker: Nebu.Web.ClientIP / trusted proxy CIDRs, consent step, refresh lease, revoke_client cascade, admin re-auth + BrowserPost, per-device legacy logout, Nebu.Web.Unrecognized, config cache (ADR-020 exception), signing key rotation; 05 building blocks, 06 runtime views, 07 deployment (preconditions table, manual verification before activation, topology), 08 concepts, 11 risks (accepted / deferred, gate (s) re-scoped); ADR-033 Phase 2 summary; docs only, oauth_enabled stays false)",
   "source_artifacts": [
     "_bmad-output/planning-artifacts/architecture.md",
@@ -112,25 +112,25 @@
     },
     "docs/architecture/05-building-blocks.md": {
       "editable": false,
-      "generated_at": "2026-10-13T12:06:34Z",
+      "generated_at": "2026-11-05T13:17:15Z",
       "source": "docs/stories/oauth-broker/client-ip-misconfiguration-warnings.md (prior delta: docs/stories/oauth-broker/legacy-sso-redirect-confirmation.md (prior delta: docs/stories/matrix-spec-gaps/room-tags.md (prior delta: docs/stories/matrix-spec-gaps/room-account-data-and-read-markers.md (prior delta: docs/stories/bugfix/fix-matrix-client-v1-media-download-thumbnail-routes/fix-matrix-client-v1-media-download-thumbnail-routes.md (prior delta: docs/stories/media-securi)))",
       "arc42_section": "05 Building Block View"
     },
     "docs/architecture/06-runtime.md": {
       "editable": false,
-      "generated_at": "2026-10-13T12:06:34Z",
+      "generated_at": "2026-11-05T13:17:15Z",
       "source": "_bmad-output/planning-artifacts/architecture.md",
       "arc42_section": "06 Runtime View"
     },
     "docs/architecture/07-deployment.md": {
       "editable": false,
-      "generated_at": "2026-10-13T12:06:34Z",
+      "generated_at": "2026-11-05T13:17:15Z",
       "source": "_bmad-output/planning-artifacts/architecture.md",
       "arc42_section": "07 Deployment View"
     },
     "docs/architecture/08-concepts.md": {
       "editable": false,
-      "generated_at": "2026-10-13T12:06:34Z",
+      "generated_at": "2026-11-05T13:17:15Z",
       "source": "docs/stories/oauth-broker/client-ip-misconfiguration-warnings.md (prior delta: docs/stories/oauth-broker/legacy-sso-redirect-confirmation.md (prior delta: docs/stories/matrix-spec-gaps/room-tags.md (prior delta: docs/stories/matrix-spec-gaps/room-account-data-and-read-markers.md (prior delta: docs/stories/enhanced-logging/war-room-dedicated-page.md))))",
       "arc42_section": "08 Cross-cutting Concepts"
     },

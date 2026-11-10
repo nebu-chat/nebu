@@ -1,0 +1,9 @@
+# code-review — cycle 0
+INFO | review-prescan.md | Prescan has no MAJOR/MINOR/HINT lines (339 added lines, 8 files, no migration) | none
+INFO | server/lib/nebu/web/router/protected.ex:1012 | All 5 AC scenarios met: Map.fetch separates missing key (existence check only, no write, no device-list stamp) from null (clear) and string (rename); non-string gives 400 M_BAD_JSON before the lookup; unknown or foreign device gives 404 via the user-scoped get_device/rename_device | none
+INFO | server/lib/nebu/web/router/protected.ex:1014 | DeviceKeyStore.get_device returns nil on a DB error too, so PUT {} answers 404 instead of 500 when the DB is down. rename_device already behaved the same way, so this is not a regression | optional: match {:error,_} separately if a 500 is wanted
+INFO | server/lib/nebu/web/router/protected.ex:1003 | A body that is not a JSON object (for example a top-level array) goes to body_params -> %{} -> 200/404 rather than M_BAD_JSON/M_NOT_JSON. This existed before and the Oracle marks it optional | optional follow-up
+INFO | server/lib/nebu/oauth/device_name.ex:78 | plan/3 now returns {:existing, ""}, so consent_page device_name_line shows an empty bold name for a stored blank name. The story asks for this behaviour (the name is never replaced); cosmetic only | optional: show a placeholder for a blank existing name
+INFO | server/test/nebu/matrix/device_put_keeps_display_name_test.exs:107 | The test-review "no assertion" lints are false positives: the helpers assert status, body, DB, GET /devices, GET /devices/{id} and keys/query | none
+INFO | server/test/nebu/oauth/device_name_oauth_test_support.exs:133 | clear_name! now sends an explicit null as the Oracle required; the flow/chain test descriptions match | none
+INFO | ADR/cluster | No ADR-018/019/020 or cluster-safety violation: SQL stays in DeviceKeyStore (existing), no new modules, no process registration | none

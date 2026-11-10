@@ -14,7 +14,9 @@ defmodule Nebu.OAuth.Consent do
 
     * `GET /oauth2/consent` renders the page from the LIVE row of the cookie (`Nebu.OAuth.ConsentPage`);
       it mutates nothing, so a reload is safe (PRG).
-    * `POST /oauth2/consent` (`csrf_token`, `decision=allow|deny`) decides.
+    * `POST /oauth2/consent` (`csrf_token`, `decision=allow|deny`, and `device_name` when the page asked for one) decides. An Allow without a usable
+      device name (nothing derivable from the client, none typed, only invisible characters) shows the page again (422), nothing consumed (story
+      oauth-pages-redesign / 01-device-naming-chain).
     * any other method (a preflight `OPTIONS` included) => `405` page (`Allow: GET, POST`); any sub-path
       => `404` page. Browser navigation: no CORS at all.
 
@@ -64,7 +66,7 @@ defmodule Nebu.OAuth.Consent do
   import Plug.Conn
   require Logger
 
-  alias Nebu.OAuth.{Authorize, AuthorizeRequest, BrowserPost, ClientStore, CodeStore, Config, ConsentGrantStore, ConsentPage, ConsentStore, FormPost, Pages}
+  alias Nebu.OAuth.{Authorize, AuthorizeRequest, BrowserPost, ClientStore, CodeStore, Config, ConsentGrantStore, ConsentPage, ConsentStore, DeviceName, FormPost, Pages}
   alias Nebu.Web.ClientIP
   alias Nebu.Web.Plugs.RateLimit
 
@@ -115,7 +117,10 @@ defmodule Nebu.OAuth.Consent do
   # GET: the page
   # ════════════════════════════════════════════════════════════════════════════
 
-  defp show(conn) do
+  defp show(conn), do: show(conn, 200, false)
+
+  # `status` / `name_error`: the page shown AGAIN after an Allow without a usable device name (422, nothing consumed).
+  defp show(conn, status, name_error) do
     with {:ok, cookie} <- consent_cookie(conn),
          {:ok, row} <- peek(cookie),
          {:ok, client} <- approved_client(row.client_id),
@@ -127,7 +132,11 @@ defmodule Nebu.OAuth.Consent do
         device_id: row.device_id,
         device: device,
         login_fresh: row.login_fresh,
-        csrf_token: csrf_token(cookie)
+        csrf_token: csrf_token(cookie),
+        # story oauth-pages-redesign / 01-device-naming-chain: the name the device will get, or the question
+        device_name: DeviceName.plan(client.metadata, row.device_id, holder_name_of(device)),
+        name_error: name_error,
+        status: status
       }
 
       case ConsentPage.send_page(conn, page) do
@@ -166,12 +175,12 @@ defmodule Nebu.OAuth.Consent do
   # ════════════════════════════════════════════════════════════════════════════
 
   defp post(conn, issuer) do
-    with {:parse, {:ok, conn, params}} <- {:parse, FormPost.parse(conn)},
+    with {:parse, {:ok, conn, params}} <- {:parse, FormPost.parse(conn, ["device_name"])},
          {:decision, decision} when decision in ["allow", "deny"] <- {:decision, params["decision"]},
          {:origin, :ok} <- {:origin, BrowserPost.check(conn, issuer)},
          {:cookie, {:ok, cookie}} <- {:cookie, consent_cookie(conn)},
          {:csrf, true} <- {:csrf, csrf_ok?(params["csrf_token"], cookie)} do
-      decide(conn, issuer, cookie, decision)
+      decide(conn, issuer, cookie, decision, params["device_name"])
     else
       {:parse, {:error, conn, _status, _description}} ->
         Pages.send_page(conn, 400, "invalid_request")
@@ -192,14 +201,38 @@ defmodule Nebu.OAuth.Consent do
   defp csrf_ok?(token, cookie) when is_binary(token), do: Plug.Crypto.secure_compare(token, csrf_token(cookie))
   defp csrf_ok?(_token, _cookie), do: false
 
-  defp decide(conn, issuer, cookie, decision) do
+  # An Allow while the device needs a name that nobody supplied is refused BEFORE the row is consumed: the page is shown again (422), the same cookie and
+  # CSRF token still work, no code, no device. Deny never needs a name.
+  defp decide(conn, issuer, cookie, "allow", typed) do
+    if name_missing?(cookie, typed),
+      do: show(conn, 422, true),
+      else: consume_and_decide(conn, issuer, cookie, "allow", typed)
+  end
+
+  defp decide(conn, issuer, cookie, decision, typed), do: consume_and_decide(conn, issuer, cookie, decision, typed)
+
+  # Any problem reading the row, the client or the device is NOT a missing name: the normal path produces the right page.
+  defp name_missing?(cookie, typed) do
+    with {:ok, row} <- ConsentStore.peek(cookie),
+         {:ok, client} <- approved_client(row.client_id),
+         {:ok, device} <- device_check(row.user_id, row.device_id, row.client_id) do
+      DeviceName.plan(client.metadata, row.device_id, holder_name_of(device)) == :ask and DeviceName.typed(typed) == :none
+    else
+      _ -> false
+    end
+  end
+
+  defp holder_name_of({_kind, %{display_name: name}}), do: name
+  defp holder_name_of(_device), do: nil
+
+  defp consume_and_decide(conn, issuer, cookie, decision, typed) do
     case ConsentStore.consume(cookie) do
       {:ok, row} ->
         conn = clear_cookie(conn)
 
-        with {:ok, _client} <- approved_client(row.client_id),
+        with {:ok, client} <- approved_client(row.client_id),
              {:ok, _target} <- usable_target(row) do
-          if decision == "deny", do: deny(conn, issuer, row), else: allow(conn, issuer, row)
+          if decision == "deny", do: deny(conn, issuer, row), else: allow(conn, issuer, row, client, typed)
         else
           {:page, status, code} ->
             Logger.info("OAuth consent: refused client_id=#{row.client_id} reason=#{code}")
@@ -232,11 +265,22 @@ defmodule Nebu.OAuth.Consent do
     error_redirect(conn, issuer, row, "access_denied")
   end
 
-  defp allow(conn, issuer, row) do
+  defp allow(conn, issuer, row, client, typed) do
     case device_check(row.user_id, row.device_id, row.client_id) do
-      {:ok, device} -> mint(conn, issuer, row, device)
+      {:ok, device} -> mint(conn, issuer, Map.put(row, :device_display_name, typed_name(client, row, device, typed)), device)
       :refused -> refuse_device(conn, row)
       :unavailable -> Pages.send_page(conn, 503, "unavailable", retry_after: @unavailable_retry_after_s)
+    end
+  end
+
+  # The typed name travels with the code ONLY when the user was asked (nothing derivable, the device has no name); a forged `device_name` next to a
+  # derived name is ignored.
+  defp typed_name(client, row, device, typed) do
+    with :ask <- DeviceName.plan(client.metadata, row.device_id, holder_name_of(device)),
+         {:ok, name} <- DeviceName.typed(typed) do
+      name
+    else
+      _ -> nil
     end
   end
 
@@ -265,7 +309,7 @@ defmodule Nebu.OAuth.Consent do
 
   defp mint(conn, issuer, row, device, outcome \\ :allowed) do
     attrs =
-      Map.take(row, [:client_id, :redirect_uri, :code_challenge, :device_id, :user_id, :scope, :scope_prefix, :response_mode])
+      Map.take(row, [:client_id, :redirect_uri, :code_challenge, :device_id, :user_id, :scope, :scope_prefix, :response_mode, :device_display_name])
       |> Map.merge(%{
         client_nonce: row.client_nonce,
         openid_requested: row.openid_requested,

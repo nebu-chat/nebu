@@ -427,7 +427,8 @@ Then('the browser stays on the Nebu authorize URL', async ({ page }: { page: Pag
 });
 
 Then('the page shows the next step {string}', async ({ page }: { page: Page }, text: string) => {
-  await expect(page.locator('main')).toContainText('What you can do');
+  // story oauth-pages-redesign/02: the "What you can do" h2 is gone; the suggestion is the bold line (or under "More options")
+  await expect(page.locator('main')).not.toContainText('What you can do');
   await expect(page.locator('main')).toContainText(text);
 });
 

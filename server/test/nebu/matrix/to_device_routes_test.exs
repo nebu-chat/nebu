@@ -16,6 +16,8 @@ defmodule Nebu.Matrix.ToDeviceRoutesTest do
   """
   use ExUnit.Case, async: false
 
+  alias Nebu.Web.SessionLookupTestSupport, as: LookupFault
+
   alias Nebu.Matrix.ToDeviceTestSupport, as: TD
   alias Nebu.Web.LogStore.RouteNormalizer
 
@@ -34,6 +36,7 @@ defmodule Nebu.Matrix.ToDeviceRoutesTest do
     end
 
     test "a junk token (opaque or JWT-shaped): 401 M_UNKNOWN_TOKEN" do
+      LookupFault.setup_no_row_lookup()
       for token <- ["not-a-token", "aaa.bbb.ccc"] do
         c = TD.req(:put, @p <> "/m.dummy/t1", token, %{"messages" => %{}})
         assert {c.status, TD.json(c)["errcode"]} == {401, "M_UNKNOWN_TOKEN"}, "#{token}: #{c.status} #{String.slice(c.resp_body, 0, 120)}"
@@ -65,6 +68,7 @@ defmodule Nebu.Matrix.ToDeviceRoutesTest do
     end
 
     test "a junk bearer (opaque or JWT-shaped) + 64 KiB + 1 .. 6 MiB is 401 M_UNKNOWN_TOKEN, the body is never read" do
+      LookupFault.setup_no_row_lookup()
       for size <- @sizes, token <- ["junk-token", "aaa.bbb.ccc"] do
         c = TD.req(:put, @p <> "/m.dummy/t1", token, {:raw, pad_to(body(), size)})
         assert {c.status, TD.json(c)["errcode"]} == {401, "M_UNKNOWN_TOKEN"}, "#{size} #{token}: #{c.status}"
@@ -73,6 +77,7 @@ defmodule Nebu.Matrix.ToDeviceRoutesTest do
     end
 
     test "no token or a junk token + malformed or non-object JSON: 401, never M_NOT_JSON / M_BAD_JSON, body unread" do
+      LookupFault.setup_no_row_lookup()
       for raw <- ["{nope", "[1,2]", ~s("text"), ""], token <- [nil, "junk-token"] do
         c = TD.req(:put, @p <> "/m.dummy/t1", token, {:raw, raw})
         assert c.status == 401, "#{inspect(raw)} #{inspect(token)}: #{c.status} #{c.resp_body}"
@@ -102,6 +107,7 @@ defmodule Nebu.Matrix.ToDeviceRoutesTest do
     end
 
     test "an ENCODED sendToDevice path with a junk bearer + 6 MiB is 401 M_UNKNOWN_TOKEN, body unread" do
+      LookupFault.setup_no_row_lookup()
       for prefix <- @encoded_prefixes do
         c = TD.req(:put, prefix <> "/m.dummy/t1", "junk-token", {:raw, pad_to(body(), 6 * 1024 * 1024)})
         assert {c.status, TD.json(c)["errcode"]} == {401, "M_UNKNOWN_TOKEN"}, prefix

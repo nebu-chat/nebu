@@ -54,7 +54,9 @@ defmodule Nebu.OAuth.OAuthPagesTest do
         assert body =~ ~s(<main data-page="oauth-error" data-error="#{unquote(code)}">)
         [_, title] = Regex.run(~r/<title>([^<]+)<\/title>/, body)
         assert String.length(String.trim(title)) > 5, "specific <title> required"
-        assert body =~ ~r/What you can do/i, "plain-language \"What you can do\" section"
+        refute body =~ ~r/What you can do/i, "the old \"What you can do\" heading is gone (story oauth-pages-redesign/02)"
+        assert body =~ ~r/<p>[^<]+<\/p>/, "a plain-language explanation"
+        assert body =~ ~r/<strong>[^<]+<\/strong>/, "one bold primary suggestion"
 
         for forbidden <- [~r/<script/i, ~r/<form/i, ~r/<img/i, ~r/<iframe/i, ~r/\son\w+=/i, ~r/href="https?:/i] do
           refute body =~ forbidden, "#{inspect(forbidden)} must not appear on an OAuth page"
@@ -145,8 +147,9 @@ defmodule Nebu.OAuth.OAuthPagesTest do
     end
 
     test "method_not_allowed text and overflow-safe client host (UX advisories 1 + 8)" do
-      assert send_page(405, "method_not_allowed", allow: "GET").resp_body =~
-               "This page cannot be opened this way. Start signing in from your app."
+      body = send_page(405, "method_not_allowed", allow: "GET").resp_body
+      assert body =~ "This address only works when your app sends you here."
+      assert body =~ "Start signing in from your app."
 
       assert send_page(403, "client_pending", client_host: "a.example.com").resp_body =~ "overflow-wrap:anywhere"
     end

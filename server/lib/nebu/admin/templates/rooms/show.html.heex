@@ -17,7 +17,7 @@
   </div>
 
   <div :if={@room != nil}>
-    <h1 class="text-2xl font-bold mb-4 flex items-center gap-3" data-room-id={@room.room_id}>
+    <h1 class="text-2xl font-bold mb-4 flex items-center gap-3 break-words" data-room-id={@room.room_id}>
       {room_display_name(@room)}
       <span
         class={"badge " <> status_badge_class(room_status(@room))}

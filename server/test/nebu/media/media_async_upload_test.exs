@@ -81,6 +81,8 @@ defmodule Nebu.Web.MediaAsyncUploadTest do
       fallback.
   """
   use ExUnit.Case, async: false
+
+  alias Nebu.Web.SessionLookupTestSupport, as: LookupFault
   import Plug.Test
   import Plug.Conn
 
@@ -793,6 +795,7 @@ defmodule Nebu.Web.MediaAsyncUploadTest do
   end
 
   test "PUT .../upload with a garbage Bearer token -> 401 M_UNKNOWN_TOKEN" do
+    LookupFault.setup_no_row_lookup()
     conn =
       put_upload(media_id(), "bytes", [
         {"content-type", "application/octet-stream"},

@@ -1,0 +1,7 @@
+# atdd-verify — matrix-token-lookup-db-error-not-401: 6 scenarios, 17 ExUnit tests (0 placeholders), 0 feature files; rc=2 tests=None failures=None log=/Users/philippbeyerlein/dev/01_gitlab/1200_philippb/open-chat/.claude/worktrees/feature-better-accounts-ux/.claude/test-logs/atdd-verify.log
+MINOR | server/test/nebu/web/oidc_plug_lookup_failure_test.exs:175 | test without any assertion: "AC1: every fault form on the client route (whoami) answers 5" | assert the observable outcome of the Then step
+MINOR | server/test/nebu/web/oidc_plug_lookup_failure_test.exs:184 | test without any assertion: "AC1: every fault form on the media routes answers 503 M_UNKN" | assert the observable outcome of the Then step
+MINOR | server/test/nebu/web/oidc_plug_lookup_failure_test.exs:223 | test without any assertion: "AC6: unknown (random 64 hex) tokens get the same 503 under e" | assert the observable outcome of the Then step
+MINOR | server/test/nebu/web/oidc_plug_lookup_failure_test.exs:232 | test without any assertion: "AC6: malformed opaque tokens (non-hex, short, long) get the " | assert the observable outcome of the Then step
+MINOR | server/test/nebu/web/oidc_plug_lookup_failure_test.exs:320 | test without any assertion: "AC1: a VALID token under every fault form answers 503 (not 4" | assert the observable outcome of the Then step
+MAJOR | run | no ExUnit summary — test run failed before executing tests | see /Users/philippbeyerlein/dev/01_gitlab/1200_philippb/open-chat/.claude/worktrees/feature-better-accounts-ux/.claude/test-logs/atdd-verify.log

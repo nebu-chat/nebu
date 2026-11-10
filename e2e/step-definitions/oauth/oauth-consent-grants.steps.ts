@@ -178,9 +178,12 @@ Then('the notice is announced as a status', async ({ page }: { page: Page }) => 
 });
 
 Then('the explanation says that signed-in devices stay signed in and links to Devices', async ({ page }: { page: Page }) => {
-  const note = page.locator('[data-role="grants-note"]');
-  await expect(note).toContainText('does not sign out devices that are already signed in');
-  await expect(note.locator('a[href="/account?action=org.matrix.devices_list"]')).toHaveText('Devices');
+  // story oauth-pages-redesign/05: one sentence in the main view, the full explanation (with the link to Devices) in the collapsed details
+  await expect(page.locator('[data-role="grants-note"]')).toBeVisible();
+  const details = page.locator('[data-role="grants-details"]');
+  await details.locator('summary').click();
+  await expect(details).toContainText('does not sign out devices that are already signed in');
+  await expect(details.locator('a[href="/account?action=org.matrix.devices_list"]')).toHaveText('Devices');
 });
 
 Then('the empty state says {string}', async ({ page }: { page: Page }, text: string) => {

@@ -118,6 +118,19 @@ defmodule Nebu.Admin.LogsLive.WarRoomTest do
   @secret_key_base String.duplicate("nebu-wr-dedicated-page-test-key", 2)
   @admin_session %{"current_user" => %{"admin" => true, "sub" => "admin-wr-dedicated-tests"}}
 
+  # bugfix integration-test-flakes-fix (E): the admin LiveViews redirect to /admin/bootstrap unless server_config.bootstrap_completed is "true". On a
+  # fresh database only an earlier test of another file used to set it (the detail-page tests mount through the real router and failed with
+  # `{:redirect, "/admin/bootstrap"}` when this file ran alone). The DB-backed describes (`@describetag :integration`) set their own precondition;
+  # like the sibling suites it is left set (a config row cannot be deleted by the runtime role, the live stack shares the database).
+  setup context do
+    if context[:integration] do
+      Nebu.Release.migrate()
+      Nebu.Admin.DB.upsert_server_config(%{"bootstrap_completed" => "true"})
+    end
+
+    :ok
+  end
+
   # ── helpers ──────────────────────────────────────────────────────────────
 
   defp run_id, do: "#{System.unique_integer([:positive])}-#{:erlang.phash2(self())}"
@@ -390,7 +403,9 @@ defmodule Nebu.Admin.LogsLive.WarRoomTest do
              "AC1: the active session must be listed FIRST, regardless of start time"
 
       # The two ended sessions must both appear, ordered most-recent-start first.
-      ended_ids = ids -- [active]
+      # bugfix integration-test-flakes-fix (F): only this test's own sessions are compared. The list shows EVERY row of `war_room_sessions`, and
+      # sessions of other tests (started through the form: `started_by` is the admin user, not this file's prefix) are in it too.
+      ended_ids = Enum.filter(ids, &(&1 in [recent_ended, old_ended]))
       assert ended_ids == [recent_ended, old_ended],
              "AC1: ended sessions must be ordered by most recent start_at first"
     end
@@ -786,7 +801,7 @@ defmodule Nebu.Admin.LogsLive.WarRoomTest do
       on_exit(fn ->
         Ecto.Adapters.SQL.query(
           Nebu.Repo,
-          "DELETE FROM war_room_sessions WHERE started_by LIKE 'distinctive-wr-page-test-%'",
+          "DELETE FROM war_room_sessions WHERE started_by LIKE 'distinctive-wr-page-test-%' OR reason LIKE 'distinctive-wr-page-test-%'",
           []
         )
       end)
@@ -1068,7 +1083,7 @@ defmodule Nebu.Admin.LogsLive.WarRoomTest do
       on_exit(fn ->
         Ecto.Adapters.SQL.query(
           Nebu.Repo,
-          "DELETE FROM war_room_sessions WHERE started_by LIKE 'distinctive-wr-page-test-%'",
+          "DELETE FROM war_room_sessions WHERE started_by LIKE 'distinctive-wr-page-test-%' OR reason LIKE 'distinctive-wr-page-test-%'",
           []
         )
       end)
@@ -1103,9 +1118,15 @@ defmodule Nebu.Admin.LogsLive.WarRoomTest do
           [reason]
         )
 
-      assert [[id]] = result.rows,
+      assert [[raw_id]] = result.rows,
              "precondition: the route-shaped value must pass shape validation and persist " <>
                "(this test is about RENDER-time escaping, not input rejection)"
+
+      # bugfix integration-test-flakes-fix (A): `id` is a native `uuid` column, a raw `query!/3` returns it as a 16-byte BINARY. Interpolated
+      # into the URL those bytes are random: with a `/` the route 404s (the 404 message is invalid UTF-8 and crashed the ExUnit CLI formatter, the
+      # whole run ended without a summary), with a `?` / `#` the path is cut, the page mounts without the session and `Floki.text(nil)` raised.
+      # The canonical textual form, exactly as `insert_session/1` above does it.
+      id = Ecto.UUID.load!(raw_id)
 
       {:ok, _detail_view, detail_html} = mount_via_router("/admin/logs/war-room/#{id}")
 
@@ -1116,10 +1137,10 @@ defmodule Nebu.Admin.LogsLive.WarRoomTest do
                "validation alone (must start with \"/\") does not exclude HTML-special " <>
                "characters, so escaping at RENDER time is the real defense here"
 
+      meta = parsed(detail_html) |> find(~s([data-testid="war-room-detail-meta"]))
+
       assert detail_html =~ "&lt;b&gt;xss-probe&lt;/b&gt;" or
-               (parsed(detail_html)
-                |> find(~s([data-testid="war-room-detail-meta"]))
-                |> Floki.text() =~ "xss-probe"),
+               (meta != nil and Floki.text(meta) =~ "xss-probe"),
              "expected the value to still be DISPLAYED, as inert escaped text (not silently " <>
                "stripped) — proves the fix is escaping, not merely deleting the field: " <>
                "got #{inspect(detail_html)}"

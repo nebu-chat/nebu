@@ -32,14 +32,18 @@ defmodule Nebu.OAuth.FormPost do
 
   @max_body 16_384
 
-  @doc "Parses the form body: `{:ok, conn, params}` or `{:error, conn, status, description}`."
-  @spec parse(Plug.Conn.t()) :: {:ok, Plug.Conn.t(), %{String.t() => String.t()}} | {:error, Plug.Conn.t(), pos_integer(), String.t()}
-  def parse(conn) do
+  @doc """
+  Parses the form body: `{:ok, conn, params}` or `{:error, conn, status, description}`. `free_text` names parameters whose value may contain control
+  characters (a name typed by the user; valid UTF-8 is still required); every other value must be free of them.
+  """
+  @spec parse(Plug.Conn.t(), [String.t()]) ::
+          {:ok, Plug.Conn.t(), %{String.t() => String.t()}} | {:error, Plug.Conn.t(), pos_integer(), String.t()}
+  def parse(conn, free_text \\ []) do
     with :ok <- check_query(conn),
          :ok <- check_content_type(conn),
          {:ok, body, conn} <- read_form(conn),
          {:ok, pairs} <- parse_pairs(conn, body),
-         {:ok, params} <- validate(conn, pairs) do
+         {:ok, params} <- validate(conn, pairs, free_text) do
       {:ok, conn, params}
     else
       {:error, %Plug.Conn{}, _status, _description} = error -> error
@@ -71,8 +75,8 @@ defmodule Nebu.OAuth.FormPost do
     end
   end
 
-  defp validate(conn, pairs) do
-    case TokenRequest.validate_params(pairs) do
+  defp validate(conn, pairs, free_text) do
+    case TokenRequest.validate_params(pairs, free_text) do
       {:ok, params} -> {:ok, params}
       {:error, :invalid_request} -> {:error, conn, 400, "The request contains a duplicated or invalid parameter."}
     end

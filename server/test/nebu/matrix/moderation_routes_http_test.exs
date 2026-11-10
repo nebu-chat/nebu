@@ -1172,7 +1172,8 @@ defmodule Nebu.Matrix.ModerationRoutesHttpTest do
         assert result == :ok, "#{action} must be a known action and be written, got #{inspect(result)}"
       end
 
-      on_exit(fn -> Ecto.Adapters.SQL.query(Nebu.Repo, "DELETE FROM audit_log WHERE target_id = $1", [room]) end)
+      # bugfix test-cleanup-rls-noop-delete: privileged delete of this test's own audit rows (a runtime-role DELETE deletes nothing from audit_log)
+      on_exit(fn -> T.privileged_sql!("DELETE FROM audit_log WHERE target_id = $1", [room]) end)
     end
 
     test "no row for a refusal and none for the ban no-op", %{a: a, b: b, c: c} do

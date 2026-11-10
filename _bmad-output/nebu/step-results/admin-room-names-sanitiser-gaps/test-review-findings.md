@@ -1,0 +1,9 @@
+# test-review — cycle 0
+INFO | test-lint.md | lint reported no MAJOR/MINOR lines; only 4 JUDGE lines, judged below | -
+INFO | server/test/nebu/admin/room_names_test.exs:145 | AC1 covered: 13 invisible-only classes (ZWJ/ZWNJ, Hangul fillers, braille blank, tag chars, annotation marks, marks only, mixed with spaces), each asserts sanitize==\"\" and member_label==localpart; fails for a wrong impl | -
+INFO | server/test/nebu/admin/room_names_test.exs:178 | AC2 covered: ASCII, accents, CJK, emoji ZWJ, Persian ZWNJ, Indic virama+ZWJ, plain emoji/symbols unchanged; works as regression guard | -
+INFO | server/test/nebu/admin/room_names_test.exs:229 | AC3 covered: marks interleaved with ZWJ/ZWNJ asserted <=3 marks and byte_size<32 on sanitize and member_label | -
+MINOR | server/test/nebu/admin/admin_rooms_fallback_name_test.exs:757 | AC4 only-NUL test asserts rooms a and b appear on the UNFILTERED list, which is capped at 500 rows (file comment lines 102-104 say this is unreliable with rows left by other suites) -> flaky | add a second filter (e.g. combine with ?status=active) or assert only status 200 plus that the page is non-empty, or seed so a/b rank first
+MINOR | server/test/nebu/admin/room_names_test.exs:239 | test 'runs of joiners collapse to one' (300 ZWJ -> one) and the exact prefix assertion at :189 pin implementation details not in the story ACs | keep only the <=3 marks / size bound, or mark as intentional design decision
+INFO | server/test/nebu/admin/admin_rooms_fallback_name_test.exs:748 | AC4 main test is meaningful: 3 NUL positions, a found, b absent (a truncate-at-NUL impl would match b and fail); asserts status 200 and non-empty | -
+INFO | server/test/nebu/admin/room_names_test.exs:1 | git diff --staged is empty: tests are modified but not staged (reviewed via git diff HEAD) | stage before commit

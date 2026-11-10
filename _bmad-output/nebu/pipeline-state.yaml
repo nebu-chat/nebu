@@ -8,7 +8,70 @@
 #   _bmad-output/nebu/epics/<epic-name>/pipeline-state.yaml
 # This file is no longer used for named-epic pipeline runs.
 #
-# last_updated: 2026-08-27
+# last_updated: 2026-11-09
+# [sync-rejoin-floor-window-point-lookups] 2026-11-09T08:41Z final → covering index 000063 + range form kept (point lookups regressed the stale regime, see story); residual accepted by owner (fresh ANALYZE on churned table: one whole-room read); floor test relaxed accordingly; Kassandra CLEAN on final tree (last edit test assertions/comments/docs only); unit 7723 passed exit 0; two full fresh-DB runs 13542 tests: run1 1 failure SyncConcurrentTest AC2 (known in-process /sync RL flake, triage 18), run2 6 failures WarRoomExclusiveScopeTest (known single-active war-room session isolation, triage 21), both pass in isolation x2; no plan-stability failure
+# [sync-rejoin-floor-window-point-lookups] 2026-11-09T07:41Z security-review → Kassandra CLEAN
+# [sync-rejoin-floor-window-point-lookups] 2026-11-09T07:32Z code-review → opus cycle 0 MINOR (AC10 b bulk rows never removed) refuted: raw_room! registers cleanup_room_events_on_exit = DELETE of all events of the room; INFO fixes applied (rename def, single ANALYZE, comment); unit 7723 passed exit 0; migration up/down/up on live DB ok
+# [sync-rejoin-floor-window-point-lookups] 2026-11-09T07:27Z owner decision option 2 → migration 000063 events_room_pos_ts_idx covering index; range form kept (point lookups equal on it, worse without it); plan-shape tests, floor bound test, migration test; red/green: HTTP bound 436/32 and 438/34 on fa8b8dfc, green 3/3 + 6 stale runs with index; oracle not re-run (query text unchanged)
+# [sync-rejoin-floor-window-point-lookups] 2026-11-08T19:51Z security-review → Kassandra CLEAN
+# [sync-rejoin-floor-window-point-lookups] 2026-11-08T19:49Z code-review → CLEAN (cycle 1)
+# [sync-rejoin-floor-window-point-lookups] 2026-11-08T19:45Z ci-gate → unit 7718 passed (exit 0), targeted seeds 951703 and 1: 1451 tests 0 failures; code-review cycle 0 (opus) MINOR: guard of regression test depends on global stats -> fixed (small rooms scaled to table), moduledoc states 2x64 probes / 64 rows
+# [sync-rejoin-floor-window-point-lookups] 2026-11-08T19:24Z dev-story → db.ex floor = 2x generate_series + LATERAL LIMIT 1; moduledoc D-A1 corrected; green: 111 DB tests, HTTP bound under bloat
+# [sync-rejoin-floor-window-point-lookups] 2026-11-08T19:16Z baseline-integration → reused log of admin-room-names-sanitiser-gaps on the same code (13534 tests, 0 failures); cache lookup MISS by HEAD only
+# [sync-rejoin-floor-window-point-lookups] 2026-11-08T19:15Z pipeline started (--bug, story file written, create-story skipped)
+# [admin-room-names-sanitiser-gaps] 2026-11-08T19:12Z committed ✓ (fa8b8dfc, 2 cycles, Kassandra CLEAN)
+# [admin-room-names-sanitiser-gaps] 2026-11-08T19:12Z ci-final → full fresh-DB integration 13534 tests 0 failures; arc42 skipped (not architecture-relevant)
+# [admin-room-names-sanitiser-gaps] 2026-11-08T18:55Z security-review → Kassandra CLEAN
+# [admin-room-names-sanitiser-gaps] 2026-11-08T18:55Z code-review → CLEAN (cycle 1)
+# [admin-room-names-sanitiser-gaps] 2026-11-08T18:54Z dev-story cycle 1 → U+1D159 filler + test + comment; unit exit 0
+# [admin-room-names-sanitiser-gaps] 2026-11-08T18:49Z code-review → 1 MINOR → cycle 1
+# [admin-room-names-sanitiser-gaps] 2026-11-08T18:47Z ci-gate → unit exit 0, targeted fresh-DB integration 74/74 (NUL tests red without fix); full integration deferred to after final code
+# [admin-room-names-sanitiser-gaps] 2026-11-08T18:41Z dev-story → implemented in room_names.ex + rooms_controller.ex (by orchestrator)
+# [admin-room-names-sanitiser-gaps] 2026-11-08T18:41Z test-review → MINOR (0 MAJOR, 2 MINOR)
+# [admin-room-names-sanitiser-gaps] 2026-11-08T18:40Z atdd → red tests written (6 red on d7914da5, AC2 regression green)
+# [admin-room-names-sanitiser-gaps] 2026-11-08T18:38Z pipeline started (--bug, create-story skipped)
+# [admin-rooms-fallback-name] 2026-11-08T17:51Z ci-gate -> full fresh-DB integration 13508 tests, 2 failures (HistoryVisibilityDbTest AC10b EXPLAIN plan, LegacyLogoutPerDeviceTest AC1 401), both pass in isolation (79 tests); unit exit 0; committed
+# [admin-rooms-fallback-name] 2026-11-08T17:31Z security-review → Kassandra CLEAN
+# [admin-rooms-fallback-name] 2026-11-08T17:31Z code-review → 1 MINOR deferred (cycle cap)
+# [admin-rooms-fallback-name] 2026-11-08T17:26Z code-review → 2 MINOR → cycle 1
+# [admin-rooms-fallback-name] 2026-11-08T17:23Z ux-gate → CLEAN
+# [admin-rooms-fallback-name] 2026-11-08T17:17Z test-review -> MINOR x4 fixed in tests (AC7 lower bounds, AC5 exact text, wildcard term); impl written by orchestrator (dev agents cannot run mix)
+# [admin-rooms-fallback-name] 2026-11-08T17:11Z --bug run started; ATDD = existing red suite (12 tests); classify ui=true sec=required matrix=false
+# [unit-tests-junk-token-503-after-lookup-fix] 2026-11-08T17:08Z bug run: cause verified (f9f58c45; same 10 files green on d8841dd3), :no_row test seam + setup_no_row_lookup helper, 17 tests fixed, unit 7671 passed exit 0, targeted integration 272/0, full integration 13 failures (12 RoomsFallbackName + 1 new writer_test AC6 timing flake, passes 3x alone), review CLEAN, SEC Gate 1 CLEAN
+# [test-cleanup-rls-noop-delete] 2026-11-08T16:26Z committed ✓ (test-only: restore_server_config_on_exit! helper, 14 suites, guard test; 2 fresh-DB full runs 13469 tests, 12 failures each = RoomsFallbackNameTest only; unit: 17 pre-existing failures from f9f58c45 no-DB 503-vs-401 tests)
+# [test-cleanup-rls-noop-delete] 2026-11-08T15:50Z code-review cycle0 MINOR (2 minor, 0 major) fixed by hand in one cycle: dead prior in oauth_config_test, guard look-back stops at an earlier delete; INFO: restore not transactional (accepted)
+# [test-cleanup-rls-noop-delete] 2026-11-08T15:48Z atdd(guard test red 23 offenders, probe before/after) test-review(lint CLEAN, 3 judge = mapping only, covered by probe+guard) dev-story done (helper restore_server_config_on_exit!, 14 suites)
+# [test-cleanup-rls-noop-delete] 2026-11-08T15:36Z pipeline started (--bug, test-only, story written by hand, follow-up K of the flake triage)
+# [matrix-token-lookup-db-error-not-401] 2026-11-07T20:00Z ci-gate → 6 non-baseline failures (SyncRejoinRangeScanBound x3 = family I, SpacesFoundation x3 after /sync 429) accepted by coordinator under the epic flake policy (untouched files, auth-unrelated, green in isolation 18/0); commit
+# [matrix-token-lookup-db-error-not-401] 2026-11-07T19:17Z security-review CLEAN (0 crit/high, 1 medium pre-existing JWT fail-open, 1 low); final CI BLOCKED: 6 non-baseline failures (known flake families), isolated rerun green; NOT committed (staged)
+# [matrix-token-lookup-db-error-not-401] 2026-11-07T18:59Z code-review cycle0 → MINOR 0 major (query-param test suggestion dismissed: plug reads only the Authorization header, pre-existing, reported); no fix cycle
+# [matrix-token-lookup-db-error-not-401] 2026-11-07T18:58Z atdd(17 tests, 11 red) test-review(lint minors = false positives) dev-story done; targeted green 1114/0; full CI deferred to single final run
+# [matrix-token-lookup-db-error-not-401] 2026-11-07T18:49Z oracle-gate → spec context captured (agent, coverage none by script)
+# [matrix-token-lookup-db-error-not-401] 2026-11-07T18:48Z pipeline started (--bug, story written, classify matrix=true ui=false sec=required)
+# [integration-test-flakes-fix] 2026-11-06T13:17Z code-review CLEAN (cycle 1, cycle 0 MAJOR perf tag fixed); security skipped (test-only, SEC_SUGGEST not-needed)
+# [integration-test-flakes-fix] 2026-11-06T13:17Z ci-gate → 2 fresh-DB full runs: 13450 tests, 12 failures each = RoomsFallbackNameTest only (story G); unit exit 0
+# [integration-test-flakes-fix] 2026-11-06T11:55Z test-review → CLEAN (0 MAJOR, 0 MINOR)
+# [integration-test-flakes-fix] 2026-11-06T11:42Z pipeline started (bug mode, test-only); classify: matrix=false ui=false sec=not-needed
+# [matrix-uia-authdone-else-if] 2026-11-06T09:03Z commit → fix(matrix) UIA authDone else-if; arc42 skipped (not relevant)
+# [matrix-uia-authdone-else-if] 2026-11-06T09:03Z ci-gate → full run 2: 13448 tests 31 failures; new families (RoomAccountData 429, SyncConcurrent 429, AlertNotifier, SsoLogin extra_redirect_schemes) pass in isolation on fresh DB (targeted 110 tests, 1 failure = baseline WarRoomTest active-first); run 1 aborted by ExUnit formatter crash on WarRoomTest exclusive_other flake
+# [matrix-uia-authdone-else-if] 2026-11-06T08:52Z security-review → Kassandra CLEAN
+# [matrix-uia-authdone-else-if] 2026-11-06T08:49Z code-review → CLEAN (cycle 1)
+# [matrix-uia-authdone-else-if] 2026-11-06T08:46Z code-review → 3 MINOR → cycle 1
+# [matrix-uia-authdone-else-if] 2026-11-06T08:21Z dev-story → DONE (else-if script, story-04 test + e2e step updated; targeted 51 tests green)
+# [matrix-uia-authdone-else-if] 2026-11-06T08:20Z test-review → CLEAN (0 MAJOR, 0 MINOR)
+# [matrix-uia-authdone-else-if] 2026-11-06T08:20Z atdd → 3 tests, 2 red (tea/direct; atdd_verify cannot run mix in sandbox, red run via docker)
+# [matrix-uia-authdone-else-if] 2026-11-06T08:18Z baseline-integration → MISS; HEAD ef0d86b6 (integration-tested by previous bugfix run) used as baseline
+# [matrix-uia-authdone-else-if] 2026-11-06T08:18Z pipeline started (--bug, MATRIX=true UI=false SEC=required)
+# [matrix-put-device-keeps-display-name] 2026-11-06T08:16Z committed ✓ (bug run: oracle, tea ATDD 19 tests, review CLEAN, Kassandra CLEAN; CI flakes accepted)
+# [matrix-put-device-keeps-display-name] 2026-11-06T08:16Z arc42-update → skipped (no architecture-relevant paths)
+# [matrix-put-device-keeps-display-name] 2026-11-06T08:16Z security-review → Kassandra CLEAN
+# [matrix-put-device-keeps-display-name] 2026-11-06T08:15Z code-review → CLEAN (cycle 0)
+# [matrix-put-device-keeps-display-name] 2026-11-06T08:14Z ci-gate → full fresh-DB integration 13445 tests 36 failures (22 baseline, new files all known flakes: MemberPrevContentHttp, SyncRejoinRangeScanBoundHttp, Retention, TemporaryCapture; pass in isolation); unit ok; targeted 127/0
+# [matrix-put-device-keeps-display-name] 2026-11-06T07:45Z dev-story → done (cycle 0)
+# [matrix-put-device-keeps-display-name] 2026-11-06T07:44Z test-review → MINOR (0 MAJOR, 3 MINOR)
+# [matrix-put-device-keeps-display-name] 2026-11-06T07:43Z atdd → 19 tests, 9 red for the right reasons (tea, verified in targeted run)
+# [matrix-put-device-keeps-display-name] 2026-11-06T07:39Z baseline-integration → reused story-06 final fresh-DB log (HEAD 70b0adf3 = same server code); 23 failures pre-existing
+# [matrix-put-device-keeps-display-name] 2026-11-06T07:39Z pipeline started (--bug, MATRIX=true per frontmatter)
 # [fix-media-download-gzip-decompression] 2026-08-27T19:11Z committed ✓ 89aa61b4 (ATDD 6 tests+test-review CLEAN+Dev fix+ci-gate 325/325+code-review 1 MAJOR fixed+8 MINOR fixed 1 cycle+Kassandra CLEAN 3 LOW/4 INFO+arc42 updated)
 # [fix-media-download-gzip-decompression] 2026-08-27T19:10Z arc42-update → done (ADR-029 read-path invariant added, 05-building-blocks.md decrypt/decompress pipeline updated)
 # [fix-media-download-gzip-decompression] 2026-08-27T19:07Z security-review → Kassandra CLEAN (0 CRIT/HIGH, 3 LOW, 4 INFO — no decompression bomb, no masking, no new surface, ClamAV-vs-served claim verified)
@@ -296,7 +359,7 @@ current_step: null
 completed: []
 cycle_count: 0
 blocked_reason: null
-last_updated: "2026-08-27T19:11Z"
+last_updated: "2026-11-09T08:41Z"
 story: "device-key-registration"
 current_step: "commit"
 completed:

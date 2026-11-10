@@ -2997,6 +2997,44 @@ defmodule Nebu.OAuth.TestSupport do
     :ok
   end
 
+  @doc """
+  Makes a test the owner of the given `server_config` keys (bugfix test-cleanup-rls-noop-delete). `server_config` has FORCE row level security and no DELETE
+  policy, so a cleanup DELETE of a config row through `Nebu.Repo` deletes NOTHING and the value a test wrote leaks into the following tests and
+  the live stack. This helper snapshots the rows of `keys` (privileged role, BEFORE the caller writes anything) and registers an `on_exit` that deletes the
+  keys again and re-inserts the snapshot: the previous value is back, and a key that was absent is absent again (an UPSERT to "" cannot do that).
+  The caches in front of the keys (log policy, OIDC scope / claim) are refreshed after the restore, as the public write path does.
+
+  `clear: true` additionally removes the keys right away (a test that needs "not set" as its start state). Returns the snapshot rows.
+  Needs the privileged role (`NEBU_DB_URL_MIGRATE`): call it only where the test already needs a database.
+  """
+  def restore_server_config_on_exit!(keys, opts \\ []) when is_list(keys) do
+    %{rows: rows} = privileged_sql!("SELECT key, value, set_at FROM server_config WHERE key = ANY($1)", [keys])
+
+    ExUnit.Callbacks.on_exit(fn ->
+      privileged_sql!("DELETE FROM server_config WHERE key = ANY($1)", [keys])
+
+      for [k, v, at] <- rows,
+          do: privileged_sql!("INSERT INTO server_config (key, value, set_at) VALUES ($1, $2, $3)", [k, v, at])
+
+      refresh_config_caches()
+    end)
+
+    if opts[:clear] do
+      privileged_sql!("DELETE FROM server_config WHERE key = ANY($1)", [keys])
+      refresh_config_caches()
+    end
+
+    rows
+  end
+
+  # the node-local caches `Nebu.Admin.DB.upsert_server_config/1` refreshes after a write (a privileged write bypasses that path)
+  defp refresh_config_caches do
+    Nebu.Web.LogStore.refresh_policy_cache()
+    Nebu.Matrix.invalidate_oidc_claim_cache()
+    if Process.whereis(Nebu.Web.OidcConfig), do: Nebu.Web.OidcConfig.refresh()
+    :ok
+  end
+
   # ════════════════════════════════════════════════════════════════════════════
   # Story legacy-sso-redirect-confirmation (G3-3): the confirmation page of the legacy SSO login
   # ════════════════════════════════════════════════════════════════════════════

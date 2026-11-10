@@ -1,0 +1,8 @@
+# code-review — cycle 1
+INFO | prescan | review-prescan.md has no MAJOR/MINOR/HINT lines (CLEAN) | -
+INFO | e2e/step-definitions/oauth/portal-rename-device.steps.ts:392 | Previous MINOR FIXED: foreign users row is now created by the fixture (insertUserDeviceRow), the annotation/degrade branch is gone, ids is always [FOREIGN_DEVICE, UNKNOWN_DEVICE], the foreign-device assertion is unconditional, and the fixture throws instead of returning false | -
+INFO | e2e/fixtures/db.ts:1028 | SQL is safe: userId/deviceId/displayName all go through sqlLiteral (single-quote doubling), values are test constants; no raw interpolation | -
+INFO | e2e/fixtures/db.ts:1028 | users insert needs only user_id + created_at (rest nullable/defaulted per 000001/000030); ON CONFLICT DO NOTHING + count(*) over RETURNING correctly reports whether THIS call created the row, so a pre-existing marie row is never deleted | -
+INFO | e2e/step-definitions/oauth/portal-rename-device.steps.ts:105 | Cleanup order correct and scoped: wipe() (Before and After) deletes the fixture device row first, then the users row only when foreignUserCreated; flag reset afterwards; user-id-scoped DELETEs only | -
+INFO | e2e/fixtures/db.ts:1031 | Edge: if the device INSERT fails after the users row was created, insertUserDeviceRow throws before the flag is returned, leaving an orphan users row for marie (harmless: later runs see it as pre-existing, the scenario stays deterministic) | Optional: delete the created users row in a catch before rethrowing
+INFO | e2e/fixtures/db.ts:1041 | ON CONFLICT DO UPDATE on devices makes the fixture idempotent against a leftover row from a crashed run; deleteUserDeviceRow in wipe() removes it | -

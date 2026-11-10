@@ -22,6 +22,16 @@ defmodule Nebu.Web.LogStore.RetentionTest do
 
   @moduletag :integration
 
+  @policy_keys ~w(log_collect_info log_collect_debug log_retention_info_days log_retention_debug_days log_retention_info_max_count log_retention_debug_max_count)
+  @neutral_policy %{
+    "log_collect_info" => "false",
+    "log_collect_debug" => "false",
+    "log_retention_info_days" => "",
+    "log_retention_debug_days" => "",
+    "log_retention_info_max_count" => "",
+    "log_retention_debug_max_count" => ""
+  }
+
   setup do
     Nebu.Release.migrate()
 
@@ -57,6 +67,14 @@ defmodule Nebu.Web.LogStore.RetentionTest do
     # breaking this file's exact-count assertions. Forcing both off here
     # removes that shared-fixture cross-file hazard for this file's own
     # synthetic-dataset tests.
+    # bugfix integration-test-flakes-fix (D): the on_exit below used to "clean up" with `DELETE FROM server_config`, which deletes nothing, so
+    # `log_retention_info_max_count=500` and `log_collect_info=false` stayed for the rest of the run (and for the live stack on the same database):
+    # the cap then removed rows of unrelated tests (Session.SweeperTest "a fresh INFO row must survive the sweep"). The policy keys are now put back
+    # to what they were when the test started (UPSERT is permitted by the `config_update_mutable` policy; an absent key goes back to its neutral
+    # value, which reads as "not set").
+    {:ok, config} = Nebu.Admin.DB.get_server_config()
+    prior = Map.take(config, @policy_keys)
+
     Nebu.Admin.DB.upsert_server_config(%{
       "log_collect_info" => "false",
       "log_collect_debug" => "false",
@@ -66,24 +84,14 @@ defmodule Nebu.Web.LogStore.RetentionTest do
       "log_retention_debug_max_count" => ""
     })
 
+    on_exit(fn -> Nebu.Admin.DB.upsert_server_config(Map.merge(@neutral_policy, prior)) end)
+
     on_exit(fn ->
       Ecto.Adapters.SQL.query(
         Nebu.Repo,
         "DELETE FROM operational_logs WHERE message LIKE 'distinctive-retention-%'",
         []
       )
-
-      Ecto.Adapters.SQL.query(Nebu.Repo, "DELETE FROM server_config WHERE key = $1", [
-        "log_retention_info_days"
-      ])
-
-      Ecto.Adapters.SQL.query(Nebu.Repo, "DELETE FROM server_config WHERE key = $1", [
-        "log_retention_debug_max_count"
-      ])
-
-      Ecto.Adapters.SQL.query(Nebu.Repo, "DELETE FROM server_config WHERE key = $1", [
-        "log_retention_info_max_count"
-      ])
 
       Ecto.Adapters.SQL.query(
         Nebu.Repo,
@@ -204,9 +212,11 @@ defmodule Nebu.Web.LogStore.RetentionTest do
       Ecto.Adapters.SQL.query!(
         Nebu.Repo,
         """
+        -- bugfix integration-test-flakes-fix (F): seeded one hour IN THE FUTURE so that these rows are the newest of the table: the cap keeps the 500
+        -- globally newest rows, and the live stack / other tests write rows of the same level with `inserted_at = now()` concurrently
         INSERT INTO operational_logs (level, source, message, inserted_at)
         SELECT 'debug', 'test', 'distinctive-retention-debugcap-' || gs,
-               now() - (gs * interval '1 second')
+               now() + interval '1 hour' - (gs * interval '1 second')
         FROM generate_series(1, 1000) AS gs
         """,
         []
@@ -322,9 +332,10 @@ defmodule Nebu.Web.LogStore.RetentionTest do
       Ecto.Adapters.SQL.query!(
         Nebu.Repo,
         """
+        -- bugfix integration-test-flakes-fix (F): seeded one hour in the future (see the DEBUG cap test): the cap keeps the 500 globally newest rows
         INSERT INTO operational_logs (level, source, message, inserted_at)
         SELECT 'info', 'test', 'distinctive-infocap-' || gs,
-               now() - (gs * interval '1 second')
+               now() + interval '1 hour' - (gs * interval '1 second')
         FROM generate_series(1, 1000) AS gs
         """,
         []

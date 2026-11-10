@@ -61,7 +61,7 @@ defmodule Nebu.OAuth.Authorize do
   import Plug.Conn
   require Logger
 
-  alias Nebu.OAuth.{AuthorizeRequest, AuthzStore, ClientStore, Config, Consent, ConsentGrantStore, ConsentStore, Freshness, Pages, SourceKey}
+  alias Nebu.OAuth.{AuthorizeRequest, AuthzStore, ClientStore, Config, Consent, ConsentGrantStore, ConsentStore, DeviceName, Freshness, Pages, SourceKey}
   alias Nebu.Web.ClientIP
   alias Nebu.Web.Plugs.RateLimit
 
@@ -480,8 +480,20 @@ defmodule Nebu.OAuth.Authorize do
   defp remembered?(_user_id, %{force_consent: true}, _device), do: false
   defp remembered?(_user_id, _row, {:replace, _holder}), do: false
 
-  defp remembered?(user_id, row, _device),
-    do: ConsentGrantStore.skip_consent?(user_id, row.client_id, row.scope, row.redirect_uri) == {:ok, true}
+  # Story oauth-pages-redesign / 01-device-naming-chain: a remembered Allow never creates a nameless device either. When the device has no name yet and none can
+  # be derived from the client record (`Nebu.OAuth.DeviceName.plan/3`), the page asks (an unreadable client record asks too).
+  defp remembered?(user_id, row, device),
+    do: ConsentGrantStore.skip_consent?(user_id, row.client_id, row.scope, row.redirect_uri) == {:ok, true} and device_named_or_derivable?(row, device)
+
+  defp device_named_or_derivable?(row, device) do
+    case ClientStore.fetch_by_client_id(row.client_id) do
+      {:ok, %{status: "approved", metadata: %{} = metadata}} -> DeviceName.plan(metadata, row.device_id, holder_display_name(device)) != :ask
+      _ -> false
+    end
+  end
+
+  defp holder_display_name({_kind, %{display_name: name}}), do: name
+  defp holder_display_name(_device), do: nil
 
   # FR13, gate l: with `oauth_idp_revalidation = per_refresh` (also the fail-closed reading of an unknown value
   # or an unreadable config) every refresh redeems the stored IdP refresh token, so a login WITHOUT one could

@@ -1,0 +1,193 @@
+<!doctype html>
+<!--
+  MOCKUP (static, not production code). Nebu consent page redesign, 2026-11-05.
+  The review toolbar (language / theme / scenario) exists only in this mockup.
+  Production pages: no external resource, no webfont, inline SVG logo, one <style>, one pinned script (ArmScript).
+-->
+<html lang="en" data-lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Allow this app to use your account</title>
+<style>
+/* ── Nebu page tokens (dark = default, light = prefers-color-scheme: light) ─────────────── */
+:root{
+  --bg:#111827; --card:#1f2937; --border:#374151; --text:#f9fafb; --muted:#9ca3af;
+  --primary:#f97316; --on-primary:#1c1917; --focus:#f9fafb; --outline:#9ca3af;
+  --warn-bg:#451a03; --warn-bd:#f59e0b; --warn-tx:#fde68a;
+  --err-bg:#450a0a;  --err-bd:#ef4444;  --err-tx:#fca5a5;
+  --chip:#111827;
+}
+@media (prefers-color-scheme:light){:root:not([data-theme=dark]){
+  --bg:#f3f4f6; --card:#ffffff; --border:#d1d5db; --text:#111827; --muted:#4b5563;
+  --primary:#f97316; --on-primary:#1c1917; --focus:#111827; --outline:#6b7280;
+  --warn-bg:#fffbeb; --warn-bd:#b45309; --warn-tx:#78350f;
+  --err-bg:#fef2f2;  --err-bd:#b91c1c;  --err-tx:#7f1d1d;
+  --chip:#f3f4f6;
+}}
+:root[data-theme=light]{
+  --bg:#f3f4f6; --card:#ffffff; --border:#d1d5db; --text:#111827; --muted:#4b5563;
+  --primary:#f97316; --on-primary:#1c1917; --focus:#111827; --outline:#6b7280;
+  --warn-bg:#fffbeb; --warn-bd:#b45309; --warn-tx:#78350f;
+  --err-bg:#fef2f2;  --err-bd:#b91c1c;  --err-tx:#7f1d1d;
+  --chip:#f3f4f6;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.6;overflow-wrap:anywhere}
+.shell{min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:1.5rem 1rem 3rem}
+.brand{display:flex;align-items:center;gap:.6rem;margin:.5rem 0 1.25rem;font-weight:600;letter-spacing:-.01em}
+.brand svg{width:32px;height:32px}
+.card{width:100%;max-width:30rem;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:1.5rem}
+h1{font-size:1.5rem;line-height:1.25;letter-spacing:-.02em;font-weight:600;margin:0 0 .75rem}
+p{margin:0 0 1rem}
+.lead{color:var(--text)}
+.muted{color:var(--muted);font-size:.9rem}
+/* the one thing the user must recognise: which app */
+.app{display:flex;align-items:center;gap:.75rem;background:var(--chip);border:1px solid var(--border);border-radius:8px;padding:.75rem 1rem;margin:0 0 1rem}
+.app .glyph{flex:none;width:40px;height:40px;border-radius:8px;background:var(--border);display:grid;place-items:center;font-weight:700}
+.app .name{font-weight:600;font-size:1.1rem}
+.app .claim{display:block;color:var(--muted);font-size:.8rem}
+.perm{display:flex;gap:.6rem;align-items:flex-start;margin:0 0 1rem}
+.perm svg{flex:none;width:20px;height:20px;margin-top:.2rem}
+/* notices: icon + bold label + text, never colour alone */
+.notice{border:2px solid;border-radius:8px;padding:.75rem 1rem;margin:0 0 1rem;display:flex;gap:.6rem}
+.notice svg{flex:none;width:20px;height:20px;margin-top:.15rem}
+.notice.warn{background:var(--warn-bg);border-color:var(--warn-bd);color:var(--warn-tx)}
+.notice.err{background:var(--err-bg);border-color:var(--err-bd);color:var(--err-tx)}
+.notice p{margin:0}
+/* details: native <details>, no JavaScript */
+details{border-top:1px solid var(--border);margin-top:1.25rem;padding-top:.5rem}
+summary{cursor:pointer;min-height:44px;display:flex;align-items:center;color:var(--muted);font-weight:500}
+summary:focus-visible,button:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+dl{margin:.25rem 0 0}dt{color:var(--muted);font-size:.8rem;margin-top:.75rem}dd{margin:0}
+/* actions: Deny first in DOM and visual order; Allow is the only filled button */
+.actions{display:flex;flex-wrap:wrap;gap:.75rem;margin-top:1.25rem}
+button{flex:1 1 9rem;min-height:48px;padding:.6rem 1rem;border-radius:8px;font:inherit;font-weight:600;cursor:pointer}
+button.secondary{background:transparent;color:var(--text);border:2px solid var(--outline)}
+button.primary{background:var(--primary);color:var(--on-primary);border:2px solid var(--primary)}
+button[aria-disabled=true]{opacity:.55;cursor:not-allowed}
+.hint{margin:.75rem 0 0}
+.fine{margin-top:1rem;color:var(--muted);font-size:.85rem}
+.devname{margin:0 0 1rem}.devname .muted{font-size:.8rem}
+.field{margin:0 0 .5rem}.field label{display:block;font-weight:600;margin-bottom:.35rem}
+.field input{width:100%;min-height:48px;padding:.6rem .8rem;border-radius:8px;border:2px solid var(--outline);background:var(--chip);color:var(--text);font:inherit}
+.field input:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+.field p{margin:.35rem 0 0}
+[hidden]{display:none}
+@media (forced-colors:active){button,.notice,.app{border:2px solid CanvasText}}
+/* ── bilingual strings (mockup only: production renders ONE language server-side) ─────── */
+html[data-lang=en] [lang=de],html[data-lang=de] [lang=en]{display:none!important}
+/* ── review toolbar (mockup only) ─────────────────────────────────────────────────────── */
+.toolbar{position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;gap:1rem;justify-content:center;padding:.5rem 1rem;background:#000;color:#fff;font:13px system-ui}
+.toolbar label{display:flex;gap:.35rem;align-items:center}
+</style>
+</head>
+<body>
+<div class="toolbar" aria-label="Mockup controls (not part of the page)">
+  <label>Language <select id="t-lang"><option>en</option><option>de</option></select></label>
+  <label>Theme <select id="t-theme"><option value="">system</option><option>dark</option><option>light</option></select></label>
+  <label>Scenario <select id="t-scn">
+    <option value="normal">Normal (fresh login, new session)</option>
+    <option value="replace">Replaces another session</option>
+    <option value="stale">Login not fresh</option>
+    <option value="phish">Destination ≠ app website</option>
+    <option value="all">All warnings at once</option>
+    <option value="noname">No name derivable: ask for a device name</option></select></label>
+</div>
+
+<div class="shell">
+  <div class="brand">
+    <!-- inline SVG: allowed under img-src 'none'. Hexagon-N from docs/icons/icon.svg, simplified -->
+    <svg viewBox="0 0 512 512" aria-hidden="true"><polygon points="256,42 442,149 442,363 256,470 70,363 70,149" fill="#0f1923" stroke="#2a6fff" stroke-width="22"/><text x="256" y="330" font-family="Arial,Helvetica,sans-serif" font-size="280" font-weight="700" fill="#fff" text-anchor="middle">N</text><circle cx="442" cy="149" r="26" fill="#2a6fff"/></svg>
+    <span>Nebu</span>
+  </div>
+
+  <main class="card" data-page="oauth-consent" data-device="new" data-fresh="true">
+    <h1><span lang="en">Allow this app to use your account?</span><span lang="de">Dieser App Zugriff auf Ihr Konto erlauben?</span></h1>
+
+    <!-- Risk warnings: ALWAYS visible when they apply, directly under the headline, before the decision. -->
+    <div class="notice err" id="freshness-notice" data-role="freshness-notice" data-scn="stale all" hidden>
+      <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path d="M10 2 1 18h18L10 2Zm-1 6h2v5H9V8Zm0 6h2v2H9v-2Z"/></svg>
+      <p><strong><span lang="en">Warning:</span><span lang="de">Achtung:</span></strong>
+        <span lang="en">You were not asked for your password just now. If you did not start this sign-in yourself, choose Deny.</span>
+        <span lang="de">Ihr Passwort wurde eben nicht abgefragt. Wenn Sie diese Anmeldung nicht selbst gestartet haben, wählen Sie „Ablehnen“.</span></p>
+    </div>
+    <div class="notice err" id="destination-notice" data-role="destination-notice" data-scn="phish all" hidden>
+      <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path d="M10 2 1 18h18L10 2Zm-1 6h2v5H9V8Zm0 6h2v2H9v-2Z"/></svg>
+      <p><strong><span lang="en">Warning:</span><span lang="de">Achtung:</span></strong>
+        <span lang="en">You will be sent to <b>login.evil.example</b>, which does not belong to the app’s website (chat.acme.example). Only continue if you trust it.</span>
+        <span lang="de">Sie werden zu <b>login.evil.example</b> weitergeleitet. Das gehört nicht zur Website der App (chat.acme.example). Fahren Sie nur fort, wenn Sie dem vertrauen.</span></p>
+    </div>
+    <div class="notice warn" id="replace-notice" data-role="replace-notice" data-scn="replace all" hidden>
+      <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path d="M10 2 1 18h18L10 2Zm-1 6h2v5H9V8Zm0 6h2v2H9v-2Z"/></svg>
+      <p><strong><span lang="en">Heads-up:</span><span lang="de">Hinweis:</span></strong>
+        <span lang="en">Your session “Firefox on Linux” will be signed out.</span>
+        <span lang="de">Ihre Sitzung „Firefox auf Linux“ wird abgemeldet.</span></p>
+    </div>
+
+    <!-- 1. WHO asks -->
+    <div class="app">
+      <div class="glyph" aria-hidden="true">E</div>
+      <div><span class="name">Element Web</span>
+        <span class="claim"><span lang="en">Name given by the app, not verified</span><span lang="de">Vom Hersteller der App angegeben, nicht geprüft</span></span></div>
+    </div>
+
+    <!-- 2. WHAT it gets, in one sentence -->
+    <div class="perm">
+      <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path d="M10 1 3 4v5c0 4.4 3 8.3 7 10 4-1.7 7-5.6 7-10V4l-7-3Z"/></svg>
+      <p class="lead"><span lang="en">As <strong>@anna:nebu.example</strong> it gets <strong>full access</strong>: read and send messages, manage rooms, devices and encryption keys.</span>
+        <span lang="de">Als <strong>@anna:nebu.example</strong> erhält sie <strong>vollen Zugriff</strong>: Nachrichten lesen und senden, Räume, Geräte und Verschlüsselungsschlüssel verwalten.</span></p>
+    </div>
+
+    <!-- 2b. WHAT the device will be called (story 01-device-naming-chain) -->
+    <p class="devname" data-role="device-name" data-scn="normal replace stale phish all">
+      <span class="muted"><span lang="en">This session will be named</span><span lang="de">Diese Sitzung heißt</span></span><br>
+      <strong>Element Web (CdEfGhIj)</strong></p>
+
+    <form method="post" action="/oauth2/consent">
+      <input type="hidden" name="csrf_token" value="…">
+      <!-- shown (and required) ONLY when no name can be derived: client name, then website host, then ask -->
+      <div class="field" data-scn="noname" hidden>
+        <label for="device-name"><span lang="en">Name this device</span><span lang="de">Geben Sie diesem Gerät einen Namen</span></label>
+        <input id="device-name" name="device_name" type="text" maxlength="64" required aria-describedby="device-name-help" autocomplete="off">
+        <p class="muted" id="device-name-help"><span lang="en">So you can recognise it in your device list, for example “Anna’s phone”.</span><span lang="de">Damit Sie es in Ihrer Geräteliste wiedererkennen, zum Beispiel „Annas Handy“.</span></p>
+      </div>
+      <div class="actions">
+        <button type="submit" name="decision" value="deny" class="secondary"><span lang="en">Deny</span><span lang="de">Ablehnen</span></button>
+        <button type="submit" name="decision" value="allow" id="allow" class="primary" form="oauth-consent-armed" aria-disabled="true" aria-describedby="arm-hint" data-arm><span lang="en">Allow</span><span lang="de">Erlauben</span></button>
+      </div>
+      <p class="muted hint" id="arm-hint" data-arm-hint><span lang="en">“Allow” unlocks a moment after you interact with this page. This protects you from accidental clicks.</span><span lang="de">„Erlauben“ wird kurz nach Ihrer ersten Interaktion mit dieser Seite freigeschaltet. Das schützt vor versehentlichen Klicks.</span></p>
+      <p class="muted" role="status" data-arm-status></p>
+      <noscript><p class="muted"><span lang="en">JavaScript is off, so “Allow” stays unavailable. You can still choose Deny.</span><span lang="de">JavaScript ist aus, daher bleibt „Erlauben“ gesperrt. „Ablehnen“ funktioniert weiterhin.</span></p></noscript>
+    </form>
+
+    <p class="fine"><span lang="en">Only allow this if you just started signing in to this app yourself.</span><span lang="de">Erlauben Sie nur, wenn Sie die Anmeldung in dieser App gerade selbst gestartet haben.</span></p>
+
+    <!-- 3. everything else: later -->
+    <details>
+      <summary><span lang="en">Show details</span><span lang="de">Details anzeigen</span></summary>
+      <dl>
+        <dt><span lang="en">App website (claimed, not verified)</span><span lang="de">Website der App (angegeben, nicht geprüft)</span></dt><dd>chat.acme.example</dd>
+        <dt id="consent-destination-label"><span lang="en">After you choose, you are sent to</span><span lang="de">Nach Ihrer Wahl werden Sie weitergeleitet zu</span></dt><dd id="consent-destination">chat.acme.example <span lang="en">(part of the app website)</span><span lang="de">(Teil der App-Website)</span></dd>
+        <dt><span lang="en">Your session</span><span lang="de">Ihre Sitzung</span></dt><dd><span lang="en">A new session (device ABCDEFGHIJ) will be created.</span><span lang="de">Eine neue Sitzung (Gerät ABCDEFGHIJ) wird angelegt.</span></dd>
+        <dt><span lang="en">Terms of service (claimed by the app)</span><span lang="de">Nutzungsbedingungen (von der App angegeben)</span></dt><dd>https://acme.example/terms</dd>
+        <dt><span lang="en">Privacy policy (claimed by the app)</span><span lang="de">Datenschutzerklärung (von der App angegeben)</span></dt><dd>https://acme.example/privacy</dd>
+      </dl>
+    </details>
+  </main>
+</div>
+
+<script>
+/* MOCKUP toolbar only. */
+var q=function(s){return document.querySelector(s)};
+q('#t-lang').onchange=function(){document.documentElement.dataset.lang=this.value;document.documentElement.lang=this.value;scn()};
+q('#t-theme').onchange=function(){this.value?document.documentElement.dataset.theme=this.value:delete document.documentElement.dataset.theme};
+function scn(){var v=q('#t-scn').value;document.querySelectorAll('[data-scn]').forEach(function(e){e.hidden=e.dataset.scn.split(' ').indexOf(v)<0});
+  document.querySelectorAll('.field').forEach(function(e){e.hidden=v!=='noname'});
+  q('.app .name').textContent=v==='noname'?(document.documentElement.dataset.lang==='de'?'Kein Name angegeben':'No name given'):'Element Web';
+  q('main').dataset.device=(v=='replace'||v=='all')?'replace':'new';q('main').dataset.fresh=(v=='stale'||v=='all')?'false':'true'}
+q('#t-scn').onchange=scn;scn();
+</script>
+</body>
+</html>

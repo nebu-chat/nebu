@@ -4,16 +4,19 @@ defmodule Nebu.Matrix.SsoConfirmPage do
   finding G3-3, decisions D9 and D15): the confirmation page, the "cancelled" page, the error pages and the
   headers of every response of the flow, including the `303`s.
 
-  Standalone HTML like the OAuth consent page (no admin layout, no external resource, no image, no link, no
-  `autofocus`, no inline event handler). Every request-derived value (the Matrix user id, the displayed path) is
+  Standalone HTML in the Nebu look (story oauth-pages-redesign/04): the frame, the ONE shared `<style>` and the logo come from
+  `Nebu.Web.PageShell`, the texts (English / German by the browser's `Accept-Language`, `Nebu.Web.Locale`) from
+  `Nebu.Web.PageText` (`sso.*`, `err.*`). Same decision-first structure as the consent page: h1, risk notice, the target
+  origin as the app block, Cancel first, Continue (armed), ONE visible hint line, the user id and the path inside ONE
+  closed `<details>`. No admin layout, no external resource, no image, no link, no `autofocus`, no inline event handler. Every request-derived value (the Matrix user id, the displayed path) is
   HTML-escaped with `Plug.HTML.html_escape/1`; the page never shows the query or the fragment of the redirect
   URL; the error pages render no request value at all.
 
   ## Contract (E2E / test hooks, D15)
 
   `<main data-page="sso-confirm" data-result="pending">`, ONE `<h1>` "Continue signing in to this app?",
-  `data-role="user-id"`, a `<dl>` with `data-role="target-origin"` (the ASCII / `xn--` host, port only when not
-  443) and the optional path (raw, truncated to 60 characters), a "Warning:" notice, ONE `<form method="post"
+  `data-role="target-origin"` (the ASCII / `xn--` host, port only when not 443), a "Warning:" notice,
+  `data-role="user-id"` and the optional `data-role="target-path"` (raw, truncated to 60 characters) inside the `<details>`, ONE `<form method="post"
   action="/_matrix/client/v3/login/sso/confirm">` with the hidden `csrf_token` and two equal-weight submit buttons,
   Cancel FIRST, Continue (`id="continue"`, `data-arm`) rendered `aria-disabled="true"` (never `disabled`, UX B1) and aria-described by the
   hint (`data-arm-hint`, visible by default), the target origin and the notice, the polite live region
@@ -21,7 +24,7 @@ defmodule Nebu.Matrix.SsoConfirmPage do
   `<noscript>` (Continue needs JavaScript: fail closed, only Cancel works) and ONE inline script, exactly
   `Nebu.Web.ArmScript.script/0`, pinned by its SHA-256 in the CSP. `data-page="sso-confirm" data-result="cancelled"`
   after Cancel, `data-page="sso-confirm-error" data-error="invalid_state|forbidden|invalid_request|rate_limited|unavailable"`
-  for the error pages. `lang="en"`, a STATIC `<title>`, a visible focus outline, 44 px touch targets, works at 320 px.
+  for the error pages. `lang` follows the browser, a STATIC `<title>`, a visible focus outline, 44 px touch targets, works at 320 px.
 
   ## Headers
 
@@ -40,47 +43,46 @@ defmodule Nebu.Matrix.SsoConfirmPage do
 
   import Plug.Conn
 
+  alias Nebu.Web.{Locale, PageShell, PageText}
+
   @confirm_path "/_matrix/client/v3/login/sso/confirm"
 
-  @css "*{box-sizing:border-box}body{font-family:system-ui,sans-serif;line-height:1.5;margin:0;padding:1.5rem 1rem;color:#1a1a1a;background:#fff;overflow-wrap:anywhere}" <>
-         "main{max-width:40rem;margin:0 auto}h1{font-size:1.5rem;margin:0 0 1rem}h2{font-size:1.1rem;margin:1.5rem 0 .5rem}p{margin:0 0 1rem}ul{margin:0 0 1rem;padding-left:1.25rem}" <>
-         "dl{margin:0 0 1.25rem}dt{font-weight:bold;margin-top:.85rem}dd{margin:0}" <>
-         ".notice{padding:.75rem 1rem;border:2px solid #b3261e;border-radius:.25rem;background:#fce8e6;margin:0 0 1rem}" <>
-         "dd.key{font-size:1.15rem;font-weight:bold}code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:#f1f3f4;border:1px solid #747775;border-radius:.25rem;padding:.1rem .35rem;overflow-wrap:anywhere}.hint{margin:1rem 0 0;font-size:.95rem}[hidden]{display:none}" <>
-         ".actions{display:flex;flex-wrap:wrap;gap:1rem;margin-top:1rem}" <>
-         "button{flex:1 1 8rem;min-height:44px;padding:.6rem 1rem;border:2px solid #0b57d0;border-radius:.25rem;background:#fff;color:#0b57d0;font:inherit;font-weight:bold;cursor:pointer}" <>
-         "button:focus{outline:3px solid #1a1a1a;outline-offset:2px}button[aria-disabled=true]{opacity:.6;cursor:not-allowed}" <>
-         "@media (forced-colors:active){button{border:2px solid ButtonText}.notice{border:2px solid CanvasText}}"
-
-  @css_hash Base.encode64(:crypto.hash(:sha256, @css))
+  # The ONE inline style block is the shared one of the Nebu page shell; its hash is the CSP style source.
+  @css_hash Base.encode64(:crypto.hash(:sha256, PageShell.css()))
   @script Nebu.Web.ArmScript.script()
   @script_hash Base.encode64(:crypto.hash(:sha256, @script))
 
-  @title "Confirm sign-in"
   @max_path_chars 60
 
-  # kind => {status hint, title, heading, explanation, actions}
+  @warn_icon ~s(<svg viewBox="0 0 20 20" width="20" height="20" fill="currentColor" aria-hidden="true" focusable="false">) <>
+               ~s(<path d="M10 2 1 18h18L10 2Zm-1 6h2v5H9V8Zm0 6h2v2H9v-2Z"/></svg>)
+
+  # error code => catalog keys of the further suggestions (under "More options"). Title, heading, explanation and the bold
+  # primary suggestion of a code are the shared `err.<code>.title|heading|explanation|primary` texts.
   @errors %{
-    "invalid_state" =>
-      {"Sign-in link expired", "This sign-in link has expired or was already used. Start signing in again from your app.",
-       ["Go back to the app you were signing in to.", "Start signing in again.", "You can close this window."]},
-    "forbidden" =>
-      {"Sign-in request refused", "Nebu could not verify that this request came from the confirmation page you were shown.",
-       ["Go back to the confirmation page and use its buttons.", "If that does not work, start signing in again from your app."]},
-    "invalid_request" =>
-      {"Sign-in request refused", "The request could not be read. Nothing was changed.",
-       ["Go back to the confirmation page and use its buttons.", "If that does not work, start signing in again from your app."]},
-    "rate_limited" =>
-      {"Too many requests", "Too many requests were made from your address. Nothing was changed.",
-       ["Wait a moment, then try again from the same page."]},
-    "unavailable" =>
-      {"Sign-in unavailable", "Nebu cannot complete this step right now. No sign-in token was issued.",
-       ["Wait a moment, then start signing in again from your app."]}
+    "invalid_state" => ["sso.more.back_to_app"],
+    "forbidden" => ["sso.more.use_buttons"],
+    "invalid_request" => ["sso.more.use_buttons", "act.contact"],
+    "rate_limited" => [],
+    "unavailable" => []
   }
 
-  @doc "The inline CSS of the pages (its SHA-256 is in every CSP)."
+  # A key missing in either language fails the build, never renders a blank.
+  for {code, more} <- @errors,
+      key <-
+        [
+          "err.#{code}.title",
+          "err.#{code}.heading",
+          "err.#{code}.explanation",
+          "err.#{code}.primary"
+        ] ++ more,
+      lang <- [:en, :de] do
+    PageText.fetch!(key, lang)
+  end
+
+  @doc "The inline CSS of the pages (the shared shell stylesheet; its SHA-256 is in every CSP)."
   @spec css() :: String.t()
-  def css, do: @css
+  def css, do: PageShell.css()
 
   # ── headers ──────────────────────────────────────────────────────────────────
 
@@ -121,9 +123,6 @@ defmodule Nebu.Matrix.SsoConfirmPage do
     |> put_resp_content_type("text/html")
   end
 
-  defp static_csp,
-    do: "default-src 'none'; style-src 'sha256-#{@css_hash}'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
-
   defp page_csp(form_action) do
     "default-src 'none'; style-src 'sha256-#{@css_hash}'; script-src 'sha256-#{@script_hash}'; img-src 'none'; base-uri 'none'; " <>
       "frame-ancestors 'none'; form-action 'self' #{form_action}"
@@ -134,25 +133,28 @@ defmodule Nebu.Matrix.SsoConfirmPage do
   @doc """
   Renders and SENDS the confirmation page (status 200) from the stored `entry` (`:host`, `:port`, `:path`,
   `:user_id`) and the CSRF token: `{:ok, conn}`, or `:error` (nothing sent) when the stored host / port is not a
-  valid CSP host-source (fail closed: the caller answers the `invalid_state` page).
+  valid CSP host-source (fail closed: the caller answers the `invalid_state` page). The language comes from the conn.
   """
   @spec send_page(Plug.Conn.t(), map(), String.t()) :: {:ok, Plug.Conn.t()} | :error
   def send_page(conn, entry, csrf_token) when is_binary(csrf_token) do
     with {:ok, host, port} <- valid_target(entry) do
       source = "https://" <> host <> port_suffix(port)
+      lang = Locale.from_conn(conn)
 
       conn =
         conn
         |> html_headers(page_csp(source))
         |> put_resp_header("referrer-policy", "same-origin")
-        |> send_resp(200, render_page(entry, host, port, csrf_token))
+        |> send_resp(200, render_page(lang, entry, host, port, csrf_token))
 
       {:ok, conn}
     end
   end
 
   defp valid_target(%{host: host, port: port}) when is_binary(host) do
-    if Nebu.Matrix.SsoRedirect.valid_https_host?(host) and valid_port?(port), do: {:ok, host, port}, else: :error
+    if Nebu.Matrix.SsoRedirect.valid_https_host?(host) and valid_port?(port),
+      do: {:ok, host, port},
+      else: :error
   end
 
   defp valid_target(_entry), do: :error
@@ -163,72 +165,92 @@ defmodule Nebu.Matrix.SsoConfirmPage do
   defp port_suffix(nil), do: ""
   defp port_suffix(port), do: ":" <> Integer.to_string(port)
 
-  defp render_page(entry, host, port, csrf_token) do
-    """
-    <!doctype html>
-    <html lang="en">
-    <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="color-scheme" content="light">
-    <title>#{@title}</title>
-    <style>#{@css}</style>
-    </head>
-    <body>
-    <main data-page="sso-confirm" data-result="pending">
-    <h1>Continue signing in to this app?</h1>
-    <p>You are signed in as <strong data-role="user-id">#{esc(entry[:user_id])}</strong>.</p>
-    <dl>
-    <dt>The app asks to be sent to</dt>
-    <dd class="key"><code id="target-origin" data-role="target-origin">#{esc("https://" <> host <> port_suffix(port))}</code></dd>
-    #{idn_notice(host)}#{path_line(entry[:path])}</dl>
-    <p class="notice" id="confirm-notice"><strong>Warning:</strong> This address is not on the list of apps your administrator trusts. Continuing gives the app at this address full access to your Matrix account: it can read and send messages as you. Only continue if you just started signing in to this app yourself and you recognise the address. If you did not, choose Cancel. Cancel stops the sign-in. Nothing is sent to the app. This request expires in 5 minutes.</p>
-    <form method="post" action="#{@confirm_path}">
-    <input type="hidden" name="csrf_token" value="#{esc(csrf_token)}">
-    <p class="hint" id="arm-hint" data-arm-hint>Continue becomes available a moment after you move the pointer, press a key, scroll, tap or move the focus. Then move onto Continue to use it.</p>
-    <p class="hint" role="status" data-arm-status></p>
-    <noscript><p class="hint">JavaScript is off, so Continue stays unavailable. Turn on JavaScript or use another browser. You can still choose Cancel.</p></noscript>
-    <div class="actions">
-    <button type="submit" name="decision" value="cancel">Cancel</button>
-    <button type="submit" name="decision" value="continue" id="continue" form="sso-confirm-armed" aria-disabled="true" aria-describedby="arm-hint target-origin confirm-notice" data-arm>Continue</button>
-    </div>
-    </form>
-    <script>#{@script}</script>
-    </main>
-    </body>
-    </html>
-    """
+  defp t(lang, key), do: PageShell.esc(PageText.fetch!(key, lang))
+
+  # Order (design 5.2): h1, the risk notice, the target origin as the app block, (the IDN note), the form (Cancel first, Continue
+  # armed, ONE hint line, live region, noscript), the collapsed details (user id, path). The shell adds the logo, the style block
+  # and the one arming script.
+  defp render_page(lang, entry, host, port, csrf_token) do
+    content =
+      Enum.join(
+        [
+          "<h1>#{t(lang, "sso.confirm.heading")}</h1>",
+          ~s(<div class="notice error icon" id="confirm-notice">#{@warn_icon}<p><strong>#{t(lang, "consent.warning")}</strong> #{t(lang, "sso.confirm.notice")}</p></div>),
+          ~s(<div class="app"><div><span class="claim">#{t(lang, "sso.confirm.origin_label")}</span>) <>
+            ~s(<span class="name"><code id="target-origin" data-role="target-origin">#{PageShell.esc("https://" <> host <> port_suffix(port))}</code></span></div></div>),
+          idn_notice(host, lang),
+          ~s(<form method="post" action="#{@confirm_path}">),
+          ~s(<input type="hidden" name="csrf_token" value="#{PageShell.esc(csrf_token)}">),
+          ~s(<div class="actions">),
+          ~s(<button type="submit" name="decision" value="cancel" class="btn secondary">#{t(lang, "sso.confirm.cancel")}</button>),
+          ~s(<button type="submit" name="decision" value="continue" id="continue" class="btn primary" form="sso-confirm-armed" aria-disabled="true" aria-describedby="arm-hint target-origin confirm-notice" data-arm>#{t(lang, "sso.confirm.continue")}</button>),
+          "</div>",
+          ~s(<p class="muted hint" id="arm-hint" data-arm-hint>#{t(lang, "sso.confirm.arm_hint")}</p>),
+          ~s(<p class="muted" role="status" data-arm-status></p>),
+          ~s(<noscript><p class="muted">#{t(lang, "sso.confirm.noscript")}</p></noscript>),
+          "</form>",
+          details(entry, lang)
+        ]
+        |> Enum.reject(&(&1 == "")),
+        "\n"
+      )
+
+    PageShell.render(lang,
+      title: PageText.fetch!("sso.confirm.title", lang),
+      main_attrs: ~s(data-page="sso-confirm" data-result="pending"),
+      content: content,
+      script: @script
+    )
   end
 
-  defp idn_notice(host) do
+  defp idn_notice(host, lang) do
     if host |> String.split(".") |> Enum.any?(&String.starts_with?(&1, "xn--")),
-      do: ~s(<dt>Note</dt>\n<dd data-role="idn-notice">This address uses special characters, which can be used to imitate another address. It is shown in a technical form starting with xn--. Check it carefully.</dd>\n),
+      do: ~s(<p class="muted" data-role="idn-notice">#{t(lang, "sso.confirm.idn")}</p>),
       else: ""
   end
 
-  # The raw path as received (percent-encoded form), cut at 60 characters; omitted for an empty path or `/`.
-  defp path_line(path) when is_binary(path) and path not in ["", "/"] do
+  # The user id and the raw path as received (percent-encoded form, cut at 60 characters; omitted for an empty path or `/`).
+  defp details(entry, lang) do
+    rows =
+      [
+        ~s(<dt>#{t(lang, "sso.confirm.d.user")}</dt>\n<dd data-role="user-id">#{PageShell.esc(entry[:user_id])}</dd>),
+        path_row(entry[:path], lang)
+      ]
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.join("\n")
+
+    "<details>\n<summary>#{t(lang, "consent.details")}</summary>\n<dl>\n#{rows}\n</dl>\n</details>"
+  end
+
+  defp path_row(path, lang) when is_binary(path) and path not in ["", "/"] do
     shown =
       if String.length(path) > @max_path_chars,
         do: String.slice(path, 0, @max_path_chars) <> "...",
         else: path
 
-    ~s(<dt>Path</dt>\n<dd data-role="target-path">#{esc(shown)}</dd>\n)
+    ~s(<dt>#{t(lang, "sso.confirm.d.path")}</dt>\n<dd data-role="target-path">#{PageShell.esc(shown)}</dd>)
   end
 
-  defp path_line(_path), do: ""
+  defp path_row(_path, _lang), do: ""
 
   # ── cancelled and error pages ────────────────────────────────────────────────
 
   @doc "The `200` page after Cancel: no token was minted, the entry is gone."
   @spec send_cancelled(Plug.Conn.t()) :: Plug.Conn.t()
   def send_cancelled(conn) do
+    lang = Locale.from_conn(conn)
+
+    body =
+      PageShell.render(lang,
+        title: PageText.fetch!("sso.cancelled.title", lang),
+        main_attrs: ~s(data-page="sso-confirm" data-result="cancelled"),
+        content:
+          "<h1>#{t(lang, "sso.cancelled.title")}</h1>\n<p>#{t(lang, "sso.cancelled.text")}</p>"
+      )
+
     conn
-    |> html_headers(static_csp())
-    |> send_resp(
-      200,
-      shell("sso-confirm", ~s(data-result="cancelled"), "Sign-in cancelled", "Sign-in cancelled", "<p>No access was given. You can close this window.</p>\n")
-    )
+    |> html_headers(PageShell.csp())
+    |> send_resp(200, body)
   end
 
   @doc """
@@ -238,44 +260,43 @@ defmodule Nebu.Matrix.SsoConfirmPage do
   @spec send_error(Plug.Conn.t(), pos_integer(), String.t(), keyword()) :: Plug.Conn.t()
   def send_error(conn, status, code, opts \\ []) do
     code = if Map.has_key?(@errors, code), do: code, else: "unavailable"
-    {heading, explanation, actions} = Map.fetch!(@errors, code)
-
-    items = Enum.map_join(actions, "", &"<li>#{&1}</li>\n")
-
-    body =
-      "<p>#{explanation}</p>\n<h2>What you can do</h2>\n<ul>\n#{items}</ul>\n"
+    lang = Locale.from_conn(conn)
 
     conn
-    |> html_headers(static_csp())
+    |> html_headers(PageShell.csp())
     |> maybe_retry_after(opts[:retry_after])
-    |> send_resp(status, shell("sso-confirm-error", ~s(data-error="#{code}"), heading, heading, body))
+    |> send_resp(status, render_error(lang, code))
+  end
+
+  defp render_error(lang, code) do
+    key = &"err.#{code}.#{&1}"
+
+    more_html =
+      case Map.fetch!(@errors, code) do
+        [] ->
+          ""
+
+        keys ->
+          items = Enum.map_join(keys, "\n", &"<li>#{t(lang, &1)}</li>")
+
+          "\n<details>\n<summary>#{t(lang, "ui.more_options")}</summary>\n<ul>\n#{items}\n</ul>\n</details>"
+      end
+
+    content =
+      "#{PageShell.status_icon()}\n" <>
+        "<h1>#{t(lang, key.("heading"))}</h1>\n" <>
+        "<p>#{t(lang, key.("explanation"))}</p>\n" <>
+        "<p class=\"primary\"><strong>#{t(lang, key.("primary"))}</strong></p>#{more_html}"
+
+    PageShell.render(lang,
+      title: PageText.fetch!(key.("title"), lang),
+      main_attrs: ~s(data-page="sso-confirm-error" data-error="#{code}"),
+      content: content
+    )
   end
 
   defp maybe_retry_after(conn, seconds) when is_integer(seconds) and seconds >= 0,
     do: put_resp_header(conn, "retry-after", Integer.to_string(seconds))
 
   defp maybe_retry_after(conn, _none), do: conn
-
-  # Every page has its OWN static `<title>` (never a request value).
-  defp shell(page, extra_attr, title, heading, body) do
-    """
-    <!doctype html>
-    <html lang="en">
-    <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="color-scheme" content="light">
-    <title>#{title}</title>
-    <style>#{@css}</style>
-    </head>
-    <body>
-    <main data-page="#{page}" #{extra_attr}>
-    <h1>#{heading}</h1>
-    #{body}</main>
-    </body>
-    </html>
-    """
-  end
-
-  defp esc(value), do: value |> to_string() |> Plug.HTML.html_escape()
 end

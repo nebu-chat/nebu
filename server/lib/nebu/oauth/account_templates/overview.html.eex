@@ -1,13 +1,15 @@
-<section aria-labelledby="profile-heading">
-<h2 id="profile-heading">Profile</h2>
+<p><%= t(@lang, "acct.default.sentence") %></p>
+<div class="tiles">
+<a class="tile" data-role="portal-tile" data-tile="devices" href="/account?action=org.matrix.devices_list"><b><%= t(@lang, "acct.nav.devices") %></b><span><%= tf(@lang, if(@devices_count_exact, do: "acct.tile.devices_count", else: "acct.tile.devices_count_least"), %{"n" => @devices_count}) %></span></a>
+<a class="tile" data-role="portal-tile" data-tile="apps" href="/account/apps"><b><%= t(@lang, "acct.nav.apps") %></b><span><%= @apps_text %></span></a>
+<a class="tile" data-role="portal-tile" data-tile="security" href="/account?action=org.matrix.cross_signing_reset"><b><%= t(@lang, "acct.nav.security") %></b><span><%= t(@lang, "acct.tile.security") %></span></a>
+</div>
+<details data-role="profile-details">
+<summary><%= t(@lang, "acct.profile.summary") %></summary>
 <dl>
-<dt>Matrix ID</dt>
+<dt><%= t(@lang, "acct.profile.matrix_id") %></dt>
 <dd><%= @user_id %></dd>
-<dt>Display name</dt>
-<dd><%= @display_name || "Not set" %></dd>
+<dt><%= t(@lang, "acct.profile.display_name") %></dt>
+<dd><%= @display_name || t(@lang, "acct.not_set") %></dd>
 </dl>
-</section>
-<section aria-labelledby="devices-heading">
-<h2 id="devices-heading">Your devices</h2>
-<%= @table %>
-</section>
+</details>

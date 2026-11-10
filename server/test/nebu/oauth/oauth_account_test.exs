@@ -569,7 +569,8 @@ defmodule Nebu.OAuth.OAuthAccountTest do
         conn = T.account_get(path, cookie: ctx.acct.cookie)
         T.assert_account_page(conn, "default")
         refute conn.resp_body =~ "UNKNOWN-ECHO"
-        assert conn.resp_body =~ ctx.s.device_id, "the default page combines the profile summary and the device list"
+        assert conn.resp_body =~ ~r/data-tile="devices"[^>]*>.*?1 signed in/s, "the overview shows the live device count (device ids live on the devices page)"
+        refute conn.resp_body =~ ctx.s.device_id, "the overview no longer lists devices"
       end
     end
 
@@ -698,7 +699,8 @@ defmodule Nebu.OAuth.OAuthAccountTest do
       assert body =~ "&lt;script&gt;"
       refute body =~ "<b>Laptop</b>"
       assert body =~ "Unnamed device"
-      assert body =~ ~r/<table/ and body =~ ~r/<caption/ and body =~ ~s(scope="col")
+      assert body =~ ~s(data-role="device-list")
+      refute body =~ ~r/<table|<caption/
     end
 
     test "storage failure => 503 unavailable (never 'no devices')" do

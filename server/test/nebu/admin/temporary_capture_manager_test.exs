@@ -66,13 +66,23 @@ defmodule Nebu.Admin.TemporaryCaptureManagerTest do
 
     Ecto.Adapters.SQL.query!(Nebu.Repo, "DELETE FROM admin_temporary_captures", [])
 
-    Ecto.Adapters.SQL.query!(
-      Nebu.Repo,
-      "DELETE FROM audit_log WHERE action IN ('enable_temporary_capture', 'disable_temporary_capture')",
-      []
-    )
+    # bugfix integration-test-flakes-fix (D): `CaptureCache` is a persistent_term cache of the capture table; the rows above are removed by SQL, so
+    # the cache still held the previous test's `/health` (e.g. the active row left by the AC5 sweep test) and the AC4 precondition
+    # `refute should_persist?("warning", "/health")` failed (order dependent within this file).
+    Nebu.Web.LogStore.CaptureCache.refresh_now()
 
-    :ok
+    on_exit(fn ->
+      Ecto.Adapters.SQL.query(Nebu.Repo, "DELETE FROM admin_temporary_captures", [])
+      Nebu.Web.LogStore.CaptureCache.refresh_now()
+    end)
+
+    # bugfix integration-test-flakes-fix (D): the former `DELETE FROM audit_log WHERE action IN (...)` here deleted NOTHING (audit_log is append-only:
+    # `audit_log_no_delete` RLS policy, no DELETE grant), so `audit_rows/1` saw the enable/disable rows of every earlier run (4-6 x `/health`).
+    # The audit assertions look at the rows written since this test started instead (the insert trigger forces `event_time = NOW()`; `now()` of
+    # this separate statement is not later than the transaction time of any later write).
+    %{rows: [[since]]} = Ecto.Adapters.SQL.query!(Nebu.Repo, "SELECT now()", [])
+
+    {:ok, since: since}
   end
 
   defp insert_capture(endpoint, enabled_offset_sql, expires_offset_sql, started_by) do
@@ -92,11 +102,11 @@ defmodule Nebu.Admin.TemporaryCaptureManagerTest do
     ).rows
   end
 
-  defp audit_rows(action) do
+  defp audit_rows(action, since) do
     Ecto.Adapters.SQL.query!(
       Nebu.Repo,
-      "SELECT actor_user_id, target_type, target_id FROM audit_log WHERE action = $1",
-      [action]
+      "SELECT actor_user_id, target_type, target_id FROM audit_log WHERE action = $1 AND event_time >= $2 ORDER BY event_time, id",
+      [action, since]
     ).rows
   end
 
@@ -164,20 +174,20 @@ defmodule Nebu.Admin.TemporaryCaptureManagerTest do
   end
 
   describe "AC12 (Option B): enable/disable write compliance audit entries" do
-    test "enable/2 records an enable_temporary_capture audit row naming actor and endpoint" do
+    test "enable/2 records an enable_temporary_capture audit row naming actor and endpoint", %{since: since} do
       {:ok, _capture} = TemporaryCaptureManager.enable(@endpoint_route, "@admin:test.local")
 
       assert [["@admin:test.local", "endpoint", @endpoint_route]] =
-               audit_rows("enable_temporary_capture"),
+               audit_rows("enable_temporary_capture", since),
              "AC12: enabling collection on an off endpoint is an admin-initiated " <>
                "logging-policy change and must be audit-logged (retention-settings precedent)"
     end
 
-    test "disable/1 records a disable_temporary_capture audit row" do
+    test "disable/1 records a disable_temporary_capture audit row", %{since: since} do
       {:ok, _capture} = TemporaryCaptureManager.enable(@endpoint_route, "@admin:test.local")
       :ok = TemporaryCaptureManager.disable(@endpoint_route)
 
-      assert [[_actor, "endpoint", @endpoint_route]] = audit_rows("disable_temporary_capture")
+      assert [[_actor, "endpoint", @endpoint_route]] = audit_rows("disable_temporary_capture", since)
     end
   end
 

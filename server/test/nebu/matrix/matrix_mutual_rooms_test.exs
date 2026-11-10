@@ -84,6 +84,8 @@ defmodule Nebu.Web.MatrixMutualRoomsTest do
   """
 
   use ExUnit.Case, async: false
+
+  alias Nebu.Web.SessionLookupTestSupport, as: LookupFault
   import Plug.Test
   import Plug.Conn
 
@@ -253,6 +255,7 @@ defmodule Nebu.Web.MatrixMutualRoomsTest do
     end
 
     test "garbage/unparseable Bearer token → 401 M_UNKNOWN_TOKEN" do
+      LookupFault.setup_no_row_lookup()
       _priv = setup_oidc_keys()
 
       conn = mutual_rooms("not-a-jwt-at-all", "@someone:test.local")

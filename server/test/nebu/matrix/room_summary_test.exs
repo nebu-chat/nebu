@@ -23,6 +23,8 @@ defmodule Nebu.Matrix.RoomSummaryTest do
   """
   use ExUnit.Case, async: false
 
+  alias Nebu.Web.SessionLookupTestSupport, as: LookupFault
+
   import ExUnit.CaptureLog
   import Plug.Conn
   import Plug.Test
@@ -323,6 +325,7 @@ defmodule Nebu.Matrix.RoomSummaryTest do
 
   describe "AC1/RU2 — authentication and methods" do
     test "AC1.2: no token => 401 M_MISSING_TOKEN, junk token => 401 M_UNKNOWN_TOKEN; the handler is never reached" do
+      LookupFault.setup_no_row_lookup()
       none = req(:get, summary_path("!r:test.local"))
       assert {none.status, json(none)["errcode"]} == {401, "M_MISSING_TOKEN"}
       junk = req(:get, summary_path("!r:test.local"), "junk")

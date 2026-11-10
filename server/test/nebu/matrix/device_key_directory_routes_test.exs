@@ -13,6 +13,8 @@ defmodule Nebu.Matrix.DeviceKeyDirectoryRoutesTest do
   """
   use ExUnit.Case, async: false
 
+  alias Nebu.Web.SessionLookupTestSupport, as: LookupFault
+
   alias Nebu.Matrix.ToDeviceTestSupport, as: TD
 
   @claim "/_matrix/client/v3/keys/claim"
@@ -29,6 +31,7 @@ defmodule Nebu.Matrix.DeviceKeyDirectoryRoutesTest do
     end
 
     test "a junk token (opaque or JWT-shaped): 401 M_UNKNOWN_TOKEN" do
+      LookupFault.setup_no_row_lookup()
       for token <- ["not-a-token", "aaa.bbb.ccc"], do: assert(errcode(TD.req(:post, @claim, token, %{"one_time_keys" => %{}})) == {401, "M_UNKNOWN_TOKEN"})
     end
 
@@ -61,6 +64,7 @@ defmodule Nebu.Matrix.DeviceKeyDirectoryRoutesTest do
     end
 
     test "a junk token: 401 M_UNKNOWN_TOKEN" do
+      LookupFault.setup_no_row_lookup()
       for token <- ["not-a-token", "aaa.bbb.ccc"], do: assert(errcode(TD.req(:get, @changes <> "?from=a&to=b", token)) == {401, "M_UNKNOWN_TOKEN"})
     end
 

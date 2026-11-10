@@ -25,10 +25,10 @@ ORACLE_FILE: [ORACLE_FILE or none]
 ## Evaluate
 
 ```bash
-python3 skills/nebu-pipeline/scripts/pipeline_gates.py decide --step test-review --story [STORY_ID] --cycle 0 --digest $STEP_RESULTS_DIR/[STORY_ID]/test-lint.digest
+python3 skills/nebu-pipeline/scripts/pipeline_gates.py decide --step test-review --story [STORY_ID] --cycle 0 --apply $STATE_FILE --digest $STEP_RESULTS_DIR/[STORY_ID]/test-lint.digest
 # agent ran: pass its digest instead →  decide … --digest - <<'EOF'
 <the agent's digest lines, verbatim>
 EOF
 ```
-Prints `ACTION`, `STATE`, `MESSAGE`. `NEXT` → run `pipeline_state.py --file $STATE_FILE <STATE>` and show `MESSAGE`. `ASK_USER` (MAJOR gaps) → show `MESSAGE`, stop and wait:
+Prints `ACTION`, `STATE`, `MESSAGE`. `NEXT` → the state is already updated (`APPLIED`); show `MESSAGE`. `ASK_USER` (MAJOR gaps) → show `MESSAGE`, stop and wait:
 "continue" → run `pipeline_state.py` with `STATE`; otherwise the user fixes the gaps and Step 2 restarts.

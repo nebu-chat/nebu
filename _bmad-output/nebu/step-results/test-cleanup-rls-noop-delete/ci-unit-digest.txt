@@ -1,0 +1,106 @@
+EXIT=2 tests=? (no ExUnit summary found) time=222.2s log=_bmad-output/nebu/step-results/test-cleanup-rls-noop-delete/unit.log
+FAIL 1) test authentication comes before the body (no pre-auth read or parse) an ENCODED room_keys path with a junk bearer + 6 MiB is 401 M_UNKNOWN_TOKEN, body unread (all write routes) (Nebu.Matrix.RoomKeysRoutesTest) test/nebu/matrix/room_keys_routes_test.exs:155
+    put /_matrix/client/v3/room%5Fkeys/keys/%21room%3Atest.local?version=1: 503 {"errcode":"M_UNKNOWN","error":"Authentication is temporarily unavailable, retry later"}
+    code: for prefix <- @encoded_prefixes, {method, suffix} <- [{:put, "/keys/#{@room}?version=1"}, {:post, "/version"}, {:put, "/version/1"}] do
+    stacktrace:
+    test/nebu/matrix/room_keys_routes_test.exs:158: anonymous fn/3 in Nebu.Matrix.RoomKeysRoutesTest."test authentication comes before the body (no pre-auth read or parse) an ENCODED room_keys path with a
+    (elixir 1.20.4) lib/enum.ex:2622: Enum."-reduce/3-lists^foldl/2-0-"/3
+    test/nebu/matrix/room_keys_routes_test.exs:156: (test)
+FAIL 2) test authentication comes before the body (no pre-auth read or parse) no token + malformed JSON (or a non-object body) is 401 M_MISSING_TOKEN, never M_NOT_JSON / M_BAD_JSON, body unread; a junk token the same with 401 M_UNKNOWN_TOKEN (Nebu.Matrix.RoomKeysRoutesTest) test/nebu/matrix/room_keys_routes_test.exs:121
+    put /_matrix/client/v3/room_keys/keys?version=1 {nope (junk token)
+    code: for raw <- ["{nope", "[1,2]", ~s("text")], {method, path} <- [{:put, @p <> "/keys?version=1"}, {:post, @p <> "/version"}, {:put, @p <> "/version/1"}] do
+    stacktrace:
+    test/nebu/matrix/room_keys_routes_test.exs:128: anonymous fn/3 in Nebu.Matrix.RoomKeysRoutesTest."test authentication comes before the body (no pre-auth read or parse) no token + malformed JSON (or a 
+    (elixir 1.20.4) lib/enum.ex:2622: Enum."-reduce/3-lists^foldl/2-0-"/3
+    test/nebu/matrix/room_keys_routes_test.exs:122: (test)
+    ....
+FAIL 3) test the 14 routes are authenticated a junk token (opaque or JWT-shaped) answers 401 M_UNKNOWN_TOKEN (Nebu.Matrix.RoomKeysRoutesTest) test/nebu/matrix/room_keys_routes_test.exs:49
+    get /_matrix/client/v3/room_keys/version (not-a-token): 503 {"errcode":"M_UNKNOWN","error":"Authentication is temporarily unavailable, retry later"}
+    code: for {method, path} <- @clauses, token <- ["not-a-token", "aaa.bbb.ccc"] do
+    stacktrace:
+    test/nebu/matrix/room_keys_routes_test.exs:52: anonymous fn/4 in Nebu.Matrix.RoomKeysRoutesTest."test the 14 routes are authenticated a junk token (opaque or JWT-shaped) answers 401 M_UNKNOWN_TOKEN"/1
+    (elixir 1.20.4) lib/enum.ex:2622: Enum."-reduce/3-lists^foldl/2-0-"/3
+    test/nebu/matrix/room_keys_routes_test.exs:50: (test)
+    ...
+FAIL 4) test authentication comes before the body (no pre-auth read or parse) a junk bearer (opaque or JWT-shaped) + 1 000 001 bytes or 6 MiB (above the 5 MiB cap too) is 401 M_UNKNOWN_TOKEN, never 413 / 5xx, and the body is never read (Nebu.Matrix.RoomKeysRoutesTest) test/nebu/matrix/room_keys_routes_test.exs:93
+    put /_matrix/client/v3/room_keys/keys?version=1 (1000001, junk-token): 503 {"errcode":"M_UNKNOWN","error":"Authentication is temporarily unavailable, retry later"}
+    code: for {method, path} <- @write_routes, size <- @big_sizes, token <- ["junk-token", "aaa.bbb.ccc"] do
+    stacktrace:
+    test/nebu/matrix/room_keys_routes_test.exs:96: anonymous fn/5 in Nebu.Matrix.RoomKeysRoutesTest."test authentication comes before the body (no pre-auth read or parse) a junk bearer (opaque or JWT-shap
+    (elixir 1.20.4) lib/enum.ex:2622: Enum."-reduce/3-lists^foldl/2-0-"/3
+    test/nebu/matrix/room_keys_routes_test.exs:94: (test)
+    ......
+    15:52:18.291 [warning] ExAws: HTTP ERROR: :econnrefused for URL: "http://127.0.0.1:38479/b/obj-put" ATTEMPT: 1
+    15:52:18.291 [warning] ExAws: HTTP ERROR: :econnrefused for URL: "http://127.0.0.1:38479/b/obj-get" ATTEMPT: 1
+    15:52:18.292 [warning] ExAws: HTTP ERROR: :econnrefused for URL: "http://127.0.0.1:38479/b/obj-del" ATTEMPT: 1
+    15:52:18.292 [warning] ExAws: HTTP ERROR: :econnrefused for URL: "http://127.0.0.1:38479/nebu-media-archive/obj-copy" ATTEMPT: 1
+    15:52:18.292 [warning] ExAws: HTTP ERROR: :econnrefused for URL: "http://127.0.0.1:38479/nebu-media-archive/obj-arch" ATTEMPT: 1
+FAIL 5) test auth gate on protected Matrix routes GET /_matrix/client/v3/sync with a garbage Bearer token → 401 M_UNKNOWN_TOKEN (Nebu.Web.MatrixRouterTest) test/nebu/matrix/matrix_router_test.exs:364
+    Assertion with == failed
+    code:  assert conn.status == 401
+    left:  503
+    right: 401
+    stacktrace:
+    test/nebu/matrix/matrix_router_test.exs:372: (test)
+    ...........................................................................
+    15:52:50.705 [warning] Nebu.Media.Storage: request not sent, the saved storage settings cannot be read
+    ...
+    15:52:51.261 [warning] Nebu.Media.StorageConfig: loader raised: %RuntimeError{message: "db down"}
+    15:52:51.261 [warning] Nebu.Media.Storage: request not sent, the saved storage settings cannot be read
+    15:52:51.261 [warning] Nebu.Media.StorageConfig: loader raised: %RuntimeError{message: "db down"}
+FAIL 6) test AC1/RU2 — authentication and methods AC1.2: no token => 401 M_MISSING_TOKEN, junk token => 401 M_UNKNOWN_TOKEN; the handler is never reached (Nebu.Matrix.RoomSummaryTest) test/nebu/matrix/room_summary_test.exs:325
+    Assertion with == failed
+    code:  assert {junk.status, json(junk)["errcode"]} == {401, "M_UNKNOWN_TOKEN"}
+    left:  {503, "M_UNKNOWN"}
+    right: {401, "M_UNKNOWN_TOKEN"}
+    stacktrace:
+    test/nebu/matrix/room_summary_test.exs:329: (test)
+    ...............
+    15:53:00.018 [warning] matrix auth: access token lookup unavailable class=repo_not_started
+FAIL 7) test POST upload with a garbage Bearer token → 401 M_UNKNOWN_TOKEN (Nebu.Web.MediaUploadTest) test/nebu/media/media_upload_test.exs:151
+    Assertion with == failed
+    code:  assert conn.status == 401
+    left:  503
+    right: 401
+    stacktrace:
+    test/nebu/media/media_upload_test.exs:158: (test)
+    ......
+    15:53:00.199 [info] [status: 400, path: "/_matrix/client/v3/login/sso/confirm", request_id: "77228980-4b4f-4433-ae15-9bdf7880ca8d", method: "GET", route_template: "/_matrix/client/v3/login/sso/confirm
+    15:53:00.200 [debug] {"status":400,"path":"/_matrix/client/v3/login/sso/confirm","request_id":"77228980-4b4f-4433-ae15-9bdf7880ca8d","method":"GET","query_string":null,"request_body":null,"auth_header
+    15:53:00.200 [info] [status: 429, path: "/_matrix/client/v3/login/sso/confirm", request_id: "5e7f6476-943c-4c3f-9290-565d2e38e8a8", method: "GET", route_template: "/_matrix/client/v3/login/sso/confirm
+    15:53:00.200 [debug] {"status":429,"path":"/_matrix/client/v3/login/sso/confirm","request_id":"5e7f6476-943c-4c3f-9290-565d2e38e8a8","method":"GET","query_string":null,"request_body":null,"auth_header
+    .
+FAIL 8) test auth gate on GET /mutual_rooms (AC9) — no DB garbage/unparseable Bearer token → 401 M_UNKNOWN_TOKEN (Nebu.Web.MatrixMutualRoomsTest) test/nebu/matrix/matrix_mutual_rooms_test.exs:255
+    Assertion with == failed
+    code:  assert conn.status == 401
+    left:  503
+    right: 401
+    stacktrace:
+    test/nebu/matrix/matrix_mutual_rooms_test.exs:260: (test)
+    ..........
+    15:53:23.569 [warning] mutual_rooms: get_rooms_for_user failed for @mutual-rl-probe:test.local: %RuntimeError{message: "could not lookup Ecto repo Nebu.Repo because it was not started or it does not e
+    15:53:23.570 [warning] mutual_rooms: get_rooms_for_user failed for @mutual-rl-probe:test.local: %RuntimeError{message: "could not lookup Ecto repo Nebu.Repo because it was not started or it does not e
+    15:53:23.570 [warning] mutual_rooms: get_rooms_for_user failed for @mutual-rl-probe:test.local: %RuntimeError{message: "could not lookup Ecto repo Nebu.Repo because it was not started or it does not e
+    15:53:23.570 [warning] mutual_rooms: get_rooms_for_user failed for @mutual-rl-probe:test.local: %RuntimeError{message: "could not lookup Ecto repo Nebu.Repo because it was not started or it does not e
+    15:53:23.570 [warning] mutual_rooms: get_rooms_for_user failed for @mutual-rl-probe:test.local: %RuntimeError{message: "could not lookup Ecto repo Nebu.Repo because it was not started or it does not e
+... 9 more failures (see log)
+WARNINGS: 13
+  the variable "discard_bits" is accessed inside size(...) of a bitstring but it was defined outside of the matc @ └─ lib/merkle_map/merkle_tree_impl.ex:54:20: MerkleMap.MerkleTreeImpl.put_leaf/3
+  the variable "levels" is accessed inside size(...) of a bitstring but it was defined outside of the match. You @ └─ lib/merkle_map/merkle_tree_impl.ex:163:27: MerkleMap.MerkleTreeImpl.do_diff_keys/3
+  Logger.warn/1 is deprecated. Use Logger.warning/2 instead @ └─ lib/delta_crdt.ex:81:14: DeltaCrdt.warn_low_sync_interval/1
+  | 15:55:28.817 [error] invite: failed to write the m.room.member invite event for !inv-evfail-532610:test.local (:write_failed)
+  | ....
+  | 15:55:28.929 [error] room !inv-rearmfail-395907:test.local: the membership change was rolled back (:simulated_db_down)
+  | .
+  | 15:55:28.929 [error] invite: failed to write the m.room.member invite event for !inv-rearmfail-395907:test.local (:write_failed)
+  | ......................
+  | 15:55:28.946 [error] admin: the SSO redirect origins change could not be saved: :db_down
+  | ........
+  | 15:55:28.948 [error] admin: the SSO redirect origins change could not be saved: :db_down
+  | ........................................................................................................................................................................................................
+  | Finished in 222.2 seconds (17.9s async, 204.3s sync)
+  | 
+  | Result: 7651/7668 passed, 7 skipped, 5886 excluded
+  | Failed: 17 tests
+  | make: *** [test-unit-elixir] Error 2
+UNIT_DONE

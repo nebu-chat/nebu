@@ -339,7 +339,9 @@ defmodule Nebu.MediaAdminActionsTest do
 
   test "media_blocked, media_unblocked, media_deleted, media_rescanned are all present in AuditWriter.@known_actions" do
     mid = media_id("allowlist_check")
-    on_exit(fn -> Ecto.Adapters.SQL.query(Repo, "DELETE FROM audit_log WHERE target_id = $1", [mid]) end)
+    # bugfix test-cleanup-rls-noop-delete: a DELETE through the runtime role deletes nothing from audit_log (policy audit_log_no_delete, nebu_app is not
+    # the owner): the rows of this test's own target id are removed with the privileged role.
+    on_exit(fn -> Nebu.OAuth.TestSupport.privileged_sql!("DELETE FROM audit_log WHERE target_id = $1", [mid]) end)
 
     for action <- ~w(media_blocked media_unblocked media_deleted media_rescanned) do
       result =
@@ -723,8 +725,9 @@ defmodule Nebu.MediaAdminActionsTest do
   test "media_infected_override is present in AuditWriter.@known_actions" do
     mid = media_id("override_allowlist_check")
 
+    # bugfix test-cleanup-rls-noop-delete: privileged delete of this test's own audit rows (see the allowlist test above)
     on_exit(fn ->
-      Ecto.Adapters.SQL.query(Repo, "DELETE FROM audit_log WHERE target_id = $1", [mid])
+      Nebu.OAuth.TestSupport.privileged_sql!("DELETE FROM audit_log WHERE target_id = $1", [mid])
     end)
 
     result =

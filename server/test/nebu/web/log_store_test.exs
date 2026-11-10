@@ -238,6 +238,9 @@ defmodule Nebu.Web.LogStoreTest do
     test "a DEBUG log entry still broadcasts to \"operational_logs\" even when log_collect_debug is false" do
       ensure_pubsub_started!()
 
+      # bugfix test-cleanup-rls-noop-delete: this test wrote the two policy keys and never put them back (probe: both stayed `false` afterwards)
+      Nebu.OAuth.TestSupport.restore_server_config_on_exit!(["log_collect_debug", "log_collect_info"])
+
       Nebu.Admin.DB.upsert_server_config(%{
         "log_collect_debug" => "false",
         "log_collect_info" => "false"
@@ -271,15 +274,9 @@ defmodule Nebu.Web.LogStoreTest do
           log_collect_debug log_retention_debug_days log_retention_debug_max_count
         )
 
-        on_exit(fn ->
-          if Process.whereis(Nebu.Repo) do
-            for key <- keys do
-              Ecto.Adapters.SQL.query(Nebu.Repo, "DELETE FROM server_config WHERE key = $1", [
-                key
-              ])
-            end
-          end
-        end)
+        # bugfix test-cleanup-rls-noop-delete: the former `DELETE FROM server_config` cleanup deleted nothing (FORCE row level security, no DELETE policy):
+        # the keys are snapshotted before the first write and put back (or removed again) with the privileged role on exit.
+        Nebu.OAuth.TestSupport.restore_server_config_on_exit!(keys)
 
         for key <- keys do
           assert :ok = Nebu.Admin.DB.upsert_server_config(%{key => "first-value"})
@@ -328,13 +325,8 @@ defmodule Nebu.Web.LogStoreTest do
     @tag :integration
     test "reflects server_config values when they have been set" do
       if Process.whereis(Nebu.Repo) do
-        on_exit(fn ->
-          if Process.whereis(Nebu.Repo) do
-            Ecto.Adapters.SQL.query(Nebu.Repo, "DELETE FROM server_config WHERE key = $1", [
-              "log_collect_info"
-            ])
-          end
-        end)
+        # bugfix test-cleanup-rls-noop-delete: privileged restore instead of a no-op DELETE (see the AC3 test above)
+        Nebu.OAuth.TestSupport.restore_server_config_on_exit!(["log_collect_info"])
 
         Nebu.Admin.DB.upsert_server_config(%{"log_collect_info" => "true"})
 
@@ -408,6 +400,14 @@ defmodule Nebu.Web.LogStoreTest do
     # returning every row) until "war_room_id" is added to the allowlist.
     # ────────────────────────────────────────────────────────────────────────
     test "get_logs(%{war_room_id: id}) returns only entries tagged with that session" do
+      # bugfix integration-test-flakes-fix (F): AC2 allows ONE active session (`war_room_sessions_single_active_idx`); one left active by another
+      # test file made the insert below fail with a unique violation. End whatever is active first (as war_room_manager_test's `end_all_active!/0`).
+      Ecto.Adapters.SQL.query!(
+        Nebu.Repo,
+        "UPDATE war_room_sessions SET ended_at = now(), ended_reason = 'manual_stop' WHERE ended_at IS NULL",
+        []
+      )
+
       session_result =
         Ecto.Adapters.SQL.query!(
           Nebu.Repo,
@@ -478,13 +478,8 @@ defmodule Nebu.Web.LogStoreTest do
     @tag :integration
     test "reflects the server_config value when log_retention_info_max_count has been set" do
       if Process.whereis(Nebu.Repo) do
-        on_exit(fn ->
-          if Process.whereis(Nebu.Repo) do
-            Ecto.Adapters.SQL.query(Nebu.Repo, "DELETE FROM server_config WHERE key = $1", [
-              "log_retention_info_max_count"
-            ])
-          end
-        end)
+        # bugfix test-cleanup-rls-noop-delete: privileged restore instead of a no-op DELETE (see the AC3 test above)
+        Nebu.OAuth.TestSupport.restore_server_config_on_exit!(["log_retention_info_max_count"])
 
         Nebu.Admin.DB.upsert_server_config(%{"log_retention_info_max_count" => "750"})
 

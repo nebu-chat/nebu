@@ -27,7 +27,7 @@ defmodule Nebu.OAuth.CodeStore do
 
   @columns ~w(code_hash client_id redirect_uri code_challenge device_id user_id scope scope_prefix
               response_mode client_nonce openid_requested idp_rt_enc auth_time created_at
-              expires_at used_at device_holder_checked device_holder_client_id)a
+              expires_at used_at device_holder_checked device_holder_client_id device_display_name)a
 
   @select_list Enum.map_join(@columns, ", ", &Atom.to_string/1)
 
@@ -35,8 +35,8 @@ defmodule Nebu.OAuth.CodeStore do
   INSERT INTO oauth_codes
     (code_hash, client_id, redirect_uri, code_challenge, device_id, user_id, scope, scope_prefix,
      response_mode, client_nonce, openid_requested, idp_rt_enc, auth_time, expires_at,
-     device_holder_checked, device_holder_client_id)
-  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, now() + ($14::int * interval '1 second'), $15, $16)
+     device_holder_checked, device_holder_client_id, device_display_name)
+  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, now() + ($14::int * interval '1 second'), $15, $16, $17)
   """
 
   @sql_consume """
@@ -75,7 +75,8 @@ defmodule Nebu.OAuth.CodeStore do
   `idp_rt_enc` (already encrypted or nil), `auth_time` (unix seconds or nil)); optional
   `device_holder_checked` / `device_holder_client_id` (story oauth-authorize-freshness L-1: the OAuth app that
   held the device when the user clicked Allow, nil = none or a legacy session; re-checked when the code is
-  redeemed). Returns
+  redeemed) and `device_display_name` (story oauth-pages-redesign / 01-device-naming-chain: the sanitised name the user typed on the Allow page, nil = none;
+  migration 000062). Returns
   `{:ok, plaintext_code}` — the only place the plaintext exists — or `{:error, reason}`.
   """
   @spec insert(map()) :: {:ok, String.t()} | {:error, term()}
@@ -98,7 +99,8 @@ defmodule Nebu.OAuth.CodeStore do
       to_datetime(Map.get(attrs, :auth_time)),
       @ttl_seconds,
       Map.get(attrs, :device_holder_checked, false) == true,
-      Map.get(attrs, :device_holder_client_id)
+      Map.get(attrs, :device_holder_client_id),
+      Map.get(attrs, :device_display_name)
     ]
 
     case query(@sql_insert, params) do

@@ -150,10 +150,9 @@ defmodule Nebu.Workers.MediaReleasedAutoDeleteWorkerIntegrationTest do
   end
 
   defp cleanup!(media_id) do
-    # audit_log is not append-only-protected — a plain DELETE via the app's own
-    # Nebu.Repo connection (owner role in this project's single-role dev/CI
-    # deployment) is sufficient, no migrate-role trigger dance needed.
-    Ecto.Adapters.SQL.query(Repo, "DELETE FROM audit_log WHERE target_id = $1", [media_id])
+    # bugfix test-cleanup-rls-noop-delete: the former plain DELETE through Nebu.Repo deleted nothing (nebu_app is not the table owner in the dual-role
+    # stack, so the audit_log_no_delete policy applies): the rows of this media id are removed with the privileged role.
+    Nebu.OAuth.TestSupport.privileged_sql!("DELETE FROM audit_log WHERE target_id = $1", [media_id])
 
     conn = migrate_role_conn!()
 

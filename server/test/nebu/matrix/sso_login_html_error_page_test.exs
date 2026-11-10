@@ -233,15 +233,15 @@ defmodule Nebu.Matrix.SsoLoginHtmlErrorPageTest do
   # ════════════════════════════════════════════════════════════════════════════
 
   describe "Test 5 (AC5): security headers on the HTML error response" do
-    test "HTML response includes CSP default-src 'none' and X-Content-Type-Options: nosniff" do
+    test "HTML response includes the strict shell CSP (default-src 'none', one style hash) and X-Content-Type-Options: nosniff" do
       conn = dispatch(rejected_scheme_query(), "text/html")
 
       assert conn.status == 400
 
       csp = conn |> get_resp_header("content-security-policy")
 
-      assert "default-src 'none'" in csp,
-             "expected Content-Security-Policy: default-src 'none', got: #{inspect(csp)}"
+      assert [Nebu.Web.PageShell.csp()] == csp,
+             "expected the shell Content-Security-Policy (default-src 'none', the style by hash only), got: #{inspect(csp)}"
 
       nosniff = conn |> get_resp_header("x-content-type-options")
 

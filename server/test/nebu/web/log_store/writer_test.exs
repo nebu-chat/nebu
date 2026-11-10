@@ -37,6 +37,10 @@ defmodule Nebu.Web.LogStore.WriterTest do
         existing -> existing
       end
 
+    # bugfix test-cleanup-rls-noop-delete: the former `DELETE FROM server_config` cleanup deleted nothing (FORCE row level security, no DELETE policy), so
+    # `log_collect_info=true` stayed behind for the rest of the run: the two keys are snapshotted here and put back (or removed again) on exit.
+    Nebu.OAuth.TestSupport.restore_server_config_on_exit!(["log_collect_info", "log_collect_debug"])
+
     on_exit(fn ->
       if Process.whereis(Nebu.Repo) do
         Ecto.Adapters.SQL.query(
@@ -44,11 +48,6 @@ defmodule Nebu.Web.LogStore.WriterTest do
           "DELETE FROM operational_logs WHERE message LIKE 'distinctive-writer-%'",
           []
         )
-
-        Ecto.Adapters.SQL.query(Nebu.Repo, "DELETE FROM server_config WHERE key IN ($1, $2)", [
-          "log_collect_info",
-          "log_collect_debug"
-        ])
       end
     end)
 
@@ -118,7 +117,9 @@ defmodule Nebu.Web.LogStore.WriterTest do
       result =
         wait_until_rows(
           "SELECT id FROM operational_logs WHERE message LIKE 'distinctive-writer-flush-test-%'",
-          []
+          [],
+          7_000,
+          10
         )
 
       assert result.num_rows == 10,

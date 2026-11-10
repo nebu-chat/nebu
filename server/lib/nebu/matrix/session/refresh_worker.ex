@@ -269,6 +269,10 @@ defmodule Nebu.Matrix.Session.RefreshWorker do
 
       :error ->
         :ok
+
+      # lookup failed (transient DB error): skip the row, never delete; the next sweep retries it
+      {:error, :unavailable} ->
+        :ok
     end
   rescue
     e ->

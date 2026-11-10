@@ -66,7 +66,7 @@ defmodule Nebu.OAuth.ConsentGrantAccountTest do
       assert body =~ ~s(data-role="consent-grant")
       assert body =~ ~s(data-client-id="#{cid}")
       assert body =~ "Grant Test App"
-      assert body =~ ~r/<td data-label="Website">app\.example\.com<\/td>/, "the stored (verified) host of the client"
+      assert body =~ ~r/Website: app\.example\.com/, "the stored (verified) host of the client"
       assert body =~ ~s(action="/account/apps/withdraw")
       assert body =~ ~r/method="post"/i
       assert body =~ ~r/name="client_id"\s+value="#{cid}"|value="#{cid}"\s+name="client_id"/
@@ -105,7 +105,8 @@ defmodule Nebu.OAuth.ConsentGrantAccountTest do
       assert body =~ ~r/<h1>Apps you have allowed<\/h1>/
       refute body =~ "<title>Allowed apps</title>"
 
-      assert body =~ ~r/data-role="grants-note">These are the apps you have allowed to use your Matrix account\./
+      assert body =~ ~r/data-role="grants-note">These apps may use your account without asking you again\./
+      assert body =~ ~r/data-role="grants-details"[^>]*>\s*<summary>[^<]*<\/summary>\s*<p>These are the apps you have allowed to use your Matrix account\./
       refute body =~ "allowed to sign you in"
 
       assert body =~ ~s(<p data-role="no-grants">There are no allowed apps on your account. An app appears here after you allow it when you sign in.</p>)
@@ -123,11 +124,11 @@ defmodule Nebu.OAuth.ConsentGrantAccountTest do
       assert body =~ ~s|aria-label="Withdraw the permission of Twin App (two.example.com)"|
     end
 
-    test "UX 1: an app whose registration has no stored host is named `(unknown website)`, the cell says Unknown", %{cid: cid, priv: priv, sub: sub, uid: uid} do
+    test "UX 1: an app whose registration has no stored host is named `(unknown website)`, the card says Unknown", %{cid: cid, priv: priv, sub: sub, uid: uid} do
       G.allow_new!(cid, priv, sub)
       body = G.apps_get(G.account!(uid)).resp_body
       assert body =~ ~s|aria-label="Withdraw the permission of Grant Test App (unknown website)"|
-      assert body =~ ~r/<td data-label="Website">Unknown<\/td>/
+      assert body =~ ~r/Website: Unknown/
     end
 
     test "Kassandra INFO #4: a hostile CLAIMED client_uri host never appears; only the stored client_host does", %{priv: priv, sub: sub, uid: uid} do
@@ -136,7 +137,7 @@ defmodule Nebu.OAuth.ConsentGrantAccountTest do
       G.allow_new!(cid, priv, sub)
 
       body = G.apps_get(G.account!(uid)).resp_body
-      assert body =~ ~r/<td data-label="Website">verified\.example\.com<\/td>/
+      assert body =~ ~r/Website: verified\.example\.com/
       refute body =~ "phish-claimed.evil.example"
       refute body =~ "evil.example"
     end
@@ -237,7 +238,7 @@ defmodule Nebu.OAuth.ConsentGrantAccountTest do
 
       ok = T.account_get("/account/apps?notice=grant_withdrawn", cookie: acct.cookie).resp_body
       assert ok =~ ~s(data-notice="grant_withdrawn")
-      assert ok =~ ~r/class="notice success"[^>]*role="status"/
+      assert ok =~ ~r/class="notice success[^"]*"[^>]*role="status"/
 
       bad = T.account_get("/account/apps?notice=grant_not_found", cookie: acct.cookie).resp_body
       assert bad =~ ~s(data-notice="grant_not_found")

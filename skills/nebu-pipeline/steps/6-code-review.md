@@ -51,17 +51,17 @@ python3 skills/nebu-pipeline/scripts/pipeline_gates.py review-mark \
 
 ```bash
 python3 skills/nebu-pipeline/scripts/pipeline_gates.py decide --step code-review --story [STORY_ID] --cycle [CYCLE_COUNT] \
-  --max-minor [MAX_AUTO_MINOR_CYCLES] --digest - <<'EOF'
+  --max-minor [MAX_AUTO_MINOR_CYCLES] --git-add . --apply $STATE_FILE --digest - <<'EOF'
 <the agent's digest lines, verbatim>
 EOF
 ```
-Output lines `ACTION`, `STATE`, `STATE_FIX`, `STATE_ACCEPT`, `COPIED`, `MESSAGE`:
+Output lines `ACTION`, `APPLIED`, `STATE`, `STATE_FIX`, `STATE_ACCEPT`, `COPIED`, `MESSAGE`. On `NEXT`/`CYCLE`/`DEFER_MINOR` the script has already run `git add .` and the state update (`APPLIED`) — no further call:
 
 | `ACTION` | You do |
 |---|---|
-| `NEXT` (CLEAN) | run `pipeline_state.py --file $STATE_FILE <STATE>`, show `MESSAGE` → Step 6b/7 |
-| `CYCLE` (MINOR, below the cap) | run `pipeline_state.py` with `STATE`, show `MESSAGE` → back to Step 4 with the new `CYCLE_COUNT` |
-| `DEFER_MINOR` (MINOR at the cap) | the script already wrote `deferred-minor.md` (`COPIED`); run `pipeline_state.py` with `STATE`, show `MESSAGE` → Step 6b/7; mention the deferred count in the commit summary |
+| `NEXT` (CLEAN) | show `MESSAGE` → Step 6b/7 |
+| `CYCLE` (MINOR, below the cap) | show `MESSAGE` → back to Step 4 with the new `CYCLE_COUNT` |
+| `DEFER_MINOR` (MINOR at the cap) | the script already wrote `deferred-minor.md` (`COPIED`); show `MESSAGE` → Step 6b/7; mention the deferred count in the commit summary |
 | `ASK_USER` (MAJOR/CRITICAL, or the 3-round limit) | show `MESSAGE` verbatim and wait. `fix` → `pipeline_state.py` with `STATE_FIX`, back to Step 4. `accept [reason]` → `STATE_ACCEPT` (add the reason to the log text), continue. `stop` → pause |
 
-Show `✓ Step 6: …` as given in `MESSAGE`. Substitute `[STORY_ID]` nowhere by hand: `STATE` is ready to run (the word `TIMESTAMP` is replaced by `pipeline_state.py`).
+Show `✓ Step 6: …` as given in `MESSAGE`. Substitute `[STORY_ID]` nowhere by hand: `STATE` (needed only for the manual `ASK_USER` cases) is ready to run (the word `TIMESTAMP` is replaced by `pipeline_state.py`).

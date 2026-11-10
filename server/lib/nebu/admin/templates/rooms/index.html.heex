@@ -12,6 +12,20 @@
 
   <%!-- Status filter: GET query param (no LiveView event) --%>
   <form id="room-filter-form" method="get" action="/admin/rooms" class="mb-4 max-w-xs" data-form="room-filter">
+    <div class="form-control w-full mb-2">
+      <label for="room-search" class="label-text">Search rooms</label>
+      <input
+        type="search"
+        id="room-search"
+        name="q"
+        value={assigns[:search] || ""}
+        maxlength="100"
+        placeholder="Room name or id"
+        autocomplete="off"
+        class="input input-bordered w-full"
+        data-field="room-search"
+      />
+    </div>
     <label class="form-control w-full">
       <span class="label-text">Status</span>
       <select
@@ -47,7 +61,7 @@
         data-status={room_status(room)}
       >
         <td>
-          <a href={"/admin/rooms/" <> URI.encode(room.room_id, &URI.char_unreserved?(&1))} class="text-primary">
+          <a href={"/admin/rooms/" <> URI.encode(room.room_id, &URI.char_unreserved?(&1))} class="text-primary break-words" title={room.room_id}>
             {room_display_name(room)}
           </a>
         </td>

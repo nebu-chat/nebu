@@ -17,6 +17,7 @@ defmodule Nebu.MixProject do
         &String.ends_with?(&1, "media_fakes.exs"),
         &String.ends_with?(&1, "create_room_test_support.exs"),
         &String.ends_with?(&1, "oidc_test_support.exs"),
+        &String.ends_with?(&1, "session_lookup_test_support.exs"),
         &String.ends_with?(&1, "media_mutation_invariant_support.exs"),
         &String.ends_with?(&1, "clamav_fake_server.exs"),
         &String.ends_with?(&1, "oauth_test_support.exs"),

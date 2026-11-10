@@ -82,23 +82,12 @@ defmodule Nebu.Matrix.MemberPrevContentHttpTest do
 
   # waits until the millisecond clock is PAST the newest event of the last seconds (createRoom stamps its chain and the invite events up to
   # about 70 ms AHEAD of the clock, follow-up eu F-4): the smallest wait that makes the scenarios deterministic
-  defp tick do
-    horizon = System.system_time(:millisecond) - 10_000
-    newest = T.sql!("SELECT coalesce(max(origin_server_ts), 0) FROM events WHERE origin_server_ts > $1", [horizon]).rows |> hd() |> hd()
-    :ok = wait_until(fn -> System.system_time(:millisecond) > newest end, 300)
-  end
+  # bugfix integration-test-flakes-fix (C): the shared helper (a wall-clock budget instead of 300 x 1 ms, a readable failure instead of `:timeout`)
+  defp tick, do: Nebu.Matrix.ModerationTestSupport.tick()
 
   defp ts_after(room) do
     newest = T.sql!("SELECT coalesce(max(origin_server_ts), 0) FROM events WHERE room_id = $1", [room]).rows |> hd() |> hd()
     max(System.system_time(:millisecond), newest) + 1
-  end
-
-  defp wait_until(fun, attempts) when is_integer(attempts) do
-    cond do
-      fun.() -> :ok
-      attempts <= 0 -> :timeout
-      true -> (Process.sleep(1); wait_until(fun, attempts - 1))
-    end
   end
 
   defp make_room(user, body) do

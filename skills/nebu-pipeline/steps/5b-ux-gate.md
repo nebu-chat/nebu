@@ -19,9 +19,9 @@ REPORT_FILE: $STEP_RESULTS_DIR/[STORY_ID]/ux-findings.md
 ## Evaluate (script)
 
 ```bash
-python3 skills/nebu-pipeline/scripts/pipeline_gates.py decide --step ux-gate --story [STORY_ID] --digest - <<'EOF'
+python3 skills/nebu-pipeline/scripts/pipeline_gates.py decide --step ux-gate --story [STORY_ID] --apply $STATE_FILE --digest - <<'EOF'
 <the agent's digest lines, verbatim>
 EOF
 ```
-`ACTION: NEXT` → `pipeline_state.py --file $STATE_FILE <STATE>`, show `MESSAGE`. `ACTION: ASK_USER` (violations are blocking) → show `MESSAGE`, stop and wait; "continue" → run `pipeline_state.py` with `STATE`.
+`ACTION: NEXT` → state already updated (`APPLIED`), show `MESSAGE`. `ACTION: ASK_USER` (violations are blocking) → show `MESSAGE`, stop and wait; "continue" → run `pipeline_state.py` with `STATE`.
 Skipped (not a UI story): `pipeline_state.py --file $STATE_FILE --log "[STORY_ID] TIMESTAMP ux-gate → skipped (no UI)"`.

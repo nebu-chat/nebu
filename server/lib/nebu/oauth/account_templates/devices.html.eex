@@ -1,2 +1,37 @@
-<p>These are the devices and apps that are signed in to your account. Sign out the ones you do not recognize or no longer use.</p>
-<%= @table %>
+<p><%= t(@lang, "acct.devices.sentence") %></p>
+<%= if @devices == [] do %>
+<p data-role="no-devices"><%= t(@lang, "acct.devices.empty") %></p>
+<% else %>
+<ul class="cards" data-role="device-list">
+<%= for d <- @devices do %>
+<li class="card" data-role="account-device" data-device-id="<%= d.device_id %>">
+<div class="top">
+<div>
+<h2 data-role="device-name"><%= device_name(d, @lang) %></h2>
+<p class="meta" data-role="device-meta"><%= app_label(d, @lang) %> · <%= active(d, @lang) %></p>
+</div>
+<a class="btn secondary" data-role="device-row-rename" href="<%= rename_href(d.device_id) %>" aria-label="<%= tf(@lang, "acct.device.rename_label", %{"name" => device_name(d, @lang), "id" => d.device_id}) %>"><%= t(@lang, "acct.device.rename") %></a>
+<a class="btn danger" data-role="device-row-sign-out" href="<%= device_href("org.matrix.device_delete", d.device_id) %>" aria-label="<%= tf(@lang, "acct.device.sign_out_label", %{"name" => device_name(d, @lang), "id" => d.device_id}) %>"><%= t(@lang, "acct.device.sign_out") %></a>
+</div>
+<details>
+<summary><%= t(@lang, "acct.details") %></summary>
+<dl>
+<dt><%= t(@lang, "acct.device.d.id") %></dt>
+<dd><%= d.device_id %></dd>
+<dt><%= t(@lang, "acct.device.d.app") %></dt>
+<dd><%= app_label(d, @lang) %></dd>
+<dt><%= t(@lang, "acct.device.d.last_active") %></dt>
+<dd><%= time_tag(d.last_seen_ts, t(@lang, "acct.never")) %></dd>
+<dt><%= t(@lang, "acct.device.d.ip") %></dt>
+<dd><%= d.last_seen_ip || t(@lang, "acct.unknown") %></dd>
+<dt><%= t(@lang, "acct.device.d.added") %></dt>
+<dd><%= time_tag(d.created_at, t(@lang, "acct.unknown")) %></dd>
+</dl>
+</details>
+</li>
+<% end %>
+</ul>
+<%= if @hidden > 0 do %>
+<p data-role="devices-truncated"><%= hidden_note(@hidden, @hidden_exact, @lang) %></p>
+<% end %>
+<% end %>

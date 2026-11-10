@@ -63,21 +63,28 @@ defmodule Nebu.Admin.LogsControllerTest do
   setup do
     Application.put_env(:nebu_http, :admin_csrf_bypass, true)
 
-    # Defensive reset — NOT relying on the on_exit DELETEs below actually
-    # working. `server_config` has FORCE ROW LEVEL SECURITY and (by design;
-    # no production code path ever deletes a config row) NO policy permits
-    # DELETE for any key, so every `DELETE FROM server_config WHERE key =
-    # ...` below silently affects 0 rows — a value set by an EARLIER test
-    # (in this file, or another file sharing the same live Nebu.Repo
-    # connection within one `mix test` run, e.g. retention_test.exs) would
-    # otherwise leak forward and break a later test's "this key is unset"
-    # assumption (e.g. AT10's "blank/zero persists as no limit"). UPSERT-ing
-    # each key to its neutral value ("false"/"" — both read back as
-    # false/nil) IS permitted by the `config_update_mutable` RLS policy
-    # (unlike DELETE), reliably re-establishing a clean baseline before
-    # every test. Tests that need a specific value still `seed_policy/1` it
-    # explicitly afterward (an UPDATE, which works).
+    # Defensive reset — `server_config` has FORCE ROW LEVEL SECURITY and (by
+    # design; no production code path ever deletes a config row) NO policy
+    # permits DELETE for any key for the runtime role, so a plain `DELETE
+    # FROM server_config WHERE key = ...` silently affects 0 rows — a value
+    # set by an EARLIER test (in this file, or another file sharing the same
+    # live Nebu.Repo connection within one `mix test` run, e.g.
+    # retention_test.exs) would otherwise leak forward and break a later
+    # test's "this key is unset" assumption (e.g. AT10's "blank/zero
+    # persists as no limit"). UPSERT-ing each key to its neutral value
+    # ("false"/"" — both read back as false/nil) IS permitted by the
+    # `config_update_mutable` RLS policy (unlike DELETE), reliably
+    # re-establishing a clean baseline before every test. Tests that need a
+    # specific value still `seed_policy/1` it explicitly afterward (an
+    # UPDATE, which works).
+    #
+    # bugfix test-cleanup-rls-noop-delete: the on_exit used to DELETE the keys
+    # (a no-op), so the last test's values (e.g. log_collect_debug=true) stayed
+    # behind for the rest of the run and for the live stack. The keys are now
+    # snapshotted before the reset and put back by the privileged role on exit.
     if Process.whereis(Nebu.Repo) do
+      Nebu.OAuth.TestSupport.restore_server_config_on_exit!(@log_policy_keys)
+
       Nebu.Admin.DB.upsert_server_config(%{
         "log_collect_info" => "false",
         "log_retention_info_days" => "",
@@ -91,12 +98,6 @@ defmodule Nebu.Admin.LogsControllerTest do
     on_exit(fn ->
       Application.delete_env(:nebu_http, :admin_csrf_bypass)
       Application.delete_env(:nebu_http, :admin_logs_retention_writer)
-
-      if Process.whereis(Nebu.Repo) do
-        for key <- @log_policy_keys do
-          Ecto.Adapters.SQL.query(Nebu.Repo, "DELETE FROM server_config WHERE key = $1", [key])
-        end
-      end
     end)
 
     :ok

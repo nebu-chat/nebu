@@ -1,0 +1,27 @@
+<dl>
+<dt><%= t(@lang, "acct.device.d.id") %></dt>
+<dd><%= @device.device_id %></dd>
+<dt><%= t(@lang, "acct.device.d.app") %></dt>
+<dd><%= app_label(@device, @lang) %></dd>
+</dl>
+<%= if @fresh do %>
+<form method="post" action="/account/devices/rename" data-role="rename-device-form">
+<input type="hidden" name="device_id" value="<%= @device.device_id %>">
+<input type="hidden" name="csrf_token" value="<%= @csrf_token %>">
+<div class="field">
+<label for="device-name"><%= t(@lang, "acct.rename.label") %></label>
+<input type="text" id="device-name" name="device_name" value="<%= @device.display_name %>" maxlength="64" autocomplete="off" aria-describedby="device-name-hint">
+<p class="muted" id="device-name-hint"><%= t(@lang, "acct.rename.hint") %></p>
+</div>
+<div class="actions">
+<button type="submit" class="btn primary" data-role="rename-save"><%= t(@lang, "acct.rename.save") %></button>
+<a class="btn secondary" data-role="rename-cancel" href="/account?action=org.matrix.devices_list"><%= t(@lang, "acct.rename.cancel") %></a>
+</div>
+</form>
+<% else %>
+<%= if !@no_auth_time do %>
+<p><%= t(@lang, "acct.rename.reauth") %></p>
+<p><a data-role="reauth" class="btn primary" href="<%= @reauth_href %>"><%= t(@lang, "acct.reauth.button") %></a></p>
+<% end %>
+<p><a data-role="rename-cancel" class="btn secondary" href="/account?action=org.matrix.devices_list"><%= t(@lang, "acct.rename.cancel") %></a></p>
+<% end %>

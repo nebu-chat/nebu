@@ -1,0 +1,7 @@
+# code-review — cycle 0
+MINOR | server/lib/nebu/web/page_shell.ex:43 | `summary{display:flex}` removes the native list-item disclosure marker (triangle) in Chromium/Firefox, so "More options"/"Weitere Möglichkeiten" has no visual expand affordance beyond colour | keep `display:list-item` (use padding/min-height for the 44px target) or add an explicit `summary::before`/`::marker` indicator
+INFO | server/lib/nebu/oauth/pages.ex:83 | response body now varies on Accept-Language but no `Vary: Accept-Language` is sent; harmless because Cache-Control is no-store | optionally add `vary: accept-language` in a later shell story
+INFO | server/lib/nebu/web/page_shell.ex:61 | status icon always uses `--err-border` (red) also for client_pending (a waiting, not an error, state) | consider a warn-coloured variant when the shell gains notice types
+INFO | server/lib/nebu/web/page_shell.ex:38 | `.notice`, `.btn`, `.muted` styles are unused by the 13 error pages yet (intended for later stories); they are part of the CSP hash, so each later CSS change re-hashes — fine by design
+INFO | server/test/nebu/oauth/page_shell_i18n_test.exs:275 | "a missing key fails the build" is enforced by compile-time loops in PageText and Pages but not exercised by a test (cannot be from ExUnit without Code.compile_string); acceptable
+INFO | e2e/step-definitions/oauth/page-shell-and-i18n.steps.ts:15 | header comment says "share no module state" while the file uses module-level `let` (reset in Before); comment slightly misleading

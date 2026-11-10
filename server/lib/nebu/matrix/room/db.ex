@@ -2863,12 +2863,25 @@ defmodule Nebu.Matrix.Room.DB do
   `world_readable` room the plain read was cheap, about 21 rows, so this is a regression there), never a function of the hidden
   history.
 
-  The statement is written so that the bound holds whatever the planner picks (decision D-A1): the position bounds are
-  `COALESCE(room_pos, 0)` expressions (a plain bound lets the planner walk the partial position index over the hidden stretch), the
-  special events are fetched by a `LATERAL ... LIMIT 1` on the primary key with the room checked afterwards, and the floor is a
-  `min()` over a position RANGE (a `ORDER BY room_pos DESC LIMIT 64` is turned into a bitmap scan of the whole room under stale
-  statistics; the empty-window fallback is a range for the same reason) behind an `OFFSET 0` fence (without it the planner may rewrite `min(origin_server_ts)` into a walk of
-  `events_room_id_ts_idx`, a read of the room's history below the window; pinned by the plan-shape tests). Not a `DBBehaviour`
+  What is, and is not, guaranteed (decision D-A1, corrected by bugfix sync-rejoin-floor-window-point-lookups: the earlier claim "the
+  bound holds whatever the planner picks" was FALSE for the floor window). The position bounds are `COALESCE(room_pos, 0)`
+  expressions (a plain bound lets the planner walk the partial position index over the hidden stretch), the special events are
+  fetched by a `LATERAL ... LIMIT 1` on the primary key with the room checked afterwards, and the floor is a `min()` over a position
+  RANGE behind an `OFFSET 0` fence (without it the planner may rewrite `min(origin_server_ts)` into a walk of
+  `events_room_id_ts_idx`, a read of the room's history below the window). The floor window is bounded by its INDEX, not by the
+  statement text: the position is per room but its statistics are global, so the estimate of a low range is inflated (hundreds of
+  rows against the real 10), and an index that serves the range with only `room_id` as index condition (`events_room_id_ts_idx`,
+  small because identical `(room_id, ts)` keys are deduplicated) read the WHOLE room (measured: 404 of 414 rows removed by the
+  filter). Migration 000063 adds the covering index `events_room_pos_ts_idx (room_id, room_pos) INCLUDE (origin_server_ts) WHERE
+  room_pos IS NOT NULL`: the floor is then an index-only scan of at most 64 entries (heap fetches only for rows not yet all-visible,
+  also at most 64), cheaper than any room-only path in every regime measured (skew, stale statistics, fresh `ANALYZE`, generic and
+  custom plans, index-only scans off). 64 point lookups (`generate_series` + `LATERAL ... LIMIT 1`) were measured as an alternative:
+  without the covering index they are WORSE (a stale-statistics plan used the room-only bitmap 64 times); with it they are equal, so
+  the simpler range stays. Residual (measured in a hostile transaction): when index-only scans are not usable (switched off, or most
+  pages not all-visible so the covering index costs like a plain index) AND a still smaller room-only index exists AND the estimate
+  is inflated, the planner can still pick a room-only bitmap scan: ONE read of the room per floor, the behaviour before the
+  migration. Measured on a churned table with a fresh ANALYZE: one whole-room read per floor (accepted residual; a per-room floor structure that removes
+  the planner choice is a possible later story). The bound is pinned by the plan-shape tests and the row probes, not guaranteed against an arbitrary planner. Not a `DBBehaviour`
   callback. `{:ok, events}` | `{:error, reason}`. Read-only.
   """
   @spec fetch_visible_events_in_range_segmented(String.t(), String.t(), non_neg_integer(), non_neg_integer(), pos_integer()) ::

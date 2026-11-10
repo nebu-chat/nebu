@@ -369,19 +369,14 @@ defmodule Nebu.Web.LogStore.HandlerTest do
     test "a send-event request with a real message body is persisted to operational_logs WITHOUT the raw secret" do
       Nebu.Release.migrate()
 
+      # bugfix test-cleanup-rls-noop-delete: the former `DELETE FROM server_config` cleanup deleted nothing (FORCE row level security, no DELETE
+      # policy), so the log policy written below stayed behind for the rest of the run. Snapshot first, privileged restore on exit.
+      Nebu.OAuth.TestSupport.restore_server_config_on_exit!(["log_collect_info", "log_collect_debug"])
+
       Nebu.Admin.DB.upsert_server_config(%{
         "log_collect_info" => "true",
         "log_collect_debug" => "true"
       })
-
-      on_exit(fn ->
-        if Process.whereis(Nebu.Repo) do
-          Ecto.Adapters.SQL.query(Nebu.Repo, "DELETE FROM server_config WHERE key IN ($1, $2)", [
-            "log_collect_info",
-            "log_collect_debug"
-          ])
-        end
-      end)
 
       case Process.whereis(Nebu.Web.LogStore.Writer) do
         nil -> start_supervised!(Nebu.Web.LogStore.Writer)
@@ -515,6 +510,10 @@ defmodule Nebu.Web.LogStore.HandlerTest do
       Nebu.Release.migrate()
       ensure_war_room_deps_started!()
 
+      # bugfix test-cleanup-rls-noop-delete: the former `DELETE FROM server_config` cleanup deleted nothing (FORCE row level security, no DELETE
+      # policy), so the log policy written below stayed behind for the rest of the run. Snapshot first, privileged restore on exit.
+      Nebu.OAuth.TestSupport.restore_server_config_on_exit!(["log_collect_info", "log_collect_debug"])
+
       Nebu.Admin.DB.upsert_server_config(%{
         "log_collect_info" => "false",
         "log_collect_debug" => "false"
@@ -546,12 +545,6 @@ defmodule Nebu.Web.LogStore.HandlerTest do
           Ecto.Adapters.SQL.query(Nebu.Repo, "DELETE FROM war_room_sessions WHERE id = $1", [
             Ecto.UUID.dump!(session.id)
           ])
-
-          Ecto.Adapters.SQL.query(
-            Nebu.Repo,
-            "DELETE FROM server_config WHERE key IN ($1, $2)",
-            ["log_collect_info", "log_collect_debug"]
-          )
         end
       end)
 
@@ -610,6 +603,10 @@ defmodule Nebu.Web.LogStore.HandlerTest do
       Nebu.Release.migrate()
       ensure_war_room_deps_started!()
 
+      # bugfix test-cleanup-rls-noop-delete: the former `DELETE FROM server_config` cleanup deleted nothing (FORCE row level security, no DELETE
+      # policy), so the log policy written below stayed behind for the rest of the run. Snapshot first, privileged restore on exit.
+      Nebu.OAuth.TestSupport.restore_server_config_on_exit!(["log_collect_info", "log_collect_debug"])
+
       Nebu.Admin.DB.upsert_server_config(%{
         "log_collect_info" => "true",
         "log_collect_debug" => "false"
@@ -636,12 +633,6 @@ defmodule Nebu.Web.LogStore.HandlerTest do
           Ecto.Adapters.SQL.query(Nebu.Repo, "DELETE FROM war_room_sessions WHERE id = $1", [
             Ecto.UUID.dump!(session.id)
           ])
-
-          Ecto.Adapters.SQL.query(
-            Nebu.Repo,
-            "DELETE FROM server_config WHERE key IN ($1, $2)",
-            ["log_collect_info", "log_collect_debug"]
-          )
         end
       end)
 
@@ -710,6 +701,10 @@ defmodule Nebu.Web.LogStore.HandlerTest do
       Nebu.Release.migrate()
       ensure_war_room_deps_started!()
 
+      # bugfix test-cleanup-rls-noop-delete: the former `DELETE FROM server_config` cleanup deleted nothing (FORCE row level security, no DELETE
+      # policy), so the log policy written below stayed behind for the rest of the run. Snapshot first, privileged restore on exit.
+      Nebu.OAuth.TestSupport.restore_server_config_on_exit!(["log_collect_info", "log_collect_debug"])
+
       Nebu.Admin.DB.upsert_server_config(%{
         "log_collect_info" => "false",
         "log_collect_debug" => "false"
@@ -734,12 +729,6 @@ defmodule Nebu.Web.LogStore.HandlerTest do
           Ecto.Adapters.SQL.query(Nebu.Repo, "DELETE FROM war_room_sessions WHERE id = $1", [
             Ecto.UUID.dump!(session.id)
           ])
-
-          Ecto.Adapters.SQL.query(
-            Nebu.Repo,
-            "DELETE FROM server_config WHERE key IN ($1, $2)",
-            ["log_collect_info", "log_collect_debug"]
-          )
         end
       end)
 

@@ -1,0 +1,4 @@
+feat(oauth): shared Nebu page shell and German/English texts
+
+Pipeline: ATDD, 1 fix cycle, Code CLEAN, Kassandra CLEAN.
+Refs: REQ-2026-017

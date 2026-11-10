@@ -37,11 +37,11 @@ She verifies the candidates first, then reviews what the prescan cannot see (aut
 ## Evaluate (script)
 
 ```bash
-python3 skills/nebu-pipeline/scripts/pipeline_gates.py decide --step security-review --story [STORY_ID] --digest - <<'EOF'
+python3 skills/nebu-pipeline/scripts/pipeline_gates.py decide --step security-review --story [STORY_ID] --git-add . --apply $STATE_FILE --digest - <<'EOF'
 <the agent's digest lines, verbatim>
 EOF
 ```
-`ACTION: NEXT` → `pipeline_state.py --file $STATE_FILE <STATE>` (then `rtk git add .` for a CLEAN report), show `MESSAGE`.
+`ACTION: NEXT` → the script already ran `git add .` (stages the report) and updated the state (`APPLIED`); show `MESSAGE`.
 `ACTION: ASK_USER` (CRITICAL, or HIGH when `blocking_severity: HIGH` in `.claude/security-agent.yaml`) → show `MESSAGE`, stop and wait. (a) fix → `STATE_FIX`, back to Step 4;
 (b) accept with justification / (c) follow-up story / `continue` → `STATE`.
 

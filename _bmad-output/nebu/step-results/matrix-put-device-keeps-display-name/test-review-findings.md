@@ -1,0 +1,12 @@
+# test-review — cycle 0
+MINOR | server/test/nebu/matrix/device_put_keeps_display_name_test.exs:107 | (lint, verbatim) test without assertion: "PUT with a name string still renames (regression)" | assert the observable outcome
+MINOR | server/test/nebu/matrix/device_put_keeps_display_name_test.exs:133 | (lint, verbatim) test without assertion: "PUT {\"display_name\": <#{label}>} -> 400 M_BAD_JSON and the" | assert the observable outcome
+MINOR | _bmad-output/nebu/step-results/matrix-put-device-keeps-display-name/oracle-context.md | (lint, verbatim) spec error code M_NOT_JSON is not referenced by any test | add a test for it or note why it does not apply
+INFO | server/test/nebu/matrix/device_put_keeps_display_name_test.exs:107 | JUDGE: the two lint "no assertion" MINORs are false positives; put!/assert_name_everywhere!/assert_errcode! assert status, {} body, DB name, GET /devices, GET /devices/{id} | none
+INFO | server/test/nebu/matrix/device_put_keeps_display_name_test.exs:133 | Assertions meaningful: 400 tests check status AND errcode M_BAD_JSON AND name unchanged in DB/GET; a wrong impl (404, 200, wrong errcode, name wiped) fails | none
+INFO | server/test/nebu/matrix/device_put_keeps_display_name_test.exs:119 | Null-clear test passes today (current handler clears on any missing key); it is a regression pin guarding the null branch against over-correction, not a red test | none
+INFO | server/test/nebu/matrix/device_put_keeps_display_name_test.exs:150 | Unknown-device PUT with null display_name and a stored-"" GET /devices (must return "") are not tested | optional extra cases
+INFO | server/test/nebu/matrix/device_put_keeps_display_name_test.exs:1 | M_NOT_JSON (malformed body) and 201-for-AS are not tested; Oracle marks them optional/out of scope | optional
+INFO | server/test/nebu/oauth/device_name_plan_blank_test.exs:21 | Plan/3 blank scenario covered purely (3 failing, 3 regression); the integration effect (Allow page does not replace stored "") has no DB-level test | optional
+INFO | docs/stories/bugfix/matrix-put-device-keeps-display-name.md:1 | All 5 AC scenarios have tests (PUT {}, null, non-string x4, unknown 404 x2, plan blank x3); extra Oracle cases (foreign device 404, 401 M_MISSING_TOKEN) covered; no GenServer state, no UI story | none
+INFO | server/test/nebu/oauth/device_name_oauth_test_support.exs:127 | clear_name! switched to explicit null as the Oracle demanded; red.log shows 9 expected failures (4 non-string, PUT {}, blank PUT {}, 3 plan) and 59 passes | none

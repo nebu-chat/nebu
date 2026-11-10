@@ -61,6 +61,15 @@ defmodule Nebu.Matrix.SsoLogin do
   require Logger
 
   alias Nebu.Matrix.{SsoConfirm, SsoRedirect, SsoStore}
+  alias Nebu.Web.{Locale, PageShell, PageText}
+
+  # The ONE inline script of the "Authentication complete" page: the Matrix v1.18 UIA fallback script, verbatim (UIA > Fallback):
+  # onAuthDone when the client defines it, ELSE postMessage("authDone", "*") to the opener (one notification path, never both; the
+  # wildcard target origin is spec-prescribed, the client checks ev.origin). The CSP allows exactly this script by its SHA-256,
+  # computed at compile time from this same text.
+  @uia_script ~s|if (window.onAuthDone) { window.onAuthDone(); } else if (window.opener && window.opener.postMessage) { | <>
+                ~s|window.opener.postMessage("authDone", "*"); }|
+  @uia_csp PageShell.csp_with_script(@uia_script)
 
   # State (user-typing-at-IdP) window and opaque-loginToken replay window.
   @state_ttl_seconds 600
@@ -154,9 +163,9 @@ defmodule Nebu.Matrix.SsoLogin do
       scheme = uri.scheme && String.downcase(uri.scheme)
 
       conn
-      |> put_resp_header("content-security-policy", "default-src 'none'")
+      |> put_resp_header("content-security-policy", PageShell.csp())
       |> put_resp_content_type("text/html")
-      |> send_resp(400, render_html_error(scheme))
+      |> send_resp(400, render_html_error(scheme, Locale.from_conn(conn)))
     else
       error(conn, 400, "M_INVALID_PARAM", "redirectUrl scheme is not permitted")
     end
@@ -263,25 +272,24 @@ defmodule Nebu.Matrix.SsoLogin do
   # Public (not `defp`) so it can be unit-tested directly, independent of the
   # HTTP/Plug.Conn integration path.
   @doc false
-  @spec render_html_error(String.t() | nil) :: String.t()
-  def render_html_error(scheme) do
-    escaped_scheme = Plug.HTML.html_escape(scheme || "")
+  @spec render_html_error(String.t() | nil, Locale.t()) :: String.t()
+  def render_html_error(scheme, lang \\ :en) do
+    t = &PageShell.esc(PageText.fetch!(&1, lang))
+    code = "<code>#{PageShell.esc(scheme || "")}</code>"
+    explanation = Regex.replace(~r/\{scheme\}/, t.("unsupported.explanation"), fn _ -> code end)
 
-    """
-    <!doctype html>
-    <html lang="en">
-    <head>
-      <meta charset="utf-8">
-      <title>Login Not Supported</title>
-    </head>
-    <body>
-      <h1>Login Method Not Supported</h1>
-      <p>This app's login method (<code>#{escaped_scheme}</code>) is not yet permitted on this server.</p>
-      <p>Please contact your server administrator and ask them to add this scheme under
-      the Admin UI at <code>/admin/config</code>, in the "SSO redirect schemes" section.</p>
-    </body>
-    </html>
-    """
+    content =
+      "#{PageShell.status_icon()}\n" <>
+        "<h1>#{t.("unsupported.heading")}</h1>\n" <>
+        "<p>#{explanation}</p>\n" <>
+        "<p class=\"primary\"><strong>#{t.("unsupported.primary")}</strong></p>\n" <>
+        "<details>\n<summary>#{t.("ui.more_options")}</summary>\n<ul>\n<li>#{t.("unsupported.more")}</li>\n</ul>\n</details>"
+
+    PageShell.render(lang,
+      title: PageText.fetch!("unsupported.title", lang),
+      main_attrs: ~s(data-page="sso-login-error" data-error="unsupported_scheme"),
+      content: content
+    )
   end
 
   defp do_redirect(conn, redirect_url, uia_session, action \\ nil) do
@@ -637,16 +645,7 @@ defmodule Nebu.Matrix.SsoLogin do
 
     case Nebu.Matrix.Uia.complete(uia_session, authenticated_user) do
       {:ok, _user_id} ->
-        conn
-        |> put_resp_header("cache-control", "no-store")
-        |> put_resp_content_type("text/html")
-        |> send_resp(200, """
-        <!doctype html><html><head><meta charset="utf-8"><title>Authentication complete</title></head>
-        <body><p>Authentication complete. You may return to your client.</p>
-        <script>if (window.onAuthDone) { window.onAuthDone(); }
-        if (window.opener && window.opener.postMessage) { window.opener.postMessage("authDone", "*"); }</script>
-        </body></html>
-        """)
+        send_uia_result(conn, :complete)
 
       :error ->
         # Identity mismatch (or unknown/expired/consumed session). Do NOT mark the
@@ -654,14 +653,57 @@ defmodule Nebu.Matrix.SsoLogin do
         # warning with NO PII / token / session id.
         Logger.warning("matrix UIA SSO: completion identity did not match the pending request")
 
-        conn
-        |> put_resp_header("cache-control", "no-store")
-        |> put_resp_content_type("text/html")
-        |> send_resp(403, """
-        <!doctype html><html><head><meta charset="utf-8"><title>Authentication did not match</title></head>
-        <body><p>This authentication did not match the request that started it. The operation was not authorised.</p></body></html>
-        """)
+        send_uia_result(conn, :mismatch)
     end
+  end
+
+  @doc """
+  Sends the terminal page of the UIA SSO fallback and returns the conn (it logs nothing, renders no request value; the
+  language comes from the conn). `:complete` = status 200 "Authentication complete": the shell page whose ONE inline script
+  (the spec script: `window.onAuthDone()`, else `window.opener.postMessage("authDone", "*")`) is allowed by its SHA-256 only.
+  `:mismatch` = status 403 "Authentication did not match": no script, the strict shell CSP. Both `no-store`, never COOP
+  (popup clients need `window.opener`).
+  """
+  @spec send_uia_result(Plug.Conn.t(), :complete | :mismatch) :: Plug.Conn.t()
+  def send_uia_result(conn, :complete) do
+    lang = Locale.from_conn(conn)
+
+    body =
+      PageShell.render(lang,
+        title: PageText.fetch!("uia.complete.title", lang),
+        main_attrs: ~s(data-page="sso-uia-result" data-result="complete"),
+        content:
+          "<h1>#{PageShell.esc(PageText.fetch!("uia.complete.title", lang))}</h1>\n" <>
+            "<p>#{PageShell.esc(PageText.fetch!("uia.complete.text", lang))}</p>",
+        script: @uia_script
+      )
+
+    conn
+    |> put_resp_header("cache-control", "no-store")
+    |> put_resp_header("content-security-policy", @uia_csp)
+    |> put_resp_content_type("text/html")
+    |> send_resp(200, body)
+  end
+
+  def send_uia_result(conn, :mismatch) do
+    lang = Locale.from_conn(conn)
+    t = &PageShell.esc(PageText.fetch!(&1, lang))
+
+    body =
+      PageShell.render(lang,
+        title: PageText.fetch!("uia.mismatch.title", lang),
+        main_attrs: ~s(data-page="sso-uia-result" data-result="mismatch"),
+        content:
+          "#{PageShell.status_icon()}\n<h1>#{t.("uia.mismatch.heading")}</h1>\n" <>
+            "<p>#{t.("uia.mismatch.explanation")}</p>\n" <>
+            "<p class=\"primary\"><strong>#{t.("uia.mismatch.primary")}</strong></p>"
+      )
+
+    conn
+    |> put_resp_header("cache-control", "no-store")
+    |> put_resp_header("content-security-policy", PageShell.csp())
+    |> put_resp_content_type("text/html")
+    |> send_resp(403, body)
   end
 
   # ── redirectUrl allowlist (open-redirect protection — Go isRedirectURLAllowed) ─

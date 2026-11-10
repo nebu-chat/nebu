@@ -443,6 +443,11 @@ defmodule Nebu.Web.AdminOidcLoginTest do
   end
 
   test "on_mount denies an admin whose capped session has expired" do
+    # bugfix integration-test-flakes-fix (E): the live half below mounts with `bootstrap_completed` read from the database; an instance that has not
+    # finished the bootstrap wizard funnels every admin LiveView to /admin/bootstrap (`{:halt, ...}`). Only an earlier test of this or another file
+    # set it (random order / fresh database -> red). Set here when the database is up (the unit run has no Repo and needs nothing).
+    if Process.whereis(Nebu.Repo), do: Nebu.Admin.DB.upsert_server_config(%{"bootstrap_completed" => "true"})
+
     expired = %{"admin" => true, "sub" => "kai", "session_exp" => System.system_time(:second) - 1}
     assert {:halt, _socket} = Auth.on_mount(:require_admin, %{}, %{"current_user" => expired}, %Phoenix.LiveView.Socket{})
 
@@ -901,7 +906,7 @@ defmodule Nebu.Web.AdminOidcLoginTest do
       on_exit(fn -> Application.delete_env(:nebu_http, :admin_oidc_token_override) end)
 
       # Before this story's fix, no users row exists yet for this identity.
-      {users_before, _} = Nebu.Admin.DB.list_users(500, "", "")
+      {users_before, _} = Nebu.Admin.DB.list_users(500, "", user_id)
       refute Enum.any?(users_before, &(&1.user_id == user_id)),
              "sanity: the admin-only user must not pre-exist from a prior run"
 
@@ -918,7 +923,7 @@ defmodule Nebu.Web.AdminOidcLoginTest do
 
       assert conn.status == 302
 
-      {users_after, _} = Nebu.Admin.DB.list_users(500, "", "")
+      {users_after, _} = Nebu.Admin.DB.list_users(500, "", user_id)
 
       assert Enum.any?(users_after, &(&1.user_id == user_id)),
              "AC3: #{user_id} must appear in Nebu.Admin.DB.list_users/3 (backing GET " <>
@@ -966,7 +971,7 @@ defmodule Nebu.Web.AdminOidcLoginTest do
 
       assert admin_conn.status == 302
 
-      {users_after_admin, _} = Nebu.Admin.DB.list_users(500, "", "")
+      {users_after_admin, _} = Nebu.Admin.DB.list_users(500, "", user_id)
       assert Enum.count(users_after_admin, &(&1.user_id == user_id)) == 1,
              "expected exactly one row after admin-only provisioning"
 
@@ -984,7 +989,7 @@ defmodule Nebu.Web.AdminOidcLoginTest do
              "AC4: a subsequent real Matrix login of an admin-provisioned identity must " <>
                "succeed (idempotent upsert), not error. Got: #{inspect(resp)}"
 
-      {users_after_matrix, _} = Nebu.Admin.DB.list_users(500, "", "")
+      {users_after_matrix, _} = Nebu.Admin.DB.list_users(500, "", user_id)
       assert Enum.count(users_after_matrix, &(&1.user_id == user_id)) == 1,
              "AC4: no duplicate users row after the subsequent real Matrix login — got " <>
                "#{Enum.count(users_after_matrix, &(&1.user_id == user_id))} rows for #{user_id}"
@@ -1040,7 +1045,7 @@ defmodule Nebu.Web.AdminOidcLoginTest do
 
       assert admin_conn.status == 302
 
-      {users_after_admin, _} = Nebu.Admin.DB.list_users(500, "", "")
+      {users_after_admin, _} = Nebu.Admin.DB.list_users(500, "", user_id)
       assert Enum.any?(users_after_admin, &(&1.user_id == user_id)),
              "AC5: #{user_id} must appear in GET /admin/users after an admin-only login with " <>
                "no prior Matrix login — got users: " <>

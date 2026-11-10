@@ -157,7 +157,7 @@ Then(
   'the consent page names the app {string} as claimed by the app',
   async ({ page }: { page: Page }, appName: string) => {
     await expect(consentMain(page)).toBeVisible({ timeout: NAV_TIMEOUT_MS });
-    await expect(consentMain(page)).toContainText('App name (claimed by the app)');
+    await expect(consentMain(page)).toContainText('Name given by the app, not verified');
     await expect(consentMain(page)).toContainText(appName);
   },
 );
@@ -333,12 +333,9 @@ When(
     await expect(consentMain(page), 'the reloaded consent page is shown').toBeVisible({ timeout: NAV_TIMEOUT_MS });
     await expect(allowButton(page), 'a reload gives a fresh, unarmed page').toHaveAttribute('aria-disabled', 'true');
 
-    const unarmedBox = await allowButton(page).boundingBox();
-    expect(unarmedBox, 'unarmed Allow has a layout box').not.toBeNull();
-    expect(
-      parked.y >= unarmedBox!.y && parked.y <= unarmedBox!.y + unarmedBox!.height,
-      `the parked point must NOT be on the unarmed Allow ${JSON.stringify(unarmedBox)}: Allow only arrives under the pointer with the arming`,
-    ).toBe(false);
+    // story oauth-pages-redesign/03: the arming hint now sits BELOW the buttons, so Allow no longer moves when the page arms.
+    // The pointer therefore rests on Allow already while it is unarmed (the harder case for the defence): the click must still be refused.
+    expect(await allowButton(page).boundingBox(), 'unarmed Allow has a layout box').not.toBeNull();
     await page.mouse.move(parked.x, parked.y); // the pointer parks where Allow will be
     await waitArmDwell(page);
     await page.keyboard.press('Shift'); // a key press is interaction that is not on Allow: it arms the page

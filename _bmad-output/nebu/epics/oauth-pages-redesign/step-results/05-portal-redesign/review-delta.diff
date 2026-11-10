@@ -1,0 +1,182 @@
+diff --git a/_bmad-output/nebu/epics/oauth-pages-redesign/pipeline-state.yaml b/_bmad-output/nebu/epics/oauth-pages-redesign/pipeline-state.yaml
+index 0a0ff341..7b3124b6 100644
+--- a/_bmad-output/nebu/epics/oauth-pages-redesign/pipeline-state.yaml
++++ b/_bmad-output/nebu/epics/oauth-pages-redesign/pipeline-state.yaml
+@@ -1,6 +1,8 @@
+ # Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents.
+ # Do not edit manually during an active pipeline run.
+ # last_updated: 2026-11-05
++# [05-portal-redesign] 2026-11-05T18:31Z dev-story → done (cycle 1)
++# [05-portal-redesign] 2026-11-05T18:30Z code-review → 3 MINOR → cycle 1
+ # [05-portal-redesign] 2026-11-05T18:28Z ux-gate → CLEAN
+ # [05-portal-redesign] 2026-11-05T18:26Z ci-gate → full fresh-DB run new=10 (2 story test files fixed; 8 outside files pass in isolation, accepted per epic policy, follow-ups.md extended); targeted run 3161 tests new=0; unit 1869 passed
+ # [05-portal-redesign] 2026-11-05T17:59Z dev-story → done (cycle 0)
+@@ -73,13 +75,13 @@
+ # [01-device-naming-chain] 2026-11-05T09:30Z oracle-gate → skipped (MATRIX=false)
+ # [01-device-naming-chain] 2026-11-05T09:30Z classify → matrix=false(classifier; story frontmatter matrix:true) ui=true infra=false sec=required
+ story: "05-portal-redesign"
+-current_step: "ux-gate"
++current_step: "ci-gate"
+ completed:
+   - classify
+   - atdd
+   - test-review
+   - dev-story
+   - ci-gate
+-cycle_count: 0
++cycle_count: 1
+ blocked_reason: null
+-last_updated: "2026-11-05T18:28Z"
++last_updated: "2026-11-05T18:31Z"
+diff --git a/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/05-portal-redesign/code-review-findings.md b/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/05-portal-redesign/code-review-findings.md
+new file mode 100644
+index 00000000..7cf527a6
+--- /dev/null
++++ b/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/05-portal-redesign/code-review-findings.md
+@@ -0,0 +1,10 @@
++# code-review — cycle 0
++MINOR | e2e/step-definitions/oauth/portal-redesign.steps.ts:695 | brittle selector (lint, final; carried from test-review) | use role/label/test-id selectors
++MINOR | server/lib/nebu/oauth/account_pages.ex:237 | overview tile count = length(devices) + hidden is shown as an exact "N signed in" even when hidden_exact is false (read limit reached, the count is only a lower bound); the devices page says "at least" for the same case | pass hidden_exact into render_overview and use an "at least N" / "N+" catalog variant (EN+DE)
++MINOR | e2e/step-definitions/oauth/portal-redesign.steps.ts:677 | AC5 scenario is skipped when reset requests are left over from an earlier run (state pollution turns the click-proof check into a silent skip) | decline/clean the leftover requests in the Given step (or wipe them in setup) so exactly one request exists, and fail rather than skip
++INFO | e2e/step-definitions/oauth/portal-redesign.steps.ts:162 | gate-y skip when the IdP gives no auth_time follows the established epic pattern (annotation + evidence log) | none
++INFO | server/lib/nebu/oauth/account.ex:288 | overview reads consent grants before the device list and runs with_app_names on devices it never shows (device_list_page reused for :default) | optional: read grants inside the with_devices callback, skip with_app_names for :default
++INFO | server/lib/nebu/oauth/account_pages.ex:380 | active/2: a last_seen_ts slightly in the future (clock skew) renders "active in 1 minute" | optional: clamp positive delta to 0 ("just now")
++INFO | server/lib/nebu/oauth/account_templates/devices.html.eex:13 | the per-device "Details" link to org.matrix.device_view was dropped from the list (route still reachable from Matrix clients; details now in <details>) | none, matches design
++INFO | server/lib/nebu/oauth/account_templates/apps.html.eex:11 | website fallback uses acct.unknown while the aria-label uses grant_host/2 (acct.apps.host_unknown): two different "unknown" texts for the same value | optional: use grant_host/2 in the meta line too
++INFO | server/lib/nebu/oauth/account_pages.ex:297 | escaping verified: heading/title/user_id/action via PageShell.esc, tf/2 output escaped by the engine, data-error whitelisted, click-proof script only when reset_script?/2 and CSP pinned; AC1-AC5 each covered by ExUnit + Playwright | none
+diff --git a/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/05-portal-redesign/review-prescan.digest b/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/05-portal-redesign/review-prescan.digest
+new file mode 100644
+index 00000000..258bfaef
+--- /dev/null
++++ b/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/05-portal-redesign/review-prescan.digest
+@@ -0,0 +1,4 @@
++VERDICT: CLEAN
++COUNTS: major=0 minor=0 hints=0
++REPORT: _bmad-output/nebu/epics/oauth-pages-redesign/step-results/05-portal-redesign/review-prescan.md
++TOP: -
+diff --git a/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/05-portal-redesign/review-prescan.md b/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/05-portal-redesign/review-prescan.md
+new file mode 100644
+index 00000000..fa07743a
+--- /dev/null
++++ b/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/05-portal-redesign/review-prescan.md
+@@ -0,0 +1,2 @@
++# review-prescan — 2504 added lines, 30 changed files, last shipped migration 000062
++
+diff --git a/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/05-portal-redesign/reviewed-tree.txt b/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/05-portal-redesign/reviewed-tree.txt
+new file mode 100644
+index 00000000..2cced7d9
+--- /dev/null
++++ b/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/05-portal-redesign/reviewed-tree.txt
+@@ -0,0 +1 @@
++5fc99ee82817e0f8fd86055230df952404c91175
+diff --git a/e2e/step-definitions/oauth/portal-redesign.steps.ts b/e2e/step-definitions/oauth/portal-redesign.steps.ts
+index 5b62b7b2..381e71ab 100644
+--- a/e2e/step-definitions/oauth/portal-redesign.steps.ts
++++ b/e2e/step-definitions/oauth/portal-redesign.steps.ts
+@@ -660,6 +660,16 @@ When(lit('it is rendered in the new layout'), async ({ browser }: { browser: Bro
+   await page.goto(challengeUrl, { waitUntil: 'domcontentloaded' });
+   await dexLogin(page);
+   await expect(page.locator('main[data-page="account"][data-action="org.matrix.cross_signing_reset"]')).toBeVisible({ timeout: NAV_TIMEOUT_MS });
++
++  // reset requests left over from an earlier run would turn the click-proof check into a skip: decline them until exactly one is left
++  // (only possible with a fresh session; without auth_time the Then step records the gate instead)
++  const requestCards = page.locator('[data-role="reset-request"]');
++  const declineButtons = page.locator('[data-role="decline-reset"]');
++  for (let left = await requestCards.count(); left > 1 && (await declineButtons.count()) > 0; left -= 1) {
++    await declineButtons.first().click();
++    await expect(requestCards, 'a leftover reset request was declined').toHaveCount(left - 1, { timeout: NAV_TIMEOUT_MS });
++  }
++
+   const again = await ctx.request.get(page.url(), { maxRedirects: 0 });
+   resetRun = { page, csp: again.headers()['content-security-policy'] ?? '' };
+ });
+@@ -674,15 +684,12 @@ Then(
+     const approve = page.locator('[data-role="approve-reset"]');
+     const decline = page.locator('[data-role="decline-reset"]');
+ 
+-    if (requests !== 1) {
+-      $testInfo.annotations.push({ type: 'pending-requests', description: `${requests} reset requests are pending (left over from an earlier run); the approve form needs exactly one` });
+-      $testInfo.skip(true, `${requests} pending reset requests: the approve form and its script are only rendered for exactly one`);
+-    }
+-
+     if ((await approve.count()) === 0) {
+       gateY($testInfo, 'the IdP (Dex) reports no auth_time: the account session is not fresh, the approve form is not rendered (FR14)');
+     }
+ 
++    expect(requests, 'exactly one reset request is pending (leftovers are declined in the When step)').toBe(1);
++
+     // exactly one script: the click proof, allowed by its SHA-256 and nothing else
+     const scripts = page.locator('script');
+     await expect(scripts, 'exactly one script element').toHaveCount(1);
+@@ -692,7 +699,7 @@ Then(
+     expect(scriptSrc, 'script-src is exactly the hash of the inline script').toBe(hash);
+     expect(csp, 'no unsafe source').not.toMatch(/unsafe-/);
+     await expect(page.locator('input[data-click-proof]'), 'the click-proof field is in the approve form').toHaveCount(1);
+-    await expect(approve.locator('xpath=ancestor::form').locator('input[data-click-proof]')).toHaveCount(1);
++    await expect(page.locator('form:has([data-role="approve-reset"]) input[data-click-proof]')).toHaveCount(1);
+ 
+     // Decline first, two separate forms, clearly separated, big targets
+     await expect(approve).toBeVisible();
+diff --git a/server/lib/nebu/oauth/account_pages.ex b/server/lib/nebu/oauth/account_pages.ex
+index 0c3b3c85..730af7dd 100644
+--- a/server/lib/nebu/oauth/account_pages.ex
++++ b/server/lib/nebu/oauth/account_pages.ex
+@@ -235,6 +235,7 @@ defmodule Nebu.OAuth.AccountPages do
+              user_id: a.user_id,
+              display_name: a[:display_name],
+              devices_count: length(devices) + Map.get(a, :hidden, 0),
++             devices_count_exact: Map.get(a, :hidden_exact, true),
+              apps_text: apps_text(Map.get(a, :grants), lang)
+            })}
+ 
+@@ -377,7 +378,8 @@ defmodule Nebu.OAuth.AccountPages do
+   defp active(%{last_seen_ts: ms}, lang) when is_integer(ms) do
+     case DateTime.from_unix(ms, :millisecond) do
+       {:ok, dt} ->
+-        delta_s = div(ms - System.system_time(:millisecond), 1000)
++        # a timestamp slightly in the future (clock skew between nodes) reads "just now", not "in 1 minute"
++        delta_s = min(div(ms - System.system_time(:millisecond), 1000), 0)
+ 
+         if delta_s < -@relative_max_s,
+           do: tf(lang, "acct.active.date", %{"date" => Calendar.strftime(dt, "%Y-%m-%d")}),
+diff --git a/server/lib/nebu/oauth/account_templates/overview.html.eex b/server/lib/nebu/oauth/account_templates/overview.html.eex
+index a2811c96..89dbe8e4 100644
+--- a/server/lib/nebu/oauth/account_templates/overview.html.eex
++++ b/server/lib/nebu/oauth/account_templates/overview.html.eex
+@@ -1,6 +1,6 @@
+ <p><%= t(@lang, "acct.default.sentence") %></p>
+ <div class="tiles">
+-<a class="tile" data-role="portal-tile" data-tile="devices" href="/account?action=org.matrix.devices_list"><b><%= t(@lang, "acct.nav.devices") %></b><span><%= tf(@lang, "acct.tile.devices_count", %{"n" => @devices_count}) %></span></a>
++<a class="tile" data-role="portal-tile" data-tile="devices" href="/account?action=org.matrix.devices_list"><b><%= t(@lang, "acct.nav.devices") %></b><span><%= tf(@lang, if(@devices_count_exact, do: "acct.tile.devices_count", else: "acct.tile.devices_count_least"), %{"n" => @devices_count}) %></span></a>
+ <a class="tile" data-role="portal-tile" data-tile="apps" href="/account/apps"><b><%= t(@lang, "acct.nav.apps") %></b><span><%= @apps_text %></span></a>
+ <a class="tile" data-role="portal-tile" data-tile="security" href="/account?action=org.matrix.cross_signing_reset"><b><%= t(@lang, "acct.nav.security") %></b><span><%= t(@lang, "acct.tile.security") %></span></a>
+ </div>
+diff --git a/server/lib/nebu/web/page_text.ex b/server/lib/nebu/web/page_text.ex
+index 015d0d11..f4b429c6 100644
+--- a/server/lib/nebu/web/page_text.ex
++++ b/server/lib/nebu/web/page_text.ex
+@@ -276,6 +276,7 @@ defmodule Nebu.Web.PageText do
+       {"Manage where you are signed in and which apps may use your account.",
+        "Verwalten Sie, wo Sie angemeldet sind und welche Apps Ihr Konto nutzen dürfen."},
+     "acct.tile.devices_count" => {"{n} signed in", "{n} angemeldet"},
++    "acct.tile.devices_count_least" => {"At least {n} signed in", "Mindestens {n} angemeldet"},
+     "acct.tile.apps_count" => {"{n} allowed", "{n} erlaubt"},
+     "acct.tile.apps_open" => {"Manage allowed apps", "Erlaubte Apps verwalten"},
+     "acct.tile.security" => {"Reset encryption identity", "Verschlüsselungs-Identität zurücksetzen"},
+diff --git a/server/test/nebu/oauth/portal_redesign_test.exs b/server/test/nebu/oauth/portal_redesign_test.exs
+index 13073e58..f826dedf 100644
+--- a/server/test/nebu/oauth/portal_redesign_test.exs
++++ b/server/test/nebu/oauth/portal_redesign_test.exs
+@@ -460,6 +460,12 @@ defmodule Nebu.OAuth.PortalRedesignTest do
+       assert devices_tile.text =~ devices_count
+       assert apps_tile.text =~ apps_count
+     end
++
++    # a read that hit its limit only knows a lower bound: the tile says "at least"
++    for {lang, text} <- [{:en, "At least 3 signed in"}, {:de, "Mindestens 3 angemeldet"}] do
++      [devices_tile | _] = lang |> body(:default, %{devices: devices(), hidden: 0, hidden_exact: false, grants: []}) |> tiles()
++      assert devices_tile.text =~ text
++    end
+   end
+ 
+   # Scenario: Devices are cards, not a table

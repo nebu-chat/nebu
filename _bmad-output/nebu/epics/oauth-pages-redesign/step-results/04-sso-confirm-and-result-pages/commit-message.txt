@@ -1,0 +1,4 @@
+feat(pipeline): SSO confirmation and sign-in result pages in the Nebu look
+
+Pipeline: ATDD, 1 fix cycle, Code CLEAN, Kassandra CLEAN.
+Refs: REQ-2026-019

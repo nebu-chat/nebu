@@ -23,6 +23,8 @@ defmodule Nebu.Web.MediaUploadTest do
   404 self-inflicted by the verb fix.
   """
   use ExUnit.Case, async: false
+
+  alias Nebu.Web.SessionLookupTestSupport, as: LookupFault
   import Plug.Test
   import Plug.Conn
 
@@ -149,6 +151,7 @@ defmodule Nebu.Web.MediaUploadTest do
   end
 
   test "POST upload with a garbage Bearer token → 401 M_UNKNOWN_TOKEN" do
+    LookupFault.setup_no_row_lookup()
     conn =
       post_upload("data", [
         {"content-type", "image/jpeg"},

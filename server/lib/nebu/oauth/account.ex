@@ -20,6 +20,8 @@ defmodule Nebu.OAuth.Account do
     * `GET /account/reauth` — starts an IdP (re-)authentication for a return target (A10)
     * `GET /account/apps` — the apps the user has allowed (remembered consent, story persistent-consent-grants); the sign-in
       started there returns there (return action `apps`)
+    * `GET /account/devices/rename?device_id=` — the rename page of one device (story oauth-pages-redesign/06); `POST /account/devices/rename`
+      renames it (freshness-gated like the sign-out of a device, the name sanitised like a name typed on the Allow page)
     * `POST /account/devices/delete`, `/account/cross_signing_reset/approve`, `.../decline`,
       `/account/logout` — state changes (A9, A10, A11); `POST /account/apps/withdraw` withdraws one remembered consent (no fresh
       sign-in needed, existing sessions untouched)
@@ -79,7 +81,7 @@ defmodule Nebu.OAuth.Account do
   import Plug.Conn
   require Logger
 
-  alias Nebu.OAuth.{AccountPages, AccountStore, AuthorizeRequest, BrowserPost, ClientStore, Config, ConsentGrantStore, Freshness, FormPost, SourceKey}
+  alias Nebu.OAuth.{AccountPages, AccountStore, AuthorizeRequest, BrowserPost, ClientStore, Config, ConsentGrantStore, DeviceName, Freshness, FormPost, SourceKey}
   alias Nebu.Web.ClientIP
   alias Nebu.Web.Plugs.RateLimit
 
@@ -120,7 +122,7 @@ defmodule Nebu.OAuth.Account do
   }
 
   @get_paths [[], ["reauth"], ["apps"]]
-  @post_paths [["devices", "delete"], ["cross_signing_reset", "approve"], ["cross_signing_reset", "decline"], ["logout"], ["apps", "withdraw"]]
+  @post_paths [["devices", "delete"], ["devices", "rename"], ["cross_signing_reset", "approve"], ["cross_signing_reset", "decline"], ["logout"], ["apps", "withdraw"]]
 
   # ════════════════════════════════════════════════════════════════════════════
   # entry point of /account*
@@ -149,7 +151,11 @@ defmodule Nebu.OAuth.Account do
   defp route(%Plug.Conn{method: "GET", path_info: []} = conn, issuer), do: show(conn, issuer)
   defp route(%Plug.Conn{method: "GET", path_info: ["reauth"]} = conn, issuer), do: reauth(conn, issuer)
   defp route(%Plug.Conn{method: "GET", path_info: ["apps"]} = conn, issuer), do: apps(conn, issuer)
+  defp route(%Plug.Conn{method: "GET", path_info: ["devices", "rename"]} = conn, issuer), do: rename_page(conn, issuer)
   defp route(%Plug.Conn{method: "POST", path_info: path} = conn, issuer) when path in @post_paths, do: post(conn, issuer, path)
+
+  defp route(%Plug.Conn{path_info: ["devices", "rename"]} = conn, _issuer),
+    do: AccountPages.send_error(conn, 405, "method_not_allowed", allow: "GET, POST")
 
   defp route(%Plug.Conn{path_info: path} = conn, _issuer) when path in @get_paths,
     do: AccountPages.send_error(conn, 405, "method_not_allowed", allow: "GET")
@@ -199,6 +205,47 @@ defmodule Nebu.OAuth.Account do
       {:error, :storage} ->
         session_error(conn, :storage)
     end
+  end
+
+  # story oauth-pages-redesign/06: the rename page of ONE device of the signed-in user (a foreign / unknown / missing id is the device list
+  # with the notice `device_not_found`, like every device page). A stale session gets the re-authentication link instead of the form, a
+  # session without `auth_time` the notice `freshness_unavailable` and no link (FR14). `notice` carries the outcome of a refused POST.
+  defp rename_page(conn, issuer) do
+    request = parse_request(conn)
+
+    case current_session(conn) do
+      {:ok, session} -> render_rename(conn, session, request)
+      :none -> start_login(conn, issuer, {@devices_list, nil}, [session_hash(conn)])
+      {:error, reason} -> session_error(conn, reason)
+    end
+  end
+
+  defp render_rename(conn, session, request) do
+    base = %{
+      user_id: session.user_id,
+      display_name: session.display_name,
+      csrf_token: session.csrf_token,
+      notice: request.notice || if(is_nil(session.auth_time), do: "freshness_unavailable")
+    }
+
+    with_devices(conn, session, fn devices ->
+      case request.device_id && Enum.find(devices, &(&1.device_id == request.device_id)) do
+        %{} = device ->
+          page =
+            Map.merge(base, %{
+              action: "device_rename",
+              device: device,
+              fresh: fresh?(session.auth_time),
+              no_auth_time: is_nil(session.auth_time),
+              reauth_href: reauth_href(@devices_list, nil)
+            })
+
+          AccountPages.send_page(conn, 200, :rename, page)
+
+        _ ->
+          notice_redirect(conn, [{"action", @devices_list}], "device_not_found")
+      end
+    end)
   end
 
   defp reauth(conn, issuer) do
@@ -287,7 +334,14 @@ defmodule Nebu.OAuth.Account do
         reset_page(conn, session, base_destructive)
 
       _default ->
-        with_devices(conn, session, fn devices -> device_list_page(conn, base, devices, "default", :default) end)
+        # the overview shows the live count of allowed apps; when the grants cannot be read the tile loses its count (nil)
+        grants =
+          case ConsentGrantStore.list_for_user(session.user_id) do
+            {:ok, list} -> list
+            {:error, :storage} -> nil
+          end
+
+        with_devices(conn, session, fn devices -> device_list_page(conn, Map.put(base, :grants, grants), devices, "default", :default) end)
     end
   end
 
@@ -742,13 +796,19 @@ defmodule Nebu.OAuth.Account do
   # ════════════════════════════════════════════════════════════════════════════
 
   defp post(conn, issuer, path) do
-    case FormPost.parse(conn) do
+    # story oauth-pages-redesign/06: only the rename form carries free text; `device_name` may hold control characters (valid UTF-8 suffices),
+    # `DeviceName.typed/1` sanitises it. Every other account POST keeps the strict parse.
+    free_text = if path == ["devices", "rename"], do: ["device_name"], else: []
+
+    case FormPost.parse(conn, free_text) do
       {:error, conn, _status, _description} ->
         AccountPages.send_error(conn, 400, "invalid_request")
 
       {:ok, conn, params} ->
         case current_session(conn) do
           {:ok, session} -> checked_post(conn, issuer, path, params, session)
+          # story oauth-pages-redesign/06: a rename without a session starts the sign-in at once (the return target is the device list)
+          :none when path == ["devices", "rename"] -> start_login(conn, issuer, {@devices_list, nil}, [session_hash(conn)])
           # an expired session: sign in first (a POST cannot be replayed through the IdP)
           :none -> redirect(conn, "/account", 303)
           {:error, reason} -> session_error(conn, reason)
@@ -786,6 +846,7 @@ defmodule Nebu.OAuth.Account do
 
   defp dispatch(conn, ["logout"], _params, session), do: logout(conn, session)
   defp dispatch(conn, ["devices", "delete"], params, session), do: delete_device(conn, params, session)
+  defp dispatch(conn, ["devices", "rename"], params, session), do: rename_device(conn, params, session)
   defp dispatch(conn, ["apps", "withdraw"], params, session), do: withdraw_grant(conn, params, session)
   defp dispatch(conn, ["cross_signing_reset", verb], params, session), do: decide_reset(conn, verb, params, session)
 
@@ -857,6 +918,54 @@ defmodule Nebu.OAuth.Account do
             unavailable(conn)
         end
     end
+  end
+
+  # story oauth-pages-redesign/06: the SAME order as `delete_device/3` (CSRF and Origin / fetch metadata came before), then the typed name is
+  # sanitised exactly like the name typed on the Allow page (`DeviceName.typed/1`). The Matrix domain writes `devices.display_name` of THIS user's
+  # device only. The name is never logged. A refusal that keeps the form (stale, no auth_time, invalid name) lands on the rename page.
+  defp rename_device(conn, params, session) do
+    device_id = params["device_id"]
+
+    cond do
+      is_nil(session.auth_time) ->
+        rename_redirect(conn, device_id, "freshness_unavailable")
+
+      not fresh?(session.auth_time) ->
+        rename_redirect(conn, device_id, "stale")
+
+      not valid_device_id?(device_id) ->
+        notice_redirect(conn, [{"action", @devices_list}], "device_not_found")
+
+      true ->
+        case DeviceName.typed(params["device_name"]) do
+          {:ok, name} -> store_device_name(conn, session, device_id, name)
+          :none -> rename_redirect(conn, device_id, "device_name_invalid")
+        end
+    end
+  end
+
+  defp store_device_name(conn, session, device_id, name) do
+    case Nebu.Matrix.account_rename_device(session.user_id, device_id, name) do
+      :ok ->
+        Logger.info("OAuth account: device renamed user_id=#{session.user_id} device_id=#{device_id}")
+        notice_redirect(conn, [{"action", @devices_list}], "device_renamed")
+
+      {:error, :not_found} ->
+        notice_redirect(conn, [{"action", @devices_list}], "device_not_found")
+
+      {:error, :invalid_name} ->
+        rename_redirect(conn, device_id, "device_name_invalid")
+
+      {:error, :unavailable} ->
+        Logger.error("OAuth account: the device could not be renamed")
+        AccountPages.send_error(conn, 500, "server_error")
+    end
+  end
+
+  defp rename_redirect(conn, device_id, notice) do
+    if valid_device_id?(device_id),
+      do: redirect(conn, "/account/devices/rename?" <> URI.encode_query([{"device_id", device_id}, {"notice", notice}]), 303),
+      else: notice_redirect(conn, [{"action", @devices_list}], notice)
   end
 
   # The same locked teardown as revoke / logout (story 5 C12): every `matrix_sessions` row of the device

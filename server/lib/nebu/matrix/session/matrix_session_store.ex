@@ -157,14 +157,17 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
   end
 
   @doc """
-  Looks up a session by opaque access token. Returns `{:ok, session}` or `:error`.
+  Looks up a session by opaque access token. Returns `{:ok, session}`, `:error` (no such row: the token is
+  unknown) or `{:error, :unavailable}` (the lookup itself failed: DB error, pool timeout/exit, repo not
+  started). The two MUST stay distinct: `OidcPlug` answers `:error` with `401 M_UNKNOWN_TOKEN` (the client drops
+  its session) and `{:error, :unavailable}` with a retryable `503` (bugfix matrix-token-lookup-db-error-not-401).
 
   The session map exposes `:access_token_hash`, `:refresh_token_hash`, `:oidc_refresh_token`
   (encrypted, may be `nil`), `:user_id`, `:device_id`, `:expires_at`,
   `:revoked_at`, `:grace_until`, `:auth_api` (`"legacy"` | `"oauth"`). The expiry decision is made by the caller
   (`OidcPlug`) so the AC5 `soft_logout` path can distinguish expired from absent.
   """
-  @spec get_by_access_token(String.t()) :: {:ok, map()} | :error
+  @spec get_by_access_token(String.t()) :: {:ok, map()} | :error | {:error, :unavailable}
   def get_by_access_token(access_token) when is_binary(access_token),
     do: get_by_access_token_hash(hash_token(access_token))
 
@@ -172,13 +175,66 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
   # INTERNAL - pass-the-hash warning: only for hash values read from the DB (RefreshWorker,
   # HttpPublic.rotate_attempt). NEVER pass a client-supplied value here: a leaked hash
   # must not act as a credential. Public API takes plaintext tokens only.
-  @spec get_by_access_token_hash(String.t()) :: {:ok, map()} | :error
+  @spec get_by_access_token_hash(String.t()) :: {:ok, map()} | :error | {:error, :unavailable}
   def get_by_access_token_hash(access_token_hash) when is_binary(access_token_hash) do
-    case safe_query(select_sql("access_token_hash = $1"), [access_token_hash]) do
+    case lookup_query(select_sql("access_token_hash = $1"), [access_token_hash]) do
       {:ok, %{rows: [row]}} -> {:ok, row_to_session(row)}
-      _ -> :error
+      {:ok, %{rows: []}} -> :error
+      # a failed lookup (or any shape that is not "one row" / "no row") is NOT "unknown token": fail closed
+      # (never authenticates) but retryable, so a client keeps its session
+      other -> lookup_unavailable(other)
     end
   end
+
+  # The lookup query of the access-token auth path: never raises, never exits. A raised exception, an
+  # `:exit` (pool checkout timeout) and an `{:error, _}` result all come back as `{:error, _}`.
+  defp lookup_query(sql, params) do
+    lookup_fault(fn -> safe_query(sql, params) end)
+  rescue
+    e -> {:error, e}
+  catch
+    :exit, reason -> {:error, {:exit, reason}}
+  end
+
+  # Test-only fault injection seam, compile-time guarded (`Mix.env() == :test`): `Application` env
+  # `:nebu_http, :matrix_session_lookup_fault` = `{:error, term}` (used as the query result), `:raise`
+  # (a `DBConnection.ConnectionError`), `:exit` (a pool checkout timeout exit) or `:no_row` (the query
+  # answered "no such row": a deterministic unknown token without a database, bugfix
+  # unit-tests-junk-token-503-after-lookup-fix). Absent in every other env.
+  if Mix.env() == :test do
+    defp lookup_fault(fun) do
+      case Application.get_env(:nebu_http, :matrix_session_lookup_fault) do
+        nil -> fun.()
+        {:error, _} = result -> result
+        :no_row -> {:ok, %{rows: []}}
+        :raise -> raise DBConnection.ConnectionError, "injected session lookup fault"
+        :exit -> exit({:timeout, {DBConnection.Holder, :checkout, []}})
+      end
+    end
+  else
+    defp lookup_fault(fun), do: fun.()
+  end
+
+  # ONE WARNING per minute per node (log-volume control only, never correctness) naming only a redacted error
+  # class (an exception MODULE, an exit tag or an atom): never the token, hash, user, device, SQL, bound
+  # parameters or the exception message (No Sensitive Data in Logs law).
+  defp lookup_unavailable(result) do
+    class = lookup_error_class(result)
+
+    if Nebu.Web.Plugs.RateLimit.take({"session_lookup_unavailable_warning", :node}, 1, 1) == :ok do
+      Logger.warning("matrix auth: access token lookup unavailable class=#{class}")
+    end
+
+    {:error, :unavailable}
+  rescue
+    _ -> {:error, :unavailable}
+  end
+
+  defp lookup_error_class({:error, {:exit, {tag, _detail}}}) when is_atom(tag), do: "exit_#{tag}"
+  defp lookup_error_class({:error, {:exit, tag}}) when is_atom(tag), do: "exit_#{tag}"
+  defp lookup_error_class({:error, %module{}}), do: inspect(module)
+  defp lookup_error_class({:error, tag}) when is_atom(tag), do: Atom.to_string(tag)
+  defp lookup_error_class(_other), do: "unknown"
 
   @doc """
   Classifies a presented refresh token for `POST /refresh`.
@@ -778,8 +834,8 @@ defmodule Nebu.Matrix.Session.MatrixSessionStore do
   defp query(sql, params), do: Ecto.Adapters.SQL.query(Nebu.Repo, sql, params)
 
   # Read-path query that never raises: a failed lookup (DB down / not started, or a
-  # query error) is reported as `{:error, _}` so the opaque-token auth path treats
-  # it as "cannot authenticate this token" (→ 401) instead of crashing the request.
+  # query error) is reported as `{:error, _}` instead of crashing the request. The access-token lookup
+  # (`get_by_access_token_hash/1`) maps it to `{:error, :unavailable}` (→ 503, never 401).
   # Used only by the lookups; writes (create/rotate/revoke) still surface failures.
   defp safe_query(sql, params) do
     if Process.whereis(Nebu.Repo) do

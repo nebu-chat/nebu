@@ -20,10 +20,10 @@ CODE_REVIEW_FILE: $STEP_RESULTS_DIR/[STORY_ID]/code-review-findings.md   (cycle 
 The agent replies with the dev digest (`VERDICT: DONE | BLOCKED`, `TESTS`, `FILES`, `BLOCKER`). The `SubagentStop` hook runs `invariant_check.py`; exit 2 → do not proceed to code-review.
 
 ```bash
-rtk git add .
-python3 skills/nebu-pipeline/scripts/pipeline_gates.py decide --step dev-story --story [STORY_ID] --cycle [CYCLE_COUNT] --digest - <<'EOF'
+python3 skills/nebu-pipeline/scripts/pipeline_gates.py decide --step dev-story --story [STORY_ID] --cycle [CYCLE_COUNT] \
+  --git-add . --apply $STATE_FILE --digest - <<'EOF'
 <the agent's digest lines, verbatim>
 EOF
 ```
-`ACTION: NEXT` → `python3 skills/nebu-pipeline/scripts/pipeline_state.py --file $STATE_FILE <STATE>`, show `MESSAGE` (`✓ Step 4: Implementation complete. Cycle: N`).
+`ACTION: NEXT` → the script already ran `git add .` and updated the state (`APPLIED`) — just show `MESSAGE` (`✓ Step 4: Implementation complete. Cycle: N`).
 `ACTION: STOP` (`BLOCKED`) → show `MESSAGE` (the blocker), stop, user decides.

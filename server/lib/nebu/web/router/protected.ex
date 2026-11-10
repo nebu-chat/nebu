@@ -999,15 +999,34 @@ defmodule Nebu.Web.Router.Protected do
   # PUT /devices/{deviceId} — rename (S3 AC2). Owner-scoped, NOT UIA-gated. A rename
   # of an unknown / another user's device affects 0 rows → 404 M_NOT_FOUND (no IDOR,
   # no existence oracle). Success → 200 {}.
+  #
+  # story matrix-put-device-keeps-display-name (Matrix spec v1.18: "If not given, the display name is unchanged"):
+  #   * no `display_name` key → the name is kept; only the user-scoped existence check runs (200 {} / 404), nothing is written
+  #     and no device-list change is stamped;
+  #   * `display_name: null` → the name is cleared (a Nebu choice, the spec does not define null);
+  #   * a string → rename as before;
+  #   * any other type (number, object, array, boolean) → 400 M_BAD_JSON, decided BEFORE the device lookup.
   put "/client/v3/devices/:device_id" do
     user = conn.assigns[:current_user]
     did = URI.decode_www_form(device_id)
-    display_name = body_params(conn)["display_name"]
 
-    if DeviceKeyStore.rename_device(user, did, display_name) == :ok do
-      send_json(conn, 200, %{})
-    else
-      error(conn, 404, "M_NOT_FOUND", "Unknown device")
+    case Map.fetch(body_params(conn), "display_name") do
+      :error ->
+        if DeviceKeyStore.get_device(user, did) == nil do
+          error(conn, 404, "M_NOT_FOUND", "Unknown device")
+        else
+          send_json(conn, 200, %{})
+        end
+
+      {:ok, display_name} when is_nil(display_name) or is_binary(display_name) ->
+        if DeviceKeyStore.rename_device(user, did, display_name) == :ok do
+          send_json(conn, 200, %{})
+        else
+          error(conn, 404, "M_NOT_FOUND", "Unknown device")
+        end
+
+      {:ok, _other} ->
+        error(conn, 400, "M_BAD_JSON", "display_name must be a string or null")
     end
   end
 

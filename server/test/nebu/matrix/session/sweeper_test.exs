@@ -12,6 +12,8 @@ defmodule Nebu.Matrix.Session.SweeperTest do
 
   @moduletag :integration
 
+  @policy_keys ~w(log_retention_info_days log_retention_info_max_count log_retention_debug_max_count)
+
   setup do
     Nebu.Release.migrate()
 
@@ -21,6 +23,14 @@ defmodule Nebu.Matrix.Session.SweeperTest do
         pid -> pid
       end
 
+    # bugfix integration-test-flakes-fix (D): the retention keys this test depends on are set explicitly to their neutral value ("" reads as
+    # "not set"), because an earlier test (RetentionTest) used to leave `log_retention_info_max_count=500` behind: its `DELETE FROM server_config`
+    # cleanup deleted nothing (FORCE row level security, no DELETE policy). With that cap active and more than 500 newer INFO rows written by the
+    # live stack, the cap removed the 1-day-old "fresh" row. Put back to the values found at the start (UPSERT, not DELETE) on exit.
+    {:ok, config} = Nebu.Admin.DB.get_server_config()
+    prior = Map.take(config, @policy_keys)
+    Nebu.Admin.DB.upsert_server_config(Map.new(@policy_keys, &{&1, ""}))
+
     on_exit(fn ->
       if Process.whereis(Nebu.Repo) do
         Ecto.Adapters.SQL.query(
@@ -29,9 +39,7 @@ defmodule Nebu.Matrix.Session.SweeperTest do
           []
         )
 
-        Ecto.Adapters.SQL.query(Nebu.Repo, "DELETE FROM server_config WHERE key = $1", [
-          "log_retention_info_days"
-        ])
+        Nebu.Admin.DB.upsert_server_config(Map.merge(Map.new(@policy_keys, &{&1, ""}), prior))
       end
     end)
 

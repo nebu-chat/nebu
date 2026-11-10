@@ -167,40 +167,16 @@ defmodule Nebu.Matrix.UserIdTest do
 
     setup do
       if Process.whereis(Nebu.Repo) do
-        # seed the configured claim, restore afterwards
-        prev =
-          case Ecto.Adapters.SQL.query(
-                 Nebu.Repo,
-                 "SELECT value FROM server_config WHERE key = 'oidc_user_id_claim' LIMIT 1",
-                 []
-               ) do
-            {:ok, %{rows: [[v]]}} -> v
-            _ -> nil
-          end
+        # seed the configured claim, restore afterwards (bugfix test-cleanup-rls-noop-delete: the restore used to end in a no-op
+        # `DELETE FROM server_config` when the key was absent at the start; the privileged helper puts the previous row back, or removes the key again,
+        # and invalidates the OidcClaimCache)
+        Nebu.OAuth.TestSupport.restore_server_config_on_exit!(["oidc_user_id_claim"])
 
         # Use the public write helper (ADR-018/ADR-020): it supplies the NOT-NULL
         # `set_at` column AND invalidates the node-local OidcClaimCache so the new
         # claim is actually read on the next derivation (a raw INSERT omitted set_at
         # → not_null_violation, and left a stale cache).
         :ok = Nebu.Admin.DB.upsert_server_config(%{"oidc_user_id_claim" => "email"})
-
-        on_exit(fn ->
-          if Process.whereis(Nebu.Repo) do
-            case prev do
-              nil ->
-                Ecto.Adapters.SQL.query!(
-                  Nebu.Repo,
-                  "DELETE FROM server_config WHERE key = 'oidc_user_id_claim'",
-                  []
-                )
-
-                Nebu.Matrix.OidcClaimCache.reset_for_test()
-
-              v ->
-                :ok = Nebu.Admin.DB.upsert_server_config(%{"oidc_user_id_claim" => v})
-            end
-          end
-        end)
 
         :ok
       else

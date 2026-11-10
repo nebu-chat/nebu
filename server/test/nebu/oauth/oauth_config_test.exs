@@ -22,7 +22,7 @@ defmodule Nebu.OAuth.OAuthConfigTest do
 
   `server_config` is under FORCE ROW LEVEL SECURITY and the runtime role cannot DELETE, so the
   tests write through UPDATE (which requires migration 000040 to extend `config_update_mutable`
-  with `oauth_enabled`, see `000040_oauth_clients_test.exs`) and restore the prior value.
+  with `oauth_enabled`, see `000040_oauth_clients_test.exs`); the setup puts every key back with `T.restore_server_config_on_exit!/2` (privileged).
   """
   use ExUnit.Case, async: false
   @moduletag :integration
@@ -36,22 +36,11 @@ defmodule Nebu.OAuth.OAuthConfigTest do
 
   setup do
     T.clear_oauth_config()
-    prior = T.sql!("SELECT value FROM server_config WHERE key = 'oauth_enabled'").rows
+    # bugfix test-cleanup-rls-noop-delete: every test of the file may write these keys. They are put back exactly (an absent key is absent again, where the
+    # former on_exit left `oauth_enabled = 'false'` behind and the AC15 describe deleted the token settings instead of restoring them): privileged restore.
+    T.restore_server_config_on_exit!(["oauth_enabled", "oauth_access_token_ttl_seconds", "oauth_idp_revalidation"])
 
-    on_exit(fn ->
-      value =
-        case prior do
-          [[v]] -> v
-          _ -> "false"
-        end
-
-      T.sql!(
-        "INSERT INTO server_config (key, value, set_at) VALUES ('oauth_enabled', $1, 0) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
-        [value]
-      )
-    end)
-
-    {:ok, prior: prior}
+    :ok
   end
 
   defp set_enabled!(value) do
@@ -146,16 +135,6 @@ defmodule Nebu.OAuth.OAuthConfigTest do
 
   # ── story oauth-token-endpoint (story 3), AC15 — token settings from server_config ──
   describe "AC15 (story 3) — token_settings/0 reads oauth_access_token_ttl_seconds / oauth_idp_revalidation" do
-    setup do
-      on_exit(fn ->
-        T.privileged_sql!(
-          "DELETE FROM server_config WHERE key IN ('oauth_access_token_ttl_seconds', 'oauth_idp_revalidation')"
-        )
-      end)
-
-      :ok
-    end
-
     defp put_key!(key, value) do
       T.sql!(
         "INSERT INTO server_config (key, value, set_at) VALUES ($1, $2, 0) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",

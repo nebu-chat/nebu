@@ -20,6 +20,7 @@ Options:
   --blocked REASON  Set blocked_reason field (use "null" to clear)
   --timestamp ISO   Set last_updated (default: current UTC)
   --commit          Zero all YAML fields, keep all comment/log lines
+  --git-add PATH    Run `git add -- PATH` first (repeatable) - saves a separate tool call per step end
 
 Multiple flags combine in one call:
   pipeline_state.py --file path --step atdd --done create-story --log "[9-1] ... create-story → story.md"
@@ -150,10 +151,16 @@ def main():
     parser.add_argument("--blocked", default=None, help="Set blocked_reason ('null' to clear)")
     parser.add_argument("--timestamp", default=None, help="ISO timestamp (default: current UTC)")
     parser.add_argument("--commit", action="store_true", help="Zero all YAML fields on story completion")
+    parser.add_argument("--git-add", action="append", default=[], metavar="PATH", help="git add -- PATH before the update (repeatable)")
     args = parser.parse_args()
 
     ts = args.timestamp or now_iso()
     date_only = ts[:10]
+
+    if args.git_add:
+        import subprocess
+        r = subprocess.run(["git", "add", "--"] + args.git_add, capture_output=True, text=True)
+        print(f"git add {' '.join(args.git_add)}: " + ("ok" if r.returncode == 0 else f"FAILED {r.stderr.strip()[:160]}"))
 
     if not os.path.exists(args.file):
         # first call for a new epic: create the file instead of failing (the pipeline used to improvise this by hand)

@@ -64,11 +64,8 @@ defmodule Nebu.Matrix.SyncMembershipPartitionHttpTest do
   # invite events, which become the invitee's anchor) max(now, previous + 1), i.e. up to several ms AHEAD of the clock (follow-up eu F-4),
   # and the incremental sync reads `origin_server_ts > anchor`: an event stamped with the plain clock right after such a response could be
   # older than the anchor and never be delivered. A 1 ms tick is not enough; this is the smallest wait that makes the scenarios deterministic.
-  defp tick do
-    horizon = System.system_time(:millisecond) - 10_000
-    newest = T.sql!("SELECT coalesce(max(origin_server_ts), 0) FROM events WHERE origin_server_ts > $1", [horizon]).rows |> hd() |> hd()
-    :ok = wait_until(fn -> System.system_time(:millisecond) > newest end, 300)
-  end
+  # bugfix integration-test-flakes-fix (C): the shared helper (a wall-clock budget instead of 300 x 1 ms, a readable failure instead of `:timeout`)
+  defp tick, do: Nebu.Matrix.ModerationTestSupport.tick()
 
   # an explicit timestamp strictly newer than everything in the room (and than the clock)
   defp ts_after(room) do

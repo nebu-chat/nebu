@@ -10,6 +10,12 @@ defmodule Nebu.OAuth.OAuthConsentPageTest do
   names, loopback / private-use / upper-case-scheme redirect URIs, a redirect URI that must fail the
   CSP source check).
 
+  Amended by story `oauth-pages-redesign/03-consent-page-redesign` (the decision first, details in a closed `<details>`, German /
+  English through the shared shell): the `<h1>` is "Allow this app to use your account?", the hint is ONE line and the full
+  instructions sit in the visually hidden `#arm-instructions` (Allow is described by `arm-hint arm-instructions[ notices]`), the
+  hint and the live region follow the buttons, and the notices are `<div class="notice ...">`. The new page order is pinned in
+  `consent_page_redesign_test.exs`; where the list below still says otherwise, that file and the amended assertions win.
+
   Pinned contract (also in `oauth_test_support.exs` and the report of the ATDD role):
 
     * `<main data-page="oauth-consent" data-device="new|same_client|replace" data-fresh="true|false">`
@@ -110,7 +116,7 @@ defmodule Nebu.OAuth.OAuthConsentPageTest do
       assert length(Regex.scan(~r/<main[\s>]/, b)) == 1
 
       assert [_] = Regex.scan(~r/<h1[\s>]/, b), "exactly one level-1 heading"
-      assert b =~ ~r/<h1[^>]*>\s*Allow this app to use your Matrix account\?\s*<\/h1>/
+      assert b =~ ~r/<h1[^>]*>\s*Allow this app to use your account\?\s*<\/h1>/
       assert b =~ ~r/<dl[\s>]/, "the facts are a description list"
       assert b =~ ~r/<dt[\s>]/ and b =~ ~r/<dd[\s>]/
 
@@ -170,12 +176,12 @@ defmodule Nebu.OAuth.OAuthConsentPageTest do
       row = T.insert_consent!(cid, user_id: uid, device_id: "TXT0000001")
       t = plain(get_page(row).resp_body)
       assert t =~ uid
-      assert t =~ "App name (claimed by the app)"
+      assert t =~ "Name given by the app, not verified"
       assert t =~ "Consent Page App"
       assert t =~ "App website (claimed by the app, not verified by Nebu)"
       refute t =~ "approved by your administrator", "L-5: the unverified client_uri must not borrow the administrator's credibility"
       assert t =~ "app.example.com"
-      assert t =~ "Full access to your account: read and send messages, and manage your rooms, devices and encryption keys."
+      assert t =~ "full access : read and send messages, manage rooms, devices and encryption keys."
       assert t =~ "Only allow this if you just started signing in to this app yourself."
       assert t =~ "After you choose, you are sent to"
     end
@@ -346,9 +352,10 @@ defmodule Nebu.OAuth.OAuthConsentPageTest do
       _legacy = T.legacy_session!(uid, dev)
       b = get_page(T.insert_consent!(cid, user_id: uid, device_id: dev, login_fresh: false, redirect_uri: "https://evil.example.net/cb")).resp_body
 
-      for role <- ~w(freshness-notice destination-notice replace-notice) do
-        assert [block] = Regex.scan(~r/<p\b[^>]*data-role="#{role}"[^>]*>.*?<\/p>/s, b) |> Enum.map(&hd/1), "#{role} is rendered once"
-        assert block =~ ~r/<strong>Warning:<\/strong>/, "#{role}: a text label (not colour only)"
+      for {role, label} <- [{"freshness-notice", "Warning:"}, {"destination-notice", "Warning:"}, {"replace-notice", "Heads-up:"}] do
+        assert [block] = Regex.scan(~r/<div\b[^>]*data-role="#{role}"[^>]*>.*?<\/div>/s, b) |> Enum.map(&hd/1), "#{role} is rendered once"
+        assert block =~ "<strong>#{label}</strong>", "#{role}: a text label (not colour only)"
+        assert block =~ "<svg", "#{role}: an icon"
         refute block =~ ~r/\srole=/, "#{role}: static text in a live region is not announced reliably (UX N4)"
       end
 
@@ -485,17 +492,20 @@ defmodule Nebu.OAuth.OAuthConsentPageTest do
       refute allow =~ ~r/\sdisabled(\s|>|=)/
     end
 
-    test "hint and noscript line carry the exact D3 wording (how Allow becomes available)", %{cid: cid, uid: uid} do
+    test "hint, hidden instructions and noscript line carry the exact wording (how Allow becomes available)", %{cid: cid, uid: uid} do
       b = get_page(T.insert_consent!(cid, user_id: uid)).resp_body
 
+      # story oauth-pages-redesign/03: ONE visible hint line; the full instructions stay in a visually hidden element Allow is described by
+      assert plain(b) =~ "Allow unlocks a moment after you interact with this page. This protects you from accidental clicks."
+
       assert plain(b) =~
-               "Mouse: move the pointer onto Allow, then click. Keyboard: move the focus onto Allow, then press Enter. Touch: tap Allow. Allow becomes available a moment after your first interaction with the page; this protects you from accidental clicks."
+               "Mouse: move the pointer onto Allow, then click. Keyboard: move the focus onto Allow, then press Enter. Touch: tap Allow. Allow becomes available a moment after your first interaction with the page."
 
       refute plain(b) =~ "Allow becomes available a moment after you move the pointer or press a key.", "the old wording is gone"
       refute plain(b) =~ "Then move onto Allow to use it.", "review cycle 1 (UX N6): the hint names the action per input method"
 
       assert plain(b) =~
-               "JavaScript is off, so Allow stays unavailable even after the steps above. Turn on JavaScript or use another browser. You can still choose Deny."
+               "JavaScript is off, so Allow stays unavailable. Turn on JavaScript or use another browser. You can still choose Deny."
 
       assert b =~ ~r/<noscript>.*Allow stays unavailable.*Deny.*<\/noscript>/s, "no JavaScript => Allow stays inert, Deny works (fail closed)"
       assert [allow_btn] = Regex.scan(~r/<button\b[^>]*value="allow"[^>]*>.*?<\/button>/s, b) |> Enum.map(&hd/1)
@@ -516,7 +526,7 @@ defmodule Nebu.OAuth.OAuthConsentPageTest do
       assert script =~ ~r/if\(e\.detail===0\)\{if\(!focused\)\{e\.preventDefault\(\)/
     end
 
-    test "AC2: one data-arm, one visible hint, one EMPTY live region, hint and region inside the form before .actions", %{cid: cid, uid: uid} do
+    test "AC2: one data-arm, one visible hint, one EMPTY live region, hint and region inside the form after .actions (story oauth-pages-redesign/03)", %{cid: cid, uid: uid} do
       b = get_page(T.insert_consent!(cid, user_id: uid)).resp_body
 
       assert length(Regex.scan(~r/\sdata-arm(?![-\w])/, b)) == 1, "exactly one data-arm element"
@@ -525,7 +535,7 @@ defmodule Nebu.OAuth.OAuthConsentPageTest do
 
       assert [hint] = Regex.scan(~r/<[^>]*data-arm-hint[^>]*>/, b) |> Enum.map(&hd/1)
       assert hint =~ ~s(id="arm-hint")
-      assert hint =~ ~s(class="hint")
+      assert hint =~ ~r/class="[^"]*\bhint\b/
       refute hint =~ ~r/\shidden(\s|>|=)/, "the hint is hidden by the script when it arms, not by the markup"
 
       assert [region] = Regex.scan(~r/<p\b[^>]*data-arm-status[^>]*>.*?<\/p>/s, b) |> Enum.map(&hd/1)
@@ -540,8 +550,8 @@ defmodule Nebu.OAuth.OAuthConsentPageTest do
       {status_at, _} = :binary.match(b, "data-arm-status")
       {actions_at, _} = :binary.match(b, ~s(class="actions"))
       {form_end, _} = :binary.match(b, "</form>")
-      assert form_at < hint_at and hint_at < actions_at and actions_at < form_end, "the hint is inside the form before the buttons"
-      assert form_at < status_at and status_at < actions_at, "the live region is inside the form before the buttons"
+      assert form_at < actions_at and actions_at < hint_at and hint_at < form_end, "the hint is inside the form right after the buttons"
+      assert actions_at < status_at and status_at < form_end, "the live region is inside the form after the buttons"
     end
 
     test "the page embeds exactly Nebu.Web.ArmScript.script() and nothing else active (AC1)", %{cid: cid, uid: uid} do
@@ -574,7 +584,7 @@ defmodule Nebu.OAuth.OAuthConsentPageTest do
     test "CSS: button[aria-disabled=true] replaces button:disabled; the CSP style hash equals the inlined CSS", %{cid: cid, uid: uid} do
       conn = get_page(T.insert_consent!(cid, user_id: uid))
       assert [css] = Regex.scan(~r/<style>(.*?)<\/style>/s, conn.resp_body) |> Enum.map(&List.last/1)
-      assert css =~ "button[aria-disabled=true]{opacity:.6;cursor:not-allowed}"
+      assert css =~ ".btn[aria-disabled=true]{opacity:.55;cursor:not-allowed}"
       refute css =~ "button:disabled"
       assert css == apply(Nebu.OAuth.ConsentPage, :css, [])
       assert [_, hash] = Regex.run(~r/style-src 'sha256-([^']+)'/, csp(conn))
@@ -583,25 +593,24 @@ defmodule Nebu.OAuth.OAuthConsentPageTest do
   end
 
   describe "N3/N4 — Allow is described by the hint, the destination and every RENDERED warning block (and only those)" do
-    test "fresh login, destination inside the app website: arm-hint consent-destination-label consent-destination, nothing else", %{cid: cid, uid: uid} do
+    test "fresh login, destination inside the app website: arm-hint arm-instructions, nothing else", %{cid: cid, uid: uid} do
       b = get_page(T.insert_consent!(cid, user_id: uid, device_id: "DESC000001", login_fresh: true)).resp_body
       ids = allow_describedby(b)
-      assert ids == ["arm-hint", "consent-destination-label", "consent-destination"]
+      assert ids == ["arm-hint", "arm-instructions"]
       assert_ids_exist(b, ids)
       refute b =~ "freshness-notice" or b =~ "destination-notice" or b =~ "replace-notice"
     end
 
-    test "UX N4: the destination <dt id=consent-destination-label> names the value; Allow is described by the label first", %{cid: cid, uid: uid} do
+    test "UX N4: the destination <dt id=consent-destination-label> names the value (in the details, not in the main view)", %{cid: cid, uid: uid} do
       b = get_page(T.insert_consent!(cid, user_id: uid)).resp_body
       assert [dt] = Regex.scan(~r/<dt\b[^>]*id="consent-destination-label"[^>]*>.*?<\/dt>/s, b) |> Enum.map(&hd/1)
       assert plain(dt) =~ "After you choose, you are sent to"
-      assert Enum.take(allow_describedby(b), 3) == ["arm-hint", "consent-destination-label", "consent-destination"]
+      assert :binary.match(b, "consent-destination-label") > :binary.match(b, "<details")
     end
 
-    test "the destination <dd class=key id=consent-destination> carries the redirect target", %{cid: cid, uid: uid} do
+    test "the destination <dd id=consent-destination> carries the redirect target", %{cid: cid, uid: uid} do
       b = get_page(T.insert_consent!(cid, user_id: uid)).resp_body
       assert [dd] = Regex.scan(~r/<dd\b[^>]*id="consent-destination"[^>]*>.*?<\/dd>/s, b) |> Enum.map(&hd/1)
-      assert dd =~ ~s(class="key")
       assert plain(dd) =~ "app.example.com"
     end
 
@@ -613,14 +622,14 @@ defmodule Nebu.OAuth.OAuthConsentPageTest do
       b = get_page(T.insert_consent!(cid, user_id: uid, device_id: dev, login_fresh: false, redirect_uri: "https://evil.example.net/cb")).resp_body
 
       ids = allow_describedby(b)
-      assert Enum.take(ids, 3) == ["arm-hint", "consent-destination-label", "consent-destination"]
-      assert Enum.sort(Enum.drop(ids, 3)) == ["destination-notice", "freshness-notice", "replace-notice"]
+      assert Enum.take(ids, 2) == ["arm-hint", "arm-instructions"]
+      assert Enum.sort(Enum.drop(ids, 2)) == ["destination-notice", "freshness-notice", "replace-notice"]
       assert_ids_exist(b, ids)
 
       for {role, id} <- [{"freshness-notice", "freshness-notice"}, {"destination-notice", "destination-notice"}, {"replace-notice", "replace-notice"}] do
-        assert [tag] = Regex.scan(~r/<p\b[^>]*data-role="#{role}"[^>]*>/, b) |> Enum.map(&hd/1)
+        assert [tag] = Regex.scan(~r/<div\b[^>]*data-role="#{role}"[^>]*>/, b) |> Enum.map(&hd/1)
         assert tag =~ ~s(id="#{id}"), "the existing data-role keeps its hook and gains the id"
-        assert tag =~ ~s(class="notice")
+        assert tag =~ ~r/class="notice /
       end
     end
 
@@ -628,15 +637,15 @@ defmodule Nebu.OAuth.OAuthConsentPageTest do
       cid = T.oauth_client!([@https, "https://evil.example.net/cb"], client_uri: @website)
 
       stale = allow_describedby(get_page(T.insert_consent!(cid, user_id: uid, device_id: "DESC000003", login_fresh: false)).resp_body)
-      assert stale == ["arm-hint", "consent-destination-label", "consent-destination", "freshness-notice"]
+      assert stale == ["arm-hint", "arm-instructions", "freshness-notice"]
 
       foreign = get_page(T.insert_consent!(cid, user_id: uid, device_id: "DESC000004", login_fresh: true, redirect_uri: "https://evil.example.net/cb")).resp_body
-      assert allow_describedby(foreign) == ["arm-hint", "consent-destination-label", "consent-destination", "destination-notice"]
+      assert allow_describedby(foreign) == ["arm-hint", "arm-instructions", "destination-notice"]
 
       dev = "DESC000005"
       :ok = Nebu.Matrix.DeviceKeyStore.upsert_device(uid, dev, display_name: "Dormant", last_seen_ts: System.system_time(:millisecond))
       replaced = get_page(T.insert_consent!(cid, user_id: uid, device_id: dev, login_fresh: true)).resp_body
-      assert allow_describedby(replaced) == ["arm-hint", "consent-destination-label", "consent-destination", "replace-notice"]
+      assert allow_describedby(replaced) == ["arm-hint", "arm-instructions", "replace-notice"]
     end
 
     test "aria-describedby never names an id that is not in the page (nil freshness, loopback, private scheme)" do
@@ -655,8 +664,8 @@ defmodule Nebu.OAuth.OAuthConsentPageTest do
         assert_ids_exist(b, allow_describedby(b))
       end
 
-      assert allow_describedby(page.(%{login_fresh: nil})) == ["arm-hint", "consent-destination-label", "consent-destination", "freshness-notice"]
-      assert allow_describedby(page.(%{redirect_uri: "http://localhost:53682/cb"})) == ["arm-hint", "consent-destination-label", "consent-destination"]
+      assert allow_describedby(page.(%{login_fresh: nil})) == ["arm-hint", "arm-instructions", "freshness-notice"]
+      assert allow_describedby(page.(%{redirect_uri: "http://localhost:53682/cb"})) == ["arm-hint", "arm-instructions"]
     end
   end
 
@@ -689,7 +698,7 @@ defmodule Nebu.OAuth.OAuthConsentPageTest do
       _legacy = T.legacy_session!(uid, dev)
       b = get_page(T.insert_consent!(cid, user_id: uid, device_id: dev)).resp_body
       assert b =~ ~s(data-role="replace-notice")
-      assert plain(b) =~ "Warning: Another session will be signed out: Phil&#39;s Pixel (device WARN000001)."
+      assert plain(b) =~ "Heads-up: Another session will be signed out: Phil&#39;s Pixel (device WARN000001)."
       assert :binary.match(b, "replace-notice") < :binary.match(b, "<form")
       same = get_page(T.insert_consent!(cid, user_id: uid, device_id: "WARN000002")).resp_body
       refute same =~ "replace-notice"

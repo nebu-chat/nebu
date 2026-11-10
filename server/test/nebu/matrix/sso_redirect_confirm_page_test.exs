@@ -5,10 +5,11 @@ defmodule Nebu.Matrix.SsoRedirectConfirmPageTest do
 
   Pinned contract (D9, D15; ATDD role):
 
-    * `<main data-page="sso-confirm" data-result="pending">`, `<html lang="en">`, ONE static `<title>Confirm
-      sign-in</title>`, ONE `<h1>` "Continue signing in to this app?", `data-role="user-id"` (Matrix id derived
-      from the claims), a `<dl>` with `data-role="target-origin"` (the normalized origin, ASCII / `xn--` host) and
-      the path (raw, truncated to 60 characters + "...", omitted for empty or `/`), NEVER the query or fragment.
+    * `<main data-page="sso-confirm" data-result="pending">`, `<html lang="en">` (no Accept-Language), ONE static `<title>Confirm
+      sign-in</title>`, ONE `<h1>` "Continue signing in to this app?", `data-role="target-origin"` (the normalized origin,
+      ASCII / `xn--` host) in the app block, and inside the one `<details>` a `<dl>` with `data-role="user-id"` (Matrix id
+      derived from the claims) and the path (raw, truncated to 60 characters + "...", omitted for empty or `/`), NEVER the
+      query or fragment. The shell / German layer is pinned by `Nebu.OAuth.SsoConfirmAndResultPagesTest`.
     * ONE form `method="post" action="/_matrix/client/v3/login/sso/confirm"` with the hidden `csrf_token` and two
       submit buttons, Cancel FIRST, Continue (`id="continue"`) rendered `aria-disabled="true"` (not `disabled`, UX B1), ONE inline script that is
       exactly `Nebu.Web.ArmScript.script/0` (pinned by its SHA-256 in the CSP) addressing the button only through
@@ -94,7 +95,7 @@ defmodule Nebu.Matrix.SsoRedirectConfirmPageTest do
       assert origin == "https://unlisted.example"
       assert [_, user] = Regex.run(~r/data-role="user-id"[^>]*>([^<]*)</, b)
       assert user == T.sso_user_id(%{"sub" => sub})
-      assert plain(b) =~ "You are signed in as"
+      assert plain(b) =~ "Signed in as"
       assert plain(b) =~ "The app asks to be sent to"
 
       assert [form] = Regex.scan(~r/<form\b[^>]*>/, b) |> Enum.map(&hd/1)
@@ -139,7 +140,7 @@ defmodule Nebu.Matrix.SsoRedirectConfirmPageTest do
       assert t =~ "Continuing gives the app at this address full access to your Matrix account"
       assert t =~ "it can read and send messages as you"
       assert t =~ "Only continue if you just started signing in to this app yourself and you recognise the address"
-      assert t =~ "If you did not, choose Cancel."
+      assert t =~ "Cancel stops the sign-in and sends nothing to the app."
     end
 
     test "touch targets, focus outline and a narrow viewport are in the CSS (WCAG 2.1 AA hooks)", %{priv: priv} do
@@ -208,11 +209,14 @@ defmodule Nebu.Matrix.SsoRedirectConfirmPageTest do
       assert b =~ ~r/<[^>]*id="confirm-notice"/
     end
 
-    test "B1: the hint is VISIBLE by default (no hidden attribute: it still explains Continue when the script fails) and sits before the buttons", %{priv: priv} do
+    test "B1: the hint is VISIBLE by default (no hidden attribute: it still explains Continue when the script fails) and sits in the form right under the buttons", %{priv: priv} do
       b = page(priv, @unlisted).page.resp_body
       assert [hint] = Regex.scan(~r/<[^>]*data-arm-hint[^>]*>/, b) |> Enum.map(&hd/1)
       refute hint =~ ~r/\shidden(\s|>|=)/, "the hint is hidden by the script when it arms, not by the markup"
-      assert :binary.match(b, "data-arm-hint") < :binary.match(b, ~s(id="continue"))
+      {continue_at, _} = :binary.match(b, ~s(id="continue"))
+      {hint_at, _} = :binary.match(b, "data-arm-hint")
+      {form_end, _} = :binary.match(b, "</form>")
+      assert continue_at < hint_at and hint_at < form_end, "the hint is the line under the buttons, inside the form (design 5.1, like the consent page)"
     end
 
     test "B1/B2: a polite live region <p role=\"status\" data-arm-status> exists, empty until the script fills it", %{priv: priv} do
@@ -240,7 +244,7 @@ defmodule Nebu.Matrix.SsoRedirectConfirmPageTest do
     test "N1: the notice says why the page appears, what Cancel does and when the request expires", %{priv: priv} do
       t = plain(page(priv, @unlisted).page.resp_body)
       assert t =~ "This address is not on the list of apps your administrator trusts."
-      assert t =~ "Cancel stops the sign-in. Nothing is sent to the app."
+      assert t =~ "Cancel stops the sign-in and sends nothing to the app."
       assert t =~ "This request expires in 5 minutes."
     end
 
@@ -255,7 +259,7 @@ defmodule Nebu.Matrix.SsoRedirectConfirmPageTest do
       assert title.(T.confirm!(cb, :cancel)) == "Sign-in cancelled"
 
       # invalid_state
-      assert title.(T.sso_confirm_get(nil)) == "Sign-in link expired"
+      assert title.(T.sso_confirm_get(nil)) == "Sign-in link expired or already used"
 
       # forbidden and invalid_request
       cb2 = callback(priv, @unlisted)
@@ -263,28 +267,28 @@ defmodule Nebu.Matrix.SsoRedirectConfirmPageTest do
       pair2 = {T.sso_confirm_cookie_name(), v2}
       forbidden = T.sso_confirm_post([{"csrf_token", "wrong"}, {"decision", "continue"}], cookie: pair2)
       T.assert_confirm_error(forbidden, 403, "forbidden")
-      assert title.(forbidden) == "Sign-in request refused"
+      assert title.(forbidden) == "Request refused"
       invalid = T.sso_confirm_post([{"csrf_token", T.sso_confirm_csrf(v2)}, {"decision", "maybe"}], cookie: pair2)
       T.assert_confirm_error(invalid, 400, "invalid_request")
-      assert title.(invalid) == "Sign-in request refused"
+      assert title.(invalid) == "Invalid sign-in request"
 
       # rate_limited
       T.drain_binding!(v2)
       limited = T.sso_confirm_get(pair2)
       T.assert_confirm_error(limited, 429, "rate_limited")
-      assert title.(limited) == "Too many requests"
+      assert title.(limited) == "Too many sign-in attempts"
     end
 
     # Filling the confirm store to its 10 000 cap is quadratic (45-60 s and more on the shared CI runner): more than the 60 s default.
     @tag timeout: 300_000
-    test "N5: the unavailable page has the title \"Sign-in unavailable\" (confirm store full)", %{priv: priv} do
+    test "N5: the unavailable page has the title \"Sign-in temporarily unavailable\" (confirm store full)", %{priv: priv} do
       fill = T.confirm_entry_fixture()
 
       try do
         for i <- 1..10_000, do: :ok = apply(Nebu.Matrix.SsoStore, :put_confirm, ["fill-#{i}", fill, 300])
         conn = callback(priv, @unlisted)
         T.assert_confirm_error(conn, 503, "unavailable")
-        assert [_, "Sign-in unavailable"] = Regex.run(~r/<title>([^<]+)<\/title>/, conn.resp_body)
+        assert [_, "Sign-in temporarily unavailable"] = Regex.run(~r/<title>([^<]+)<\/title>/, conn.resp_body)
       after
         T.drop_confirm_entries!()
       end
@@ -500,9 +504,11 @@ defmodule Nebu.Matrix.SsoRedirectConfirmPageTest do
       conn = T.sso_confirm_get({T.sso_confirm_cookie_name(), marker}, headers: [{"referer", "https://#{marker}.example/"}])
       T.assert_confirm_error(conn, 400, "invalid_state")
       refute conn.resp_body =~ marker
-      assert conn.resp_body =~ "This sign-in link has expired or was already used. Start signing in again from your app."
+      assert conn.resp_body =~ "This sign-in link has expired or was already used."
+      assert conn.resp_body =~ "<strong>Close this window. Start signing in again from your app.</strong>"
       assert [_] = Regex.scan(~r/<h1[\s>]/, conn.resp_body)
-      assert conn.resp_body =~ ~r/What you can do/i
+      refute conn.resp_body =~ ~r/What you can do/i, "no \"What you can do\" heading (design 5.3): one bold suggestion, the rest under More options"
+      assert conn.resp_body =~ "More options"
     end
   end
 

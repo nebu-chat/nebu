@@ -42,6 +42,8 @@ defmodule Nebu.Web.MatrixRouterTest do
   """
 
   use ExUnit.Case, async: false
+
+  alias Nebu.Web.SessionLookupTestSupport, as: LookupFault
   import Plug.Test
   import Plug.Conn
 
@@ -362,6 +364,7 @@ defmodule Nebu.Web.MatrixRouterTest do
     end
 
     test "GET /_matrix/client/v3/sync with a garbage Bearer token → 401 M_UNKNOWN_TOKEN" do
+      LookupFault.setup_no_row_lookup()
       _priv = setup_oidc_keys()
 
       conn =

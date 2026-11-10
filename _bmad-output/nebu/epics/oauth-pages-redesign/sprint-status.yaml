@@ -1,0 +1,16 @@
+# generated: 2026-11-05
+# last_updated: 2026-11-05
+# story 06-portal-rename-device done (pipeline: ATDD, 1 fix cycle, Code CLEAN, Kassandra CLEAN): 2026-11-05
+# story 05-portal-redesign done (pipeline: ATDD, 1 fix cycle, Code CLEAN, Kassandra CLEAN): 2026-11-05
+# story 04-sso-confirm-and-result-pages done (pipeline: ATDD, 1 fix cycle, Code CLEAN, Kassandra CLEAN): 2026-11-05
+# story 03-consent-page-redesign done (pipeline: ATDD, 1 fix cycle, Code MINOR, 1 MINOR deferred, UX 1 violation(s) fixed, Kassandra CLEAN): 2026-11-05
+# story 02-page-shell-and-i18n done (pipeline: ATDD, 1 fix cycle, Code CLEAN, Kassandra CLEAN): 2026-11-05
+# story 01-device-naming-chain done (pipeline: ATDD, 1 fix cycle, Code MINOR, 1 MINOR deferred, Kassandra CLEAN): 2026-11-05
+# story 01-device-naming-chain done (pipeline: ATDD, 1 fix cycle, Code MINOR, 1 MINOR deferred, Kassandra CLEAN): 2026-11-05
+development_status:
+  01-device-naming-chain: done
+  02-page-shell-and-i18n: done
+  03-consent-page-redesign: done
+  04-sso-confirm-and-result-pages: done
+  05-portal-redesign: done
+  06-portal-rename-device: done

@@ -910,6 +910,17 @@ defmodule Nebu.Matrix do
   def account_devices(user_id) when is_binary(user_id), do: Nebu.Matrix.AccountManagement.devices(user_id)
 
   @doc """
+  Story oauth-pages-redesign/06: the account portal renames ONE device of `user_id` (the id of the verified portal session,
+  never of a request). `name` must already be sanitised by the caller (non-empty, trimmed, at most 64 code points, no control
+  or invisible characters); anything else is `{:error, :invalid_name}` and nothing is written. Writes `devices.display_name`
+  of that user's device only, through `rename_user_device/3` (a keyed device advances the device-list stream).
+  `{:error, :not_found}` for a foreign or unknown device (nothing changes), `{:error, :unavailable}` on a database problem.
+  Never logs the name, never raises.
+  """
+  @spec account_rename_device(String.t(), String.t(), String.t()) :: :ok | {:error, :invalid_name | :not_found | :unavailable}
+  def account_rename_device(user_id, device_id, name), do: Nebu.Matrix.AccountManagement.rename_device(user_id, device_id, name)
+
+  @doc """
   User id, display name and activity of the account-page user (A5, A8): `{:ok, %{user_id:,
   display_name:}}`, `{:error, :deactivated}`, `{:error, :not_found}` (no `users` row) or
   `{:error, :unavailable}`.

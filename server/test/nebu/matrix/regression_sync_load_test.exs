@@ -34,16 +34,20 @@ defmodule Nebu.Web.RegressionSyncLoadTest do
   generous failsafe against scheduler jitter, NOT the latency gate — the gate is the
   post-hoc median over measured `t_received - t0` values.
 
-  Tagged `:integration` so it is excluded from the default `mix test` run
-  (test_helper.exs sets `exclude: [:integration]`) and runs only under the
-  integration profile (e.g. `make test-integration` / `--include integration`).
+  Tagged `:perf` (not `:integration`) so that it is excluded from every default run
+  (test_helper.exs sets `exclude: [:integration, :perf]`) and runs only on demand
+  against the live stack: `make test-perf` (`mix test --only perf`).
   """
 
   use ExUnit.Case, async: false
   import Plug.Test
   import Plug.Conn
 
-  @moduletag :integration
+  # bugfix integration-test-flakes-fix (J): a hardware-dependent latency budget, opt-in: `make test-perf` (excluded from `make test-integration`).
+  # Deliberately NOT tagged `:integration` as well: in ExUnit an include filter wins over an exclude, so `mix test --include integration` (the
+  # integration run and CI) would run every test that carries the `:integration` tag even though it is also tagged `:perf`. It still needs the live
+  # stack (database); `make test-perf` provides it.
+  @moduletag :perf
 
   # AC7 scale. Kept as module attributes so the intent is explicit and the 10_000
   # total-deliveries figure is derived, never hard-coded in two places.

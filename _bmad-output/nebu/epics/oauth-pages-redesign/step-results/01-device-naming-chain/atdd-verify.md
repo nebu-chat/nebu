@@ -1,0 +1,3 @@
+# atdd-verify — 01-device-naming-chain: 5 scenarios, 13 ExUnit tests (0 placeholders), 1 feature files; rc=2 tests=None failures=None log=/Users/philippbeyerlein/dev/01_gitlab/1200_philippb/open-chat/.claude/worktrees/feature-better-accounts-ux/.claude/test-logs/atdd-verify.log
+MINOR | server/test/nebu/oauth/device_naming_chain_test.exs:174 | test without any assertion: "a usable client name still wins over the host when it merely" | assert the observable outcome of the Then step
+MAJOR | run | no ExUnit summary — test run failed before executing tests | see /Users/philippbeyerlein/dev/01_gitlab/1200_philippb/open-chat/.claude/worktrees/feature-better-accounts-ux/.claude/test-logs/atdd-verify.log

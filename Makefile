@@ -14,7 +14,7 @@ CI_REGISTRY_IMAGE ?= registry.gitlab.com/philippb/open-chat
 # Strip the leading 'v' from TAG (e.g. v1.0.0 → 1.0.0) for image tagging.
 IMAGE_VERSION = $(patsubst v%,%,$(TAG))
 
-.PHONY: ci build-gateway build-media build-server redeploy dev dev-tls dev-tls-certs dev-tls-oauth-on dev-tls-oauth-off dev-reset-db setup test-unit-go test-unit-elixir test-integration test-integration-elixir test-integration-ci test-e2e test-matrix-compat test-load-silber build-element-e2e test-e2e-element test-e2e-element-ci test-e2e-admin-ci test-e2e-oauth-ci build-fluffychat-e2e test-e2e-fluffychat gen-api assets test-compose-ports test-compose-minio test-iac-validate test-load-syntax release release-push
+.PHONY: ci build-gateway build-media build-server redeploy dev dev-tls dev-tls-certs dev-tls-oauth-on dev-tls-oauth-off dev-reset-db setup test-unit-go test-unit-elixir test-integration test-integration-elixir test-integration-ci test-perf test-e2e test-matrix-compat test-load-silber build-element-e2e test-e2e-element test-e2e-element-ci test-e2e-admin-ci test-e2e-oauth-ci build-fluffychat-e2e test-e2e-fluffychat gen-api assets test-compose-ports test-compose-minio test-iac-validate test-load-syntax release release-push
 
 ## ci: Aggregate CI gate — Elixir unit tests + the no-go-files smoke gate (AT#2).
 ## go-removal-cleanup (full-elixir-stack): the canonical local CI entrypoint after
@@ -183,6 +183,7 @@ test-unit-elixir:
 ## go-removal-cleanup (full-elixir-stack): the Go integration runner was removed — the server
 ## now serves the public Matrix endpoint (server:8008) and admin (server:4000). The Elixir
 ## integration tests (mix test --include integration) run against the live stack.
+## Tests tagged :perf (hardware-dependent latency / throughput budgets) are excluded by test/test_helper.exs: run them with `make test-perf`.
 test-integration: setup
 	NEBU_RATE_LIMIT_DISABLED=true docker compose up -d --wait && \
 	docker run --rm -v $(PWD):/workspace -w /workspace \
@@ -228,6 +229,25 @@ test-integration-ci: setup
 		elixir:1.19-alpine \
 		sh -c "cd server && mix local.hex --force && mix deps.get && mix test --include integration --warnings-as-errors"; \
 	EXIT=$$?; docker compose -f docker-compose.yml -f docker-compose.ci.yml down; exit $$EXIT
+
+## test-perf: Run the performance-budget tests (tests tagged :perf) against the live Elixir stack — opt-in, NOT part of test-integration.
+## bugfix integration-test-flakes-fix (J): RegressionSyncLoadTest (200 /sync clients, median delivery latency <= 150 ms) and the MemberSliceGate throughput
+## check assert hardware-dependent budgets. They are excluded from `make test-integration` / `make test-unit-elixir` / CI by `test/test_helper.exs`
+## (`exclude: [:perf]`); this target runs exactly them (`--only perf`: include :perf, exclude everything else; do NOT add `--include integration`, it would pull in the whole integration suite). Expect a failing latency budget on a laptop with Docker Desktop.
+test-perf: setup
+	NEBU_RATE_LIMIT_DISABLED=true docker compose up -d --wait && \
+	docker run --rm -v $(PWD):/workspace -w /workspace \
+		--network=nebu_default \
+		-e NEBU_DB_URL=postgresql://nebu_app:nebu_app_dev_pw@postgres:5432/nebu \
+		-e NEBU_DB_URL_MIGRATE=postgresql://nebu_migrate:nebu_migrate_dev_pw@postgres:5432/nebu \
+		-e NEBU_TEST_MATRIX_URL=http://server:8008 \
+		-e NEBU_TEST_SERVER_URL=http://server:4000 \
+		-e NEBU_TEST_DEX_URL=http://dex:5556 \
+		elixir:1.19-alpine \
+		sh -c "cd server && mix local.hex --force && mix deps.get && mix test --only perf --warnings-as-errors"; \
+	ELIXIR_EXIT=$$?; \
+	docker compose down; \
+	exit $$ELIXIR_EXIT
 
 ## test-matrix-compat: Matrix SDK compatibility smoke test (optional CI gate — not part of test-integration)
 ## Validates that a real matrix-js-sdk client can connect, create a room, send a message, and

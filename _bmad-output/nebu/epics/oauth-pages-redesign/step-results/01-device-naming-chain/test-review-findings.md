@@ -1,0 +1,7 @@
+# test-review — cycle 0
+MINOR | server/test/nebu/oauth/device_naming_chain_test.exs:174 | test without assertion: "a usable client name still wins over the host when it merely" | assert the observable outcome
+INFO | server/test/nebu/oauth/device_naming_chain_test.exs:174 | judge: the lint MINOR is a false positive in substance, the test asserts via assert_shows_name!/2 (helper); it never submits Allow so the stored name is unchecked | optionally add allowed!/D.name_of check
+INFO | server/test/nebu/oauth/device_naming_chain_test.exs:219 | regex `data-role="device-name"[^>]*>[^<]*\(` is weak; would pass if the derived-name line were absent or reworded | refute_name_line via D helper or assert no data-role="device-name" element
+INFO | server/test/nebu/oauth/device_naming_chain_test.exs:339 | overlong-name test accepts either refusal or cut (tolerant by design); the refusal branch does not assert the page asks again | acceptable; tighten once dev picks behaviour
+INFO | server/test/nebu/oauth/device_naming_chain_test.exs:91 | refusal status accepted as 200/400/422, the contract is loose but the no-redirect/not-consumed/no-device asserts make it meaningful | none
+INFO | all | all 5 ACs have a scenario test plus edge tests, assertions are meaningful (exact display_name, Matrix GET /devices, DB rows, consent row retained, log leak probe); e2e feature + steps present for the UI story, reused steps exist; no crash/restart need (no GenServer state), no Oracle | none

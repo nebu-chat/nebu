@@ -338,9 +338,19 @@ defmodule Nebu.Matrix.ToDeviceTestSupport do
     prev_env = System.get_env("NEBU_RATE_LIMIT_DISABLED")
     System.delete_env("NEBU_RATE_LIMIT_DISABLED")
     ExUnit.Callbacks.on_exit(fn -> if prev_env, do: System.put_env("NEBU_RATE_LIMIT_DISABLED", prev_env) end)
-    T.reset_rate_limits()
+    # bugfix integration-test-flakes-fix (B): `on_exit` callbacks run in REVERSE order of registration. `T.reset_rate_limits/0` (frozen clock
+    # `fn -> 1_000_000 end`) used to run BEFORE the two `put_env_restoring` calls, so `put_env_restoring` captured that frozen clock as "the old value"
+    # and its callback (the last one to run) put it BACK after `restore_rate_limits/0` had removed it: no per-IP bucket refilled for the rest of the
+    # run (429 `M_LIMIT_EXCEEDED` in RoomAccountDataTest, SyncConcurrentTest, MatrixSsoTest, ForgetRoomMembershipPurgeTest). The seams are captured
+    # first and `reset_rate_limits/0` last, as in `RoomKeysTestSupport.enable_rate_limit/0`: the cleanup then runs `restore_rate_limits/0` first and
+    # the seam restores after it.
     put_env_restoring(:nebu_http, :rate_limit_clock_fn, fn -> 5_000_000 end)
     put_env_restoring(:nebu_http, :rate_limit_disabled, false)
+    T.reset_rate_limits()
+    # the helpers of the suites are written against this base instant (`reset_rate_limits/0` froze the clock at 1_000_000): the clock of the test
+    # stays 5_000_000, as it was when the seams were installed in the opposite order. Restored by the `put_env_restoring` above (it runs after
+    # `restore_rate_limits/0`, which puts back the 5_000_000 clock captured by `reset_rate_limits/0`).
+    Application.put_env(:nebu_http, :rate_limit_clock_fn, fn -> 5_000_000 end)
     ExUnit.Callbacks.on_exit(&T.restore_rate_limits/0)
   end
 

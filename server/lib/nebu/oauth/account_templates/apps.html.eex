@@ -1,34 +1,27 @@
-<p data-role="grants-note">These are the apps you have allowed to use your Matrix account. Nebu does not ask you again for them. Withdrawing the permission of an app does not sign out devices that are already signed in: use <a href="/account?action=org.matrix.devices_list">Devices</a> for that. The app asks for your permission again the next time it wants to sign you in.</p>
+<p data-role="grants-note"><%= t(@lang, "acct.apps.note") %></p>
 <%= if @grants == [] do %>
-<p data-role="no-grants">There are no allowed apps on your account. An app appears here after you allow it when you sign in.</p>
+<p data-role="no-grants"><%= t(@lang, "acct.apps.empty") %></p>
 <% else %>
-<div class="table-wrap" role="region" aria-label="Allowed apps table" tabindex="0">
-<table>
-<caption>Apps you have allowed</caption>
-<thead>
-<tr>
-<th scope="col">App (name claimed by the app)</th>
-<th scope="col">Website</th>
-<th scope="col">Allowed on</th>
-<th scope="col">Actions</th>
-</tr>
-</thead>
-<tbody>
+<ul class="cards" data-role="grant-list">
 <%= for g <- @grants do %>
-<tr data-role="consent-grant" data-client-id="<%= g.client_id %>">
-<th scope="row" data-label="App (name claimed by the app)"><%= grant_name(g) %></th>
-<td data-label="Website"><%= if g.client_host in [nil, ""], do: "Unknown", else: g.client_host %></td>
-<td data-label="Allowed on"><%= grant_time(g.granted_at) %></td>
-<td data-label="Actions">
+<li class="card" data-role="consent-grant" data-client-id="<%= g.client_id %>">
+<div class="top">
+<div>
+<h2 data-role="grant-name"><%= grant_name(g, @lang) %></h2>
+<p class="meta"><%= t(@lang, "acct.apps.website") %>: <%= if g.client_host in [nil, ""], do: t(@lang, "acct.unknown"), else: g.client_host %> · <%= t(@lang, "acct.apps.allowed_on") %> <%= grant_time(g.granted_at, @lang) %></p>
+</div>
 <form method="post" action="/account/apps/withdraw">
 <input type="hidden" name="csrf_token" value="<%= @csrf_token %>">
 <input type="hidden" name="client_id" value="<%= g.client_id %>">
-<button type="submit" class="danger" data-role="withdraw-grant" aria-label="Withdraw the permission of <%= grant_name(g) %> (<%= grant_host(g) %>)">Withdraw</button>
+<button type="submit" class="btn danger" data-role="withdraw-grant" aria-label="<%= tf(@lang, "acct.apps.withdraw_label", %{"name" => grant_name(g, @lang), "host" => grant_host(g, @lang)}) %>"><%= t(@lang, "acct.apps.withdraw") %></button>
 </form>
-</td>
-</tr>
-<% end %>
-</tbody>
-</table>
 </div>
+</li>
 <% end %>
+</ul>
+<% end %>
+<details data-role="grants-details">
+<summary><%= t(@lang, "acct.apps.details_summary") %></summary>
+<p><%= t(@lang, "acct.apps.details") %></p>
+<p><a href="/account?action=org.matrix.devices_list"><%= t(@lang, "acct.nav.devices") %></a></p>
+</details>

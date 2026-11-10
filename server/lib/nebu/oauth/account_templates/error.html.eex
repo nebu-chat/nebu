@@ -1,25 +1,17 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="light">
-<title><%= @title %></title>
-<style><%= @css %></style>
-</head>
-<body>
-<main data-page="account-error" data-error="<%= @code %>">
+<%= @icon %>
 <h1><%= @heading %></h1>
 <p><%= @explanation %></p>
-<h2>What you can do</h2>
+<p class="primary"><strong><%= @primary %></strong></p>
+<%= if @more != [] do %>
+<details>
+<summary><%= @more_label %></summary>
 <ul>
-<%= for item <- @actions do %>
+<%= for item <- @more do %>
 <li><%= item %></li>
 <% end %>
 </ul>
-<%= if @restart do %>
-<p><a href="/account">Back to the account page</a></p>
+</details>
 <% end %>
-</main>
-</body>
-</html>
+<%= if @restart do %>
+<p><a class="btn" href="/account"><%= @restart_label %></a></p>
+<% end %>
