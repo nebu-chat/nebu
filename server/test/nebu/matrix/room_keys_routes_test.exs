@@ -13,6 +13,8 @@ defmodule Nebu.Matrix.RoomKeysRoutesTest do
   """
   use ExUnit.Case, async: false
 
+  alias Nebu.Web.SessionLookupTestSupport, as: LookupFault
+
   alias Nebu.Matrix.RoomKeysTestSupport, as: RK
 
   @p "/_matrix/client/v3/room_keys"
@@ -47,6 +49,7 @@ defmodule Nebu.Matrix.RoomKeysRoutesTest do
     end
 
     test "a junk token (opaque or JWT-shaped) answers 401 M_UNKNOWN_TOKEN" do
+      LookupFault.setup_no_row_lookup()
       for {method, path} <- @clauses, token <- ["not-a-token", "aaa.bbb.ccc"] do
         c = RK.req(method, path, token, nil)
         assert {c.status, RK.json(c)["errcode"]} == {401, "M_UNKNOWN_TOKEN"}, "#{method} #{path} (#{token}): #{c.status} #{String.slice(c.resp_body, 0, 120)}"
@@ -91,6 +94,7 @@ defmodule Nebu.Matrix.RoomKeysRoutesTest do
     end
 
     test "a junk bearer (opaque or JWT-shaped) + 1 000 001 bytes or 6 MiB (above the 5 MiB cap too) is 401 M_UNKNOWN_TOKEN, never 413 / 5xx, and the body is never read" do
+      LookupFault.setup_no_row_lookup()
       for {method, path} <- @write_routes, size <- @big_sizes, token <- ["junk-token", "aaa.bbb.ccc"] do
         c = RK.req(method, path, token, {:raw, pad_to(put_body(), size)})
         assert {c.status, RK.json(c)["errcode"]} == {401, "M_UNKNOWN_TOKEN"}, "#{method} #{path} (#{size}, #{token}): #{c.status} #{String.slice(c.resp_body, 0, 100)}"
@@ -119,6 +123,7 @@ defmodule Nebu.Matrix.RoomKeysRoutesTest do
     end
 
     test "no token + malformed JSON (or a non-object body) is 401 M_MISSING_TOKEN, never M_NOT_JSON / M_BAD_JSON, body unread; a junk token the same with 401 M_UNKNOWN_TOKEN" do
+      LookupFault.setup_no_row_lookup()
       for raw <- ["{nope", "[1,2]", ~s("text")], {method, path} <- [{:put, @p <> "/keys?version=1"}, {:post, @p <> "/version"}, {:put, @p <> "/version/1"}] do
         c = RK.req(method, path, nil, {:raw, raw})
         assert {c.status, RK.json(c)["errcode"]} == {401, "M_MISSING_TOKEN"}, "#{method} #{path} #{raw}"
@@ -153,6 +158,7 @@ defmodule Nebu.Matrix.RoomKeysRoutesTest do
     end
 
     test "an ENCODED room_keys path with a junk bearer + 6 MiB is 401 M_UNKNOWN_TOKEN, body unread (all write routes)" do
+      LookupFault.setup_no_row_lookup()
       for prefix <- @encoded_prefixes, {method, suffix} <- [{:put, "/keys/#{@room}?version=1"}, {:post, "/version"}, {:put, "/version/1"}] do
         c = RK.req(method, prefix <> suffix, "junk-token", {:raw, pad_to(put_body(), 6 * 1024 * 1024)})
         assert {c.status, RK.json(c)["errcode"]} == {401, "M_UNKNOWN_TOKEN"}, "#{method} #{prefix <> suffix}: #{c.status} #{String.slice(c.resp_body, 0, 100)}"

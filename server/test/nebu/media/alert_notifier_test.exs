@@ -44,7 +44,6 @@ defmodule Nebu.Media.AlertNotifierTest do
   """
 
   use ExUnit.Case, async: false
-  use Oban.Testing, repo: Nebu.Repo
 
   @moduletag :integration
 
@@ -54,6 +53,32 @@ defmodule Nebu.Media.AlertNotifierTest do
   @run_id Base.url_encode64(:crypto.strong_rand_bytes(6), padding: false)
 
   defp media_id(suffix), do: "alertnotif_#{@run_id}_#{suffix}"
+
+  # bugfix integration-test-flakes-fix (F): `assert_enqueued/1` / `refute_enqueued/1` only look at jobs that are still `available` / `scheduled`.
+  # This app runs Oban with live queues in the test process AND in the server stack on the same database, so a job inserted by the code under test
+  # can already be `executing` / `completed` / `retryable` / `discarded` (the webhook URL is unreachable) when the assertion looks: the assertion
+  # then failed sporadically, and a refute could pass vacuously. These helpers ask `oban_jobs` for the media alert jobs of one media id in ANY state.
+  defp alert_jobs(media_id) do
+    worker = MediaAlertWebhookWorker |> Atom.to_string() |> String.replace_leading("Elixir.", "")
+
+    Ecto.Adapters.SQL.query!(
+      Nebu.Repo,
+      "SELECT args FROM oban_jobs WHERE worker = $1 AND queue = 'media_alerts' AND args @> $2::jsonb",
+      [worker, %{"media_id" => media_id}]
+    ).rows
+    |> Enum.map(fn [args] -> args end)
+  end
+
+  defp assert_alert_job(media_id, state) do
+    jobs = alert_jobs(media_id)
+
+    assert Enum.any?(jobs, &(&1["state"] == state)),
+           "expected a media alert job for #{media_id} with state #{inspect(state)} (any job state), got #{inspect(jobs)}"
+  end
+
+  defp refute_alert_job(media_id) do
+    assert alert_jobs(media_id) == [], "no media alert job may exist for #{media_id} (any job state)"
+  end
 
   setup do
     if Process.whereis(Nebu.Repo) == nil do
@@ -85,11 +110,7 @@ defmodule Nebu.Media.AlertNotifierTest do
 
     assert :ok = AlertNotifier.handle_broadcast({:media_state_transition, id, :scanning, :infected})
 
-    assert_enqueued(
-      worker: MediaAlertWebhookWorker,
-      args: %{"media_id" => id, "state" => "infected"},
-      queue: "media_alerts"
-    )
+    assert_alert_job(id, "infected")
   end
 
   # ─── Acceptance Test 2 (AC2) — scan_failed enqueues the webhook job ────────
@@ -101,11 +122,7 @@ defmodule Nebu.Media.AlertNotifierTest do
     assert :ok =
              AlertNotifier.handle_broadcast({:media_state_transition, id, :quarantined, :scan_failed})
 
-    assert_enqueued(
-      worker: MediaAlertWebhookWorker,
-      args: %{"media_id" => id, "state" => "scan_failed"},
-      queue: "media_alerts"
-    )
+    assert_alert_job(id, "scan_failed")
   end
 
   # ─── Acceptance Test 3 (AC4) — no webhook URL configured is a no-op ────────
@@ -116,7 +133,7 @@ defmodule Nebu.Media.AlertNotifierTest do
 
     assert :ok = AlertNotifier.handle_broadcast({:media_state_transition, id, :scanning, :infected})
 
-    refute_enqueued(worker: MediaAlertWebhookWorker, args: %{"media_id" => id})
+    refute_alert_job(id)
   end
 
   # ─── Acceptance Test 4 (AC5) — only :infected/:scan_failed notify ──────────
@@ -129,7 +146,7 @@ defmodule Nebu.Media.AlertNotifierTest do
 
       assert :ok = AlertNotifier.handle_broadcast({:media_state_transition, id, :scanning, new_state})
 
-      refute_enqueued(worker: MediaAlertWebhookWorker, args: %{"media_id" => id})
+      refute_alert_job(id)
     end
   end
 
@@ -141,6 +158,6 @@ defmodule Nebu.Media.AlertNotifierTest do
 
     assert :ok = AlertNotifier.handle_broadcast({:media_state_transition, id, :infected, :infected})
 
-    refute_enqueued(worker: MediaAlertWebhookWorker, args: %{"media_id" => id})
+    refute_alert_job(id)
   end
 end

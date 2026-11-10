@@ -154,6 +154,39 @@ defmodule Nebu.Matrix.AccountManagement do
     end
   end
 
+  @max_device_name 64
+
+  @doc "See `Nebu.Matrix.account_rename_device/3`."
+  @spec rename_device(String.t(), String.t(), String.t()) :: :ok | {:error, :invalid_name | :not_found | :unavailable}
+  def rename_device(user_id, device_id, name) when is_binary(user_id) and is_binary(device_id) do
+    if valid_device_name?(name) do
+      # the one user-scoped write (it also stamps the device-list change of a keyed device); `:error` is "no such row OR a database problem"
+      case Nebu.Matrix.DeviceKeyStore.rename_device(user_id, device_id, name) do
+        :ok -> :ok
+        :error -> rename_failure(user_id, device_id)
+      end
+    else
+      {:error, :invalid_name}
+    end
+  end
+
+  def rename_device(_user_id, _device_id, _name), do: {:error, :invalid_name}
+
+  defp rename_failure(user_id, device_id) do
+    case query("SELECT 1 FROM devices WHERE user_id = $1 AND device_id = $2", [user_id, device_id]) do
+      {:ok, %{rows: []}} -> {:error, :not_found}
+      _ -> {:error, :unavailable}
+    end
+  end
+
+  # defence in depth: the caller sanitises, the store never accepts an empty, overlong, control-carrying or invalid name
+  defp valid_device_name?(name) when is_binary(name) do
+    String.valid?(name) and name != "" and String.length(name) <= @max_device_name and String.trim(name) == name and
+      not Regex.match?(~r/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u, name)
+  end
+
+  defp valid_device_name?(_name), do: false
+
   defp holder(display_name, last_seen_ts, session) do
     %{
       display_name: display_name,

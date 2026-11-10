@@ -1,0 +1,190 @@
+diff --git a/_bmad-output/nebu/epics/oauth-pages-redesign/pipeline-state.yaml b/_bmad-output/nebu/epics/oauth-pages-redesign/pipeline-state.yaml
+index 0cdb68f1..faec63ff 100644
+--- a/_bmad-output/nebu/epics/oauth-pages-redesign/pipeline-state.yaml
++++ b/_bmad-output/nebu/epics/oauth-pages-redesign/pipeline-state.yaml
+@@ -1,6 +1,8 @@
+ # Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents.
+ # Do not edit manually during an active pipeline run.
+ # last_updated: 2026-11-05
++# [06-portal-rename-device] 2026-11-05T19:51Z dev-story → done (cycle 1, e2e-only; server code unchanged since CI gate, integration not stale)
++# [06-portal-rename-device] 2026-11-05T19:50Z code-review → 1 MINOR → cycle 1
+ # [06-portal-rename-device] 2026-11-05T19:47Z ux-gate → CLEAN
+ # [06-portal-rename-device] 2026-11-05T19:47Z ci-gate → full integration 13426 tests, 23 failures: 22 pre-existing (baseline) + 1 new (story-05 notice_codes pin, fixed by test update; portal+rename+account targeted 196/196 green); unit exit 0; 2 CI-fix dev passes (FormPost free_text for device_name, @notices)
+ # [06-portal-rename-device] 2026-11-05T19:19Z dev-story → done (cycle 0)
+@@ -90,13 +92,13 @@
+ # [01-device-naming-chain] 2026-11-05T09:30Z oracle-gate → skipped (MATRIX=false)
+ # [01-device-naming-chain] 2026-11-05T09:30Z classify → matrix=false(classifier; story frontmatter matrix:true) ui=true infra=false sec=required
+ story: "06-portal-rename-device"
+-current_step: "ux-gate"
++current_step: "code-review"
+ completed:
+   - oracle-gate
+   - atdd
+   - test-review
+   - dev-story
+   - ci-gate
+-cycle_count: 0
++cycle_count: 1
+ blocked_reason: null
+-last_updated: "2026-11-05T19:47Z"
++last_updated: "2026-11-05T19:51Z"
+diff --git a/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/06-portal-rename-device/code-review-findings.md b/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/06-portal-rename-device/code-review-findings.md
+new file mode 100644
+index 00000000..1fca1bb8
+--- /dev/null
++++ b/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/06-portal-rename-device/code-review-findings.md
+@@ -0,0 +1,12 @@
++# code-review — cycle 0
++MINOR | e2e/step-definitions/oauth/portal-rename-device.steps.ts:392 | When FOREIGN_USER has no `users` row, the "another user's device" half of scenario 3 is silently dropped (annotation only) and only the unknown-id case runs; coverage depends on leftover state | Make it deterministic: insert the foreign `users` row in the fixture (or sign the foreign user in once) and fail instead of degrading
++INFO | server/lib/nebu/oauth/account.ex:807 | Deviation accepted: a POST to /account/devices/rename without a session answers 302 via start_login (ATDD test pins 302), while every other account POST answers 303 /account. No auth bypass (no write, binding cookie per state, per-source cap on login requests), but it is an inconsistency with the "a POST cannot be replayed through the IdP" rule | Optionally record the reason in the story Decisions
++INFO | server/lib/nebu/oauth/account.ex:965 | Deviation accepted: stale / freshness_unavailable / device_name_invalid redirect (303) to the rename page with the notice; the AC asks for 303 + notice + "Confirm it is you" link and "the form shown again", which the rename page delivers (tests assert notice + reauth link on the landed page). A foreign id with a valid format lands on device_not_found via render_rename, no leak | -
++INFO | server/lib/nebu/oauth/account.ex:239 | The reauth link on the rename page returns to the devices list (`reauth_href(@devices_list, nil)`), not to the rename page; the user must click Rename again after re-authenticating (return_target only knows the five actions) | Follow-up: allow a rename return target
++INFO | server/lib/nebu/oauth/account.ex:950 | Logger.info logs user_id and device_id only, never the name; same pattern as the device sign-out / consent withdraw lines. No name in any log path (DeviceKeyStore.rename_device and AccountManagement do not log) | -
++INFO | server/lib/nebu/oauth/account.ex:921 | Check order matches delete_device: session -> CSRF + BrowserPost (checked_post) -> auth_time nil -> fresh? -> valid_device_id? -> write; user id only from session; FormPost free_text limited to ["device_name"] on the rename path | -
++INFO | server/lib/nebu/matrix/account_management.ex:160 | ADR-018/020 OK: OAuth calls the new facade Nebu.Matrix.account_rename_device/3; SQL stays in the Matrix domain; the write reuses DeviceKeyStore.rename_device/3 (user-scoped UPDATE + stamp_if_keyed!, covered by the keyed-device oracle test) | -
++INFO | server/lib/nebu/oauth/account_templates/rename.html.eex:13 | `maxlength="64"` counts UTF-16 units, the server limit is 64 code points: names with astral characters (emoji) are capped at fewer typed characters in the browser than the server allows; harmless | -
++INFO | server/lib/nebu/oauth/device_name.ex:91 | Deferred MINOR of story 01 (plan/3): confirmed out of the rename path; rename uses only DeviceName.typed/1 | -
++INFO | e2e/step-definitions/oauth/portal-rename-device.steps.ts:147 | gate-y skip (no auth_time from a real IdP) with annotation + evidence log: accepted epic pattern | -
++INFO | server/test/nebu/oauth/portal_rename_device_test.exs:1 | The AC rule "new name appears in the Allow page's 'replaces your session NAME' line" has no direct test; it reads the same devices.display_name column | Optional: one assertion on the Allow page
+diff --git a/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/06-portal-rename-device/review-prescan.digest b/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/06-portal-rename-device/review-prescan.digest
+new file mode 100644
+index 00000000..34086493
+--- /dev/null
++++ b/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/06-portal-rename-device/review-prescan.digest
+@@ -0,0 +1,4 @@
++VERDICT: CLEAN
++COUNTS: major=0 minor=0 hints=0
++REPORT: _bmad-output/nebu/epics/oauth-pages-redesign/step-results/06-portal-rename-device/review-prescan.md
++TOP: -
+diff --git a/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/06-portal-rename-device/review-prescan.md b/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/06-portal-rename-device/review-prescan.md
+new file mode 100644
+index 00000000..c74b5fe2
+--- /dev/null
++++ b/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/06-portal-rename-device/review-prescan.md
+@@ -0,0 +1,2 @@
++# review-prescan — 1367 added lines, 20 changed files, last shipped migration 000062
++
+diff --git a/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/06-portal-rename-device/reviewed-tree.txt b/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/06-portal-rename-device/reviewed-tree.txt
+new file mode 100644
+index 00000000..78eedfc1
+--- /dev/null
++++ b/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/06-portal-rename-device/reviewed-tree.txt
+@@ -0,0 +1 @@
++a5711711ba3a77aebe4ad2b98858f65a42f9dc49
+diff --git a/e2e/fixtures/db.ts b/e2e/fixtures/db.ts
+index 50c0cbe0..6f208484 100644
+--- a/e2e/fixtures/db.ts
++++ b/e2e/fixtures/db.ts
+@@ -1019,18 +1019,32 @@ export function ageAccountSessionAuthTime(userId: string, seconds: number): void
+ }
+ 
+ /**
+- * A `devices` row (no session, no keys) for a user that already exists in `users`; returns false when the user has no row (never signed in), so a
+- * scenario can fall back to "a device id that does not exist" instead of failing on a foreign-key error. Removed again by `deleteUserDeviceRow`.
++ * A `devices` row (no session, no keys) for a user. The user's `users` row is created first when it does not exist yet (only `user_id` and
++ * `created_at` are required), so the scenario is deterministic and never depends on that user having signed in before. Returns true when THIS call
++ * created the `users` row (pass that to `deleteUserRowIfCreated` for the cleanup); throws when the device row could not be made. Removed again by
++ * `deleteUserDeviceRow`.
+  */
+ export function insertUserDeviceRow(userId: string, deviceId: string, displayName: string): boolean {
++  const created = runSqlQuery(
++    `WITH ins AS (INSERT INTO users (user_id, created_at) VALUES (${sqlLiteral(userId)}, floor(extract(epoch FROM now()) * 1000)::bigint) ` +
++      `ON CONFLICT (user_id) DO NOTHING RETURNING 1) SELECT count(*) FROM ins`,
++  );
+   const out = runSqlQuery(
+     `WITH ins AS (INSERT INTO devices (user_id, device_id, display_name, created_at, updated_at) ` +
+-      `SELECT user_id, ${sqlLiteral(deviceId)}, ${sqlLiteral(displayName)}, floor(extract(epoch FROM now()) * 1000)::bigint, floor(extract(epoch FROM now()) * 1000)::bigint ` +
+-      `FROM users WHERE user_id = ${sqlLiteral(userId)} RETURNING 1) SELECT count(*) FROM ins`,
++      `VALUES (${sqlLiteral(userId)}, ${sqlLiteral(deviceId)}, ${sqlLiteral(displayName)}, floor(extract(epoch FROM now()) * 1000)::bigint, floor(extract(epoch FROM now()) * 1000)::bigint) ` +
++      `ON CONFLICT (user_id, device_id) DO UPDATE SET display_name = EXCLUDED.display_name RETURNING 1) SELECT count(*) FROM ins`,
+   );
+-  return Number(out) === 1;
++  if (Number(out) !== 1) {
++    throw new Error(`[fixtures/db] could not create the device row ${deviceId} of ${userId}`);
++  }
++  return Number(created) === 1;
+ }
+ 
+ export function deleteUserDeviceRow(userId: string, deviceId: string): void {
+   runSql(`DELETE FROM devices WHERE user_id = ${sqlLiteral(userId)} AND device_id = ${sqlLiteral(deviceId)}`);
+ }
++
++/** Remove a `users` row that `insertUserDeviceRow` created (call after `deleteUserDeviceRow`); only that user's own row, nothing else. */
++export function deleteUserRowIfCreated(userId: string): void {
++  runSql(`DELETE FROM users WHERE user_id = ${sqlLiteral(userId)}`);
++}
+diff --git a/e2e/step-definitions/oauth/portal-rename-device.steps.ts b/e2e/step-definitions/oauth/portal-rename-device.steps.ts
+index 096d67de..0c403f4c 100644
+--- a/e2e/step-definitions/oauth/portal-rename-device.steps.ts
++++ b/e2e/step-definitions/oauth/portal-rename-device.steps.ts
+@@ -42,6 +42,7 @@ import {
+   ageAccountSessionAuthTime,
+   insertUserDeviceRow,
+   deleteUserDeviceRow,
++  deleteUserRowIfCreated,
+ } from '../../fixtures/db';
+ import { E2E_ISSUER } from '../../fixtures/oauth-issuer';
+ import { NEBU_USERS, DEX_TEST_PASSWORD } from '../../fixtures/users';
+@@ -89,7 +90,7 @@ let priorIssuer: string | null = null;
+ let contexts: BrowserContext[] = [];
+ let tokens: Record<string, string> = {};
+ let dataReady = false;
+-let foreignRow = false;
++let foreignUserCreated = false;
+ let page: Page | null = null;
+ let notice: Notice | null = null;
+ let staleHasReauth = false;
+@@ -105,6 +106,8 @@ function wipe(): void {
+   clearOAuthClientsByIdPrefix(CLIENT_PREFIX);
+   for (const id of [DEVICE_A, DEVICE_B]) clearDeviceOfUser(USER.matrixId, id);
+   deleteUserDeviceRow(FOREIGN_USER.matrixId, FOREIGN_DEVICE);
++  if (foreignUserCreated) deleteUserRowIfCreated(FOREIGN_USER.matrixId);
++  foreignUserCreated = false;
+   clearAccountSessions(USER.matrixId);
+ }
+ 
+@@ -112,7 +115,6 @@ Before({ tags: '@REQ-2026-021' }, async () => {
+   contexts = [];
+   tokens = {};
+   dataReady = false;
+-  foreignRow = false;
+   page = null;
+   notice = null;
+   staleHasReauth = false;
+@@ -247,7 +249,7 @@ async function ensureUserData(browser: Browser, request: APIRequestContext): Pro
+   tokens[DEVICE_B] = await createDevice(browser, request, DEVICE_B);
+   setUserDeviceDisplayName(USER.matrixId, DEVICE_A, OLD_NAME);
+   setUserDeviceDisplayName(USER.matrixId, DEVICE_B, OTHER_NAME);
+-  foreignRow = insertUserDeviceRow(FOREIGN_USER.matrixId, FOREIGN_DEVICE, FOREIGN_NAME);
++  foreignUserCreated = insertUserDeviceRow(FOREIGN_USER.matrixId, FOREIGN_DEVICE, FOREIGN_NAME);
+   dataReady = true;
+ }
+ 
+@@ -389,9 +391,6 @@ Given(
+     await ensureUserData(browser, request);
+     page = await openAccount(browser, EN, DEVICES_URL);
+     requireFresh($testInfo);
+-    if (!foreignRow) {
+-      $testInfo.annotations.push({ type: 'foreign-user', description: `${FOREIGN_USER.matrixId} has no users row: only the unknown device id is exercised` });
+-    }
+   },
+ );
+ 
+@@ -399,7 +398,7 @@ When(lit('the portal user submits a rename for it'), async () => {
+   const p = page!;
+   submitted = [];
+ 
+-  const ids = foreignRow ? [FOREIGN_DEVICE, UNKNOWN_DEVICE] : [UNKNOWN_DEVICE];
++  const ids = [FOREIGN_DEVICE, UNKNOWN_DEVICE];
+ 
+   for (const id of ids) {
+     // the form of the user's own device, with the hidden device id swapped for the foreign / unknown one
+@@ -423,7 +422,7 @@ Then(lit('the notice "device_not_found" is shown and no device of any user is ch
+   expect(queryUserDeviceDisplayName(USER.matrixId, DEVICE_A), 'the own device is unchanged').toBe(OLD_NAME);
+   expect(queryUserDeviceDisplayName(USER.matrixId, DEVICE_B), 'the own other device is unchanged').toBe(OTHER_NAME);
+   expect(queryUserDeviceDisplayName(USER.matrixId, UNKNOWN_DEVICE), 'no row was created').toBeNull();
+-  if (foreignRow) expect(queryUserDeviceDisplayName(FOREIGN_USER.matrixId, FOREIGN_DEVICE), 'the other user device is unchanged').toBe(FOREIGN_NAME);
++  expect(queryUserDeviceDisplayName(FOREIGN_USER.matrixId, FOREIGN_DEVICE), 'the other user device is unchanged').toBe(FOREIGN_NAME);
+ 
+   const devices = await matrixDevices(request, tokens[DEVICE_A]);
+   expect(devices.find((d) => d.device_id === DEVICE_A)?.display_name, 'Matrix GET /devices is unchanged').toBe(OLD_NAME);

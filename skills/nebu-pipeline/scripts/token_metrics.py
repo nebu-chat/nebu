@@ -399,6 +399,22 @@ def load_records(files: list[str]) -> list[dict]:
     return out
 
 
+def dedupe_agents(recs: list) -> list:
+    """One record per agent_id (the hook can log the same stop twice; the later record wins)."""
+    seen: dict = {}
+    keep = []
+    for r in recs:
+        aid = r.get("agent_id")
+        if not aid:
+            keep.append(r)
+        elif aid in seen:
+            keep[seen[aid]] = r
+        else:
+            seen[aid] = len(keep)
+            keep.append(r)
+    return keep
+
+
 def fmt_dur(s):
     if s is None:
         return "-"
@@ -417,7 +433,7 @@ def cmd_report(args) -> None:
         if v:
             recs = [r for r in recs if r.get(key) == v]
     no_tr = [r for r in recs if r.get("transcript_found") is False]
-    recs = [r for r in recs if r.get("transcript_found") is not False]
+    recs = dedupe_agents([r for r in recs if r.get("transcript_found") is not False])
     if no_tr:
         print(
             f"! {len(no_tr)} Lauf/Läufe ohne auffindbares Subagent-Transcript (nicht mitgezählt). "
@@ -499,7 +515,7 @@ def cmd_parse(args) -> None:
 def cmd_profile(args) -> None:
     root = find_project_root()
     files = args.file or [str(root / ".claude" / "metrics" / "usage.jsonl")]
-    recs = [r for r in load_records(files) if r.get("event") == "stop" and r.get("profile")]
+    recs = dedupe_agents([r for r in load_records(files) if r.get("event") == "stop" and r.get("profile")])
     if not recs:
         print("Keine Profil-Daten (nur Läufe ab Hook-Version mit Profil, Stand Phase 2).")
         return
@@ -524,6 +540,104 @@ def cmd_profile(args) -> None:
         print("  Ergebnisse im Kontext (k Zeichen): " + ", ".join(f"{k} {v/1000:.0f}" for k, v in sorted(res.items(), key=lambda kv: -kv[1])[:6]))
 
 
+POLL_RE = re.compile(r"\bsleep\b|\buntil\b|\bwhile\b|tail\s+-f|\bwait\b|docker\s+(ps|compose\s+ps|logs)|\bpgrep\b|\bps\s+aux")
+
+
+def cmd_main_profile(args) -> None:
+    """Where does the ORCHESTRATOR (main session) spend its tokens? Reads one session transcript (never leaves the machine).
+
+    Per assistant turn: context size (input+cache-read+cache-create), weighted cost, and a category from the tools it called:
+    launch (Agent/Task), poll (sleep/until/wait/docker ps/tail -f, BashOutput, TaskOutput, Monitor), tool (other), talk (no tool).
+    Prints cost by category, the context growth curve, the largest tool results and the most frequent commands.
+    """
+    msgs: dict = {}
+    order: list = []
+    uses: dict = {}
+    sizes: dict = {}
+    humans = 0
+    with open(args.transcript, encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            try:
+                o = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(o, dict) or o.get("isSidechain") is True:
+                continue
+            m = o.get("message") if isinstance(o.get("message"), dict) else None
+            if o.get("type") == "user" and m:
+                c = m.get("content")
+                if isinstance(c, str) or (isinstance(c, list) and not any(isinstance(b, dict) and b.get("type") == "tool_result" for b in c)):
+                    humans += 1
+                if isinstance(c, list):
+                    for b in c:
+                        if isinstance(b, dict) and b.get("type") == "tool_result":
+                            sizes[b.get("tool_use_id")] = _result_len(b.get("content"))
+            elif o.get("type") == "assistant" and m:
+                mid = m.get("id") or o.get("uuid")
+                if mid not in msgs:
+                    msgs[mid] = {"usage": {}, "model": m.get("model"), "tools": []}
+                    order.append(mid)
+                rec = msgs[mid]
+                u = m.get("usage") or {}
+                if (u.get("output_tokens") or 0) >= (rec["usage"].get("output_tokens") or 0):
+                    rec["usage"] = u
+                for b in (m.get("content") or []):
+                    if isinstance(b, dict) and b.get("type") == "tool_use" and b.get("id") not in uses:
+                        inp = b.get("input") if isinstance(b.get("input"), dict) else {}
+                        name = str(b.get("name"))
+                        cmd = str(inp.get("command", "")) if name == "Bash" else str(inp.get("description") or inp.get("file_path") or inp.get("subagent_type") or "")
+                        uses[b["id"]] = {"name": name, "cmd": cmd, "msg": mid}
+                        rec["tools"].append(b["id"])
+    if not order:
+        print("no assistant messages found in", args.transcript)
+        return
+    cat_cost: dict = {}
+    cat_n: dict = {}
+    curve = []
+    total = 0.0
+    for i, mid in enumerate(order):
+        rec = msgs[mid]
+        u = rec["usage"]
+        tok = {"input": u.get("input_tokens", 0), "cache_creation": u.get("cache_creation_input_tokens", 0),
+               "cache_read": u.get("cache_read_input_tokens", 0), "output": u.get("output_tokens", 0)}
+        cost = effective(tok, rec["model"] or "sonnet")
+        ctx = tok["input"] + tok["cache_read"] + tok["cache_creation"]
+        kinds = {uses[t]["name"] for t in rec["tools"]}
+        if kinds & {"Agent", "Task"}:
+            cat = "launch (Agent/Task)"
+        elif kinds & {"BashOutput", "TaskOutput", "Monitor", "ScheduleWakeup"} or any(
+                uses[t]["name"] == "Bash" and POLL_RE.search(uses[t]["cmd"]) for t in rec["tools"]):
+            cat = "poll/wait"
+        elif kinds:
+            cat = "other tool"
+        else:
+            cat = "talk (no tool)"
+        cat_cost[cat] = cat_cost.get(cat, 0) + cost
+        cat_n[cat] = cat_n.get(cat, 0) + 1
+        total += cost
+        curve.append((i, ctx))
+    print(f"{len(order)} assistant turns, {humans} human/user messages, weighted index {total/1000:,.0f}k")
+    print("\ncost by turn category:")
+    for k, v in sorted(cat_cost.items(), key=lambda kv: -kv[1]):
+        print(f"  {k:22s} turns={cat_n[k]:4d}  index={v/1000:8,.0f}k  ({100*v/total:4.1f}%)  avg ctx-cost/turn={v/cat_n[k]/1000:6.1f}k")
+    print("\ncontext size (k tokens) every ~10% of the session:")
+    step = max(1, len(curve) // 10)
+    print("  " + "  ".join(f"#{i}:{c//1000}k" for i, c in curve[::step]) + f"  #{curve[-1][0]}:{curve[-1][1]//1000}k")
+    big = sorted(((sizes.get(t, 0), t) for t in uses), reverse=True)[:12]
+    print("\nlargest tool results (chars):")
+    for n, t in big:
+        print(f"  {n:8,d}  {uses[t]['name']:10s} {uses[t]['cmd'][:90].replace(chr(10), ' ')}")
+    kinds: dict = {}
+    for t, u in uses.items():
+        k = classify_bash(u["cmd"]) if u["name"] == "Bash" else u["name"]
+        d = kinds.setdefault(k, [0, 0])
+        d[0] += 1
+        d[1] += sizes.get(t, 0)
+    print("\ntool calls by kind (count, result chars):")
+    for k, (n, c) in sorted(kinds.items(), key=lambda kv: -kv[1][1])[:14]:
+        print(f"  {k:28s} n={n:4d}  chars={c:9,d}")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd")
@@ -537,6 +651,8 @@ def main() -> None:
     r.add_argument("--story")
     pf = sub.add_parser("profile", help="Tool-/Thinking-Profil je Schritt")
     pf.add_argument("--file", action="append")
+    mp = sub.add_parser("main-profile", help="Wofür gibt die Hauptsession (Orchestrator) Tokens aus? (liest ein Session-Transcript)")
+    mp.add_argument("--transcript", required=True)
     p = sub.add_parser("parse", help="Ein Transcript (JSONL) zusammenfassen")
     p.add_argument("transcript")
     p.add_argument("--skip-sidechain", action="store_true")
@@ -550,6 +666,8 @@ def main() -> None:
         cmd_parse(args)
     elif args.cmd == "profile":
         cmd_profile(args)
+    elif args.cmd == "main-profile":
+        cmd_main_profile(args)
 
 
 if __name__ == "__main__":

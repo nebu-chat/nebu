@@ -133,6 +133,19 @@ defmodule Nebu.Admin.LogsLive.TraceMapNodeControlsTest do
   @secret_key_base String.duplicate("nebu-trace-map-node-controls-key", 2)
   @topic "operational_logs"
 
+  # bugfix integration-test-flakes-fix (E): the admin LiveViews redirect to /admin/bootstrap unless server_config.bootstrap_completed is "true". On a
+  # fresh database only an earlier test of another file used to set it (order dependent: 16/16 tests red when this file ran alone). The DB-backed
+  # describes (`@describetag :integration`) therefore set their own precondition; like the sibling suites (media_attention_badge_test) it is left set
+  # (a config row cannot be deleted by the runtime role, and the admin pages of the live stack share the database).
+  setup context do
+    if context[:integration] do
+      Nebu.Release.migrate()
+      Nebu.Admin.DB.upsert_server_config(%{"bootstrap_completed" => "true"})
+    end
+
+    :ok
+  end
+
   @off_sync "/_matrix/client/v3/sync"
   @off_keepalive "/admin/keepalive"
   @off_health "/health"
@@ -899,16 +912,38 @@ defmodule Nebu.Admin.LogsLive.TraceMapNodeControlsTest do
   describe "AC1/AC2: configure_logging persists per-endpoint config via upsert_server_config" do
     @describetag :integration
 
+    # bugfix integration-test-flakes-fix (D): this setup used to run a plain `DELETE FROM server_config ...`, which deleted NOTHING (server_config has
+    # FORCE ROW LEVEL SECURITY and no DELETE policy for the runtime role): the "7" / "30" written by one test of this describe survived into the
+    # "rejected -> nothing persisted" tests (random order -> 3 red tests). The per-endpoint log config rows are now really removed with the privileged
+    # (migrate) role before every test, and put back exactly as they were found afterwards (a developer's stack keeps its own endpoint settings).
     setup do
       Nebu.Release.migrate()
 
-      Ecto.Adapters.SQL.query!(
-        Nebu.Repo,
-        "DELETE FROM server_config WHERE key LIKE 'log_min_level_%' OR key LIKE 'log_retention_days_%'",
-        []
-      )
+      snapshot =
+        Nebu.OAuth.TestSupport.privileged_sql!(
+          "SELECT key, value, set_at FROM server_config WHERE starts_with(key, 'log_min_level_') OR starts_with(key, 'log_retention_days_')"
+        ).rows
+
+      wipe_endpoint_log_config()
+
+      on_exit(fn ->
+        wipe_endpoint_log_config()
+
+        for [key, value, set_at] <- snapshot do
+          Nebu.OAuth.TestSupport.privileged_sql!(
+            "INSERT INTO server_config (key, value, set_at) VALUES ($1, $2, $3) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, set_at = EXCLUDED.set_at",
+            [key, value, set_at]
+          )
+        end
+      end)
 
       :ok
+    end
+
+    defp wipe_endpoint_log_config do
+      Nebu.OAuth.TestSupport.privileged_sql!(
+        "DELETE FROM server_config WHERE starts_with(key, 'log_min_level_') OR starts_with(key, 'log_retention_days_')"
+      )
     end
 
     defp seed_log_row(route) do

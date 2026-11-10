@@ -214,6 +214,41 @@ defmodule Nebu.Matrix.Room.MembershipPartitionDbTest do
 
   defp collect_nodes(_other), do: []
 
+  # a room of three or four rows cannot tell a bounded read from a whole-room read: `@bulk_rows` more messages (outside every window of these tests) make the difference visible
+  @bulk_rows 300
+  defp bulk_messages!(room, ts) do
+    ExUnit.Callbacks.on_exit(fn -> T.privileged_sql!("DELETE FROM events WHERE room_id = $1 AND sender = '@bulk:test.local'", [room]) end)
+
+    T.privileged_sql!(
+      """
+      INSERT INTO events (event_id, room_id, sender, event_type, content, origin_server_ts, state_key)
+      SELECT '$bulk' || md5(g::text || $1), $1, '@bulk:test.local', 'm.room.message', jsonb_build_object('msgtype', 'm.text', 'body', 'bulk' || g), $2::bigint + g, NULL
+      FROM generate_series(1, $3::int) AS g
+      """,
+      [room, ts, @bulk_rows]
+    )
+
+    T.privileged_sql!("ANALYZE events")
+  end
+
+  # the rows of `events` an ANALYZE-d EXPLAIN of a captured statement read (sequential scans disabled, as `plan_nodes/2`): returned plus removed by the filter / the index recheck, times the loops
+  defp events_rows_read(sql, params) do
+    {:ok, json} =
+      Nebu.Repo.transaction(fn ->
+        Ecto.Adapters.SQL.query!(Nebu.Repo, "SET LOCAL enable_seqscan = off", [])
+        %{rows: [[json]]} = Ecto.Adapters.SQL.query!(Nebu.Repo, "EXPLAIN (ANALYZE, FORMAT JSON) " <> sql, params)
+        json
+      end)
+
+    json = if is_binary(json), do: Jason.decode!(json), else: json
+
+    json
+    |> collect_nodes()
+    |> Enum.filter(&(&1["Relation Name"] == "events"))
+    |> Enum.map(fn n -> (n["Actual Rows"] + Map.get(n, "Rows Removed by Filter", 0) + Map.get(n, "Rows Removed by Index Recheck", 0)) * n["Actual Loops"] end)
+    |> Enum.sum()
+  end
+
   defp seq_scans_on(nodes, relation), do: Enum.filter(nodes, &(&1["Node Type"] == "Seq Scan" and &1["Relation Name"] == relation))
 
   # ═══ AC1 (a): the candidates ═════════════════════════════════════════════════════
@@ -832,6 +867,7 @@ defmodule Nebu.Matrix.Room.MembershipPartitionDbTest do
   # ═══ D2: the reads are served by the existing indexes (no migration) ═════════════
 
   describe "D2 - EXPLAIN of the partition reads" do
+    @tag ac: "plan-assertions-state-a-bound-not-an-index-name"
     test "with sequential scans disabled no Seq Scan survives in any of the four reads (an existing index serves each)" do
       user = user!()
       inviter = user!()
@@ -842,6 +878,7 @@ defmodule Nebu.Matrix.Room.MembershipPartitionDbTest do
       member_event!(room, user, "join", t)
       state_event!(room, "m.room.create", "", %{"creator" => inviter}, t - 1)
       message_event!(room, t + 1)
+      bulk_messages!(room, t + 1_000)
 
       {_, candidate_statements} = capture_statements(fn -> assert {:ok, _} = db(:membership_candidates, [user]) end)
       {_, latest_statements} = capture_statements(fn -> assert {:ok, _} = db(:latest_member_events, [[room], user]) end)
@@ -858,8 +895,9 @@ defmodule Nebu.Matrix.Room.MembershipPartitionDbTest do
 
         if label == "latest_member_events" do
           for {sql, params} <- statements do
-            index_names = for node <- plan_nodes(sql, params), name = node["Index Name"], do: name
-            assert "events_room_state_idx" in index_names, "latest_member_events is served by events_room_state_idx, plan uses #{inspect(index_names)}"
+            # not the NAME of an index (which of the two room-prefixed indexes serves a room of three rows depends on index sizes): the read is BOUNDED, i.e. the 300 irrelevant rows of the room are not read
+            read = events_rows_read(sql, params)
+            assert read <= 40, "latest_member_events read #{read} rows of events (a read of the whole room would be #{@bulk_rows} or more)"
           end
         end
 

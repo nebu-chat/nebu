@@ -24,17 +24,20 @@ defmodule Nebu.OAuth.TokenRequest do
 
   @doc "Duplicate / control-char / UTF-8 check, then empty values dropped. `{:ok, map}` or `{:error, :invalid_request}`."
   @spec validate_params([{String.t(), String.t()}]) :: {:ok, %{String.t() => String.t()}} | {:error, :invalid_request}
-  def validate_params(pairs) when is_list(pairs) do
+  def validate_params(pairs, free_text \\ [])
+
+  def validate_params(pairs, free_text) when is_list(pairs) do
     names = Enum.map(pairs, &elem(&1, 0))
 
     cond do
       length(Enum.uniq(names)) != length(names) -> {:error, :invalid_request}
-      not Enum.all?(pairs, fn {k, v} -> clean?(k) and clean?(v) end) -> {:error, :invalid_request}
+      # a `free_text` parameter (the typed device name of the consent form) may carry control characters: valid UTF-8 suffices, the consumer sanitises it
+      not Enum.all?(pairs, fn {k, v} -> clean?(k) and (clean?(v) or (k in free_text and is_binary(v) and String.valid?(v))) end) -> {:error, :invalid_request}
       true -> {:ok, pairs |> Enum.reject(fn {_k, v} -> v == "" end) |> Map.new()}
     end
   end
 
-  def validate_params(_other), do: {:error, :invalid_request}
+  def validate_params(_other, _free_text), do: {:error, :invalid_request}
 
   defp clean?(value) when is_binary(value), do: String.valid?(value) and not Regex.match?(~r/\p{Cc}/u, value)
   defp clean?(_value), do: false

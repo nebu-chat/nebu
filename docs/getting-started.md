@@ -154,6 +154,7 @@ window and join the same room.
 | `make dev` | Start full stack via docker compose |
 | `make test-unit-elixir` | Run Elixir unit tests in container |
 | `make test-integration` | Full stack + Playwright/Gherkin integration tests |
+| `make test-perf` | Opt-in performance-budget tests (tag `:perf`, e.g. the 200-client `/sync` latency budget); not part of `make test-integration` |
 | `make build-server` | Compile Elixir app inside the build container (`mix compile`) |
 | `make redeploy` | Rebuild the `server` Docker image and recreate the container |
 

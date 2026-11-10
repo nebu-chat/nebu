@@ -231,6 +231,11 @@ defmodule Nebu.Admin.LayoutsWarRoomIndicatorTest do
     setup do
       Nebu.Release.migrate()
 
+      # bugfix integration-test-flakes-fix (E): the admin LiveViews redirect to /admin/bootstrap unless server_config.bootstrap_completed is "true";
+      # on a fresh database only an earlier test of another file set it. Left set afterwards (like media_attention_badge_test): a config row
+      # cannot be deleted by the runtime role and the admin pages of the live stack share the database.
+      Nebu.Admin.DB.upsert_server_config(%{"bootstrap_completed" => "true"})
+
       Ecto.Adapters.SQL.query(
         Nebu.Repo,
         "UPDATE war_room_sessions SET ended_at = now(), ended_reason = 'manual_stop' WHERE ended_at IS NULL",

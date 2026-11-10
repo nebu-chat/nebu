@@ -1,0 +1,2 @@
+<p><%= t(@lang, "acct.signed_out.text") %></p>
+<p><a class="btn primary" href="/account"><%= t(@lang, "acct.signed_out.again") %></a></p>

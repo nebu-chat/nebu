@@ -163,6 +163,26 @@ Ausgangslage aus der ersten Messung (ATDD-Lauf im e2ee-Worktree): 19 Nachrichten
 
 **Zu prüfen.** (1) Ob die Deny-Syntax (`Read(**/node_modules/**)`, `Read(/server/_build/**)`) in deiner Claude-Code-Version greift: einmal eine Datei unter `server/_build` lesen lassen. (2) Ob `PreToolUse` für Subagent-Aufrufe feuert und `agent_type` im Payload steht: `read_guard.py --summary` nach dem ersten Lauf, die Spalte "by agent" muss Agentennamen zeigen. (3) Wirkung: Anzahl Verweigerungen und danach Tool-Ergebnis-Zeichen je Lauf (`token_metrics.py profile`) mit Phase 4 vergleichen.
 
+## Phase 6 – Auswertung der ersten Messreihe und Orchestrator-Turns (2026-11-05)
+
+**Messbasis:** e2ee-Checkout, 1 Session, 3 Stories + Epic-Gate, 40 Subagent-Läufe. Gewichteter Index gesamt ≈ 31,6 M.
+
+- Orchestrator ≈ 46 % (14,6 M), Subagents ≈ 54 %. Subagents: dev-story 19 %, Kassandra 13,5 % (Ø 532k je Lauf), code-review 12 %, atdd 5,6 %, test-review 2 %, oracle 1,5 %. Subagent-Kosten: 42 % Cache-Read, 26 % Output, 32 % Cache-Create; ~50k Index Fixkosten je Agent-Start.
+- Wiederholung treibt Kosten: MINOR-Fix-Zyklen (5/3/2 je Story), Kassandra nach jedem Fix-Zyklus, 3–4 volle Integrations-Gates je Story. Die Sandbox hindert Dev-Subagents am Testlauf, deshalb übernimmt der Orchestrator quick/gate.
+- `token_metrics.py report/profile` dedupliziert jetzt nach agent_id (vorher Doppelzählung bei doppeltem Stop-Hook).
+
+**`main-profile` (Hypothese Polling widerlegt):** 496 Orchestrator-Turns, 14,6 M Index. „other tool“ 377 Turns = 72 %, „talk“ 75 = 17 %, Agent-Starts 37 = 8,6 %, Polling 7 = 1,8 %. Ein Turn kostet im Schnitt 28–34k, unabhängig vom Inhalt:
+Cache-Read auf den ganzen Kontext (Kontext 52k → 434k, Reset bei #392). Kosten = Turns × Kontextgröße; einzelne Tool-Ergebnisse (max. 15k Zeichen) sind nicht der Treiber. Häufigste Aufrufe: `cat` 23, `grep` 34, `sed` 21, Python-Heredocs 21 (ad-hoc Log-Parser und Branch-Analysen), `quick.sh` 34, `git add` 34, `pipeline_state.py` 16, `pipeline_gates.py` 9, `git status` 9.
+
+**Umsetzung (Hebel 1–4):**
+1. `pipeline_gates.py decide --apply $STATE_FILE [--git-add .]` führt bei NEXT/CYCLE/DEFER_MINOR das State-Update (und `git add`) selbst aus; Ausgabezeile `APPLIED`. `pipeline_state.py --git-add PATH` für State-Updates mit Staging. Angepasst: Steps 3, 4, 5b, 6, 7, 10 und der Router.
+2. `finish_story.py` erledigt Step 9 in einem Aufruf (commit_summary, sprint-status, Commit, Traceability, Baseline-Cache, State-Reset) und gibt einen `CONTEXT_HINT` aus.
+3. Router-Abschnitt *Turn & context hygiene* und Knob `SESSION_STORY_LIMIT` (Default 1): nach jeder Story frische Session (`/clear` + `nebu-pipeline`), keine Ad-hoc-Arbeit in der Pipeline-Session, keine Python-Heredoc-Parser.
+4. CI-Logs: kein neues Skript nötig, `test_digest.py --parse FILE --baseline BASE` genügt (3,5 MB Log in 0,09 s, nur neue Failures); Testläufe über `test_digest.py -- <cmd>` auch für Projekt-Helfer wie `.e2ee-ci/quick.sh`.
+
+**Nicht umgesetzt (Hebel 5, Sandbox):** Ob die Claude-Code-Sandbox oder fehlende Freigaben in Subagents die Testläufe blockieren, ist aus den Logs nicht belegbar. Zu prüfen auf dem Mac: `/sandbox`, `~/.claude/settings.json`, ob dort `sandbox.enabled` gesetzt ist und welche Befehle (`docker`, `mix`) ausgenommen sind (`sandbox.excludedCommands`).
+Erwartung der Hebel 1–3: weniger Turns (grob 60–100 von 496) und kleinerer Kontext; belegen mit einem zweiten `main-profile` nach dem nächsten Lauf.
+
 ## Offene Punkte
 
 1. Prüfen (nach Neustart, `/skills`), ob `skillOverrides` aus `.claude/settings.json` wirken; Fallback sind die Einträge in `settings.local.json`.

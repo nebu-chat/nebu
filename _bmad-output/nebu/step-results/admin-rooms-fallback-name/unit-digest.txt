@@ -1,0 +1,2 @@
+EXIT=0 tests=? (no ExUnit summary found) time=204.9s log=_bmad-output/nebu/step-results/admin-rooms-fallback-name/unit.log
+UNIT_EXIT=0

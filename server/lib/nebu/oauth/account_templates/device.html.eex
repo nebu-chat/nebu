@@ -1,18 +1,19 @@
 <p>
-<a data-role="device-sign-out" class="button danger" href="<%= device_href("org.matrix.device_delete", @device.device_id) %>" aria-label="Sign out this device: <%= device_name(@device) %> (<%= @device.device_id %>)">Sign out this device</a>
+<a data-role="device-rename" class="btn secondary" href="<%= rename_href(@device.device_id) %>" aria-label="<%= tf(@lang, "acct.device.rename_label", %{"name" => device_name(@device, @lang), "id" => @device.device_id}) %>"><%= t(@lang, "acct.device.rename") %></a>
+<a data-role="device-sign-out" class="btn danger" href="<%= device_href("org.matrix.device_delete", @device.device_id) %>" aria-label="<%= tf(@lang, "acct.device.sign_out_this_label", %{"name" => device_name(@device, @lang), "id" => @device.device_id}) %>"><%= t(@lang, "acct.device.sign_out_this") %></a>
 </p>
 <dl>
-<dt>Name</dt>
-<dd><%= device_name(@device) %></dd>
-<dt>Device ID</dt>
+<dt><%= t(@lang, "acct.device.d.name") %></dt>
+<dd><%= device_name(@device, @lang) %></dd>
+<dt><%= t(@lang, "acct.device.d.id") %></dt>
 <dd><%= @device.device_id %></dd>
-<dt>App (name claimed by the app)</dt>
-<dd><%= app_label(@device) %></dd>
-<dt>Last active</dt>
-<dd><%= time_tag(@device.last_seen_ts, "Never") %></dd>
-<dt>Last IP</dt>
-<dd><%= @device.last_seen_ip || "Unknown" %></dd>
-<dt>Added</dt>
-<dd><%= time_tag(@device.created_at, "Unknown") %></dd>
+<dt><%= t(@lang, "acct.device.d.app") %></dt>
+<dd><%= app_label(@device, @lang) %></dd>
+<dt><%= t(@lang, "acct.device.d.last_active") %></dt>
+<dd><%= time_tag(@device.last_seen_ts, t(@lang, "acct.never")) %></dd>
+<dt><%= t(@lang, "acct.device.d.ip") %></dt>
+<dd><%= @device.last_seen_ip || t(@lang, "acct.unknown") %></dd>
+<dt><%= t(@lang, "acct.device.d.added") %></dt>
+<dd><%= time_tag(@device.created_at, t(@lang, "acct.unknown")) %></dd>
 </dl>
-<p><a href="/account?action=org.matrix.devices_list">Back to all devices</a></p>
+<p><a href="/account?action=org.matrix.devices_list"><%= t(@lang, "acct.device.back") %></a></p>

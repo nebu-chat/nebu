@@ -1,0 +1,2 @@
+EXIT=0 tests=13534 failures=0 skipped=8 time=870.6s log=_bmad-output/nebu/step-results/admin-room-names-sanitiser-gaps/ci-integration.log
+unit (make test-unit-elixir) exit 0 twice (cycle 0, cycle 1); targeted fresh-DB integration 74 tests 0 failures; full fresh-DB make test-integration 13534 tests 0 failures 8 skipped (870s); no flaky-family failure occurred

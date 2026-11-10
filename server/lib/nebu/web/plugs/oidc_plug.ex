@@ -74,6 +74,7 @@ defmodule Nebu.Web.Plugs.OidcPlug do
   # ── Opaque Nebu session token path (oidc-session-refresh) ──────────────────
   # Mirrors the Go middleware WithOpaqueSessionCheck:
   #   * not found           → 401 M_UNKNOWN_TOKEN (no soft_logout)
+  #   * lookup failed       → 503 M_UNKNOWN + Retry-After (retryable; the client keeps its session)
   #   * soft-revoked        → 401 M_UNKNOWN_TOKEN + soft_logout: true (never deletes, N-1)
   #   * expired             → 401 M_UNKNOWN_TOKEN + soft_logout: true (AC5, spec SHOULD)
   #   * valid               → assign current_user/claims; consume the pending old
@@ -84,6 +85,12 @@ defmodule Nebu.Web.Plugs.OidcPlug do
     case Store.get_by_access_token(token) do
       :error ->
         deny(conn, "M_UNKNOWN_TOKEN", "Invalid or unknown token")
+
+      # bugfix matrix-token-lookup-db-error-not-401: the lookup FAILED (DB error / pool timeout), the token is
+      # neither known nor unknown. A 401 M_UNKNOWN_TOKEN would make the client drop its session (and its E2EE
+      # keys); answer a retryable 5xx instead. Fail closed: nothing is authenticated, nothing is assigned.
+      {:error, :unavailable} ->
+        deny_unavailable(conn)
 
       {:ok, %{revoked_at: %DateTime{}}} ->
         # A hard-revoked AT (logout) is gone (DELETE); a soft-revoked AT (the old
@@ -544,6 +551,25 @@ defmodule Nebu.Web.Plugs.OidcPlug do
     conn
     |> put_resp_content_type("application/json")
     |> send_resp(401, body)
+    |> halt()
+  end
+
+  # A transient server-side failure while validating the token (spec v1.18: 401 M_UNKNOWN_TOKEN is reserved for an
+  # unknown / expired / invalid token). Same shape as `HttpPublic.refresh_unavailable/2`: 503 `M_UNKNOWN` + `Retry-After`,
+  # a fixed text (no token material, no `soft_logout`, no `retry_after_ms`, identical for every token: no oracle).
+  @lookup_retry_after_s 5
+
+  defp deny_unavailable(conn) do
+    body =
+      Jason.encode!(%{
+        "errcode" => "M_UNKNOWN",
+        "error" => "Authentication is temporarily unavailable, retry later"
+      })
+
+    conn
+    |> put_resp_header("retry-after", Integer.to_string(@lookup_retry_after_s))
+    |> put_resp_content_type("application/json")
+    |> send_resp(503, body)
     |> halt()
   end
 

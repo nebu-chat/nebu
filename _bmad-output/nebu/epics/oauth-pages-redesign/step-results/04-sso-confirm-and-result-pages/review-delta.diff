@@ -1,0 +1,113 @@
+diff --git a/_bmad-output/nebu/epics/oauth-pages-redesign/pipeline-state.yaml b/_bmad-output/nebu/epics/oauth-pages-redesign/pipeline-state.yaml
+index 7e386ba6..efdf717b 100644
+--- a/_bmad-output/nebu/epics/oauth-pages-redesign/pipeline-state.yaml
++++ b/_bmad-output/nebu/epics/oauth-pages-redesign/pipeline-state.yaml
+@@ -1,6 +1,10 @@
+ # Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents.
+ # Do not edit manually during an active pipeline run.
+ # last_updated: 2026-11-05
++# [04-sso-confirm-and-result-pages] 2026-11-05T17:07Z ci-gate → ✓ unit (fast gate, cycle 1; integration deferred to 6b)
++# [04-sso-confirm-and-result-pages] 2026-11-05T17:07Z dev-story → done (cycle 1)
++# [04-sso-confirm-and-result-pages] 2026-11-05T17:00Z code-review → 1 MINOR → cycle 1
++# [04-sso-confirm-and-result-pages] 2026-11-05T16:59Z ux-gate → CLEAN
+ # [04-sso-confirm-and-result-pages] 2026-11-05T16:50Z ci-gate → accepted-flaky per epic policy: unit 7640 ok; fresh-DB integration 13406 tests 37 failures (new=17 vs story-03 baseline; none in sso/oauth files; DeviceKeyDirectorySyncHttpTest/CreateRoomInitialStateHttpTest/AlertNotifierTest/logs_live pass or are listed flaky; targeted fresh-DB run of sso+oauth+new files: failures only LogsLive (listed), AlertNotifier passes alone)
+ # [04-sso-confirm-and-result-pages] 2026-11-05T16:27Z dev-story → done (cycle 0)
+ # [04-sso-confirm-and-result-pages] 2026-11-05T16:13Z test-review → CLEAN (0 MAJOR, 0 MINOR)
+@@ -56,13 +60,13 @@
+ # [01-device-naming-chain] 2026-11-05T09:30Z oracle-gate → skipped (MATRIX=false)
+ # [01-device-naming-chain] 2026-11-05T09:30Z classify → matrix=false(classifier; story frontmatter matrix:true) ui=true infra=false sec=required
+ story: "04-sso-confirm-and-result-pages"
+-current_step: "ux-gate"
++current_step: "code-review"
+ completed:
+   - classify
+   - atdd
+   - test-review
+   - dev-story
+   - ci-gate
+-cycle_count: 0
++cycle_count: 1
+ blocked_reason: null
+-last_updated: "2026-11-05T16:50Z"
++last_updated: "2026-11-05T17:07Z"
+diff --git a/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/04-sso-confirm-and-result-pages/code-review-findings.md b/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/04-sso-confirm-and-result-pages/code-review-findings.md
+new file mode 100644
+index 00000000..f6d664f8
+--- /dev/null
++++ b/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/04-sso-confirm-and-result-pages/code-review-findings.md
+@@ -0,0 +1,7 @@
++# code-review — cycle 0
++MINOR | server/lib/nebu/web/page_shell.ex:103 | csp_with_script/1 re-spells the whole @csp policy (style hash, base-uri, form-action, frame-ancestors) instead of deriving from it; a later change to @csp silently diverges for the UIA page | build it from the same parts as @csp (e.g. insert "script-src 'sha256-…'; " into a shared prefix/suffix) so both policies have one source
++INFO | server/lib/nebu/matrix/sso_login.ex:68 | UIA script bytes verified identical to the old heredoc (indent stripped); rendered verbatim by PageShell.render inside <script>…</script>, CSP hash computed at compile time over the same binary; postMessage("authDone","*") unchanged (wildcard noted for security step per story) | -
++INFO | server/lib/nebu/matrix/sso_confirm_page.ex:123 | confirm page_csp (form-action 'self' https origin, ArmScript hash) and put_flow_headers unchanged, no COOP; arm_script.ex byte-unchanged; cancelled/error pages now use PageShell.csp() (same shape as old static_csp) | -
++INFO | server/lib/nebu/matrix/sso_login.ex:274 | render_html_error escapes the catalog text and the scheme separately, then injects the <code> via Regex.replace with a function (no backreference expansion) — correct | -
++INFO | server/lib/nebu/web/page_text.ex:216 | EN/DE drift: "uia.complete.text" EN "return to your client" vs DE "zu Ihrer App"; "sso.confirm.arm_hint" DE adds "den Zeiger" (pointer-only) while EN is input-neutral | align wording (EN "app", DE without "Zeiger") if the UX gate agrees
++INFO | server/lib/nebu/matrix/sso_login.ex:666 | send_uia_result/2 made public as a test seam; acceptable, documented in @doc | -
+diff --git a/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/04-sso-confirm-and-result-pages/integration-stale b/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/04-sso-confirm-and-result-pages/integration-stale
+new file mode 100644
+index 00000000..e69de29b
+diff --git a/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/04-sso-confirm-and-result-pages/review-prescan.digest b/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/04-sso-confirm-and-result-pages/review-prescan.digest
+new file mode 100644
+index 00000000..9ceded1d
+--- /dev/null
++++ b/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/04-sso-confirm-and-result-pages/review-prescan.digest
+@@ -0,0 +1,4 @@
++VERDICT: CLEAN
++COUNTS: major=0 minor=0 hints=0
++REPORT: _bmad-output/nebu/epics/oauth-pages-redesign/step-results/04-sso-confirm-and-result-pages/review-prescan.md
++TOP: -
+diff --git a/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/04-sso-confirm-and-result-pages/review-prescan.md b/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/04-sso-confirm-and-result-pages/review-prescan.md
+new file mode 100644
+index 00000000..01b6a5c9
+--- /dev/null
++++ b/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/04-sso-confirm-and-result-pages/review-prescan.md
+@@ -0,0 +1,2 @@
++# review-prescan — 1335 added lines, 18 changed files, last shipped migration 000062
++
+diff --git a/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/04-sso-confirm-and-result-pages/reviewed-tree.txt b/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/04-sso-confirm-and-result-pages/reviewed-tree.txt
+new file mode 100644
+index 00000000..a690aa40
+--- /dev/null
++++ b/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/04-sso-confirm-and-result-pages/reviewed-tree.txt
+@@ -0,0 +1 @@
++5193528c402a0692b5913ffdcc34a0f4806a6a6d
+diff --git a/server/lib/nebu/web/page_shell.ex b/server/lib/nebu/web/page_shell.ex
+index 8874752b..8c009350 100644
+--- a/server/lib/nebu/web/page_shell.ex
++++ b/server/lib/nebu/web/page_shell.ex
+@@ -78,8 +78,10 @@ defmodule Nebu.Web.PageShell do
+          "\n"
+        )
+ 
+-  @csp "default-src 'none'; style-src 'sha256-#{Base.encode64(:crypto.hash(:sha256, @css))}'; " <>
+-         "base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
++  # One source for both policies: prefix (default + style hash) and suffix (base-uri, form-action, frame-ancestors).
++  @csp_prefix "default-src 'none'; style-src 'sha256-#{Base.encode64(:crypto.hash(:sha256, @css))}'; "
++  @csp_suffix "base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
++  @csp @csp_prefix <> @csp_suffix
+ 
+   @logo ~s(<svg class="logo" viewBox="0 0 32 32" width="32" height="32" aria-hidden="true" focusable="false">) <>
+           ~s(<polygon points="16,2 28,9 28,23 16,30 4,23 4,9"/><path d="M11 22V10l10 12V10"/></svg>)
+@@ -101,8 +103,7 @@ defmodule Nebu.Web.PageShell do
+   """
+   @spec csp_with_script(String.t()) :: String.t()
+   def csp_with_script(script) when is_binary(script) do
+-    "default-src 'none'; style-src 'sha256-#{Base.encode64(:crypto.hash(:sha256, @css))}'; " <>
+-      "script-src 'sha256-#{Base.encode64(:crypto.hash(:sha256, script))}'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
++    @csp_prefix <> "script-src 'sha256-#{Base.encode64(:crypto.hash(:sha256, script))}'; " <> @csp_suffix
+   end
+ 
+   @doc "The inline hexagon-N logo (decorative SVG)."
+diff --git a/server/lib/nebu/web/page_text.ex b/server/lib/nebu/web/page_text.ex
+index ca01e246..745e7e3b 100644
+--- a/server/lib/nebu/web/page_text.ex
++++ b/server/lib/nebu/web/page_text.ex
+@@ -210,7 +210,7 @@ defmodule Nebu.Web.PageText do
+     "sso.confirm.continue" => {"Continue", "Fortfahren"},
+     "sso.confirm.arm_hint" =>
+       {"Continue becomes available a moment after you interact with this page. Then move onto Continue to use it.",
+-       "Fortfahren wird kurz nach Ihrer ersten Interaktion mit dieser Seite verfügbar. Bewegen Sie dann den Zeiger auf Fortfahren, um es zu verwenden."},
++       "Fortfahren wird kurz nach Ihrer ersten Interaktion mit dieser Seite verfügbar. Gehen Sie dann zu Fortfahren, um es zu verwenden."},
+     "sso.confirm.noscript" =>
+       {"JavaScript is off, so Continue stays unavailable. Turn on JavaScript or use another browser. You can still choose Cancel.",
+        "JavaScript ist aus, daher bleibt Fortfahren gesperrt. Schalten Sie JavaScript ein oder verwenden Sie einen anderen Browser. Abbrechen funktioniert weiterhin."},

@@ -459,17 +459,10 @@ defmodule Nebu.Admin.LogsLiveTest do
       # guard already short-circuits to `%{}` (log_collect_debug defaults to
       # `false`), so no DB write is needed there anyway.
       if Process.whereis(Nebu.Repo) do
+        # bugfix test-cleanup-rls-noop-delete: the former `DELETE FROM server_config` cleanup deleted nothing (FORCE row level security, no DELETE
+        # policy): snapshot the key first, privileged restore on exit.
+        Nebu.OAuth.TestSupport.restore_server_config_on_exit!(["log_collect_debug"])
         :ok = Nebu.Admin.DB.upsert_server_config(%{"log_collect_debug" => "false"})
-
-        on_exit(fn ->
-          if Process.whereis(Nebu.Repo) do
-            Ecto.Adapters.SQL.query(
-              Nebu.Repo,
-              "DELETE FROM server_config WHERE key = 'log_collect_debug'",
-              []
-            )
-          end
-        end)
       end
 
       # `get_policy/0` always performs a LIVE DB read (see log_store.ex's own
@@ -1657,17 +1650,10 @@ defmodule Nebu.Admin.LogsLiveTest do
       # explicitly rather than assume the default survives other tests'
       # writes.
       if Process.whereis(Nebu.Repo) do
+        # bugfix test-cleanup-rls-noop-delete: the former `DELETE FROM server_config` cleanup deleted nothing (FORCE row level security, no DELETE
+        # policy): snapshot the key first, privileged restore on exit.
+        Nebu.OAuth.TestSupport.restore_server_config_on_exit!(["log_collect_debug"])
         :ok = Nebu.Admin.DB.upsert_server_config(%{"log_collect_debug" => "false"})
-
-        on_exit(fn ->
-          if Process.whereis(Nebu.Repo) do
-            Ecto.Adapters.SQL.query(
-              Nebu.Repo,
-              "DELETE FROM server_config WHERE key = 'log_collect_debug'",
-              []
-            )
-          end
-        end)
       end
 
       {:ok, view, _html} = mount_logs_live()
@@ -1723,17 +1709,10 @@ defmodule Nebu.Admin.LogsLiveTest do
       # See the `sync_filters` off-tier test above for why this precondition
       # is set explicitly rather than assumed.
       if Process.whereis(Nebu.Repo) do
+        # bugfix test-cleanup-rls-noop-delete: the former `DELETE FROM server_config` cleanup deleted nothing (FORCE row level security, no DELETE
+        # policy): snapshot the key first, privileged restore on exit.
+        Nebu.OAuth.TestSupport.restore_server_config_on_exit!(["log_collect_debug"])
         :ok = Nebu.Admin.DB.upsert_server_config(%{"log_collect_debug" => "false"})
-
-        on_exit(fn ->
-          if Process.whereis(Nebu.Repo) do
-            Ecto.Adapters.SQL.query(
-              Nebu.Repo,
-              "DELETE FROM server_config WHERE key = 'log_collect_debug'",
-              []
-            )
-          end
-        end)
       end
 
       {:ok, view, _html} = mount_logs_live()

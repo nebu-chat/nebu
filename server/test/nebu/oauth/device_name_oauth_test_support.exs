@@ -127,10 +127,13 @@ defmodule Nebu.OAuth.DeviceNameTestSupport do
     :ok
   end
 
-  @doc "`PUT /devices/{id}` WITHOUT `display_name`: the client clears the name (the handler stores NULL)."
+  @doc """
+  `PUT /devices/{id}` with an explicit JSON `{"display_name": null}`: the client clears the name (the handler stores NULL). `PUT {}` does NOT clear: per the
+  Matrix spec a missing `display_name` leaves the name unchanged.
+  """
   def clear_name!(at, device_id) do
-    conn = T.matrix_request(:put, "/_matrix/client/v3/devices/" <> URI.encode_www_form(device_id), at, body: %{})
-    assert conn.status == 200, "PUT /devices/#{device_id} without display_name must succeed, got #{conn.status}: #{conn.resp_body}"
+    conn = T.matrix_request(:put, "/_matrix/client/v3/devices/" <> URI.encode_www_form(device_id), at, body: %{"display_name" => nil})
+    assert conn.status == 200, "PUT /devices/#{device_id} with display_name null must succeed, got #{conn.status}: #{conn.resp_body}"
     :ok
   end
 

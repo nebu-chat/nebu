@@ -1,0 +1,5 @@
+feat(pipeline): every OAuth device gets a clean, recognisable name
+
+Pipeline: ATDD, 1 fix cycle, Code MINOR, 1 MINOR deferred, Kassandra CLEAN.
+1 MINOR findings deferred (see deferred-minor.md in the step results).
+Refs: REQ-2026-016

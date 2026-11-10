@@ -79,7 +79,7 @@ defmodule Nebu.Matrix.SsoRedirectLegTest do
         conn = T.sso_redirect([], redirect_url: unquote(raw), headers: [{"accept", "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8"}])
         assert conn.status == 400
         assert conn.resp_body == SsoLogin.render_html_error(unquote(scheme)), "the HTML page of render_html_error/1, unchanged"
-        assert T.header(conn, "content-security-policy") == "default-src 'none'"
+        assert T.header(conn, "content-security-policy") == Nebu.Web.PageShell.csp(), "the strict shell CSP (one style hash, nothing else)"
         refute conn.resp_body =~ "evil.example", "no part of the URL is echoed"
       end
     end

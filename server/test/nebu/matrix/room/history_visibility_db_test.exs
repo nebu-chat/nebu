@@ -729,7 +729,8 @@ defmodule Nebu.Matrix.Room.HistoryVisibilityDbTest do
       assert full_ms < 1_500, "the full range read took #{full_ms} ms over 5 000 hidden events"
     end
 
-    test "(b) EXPLAIN of the single-event and the search statements: the segment inputs use events_room_state_idx" do
+    @tag ac: "plan-assertions-state-a-bound-not-an-index-name"
+    test "(b) EXPLAIN of the single-event and the search statements: no Seq Scan and a BOUNDED read of events (rows read, not the name of an index)" do
       room = raw_room!()
       a = T.provision_user!()
       put_hv_event!(room, a, "joined", 100)
@@ -737,12 +738,36 @@ defmodule Nebu.Matrix.Room.HistoryVisibilityDbTest do
       put_join!(room, a, 50)
       put_row!(room, a, 50)
 
-      for {label, fun} <- [single: fn -> DB.fetch_visible_event(id, room, a) end, search: fn -> SearchDB.search_messages(a, "x", 5, 0, []) end] do
+      # Which of the two room-prefixed indexes (events_room_state_idx / events_room_id_ts_idx) serves the hv / member inputs of a three-row room depends on index sizes and on when autovacuum
+      # last ran, so no index NAME is asserted. The property is "no Seq Scan, bounded read": rows of `events` read (returned + removed by the filter / the recheck, times loops).
+      read_of = fn fun ->
         {query, params} = capture_marked_statement(fun)
-        json = explain!(query, params, "FORMAT JSON")
-        events_nodes = json |> plan_nodes() |> Enum.filter(&(&1["Relation Name"] == "events"))
-        assert Enum.any?(events_nodes, &(&1["Index Name"] == "events_room_state_idx")), "#{label}: the hv / member inputs are index-served"
+        events_nodes = query |> explain!(params, "ANALYZE, FORMAT JSON") |> plan_nodes() |> Enum.filter(&(&1["Relation Name"] == "events"))
+        refute Enum.any?(events_nodes, &(&1["Node Type"] == "Seq Scan")), "no sequential scan of events"
+        Enum.sum(for n <- events_nodes, do: (n["Actual Rows"] + Map.get(n, "Rows Removed by Filter", 0) + Map.get(n, "Rows Removed by Index Recheck", 0)) * n["Actual Loops"])
       end
+
+      single = fn -> DB.fetch_visible_event(id, room, a) end
+
+      for {label, fun} <- [single: single, search: fn -> SearchDB.search_messages(a, "x", 5, 0, []) end] do
+        read = read_of.(fun)
+        assert read <= 20, "#{label}: the statement read #{read} rows of events in a room of four rows"
+      end
+
+      # A room of four rows cannot tell a bounded read from a whole-room read: with 300 more messages (visible to `a`) the single-event statement (a primary-key lookup plus the hv / member
+      # inputs) still reads a handful of rows, whatever index serves the inputs. (The search statement reads the candidate messages of the room by design: no bound on the room size.)
+      T.privileged_sql!(
+        """
+        INSERT INTO events (event_id, room_id, sender, event_type, content, origin_server_ts, state_key)
+        SELECT '$bulk' || md5(g::text || $1), $1, $2, 'm.room.message', jsonb_build_object('msgtype', 'm.text', 'body', 'bulk' || g), 200 + g, NULL
+        FROM generate_series(1, 300) AS g
+        """,
+        [room, a]
+      )
+
+      T.privileged_sql!("ANALYZE events")
+      read = read_of.(single)
+      assert read <= 40, "single: the statement read #{read} rows of events in a room of 300 more rows (a read of the whole room would be 300 or more)"
     end
   end
 

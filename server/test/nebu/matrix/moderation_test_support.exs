@@ -57,10 +57,35 @@ defmodule Nebu.Matrix.ModerationTestSupport do
 
   # ─── clock ───────────────────────────────────────────────────────────────────
 
-  def tick do
+  # bugfix integration-test-flakes-fix (C): waits on a WALL-CLOCK budget, not on a count of 1 ms sleeps. The old wait (300 x `Process.sleep(1)`, about
+  # 0.3 to 0.6 s, longer under load) returned `:timeout` when a burst of any writer in the database (another test, the live server) had run the event
+  # stamps ahead of the clock, and every caller matched `:ok = tick()`: `MatchError :timeout` in about a dozen suites under full-run load. The global
+  # newest event is kept on purpose (position / since-token tests rely on "everything earlier is older"); the wait now outlasts a realistic burst, and
+  # a stamp that is really out of reach fails with the gap in milliseconds instead of an opaque `:timeout`.
+  @tick_budget_ms 10_000
+
+  def tick(budget_ms \\ @tick_budget_ms) do
     horizon = System.system_time(:millisecond) - 10_000
     newest = T.sql!("SELECT coalesce(max(origin_server_ts), 0) FROM events WHERE origin_server_ts > $1", [horizon]).rows |> hd() |> hd()
-    :ok = wait_until(fn -> System.system_time(:millisecond) > newest end, 300)
+    deadline = System.monotonic_time(:millisecond) + budget_ms
+    wait_until_clock_past(newest, deadline, budget_ms)
+  end
+
+  defp wait_until_clock_past(newest, deadline, budget_ms) do
+    gap = newest - System.system_time(:millisecond)
+
+    cond do
+      gap < 0 ->
+        :ok
+
+      System.monotonic_time(:millisecond) >= deadline ->
+        flunk("tick/0: the wall clock is still #{gap} ms behind the newest event after #{budget_ms} ms")
+
+      true ->
+        # the clock is `gap + 1` ms away from being past the newest event: sleep most of it, at least 1 ms, at most 50 ms per round
+        Process.sleep(gap |> div(2) |> max(1) |> min(50))
+        wait_until_clock_past(newest, deadline, budget_ms)
+    end
   end
 
   def wait_until(fun, attempts) when is_integer(attempts) do

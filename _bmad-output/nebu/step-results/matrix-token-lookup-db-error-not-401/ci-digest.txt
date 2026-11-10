@@ -1,0 +1,73 @@
+EXIT=2 tests=13467 failures=18 skipped=8 time=737.0s log=_bmad-output/nebu/step-results/matrix-token-lookup-db-error-not-401/ci-integration.log
+VS_BASELINE: new=6 fixed=0 same(pre-existing)=12 (baseline: 12 failures of 13450 tests) — only NEW failures are listed below
+FAIL 1) test scenario 1: a re-join after a hidden absence the read of the re-joined room touches the same number of rows for 20 and for 400 hidden events (Nebu.Matrix.SyncRejoinRangeScanBoundHttpTest) test/nebu/matrix/sync_rejoin_range_scan_bound_http_test.exs:237
+    400 hidden events: the room read touched 438 rows, 20 hidden events: 34
+    code: assert big - small <= 10, "400 hidden events: the room read touched #{big} rows, 20 hidden events: #{small}"
+    stacktrace:
+    test/nebu/matrix/sync_rejoin_range_scan_bound_http_test.exs:250: (test)
+    19:04:50.030 [warning] OIDC: email claim absent for @atdd-oa-13c6763b3b:test.local — ensure the IdP client grants the profile/email scopes if email is required
+    19:04:50.031 [warning] OIDC: preferred_username/name claim absent for @atdd-oa-13c6763b3b:test.local — ensure the IdP client grants the profile scope if display name is required
+    19:04:50.041 [warning] OIDC: email claim absent for @atdd-oa-fd9daa37bc:test.local — ensure the IdP client grants the profile/email scopes if email is required
+    19:04:50.041 [warning] OIDC: preferred_username/name claim absent for @atdd-oa-fd9daa37bc:test.local — ensure the IdP client grants the profile scope if display name is required
+    19:04:50.128 [warning] OIDC: email claim absent for @atdd-oa-43aeb049e7:test.local — ensure the IdP client grants the profile/email scopes if email is required
+    19:04:50.128 [warning] OIDC: preferred_username/name claim absent for @atdd-oa-43aeb049e7:test.local — ensure the IdP client grants the profile scope if display name is required
+    19:04:50.140 [warning] OIDC: email claim absent for @atdd-oa-47e14365bf:test.local — ensure the IdP client grants the profile/email scopes if email is required
+    19:04:50.140 [warning] OIDC: preferred_username/name claim absent for @atdd-oa-47e14365bf:test.local — ensure the IdP client grants the profile scope if display name is required
+FAIL 2) test scenario 2 / D6: the rows of the replay the replay's room read touches the same number of rows for 20 and for 400 hidden events (Nebu.Matrix.SyncRejoinRangeScanBoundHttpTest) test/nebu/matrix/sync_rejoin_range_scan_bound_http_test.exs:359
+    the replay's room read touched 426 rows for 400 hidden events, 23 for 20
+    code: assert big - small <= 10, "the replay's room read touched #{big} rows for 400 hidden events, #{small} for 20"
+    stacktrace:
+    test/nebu/matrix/sync_rejoin_range_scan_bound_http_test.exs:377: (test)
+    19:04:50.371 [warning] OIDC: email claim absent for @atdd-oa-ae9e3852c7:test.local — ensure the IdP client grants the profile/email scopes if email is required
+    19:04:50.371 [warning] OIDC: preferred_username/name claim absent for @atdd-oa-ae9e3852c7:test.local — ensure the IdP client grants the profile scope if display name is required
+    19:04:50.383 [warning] OIDC: email claim absent for @atdd-oa-359b4bd86e:test.local — ensure the IdP client grants the profile/email scopes if email is required
+    19:04:50.383 [warning] OIDC: preferred_username/name claim absent for @atdd-oa-359b4bd86e:test.local — ensure the IdP client grants the profile scope if display name is required
+    .
+    19:04:50.513 [warning] OIDC: email claim absent for @atdd-oa-66c0ff7e52:test.local — ensure the IdP client grants the profile/email scopes if email is required
+    19:04:50.514 [warning] OIDC: preferred_username/name claim absent for @atdd-oa-66c0ff7e52:test.local — ensure the IdP client grants the profile scope if display name is required
+    19:04:50.525 [warning] OIDC: email claim absent for @atdd-oa-fe1b867972:test.local — ensure the IdP client grants the profile/email scopes if email is required
+FAIL 3) test scenario 4: the read does not scan the hidden stretch cursor = join, leave and re-join without a sync: the room read touches the same number of rows for 20 and for 400 hidden events (Nebu.Matrix.SyncRejoinRangeScanBoundHttpTest) test/nebu/matrix/sync_rejoin_range_scan_bound_http_test.exs:461
+    400 hidden events: the room read touched 436 rows, 20 hidden events: 32
+    code: assert big - small <= 10, "400 hidden events: the room read touched #{big} rows, 20 hidden events: #{small}"
+    stacktrace:
+    test/nebu/matrix/sync_rejoin_range_scan_bound_http_test.exs:480: (test)
+    19:04:52.044 [warning] OIDC: email claim absent for @atdd-oa-72e3ee9217:test.local — ensure the IdP client grants the profile/email scopes if email is required
+    19:04:52.044 [warning] OIDC: preferred_username/name claim absent for @atdd-oa-72e3ee9217:test.local — ensure the IdP client grants the profile scope if display name is required
+    19:04:52.056 [warning] OIDC: email claim absent for @atdd-oa-cff1025205:test.local — ensure the IdP client grants the profile/email scopes if email is required
+    19:04:52.056 [warning] OIDC: preferred_username/name claim absent for @atdd-oa-cff1025205:test.local — ensure the IdP client grants the profile scope if display name is required
+    .
+    19:04:52.200 [warning] OIDC: email claim absent for @atdd-oa-4da5be5e47:test.local — ensure the IdP client grants the profile/email scopes if email is required
+    19:04:52.200 [warning] OIDC: preferred_username/name claim absent for @atdd-oa-4da5be5e47:test.local — ensure the IdP client grants the profile scope if display name is required
+    19:04:52.210 [warning] OIDC: email claim absent for @atdd-oa-4090adbb97:test.local — ensure the IdP client grants the profile/email scopes if email is required
+FAIL 4) test Spaces foundation — createRoom + room_type creating a Space stores content.type=m.space and rooms.room_type='m.space' (Nebu.Matrix.SpacesFoundationIntegrationTest) test/nebu/matrix/spaces_foundation_integration_test.exs:173
+    Assertion with == failed
+    code:  assert sync.status == 200
+    left:  429
+    right: 200
+    stacktrace:
+    test/nebu/matrix/spaces_foundation_integration_test.exs:192: (test)
+    19:07:31.766 [warning] OIDC: email claim absent for @kai:test.local — ensure the IdP client grants the profile/email scopes if email is required
+    19:07:31.766 [warning] OIDC: preferred_username/name claim absent for @kai:test.local — ensure the IdP client grants the profile scope if display name is required
+FAIL 5) test Spaces foundation — createRoom + room_type creating a regular room leaves rooms.room_type NULL and no type key (Nebu.Matrix.SpacesFoundationIntegrationTest) test/nebu/matrix/spaces_foundation_integration_test.exs:231
+    Assertion with != failed, both sides are exactly equal
+    code: assert content != nil
+    left: nil
+    stacktrace:
+    test/nebu/matrix/spaces_foundation_integration_test.exs:241: (test)
+    .
+    19:07:31.849 [warning] OIDC: email claim absent for @kai:test.local — ensure the IdP client grants the profile/email scopes if email is required
+    19:07:31.849 [warning] OIDC: preferred_username/name claim absent for @kai:test.local — ensure the IdP client grants the profile scope if display name is required
+FAIL 6) test Spaces foundation — createRoom + room_type extra creation_content keys are merged; creator/room_version not overridable (Nebu.Matrix.SpacesFoundationIntegrationTest) test/nebu/matrix/spaces_foundation_integration_test.exs:247
+    Assertion with == failed
+    code:  assert content["type"] == "m.space"
+    left:  nil
+    right: "m.space"
+    stacktrace:
+    test/nebu/matrix/spaces_foundation_integration_test.exs:272: (test)
+    ..............................................
+    19:07:32.485 [warning] OIDC: email claim absent for @atdd-oa-3ce748fce0:test.local — ensure the IdP client grants the profile/email scopes if email is required
+    19:07:32.485 [warning] OIDC: preferred_username/name claim absent for @atdd-oa-3ce748fce0:test.local — ensure the IdP client grants the profile scope if display name is required
+    19:07:32.503 [warning] OIDC: email claim absent for @atdd-oa-1c4fc7b995:test.local — ensure the IdP client grants the profile/email scopes if email is required
+    19:07:32.503 [warning] OIDC: preferred_username/name claim absent for @atdd-oa-1c4fc7b995:test.local — ensure the IdP client grants the profile scope if display name is required
+    .
+FINISHED

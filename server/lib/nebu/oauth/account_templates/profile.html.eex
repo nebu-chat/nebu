@@ -1,7 +1,7 @@
 <dl>
-<dt>Matrix ID</dt>
+<dt><%= t(@lang, "acct.profile.matrix_id") %></dt>
 <dd><%= @user_id %></dd>
-<dt>Display name</dt>
-<dd><%= @display_name || "Not set" %></dd>
+<dt><%= t(@lang, "acct.profile.display_name") %></dt>
+<dd><%= @display_name || t(@lang, "acct.not_set") %></dd>
 </dl>
-<p>You change your display name in your Matrix app. Deactivating your account and changing your password are managed by your administrator and your company account.</p>
+<p><%= t(@lang, "acct.profile.note") %></p>

@@ -33,9 +33,23 @@ Phase-1 defaults. Change a value to tune; the *Legacy* column restores the previ
 | `TEST_REVIEW_LLM` | auto | always | `auto`: `test_lint.py` decides alone when it has no MINOR/JUDGE items; `always`: the reviewer agent runs every time (with the lint report as input) |
 | `ORACLE_LLM` | auto | always | `auto`: `spec_extract.py` output is the Oracle context when it covers every endpoint of the story; `always`: `@nebu-oracle` runs (with the draft as head start) |
 | `NEBU_READ_MAX_KB` / `NEBU_READ_GUARD` | 40 / on | `NEBU_READ_GUARD=off` | Hook `read_guard.py` refuses `Read` (and a plain `cat`) of code/log files above the size without `limit`; denials are logged to `.claude/metrics/guard.log` (`read_guard.py --summary`). Set as environment variables (e.g. in `.claude/settings.local.json` → `env`) |
+| `SESSION_STORY_LIMIT` | 1 | unlimited | After this many committed stories per session, Step 9 ends with the advice to continue in a fresh session (`/clear` + `nebu-pipeline`; the state file resumes). See *Context hygiene* |
 | `PRESCAN_SHORT_CIRCUIT` | on | off | Cycle 0: a MAJOR from `review_prescan.py` skips the LLM review and goes straight to the fix decision (the full review then happens in the next cycle) |
 
 Run the orchestrating session on **sonnet** (`/model sonnet`). Measure with `token_metrics.py report`.
+
+## Turn & context hygiene (orchestrator)
+
+Measured on a 3-story session: the orchestrator was 46 % of all tokens. A turn costs about ten percent of the session context in cache reads, so cost = turns × context size
+(context grew 82k → 479k; turns at 400k cost three times a turn at 130k). Poll turns were only 2 %, the cost is ~380 small tool calls.
+
+- **One call per step end.** `decide … --apply $STATE_FILE [--git-add .]` instead of decide + state + `git add`; `finish_story.py` for all of Step 9. Never run `pipeline_state.py` or `git add` as separate calls where a step file shows the combined form.
+- **No ad-hoc parsers.** Never write a Python heredoc to read a CI/test log or the state file. Failures of an existing log: `test_digest.py --parse FILE [--baseline BASE.log]` (counts, only new failures, 90 ms for 3.5 MB). Commands that run tests: `test_digest.py -- <command>`
+  (also for project helpers such as `.e2ee-ci/quick.sh "mix test …"`), so the raw output never enters the context. No `cat` of story/state/report files — the scripts and digests carry what you need; `git status --short | head -20`, never plain `git status`.
+- **Batch independent commands** into one Bash call (`a && b`), keep outputs short (`| tail`, `| head`).
+- **Context hygiene.** `SESSION_STORY_LIMIT` (default 1): after the commit of a story pass the `CONTEXT_HINT` of `finish_story.py` to the user — a fresh session for the next story costs about one cache write
+  of the system prompt (~50k), each further turn at +150 k context costs ~15 k more. Everything needed is on disk; `--resume` / the next `nebu-pipeline` call continues. Do not start the next story yourself when the limit is reached unless the user says so.
+- **Keep ad-hoc work out of the pipeline session.** Branch analyses, ADR searches, log forensics and other side questions belong in a separate session; they inflate the context of every following pipeline turn.
 
 ## Path Configuration
 
@@ -98,7 +112,7 @@ python3 skills/nebu-pipeline/scripts/pipeline_state.py --file $STATE_FILE \
 | 6b final gate | only if `integration-stale` | bash | — | `6b-final-gate.md` (+ `5-ci-gate.md`) |
 | 7 security | prescan + `SEC_REVIEW` decide (see file) | script `sec_prescan.py`, then `@nebu-kassandra` | opus | `7-security.md` |
 | 8 arc42 | `ARC42_MODE` relevance check | skill `bmad-maintain-arc42` | haiku | `8-arc42.md` |
-| 9 commit | always | script `commit_summary.py` + bash | — | `9-commit.md` |
+| 9 commit | always | script `finish_story.py` | — | `9-commit.md` |
 | 10 epic-check | after commit | script `epic_status.py`; `@nebu-kassandra` (SEC Gate 2 on epic end) | opus | `10-epic-check.md` |
 
 Order: 1 → 1c → 1b → 1d → 2 → 3 → 4 → 5 → 5b → 6 ⟲ (4) → 6b → 7 → 8 → 9 → 10. Steps run **sequentially**, never in parallel.
@@ -119,7 +133,7 @@ REPORT: <path>
 TOP: <≤3 MAJOR/CRITICAL titles, or ->
 ```
 **Never judge a verdict yourself:** pass the digest to `pipeline_gates.py decide --step <test-review|dev-story|ux-gate|code-review|security-review|epic-security> --story <ID> --cycle N --digest - <<'EOF' … EOF` (or `--digest <file>` for a script digest saved with `| tee`).
-It answers `ACTION: NEXT | CYCLE | DEFER_MINOR | ASK_USER | STOP`, a ready-to-run `STATE` (arguments for `pipeline_state.py --file $STATE_FILE`) and the `MESSAGE` to show; the cycle cap, MINOR deferral, security `blocking_severity` and the 3-round limit live in the script. Show `TOP` + the report path when the user must decide; do not read the report unless asked. If an agent answers in prose instead,
+**Pass `--apply $STATE_FILE` (and `--git-add .` where the step file says so):** on `NEXT`/`CYCLE`/`DEFER_MINOR` the script then updates the state (and stages) itself — one tool call per step end instead of three; `APPLIED` confirms it. It answers `ACTION: NEXT | CYCLE | DEFER_MINOR | ASK_USER | STOP`, a ready-to-run `STATE` (arguments for `pipeline_state.py --file $STATE_FILE`, needed by hand only for `ASK_USER`) and the `MESSAGE` to show; the cycle cap, MINOR deferral, security `blocking_severity` and the 3-round limit live in the script. Show `TOP` + the report path when the user must decide; do not read the report unless asked. If an agent answers in prose instead,
 write that reply to `REPORT_FILE` once and continue. After `@nebu-dev-story` stops, the `SubagentStop` hook runs `invariant_check.py`; exit 2 → do not proceed to code-review.
 
 ## Error Handling
@@ -141,5 +155,5 @@ write that reply to `REPORT_FILE` once and continue. After `@nebu-dev-story` sto
 - Print one short status line after every step (`✓ Step N: …`).
 - Agents share no memory: everything they need is in the launch message paths and files under `$STEP_RESULTS_DIR/[STORY_ID]/`.
 - `ORACLE_FILE` carries from 1b through atdd, test-review, dev-story, code-review; `TEST_REVIEW_FILE` from 3 through dev-story and code-review; `CODE_REVIEW_FILE` through the dev↔review cycle.
-- `rtk git add .` runs after code-review unconditionally.
+- `git add .` runs after code-review unconditionally (the `decide --git-add .` flag of Steps 4, 6 and 7 does it).
 - The pipeline does not fix issues itself. The reviewer identifies; the dev agent fixes.

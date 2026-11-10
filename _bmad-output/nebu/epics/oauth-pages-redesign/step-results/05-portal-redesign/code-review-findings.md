@@ -1,0 +1,6 @@
+# code-review — cycle 1
+INFO | server/lib/nebu/oauth/account_pages.ex:237 | previous MINOR (tile exact count with lower bound) FIXED: hidden_exact passed, acct.tile.devices_count_least added EN+DE, ExUnit covers both languages | none
+INFO | e2e/step-definitions/oauth/portal-redesign.steps.ts:677 | previous MINOR (AC5 silent skip on leftover requests) FIXED: When step declines leftovers (decline redirects back to the reset page with a notice, so the count assertion holds), Then step now asserts exactly one request instead of skipping | none
+INFO | e2e/step-definitions/oauth/portal-redesign.steps.ts:702 | previous MINOR (brittle xpath ancestor selector) FIXED: replaced by form:has([data-role=approve-reset]) input[data-click-proof] | none
+INFO | server/lib/nebu/oauth/account_pages.ex:381 | previous INFO (clock skew) addressed: clamp to 0 renders "just now" (PageText.relative(0) -> rel.now); no ExUnit test for the clamp | optional: add a test with last_seen_ts slightly in the future
+INFO | e2e/step-definitions/oauth/portal-redesign.steps.ts:663 | decline loop runs only with a fresh session; without auth_time the Then step still records gate-y before the exactly-one assertion, so no new false failure | none

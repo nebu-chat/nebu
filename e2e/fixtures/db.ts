@@ -835,6 +835,9 @@ export function insertOAuthClient(opts: {
   clientUri?: string;
   /** `client_name` of the registration (default: the client id). A test-generated literal. */
   clientName?: string;
+  /** `tos_uri` / `policy_uri` of the registration (the terms / privacy URLs the app claims). Test-generated literals. */
+  tosUri?: string;
+  policyUri?: string;
 }): void {
   const id = sqlLiteral(opts.clientId);
   const uris = opts.redirectUris.map(sqlLiteral).join(', ');
@@ -847,6 +850,13 @@ export function insertOAuthClient(opts: {
       "'grant_types', jsonb_build_array('authorization_code', 'refresh_token')), " +
       `'e2e-hash-' || ${id}, ${sqlLiteral(opts.applicationType)}, 'pending')`,
   );
+  if (opts.tosUri !== undefined || opts.policyUri !== undefined) {
+    const claimed = [
+      opts.tosUri !== undefined ? `'tos_uri', ${sqlLiteral(opts.tosUri)}` : null,
+      opts.policyUri !== undefined ? `'policy_uri', ${sqlLiteral(opts.policyUri)}` : null,
+    ].filter((x) => x !== null);
+    runSql(`UPDATE oauth_clients SET metadata = metadata || jsonb_build_object(${claimed.join(', ')}) WHERE client_id = ${id}`);
+  }
   if (opts.status === 'approved') {
     runSql(
       "UPDATE oauth_clients SET status = 'approved', approved_by = '@e2e-admin:localhost', approved_at = now() " +
@@ -893,6 +903,19 @@ export function clearOAuthConsentGrantsByClientPrefix(prefix: string): void {
 /** The number of remembered consent grants of one client (`oauth_consent_grants`), over every user. */
 export function countOAuthConsentGrants(clientId: string): number {
   return Number(runSqlQuery(`SELECT count(*) FROM oauth_consent_grants WHERE client_id = ${sqlLiteral(clientId)}`));
+}
+
+/**
+ * story oauth-pages-redesign / 01-device-naming-chain (REQ-2026-016): the number of `devices` rows with this device id (over every user; the
+ * scenarios use device ids of their own), and the stored display name of the first such row (`null` = no row or a NULL name).
+ */
+export function countDevicesById(deviceId: string): number {
+  return Number(runSqlQuery(`SELECT count(*) FROM devices WHERE device_id = ${sqlLiteral(deviceId)}`));
+}
+
+export function queryDeviceDisplayName(deviceId: string): string | null {
+  const out = runSqlQuery(`SELECT display_name FROM devices WHERE device_id = ${sqlLiteral(deviceId)} LIMIT 1`);
+  return out === '' ? null : out;
 }
 
 /** Delete every account-page browser session (`oauth_account_sessions`, migration 000043) of a user. */
@@ -943,4 +966,85 @@ export function queryAccountSessionAuthTime(userId: string): number | null {
 /** The database clock (unix seconds): the reference for auth_time comparisons (no host clock skew). */
 export function queryDbEpochSeconds(): number {
   return Number(runSqlQuery('SELECT floor(extract(epoch FROM now()))::bigint'));
+}
+
+/**
+ * Insert a pending UIA session (`m.login.sso` stage NOT complete) bound to `userId`, the way `Nebu.Matrix.Uia.mint_session/3`
+ * does (oauth-pages-redesign/04: the UIA SSO fallback pages need a real session id).
+ */
+export function insertUiaSession(sessionId: string, userId: string): void {
+  runSql(
+    'INSERT INTO uia_sessions (session_id, user_id, op, params, stage_complete, consumed, created_at, expires_at) VALUES (' +
+      [
+        sqlLiteral(sessionId),
+        sqlLiteral(userId),
+        sqlLiteral('delete_devices'),
+        sqlLiteral('{}'),
+        'FALSE',
+        'FALSE',
+        'floor(extract(epoch FROM now()))::bigint',
+        'floor(extract(epoch FROM now()))::bigint + 600',
+      ].join(', ') +
+      ')',
+  );
+}
+
+/** Remove one UIA session (After-hook cleanup). */
+export function deleteUiaSession(sessionId: string): void {
+  runSql(`DELETE FROM uia_sessions WHERE session_id = ${sqlLiteral(sessionId)}`);
+}
+
+/**
+ * oauth-pages-redesign / 06-portal-rename-device (REQ-2026-021): the stored display name of ONE device of ONE user (`null` = no row or a NULL name),
+ * a direct write of that name (the precondition "a device named ..."), and the numbers the scenarios need.
+ */
+export function queryUserDeviceDisplayName(userId: string, deviceId: string): string | null {
+  const out = runSqlQuery(
+    `SELECT display_name FROM devices WHERE user_id = ${sqlLiteral(userId)} AND device_id = ${sqlLiteral(deviceId)} LIMIT 1`,
+  );
+  return out === '' ? null : out;
+}
+
+export function setUserDeviceDisplayName(userId: string, deviceId: string, displayName: string): void {
+  runSql(
+    `UPDATE devices SET display_name = ${sqlLiteral(displayName)} WHERE user_id = ${sqlLiteral(userId)} AND device_id = ${sqlLiteral(deviceId)}`,
+  );
+}
+
+/** Make every account session of a user look `seconds` old (`auth_time` is the portal sign-in time): the "older than 5 minutes" precondition. */
+export function ageAccountSessionAuthTime(userId: string, seconds: number): void {
+  runSql(
+    `UPDATE oauth_account_sessions SET auth_time = floor(extract(epoch FROM now()))::bigint - ${Math.floor(seconds)} WHERE user_id = ${sqlLiteral(userId)}`,
+  );
+}
+
+/**
+ * A `devices` row (no session, no keys) for a user. The user's `users` row is created first when it does not exist yet (only `user_id` and
+ * `created_at` are required), so the scenario is deterministic and never depends on that user having signed in before. Returns true when THIS call
+ * created the `users` row (pass that to `deleteUserRowIfCreated` for the cleanup); throws when the device row could not be made. Removed again by
+ * `deleteUserDeviceRow`.
+ */
+export function insertUserDeviceRow(userId: string, deviceId: string, displayName: string): boolean {
+  const created = runSqlQuery(
+    `WITH ins AS (INSERT INTO users (user_id, created_at) VALUES (${sqlLiteral(userId)}, floor(extract(epoch FROM now()) * 1000)::bigint) ` +
+      `ON CONFLICT (user_id) DO NOTHING RETURNING 1) SELECT count(*) FROM ins`,
+  );
+  const out = runSqlQuery(
+    `WITH ins AS (INSERT INTO devices (user_id, device_id, display_name, created_at, updated_at) ` +
+      `VALUES (${sqlLiteral(userId)}, ${sqlLiteral(deviceId)}, ${sqlLiteral(displayName)}, floor(extract(epoch FROM now()) * 1000)::bigint, floor(extract(epoch FROM now()) * 1000)::bigint) ` +
+      `ON CONFLICT (user_id, device_id) DO UPDATE SET display_name = EXCLUDED.display_name RETURNING 1) SELECT count(*) FROM ins`,
+  );
+  if (Number(out) !== 1) {
+    throw new Error(`[fixtures/db] could not create the device row ${deviceId} of ${userId}`);
+  }
+  return Number(created) === 1;
+}
+
+export function deleteUserDeviceRow(userId: string, deviceId: string): void {
+  runSql(`DELETE FROM devices WHERE user_id = ${sqlLiteral(userId)} AND device_id = ${sqlLiteral(deviceId)}`);
+}
+
+/** Remove a `users` row that `insertUserDeviceRow` created (call after `deleteUserDeviceRow`); only that user's own row, nothing else. */
+export function deleteUserRowIfCreated(userId: string): void {
+  runSql(`DELETE FROM users WHERE user_id = ${sqlLiteral(userId)}`);
 }

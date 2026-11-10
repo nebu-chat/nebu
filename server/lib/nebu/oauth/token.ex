@@ -336,7 +336,7 @@ defmodule Nebu.OAuth.Token do
       device_holder_checked: Map.get(row, :device_holder_checked, false) == true,
       expected_holder_client_id: Map.get(row, :device_holder_client_id),
       # story oauth-device-default-display-name: the Matrix domain writes it for a device whose name is unset only
-      default_device_display_name: Nebu.OAuth.DeviceName.for_client(client_id, row.device_id)
+      default_device_display_name: Nebu.OAuth.DeviceName.for_client(client_id, row.device_id, Map.get(row, :device_display_name))
     })
   end
 

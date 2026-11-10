@@ -61,7 +61,7 @@ const adminUiProject = defineBddProject({
   name: 'admin-ui',
   // features/oauth (epic oauth-broker): browser flows against Nebu's own OAuth endpoints
   // (baseURL = Nebu, like the admin UI) — no separate project needed.
-  features: ['features/admin/**/*.feature', 'features/oauth/**/*.feature'],
+  features: ['features/admin/**/*.feature', 'features/oauth/**/*.feature', 'features/oauth-pages-redesign/**/*.feature'],
   steps:    'step-definitions/**/*.ts',
   importTestFrom: 'fixtures/nebu-fixtures.ts',
   disableWarnings: { importTestFrom: true },

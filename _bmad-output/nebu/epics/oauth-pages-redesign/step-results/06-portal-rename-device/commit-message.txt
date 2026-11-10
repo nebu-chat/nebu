@@ -1,0 +1,4 @@
+feat(oauth): rename a device in the account portal
+
+Pipeline: ATDD, 1 fix cycle, Code CLEAN, Kassandra CLEAN.
+Refs: REQ-2026-021

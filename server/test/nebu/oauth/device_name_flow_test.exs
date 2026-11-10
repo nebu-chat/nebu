@@ -201,7 +201,7 @@ defmodule Nebu.OAuth.DeviceNameFlowTest do
       assert D.name_of(uid, "UNNAMEDDEV") == "FluffyChat (NAMEDDEV)"
     end
 
-    test "a name cleared through the API (PUT without display_name = NULL) gets the default again at the next login", %{cid: cid, priv: priv} do
+    test "a name cleared through the API (PUT with display_name null = NULL) gets the default again at the next login", %{cid: cid, priv: priv} do
       sub = T.unique_sub()
       first = D.session!(cid, priv, "CLEAREDDEV", sub: sub)
       assert D.name_of(first.user_id, "CLEAREDDEV") == "FluffyChat (EAREDDEV)"
@@ -305,10 +305,12 @@ defmodule Nebu.OAuth.DeviceNameFlowTest do
   end
 
   describe "cycle 1 - invisible but not empty client names" do
-    test "a client name made only of invisible characters / marks without a base falls back to 'OAuth client'; letters mixed with them are kept", %{priv: priv} do
+    # story oauth-pages-redesign / 01-device-naming-chain: an unusable client name falls through to the host of the registered client_uri (the test client
+    # has https://client.example.com); the plain "OAuth client" is only the last resort
+    test "a client name made only of invisible characters / marks without a base falls through to the website host; letters mixed with them are kept", %{priv: priv} do
       for {client_name, expected} <- [
-            {"\u{3164}" <> "\u{2800}" <> "\u{FFA0}", "OAuth client (ABCD1234)"},
-            {"\u{0301}" <> "\u{FE0F}", "OAuth client (ABCD1234)"},
+            {"\u{3164}" <> "\u{2800}" <> "\u{FFA0}", "client.example.com (ABCD1234)"},
+            {"\u{0301}" <> "\u{FE0F}", "client.example.com (ABCD1234)"},
             {"Fluffy" <> "\u{3164}" <> "Chat" <> "\u{2800}", "FluffyChat (ABCD1234)"},
             {"\u{0301}" <> "FluffyChat", "FluffyChat (ABCD1234)"}
           ] do
@@ -319,12 +321,12 @@ defmodule Nebu.OAuth.DeviceNameFlowTest do
     end
   end
 
-  describe "a client without a usable name gets the plain base" do
-    test "no client_name, an empty, a blank, a markup-only name => 'OAuth client (ABCD1234)'", %{priv: priv} do
+  describe "a client without a usable name is named after its website host" do
+    test "no client_name, an empty, a blank, a markup-only name => 'client.example.com (ABCD1234)' (story 01-device-naming-chain)", %{priv: priv} do
       for client_name <- [nil, "", "   ", "<b></b>", "\u0007\u0008"] do
         cid = D.client!(client_name)
         s = D.session!(cid, priv, "ABCD1234")
-        assert D.name_of(s.user_id, "ABCD1234") == "OAuth client (ABCD1234)", "for #{inspect(client_name)}"
+        assert D.name_of(s.user_id, "ABCD1234") == "client.example.com (ABCD1234)", "for #{inspect(client_name)}"
       end
     end
   end

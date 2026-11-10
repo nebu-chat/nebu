@@ -1,0 +1,5 @@
+feat(oauth): consent page shows the decision first, details later, in German and English
+
+Pipeline: ATDD, 1 fix cycle, Code MINOR, 1 MINOR deferred, UX 1 violation accepted (arm script messages English-only, script frozen by story, follow-up), Kassandra CLEAN (1 LOW noted).
+Playwright e2e not run (no node_modules in the sandbox).
+Refs: REQ-2026-018

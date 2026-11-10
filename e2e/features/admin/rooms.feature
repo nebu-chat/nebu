@@ -17,3 +17,11 @@ Feature: Admin UI — Rooms Page
     When the operator navigates to "/admin/rooms"
     Then the page shows "Rooms"
     And the room list contains at least one entry
+
+  # Story admin-rooms-fallback-name AC9: the index can be narrowed by a search term (fallback names of
+  # unnamed rooms and the escaping of member names are covered by the ExUnit acceptance suite).
+  @admin-rooms-search
+  Scenario: A search term without a match lists no rooms
+    When the operator navigates to "/admin/rooms?q=no-such-room-zzz-9d4f1c"
+    Then the page shows "Rooms"
+    And the page shows "No rooms found."

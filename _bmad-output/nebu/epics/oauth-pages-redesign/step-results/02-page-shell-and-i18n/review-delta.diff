@@ -1,0 +1,70 @@
+diff --git a/_bmad-output/nebu/epics/oauth-pages-redesign/pipeline-state.yaml b/_bmad-output/nebu/epics/oauth-pages-redesign/pipeline-state.yaml
+index 29a2985d..342ac0f8 100644
+--- a/_bmad-output/nebu/epics/oauth-pages-redesign/pipeline-state.yaml
++++ b/_bmad-output/nebu/epics/oauth-pages-redesign/pipeline-state.yaml
+@@ -1,6 +1,9 @@
+ # Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents.
+ # Do not edit manually during an active pipeline run.
+ # last_updated: 2026-11-05
++# [02-page-shell-and-i18n] 2026-11-05T14:34Z ci-gate cycle 1 → unit 7630 green; integration fresh DB new=5 all outside oauth, pass in isolation/listed (accepted per epic flake policy)
++# [02-page-shell-and-i18n] 2026-11-05T14:08Z dev-story → done (cycle 1)
++# [02-page-shell-and-i18n] 2026-11-05T14:07Z code-review → 1 MINOR → cycle 1
+ # [02-page-shell-and-i18n] 2026-11-05T14:06Z ux-gate → CLEAN
+ # [02-page-shell-and-i18n] 2026-11-05T14:05Z ci-gate → unit 7630 green; integration fresh DB new=4 (SyncRejoinRangeScanBoundHttp x3 pass alone, TemporaryCapture listed) accepted per epic flake policy; no oauth failures
+ # [02-page-shell-and-i18n] 2026-11-05T13:35Z dev-story → done (cycle 0)
+@@ -31,6 +34,6 @@ completed:
+   - test-review
+   - dev-story
+   - ci-gate
+-cycle_count: 0
++cycle_count: 1
+ blocked_reason: null
+-last_updated: "2026-11-05T14:06Z"
++last_updated: "2026-11-05T14:34Z"
+diff --git a/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/02-page-shell-and-i18n/reviewed-tree.txt b/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/02-page-shell-and-i18n/reviewed-tree.txt
+new file mode 100644
+index 00000000..f0794090
+--- /dev/null
++++ b/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/02-page-shell-and-i18n/reviewed-tree.txt
+@@ -0,0 +1 @@
++b67ac5e57f099b9275a4d2c9b97a875c0d15d82d
+diff --git a/docs/stories/oauth-pages-redesign/follow-ups.md b/docs/stories/oauth-pages-redesign/follow-ups.md
+index 597b9564..00684fa1 100644
+--- a/docs/stories/oauth-pages-redesign/follow-ups.md
++++ b/docs/stories/oauth-pages-redesign/follow-ups.md
+@@ -72,3 +72,9 @@ No story/oauth test failed (the whole `test/nebu/oauth` directory is green, also
+ - `Nebu.Admin.TemporaryCaptureManagerTest` AC12 enable/2 + disable/1: already listed in section 3 (pre-existing); the audit-row assertion sees
+   rows of earlier runs (6 identical rows for `/health`).
+ - Not run in this story's gate: Playwright e2e (`e2e/features/oauth-pages-redesign/02-page-shell-and-i18n.feature`); no node_modules in the sandbox.
++
++Story 02, final gate on the cycle-1 code (fresh DB, 13396 tests, 25 failures, new=5 vs story-01 baseline):
++- `Nebu.Matrix.E2eeComplianceChannelGuardTest` (4 tests) failed in the full run only; passes in the targeted fresh-DB run (`ci-targeted3.log`). Flaky, fix at epic end.
++- `Nebu.Admin.TemporaryCaptureManagerTest` AC4 should_persist?: same listed family as AC12 (already in section 3).
++- `SyncRejoinRangeScanBoundHttpTest` fails again when run together with other files, passes alone: order dependent (see above).
++- Whole `test/nebu/oauth` directory: green in both full runs and in the targeted runs.
+diff --git a/e2e/step-definitions/oauth/page-shell-and-i18n.steps.ts b/e2e/step-definitions/oauth/page-shell-and-i18n.steps.ts
+index 4e1924c3..e05347bc 100644
+--- a/e2e/step-definitions/oauth/page-shell-and-i18n.steps.ts
++++ b/e2e/step-definitions/oauth/page-shell-and-i18n.steps.ts
+@@ -12,7 +12,7 @@
+  * Reused, never redefined here (bddgen rejects duplicates): nothing - every step text of this feature is new.
+  * The text pinned in other features ("What you can do", English headings) is updated by the dev in the same story.
+  *
+- * Step files share no module state; all state below is scenario-scoped and reset in the Before hook.
++ * Module-level state below is scenario-scoped and reset in the Before hook.
+  */
+ 
+ import { Given, When, Then, Before, After } from '../../fixtures/nebu-fixtures';
+diff --git a/server/lib/nebu/web/page_shell.ex b/server/lib/nebu/web/page_shell.ex
+index f56aa321..9798b3f3 100644
+--- a/server/lib/nebu/web/page_shell.ex
++++ b/server/lib/nebu/web/page_shell.ex
+@@ -37,7 +37,7 @@ defmodule Nebu.Web.PageShell do
+            ".host{font-weight:600;overflow-wrap:anywhere}",
+            ".status{display:block;width:32px;height:32px;fill:none;stroke:var(--err-border);stroke-width:2;stroke-linecap:round}",
+            "details{margin:1rem 0 0;padding-top:.5rem;border-top:1px solid var(--border)}",
+-           "summary{display:flex;align-items:center;min-height:44px;color:var(--accent);cursor:pointer}",
++           "summary{display:list-item;padding:.65rem 0;min-height:44px;color:var(--accent);cursor:pointer}",
+            "details ul{margin:.25rem 0 0;padding-left:1.25rem}",
+            "li{margin:.35rem 0;overflow-wrap:anywhere}",
+            ".notice{margin:0 0 1rem;padding:.75rem 1rem;border:1px solid;border-radius:8px;overflow-wrap:anywhere}",

@@ -4,8 +4,8 @@ defmodule Nebu.Admin.RoomsHTML do
 
   embed_templates "templates/rooms/*"
 
-  defp room_display_name(%{name: name}) when is_binary(name) and name != "", do: name
-  defp room_display_name(%{room_id: id}), do: id
+  # One shared implementation for index and detail (story admin-rooms-fallback-name); escaped by HEEx on output.
+  defp room_display_name(room), do: Nebu.Admin.RoomNames.display_name(room)
 
   defp room_status(%{status: status}) when is_binary(status), do: status
   defp room_status(_), do: "active"

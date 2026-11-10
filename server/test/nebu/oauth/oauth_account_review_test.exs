@@ -229,17 +229,17 @@ defmodule Nebu.OAuth.OAuthAccountReviewTest do
       assert body =~ "At least 4500 more devices not shown"
     end
 
-    test "UX hooks: label-in-name, stacked-row labels, focusable scroll region, row sign-out hook, reflow CSS, color-scheme", %{priv: priv, cid: cid} do
+    test "UX hooks: label-in-name, device cards (no table), row sign-out hook, reflow CSS, color-scheme", %{priv: priv, cid: cid} do
       s = T.oauth_device!(cid, @https, priv, T.unique_sub(), dev())
       Nebu.Matrix.DeviceKeyStore.rename_device(s.user_id, s.device_id, "Work Phone")
       acct = T.account_session!(s.user_id)
 
       list = T.account_get(q([{"action", "org.matrix.devices_list"}]), cookie: acct.cookie).resp_body
-      assert list =~ ~r/data-label="Last active"/
-      assert list =~ ~r/class="table-wrap"[^>]*role="region"[^>]*aria-label="[^"]+"[^>]*tabindex="0"/
+      assert list =~ ~r/<ul[^>]*data-role="device-list"/
+      refute list =~ ~r/<table|table-wrap|data-label=/
       assert list =~ ~r/<a[^>]*data-role="device-row-sign-out"/
-      assert list =~ ~r/<meta name="color-scheme" content="light">/
-      assert list =~ "overflow-wrap:anywhere" and list =~ "white-space:normal" and list =~ "attr(data-label)" and list =~ "forced-colors"
+      assert list =~ ~r/<meta name="color-scheme" content="dark light">/
+      assert list =~ "overflow-wrap:anywhere" and list =~ "min-height:44px" and list =~ "forced-colors"
 
       view = T.account_get(q([{"action", "org.matrix.device_view"}, {"device_id", s.device_id}]), cookie: acct.cookie).resp_body
       assert [_, label] = Regex.run(~r/data-role="device-sign-out"[^>]*aria-label="([^"]+)"/, view)
@@ -248,11 +248,11 @@ defmodule Nebu.OAuth.OAuthAccountReviewTest do
       confirm = T.account_get(q([{"action", "org.matrix.device_delete"}, {"device_id", s.device_id}]), cookie: acct.cookie).resp_body
       assert confirm =~ "<title>Sign out Work Phone?</title>" and confirm =~ "<h1>Sign out Work Phone?</h1>"
       assert confirm =~ "Cancel - keep this device signed in"
-      assert confirm =~ ~r/Sign out of the account page/
+      assert confirm =~ ~r/Sign out of this page/
 
       default = T.account_get("/account", cookie: acct.cookie).resp_body
-      refute default =~ ~s(aria-current="page"), "no nav entry is the default page itself"
-      assert default =~ ~r/<h2 id="profile-heading">Profile<\/h2>/
+      assert default =~ ~r/<a href="\/account" aria-current="page">Overview<\/a>/, "the overview is the current nav entry of the default page"
+      assert default =~ ~r/<details data-role="profile-details"/, "the profile is a detail of the overview"
     end
   end
 end

@@ -1,0 +1,34 @@
+EXIT=2 tests=13508 failures=2 skipped=8 time=806.9s log=_bmad-output/nebu/step-results/admin-rooms-fallback-name/ci-integration.log
+VS_BASELINE: new=2 fixed=12 same(pre-existing)=0 (baseline: 12 failures of 13450 tests) — only NEW failures are listed below
+FAIL 1) test AC10 - one definition, bound parameters, index use, bounded scans (b) EXPLAIN of the single-event and the search statements: the segment inputs use events_room_state_idx (Nebu.Matrix.Room.HistoryVisibilityDbTest) test/nebu/matrix/room/history_visibility_db_test.exs:732
+    single: the hv / member inputs are index-served
+    code: for {label, fun} <- [single: fn -> DB.fetch_visible_event(id, room, a) end, search: fn -> SearchDB.search_messages(a, "x", 5, 0, []) end] do
+    stacktrace:
+    test/nebu/matrix/room/history_visibility_db_test.exs:744: anonymous fn/2 in Nebu.Matrix.Room.HistoryVisibilityDbTest."test AC10 - one definition, bound parameters, index use, bounded scans (b) EXPLAIN
+    (elixir 1.19.6) lib/enum.ex:2520: Enum."-reduce/3-lists^foldl/2-0-"/3
+    test/nebu/matrix/room/history_visibility_db_test.exs:740: (test)
+    ..............
+    17:37:40.187 [warning] OIDC: email claim absent for @atdd-oa-2ffe6c61fc:test.local — ensure the IdP client grants the profile/email scopes if email is required
+    17:37:40.187 [warning] OIDC: preferred_username/name claim absent for @atdd-oa-2ffe6c61fc:test.local — ensure the IdP client grants the profile scope if display name is required
+    17:37:40.200 [warning] OIDC: email claim absent for @atdd-oa-e7531926ec:test.local — ensure the IdP client grants the profile/email scopes if email is required
+    17:37:40.200 [warning] OIDC: preferred_username/name claim absent for @atdd-oa-e7531926ec:test.local — ensure the IdP client grants the profile scope if display name is required
+    17:37:40.281 [warning] OIDC: email claim absent for @atdd-oa-b7349379cd:test.local — ensure the IdP client grants the profile/email scopes if email is required
+FAIL 2) test AC1 — legacy opaque logout ends ONLY its own device (gate r core) 200 {}; session rows, device and ALL keys of L gone; O untouched and still refreshing (Nebu.OAuth.LegacyLogoutPerDeviceTest) test/nebu/oauth/legacy_logout_per_device_test.exs:263
+    Assertion with == failed
+    code:  assert conn.status == 200
+    left:  401
+    right: 200
+    stacktrace:
+    test/nebu/oauth/legacy_logout_per_device_test.exs:112: Nebu.OAuth.LegacyLogoutPerDeviceTest.keys_query/2
+    test/nebu/oauth/legacy_logout_per_device_test.exs:268: (test)
+    ..
+    17:41:28.974 [warning] legacy logout: storage failure (UndefinedFunctionError)
+    .
+    17:41:29.204 [warning] OIDC: email claim absent for @atdd-oa-8b57f969c5:test.local — ensure the IdP client grants the profile/email scopes if email is required
+    17:41:29.204 [warning] OIDC: preferred_username/name claim absent for @atdd-oa-8b57f969c5:test.local — ensure the IdP client grants the profile scope if display name is required
+WARNINGS: 5
+  Logger.warn/1 is deprecated. Use Logger.warning/2 instead @ └─ (delta_crdt 0.6.5) lib/delta_crdt.ex:81:14: DeltaCrdt.warn_low_sync_interval/1
+  Logger.warn/1 is deprecated. Use Logger.warning/2 instead @ └─ (delta_crdt 0.6.5) lib/delta_crdt/aw_lww_map.ex:31:14: DeltaCrdt.AWLWWMap.Dots.next_dot
+  a struct for DeltaCrdt.CausalCrdt.Diff is expected on struct update: @ 
+INTEGRATION_EXIT=2
+FINISHED

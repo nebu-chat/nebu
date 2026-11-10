@@ -1,0 +1,131 @@
+diff --git a/_bmad-output/nebu/epics/oauth-pages-redesign/pipeline-state.yaml b/_bmad-output/nebu/epics/oauth-pages-redesign/pipeline-state.yaml
+index 9b070105..eeddb33d 100644
+--- a/_bmad-output/nebu/epics/oauth-pages-redesign/pipeline-state.yaml
++++ b/_bmad-output/nebu/epics/oauth-pages-redesign/pipeline-state.yaml
+@@ -1,6 +1,8 @@
+ # Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents.
+ # Do not edit manually during an active pipeline run.
+ # last_updated: 2026-11-05
++# [03-consent-page-redesign] 2026-11-05T15:34Z dev-story → done (cycle 1)
++# [03-consent-page-redesign] 2026-11-05T15:31Z code-review → 4 MINOR → cycle 1
+ # [03-consent-page-redesign] 2026-11-05T15:28Z ux-gate → 1 violation (arm script live-region messages English-only) accepted: story freezes arming script + CSP hash; follow-up; 5 advisories
+ # [03-consent-page-redesign] 2026-11-05T15:25Z ci-gate → full fresh-DB integration 13401 tests, 23 failures all in listed pre-existing families (new=4: TemporaryCaptureManager, AdminOidcLogin pass/fail-as-listed); test/nebu/oauth 3139 tests green on fresh DB; unit 7634/7635 (member_slice_gate timing flake passes alone) — accepted-flaky per epic policy
+ # [03-consent-page-redesign] 2026-11-05T15:01Z dev-story → done (cycle 0)
+@@ -41,7 +43,7 @@
+ # [01-device-naming-chain] 2026-11-05T09:30Z oracle-gate → skipped (MATRIX=false)
+ # [01-device-naming-chain] 2026-11-05T09:30Z classify → matrix=false(classifier; story frontmatter matrix:true) ui=true infra=false sec=required
+ story: "03-consent-page-redesign"
+-current_step: "code-review"
++current_step: "ci-gate"
+ completed:
+   - classify
+   - baseline
+@@ -50,6 +52,6 @@ completed:
+   - dev-story
+   - ci-gate
+   - ux-gate
+-cycle_count: 0
++cycle_count: 1
+ blocked_reason: null
+-last_updated: "2026-11-05T15:28Z"
++last_updated: "2026-11-05T15:34Z"
+diff --git a/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/03-consent-page-redesign/code-review-findings.md b/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/03-consent-page-redesign/code-review-findings.md
+new file mode 100644
+index 00000000..db2f9a80
+--- /dev/null
++++ b/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/03-consent-page-redesign/code-review-findings.md
+@@ -0,0 +1,11 @@
++# code-review — cycle 0
++INFO | review-prescan.md | prescan reported no MAJOR/MINOR/HINT lines | none
++MINOR | server/lib/nebu/oauth/consent_page.ex:267 | device name line dropped the old `id="consent-device-name-label"` hook (old `<dt>`); AC rule "Unchanged: ... the id / data-role hooks" | keep the id on the label span (`<span class="muted" id="consent-device-name-label">`)
++MINOR | server/lib/nebu/web/page_text.ex:456 | `consent.noscript` (EN) still says "unavailable even after the steps above", but the steps are now visually hidden and the hint sits BELOW the buttons; DE text already dropped the phrase | drop "even after the steps above" (align with DE)
++MINOR | e2e/step-definitions/oauth/consent-page-redesign.steps.ts:414 | hard wait `waitForTimeout(1_000)` after the no-JS click (test-review finding still open) | wait for a request/navigation event or assert noJsDecisionPosts with expect.poll over a bounded window
++MINOR | e2e/step-definitions/oauth/consent-page-redesign.steps.ts:207 | requireFreshness may permanently skip scenarios 1 and 2 when Dex sends no auth_time (test-review finding still open) | settle which variant Dex yields and fail instead of skip
++INFO | server/lib/nebu/oauth/consent_page.ex:209 | destination ids removed from Allow's aria-describedby (old UX N4 decision); for loopback/private redirects the "Nebu cannot check which app receives this" text is now only in the closed details | acceptable per AC (destination in details, notices describe Allow); optionally keep `consent-destination` in describedby (aria-describedby resolves hidden content)
++INFO | server/lib/nebu/oauth/consent_page.ex:289 | label changed from "Name this device (required)" to "Device name"; required state only via `required` attribute | matches AC wording; consider a visible "(required)" marker
++INFO | e2e/step-definitions/oauth/oauth-consent.steps.ts:336 | lure test premise inverted (pointer already on unarmed Allow since layout no longer shifts); refusal still asserted by the scenario | none
++INFO | server/lib/nebu/oauth/consent_page.ex:250 | `fill/3` escapes the catalog text first and inserts only pre-escaped vars; app-supplied URLs/names stay escaped plain text, no links; CSP style/script hashes derived from PageShell.css()/@script | none
++INFO | docs/stories/oauth-pages-redesign/03-consent-page-redesign.md | all 5 ACs implemented (order, notices outside details with icon+label, details complete, arming unchanged with sr-only instructions, name field above buttons inside form); no ADR-018/020 or cluster-safety concerns (render-only change) | none
+diff --git a/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/03-consent-page-redesign/integration-stale b/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/03-consent-page-redesign/integration-stale
+new file mode 100644
+index 00000000..e69de29b
+diff --git a/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/03-consent-page-redesign/review-prescan.digest b/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/03-consent-page-redesign/review-prescan.digest
+new file mode 100644
+index 00000000..46ec3553
+--- /dev/null
++++ b/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/03-consent-page-redesign/review-prescan.digest
+@@ -0,0 +1,4 @@
++VERDICT: CLEAN
++COUNTS: major=0 minor=0 hints=0
++REPORT: _bmad-output/nebu/epics/oauth-pages-redesign/step-results/03-consent-page-redesign/review-prescan.md
++TOP: -
+diff --git a/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/03-consent-page-redesign/review-prescan.md b/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/03-consent-page-redesign/review-prescan.md
+new file mode 100644
+index 00000000..db52295e
+--- /dev/null
++++ b/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/03-consent-page-redesign/review-prescan.md
+@@ -0,0 +1,2 @@
++# review-prescan — 1394 added lines, 16 changed files, last shipped migration 000062
++
+diff --git a/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/03-consent-page-redesign/reviewed-tree.txt b/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/03-consent-page-redesign/reviewed-tree.txt
+new file mode 100644
+index 00000000..a8e1daa8
+--- /dev/null
++++ b/_bmad-output/nebu/epics/oauth-pages-redesign/step-results/03-consent-page-redesign/reviewed-tree.txt
+@@ -0,0 +1 @@
++76228266a01e1e01f40fbde415294b7345d6adff
+diff --git a/e2e/step-definitions/oauth/consent-page-redesign.steps.ts b/e2e/step-definitions/oauth/consent-page-redesign.steps.ts
+index 8b90a04e..c3c84c1c 100644
+--- a/e2e/step-definitions/oauth/consent-page-redesign.steps.ts
++++ b/e2e/step-definitions/oauth/consent-page-redesign.steps.ts
+@@ -411,7 +411,10 @@ When('the arming tests of ArmScript and the consent flow run', async ({ page, br
+     await reachConsent(plain, { ...lastSpec!, deviceId: nextDeviceId() });
+     noJsAllowAriaDisabled = await allowButton(plain).getAttribute('aria-disabled');
+     await allowButton(plain).click({ force: true });
+-    await plain.waitForTimeout(1_000);
++    // event-driven bounded window: a decision POST would fire a request event; none is expected, so the wait ends by its timeout
++    await plain
++      .waitForRequest((r) => r.method() === 'POST' && new URL(r.url()).pathname === CONSENT_PATH, { timeout: 1_000 })
++      .catch(() => undefined);
+     noJsStillOnConsent = new URL(plain.url()).pathname === CONSENT_PATH;
+   } finally {
+     await ctx.close();
+diff --git a/server/lib/nebu/oauth/consent_page.ex b/server/lib/nebu/oauth/consent_page.ex
+index 1b70c466..c2759216 100644
+--- a/server/lib/nebu/oauth/consent_page.ex
++++ b/server/lib/nebu/oauth/consent_page.ex
+@@ -266,7 +266,7 @@ defmodule Nebu.OAuth.ConsentPage do
+   # The name the device will carry (plain text, escaped). Nothing is rendered when the user is asked instead (the input carries the question).
+   defp device_name_line({kind, name}, lang) when kind in [:derived, :existing] and is_binary(name),
+     do:
+-      ~s(<p class="devname"><span class="muted">#{t(lang, "consent.devname")}</span><br>) <>
++      ~s(<p class="devname"><span class="muted" id="consent-device-name-label">#{t(lang, "consent.devname")}</span><br>) <>
+         ~s(<strong id="consent-device-name" data-role="device-name">#{cut_80(name)}</strong></p>)
+ 
+   defp device_name_line(_plan, _lang), do: ""
+diff --git a/server/lib/nebu/web/page_text.ex b/server/lib/nebu/web/page_text.ex
+index bb549546..40d688d1 100644
+--- a/server/lib/nebu/web/page_text.ex
++++ b/server/lib/nebu/web/page_text.ex
+@@ -152,7 +152,7 @@ defmodule Nebu.Web.PageText do
+       {"Mouse: move the pointer onto Allow, then click. Keyboard: move the focus onto Allow, then press Enter. Touch: tap Allow. Allow becomes available a moment after your first interaction with the page.",
+        "Maus: Bewegen Sie den Zeiger auf Erlauben und klicken Sie dann. Tastatur: Setzen Sie den Fokus auf Erlauben und drücken Sie dann die Eingabetaste. Touch: Tippen Sie auf Erlauben. Erlauben wird kurz nach Ihrer ersten Interaktion mit der Seite verfügbar."},
+     "consent.noscript" =>
+-      {"JavaScript is off, so Allow stays unavailable even after the steps above. Turn on JavaScript or use another browser. You can still choose Deny.",
++      {"JavaScript is off, so Allow stays unavailable. Turn on JavaScript or use another browser. You can still choose Deny.",
+        "JavaScript ist aus, daher bleibt Erlauben gesperrt. Schalten Sie JavaScript ein oder verwenden Sie einen anderen Browser. Ablehnen funktioniert weiterhin."},
+     "consent.fine" =>
+       {"Only allow this if you just started signing in to this app yourself.",
+diff --git a/server/test/nebu/oauth/oauth_consent_page_test.exs b/server/test/nebu/oauth/oauth_consent_page_test.exs
+index fd6878da..75894399 100644
+--- a/server/test/nebu/oauth/oauth_consent_page_test.exs
++++ b/server/test/nebu/oauth/oauth_consent_page_test.exs
+@@ -505,7 +505,7 @@ defmodule Nebu.OAuth.OAuthConsentPageTest do
+       refute plain(b) =~ "Then move onto Allow to use it.", "review cycle 1 (UX N6): the hint names the action per input method"
+ 
+       assert plain(b) =~
+-               "JavaScript is off, so Allow stays unavailable even after the steps above. Turn on JavaScript or use another browser. You can still choose Deny."
++               "JavaScript is off, so Allow stays unavailable. Turn on JavaScript or use another browser. You can still choose Deny."
+ 
+       assert b =~ ~r/<noscript>.*Allow stays unavailable.*Deny.*<\/noscript>/s, "no JavaScript => Allow stays inert, Deny works (fail closed)"
+       assert [allow_btn] = Regex.scan(~r/<button\b[^>]*value="allow"[^>]*>.*?<\/button>/s, b) |> Enum.map(&hd/1)

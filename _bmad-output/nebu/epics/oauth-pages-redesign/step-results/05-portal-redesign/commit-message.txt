@@ -1,0 +1,4 @@
+feat(oauth): account portal: overview, device cards and apps in the Nebu look
+
+Pipeline: ATDD, 1 fix cycle, Code CLEAN, Kassandra CLEAN.
+Refs: REQ-2026-020

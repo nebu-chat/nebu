@@ -488,6 +488,7 @@ defmodule Nebu.Matrix.Room.SyncRejoinRangeScanBoundDbTest do
       json |> List.wrap() |> hd() |> Map.fetch!("Plan") |> plan_nodes_of([])
     end
 
+    @tag ac: "the-floor-window-is-served-by-the-covering-index"
     test "plan shape: without the timestamp index the position index serves at most TWO scans (the floor window and its empty-window fallback)" do
       stmt = captured_statement!(away!(300))
 
@@ -496,8 +497,9 @@ defmodule Nebu.Matrix.Room.SyncRejoinRangeScanBoundDbTest do
       # the floor window (`BETWEEN $3 - 63 AND $3`) and for the fallback of an empty window (`room_pos > $3 AND room_pos <= $4 ORDER BY room_pos LIMIT 64`), nothing else. Plan-dependent
       # mutants are caught here deterministically, not by the planner's mood.
       nodes = explain_nodes!(stmt, true)
-      pos_scans = for n <- nodes, n["Relation Name"] == "events", n["Index Name"] == "events_room_pos_idx", do: n
-      assert length(pos_scans) <= 2, "#{length(pos_scans)} scans of events_room_pos_idx: #{inspect(Enum.map(pos_scans, &Map.take(&1, ["Index Cond", "Node Type"])))}"
+      # the unique position index and the covering one (migration 000063, `(room_id, room_pos) INCLUDE (origin_server_ts)`, bugfix sync-rejoin-floor-window-point-lookups) are both position indexes
+      pos_scans = for n <- nodes, n["Relation Name"] == "events", n["Index Name"] in ["events_room_pos_idx", "events_room_pos_ts_idx"], do: n
+      assert length(pos_scans) <= 2, "#{length(pos_scans)} scans of the position indexes: #{inspect(Enum.map(pos_scans, &Map.take(&1, ["Index Name", "Index Cond", "Node Type"])))}"
 
       # and each of them is one of the two position RANGES of at most 64 positions (`room_pos >= lo AND room_pos <= hi`, the values folded into the plan): the window below the base
       # (`base - 63 .. base`) and the fallback above it (`base + 1 .. min(base + 64, head)`); a scan with an open or a longer range is a walk
@@ -516,6 +518,7 @@ defmodule Nebu.Matrix.Room.SyncRejoinRangeScanBoundDbTest do
       assert Enum.all?(ranges, &(&1 in [{base - 63, base}, {base + 1, min(base + 64, head)}])), "unexpected ranges #{inspect(ranges)} (base #{base}, head #{head})"
     end
 
+    @tag ac: "the-floor-window-is-served-by-the-covering-index"
     test "plan shape: the OFFSET 0 fence keeps the floor probe a position-range scan, never a walk of the timestamp index (timestamp index kept, fresh statistics)" do
       {query, _params} = stmt = captured_statement!(away!(300))
       assert query =~ "OFFSET 0", "the fence of the floor probe is part of the statement"
@@ -527,6 +530,11 @@ defmodule Nebu.Matrix.Room.SyncRejoinRangeScanBoundDbTest do
       nodes = explain_nodes!(stmt, false)
       walks = for n <- nodes, n["Index Name"] == "events_room_id_ts_idx", (n["Index Cond"] || "") =~ "origin_server_ts IS NOT NULL", do: n
       assert walks == [], "the floor probe walks the timestamp index (min() rewritten into an ordered scan): #{inspect(Enum.map(walks, &Map.take(&1, ["Index Cond", "Filter"])))}"
+
+      # and no room-only scan with the position RANGE as a filter (the failure of the floor before migration 000063: events_room_id_ts_idx with `room_id` as the only index condition, 404 of 414
+      # rows removed by the filter): every scan of events that carries the floor's position range carries it as an INDEX condition
+      room_only_filters = for n <- nodes, n["Relation Name"] == "events", (n["Filter"] || "") =~ ~r/room_pos >= .*room_pos <= /, do: n
+      assert room_only_filters == [], "a position RANGE served as a filter over a room-only scan: #{inspect(Enum.map(room_only_filters, &Map.take(&1, ["Node Type", "Index Name", "Filter"])))}"
     end
 
     defp plan_nodes_of(%{} = node, acc), do: Enum.reduce(Map.get(node, "Plans", []), [node | acc], &plan_nodes_of/2)

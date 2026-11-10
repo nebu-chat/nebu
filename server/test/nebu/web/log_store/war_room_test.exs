@@ -61,6 +61,11 @@ defmodule Nebu.Web.LogStore.WarRoomTest do
   setup do
     Nebu.Release.migrate()
 
+    # bugfix integration-test-flakes-fix (F): `insert_session/1` inserts an ACTIVE session (`ended_at IS NULL`), and AC2 allows at most one active row
+    # (`war_room_sessions_single_active_idx`). An active session left by another test file (e.g. one started through the War Room form) made
+    # `insert_session(scope: nil)` fail with a unique violation. Every test now starts without an active session.
+    end_all_active!()
+
     pid =
       case Process.whereis(Nebu.Web.LogStore.WarRoom) do
         nil -> start_supervised!(Nebu.Web.LogStore.WarRoom)

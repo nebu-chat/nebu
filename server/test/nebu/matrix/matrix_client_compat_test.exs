@@ -33,8 +33,16 @@ defmodule Nebu.Web.MatrixClientCompatTest do
   """
 
   use ExUnit.Case, async: false
+
+  alias Nebu.Web.SessionLookupTestSupport, as: LookupFault
   import Plug.Test
   import Plug.Conn
+
+  # bugfix integration-test-flakes-fix (F): a room name derives the room's canonical alias (`#name`, then `#name-2` ... up to 20 collisions, after which
+  # the room is created WITHOUT an alias). `make test-integration` keeps its database between runs, so fixed room names collided with the rooms of
+  # earlier runs and "expected m.room.canonical_alias in state.events" failed. Every room name of this file carries a per-run id.
+  @run_id Base.encode16(:crypto.strong_rand_bytes(4), case: :lower)
+  defp room_name(base), do: "#{base}-#{@run_id}"
 
   @server_name "test.local"
   @issuer "https://keycloak.example.com/realms/nebu"
@@ -155,6 +163,7 @@ defmodule Nebu.Web.MatrixClientCompatTest do
     end
 
     test "POST /room_keys/version with a bad token → 401 M_UNKNOWN_TOKEN" do
+      LookupFault.setup_no_row_lookup()
       conn =
         call(:post, "/_matrix/client/v3/room_keys/version", %{"algorithm" => "x"}, auth("not-a-token"))
 
@@ -834,7 +843,7 @@ defmodule Nebu.Web.MatrixClientCompatTest do
     end
 
     defp create_sync_room(token, name, extra \\ %{}) do
-      conn = call(:post, "/_matrix/client/v3/createRoom", Map.merge(%{"name" => name}, extra), auth(token))
+      conn = call(:post, "/_matrix/client/v3/createRoom", Map.merge(%{"name" => room_name(name)}, extra), auth(token))
       assert conn.status == 200, "createRoom must succeed"
       json(conn)["room_id"]
     end
@@ -1209,7 +1218,7 @@ defmodule Nebu.Web.MatrixClientCompatTest do
         call(
           :post,
           "/_matrix/client/v3/createRoom",
-          %{"name" => "sync-fields-initial-room"},
+          %{"name" => room_name("sync-fields-initial-room")},
           auth(token)
         )
 
@@ -1231,7 +1240,7 @@ defmodule Nebu.Web.MatrixClientCompatTest do
         call(
           :post,
           "/_matrix/client/v3/createRoom",
-          %{"name" => "sync-fields-incremental-room"},
+          %{"name" => room_name("sync-fields-incremental-room")},
           auth(token)
         )
 
@@ -1363,7 +1372,7 @@ defmodule Nebu.Web.MatrixClientCompatTest do
         call(
           :post,
           "/_matrix/client/v3/createRoom",
-          %{"name" => "sync-fields-crash-restart-room"},
+          %{"name" => room_name("sync-fields-crash-restart-room")},
           auth(token)
         )
 
@@ -1477,7 +1486,7 @@ defmodule Nebu.Web.MatrixClientCompatTest do
         call(
           :post,
           "/_matrix/client/v3/createRoom",
-          %{"name" => "sync-fields-midwindow-room"},
+          %{"name" => room_name("sync-fields-midwindow-room")},
           auth(token)
         )
 
@@ -2814,7 +2823,7 @@ defmodule Nebu.Web.MatrixClientCompatTest do
       assert name_event != nil,
              "the room's m.room.name state event must still be present in state.events"
 
-      assert name_event["content"]["name"] == "original-legit-name",
+      assert name_event["content"]["name"] == room_name("original-legit-name"),
              "a joined non-power-user member must NOT be able to rename the room via the " <>
                "non-state send path — got #{inspect(name_event["content"]["name"])}, expected " <>
                "the original legitimately-set name. This is the room-rename authorization " <>

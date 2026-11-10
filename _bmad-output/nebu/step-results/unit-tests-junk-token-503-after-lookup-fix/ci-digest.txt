@@ -1,0 +1,16 @@
+EXIT=2 tests=13472 failures=13 skipped=8 time=800.5s log=_bmad-output/nebu/step-results/unit-tests-junk-token-503-after-lookup-fix/ci-integration.log
+VS_BASELINE: new=1 fixed=0 same(pre-existing)=12 (baseline: 12 failures of 13450 tests) — only NEW failures are listed below
+FAIL 13) test AC6: write_async/1 buffers and flushes to operational_logs 10 entries queued via write_async/1 all appear in operational_logs, and the writer stays alive (Nebu.Web.LogStore.WriterTest) test/nebu/web/log_store/writer_test.exs:103
+    expected all 10 write_async/1 entries to be flushed to operational_logs
+    code: assert result.num_rows == 10,
+    stacktrace:
+    test/nebu/web/log_store/writer_test.exs:123: (test)
+    .
+    17:01:30.953 [info] distinctive-ac7-filter-266051-36684795-info-1
+    17:01:30.953 [debug] distinctive-ac7-filter-266051-36684795-debug-1
+    17:01:30.953 [warning] distinctive-ac7-filter-266051-36684795-warn-1
+    17:01:30.953 [error] distinctive-ac7-filter-266051-36684795-error-1
+    17:01:36.040 [info] distinctive-ac7-filter-266051-36684795-info-2-after-flip
+    ....................
+    17:01:44.707 [warning] create_room: failed to register the derived canonical alias for !0771644fd09d3702:test.local (non-fatal, postgres 23503)
+FINISHED

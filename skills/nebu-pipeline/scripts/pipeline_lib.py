@@ -72,10 +72,18 @@ def frontmatter(text: str) -> dict:
 def section(text: str, name: str) -> str:
     """Body of the first level-2 section whose heading equals `name` (case-insensitive)."""
     lines = text.splitlines()
+    # lines inside ``` fences are never headings (Gherkin `# comment` lines would otherwise end the section)
+    fenced, in_fence = [], False
+    for line in lines:
+        if line.lstrip().startswith("```"):
+            in_fence = not in_fence
+            fenced.append(True)
+        else:
+            fenced.append(in_fence)
     start = None
     for i, line in enumerate(lines):
         m = re.match(r"^(#{1,6})\s+(.+?)\s*$", line)
-        if m and m.group(2).lower() == name.lower():
+        if m and not fenced[i] and m.group(2).lower() == name.lower():
             start, level = i, len(m.group(1))
             break
     if start is None:
@@ -83,7 +91,7 @@ def section(text: str, name: str) -> str:
     end = len(lines)
     for j in range(start + 1, len(lines)):
         m = re.match(r"^(#{1,6})\s+", lines[j])
-        if m and len(m.group(1)) <= level:
+        if m and not fenced[j] and len(m.group(1)) <= level:
             end = j
             break
     return "\n".join(lines[start + 1:end])

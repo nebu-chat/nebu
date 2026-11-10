@@ -1913,6 +1913,8 @@ Browser                 Nebu (Authorize / Consent)                              
   │◄───────────────────────│ 303 to the client's redirect_uri?code&state (https, loopback, private-use scheme)
 ```
 
+Device naming on the consent step (story oauth-pages-redesign/01-device-naming-chain, REQ-2026-016): the Allow page shows the name the device will get (`{:existing, name}` for a device that already carries one, which is never asked again; `{:derived, name}` from the approved client's `client_name`, else its `client_uri` host; otherwise `:ask`). On `:ask` the page shows a required `device_name` field; an Allow without a usable name answers 422 with the page again (`data-role="device-name-error"`), and nothing is consumed. The typed name travels from the consent POST into the code row (`oauth_codes.device_display_name`) and to `Nebu.OAuth.Token.issue_session/3`, which hands the final name to the Matrix domain as `default_device_display_name` (ADR-020). A remembered Allow is skipped only when the device is new and a name can be derived, or the device already has one.
+
 Client revocation (admin UI or `bin/nebu rpc`), one transaction, lock order `oauth_clients -> devices -> matrix_sessions`:
 
 ```

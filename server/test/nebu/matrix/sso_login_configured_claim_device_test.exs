@@ -226,15 +226,9 @@ defmodule Nebu.Matrix.SsoLoginConfiguredClaimDeviceTest do
 
       # Configure the operator claim = "name" (the dev/e2e setting). Use the public
       # write helper so it ALSO invalidates the OidcClaimCache (ADR-018/ADR-020).
-      prev_claim =
-        case Ecto.Adapters.SQL.query(
-               Nebu.Repo,
-               "SELECT value FROM server_config WHERE key = 'oidc_user_id_claim' LIMIT 1",
-               []
-             ) do
-          {:ok, %{rows: [[v]]}} -> v
-          _ -> nil
-        end
+      # bugfix test-cleanup-rls-noop-delete: the previous claim row is put back by the privileged helper (the former `nil` branch ended in a no-op
+      # `DELETE FROM server_config` and left `oidc_user_id_claim = "name"` behind); it also invalidates the OidcClaimCache.
+      Nebu.OAuth.TestSupport.restore_server_config_on_exit!(["oidc_user_id_claim"])
 
       :ok = Nebu.Admin.DB.upsert_server_config(%{"oidc_user_id_claim" => "name"})
 
@@ -256,20 +250,6 @@ defmodule Nebu.Matrix.SsoLoginConfiguredClaimDeviceTest do
                   [uid]
                 )
             end
-          end
-
-          case prev_claim do
-            nil ->
-              Ecto.Adapters.SQL.query!(
-                Nebu.Repo,
-                "DELETE FROM server_config WHERE key = 'oidc_user_id_claim'",
-                []
-              )
-
-              Nebu.Matrix.OidcClaimCache.reset_for_test()
-
-            v ->
-              :ok = Nebu.Admin.DB.upsert_server_config(%{"oidc_user_id_claim" => v})
           end
         end
 

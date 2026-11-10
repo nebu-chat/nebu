@@ -1,0 +1,105 @@
+# Nebu Pipeline State — written by nebu-pipeline, read by all nebu agents.
+# Do not edit manually during an active pipeline run.
+# last_updated: 2026-11-05
+# [oauth-pages-redesign] 2026-11-05T19:56Z epic-security → CLEAN (0/0/0/5 low)
+# [06-portal-rename-device] 2026-11-05T19:55Z epic-loop → story done (70b0adf3)
+# [06-portal-rename-device] 2026-11-05T19:54Z committed ✓ (ATDD+1 fix cycle+Code CLEAN+Kassandra CLEAN)
+# [06-portal-rename-device] 2026-11-05T19:54Z arc42-update → skipped (no architecture-relevant paths staged)
+# [06-portal-rename-device] 2026-11-05T19:54Z security-review → Kassandra CLEAN
+# [06-portal-rename-device] 2026-11-05T19:52Z code-review → CLEAN (cycle 1)
+# [06-portal-rename-device] 2026-11-05T19:51Z dev-story → done (cycle 1, e2e-only; server code unchanged since CI gate, integration not stale)
+# [06-portal-rename-device] 2026-11-05T19:50Z code-review → 1 MINOR → cycle 1
+# [06-portal-rename-device] 2026-11-05T19:47Z ux-gate → CLEAN
+# [06-portal-rename-device] 2026-11-05T19:47Z ci-gate → full integration 13426 tests, 23 failures: 22 pre-existing (baseline) + 1 new (story-05 notice_codes pin, fixed by test update; portal+rename+account targeted 196/196 green); unit exit 0; 2 CI-fix dev passes (FormPost free_text for device_name, @notices)
+# [06-portal-rename-device] 2026-11-05T19:19Z dev-story → done (cycle 0)
+# [06-portal-rename-device] 2026-11-05T19:16Z test-review → CLEAN (0 MAJOR, 0 MINOR)
+# [06-portal-rename-device] 2026-11-05T19:16Z atdd → 13 failing tests (5 scenario + 8 oracle), red verified by run (13/13 red, 404/missing impl); form field renamed to device_name per story
+# [06-portal-rename-device] 2026-11-05T19:07Z oracle-gate → partial coverage, @nebu-oracle ran, context captured
+# [06-portal-rename-device] 2026-11-05T19:06Z classify → classifier matrix=false vs front-matter matrix=true (front-matter followed; oracle gate run); ui=true sec=required. baseline-integration → reused story-05 final log (HEAD code identical), pre-existing failures per follow-ups.md
+# [06-portal-rename-device] 2026-11-05T19:05Z pipeline started at 1c
+# [05-portal-redesign] 2026-11-05T19:05Z epic-loop → story done (5bc13e52)
+# [05-portal-redesign] 2026-11-05T19:04Z committed ✓ (ATDD+1 fix cycle+Code CLEAN+Kassandra CLEAN)
+# [05-portal-redesign] 2026-11-05T19:04Z arc42-update → skipped (no architecture-relevant paths)
+# [05-portal-redesign] 2026-11-05T19:04Z security-review → Kassandra CLEAN
+# [05-portal-redesign] 2026-11-05T19:03Z ci-gate-final → full fresh-DB run on final code: no story/oauth failures; 19 new in unrelated files all pass in isolation (179-test targeted run new=0), accepted per epic policy
+# [05-portal-redesign] 2026-11-05T18:37Z code-review → CLEAN (cycle 1)
+# [05-portal-redesign] 2026-11-05T18:36Z ci-gate → ✓ unit (fast gate cycle 1, 7647 passed; integration deferred to 6b)
+# [05-portal-redesign] 2026-11-05T18:31Z dev-story → done (cycle 1)
+# [05-portal-redesign] 2026-11-05T18:30Z code-review → 3 MINOR → cycle 1
+# [05-portal-redesign] 2026-11-05T18:28Z ux-gate → CLEAN
+# [05-portal-redesign] 2026-11-05T18:26Z ci-gate → full fresh-DB run new=10 (2 story test files fixed; 8 outside files pass in isolation, accepted per epic policy, follow-ups.md extended); targeted run 3161 tests new=0; unit 1869 passed
+# [05-portal-redesign] 2026-11-05T17:59Z dev-story → done (cycle 0)
+# [05-portal-redesign] 2026-11-05T17:48Z test-review → MINOR (0 MAJOR, 1 MINOR)
+# [05-portal-redesign] 2026-11-05T17:47Z atdd → 5 tests red (assertion failures, verified by unit run), e2e steps portal-redesign.steps.ts, verify CLEAN
+# [05-portal-redesign] 2026-11-05T17:34Z oracle-gate → skipped (matrix=false, classifier and front-matter agree); baseline → reused story 04 final fresh-DB log (HEAD 8e09a3d1 code identical)
+# [05-portal-redesign] 2026-11-05T17:34Z classify → matrix=false ui=true sec=required
+# [04-sso-confirm-and-result-pages] 2026-11-05T17:33Z epic-loop → story done (8e09a3d1)
+# [04-sso-confirm-and-result-pages] 2026-11-05T17:33Z committed ✓ (ATDD+1 fix cycle+Code CLEAN+Kassandra CLEAN)
+# [04-sso-confirm-and-result-pages] 2026-11-05T17:33Z arc42-update → skipped (no architecture-relevant paths)
+# [04-sso-confirm-and-result-pages] 2026-11-05T17:32Z security-review → Kassandra CLEAN
+# [04-sso-confirm-and-result-pages] 2026-11-05T17:29Z ci-gate-final → integration on final code (fresh DB): 13408 tests, 21 failures, none in sso/oauth files; new=3 vs baseline all pass in isolation (targeted sso+oauth+new files: 3429 tests 0 failures) → accepted-flaky per epic policy
+# [04-sso-confirm-and-result-pages] 2026-11-05T17:07Z code-review → CLEAN (cycle 1)
+# [04-sso-confirm-and-result-pages] 2026-11-05T17:07Z ci-gate → ✓ unit (fast gate, cycle 1; integration deferred to 6b)
+# [04-sso-confirm-and-result-pages] 2026-11-05T17:07Z dev-story → done (cycle 1)
+# [04-sso-confirm-and-result-pages] 2026-11-05T17:00Z code-review → 1 MINOR → cycle 1
+# [04-sso-confirm-and-result-pages] 2026-11-05T16:59Z ux-gate → CLEAN
+# [04-sso-confirm-and-result-pages] 2026-11-05T16:50Z ci-gate → accepted-flaky per epic policy: unit 7640 ok; fresh-DB integration 13406 tests 37 failures (new=17 vs story-03 baseline; none in sso/oauth files; DeviceKeyDirectorySyncHttpTest/CreateRoomInitialStateHttpTest/AlertNotifierTest/logs_live pass or are listed flaky; targeted fresh-DB run of sso+oauth+new files: failures only LogsLive (listed), AlertNotifier passes alone)
+# [04-sso-confirm-and-result-pages] 2026-11-05T16:27Z dev-story → done (cycle 0)
+# [04-sso-confirm-and-result-pages] 2026-11-05T16:13Z test-review → CLEAN (0 MAJOR, 0 MINOR)
+# [04-sso-confirm-and-result-pages] 2026-11-05T16:13Z atdd → 5 failing tests (lean, verified; unit red run by orchestrator 0/5)
+# [04-sso-confirm-and-result-pages] 2026-11-05T16:06Z baseline-integration → reused story-03 final fresh-DB log (HEAD code identical, 35 failures pre-existing/flaky)
+# [04-sso-confirm-and-result-pages] 2026-11-05T16:06Z classify → matrix=false ui=true infra=false security_review=required; oracle skipped
+# [04-sso-confirm-and-result-pages] 2026-11-05T16:06Z pipeline started at 1c (story exists)
+# [03-consent-page-redesign] 2026-11-05T16:05Z epic-loop → story done (95ea37e6)
+# [03-consent-page-redesign] 2026-11-05T16:05Z committed ✓ (ATDD+1 fix cycle+Code MINOR+1 MINOR deferred+UX 1 violation(s) fixed+Kassandra CLEAN)
+# [03-consent-page-redesign] 2026-11-05T16:04Z ci-gate-final → full integration on final code: 35 failures, none in oauth/story files; 16 new-vs-baseline all pass in isolation on fresh DB (flaky, accepted per epic policy); unit 7635/7635
+# [03-consent-page-redesign] 2026-11-05T15:49Z arc42-update → skipped (no architecture-relevant paths)
+# [03-consent-page-redesign] 2026-11-05T15:49Z security-review → Kassandra CLEAN
+# [03-consent-page-redesign] 2026-11-05T15:46Z code-review → 1 MINOR deferred (cycle cap)
+# [03-consent-page-redesign] 2026-11-05T15:34Z dev-story → done (cycle 1)
+# [03-consent-page-redesign] 2026-11-05T15:31Z code-review → 4 MINOR → cycle 1
+# [03-consent-page-redesign] 2026-11-05T15:28Z ux-gate → 1 violation (arm script live-region messages English-only) accepted: story freezes arming script + CSP hash; follow-up; 5 advisories
+# [03-consent-page-redesign] 2026-11-05T15:25Z ci-gate → full fresh-DB integration 13401 tests, 23 failures all in listed pre-existing families (new=4: TemporaryCaptureManager, AdminOidcLogin pass/fail-as-listed); test/nebu/oauth 3139 tests green on fresh DB; unit 7634/7635 (member_slice_gate timing flake passes alone) — accepted-flaky per epic policy
+# [03-consent-page-redesign] 2026-11-05T15:01Z dev-story → done (cycle 0)
+# [03-consent-page-redesign] 2026-11-05T14:45Z test-review → MINOR (0 MAJOR, 2 MINOR)
+# [03-consent-page-redesign] 2026-11-05T14:45Z atdd → 5 failing tests (lean, verified)
+# [03-consent-page-redesign] 2026-11-05T14:37Z oracle → skipped (matrix=false)
+# [03-consent-page-redesign] 2026-11-05T14:37Z baseline → reused story-02 final fresh-DB integration log (same code as HEAD b26affeb)
+# [03-consent-page-redesign] 2026-11-05T14:37Z classify → matrix=false ui=true infra=false sec=required
+# [02-page-shell-and-i18n] 2026-11-05T14:36Z epic-loop → story done (b26affeb)
+# [02-page-shell-and-i18n] 2026-11-05T14:35Z committed ✓ (ATDD+1 fix cycle+Code CLEAN+Kassandra CLEAN)
+# [02-page-shell-and-i18n] 2026-11-05T14:35Z arc42-update → skipped (no architecture paths)
+# [02-page-shell-and-i18n] 2026-11-05T14:35Z security-review → Kassandra CLEAN
+# [02-page-shell-and-i18n] 2026-11-05T14:34Z code-review → CLEAN (cycle 1)
+# [02-page-shell-and-i18n] 2026-11-05T14:34Z ci-gate cycle 1 → unit 7630 green; integration fresh DB new=5 all outside oauth, pass in isolation/listed (accepted per epic flake policy)
+# [02-page-shell-and-i18n] 2026-11-05T14:08Z dev-story → done (cycle 1)
+# [02-page-shell-and-i18n] 2026-11-05T14:07Z code-review → 1 MINOR → cycle 1
+# [02-page-shell-and-i18n] 2026-11-05T14:06Z ux-gate → CLEAN
+# [02-page-shell-and-i18n] 2026-11-05T14:05Z ci-gate → unit 7630 green; integration fresh DB new=4 (SyncRejoinRangeScanBoundHttp x3 pass alone, TemporaryCapture listed) accepted per epic flake policy; no oauth failures
+# [02-page-shell-and-i18n] 2026-11-05T13:35Z dev-story → done (cycle 0)
+# [02-page-shell-and-i18n] 2026-11-05T13:30Z test-review → CLEAN (0 MAJOR, 0 MINOR)
+# [02-page-shell-and-i18n] 2026-11-05T13:30Z atdd → 5 failing tests (lean; run verified manually: 0/5 passed, red for missing modules/old pages)
+# [02-page-shell-and-i18n] 2026-11-05T13:23Z baseline-integration → reused cached baseline
+# [02-page-shell-and-i18n] 2026-11-05T13:23Z classify → matrix=false ui=true infra=false security=required
+# [01-device-naming-chain] 2026-11-05T13:23Z epic-loop → story done (595cbfd6)
+# [01-device-naming-chain] 2026-11-05T13:22Z committed ✓ (ATDD+1 fix cycle+Code MINOR+1 MINOR deferred+Kassandra CLEAN)
+# [01-device-naming-chain] 2026-11-05T13:17Z arc42-update → done (05,06,07,08)
+# [01-device-naming-chain] 2026-11-05T13:16Z security-review → Kassandra CLEAN
+# [01-device-naming-chain] 2026-11-05T13:15Z code-review → 1 MINOR deferred (cycle cap)
+# [01-device-naming-chain] 2026-11-05T13:13Z ux-gate → CLEAN
+# [01-device-naming-chain] 2026-11-05T13:12Z ci-gate → accepted-flaky by user (cycle 1): story tests green, known flakes recorded in docs/stories/oauth-pages-redesign/follow-ups.md (fix at epic end)
+# [01-device-naming-chain] 2026-11-05T13:00Z ci-gate → cycle1: story tests+targeted green (new=0 vs baseline on fresh DB, 219 tests/0 failures on 5 more files); full run new=12 in unrelated files, all pass in isolation → BLOCKED for user
+# [01-device-naming-chain] 2026-11-05T12:29Z ci-gate → user: fix cycle 1 for 2 story-caused failures
+# [01-device-naming-chain] 2026-11-05T10:44Z ci-gate → FAILED: new=11 vs baseline (story-related: device_naming_chain_test.exs:124 forged field still in page body; oauth_consent_page_test.exs:698 long replaced-device name not cut at 80; others sync :timeout / log-retention / rooms-fallback likely load-flaky)
+# [01-device-naming-chain] 2026-11-05T10:21Z dev-story → done (cycle 0)
+# [01-device-naming-chain] 2026-11-05T10:12Z test-review → MINOR (0 MAJOR, 1 MINOR)
+# [01-device-naming-chain] 2026-11-05T10:02Z atdd → 13 tests red for the right reason (verified manually with integration stack; atdd_verify unit run cannot cover :integration tests); pipeline_lib.section made fence-aware
+# [01-device-naming-chain] 2026-11-05T09:53Z baseline-integration → ⚠ FAILING (pre-existing, 26 of 13378; minio host ports overridden because 9000 held by nebu-oauth-dev-minio-1)
+# [01-device-naming-chain] 2026-11-05T09:30Z oracle-gate → skipped (MATRIX=false)
+# [01-device-naming-chain] 2026-11-05T09:30Z classify → matrix=false(classifier; story frontmatter matrix:true) ui=true infra=false sec=required
+story: null
+current_step: null
+completed: []
+cycle_count: 0
+blocked_reason: null
+last_updated: "2026-11-05T19:56Z"

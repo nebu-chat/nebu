@@ -25,13 +25,14 @@ Unterbefehle (alle geben eine kurze, maschinenlesbare Antwort auf stdout aus, Ex
       Frontmatter "arc42: required|skip" der Story hat Vorrang; sonst Heuristik über die
       gestagten Dateien (Migrationen, proto, docker, deploy, Router, ADRs, neue Domänen-Ordner).
 
-  decide --step STEP --digest FILE|- --cycle N --story ID [--max-minor 1] [--no-copy]
+  decide --step STEP --digest FILE|- --cycle N --story ID [--max-minor 1] [--no-copy] [--apply STATE_FILE] [--git-add PATH...]
       Entscheidungslogik der Gates als Skript (kein LLM-Denken im Orchestrator). STEP: test-review | dev-story | code-review |
       ux-gate | security-review | epic-security | oracle. Antwort (key: value, eine Zeile je Feld):
         ACTION    NEXT | CYCLE | DEFER_MINOR | ASK_USER | STOP
         STATE     fertige Argumente für pipeline_state.py (ohne --file) — bei ASK_USER: der Fall "weitermachen"
         STATE_FIX / STATE_ACCEPT   (nur ASK_USER bei code-review) Argumente für "fix" bzw. "accept"
         MESSAGE   Statuszeile bzw. Frage an den User (inkl. TOP + REPORT)
+        APPLIED   (nur mit --apply/--git-add) was das Skript schon erledigt hat — dann kein weiterer pipeline_state.py-Aufruf nötig
         COPIED    (nur DEFER_MINOR) Pfad der deferred-minor.md, wird vom Skript selbst geschrieben
 
 Cache-Ort für die Baseline: <repo>/.claude/pipeline-cache/baseline/<sha>.log (gitignored, pro Checkout).
@@ -39,6 +40,7 @@ Cache-Ort für die Baseline: <repo>/.claude/pipeline-cache/baseline/<sha>.log (g
 import argparse
 import json
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -274,7 +276,18 @@ def cmd_decide(args):
     else:
         out = {"ACTION": "ASK_USER", "MESSAGE": f"unknown step {args.step}", "STATE": ""}
 
-    for k in ("ACTION", "STATE", "STATE_FIX", "STATE_ACCEPT", "COPIED", "MESSAGE"):
+    applied = []
+    if args.git_add and out.get("ACTION") in ("NEXT", "CYCLE", "DEFER_MINOR"):
+        r = subprocess.run(["git", "add", "--"] + args.git_add, capture_output=True, text=True)
+        applied.append(f"git add {' '.join(args.git_add)}" + ("" if r.returncode == 0 else f" FAILED: {r.stderr.strip()[:160]}"))
+    if args.apply and out.get("ACTION") in ("NEXT", "CYCLE", "DEFER_MINOR") and out.get("STATE"):
+        st = Path(__file__).with_name("pipeline_state.py")
+        r = subprocess.run([sys.executable, "-B", str(st), "--file", args.apply] + shlex.split(out["STATE"]), capture_output=True, text=True)
+        applied.append("state updated" if r.returncode == 0 else f"state update FAILED: {(r.stderr or r.stdout).strip()[:160]}")
+    if applied:
+        out["APPLIED"] = "; ".join(applied)
+
+    for k in ("ACTION", "APPLIED", "STATE", "STATE_FIX", "STATE_ACCEPT", "COPIED", "MESSAGE"):
         if k in out:
             print(f"{k}: {out[k]}")
 
@@ -288,6 +301,8 @@ def main():
     d = sub.add_parser("review-delta"); d.add_argument("--mark", required=True); d.add_argument("--max-lines", type=int, default=1500); d.add_argument("--out")
     f = sub.add_parser("decide"); f.add_argument("--step", required=True); f.add_argument("--digest", required=True); f.add_argument("--cycle", type=int, default=0)
     f.add_argument("--story", default=""); f.add_argument("--max-minor", type=int, default=1); f.add_argument("--no-copy", action="store_true")
+    f.add_argument("--apply", metavar="STATE_FILE", help="on NEXT/CYCLE/DEFER_MINOR run pipeline_state.py with STATE itself (one tool call instead of two)")
+    f.add_argument("--git-add", nargs="+", metavar="PATH", help="on NEXT/CYCLE/DEFER_MINOR run `git add -- PATH...` before the state update")
     e = sub.add_parser("arc42-relevant"); e.add_argument("--story", required=True)
     args = ap.parse_args()
     {"baseline-lookup": cmd_baseline_lookup, "baseline-store": cmd_baseline_store, "review-mark": cmd_review_mark,

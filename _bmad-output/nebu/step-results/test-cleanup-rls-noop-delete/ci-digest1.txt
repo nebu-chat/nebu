@@ -1,0 +1,7 @@
+EXIT=2 tests=13469 failures=12 skipped=8 time=868.6s log=_bmad-output/nebu/step-results/test-cleanup-rls-noop-delete/ci-integration1.log
+VS_BASELINE: new=0 fixed=0 same(pre-existing)=12 (baseline: 12 failures of 13450 tests) — only NEW failures are listed below
+WARNINGS: 5
+  Logger.warn/1 is deprecated. Use Logger.warning/2 instead @ └─ (delta_crdt 0.6.5) lib/delta_crdt.ex:81:14: DeltaCrdt.warn_low_sync_interval/1
+  Logger.warn/1 is deprecated. Use Logger.warning/2 instead @ └─ (delta_crdt 0.6.5) lib/delta_crdt/aw_lww_map.ex:31:14: DeltaCrdt.AWLWWMap.Dots.next_dot
+  a struct for DeltaCrdt.CausalCrdt.Diff is expected on struct update: @ 
+FINISHED

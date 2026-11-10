@@ -99,6 +99,13 @@ defmodule Nebu.Admin.RoomsFallbackNameTest do
 
   defp endpoint_call(conn), do: @endpoint.call(conn, @endpoint.init([]))
 
+  # The index lists at most 500 rooms in a fixed order (AC9), so asserting on the plain
+  # `/admin/rooms` page depends on the rows other suites leave in `rooms`. The tests narrow the
+  # list with the search term `q` (a substring of the room id) instead.
+  defp get_index(search) do
+    build_admin_conn(:get, "/admin/rooms?q=" <> URI.encode_www_form(search)) |> endpoint_call()
+  end
+
   # ── DB seeding helpers (mirrors Nebu.Admin.AdminStaleRoomsTest /
   #    Nebu.Admin.ListRoomMembersWithoutPiiTest raw-SQL seeding conventions) ──
 
@@ -194,6 +201,19 @@ defmodule Nebu.Admin.RoomsFallbackNameTest do
     end
   end
 
+  defp get_show(room_id) do
+    encoded = URI.encode(room_id, &URI.char_unreserved?(&1))
+    build_admin_conn(:get, "/admin/rooms/#{encoded}") |> endpoint_call()
+  end
+
+  # The fallback text both pages render for `room_id` (index first, then detail).
+  defp displays(room_id) do
+    [
+      index_display_name(get_index(room_id).resp_body, room_id),
+      show_display_name(get_show(room_id).resp_body, room_id)
+    ]
+  end
+
   defp assert_matches_either_order(actual, name_a, name_b) do
     expected_ab = "#{name_a} & #{name_b}"
     expected_ba = "#{name_b} & #{name_a}"
@@ -226,7 +246,7 @@ defmodule Nebu.Admin.RoomsFallbackNameTest do
     end
 
     test "index page shows both display names instead of the raw room_id", %{room_id: room_id} do
-      conn = build_admin_conn(:get, "/admin/rooms") |> endpoint_call()
+      conn = get_index(room_id)
       assert conn.status == 200
 
       display = index_display_name(conn.resp_body, room_id)
@@ -270,7 +290,7 @@ defmodule Nebu.Admin.RoomsFallbackNameTest do
 
     test "index page falls back to the localpart (not nil/blank) and does not crash",
          %{room_id: room_id, bob_localpart: bob_localpart} do
-      conn = build_admin_conn(:get, "/admin/rooms") |> endpoint_call()
+      conn = get_index(room_id)
       assert conn.status == 200
 
       display = index_display_name(conn.resp_body, room_id)
@@ -316,7 +336,7 @@ defmodule Nebu.Admin.RoomsFallbackNameTest do
     end
 
     test "index page shows a member-count fallback, not every member's name", %{room_id: room_id} do
-      conn = build_admin_conn(:get, "/admin/rooms") |> endpoint_call()
+      conn = get_index(room_id)
       assert conn.status == 200
 
       display = index_display_name(conn.resp_body, room_id)
@@ -362,7 +382,7 @@ defmodule Nebu.Admin.RoomsFallbackNameTest do
     end
 
     test "index page shows the explicit name verbatim", %{room_id: room_id} do
-      conn = build_admin_conn(:get, "/admin/rooms") |> endpoint_call()
+      conn = get_index(room_id)
       assert conn.status == 200
       assert index_display_name(conn.resp_body, room_id) == "Team Standup"
     end
@@ -390,13 +410,15 @@ defmodule Nebu.Admin.RoomsFallbackNameTest do
 
     test "index page does not crash and does not just repeat the raw room_id",
          %{room_id: room_id} do
-      conn = build_admin_conn(:get, "/admin/rooms") |> endpoint_call()
+      conn = get_index(room_id)
       assert conn.status == 200
 
       display = index_display_name(conn.resp_body, room_id)
       refute display == nil
       refute display == room_id,
              "expected a sensible empty-room fallback (e.g. \"(empty room)\"), got the raw room_id"
+
+      assert display == "(empty room)"
     end
 
     test "show page does not crash and does not just repeat the raw room_id",
@@ -409,6 +431,8 @@ defmodule Nebu.Admin.RoomsFallbackNameTest do
       refute display == nil
       refute display == room_id,
              "expected a sensible empty-room fallback (e.g. \"(empty room)\"), got the raw room_id"
+
+      assert display == "(empty room)"
     end
   end
 
@@ -429,7 +453,7 @@ defmodule Nebu.Admin.RoomsFallbackNameTest do
 
     test "index page does not crash and does not just repeat the raw room_id",
          %{room_id: room_id} do
-      conn = build_admin_conn(:get, "/admin/rooms") |> endpoint_call()
+      conn = get_index(room_id)
       assert conn.status == 200
 
       display = index_display_name(conn.resp_body, room_id)
@@ -437,6 +461,8 @@ defmodule Nebu.Admin.RoomsFallbackNameTest do
       refute display == room_id,
              "expected a sensible single-member fallback (e.g. the member's own name/localpart), " <>
                "got the raw room_id"
+
+      assert display == "Solo"
     end
 
     test "show page does not crash and does not just repeat the raw room_id",
@@ -450,6 +476,8 @@ defmodule Nebu.Admin.RoomsFallbackNameTest do
       refute display == room_id,
              "expected a sensible single-member fallback (e.g. the member's own name/localpart), " <>
                "got the raw room_id"
+
+      assert display == "Solo"
     end
   end
 
@@ -479,7 +507,7 @@ defmodule Nebu.Admin.RoomsFallbackNameTest do
          %{room_id: room_id} do
       encoded = URI.encode(room_id, &URI.char_unreserved?(&1))
 
-      index_conn = build_admin_conn(:get, "/admin/rooms") |> endpoint_call()
+      index_conn = get_index(room_id)
       show_conn = build_admin_conn(:get, "/admin/rooms/#{encoded}") |> endpoint_call()
 
       assert index_conn.status == 200
@@ -493,6 +521,260 @@ defmodule Nebu.Admin.RoomsFallbackNameTest do
       assert index_display == show_display,
              "expected the SAME fallback text on both pages (both call room_display_name/1), " <>
                "but index=#{inspect(index_display)} show=#{inspect(show_display)}"
+    end
+  end
+
+  # ── AC7: one batched query for all listed rooms (no N+1) ──────────────────────
+
+  defp seed_unnamed_room_with_two_members(prefix, n, now) do
+    room_id = "!#{prefix}#{n}:test.local"
+    a = "@#{prefix}#{n}_a:test.local"
+    b = "@#{prefix}#{n}_b:test.local"
+
+    insert_room(room_id, "", now)
+    insert_user(a, now)
+    insert_user(b, now)
+    insert_profile(a, "Ann#{n}", now)
+    insert_profile(b, "Ben#{n}", now)
+    insert_member(room_id, a, now)
+    insert_member(room_id, b, now + 1)
+
+    on_exit(fn -> cleanup(room_id, [a, b]) end)
+    room_id
+  end
+
+  defp count_repo_queries(fun) do
+    id = "rooms-fallback-query-count-#{System.unique_integer([:positive])}"
+    me = self()
+
+    :telemetry.attach(
+      id,
+      [:nebu, :repo, :query],
+      fn _event, _measurements, meta, _config ->
+        if self() == me, do: send(me, {:repo_query, meta[:query]})
+      end,
+      nil
+    )
+
+    try do
+      fun.()
+    after
+      :telemetry.detach(id)
+    end
+
+    drain_repo_queries([])
+  end
+
+  defp drain_repo_queries(acc) do
+    receive do
+      {:repo_query, q} -> drain_repo_queries([q | acc])
+    after
+      0 -> acc
+    end
+  end
+
+  describe "AC7 — the index fetches the member names of all listed rooms with one query" do
+    test "the number of queries does not grow with the number of rooms" do
+      now = System.system_time(:millisecond)
+      for n <- 1..2, do: seed_unnamed_room_with_two_members("#{@run_id}_ac7a_", n, now)
+      large = for n <- 1..12, do: seed_unnamed_room_with_two_members("#{@run_id}_ac7b_", n, now)
+
+      small_queries = count_repo_queries(fn -> get_index("#{@run_id}_ac7a_") end)
+      large_conn_queries = count_repo_queries(fn -> get_index("#{@run_id}_ac7b_") end)
+
+      assert small_queries != [], "the telemetry probe saw no query at all"
+      assert Enum.any?(large_conn_queries, &String.contains?(&1, "room_members"))
+
+      assert length(large_conn_queries) == length(small_queries),
+             "the index must not run a query per room: 2 rooms -> #{length(small_queries)} queries, " <>
+               "12 rooms -> #{length(large_conn_queries)} queries"
+
+      # and the batched result really names every one of the 12 rooms
+      conn = get_index("#{@run_id}_ac7b_")
+      assert conn.status == 200
+
+      for {room_id, n} <- Enum.with_index(large, 1) do
+        assert_matches_either_order(index_display_name(conn.resp_body, room_id), "Ann#{n}", "Ben#{n}")
+      end
+    end
+
+    test "the names of all listed rooms come from one query on room_members" do
+      now = System.system_time(:millisecond)
+      for n <- 1..6, do: seed_unnamed_room_with_two_members("#{@run_id}_ac7c_", n, now)
+
+      queries = count_repo_queries(fn -> get_index("#{@run_id}_ac7c_") end)
+      member_queries = Enum.filter(queries, &String.contains?(&1, "room_members"))
+
+      # the room list itself counts members in a subselect; the name lookup is the second statement
+      # that reads room_members — never one per room (6 rooms here).
+      assert member_queries != [], "expected the batched name lookup on room_members to be captured"
+
+      assert length(member_queries) <= 2,
+             "expected at most 2 statements touching room_members (list + batched names), got #{length(member_queries)}"
+    end
+  end
+
+  # ── AC8: user-controlled names are escaped, sanitised and length-capped ────────
+
+  describe "AC8 — user-controlled display names" do
+    setup do
+      now = System.system_time(:millisecond)
+
+      mk = fn tag, names ->
+        room_id = "!#{@run_id}_ac8#{tag}:test.local"
+        insert_room(room_id, "", now)
+
+        users =
+          names
+          |> Enum.with_index()
+          |> Enum.map(fn {dn, idx} ->
+            uid = "@#{@run_id}_ac8#{tag}_u#{idx}:test.local"
+            insert_user(uid, now)
+            insert_profile(uid, dn, now)
+            insert_member(room_id, uid, now + idx)
+            uid
+          end)
+
+        on_exit(fn -> cleanup(room_id, users) end)
+        room_id
+      end
+
+      %{mk: mk}
+    end
+
+    test "markup in a display name is rendered HTML-escaped on both pages", %{mk: mk} do
+      room_id = mk.("x", ["<script>alert(1)</script>", "Bob"])
+
+      for conn <- [get_index(room_id), get_show(room_id)] do
+        assert conn.status == 200
+        refute conn.resp_body =~ "<script>alert(1)</script>"
+        refute conn.resp_body =~ "<script>alert(1)"
+        assert conn.resp_body =~ "&lt;script&gt;alert(1)&lt;/script&gt;"
+      end
+    end
+
+    test "a quote in a display name cannot break out of the aria-label attribute on the index", %{mk: mk} do
+      room_id = mk.("q", [~s|Eve" onfocus="alert(1)|, "Bob"])
+      conn = get_index(room_id)
+
+      assert conn.status == 200
+      refute conn.resp_body =~ ~s|onfocus="alert(1)|
+      assert conn.resp_body =~ "&quot; onfocus=&quot;alert(1)"
+    end
+
+    test "control and bidi override characters are removed, whitespace is collapsed", %{mk: mk} do
+      room_id = mk.("c", ["Bo\u202Eb\u0007 \n x", "Alice"])
+
+      for display <- displays(room_id) do
+        refute display =~ "\u202E"
+        refute display =~ "\u0007"
+        assert_matches_either_order(display, "Bob x", "Alice")
+      end
+    end
+
+    test "a very long display name is capped, the whole fallback stays bounded", %{mk: mk} do
+      long = String.duplicate("x", 300)
+      room_id = mk.("l", [long, long, long, long])
+
+      for display <- displays(room_id) do
+        assert String.length(display) <= 120,
+               "fallback name must be capped at 120 characters, got #{String.length(display)}"
+
+        refute display =~ long
+        assert display =~ "…"
+      end
+    end
+  end
+
+  # ── AC9: the index can be narrowed by a search term ───────────────────────────
+
+  describe "AC9 — search term on the rooms index" do
+    setup do
+      now = System.system_time(:millisecond)
+      name_a = "Zzq#{@run_id}Alpha"
+      a = "!#{@run_id}_ac9_a:test.local"
+      b = "!#{@run_id}_ac9_b:test.local"
+
+      insert_room(a, name_a, now)
+      insert_room(b, "Other room", now)
+
+      on_exit(fn ->
+        cleanup(a, [])
+        cleanup(b, [])
+      end)
+
+      %{a: a, b: b, name_a: name_a}
+    end
+
+    test "a room id substring lists only the matching rooms", %{a: a, b: b} do
+      conn = get_index("#{@run_id}_ac9_a")
+      assert conn.status == 200
+      assert index_display_name(conn.resp_body, a)
+      assert index_display_name(conn.resp_body, b) == nil
+    end
+
+    test "an explicit name matches case-insensitively", %{a: a, b: b, name_a: name_a} do
+      conn = get_index(String.downcase(name_a))
+      assert index_display_name(conn.resp_body, a) == name_a
+      assert index_display_name(conn.resp_body, b) == nil
+    end
+
+    test "LIKE wildcards in the term are literal", %{a: a, b: b} do
+      for term <- ["#{@run_id}_ac9%a", "#{@run_id}\\_ac9_a"] do
+        conn = get_index(term)
+        assert conn.status == 200
+        assert index_display_name(conn.resp_body, a) == nil, "term #{inspect(term)} must not match as a pattern"
+        assert index_display_name(conn.resp_body, b) == nil
+      end
+    end
+
+    test "the search term combines with the status filter", %{a: a, b: b} do
+      active = build_admin_conn(:get, "/admin/rooms?status=active&q=" <> URI.encode_www_form("#{@run_id}_ac9_a")) |> endpoint_call()
+      assert index_display_name(active.resp_body, a)
+      assert index_display_name(active.resp_body, b) == nil
+
+      archived = build_admin_conn(:get, "/admin/rooms?status=archived&q=" <> URI.encode_www_form("#{@run_id}_ac9_a")) |> endpoint_call()
+      assert archived.status == 200
+      assert index_display_name(archived.resp_body, a) == nil
+    end
+
+    test "an over-long term does not crash", %{a: a} do
+      conn = get_index(String.duplicate("a", 500))
+      assert conn.status == 200
+      assert index_display_name(conn.resp_body, a) == nil
+    end
+
+    # story admin-room-names-sanitiser-gaps AC4: a NUL byte made PostgreSQL fail (22021) -> silent empty list
+    test "AC4 — a NUL byte in the term is dropped and the rest still filters", %{a: a, b: b} do
+      for term <- ["#{@run_id}_ac9_a\u0000", "\u0000#{@run_id}_ac9_a", "#{@run_id}\u0000_ac9_a"] do
+        conn = get_index(term)
+        assert conn.status == 200
+        assert index_display_name(conn.resp_body, a), "term #{inspect(term)} must still find the room"
+        assert index_display_name(conn.resp_body, b) == nil
+      end
+    end
+
+    test "AC4 — a term that is only a NUL byte behaves like no term (no silent empty list)", %{} do
+      conn = get_index("\u0000")
+      assert conn.status == 200
+      # rooms a and b exist, so the unfiltered list is never empty (it is capped at 500 rows, so no per-room assertion)
+      refute conn.resp_body =~ "No rooms found."
+      assert conn.resp_body =~ ~r/<input[^>]*name="q"[^>]*value=""|<input[^>]*value=""[^>]*name="q"/
+    end
+
+    test "the term is reflected only escaped in the search field", %{} do
+      conn = get_index(~s|"><script>alert(1)</script>|)
+      assert conn.status == 200
+      refute conn.resp_body =~ "<script>alert(1)</script>"
+      assert conn.resp_body =~ ~s(name="q")
+    end
+
+    test "the search field is labelled and keeps the status filter", %{} do
+      conn = build_admin_conn(:get, "/admin/rooms?status=active") |> endpoint_call()
+      assert conn.status == 200
+      assert conn.resp_body =~ ~r/<label[^>]*for="room-search"/
+      assert conn.resp_body =~ ~r/<input[^>]*id="room-search"[^>]*name="q"|<input[^>]*name="q"[^>]*id="room-search"/
+      assert conn.resp_body =~ ~s(name="status")
     end
   end
 end

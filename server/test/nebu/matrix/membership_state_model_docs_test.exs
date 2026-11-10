@@ -267,17 +267,23 @@ defmodule Nebu.Matrix.MembershipStateModelDocsTest do
     end
 
     result =
-      Nebu.Repo.transaction(fn ->
-        insert.(rooms["over"], 10_001, "leave", false)
-        insert.(rooms["exact"], 10_000, "ban", false)
-        # 10 001 users whose OLDER event is a leave and whose LATEST event is a join: no non-join slot
-        insert.(rooms["joined"], 10_001, "join", true)
-        # invites, bans and leaves mixed (none is a join), 10 002 slots
-        insert.(rooms["mixed"], 10_002, ["invite", "ban", "leave"], false)
+      Nebu.Repo.transaction(
+        fn ->
+          insert.(rooms["over"], 10_001, "leave", false)
+          insert.(rooms["exact"], 10_000, "ban", false)
+          # 10 001 users whose OLDER event is a leave and whose LATEST event is a join: no non-join slot
+          insert.(rooms["joined"], 10_001, "join", true)
+          # invites, bans and leaves mixed (none is a join), 10 002 slots
+          insert.(rooms["mixed"], 10_002, ["invite", "ban", "leave"], false)
 
-        listed = Ecto.Adapters.SQL.query!(Nebu.Repo, sql, []).rows
-        Nebu.Repo.rollback({:listed, listed})
-      end)
+          listed = Ecto.Adapters.SQL.query!(Nebu.Repo, sql, [], timeout: :timer.seconds(90)).rows
+          Nebu.Repo.rollback({:listed, listed})
+        end,
+        # bugfix integration-test-flakes-fix (F): the whole transaction (about 40 000 fixture rows plus the Q-ms query) outlasted the default 15 s
+        # `:timeout` of `Repo.transaction/2` under full-run load ("tcp recv: closed" inside the transaction). The per-statement bound above covers
+        # the statements; this bounds the transaction itself and stays below the test's own 180 s ExUnit timeout.
+        timeout: :timer.seconds(170)
+      )
 
     assert {:error, {:listed, listed}} = result
     listed_rooms = Enum.map(listed, &List.first/1)

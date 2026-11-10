@@ -29,7 +29,7 @@ DATE: [YYYY-MM-DD]
 
 She writes the mandatory audit report herself and replies with the digest (`VERDICT`, `COUNTS`, `REPORT`, `TOP`). Evaluate:
 ```bash
-python3 skills/nebu-pipeline/scripts/pipeline_gates.py decide --step epic-security --story [EPIC] --digest - <<'EOF'
+python3 skills/nebu-pipeline/scripts/pipeline_gates.py decide --step epic-security --story [EPIC] --apply $STATE_FILE --digest - <<'EOF'
 <the agent's digest lines, verbatim>
 EOF
 ```

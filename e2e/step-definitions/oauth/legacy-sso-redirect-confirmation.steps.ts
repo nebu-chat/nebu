@@ -465,7 +465,7 @@ Then('the browser shows the SSO redirect error page with status {int}', async ({
   const u = new URL(page.url());
   expect(u.origin, 'the browser never left Nebu (no IdP redirect)').toBe(new URL(NEBU_BASE_URL).origin);
   expect(u.pathname).toBe(REDIRECT_PATH);
-  await expect(page.locator('h1')).toHaveText('Login Method Not Supported');
+  await expect(page.locator('h1')).toHaveText(/^(This app's sign-in method is not supported|Die Anmeldemethode dieser App wird nicht unterstützt)$/);
 });
 
 /**

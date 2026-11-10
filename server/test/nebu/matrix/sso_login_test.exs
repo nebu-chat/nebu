@@ -278,6 +278,25 @@ defmodule Nebu.Matrix.SsoLoginTest do
   defp set_extra_schemes_seam(fun) when is_function(fun, 0),
     do: Application.put_env(:nebu_http, :sso_redirect_schemes_reader, fun)
 
+  defp own_extra_schemes_state! do
+    if Process.whereis(Nebu.Repo) do
+      {:ok, config} = Nebu.Admin.DB.get_server_config()
+      prior = Map.get(config, "sso_extra_redirect_schemes", "")
+      Nebu.Admin.DB.upsert_server_config(%{"sso_extra_redirect_schemes" => ""})
+      refresh_oidc_config()
+
+      on_exit(fn ->
+        Nebu.Admin.DB.upsert_server_config(%{"sso_extra_redirect_schemes" => prior})
+        refresh_oidc_config()
+      end)
+    end
+
+    :ok
+  end
+
+  # the cache process is not part of every test run
+  defp refresh_oidc_config, do: if(Process.whereis(Nebu.Web.OidcConfig), do: Nebu.Web.OidcConfig.refresh())
+
   defp clear_extra_schemes_seam,
     do: Application.delete_env(:nebu_http, :sso_redirect_schemes_reader)
 
@@ -327,6 +346,10 @@ defmodule Nebu.Matrix.SsoLoginTest do
       set_extra_schemes_seam(fn -> ["myorg-matrix"] end)
       assert SsoLogin.redirect_url_allowed?("myorg-matrix://login?token=x")
 
+      # bugfix integration-test-flakes-fix (D): the second half falls through to the real `server_config.sso_extra_redirect_schemes` (via the OidcConfig
+      # cache), global state this test does not own: another module can leave it non-empty (its `DELETE FROM server_config` cleanup deleted nothing:
+      # row level security). With a database the test now owns that value: it is set to "" (UPSERT is permitted) for the second half and put back on exit.
+      own_extra_schemes_state!()
       clear_extra_schemes_seam()
       refute SsoLogin.redirect_url_allowed?("myorg-matrix://login?token=x")
     end

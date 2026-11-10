@@ -1,0 +1,170 @@
+<!doctype html>
+<!--
+  MOCKUP (static, not production code). Nebu end-user portal redesign (/account), 2026-11-05.
+  Shows: overview (landing) and the devices screen. Toolbar = mockup only.
+-->
+<html lang="en" data-lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Your account</title>
+<style>
+:root{
+  --bg:#111827; --card:#1f2937; --border:#374151; --text:#f9fafb; --muted:#9ca3af;
+  --primary:#f97316; --on-primary:#1c1917; --link:#fb923c; --focus:#f9fafb; --outline:#9ca3af;
+  --err:#fca5a5; --err-bd:#ef4444; --ok-bg:#052e16; --ok-bd:#22c55e; --ok-tx:#bbf7d0; --chip:#111827;
+}
+@media (prefers-color-scheme:light){:root:not([data-theme=dark]){
+  --bg:#f3f4f6; --card:#fff; --border:#d1d5db; --text:#111827; --muted:#4b5563;
+  --link:#c2410c; --focus:#111827; --outline:#6b7280;
+  --err:#7f1d1d; --err-bd:#b91c1c; --ok-bg:#f0fdf4; --ok-bd:#15803d; --ok-tx:#14532d; --chip:#f3f4f6;
+}}
+:root[data-theme=light]{
+  --bg:#f3f4f6; --card:#fff; --border:#d1d5db; --text:#111827; --muted:#4b5563;
+  --link:#c2410c; --focus:#111827; --outline:#6b7280;
+  --err:#7f1d1d; --err-bd:#b91c1c; --ok-bg:#f0fdf4; --ok-bd:#15803d; --ok-tx:#14532d; --chip:#f3f4f6;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.6;overflow-wrap:anywhere}
+.shell{max-width:44rem;margin:0 auto;padding:1rem 1rem 3rem}
+header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.75rem;padding:.5rem 0 1rem}
+.brand{display:flex;align-items:center;gap:.6rem;font-weight:600}
+.brand svg{width:32px;height:32px}
+.who{color:var(--muted);font-size:.9rem;flex:1 1 100%;margin:0}
+@media (min-width:36rem){.who{flex:0 1 auto;text-align:right}}
+nav ul{list-style:none;display:flex;flex-wrap:wrap;gap:.25rem;margin:0 0 1.5rem;padding:.25rem;background:var(--card);border:1px solid var(--border);border-radius:10px}
+nav a{display:flex;align-items:center;min-height:44px;padding:0 .9rem;border-radius:8px;color:var(--text);text-decoration:none;font-weight:500}
+nav a[aria-current=page]{background:var(--primary);color:var(--on-primary);font-weight:600}
+nav a:hover:not([aria-current]){background:var(--border)}
+a:focus-visible,button:focus-visible,summary:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+h1{font-size:1.5rem;line-height:1.25;letter-spacing:-.02em;font-weight:600;margin:0 0 .25rem}
+.sub{color:var(--muted);margin:0 0 1.25rem}
+.notice{display:flex;gap:.6rem;border:2px solid var(--ok-bd);background:var(--ok-bg);color:var(--ok-tx);border-radius:8px;padding:.75rem 1rem;margin:0 0 1.25rem}
+.notice p{margin:0}
+/* device list: one card per device, the 3 facts that matter, the rest in details */
+.list{list-style:none;margin:0;padding:0;display:grid;gap:.75rem}
+.dev{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:1rem 1.25rem}
+.dev .top{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:.75rem}
+.dev h2{font-size:1.05rem;font-weight:600;margin:0}
+.dev .meta{color:var(--muted);font-size:.9rem;margin:.1rem 0 0}
+.badge{display:inline-flex;align-items:center;gap:.35rem;font-size:.75rem;font-weight:600;padding:.1rem .55rem;border-radius:999px;background:var(--chip);border:1px solid var(--border);color:var(--text);vertical-align:middle;margin-left:.4rem}
+.btn{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:0 1rem;border-radius:8px;font:inherit;font-weight:600;cursor:pointer;text-decoration:none;border:2px solid var(--outline);background:transparent;color:var(--text)}
+.btn.danger{border-color:var(--err-bd);color:var(--err)}
+.btn.primary{background:var(--primary);border-color:var(--primary);color:var(--on-primary)}
+details{margin-top:.25rem}
+summary{cursor:pointer;min-height:44px;display:flex;align-items:center;color:var(--muted);font-size:.9rem}
+dl{display:grid;grid-template-columns:max-content 1fr;gap:.25rem 1rem;margin:0 0 .5rem;font-size:.9rem}
+dt{color:var(--muted)}dd{margin:0}
+/* overview tiles */
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(13rem,1fr));gap:.75rem;margin:0 0 1.75rem}
+.tile{display:block;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:1rem 1.25rem;color:var(--text);text-decoration:none}
+.tile b{display:block;font-size:1.05rem}.tile>span{display:block;color:var(--muted);font-size:.9rem}
+.tile:hover{border-color:var(--primary)}
+h2.sec{font-size:1.05rem;margin:1.5rem 0 .75rem}
+.foot{margin-top:2rem;padding-top:1rem;border-top:1px solid var(--border)}
+[hidden]{display:none}
+@media (forced-colors:active){.btn,.dev,.tile,.notice{border:2px solid CanvasText}nav a[aria-current=page]{border:3px solid Highlight}}
+html[data-lang=en] [lang=de],html[data-lang=de] [lang=en]{display:none!important}
+.toolbar{position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;gap:1rem;justify-content:center;padding:.5rem 1rem;background:#000;color:#fff;font:13px system-ui}
+.toolbar label{display:flex;gap:.35rem;align-items:center}
+</style>
+</head>
+<body>
+<div class="toolbar" aria-label="Mockup controls (not part of the page)">
+  <label>Language <select id="t-lang"><option>en</option><option>de</option></select></label>
+  <label>Theme <select id="t-theme"><option value="">system</option><option>dark</option><option>light</option></select></label>
+  <label>Screen <select id="t-screen"><option value="overview">Overview</option><option value="devices">Devices</option></select></label>
+  <label><input type="checkbox" id="t-notice"> success notice</label>
+</div>
+
+<div class="shell">
+  <header>
+    <div class="brand">
+      <svg viewBox="0 0 512 512" aria-hidden="true"><polygon points="256,42 442,149 442,363 256,470 70,363 70,149" fill="#0f1923" stroke="#2a6fff" stroke-width="22"/><text x="256" y="330" font-family="Arial,Helvetica,sans-serif" font-size="280" font-weight="700" fill="#fff" text-anchor="middle">N</text><circle cx="442" cy="149" r="26" fill="#2a6fff"/></svg>
+      <span>Nebu</span>
+    </div>
+    <p class="who"><span lang="en">Signed in as</span><span lang="de">Angemeldet als</span> <strong>@anna:nebu.example</strong></p>
+  </header>
+
+  <nav aria-label="Account"><ul>
+    <li><a href="#" id="nav-overview" aria-current="page"><span lang="en">Overview</span><span lang="de">Übersicht</span></a></li>
+    <li><a href="#" id="nav-devices"><span lang="en">Devices</span><span lang="de">Geräte</span></a></li>
+    <li><a href="#"><span lang="en">Apps</span><span lang="de">Apps</span></a></li>
+    <li><a href="#"><span lang="en">Security</span><span lang="de">Sicherheit</span></a></li>
+  </ul></nav>
+
+  <main data-page="account" data-action="org.matrix.profile">
+    <div class="notice" id="notice" role="status" data-role="notice" data-notice="device_deleted" hidden>
+      <p><strong><span lang="en">Done:</span><span lang="de">Erledigt:</span></strong> <span lang="en">The device was signed out.</span><span lang="de">Das Gerät wurde abgemeldet.</span></p>
+    </div>
+
+    <!-- ═════════ OVERVIEW ═════════ -->
+    <section id="screen-overview">
+      <h1><span lang="en">Your account</span><span lang="de">Ihr Konto</span></h1>
+      <p class="sub"><span lang="en">Manage where you are signed in and which apps may use your account.</span><span lang="de">Verwalten Sie, wo Sie angemeldet sind und welche Apps Ihr Konto nutzen dürfen.</span></p>
+      <div class="tiles">
+        <a class="tile" href="#" data-go="devices"><b><span lang="en">Devices</span><span lang="de">Geräte</span></b><span><span lang="en">3 signed in</span><span lang="de">3 angemeldet</span></span></a>
+        <a class="tile" href="#"><b>Apps</b><span><span lang="en">2 allowed</span><span lang="de">2 erlaubt</span></span></a>
+        <a class="tile" href="#"><b><span lang="en">Security</span><span lang="de">Sicherheit</span></b><span><span lang="en">Reset encryption identity</span><span lang="de">Verschlüsselungs-Identität zurücksetzen</span></span></a>
+      </div>
+      <details>
+        <summary><span lang="en">Show profile details</span><span lang="de">Profildetails anzeigen</span></summary>
+        <dl><dt>Matrix ID</dt><dd>@anna:nebu.example</dd><dt><span lang="en">Display name</span><span lang="de">Anzeigename</span></dt><dd>Anna Beispiel</dd></dl>
+      </details>
+    </section>
+
+    <!-- ═════════ DEVICES ═════════ -->
+    <section id="screen-devices" hidden>
+      <h1><span lang="en">Your devices</span><span lang="de">Ihre Geräte</span></h1>
+      <p class="sub"><span lang="en">These devices are signed in to your account. Don’t recognise one? Sign it out.</span><span lang="de">Diese Geräte sind bei Ihrem Konto angemeldet. Ein Gerät kommt Ihnen unbekannt vor? Melden Sie es ab.</span></p>
+      <ul class="list">
+        <li class="dev" data-role="account-device" data-device-id="ABCDEFGHIJ">
+          <div class="top">
+            <div><h2>Firefox on Linux</h2>
+              <p class="meta">Element Web · <span lang="en">active 5 minutes ago</span><span lang="de">zuletzt aktiv vor 5 Minuten</span></p></div>
+            <a class="btn danger" data-role="device-row-sign-out" href="#" aria-label="Sign out Firefox on Linux (ABCDEFGHIJ)"><span lang="en">Sign out</span><span lang="de">Abmelden</span></a>
+          </div>
+          <details><summary><span lang="en">Details</span><span lang="de">Details</span></summary>
+            <dl><dt><span lang="en">Device ID</span><span lang="de">Geräte-ID</span></dt><dd>ABCDEFGHIJ</dd><dt>IP</dt><dd>192.0.2.10</dd><dt><span lang="en">Added</span><span lang="de">Hinzugefügt</span></dt><dd>2026-10-02 09:14 UTC</dd></dl></details>
+        </li>
+        <li class="dev" data-role="account-device" data-device-id="KLMNOPQRST">
+          <div class="top">
+            <div><h2>Pixel 8</h2><p class="meta">FluffyChat · <span lang="en">active 2 days ago</span><span lang="de">zuletzt aktiv vor 2 Tagen</span></p></div>
+            <a class="btn danger" data-role="device-row-sign-out" href="#" aria-label="Sign out Pixel 8 (KLMNOPQRST)"><span lang="en">Sign out</span><span lang="de">Abmelden</span></a>
+          </div>
+          <details><summary><span lang="en">Details</span><span lang="de">Details</span></summary>
+            <dl><dt><span lang="en">Device ID</span><span lang="de">Geräte-ID</span></dt><dd>KLMNOPQRST</dd><dt>IP</dt><dd>198.51.100.7</dd><dt><span lang="en">Added</span><span lang="de">Hinzugefügt</span></dt><dd>2026-09-18 17:40 UTC</dd></dl></details>
+        </li>
+        <li class="dev" data-role="account-device" data-device-id="UVWXYZ0123">
+          <div class="top">
+            <div><h2><span lang="en">Unnamed device</span><span lang="de">Unbenanntes Gerät</span></h2><p class="meta">Element Desktop · <span lang="en">never active</span><span lang="de">noch nie aktiv</span></p></div>
+            <a class="btn danger" data-role="device-row-sign-out" href="#" aria-label="Sign out Unnamed device (UVWXYZ0123)"><span lang="en">Sign out</span><span lang="de">Abmelden</span></a>
+          </div>
+        </li>
+      </ul>
+    </section>
+
+    <form method="post" action="/account/logout" class="foot">
+      <input type="hidden" name="csrf_token" value="…">
+      <button type="submit" class="btn" data-role="sign-out"><span lang="en">Sign out of this page</span><span lang="de">Von dieser Seite abmelden</span></button>
+    </form>
+  </main>
+</div>
+
+<script>
+/* MOCKUP toolbar only. */
+var q=function(s){return document.querySelector(s)};
+q('#t-lang').onchange=function(){document.documentElement.dataset.lang=this.value;document.documentElement.lang=this.value};
+q('#t-theme').onchange=function(){this.value?document.documentElement.dataset.theme=this.value:delete document.documentElement.dataset.theme};
+function screen(s){q('#screen-overview').hidden=s!=='overview';q('#screen-devices').hidden=s!=='devices';
+  q('#nav-overview').toggleAttribute('aria-current',s==='overview');q('#nav-devices').toggleAttribute('aria-current',s==='devices');
+  document.querySelectorAll('nav a').forEach(function(a){if(a.hasAttribute('aria-current'))a.setAttribute('aria-current','page')});
+  q('#t-screen').value=s}
+q('#t-screen').onchange=function(){screen(this.value)};
+document.querySelectorAll('[data-go]').forEach(function(a){a.onclick=function(e){e.preventDefault();screen(a.dataset.go)}});
+q('#nav-overview').onclick=function(e){e.preventDefault();screen('overview')};q('#nav-devices').onclick=function(e){e.preventDefault();screen('devices')};
+q('#t-notice').onchange=function(){q('#notice').hidden=!this.checked};
+</script>
+</body>
+</html>

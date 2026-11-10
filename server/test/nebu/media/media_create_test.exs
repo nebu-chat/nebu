@@ -46,6 +46,8 @@ defmodule Nebu.Web.MediaCreateTest do
   the router entry + handler + StateMachine genesis function.
   """
   use ExUnit.Case, async: false
+
+  alias Nebu.Web.SessionLookupTestSupport, as: LookupFault
   import Plug.Test
   import Plug.Conn
 
@@ -336,6 +338,7 @@ defmodule Nebu.Web.MediaCreateTest do
   end
 
   test "POST /create with a garbage Bearer token -> 401 M_UNKNOWN_TOKEN" do
+    LookupFault.setup_no_row_lookup()
     conn = post_create([{"authorization", "Bearer not-a-real-jwt"}])
 
     assert conn.status == 401

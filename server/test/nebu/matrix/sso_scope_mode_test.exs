@@ -194,26 +194,17 @@ defmodule Nebu.Matrix.SsoScopeModeTest do
       prev_reader = Application.get_env(:nebu_http, :matrix_oidc_refresh_mode_reader)
       Application.delete_env(:nebu_http, :matrix_oidc_refresh_mode_reader)
 
+      # bugfix test-cleanup-rls-noop-delete: both the "clean before" and the "clean after" DELETEs deleted nothing (FORCE row level security, no DELETE
+      # policy), so a stale mode really did poison the default read and the last test's mode stayed behind. Privileged now: the row is removed for the
+      # test (`clear: true`) and the value found at the start is put back on exit.
       if Process.whereis(Nebu.Repo) do
-        Ecto.Adapters.SQL.query(
-          Nebu.Repo,
-          "DELETE FROM server_config WHERE key = 'matrix_oidc_refresh_mode'",
-          []
-        )
+        Nebu.OAuth.TestSupport.restore_server_config_on_exit!(["matrix_oidc_refresh_mode"], clear: true)
       end
 
       on_exit(fn ->
         case prev_reader do
           nil -> Application.delete_env(:nebu_http, :matrix_oidc_refresh_mode_reader)
           v -> Application.put_env(:nebu_http, :matrix_oidc_refresh_mode_reader, v)
-        end
-
-        if Process.whereis(Nebu.Repo) do
-          Ecto.Adapters.SQL.query(
-            Nebu.Repo,
-            "DELETE FROM server_config WHERE key = 'matrix_oidc_refresh_mode'",
-            []
-          )
         end
       end)
 
