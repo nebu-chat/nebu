@@ -1,0 +1,113 @@
+{
+  "permissions": {
+    "ask": [
+      "Bash(git commit -S *)"
+    ],
+    "deny": [
+      "Read(**/node_modules/**)",
+      "Read(/server/_build/**)",
+      "Read(**/package-lock.json)",
+      "Read(/.playwright-mcp/**)"
+    ]
+  },
+  "skillOverrides": {
+    "agent-oracle": "name-only",
+    "bmad-agent-analyst": "name-only",
+    "bmad-agent-builder": "name-only",
+    "bmad-agent-pm": "name-only",
+    "bmad-agent-tech-writer": "name-only",
+    "bmad-agent-ux-designer": "name-only",
+    "bmad-bmb-setup": "name-only",
+    "bmad-brainstorming": "name-only",
+    "bmad-cis-agent-brainstorming-coach": "name-only",
+    "bmad-cis-agent-creative-problem-solver": "name-only",
+    "bmad-cis-agent-design-thinking-coach": "name-only",
+    "bmad-cis-agent-innovation-strategist": "name-only",
+    "bmad-cis-agent-presentation-master": "name-only",
+    "bmad-cis-agent-storyteller": "name-only",
+    "bmad-cis-design-thinking": "name-only",
+    "bmad-cis-innovation-strategy": "name-only",
+    "bmad-cis-problem-solving": "name-only",
+    "bmad-cis-storytelling": "name-only",
+    "bmad-create-prd": "name-only",
+    "bmad-create-ux-design": "name-only",
+    "bmad-customize": "name-only",
+    "bmad-distillator": "name-only",
+    "bmad-document-project": "name-only",
+    "bmad-domain-research": "name-only",
+    "bmad-edit-prd": "name-only",
+    "bmad-editorial-review-prose": "name-only",
+    "bmad-editorial-review-structure": "name-only",
+    "bmad-generate-project-context": "name-only",
+    "bmad-index-docs": "name-only",
+    "bmad-market-research": "name-only",
+    "bmad-module-builder": "name-only",
+    "bmad-party-mode": "name-only",
+    "bmad-pipeline": "name-only",
+    "bmad-prfaq": "name-only",
+    "bmad-product-brief": "name-only",
+    "bmad-shard-doc": "name-only",
+    "bmad-teach-me-testing": "name-only",
+    "bmad-technical-research": "name-only",
+    "bmad-validate-prd": "name-only",
+    "bmad-workflow-builder": "name-only"
+  },
+  "hooks": {
+    "SubagentStop": [
+      {
+        "matcher": "nebu-dev-story",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 skills/nebu-pipeline/scripts/invariant_check.py --auto --lib server/lib/"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 skills/nebu-pipeline/scripts/token_metrics.py hook 2>/dev/null || true"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 skills/nebu-pipeline/scripts/pipeline_state.py --log-subagent-stop 2>/dev/null || true"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Read|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 skills/nebu-pipeline/scripts/read_guard.py 2>/dev/null || true"
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 skills/nebu-pipeline/scripts/pipeline_state.py --log-subagent-start 2>/dev/null || true"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 skills/nebu-pipeline/scripts/token_metrics.py hook 2>/dev/null || true"
+          }
+        ]
+      }
+    ]
+  }
+}
