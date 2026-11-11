@@ -63,8 +63,10 @@ locals {
   # used as is: do NOT filter on type == "public" (that left the value empty, and the server then tried to upload
   # to "https:///<bucket>/<key>": nxdomain, 500 "Failed to store media file"). The precondition on
   # upcloud_server.nebu makes an empty endpoint fail at plan/apply instead.
+  # `endpoint` is a SET of objects: a set cannot be indexed with [0] (try() would swallow the error and yield null,
+  # i.e. an empty endpoint), so the for expression turns it into a list first.
   s3_endpoint_entries = var.enable_media_gateway ? upcloud_managed_object_storage.nebu_media[0].endpoint : []
-  s3_endpoint_entry   = try(local.s3_endpoint_entries[0], null)
+  s3_endpoint_entry   = try([for ep in local.s3_endpoint_entries : ep][0], null)
   s3_endpoint         = local.s3_endpoint_entry == null ? "" : local.s3_endpoint_entry.domain_name
   # bugfix-upcloud-s3-iam-sts-endpoints (AC3): the same endpoint entry also carries separate IAM/STS URLs
   # (distinct from the S3 endpoint above) that the S3 driver needs passed through as-is.
