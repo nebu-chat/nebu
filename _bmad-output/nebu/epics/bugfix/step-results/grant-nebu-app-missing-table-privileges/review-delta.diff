@@ -1,0 +1,160 @@
+diff --git a/_bmad-output/nebu/epics/bugfix/pipeline-state.yaml b/_bmad-output/nebu/epics/bugfix/pipeline-state.yaml
+index 70bac9a4..4550f328 100644
+--- a/_bmad-output/nebu/epics/bugfix/pipeline-state.yaml
++++ b/_bmad-output/nebu/epics/bugfix/pipeline-state.yaml
+@@ -1,4 +1,7 @@
+ # last_updated: 2026-11-11
++# [grant-nebu-app-missing-table-privileges] 2026-11-11T07:43Z ci-gate → ✓ unit (fast gate, cycle 1; integration deferred to 6b)
++# [grant-nebu-app-missing-table-privileges] 2026-11-11T07:39Z dev-story → done (cycle 1)
++# [grant-nebu-app-missing-table-privileges] 2026-11-11T07:38Z code-review → 1 MINOR → cycle 1
+ # [grant-nebu-app-missing-table-privileges] 2026-11-11T07:36Z ci-gate → integration 13547 tests, 2 load flakes vs clean baseline (matrix_sso_test:308 login 500, oidc_plug_test:603); both 28/28 green in isolation, unit suite 7728/7728 green; GRANT-only change
+ # [grant-nebu-app-missing-table-privileges] 2026-11-11T07:19Z dev-story → done (cycle 0)
+ # [grant-nebu-app-missing-table-privileges] 2026-11-11T07:14Z test-review → CLEAN (0 MAJOR, 0 MINOR)
+@@ -28,11 +31,11 @@
+ # [oidc-env-optional-bootstrap] 2026-06-24T21:35Z pipeline started (--bug)
+ story: "grant-nebu-app-missing-table-privileges"
+ current_step: "code-review"
+-last_updated: "2026-11-11T07:36Z"
++last_updated: "2026-11-11T07:43Z"
+ completed:
+   - atdd
+   - test-review
+   - dev-story
+   - ci-gate
+-cycle_count: 0
++cycle_count: 1
+ blocked_reason: null
+diff --git a/_bmad-output/nebu/epics/bugfix/step-results/grant-nebu-app-missing-table-privileges/integration-stale b/_bmad-output/nebu/epics/bugfix/step-results/grant-nebu-app-missing-table-privileges/integration-stale
+new file mode 100644
+index 00000000..e69de29b
+diff --git a/_bmad-output/nebu/epics/bugfix/step-results/grant-nebu-app-missing-table-privileges/reviewed-tree.txt b/_bmad-output/nebu/epics/bugfix/step-results/grant-nebu-app-missing-table-privileges/reviewed-tree.txt
+new file mode 100644
+index 00000000..5839887f
+--- /dev/null
++++ b/_bmad-output/nebu/epics/bugfix/step-results/grant-nebu-app-missing-table-privileges/reviewed-tree.txt
+@@ -0,0 +1 @@
++89403ec55dca40972d180c84b4553109b821bbf3
+diff --git a/server/test/nebu/acceptance/grant_nebu_app_missing_table_privileges_test.exs b/server/test/nebu/acceptance/grant_nebu_app_missing_table_privileges_test.exs
+index a5189c2b..fd7514c1 100644
+--- a/server/test/nebu/acceptance/grant_nebu_app_missing_table_privileges_test.exs
++++ b/server/test/nebu/acceptance/grant_nebu_app_missing_table_privileges_test.exs
+@@ -95,26 +95,93 @@ defmodule Nebu.Acceptance.GrantNebuAppMissingTablePrivilegesTest do
+ 
+   defp version(file), do: file |> String.split("_", parts: 2) |> hd()
+ 
+-  # {table, migration_file} for every CREATE TABLE in the up migrations after 000001.
++  # Table modifiers PostgreSQL accepts between CREATE and TABLE.
++  @table_modifiers ~S"(?:(?:GLOBAL\s+|LOCAL\s+)?(?:TEMPORARY\s+|TEMP\s+)|UNLOGGED\s+)?"
++
++  # {table, migration_file} for every CREATE [TEMP|UNLOGGED] TABLE in the up migrations after 000001.
+   defp created_tables do
++    re =
++      Regex.compile!(
++        "\\ACREATE\\s+" <> @table_modifiers <> "TABLE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?(?:public\\.)?\"?([a-z_][a-z0-9_]*)\"?",
++        "i"
++      )
++
+     for file <- up_files(),
+         version(file) != "000001",
+         stmt <- statements(File.read!(path(file))),
+-        m = Regex.run(~r/\ACREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:public\.)?"?([a-z_][a-z0-9_]*)"?/i, stmt),
++        m = Regex.run(re, stmt),
+         do: {Enum.at(m, 1), file}
+   end
+ 
+-  # Tables that some migration grants to nebu_app by name.
++  # Grantees of a parsed grant: `TO a, "b" WITH GRANT OPTION` -> ["a", "b"] (lowercased, unquoted).
++  defp grantees(%{to: to}) do
++    to
++    |> String.replace(~r/\s+WITH\s+GRANT\s+OPTION\z/i, "")
++    |> String.split(",")
++    |> Enum.map(&(&1 |> String.trim() |> String.trim("\"") |> String.downcase()))
++  end
++
++  defp to_nebu_app?(g), do: "nebu_app" in grantees(g)
++
++  defp all_privs?(privs), do: MapSet.member?(privs, "ALL") or MapSet.member?(privs, "ALL PRIVILEGES")
++
++  # Tables that some migration grants any privilege on to nebu_app by name (several tables are
++  # deliberately least-privilege, e.g. no DELETE, so no particular privilege set is required here).
+   defp granted_tables do
+     for file <- up_files(),
+         g <- grants(File.read!(path(file))),
+         g.kind == :table,
+-        String.downcase(g.to) == "nebu_app",
++        to_nebu_app?(g),
+         obj <- g.objects,
+         into: MapSet.new(),
+         do: String.downcase(obj)
+   end
+ 
++  # Sequences that some migration grants USAGE on to nebu_app by name.
++  defp granted_sequences do
++    for file <- up_files(),
++        g <- grants(File.read!(path(file))),
++        g.kind == :sequence,
++        to_nebu_app?(g),
++        all_privs?(g.privs) or MapSet.member?(g.privs, "USAGE"),
++        obj <- g.objects,
++        into: MapSet.new(),
++        do: String.downcase(obj)
++  end
++
++  # {sequence, migration_file} for every sequence a post-000001 migration creates, explicitly
++  # (CREATE SEQUENCE) or implicitly (SERIAL/BIGSERIAL/SMALLSERIAL or GENERATED ... AS IDENTITY
++  # columns in CREATE TABLE and ALTER TABLE ... ADD COLUMN), named `<table>_<column>_seq`.
++  defp created_sequences do
++    explicit_re = ~r/\ACREATE\s+(?:(?:TEMPORARY|TEMP|UNLOGGED)\s+)?SEQUENCE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:public\.)?"?([a-z_][a-z0-9_]*)"?/i
++    table_re = ~r/\A(?:CREATE\s+(?:(?:GLOBAL\s+|LOCAL\s+)?(?:TEMPORARY\s+|TEMP\s+)|UNLOGGED\s+)?TABLE(?:\s+IF\s+NOT\s+EXISTS)?|ALTER\s+TABLE(?:\s+IF\s+EXISTS)?(?:\s+ONLY)?)\s+(?:public\.)?"?([a-z_][a-z0-9_]*)"?/i
++    serial_re = ~r/"?([a-z_][a-z0-9_]*)"?\s+(?:small|big)?serial\b/i
++    identity_re = ~r/"?([a-z_][a-z0-9_]*)"?\s+[a-z0-9_]+\s+GENERATED\s+(?:ALWAYS|BY\s+DEFAULT)\s+AS\s+IDENTITY/i
++
++    for file <- up_files(),
++        version(file) != "000001",
++        stmt <- statements(File.read!(path(file))),
++        {seq, _} <-
++          (case Regex.run(explicit_re, stmt) do
++             [_, name] ->
++               [{name, file}]
++
++             nil ->
++               case Regex.run(table_re, stmt) do
++                 [_, table] ->
++                   cols =
++                     Enum.map(Regex.scan(serial_re, stmt), &Enum.at(&1, 1)) ++
++                       Enum.map(Regex.scan(identity_re, stmt), &Enum.at(&1, 1))
++
++                   Enum.map(cols, &{"#{table}_#{&1}_seq", file})
++
++                 nil ->
++                   []
++               end
++           end),
++        do: {String.downcase(seq), file}
++  end
++
+   # ---------------------------------------------------------------------------
+   # Scenario: The five tables are granted to the runtime role
+   # ---------------------------------------------------------------------------
+@@ -155,6 +222,21 @@ defmodule Nebu.Acceptance.GrantNebuAppMissingTablePrivilegesTest do
+     assert missing == [], Enum.join(missing, "\n")
+   end
+ 
++  @tag ac: "no-table-can-be-shipped-without-a-runtime-grant-again"
++  test "Scenario: No sequence can be shipped without a runtime grant again" do
++    granted = granted_sequences()
++    created = created_sequences()
++
++    assert created != [], "expected serial/identity columns or CREATE SEQUENCE in the up migrations after 000001"
++
++    missing =
++      for {seq, file} <- created, not MapSet.member?(granted, seq) do
++        "sequence #{seq} (created in #{file}) has no `GRANT USAGE ... ON SEQUENCE #{seq} TO nebu_app` in any migration"
++      end
++
++    assert missing == [], Enum.join(missing, "\n")
++  end
++
+   # ---------------------------------------------------------------------------
+   # Scenario: The grant is minimal
+   # ---------------------------------------------------------------------------

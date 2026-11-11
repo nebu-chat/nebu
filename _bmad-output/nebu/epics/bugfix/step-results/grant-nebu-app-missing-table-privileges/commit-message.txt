@@ -1,0 +1,24 @@
+fix(db): grant nebu_app DML on five tables that never got a runtime grant
+
+cross_signing_keys (000014), account_data (000015), operational_logs
+(000017), war_room_sessions (000019) and admin_temporary_captures (000020)
+were created without a GRANT to the runtime role nebu_app. Migration 000001
+only grants on tables that exist at that moment, and on managed PostgreSQL
+with dual roles (nebu_migrate migrates, nebu_app runs the server) no default
+privileges compensate; only the dev database masks it. Result: permission
+denied (42501), e.g. on operational_logs, cross-signing upload/query and
+account data writes.
+
+New forward-only, GRANT-only migration 000064: SELECT, INSERT, UPDATE,
+DELETE on the five tables and USAGE, SELECT on operational_logs_id_seq. The
+down migration is a deliberate no-op. Shipped migrations are untouched.
+
+Static acceptance tests guard that no table or sequence created after
+000001 can ship without a nebu_app grant again, that the grant is minimal
+and that the shipped migrations are unchanged. Verified against a fresh
+dual-role PostgreSQL 16: without 000064 the original error appears, with it
+nebu_app has access.
+
+Supersedes the unmerged hotfix f80b554a (its number 000022 is taken).
+
+Pipeline: bugfix epic, 1 review cycle, Kassandra CLEAN (1 LOW, see report).

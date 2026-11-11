@@ -1,4 +1,17 @@
-# last_updated: 2026-06-25
+# last_updated: 2026-11-11
+# [grant-nebu-app-missing-table-privileges] 2026-11-11T08:18Z committed ✓ (ATDD+1 fix cycle+Code CLEAN+Kassandra CLEAN)
+# [grant-nebu-app-missing-table-privileges] 2026-11-11T08:18Z ci-gate-final → ✓ integration on final code, fresh DB: 13548 tests, 0 failures (earlier 2-3 failures were leftovers of a persisted DB volume, 75/75 green on fresh DB)
+# [grant-nebu-app-missing-table-privileges] 2026-11-11T07:46Z arc42-update → skipped (GRANT-only migration, no architecture change; heuristic matched only the migration path)
+# [grant-nebu-app-missing-table-privileges] 2026-11-11T07:46Z security-review → Kassandra CLEAN
+# [grant-nebu-app-missing-table-privileges] 2026-11-11T07:44Z code-review → CLEAN (cycle 1)
+# [grant-nebu-app-missing-table-privileges] 2026-11-11T07:43Z ci-gate → ✓ unit (fast gate, cycle 1; integration deferred to 6b)
+# [grant-nebu-app-missing-table-privileges] 2026-11-11T07:39Z dev-story → done (cycle 1)
+# [grant-nebu-app-missing-table-privileges] 2026-11-11T07:38Z code-review → 1 MINOR → cycle 1
+# [grant-nebu-app-missing-table-privileges] 2026-11-11T07:36Z ci-gate → integration 13547 tests, 2 load flakes vs clean baseline (matrix_sso_test:308 login 500, oidc_plug_test:603); both 28/28 green in isolation, unit suite 7728/7728 green; GRANT-only change
+# [grant-nebu-app-missing-table-privileges] 2026-11-11T07:19Z dev-story → done (cycle 0)
+# [grant-nebu-app-missing-table-privileges] 2026-11-11T07:14Z test-review → CLEAN (0 MAJOR, 0 MINOR)
+# [grant-nebu-app-missing-table-privileges] 2026-11-11T07:14Z atdd → 5 failing tests (all assertion-red; verify parser could not read 'Result: 0/5 passed' format, red state checked by hand)
+# [grant-nebu-app-missing-table-privileges] 2026-11-11T07:11Z pipeline started (--bug, release blocker v0.4.0); baseline clean
 # [postgres-ssl-env-var] 2026-06-25T10:05Z committed ✓ (ATDD+Dev+Code CLEAN, 867 passed)
 # [postgres-ssl-env-var] 2026-06-25T10:00Z arc42-update → CLAUDE.md + docs/architecture/07-deployment.md
 # [postgres-ssl-env-var] 2026-06-25T09:56Z security-review → skipped (not-needed)
@@ -23,7 +36,7 @@
 # [oidc-env-optional-bootstrap] 2026-06-24T21:35Z pipeline started (--bug)
 story: null
 current_step: null
-last_updated: "2026-06-25T00:01Z"
+last_updated: "2026-11-11T08:18Z"
 completed: []
 cycle_count: 0
 blocked_reason: null
