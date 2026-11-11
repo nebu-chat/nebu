@@ -799,7 +799,7 @@ write_files:
 %{ if enable_element_web ~}
 
         element:
-          image: vectorim/element-web:v1.12.22
+          image: vectorim/element-web:v1.12.33
           restart: unless-stopped
           volumes:
             - /opt/nebu/element-config.json:/usr/share/nginx/html/config.json:ro

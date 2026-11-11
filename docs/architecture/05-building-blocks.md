@@ -385,10 +385,15 @@ server/lib/nebu/
 │   │                   Download serves the stored Content-Type unchanged (inline/attachment per the Matrix spec inline
 │   │                   list, active-content types neutralized to octet-stream), delivers the upload filename in
 │   │                   Content-Disposition, and thumbnails only jpeg/png/apng/gif/webp (else 400) — see 08-concepts.md.
-│   │                   Story 2d extends `download` (NOT `thumbnail` — out of scope) with an opt-in
-│   │                   `?timeout_ms=N` download-stall wait for `:quarantined`/`:scanning` media, delegating
-│   │                   to `Nebu.Media.DownloadStall` before falling through to the unchanged 1c response
-│   │                   path; absent/malformed `?timeout_ms` remains byte-for-byte identical to 1c.
+│   │                   Story 2d extends `download` with a `?timeout_ms=N` stall wait for
+│   │                   `:quarantined`/`:scanning` media, delegating to `Nebu.Media.DownloadStall` before
+│   │                   falling through to the unchanged 1c response path. Since
+│   │                   `bugfix/media-download-451-scan-race` the stall is the DEFAULT, not opt-in: an
+│   │                   ABSENT `?timeout_ms` stalls for `default_stall_ms` (Matrix spec default 20_000,
+│   │                   always clamped by `max_stall_ms`; `<= 0` is a kill switch), `thumbnail` stalls
+│   │                   identically (Element requests it right after upload, racing the async scan), and
+│   │                   the stall is entered only for a room member. Explicit `timeout_ms=0` and malformed
+│   │                   values (not absent) still behave byte-for-byte like 1c: immediate 451, no subscribe.
 │   │                   Story 2b adds `PUT /_matrix/media/v3/upload/{serverName}/{mediaId}`
 │   │                   (`Nebu.Media.upload_async/3`) — the async-upload companion validating a
 │   │                   reservation created by `POST /_matrix/media/v1/create` (Story 2a): lookup(404) ->
@@ -494,8 +499,9 @@ server/lib/nebu/
 │   │                   state. Shared helper placement ensures both download and thumbnail routes enforce
 │   │                   identically with zero duplicated logic
 │   ├── download_stall.ex ← Nebu.Media.DownloadStall (Story 2d, media-security-admin-control epic):
-│   │                   opt-in `?timeout_ms=N` download-stall CONSUMER for the async-upload flow (Story
-│   │                   2a/2b). The broadcast PRODUCER this consumer waits on is
+│   │                   `?timeout_ms=N` download/thumbnail-stall CONSUMER (applied with the
+│   │                   `default_stall_ms` window when the client sends none) for the async-upload flow
+│   │                   (Story 2a/2b). The broadcast PRODUCER this consumer waits on is
 │   │                   `Nebu.Workers.MediaScanWorker` (Story 4b) — it calls `Phoenix.PubSub.broadcast/3`
 │   │                   directly (StateMachine.transition/4 itself still does not broadcast; each caller
 │   │                   that needs to is responsible for it) after EVERY terminal outcome it produces
@@ -509,20 +515,24 @@ server/lib/nebu/
 │   │                   race; already-resolved state short-circuits without entering `receive`. Otherwise
 │   │                   blocks in a single deadline-bounded `Task`-wrapped
 │   │                   `receive ... after remaining -> :timeout end` (no busy-polling, AC5), bounded by
-│   │                   the caller's `Task.await(task, clamped + 50)`. A crash-safe global `:atomics`
+│   │                   the caller via `Task.yield(task, clamped + 250)` + `Task.shutdown/2` with the
+│   │                   deadline fixed before the task starts; a raising/exiting/hung recheck degrades to
+│   │                   `:timeout` (then the immediate 1c mapping) instead of a 500. A crash-safe global `:atomics`
 │   │                   counter in `:persistent_term` (eager-init at `Nebu.Application.start/2` boot,
 │   │                   mirroring the pre-existing `:nebu_signing_key` init pattern) caps
 │   │                   simultaneously-held stalls (`max_concurrent_stalls`, default 500) and degrades
-│   │                   gracefully — no slot available → immediate no-stall response, same as absent
-│   │                   `?timeout_ms` — rather than erroring (AC6). `Nebu.Media.download/4` delegates
-│   │                   here only for `:quarantined`/`:scanning` with a clamped timeout > 0, then falls
+│   │                   gracefully — no slot available → immediate no-stall response, same as
+│   │                   `?timeout_ms=0` — rather than erroring (AC6). `Nebu.Media.download/4` and
+│   │                   `thumbnail/3` delegate here only for a room member on `:quarantined`/`:scanning`
+│   │                   with a clamped timeout > 0 (membership is checked BEFORE the stall), then falls
 │   │                   through to the UNCHANGED Story 1c `with_authorised_media → download_gate →
 │   │                   gate_message` path — the stall's outcome is advisory only; correctness comes
 │   │                   entirely from re-running the 1c deny-mapping against the freshly re-read row, so a
 │   │                   forged/spoofed broadcast can only affect timing, never which bytes get served.
-│   │                   `max_stall_ms`/`max_concurrent_stalls` read via new thin
-│   │                   `Nebu.Media.max_stall_ms/0` / `max_concurrent_stalls/0` accessors over
-│   │                   `Application.get_env(:nebu, Nebu.Media, [])` (config.exs defaults 20_000/500) —
+│   │                   `max_stall_ms`/`default_stall_ms`/`max_concurrent_stalls` read via thin
+│   │                   `Nebu.Media.max_stall_ms/0` / `default_stall_ms/0` / `max_concurrent_stalls/0`
+│   │                   accessors over `Application.get_env(:nebu, Nebu.Media, [])` (config.exs defaults
+│   │                   20_000/20_000/500) —
 │   │                   deliberately NOT sourced from Story 9a's `Nebu.Media.Config` yet, so that a future
 │   │                   swap to `Config.get/0` is a one-line change inside the accessor, not a call-site
 │   │                   change. Security review (Kassandra, Story 2d): 0 CRITICAL/HIGH; 1 MEDIUM (M-1: the
