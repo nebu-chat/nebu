@@ -1,0 +1,5 @@
+VERDICT: CLEAN
+COUNTS: major=0 minor=0 judge=0
+REPORT: _bmad-output/nebu/epics/bugfix/step-results/grant-nebu-app-missing-table-privileges/test-review-findings.md
+TOP: -
+LLM_NEEDED: no
