@@ -94,14 +94,19 @@ config :nebu, Nebu.Media.ClamAV,
   signature_max_age_hours: 48
 
 # ── media-security-admin-control/2d-download-stall-mechanism ──────────────────
-# Opt-in `?timeout_ms=N` download stall on :quarantined/:scanning media.
+# `?timeout_ms=N` download/thumbnail stall on :quarantined/:scanning media
+# (bugfix/media-download-451-scan-race: an ABSENT timeout_ms now stalls too).
+# default_stall_ms: window applied when the client sends no timeout_ms — the
+#   Matrix CS API v1.18 default (20000). Always clamped by max_stall_ms; a value
+#   <= 0 disables the default stall (absent == no stall, like `timeout_ms=0`).
 # max_stall_ms: server-owned ceiling a client-requested timeout is clamped to
 #   (AC2, spec's "content repository SHOULD impose a maximum").
 # max_concurrent_stalls: global ceiling on simultaneously held stall requests
 #   (AC6) — beyond it, requests degrade to the immediate 1c response.
-# Read via Nebu.Media.max_stall_ms/0 / max_concurrent_stalls/0 (a one-line swap
+# Read via Nebu.Media.default_stall_ms/0 / max_stall_ms/0 / max_concurrent_stalls/0 (a one-line swap
 # to Nebu.Media.Config.get/0 once Story 9 lands).
 config :nebu, Nebu.Media,
+  default_stall_ms: 20_000,
   max_stall_ms: 20_000,
   max_concurrent_stalls: 500
 

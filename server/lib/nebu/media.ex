@@ -597,17 +597,16 @@ defmodule Nebu.Media do
 
   @spec download(Plug.Conn.t(), String.t(), String.t(), String.t() | nil) :: Plug.Conn.t()
   def download(conn, server_name, media_id, file_name \\ nil) do
-    # media-security-admin-control/2d-download-stall-mechanism: opt-in
-    # `?timeout_ms=N` stall. Absent/malformed => 0 => byte-for-byte 1c behavior
-    # (no lookup, no subscribe, no wait — AC1/AC7). For a valid clamped
-    # timeout > 0 AND a stallable state (:quarantined/:scanning), block on a
-    # PubSub-driven wait BEFORE falling through to the exact same 1c
-    # with_authorised_media/download_gate/serve_bytes path, which re-reads the
+    # media-security-admin-control/2d-download-stall-mechanism +
+    # bugfix/media-download-451-scan-race: a :quarantined/:scanning file is held
+    # open, PubSub-driven, for the requested `?timeout_ms` (absent => the spec
+    # default `default_stall_ms`, see clamped_stall_ms/1) before the unchanged
+    # 1c with_authorised_media/download_gate/serve_bytes path re-reads the
     # (possibly changed) state and applies the ADR-026 mapping to it.
     conn = fetch_query_params(conn)
-    maybe_await_stall(server_name, media_id, clamped_stall_ms(conn.query_params["timeout_ms"]))
+    stall_ms = clamped_stall_ms(conn.query_params["timeout_ms"])
 
-    with_authorised_media(conn, server_name, media_id, fn conn, row, plaintext ->
+    with_authorised_media(conn, server_name, media_id, stall_ms, fn conn, row, plaintext ->
       # `{fileName}` path segment wins, but an empty / fully-sanitized-away
       # segment falls back to the stored upload filename.
       name = sanitize_filename(file_name) || Map.get(row, :filename)
@@ -620,11 +619,21 @@ defmodule Nebu.Media do
   # Config accessors kept tiny so Story 9's Nebu.Media.Config.get/0 swap is a
   # one-line change here, not a call-site change in the download handler.
   @default_max_stall_ms 20_000
+  # Matrix CS API v1.18: `timeout_ms` "defaults to 20000" on all media GETs.
+  @default_default_stall_ms 20_000
   @default_max_concurrent_stalls 500
 
   @doc "Effective ceiling (ms) a `?timeout_ms` stall is clamped to (config)."
   @spec max_stall_ms() :: pos_integer()
   def max_stall_ms, do: media_config(:max_stall_ms, @default_max_stall_ms)
+
+  @doc """
+  Stall window (ms) applied when the client sends NO `?timeout_ms` (config,
+  default 20_000 = Matrix spec default). Always clamped by `max_stall_ms/0`;
+  a value <= 0 disables the default stall (kill switch — absent == no stall).
+  """
+  @spec default_stall_ms() :: integer()
+  def default_stall_ms, do: media_config(:default_stall_ms, @default_default_stall_ms)
 
   @doc "Max number of simultaneously held download-stall requests (config)."
   @spec max_concurrent_stalls() :: pos_integer()
@@ -634,54 +643,79 @@ defmodule Nebu.Media do
   defp media_config(key, default),
     do: Application.get_env(:nebu, Nebu.Media, []) |> Keyword.get(key, default)
 
-  # Parse/validate/clamp `?timeout_ms`. Non-integer, negative, or zero (and
-  # absent) all collapse to 0 = "do not stall", exactly 1c behavior (AC1/AC7).
-  # A value above the cap is silently clamped, not an error (AC2).
-  defp clamped_stall_ms(nil), do: 0
+  # Resolves `?timeout_ms` to the effective stall window (ms); 0 = do not stall.
+  #
+  #   * absent            -> `default_stall_ms` (spec default), clamped
+  #   * positive integer  -> that value, clamped to `max_stall_ms` (not an error)
+  #   * `0`               -> 0: the client is willing to wait 0 ms (spec-defined)
+  #   * malformed (non-integer, trailing junk, negative, empty, array/map
+  #     shaped) -> 0: the spec defines nothing; treated as "no stall" and NOT
+  #     as absent, so garbage never buys a 20 s hold (1c behaviour, AC3)
+  defp clamped_stall_ms(nil), do: clamp_stall_ms(default_stall_ms())
 
   defp clamped_stall_ms(raw) when is_binary(raw) do
     case Integer.parse(raw) do
-      # `n` is already guarded > 0; the only way this can go non-positive is a
-      # misconfigured negative `max_stall_ms` in config — `max(0, …)` collapses
-      # that to 0 = "do not stall" instead of yielding a negative clamped value
-      # that would crash the stall-eligible download (fix-cycle 1, MINOR-2).
-      {n, ""} when n > 0 -> min(n, max(0, max_stall_ms()))
+      {n, ""} when n > 0 -> clamp_stall_ms(n)
       _ -> 0
     end
   end
 
-  # `conn.query_params["timeout_ms"]` is a `String.t()` for a normal
-  # `?timeout_ms=N` query string, but Plug parses a repeated/array-shaped key
-  # (e.g. `?timeout_ms[]=1`) into a list, and Plug.Conn.Query.decode/1 can also
-  # nest a map for `?timeout_ms[x]=1`. Neither `nil` nor `is_binary/1` above
-  # matches those shapes — this catch-all treats any non-string, non-nil value
-  # identically to "absent" (AC7's "not a client error" posture extended to
-  # match), instead of raising FunctionClauseError/500 on a malformed request
-  # (fix-cycle 2, MINOR — a graceful-degradation gap left by MINOR-2's fix).
+  # `conn.query_params["timeout_ms"]` can also be a list (`?timeout_ms[]=1`) or
+  # a map (`?timeout_ms[x]=1`) — malformed, never a 500 (fix-cycle 2, MINOR).
   defp clamped_stall_ms(_other), do: 0
 
-  # Only :quarantined/:scanning are stalled on (AC3): a scan is pending/running
-  # so a terminal broadcast may still arrive. :reserved (no scan job yet) and
-  # every other state fall straight through to the immediate 1c response. The
-  # `<= 0` guard (not just `== 0`) also absorbs a misconfigured negative
-  # `max_stall_ms` defensively — such a request degrades to the immediate 1c
-  # response rather than raising FunctionClauseError (fix-cycle 1, MINOR-2).
-  defp maybe_await_stall(_server_name, _media_id, clamped_ms) when clamped_ms <= 0, do: :ok
+  # Non-positive input (kill-switched default) or a misconfigured non-positive
+  # `max_stall_ms` collapse to 0 = "do not stall" instead of a negative window
+  # that would crash the stall-eligible request (fix-cycle 1, MINOR-2).
+  #
+  # `is_integer(cap)` matters: under Erlang term order a non-integer cap (e.g. a
+  # string "5000") sorts ABOVE every integer, so `min(ms, max(0, cap))` would
+  # return the client's value unclamped (security review F-4). A non-integer cap
+  # fails closed to 0 = no stall.
+  defp clamp_stall_ms(ms) when is_integer(ms) and ms > 0 do
+    case max_stall_ms() do
+      cap when is_integer(cap) and cap > 0 -> min(ms, cap)
+      _ -> 0
+    end
+  end
 
-  defp maybe_await_stall(server_name, media_id, clamped_ms) when clamped_ms > 0 do
-    case current_state(server_name, media_id) do
-      state when state in [:quarantined, :scanning] ->
-        Nebu.Media.DownloadStall.await(
-          media_id,
-          clamped_ms,
-          max_concurrent_stalls(),
-          fn -> current_state(server_name, media_id) end
-        )
+  defp clamp_stall_ms(_ms), do: 0
 
-        :ok
+  # Initial row read for with_authorised_media/5. Only :quarantined/:scanning
+  # (a scan is pending/running, so a terminal broadcast may still arrive) are
+  # stalled on; :reserved (no scan job yet), :released, the deny states and an
+  # unknown id take the immediate path off this SAME single read (AC4: no extra
+  # lookup, no wait, no subscribe).
+  #
+  # AC6: the stall is entered only for a room member. Membership is checked
+  # BEFORE stalling so a non-member never holds a slot and never learns
+  # anything from the wait — it gets the same immediate 1c answer as
+  # `timeout_ms=0`. After the wait the row is re-read and the unchanged 1c
+  # gate + membership check run on it.
+  #
+  # Timing side channel (members stall, non-members don't) is accepted: the
+  # window is ~scan time after an upload, "member" is membership of ANY room,
+  # media ids are random, and a non-member already tells 403 (released) from
+  # 451/404 without any stall.
+  defp lookup_maybe_stalled(server_name, media_id, user, stall_ms) do
+    case db_module().lookup(server_name, media_id) do
+      {:ok, %{state: state} = row}
+      when stall_ms > 0 and state in [:quarantined, :scanning] ->
+        if membership_module().member?(row.room_id, user) do
+          Nebu.Media.DownloadStall.await(
+            media_id,
+            stall_ms,
+            max_concurrent_stalls(),
+            fn -> current_state(server_name, media_id) end
+          )
 
-      _other ->
-        :ok
+          db_module().lookup(server_name, media_id)
+        else
+          {:ok, row}
+        end
+
+      other ->
+        other
     end
   end
 
@@ -696,7 +730,12 @@ defmodule Nebu.Media do
 
   @spec thumbnail(Plug.Conn.t(), String.t(), String.t()) :: Plug.Conn.t()
   def thumbnail(conn, server_name, media_id) do
-    with_authorised_media(conn, server_name, media_id, fn conn, row, plaintext ->
+    # Same stall as download/4 (bugfix/media-download-451-scan-race): Element
+    # requests the thumbnail right after upload, racing the async scan.
+    conn = fetch_query_params(conn)
+    stall_ms = clamped_stall_ms(conn.query_params["timeout_ms"])
+
+    with_authorised_media(conn, server_name, media_id, stall_ms, fn conn, row, plaintext ->
       # Thumbnail generation via libvips/Image is intentionally NOT used: the
       # Alpine build/test container has no native vips toolchain, and the Matrix
       # spec permits streaming the original for small images. Only the spec's
@@ -1025,10 +1064,10 @@ defmodule Nebu.Media do
 
   # ── shared: lookup → membership → fetch → decrypt ──────────────────────────
 
-  defp with_authorised_media(conn, server_name, media_id, on_ok) do
+  defp with_authorised_media(conn, server_name, media_id, stall_ms, on_ok) do
     user = conn.assigns[:current_user]
 
-    case db_module().lookup(server_name, media_id) do
+    case lookup_maybe_stalled(server_name, media_id, user, stall_ms) do
       {:ok, row} ->
         case download_gate(row.state) do
           :serve ->
@@ -1055,6 +1094,14 @@ defmodule Nebu.Media do
   # BEFORE the room-membership check and BEFORE fetch_and_decrypt/3 (AC7): a
   # denied non-released file must never reach Nebu.Media.Storage.get/1 or
   # Crypto.decrypt/3, and must deny identically regardless of membership.
+  #
+  # The ONE place that order is relaxed is lookup_maybe_stalled/4: for a
+  # :quarantined/:scanning row it checks membership BEFORE the gate so a
+  # non-member never holds a stall slot or learns anything from the wait
+  # (stall AC6). That check only decides whether to WAIT; the gate below still
+  # runs on the (re-read) row afterwards, so nothing is served or fetched
+  # before it, and a non-member gets the same immediate 1c answer as
+  # `timeout_ms=0`.
   #
   # `:released` is the SOLE explicit positive match (AC5 — an allow-list, not
   # a deny-list). Every other clause, including the catch-all tail, denies —

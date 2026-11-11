@@ -12,6 +12,20 @@
 # [grant-nebu-app-missing-table-privileges] 2026-11-11T07:14Z test-review → CLEAN (0 MAJOR, 0 MINOR)
 # [grant-nebu-app-missing-table-privileges] 2026-11-11T07:14Z atdd → 5 failing tests (all assertion-red; verify parser could not read 'Result: 0/5 passed' format, red state checked by hand)
 # [grant-nebu-app-missing-table-privileges] 2026-11-11T07:11Z pipeline started (--bug, release blocker v0.4.0); baseline clean
+# last_updated: 2026-10-13
+# [media-download-451-scan-race] 2026-10-13T09:02Z committed ✓ (ATDD+3 review cycles+Kassandra CLEAN, F-1 h2 slot leak fixed, unit 2429 passed)
+# [media-download-451-scan-race] 2026-10-13T08:52Z dev-story → cycle 3 (M-1 :DOWN release_claim, M-2 max_concurrent_stalls fail-closed); unit 2429 passed 0 failed; media 556 passed
+# [media-download-451-scan-race] 2026-10-13T08:31Z dev-story → cycle 2 done (keeper-process slot release, F-4 guard); unit 2423/2424, 1 flaky Workers test per run (reproduced on unchanged HEAD)
+# [media-download-451-scan-race] 2026-10-13T08:21Z security-review → Kassandra CLEAN (0 CRIT/HIGH, 2 MEDIUM, 2 LOW, 6 INFO); F-1 slot leak on h2 disconnect + F-4 guard → cycle 2
+# [media-download-451-scan-race] 2026-10-13T08:13Z dev-story → cycle 1 done (4 MINOR fixed, unit 2415 passed); full integration CI deferred to final tree after security-review
+# [media-download-451-scan-race] 2026-10-13T08:08Z code-review → 0 MAJOR, 4 MINOR → cycle 1
+# [media-download-451-scan-race] 2026-10-13T08:05Z ci-gate → media green; 29 unrelated pre-existing/flaky failures (baseline 32)
+# [media-download-451-scan-race] 2026-10-13T07:53Z dev-story → done (cycle 0), unit 2411 passed
+# [media-download-451-scan-race] 2026-10-13T07:47Z baseline-integration → 32 pre-existing failures (unrelated), +31 new ATDD red
+# [media-download-451-scan-race] 2026-10-13T07:40Z test-review → CLEAN (0 MAJOR, 8 MINOR → fixed in dev)
+# [media-download-451-scan-race] 2026-10-13T07:37Z atdd → 42 new tests (31 failing, 10 guards, 1 skipped)
+# [media-download-451-scan-race] 2026-10-13T07:32Z oracle-gate → spec default timeout_ms=20000, 451 not in spec (out of scope)
+# [media-download-451-scan-race] 2026-10-13T07:31Z pipeline started (--bug, create-story skipped; story written manually)
 # [postgres-ssl-env-var] 2026-06-25T10:05Z committed ✓ (ATDD+Dev+Code CLEAN, 867 passed)
 # [postgres-ssl-env-var] 2026-06-25T10:00Z arc42-update → CLAUDE.md + docs/architecture/07-deployment.md
 # [postgres-ssl-env-var] 2026-06-25T09:56Z security-review → skipped (not-needed)

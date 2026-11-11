@@ -702,7 +702,9 @@ defmodule Nebu.Web.MediaResponseContentTypeTest do
 
     test "state :quarantined -> 451 M_NOT_YET_UPLOADED (ADR-026)", %{token: token} do
       id = install("application/pdf", state: :quarantined)
-      conn = download(@v3_download, id, token)
+      # bugfix/media-download-451-scan-race: absent timeout_ms now stalls; pin the
+      # immediate mapping with the spec-defined timeout_ms=0.
+      conn = download(@v3_download, id, token, "?timeout_ms=0")
       assert conn.status == 451
       assert S.json(conn)["errcode"] == "M_NOT_YET_UPLOADED"
     end

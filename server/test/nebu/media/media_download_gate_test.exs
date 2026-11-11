@@ -102,6 +102,13 @@ defmodule Nebu.Web.MediaDownloadGateTest do
   defp download_path(media_id \\ @media_id),
     do: "/_matrix/media/v3/download/#{S.server_name()}/#{media_id}"
 
+  # bugfix/media-download-451-scan-race: an ABSENT `timeout_ms` now stalls
+  # :quarantined/:scanning for the spec default window. These gate tests pin the
+  # IMMEDIATE state → response mapping, so they pass the spec-defined
+  # `timeout_ms=0` ("client waits 0 ms") explicitly.
+  defp download_path_nostall(media_id \\ @media_id),
+    do: download_path(media_id) <> "?timeout_ms=0"
+
   defp thumbnail_path(media_id \\ @media_id),
     do: "/_matrix/media/v3/thumbnail/#{S.server_name()}/#{media_id}"
 
@@ -152,7 +159,7 @@ defmodule Nebu.Web.MediaDownloadGateTest do
   test "state :quarantined → 451 M_NOT_YET_UPLOADED", %{token: token} = ctx do
     put_row(@media_id, :quarantined, ctx)
 
-    conn = get(download_path(), S.auth(token))
+    conn = get(download_path_nostall(), S.auth(token))
 
     assert conn.status == 451,
            "state :quarantined must return 451, got #{conn.status}"
@@ -165,7 +172,7 @@ defmodule Nebu.Web.MediaDownloadGateTest do
   test "state :scanning → 451 M_NOT_YET_UPLOADED", %{token: token} = ctx do
     put_row(@media_id, :scanning, ctx)
 
-    conn = get(download_path(), S.auth(token))
+    conn = get(download_path_nostall(), S.auth(token))
 
     assert conn.status == 451,
            "state :scanning must return 451, got #{conn.status}"
@@ -313,7 +320,7 @@ defmodule Nebu.Web.MediaDownloadGateTest do
 
     for state <- denied_states do
       put_row(@media_id, state, ctx)
-      conn = get(download_path(), S.auth(token))
+      conn = get(download_path_nostall(), S.auth(token))
 
       refute conn.status == 200,
              "state #{inspect(state)} must be denied before storage is ever consulted"

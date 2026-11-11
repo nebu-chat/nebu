@@ -57,19 +57,15 @@ locals {
   # Access key + secret are stored in Terraform state (use encrypted remote state).
   s3_access_key = var.enable_media_gateway ? upcloud_managed_object_storage_user_access_key.nebu_media[0].access_key_id : ""
   s3_secret_key = var.enable_media_gateway ? upcloud_managed_object_storage_user_access_key.nebu_media[0].secret_access_key : ""
-  # Endpoint of the managed object storage service. A public endpoint is preferred; a service that is attached
-  # ONLY to the private network (this example: network { name = "nebu-network" }) exposes just a "private" one
-  # (<id>-private.upcloudobjects.com), which the VM reaches over the SDN (cloud-init sets
-  # NEBU_STORAGE_ALLOW_PRIVATE_ENDPOINTS). Filtering on "public" alone left the value empty, and the server then
-  # tried to upload to "https:///<bucket>/<key>" (nxdomain, 500 "Failed to store media file"). The precondition on
+  # Endpoint of the managed object storage service. In this example the service is attached ONLY to the private
+  # network (network { name = "nebu-network" }), so its endpoints are private (<id>-private.upcloudobjects.com),
+  # which the VM reaches over the SDN (cloud-init sets NEBU_STORAGE_ALLOW_PRIVATE_ENDPOINTS). The first entry is
+  # used as is: do NOT filter on type == "public" (that left the value empty, and the server then tried to upload
+  # to "https:///<bucket>/<key>": nxdomain, 500 "Failed to store media file"). The precondition on
   # upcloud_server.nebu makes an empty endpoint fail at plan/apply instead.
   s3_endpoint_entries = var.enable_media_gateway ? upcloud_managed_object_storage.nebu_media[0].endpoint : []
-  s3_endpoint_entry = try(
-    [for ep in local.s3_endpoint_entries : ep if ep.type == "public"][0],
-    local.s3_endpoint_entries[0],
-    null
-  )
-  s3_endpoint = local.s3_endpoint_entry == null ? "" : local.s3_endpoint_entry.domain_name
+  s3_endpoint_entry   = try(local.s3_endpoint_entries[0], null)
+  s3_endpoint         = local.s3_endpoint_entry == null ? "" : local.s3_endpoint_entry.domain_name
   # bugfix-upcloud-s3-iam-sts-endpoints (AC3): the same endpoint entry also carries separate IAM/STS URLs
   # (distinct from the S3 endpoint above) that the S3 driver needs passed through as-is.
   s3_iam_endpoint = local.s3_endpoint_entry == null ? "" : local.s3_endpoint_entry.iam_url
