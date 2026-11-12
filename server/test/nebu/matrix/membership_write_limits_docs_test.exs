@@ -180,7 +180,7 @@ defmodule Nebu.Matrix.MembershipWriteLimitsDocsTest do
 
   test "CHANGELOG: [Unreleased] has ONE entry for the behaviour change: tiers, caps, variables, the 403 texts, migration 000050" do
     raw = File.read!(@changelog)
-    assert [_, after_unreleased] = String.split(raw, "## [Unreleased]", parts: 2)
+    assert [_, after_unreleased] = String.split(raw, "## [0.4.0]", parts: 2)
     [unreleased | _] = String.split(after_unreleased, ~r/\n## \[/, parts: 2)
 
     entries = unreleased |> String.split(~r/\n- \*\*/) |> Enum.filter(&(&1 =~ "000050"))

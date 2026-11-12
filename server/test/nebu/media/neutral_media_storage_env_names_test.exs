@@ -184,7 +184,7 @@ defmodule Nebu.Media.NeutralMediaStorageEnvNamesTest do
   @tag ac: "the-breaking-change-is-documented-for-operators"
   test "Scenario: The breaking change is documented for operators" do
     changelog = File.read!(@changelog)
-    [_, after_unreleased] = String.split(changelog, "## [Unreleased]", parts: 2)
+    [_, after_unreleased] = String.split(changelog, "## [0.4.0]", parts: 2)
     unreleased = after_unreleased |> String.split(~r/\n## \[/, parts: 2) |> hd() |> String.replace(~r/\s+/, " ")
 
     # one entry that is marked as breaking and names the rename

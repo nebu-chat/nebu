@@ -106,8 +106,8 @@ defmodule Nebu.OAuth.ConsentGrantDocsTest do
 
   test "CHANGELOG [Unreleased]: the entry names the story, the migration, the skip rule, prompt=consent, the account page and the erasure" do
     c = read(@changelog)
-    assert has?(c, "## [Unreleased]")
-    [_, rest] = String.split(c, "## [Unreleased]", parts: 2)
+    assert has?(c, "## [0.4.0]")
+    [_, rest] = String.split(c, "## [0.4.0]", parts: 2)
     unreleased = rest |> String.split(~r/ ## \[\d/, parts: 2) |> hd()
     entry = between(unreleased, "persistent-consent-grants", "- **")
 
@@ -157,7 +157,7 @@ defmodule Nebu.OAuth.ConsentGrantDocsTest do
 
   test "CHANGELOG (cycle 1): the entry mentions prompt=login, the device rule and the deploy window" do
     c = read(@changelog)
-    [_, rest] = String.split(c, "## [Unreleased]", parts: 2)
+    [_, rest] = String.split(c, "## [0.4.0]", parts: 2)
     entry = rest |> String.split(~r/ ## \[\d/, parts: 2) |> hd() |> between("persistent-consent-grants", "- **")
 
     for {pattern, why} <- [{~r/no `prompt=login`/, "prompt=login as a reason to ask again"}, {~r/deploy window/i, "the deploy window"}, {~r/legacy session|another session|replace/i, "the device rule"}] do

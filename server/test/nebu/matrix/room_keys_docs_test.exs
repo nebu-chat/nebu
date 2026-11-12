@@ -196,7 +196,7 @@ defmodule Nebu.Matrix.RoomKeysDocsTest do
 
   describe "CHANGELOG, cycles 1 and 2" do
     test "the entry names the budget, the bulk read bucket and migration 000058" do
-      unreleased = read(@changelog) |> String.split("## [Unreleased]", parts: 2) |> List.last() |> String.split(~r/\n## \[/, parts: 2) |> hd() |> squash()
+      unreleased = read(@changelog) |> String.split("## [0.4.0]", parts: 2) |> List.last() |> String.split(~r/\n## \[/, parts: 2) |> hd() |> squash()
       assert unreleased =~ "64 MiB", "cycle 2 (deliberate, supersedes 256 MiB)"
       refute unreleased =~ "256 MiB"
       assert unreleased =~ ~r/bulk/i
@@ -324,7 +324,7 @@ defmodule Nebu.Matrix.RoomKeysDocsTest do
   describe "CHANGELOG" do
     test "has an entry for the key backup under [Unreleased]" do
       text = read(@changelog)
-      [_, rest] = String.split(text, "## [Unreleased]", parts: 2)
+      [_, rest] = String.split(text, "## [0.4.0]", parts: 2)
       unreleased = rest |> String.split(~r/\n## \[/, parts: 2) |> hd() |> squash()
       assert unreleased =~ "room_keys", "the entry names the routes"
       assert unreleased =~ @story or unreleased =~ ~r/key backup/i

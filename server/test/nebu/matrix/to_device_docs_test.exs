@@ -54,7 +54,7 @@ defmodule Nebu.Matrix.ToDeviceDocsTest do
   defp td_section, do: squash(section(read(@concepts), ["to-device messaging"]))
 
   defp unreleased do
-    read(@changelog) |> String.split("## [Unreleased]", parts: 2) |> List.last() |> String.split(~r/\n## \[/, parts: 2) |> hd() |> squash()
+    read(@changelog) |> String.split("## [0.4.0]", parts: 2) |> List.last() |> String.split(~r/\n## \[/, parts: 2) |> hd() |> squash()
   end
 
   defp decisions do

@@ -294,7 +294,7 @@ defmodule Nebu.Matrix.EventSizeLimitDocsTest do
 
   test "CHANGELOG (d): [Unreleased] ### Changed has a warning entry: 413 M_TOO_LARGE (65 536 canonical bytes, 255 bytes), the 1 MB envelope, user ids, upgrade_room, existing events unchanged" do
     changelog = File.read!(@changelog)
-    assert [_, from_unreleased] = String.split(changelog, "## [Unreleased]", parts: 2)
+    assert [_, from_unreleased] = String.split(changelog, "## [0.4.0]", parts: 2)
     [unreleased | _] = String.split(from_unreleased, ~r/\n## \[/, parts: 2)
 
     assert [_, from_changed] = String.split(unreleased, "### Changed", parts: 2)
