@@ -37,7 +37,7 @@ defmodule Nebu.OAuth.DeviceNameDocsTest do
   end
 
   test "CHANGELOG [Unreleased]: an entry for the story that says what a user sees" do
-    unreleased = @changelog |> read() |> between("## [Unreleased]", " ## [")
+    unreleased = @changelog |> read() |> between("## [0.4.0]", " ## [")
     assert unreleased =~ "oauth-device-default-display-name"
     [_, rest] = String.split(unreleased, "oauth-device-default-display-name", parts: 2)
     entry = rest |> String.split(" - **", parts: 2) |> hd()
@@ -61,7 +61,7 @@ defmodule Nebu.OAuth.DeviceNameDocsTest do
 
   test "cycle 1 - 08-concepts and CHANGELOG do not claim 'not logged' without the caveat: the new code does not log it, the debug request logger's GET /devices capture shows it" do
     sec = @concepts |> read() |> between(@heading, " ##")
-    unreleased = @changelog |> read() |> between("## [Unreleased]", " ## [")
+    unreleased = @changelog |> read() |> between("## [0.4.0]", " ## [")
     [_, rest] = String.split(unreleased, "oauth-device-default-display-name", parts: 2)
     entry = rest |> String.split(" - **", parts: 2) |> hd()
 

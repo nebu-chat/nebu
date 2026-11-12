@@ -73,7 +73,7 @@ defmodule Nebu.Matrix.HistoryVisibilityCycle1DocsTest do
   end
 
   test "CHANGELOG: a Changed entry names the gj validation, the cap and the read markers" do
-    [_, unreleased] = String.split(File.read!(@changelog), "## [Unreleased]", parts: 2)
+    [_, unreleased] = String.split(File.read!(@changelog), "## [0.4.0]", parts: 2)
     [unreleased | _] = String.split(unreleased, ~r/\n## \[/, parts: 2)
     entry = unreleased |> String.split(~r/\n- /) |> Enum.find(&(&1 =~ "security cycle 1" and &1 =~ "M_BAD_JSON"))
     assert entry, "the Changed entry of the security cycle"

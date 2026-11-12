@@ -53,7 +53,7 @@ defmodule Nebu.Matrix.DeviceKeyDirectoryDocsTest do
   defp dkd_section, do: squash(section(read(@concepts), ["device-key directory"]))
 
   defp unreleased do
-    read(@changelog) |> String.split("## [Unreleased]", parts: 2) |> List.last() |> String.split(~r/\n## \[/, parts: 2) |> hd() |> squash()
+    read(@changelog) |> String.split("## [0.4.0]", parts: 2) |> List.last() |> String.split(~r/\n## \[/, parts: 2) |> hd() |> squash()
   end
 
   defp decisions do

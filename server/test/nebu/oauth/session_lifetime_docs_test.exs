@@ -147,7 +147,7 @@ defmodule Nebu.OAuth.SessionLifetimeDocsTest do
 
   test "CHANGELOG: [Unreleased] describes the setting, the audit action and migration 000056" do
     c = File.read!(@changelog)
-    [_, rest] = String.split(c, "## [Unreleased]", parts: 2)
+    [_, rest] = String.split(c, "## [0.4.0]", parts: 2)
     [unreleased | _] = Regex.split(~r/\n## \[/, rest, parts: 2)
     unreleased = String.replace(unreleased, ~r/\s+/, " ")
 

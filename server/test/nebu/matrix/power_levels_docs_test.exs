@@ -71,7 +71,7 @@ defmodule Nebu.Matrix.PowerLevelsDocsTest do
 
   defp unreleased_section(heading) do
     changelog = File.read!(@changelog)
-    assert [_, from_unreleased] = String.split(changelog, "## [Unreleased]", parts: 2)
+    assert [_, from_unreleased] = String.split(changelog, "## [0.4.0]", parts: 2)
     [unreleased | _] = String.split(from_unreleased, ~r/\n## \[/, parts: 2)
 
     assert [_, from_heading] = String.split(unreleased, "### #{heading}", parts: 2), "[Unreleased] has a #{heading} section"

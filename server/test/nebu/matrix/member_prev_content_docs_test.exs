@@ -207,7 +207,7 @@ defmodule Nebu.Matrix.MemberPrevContentDocsTest do
 
   test "CHANGELOG (d): [Unreleased] has a ### Fixed entry: prev_content / prev_sender, Element marks an accepted DM as a direct chat (ff), a declined invitation reads 'rejected the invitation'" do
     changelog = File.read!(@changelog)
-    assert [_, from_unreleased] = String.split(changelog, "## [Unreleased]", parts: 2)
+    assert [_, from_unreleased] = String.split(changelog, "## [0.4.0]", parts: 2)
     [unreleased | _] = String.split(from_unreleased, ~r/\n## \[/, parts: 2)
 
     assert unreleased =~ "### Fixed", "[Unreleased] has a Fixed section"

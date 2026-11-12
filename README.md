@@ -34,7 +34,7 @@
 Nebu is a chat server that speaks the [Matrix Client-Server API](https://spec.matrix.org/latest/client-server-api/), so any standard Matrix client (Element, Cinny, FluffyChat, …) works out of the box. It's built for organizations that need full data sovereignty: on-premise deployment, no vendor lock-in, no telemetry, no federation overhead.
 
 <!-- markdownlint-disable-next-line MD013 -->
-**Status:** Pre-alpha. Core chat functionality and production deployment tooling implemented (Epics 1–11 complete). Not production-ready — see [Current Limitations](#current-limitations) before evaluating.
+**Status:** Pre-alpha. Core chat functionality and production deployment tooling implemented (Phases 1–12 implemented; managed E2EE key escrow and clustering planned). Not production-ready — see [Current Limitations](#current-limitations) before evaluating.
 
 ---
 
@@ -235,8 +235,8 @@ All dependencies are Apache 2.0, MIT, BSD, or PostgreSQL License. No AGPLv3, no 
 | 9     | Post-MVP API completeness, full-text search, OIDC user directory (SCIM 2.0)      | Done     |
 | 10    | Production deployment (Stackit/AWS/K8s), Element Web integration, certbot TLS    | Done     |
 | 11    | E2EE client infrastructure (key backup, to-device, verification) — done; Managed E2EE key escrow (ADR-011) — planned | Partly done |
-| 12    | Matrix Spaces + room moderator feature completeness                               | Planned  |
-| 13    | Object storage (MinIO S3), clustering & horizontal scale                          | Planned  |
+| 12    | Matrix Spaces + room moderator feature completeness                               | Done     |
+| 13    | S3-compatible object storage — done; clustering & horizontal scale — planned     | Partly done |
 <!-- markdownlint-enable MD013 MD060 -->
 
 Detailed roadmap: [`docs/roadmap.md`](docs/roadmap.md)
