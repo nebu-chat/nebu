@@ -1,0 +1,7 @@
+# Checkov configuration. DevGuard's IaC scan (devguard:infrastructure_as_code_scanning, merge request and main pipeline) reads this file.
+# Only paths that are NOT Nebu's own runtime infrastructure are skipped; real findings are fixed in code.
+skip-path:
+  # CI-only Dex image used by the e2e jobs (built by `build-ci-dex`); never deployed. No HEALTHCHECK needed.
+  - docker/Dockerfile.dex-ci
+  # Dev / CI Dex configuration with fixed test clients and passwords (docker-compose, e2e). Test fixtures, not secrets.
+  - dev/dex/config.yaml

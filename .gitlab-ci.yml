@@ -154,9 +154,9 @@ build-ci-elixir:
     # Built whenever the Dockerfile changes (the merge request / branch / main pipeline that carries the change builds the image BEFORE the
     # unit stage pulls it: stage order). Everywhere else it is a manual, non-blocking job: the way to (re)build the image by hand
     # (fresh registry, expired tag): open a pipeline on main or the branch (Run pipeline) and start `build-ci-elixir` / `build-ci-dex`.
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH'
+    - if: '$CI_COMMIT_BRANCH || $CI_PIPELINE_SOURCE == "merge_request_event"'
       changes: [docker/Dockerfile.ci.elixir]
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH'
+    - if: '$CI_COMMIT_BRANCH || $CI_PIPELINE_SOURCE == "merge_request_event"'
       when: manual
       allow_failure: true
 build-ci-dex:
@@ -164,9 +164,9 @@ build-ci-dex:
   script:
     - /kaniko/executor --context "${CI_PROJECT_DIR}" --dockerfile docker/Dockerfile.dex-ci --destination "${CI_REGISTRY_IMAGE}/ci-dex:v2.45.1" --cache=true --cache-ttl=168h
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH'
+    - if: '$CI_COMMIT_BRANCH || $CI_PIPELINE_SOURCE == "merge_request_event"'
       changes: [docker/Dockerfile.dex-ci, dev/dex/config.yaml]
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH'
+    - if: '$CI_COMMIT_BRANCH || $CI_PIPELINE_SOURCE == "merge_request_event"'
       when: manual
       allow_failure: true
 # ─── Unit Tests ───────────────────────────────────────────────────────────────
@@ -727,21 +727,67 @@ include:
   - local: .gitlab/ci/release-image-aliases.yml
     rules:
     - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
-# devguard-ci-components exposes no input to disable individual jobs, so the
-# only way to turn one off is to override it by job name after the include.
-# IaC scanning (devguard:infrastructure_as_code_scanning) only has
-# deploy/tofu/examples/* to scan — operator-facing deployment recommendations
-# (ADR-012), not infrastructure Nebu itself runs — so findings there aren't
-# actionable for this repo. Skipped outright (not allow_failure) so it stops
-# showing red on main.
+# devguard-ci-components exposes no input to disable individual jobs, so the only way to turn one off is
+# to override it by job name after the include (see the `-release` overrides below).
+# IaC scanning (devguard:infrastructure_as_code_scanning) runs in merge requests and in the main pipeline. What it finds is
+# fixed or skipped in the repository: `.checkov.yml` lists the paths that are not Nebu's own infrastructure
+# (dev / CI images), the rest is fixed in code.
+
+# ─── DevGuard code-risk scanners: merge requests (and main), not release tags ─────────────────────────────────
+# Secret scanning, SAST and IaC scanning look at the source tree, so a finding has to be caught BEFORE the merge:
+# they run in every merge request pipeline (jobs `devguard:*-mr` below) and, through the first include, on main.
+# A release tag is too late for them, so the `-release` instances of the second include are switched off.
+# Software composition analysis (SBOM / dependency risk) is deliberately NOT part of the MR pipeline: it runs
+# in the main pipeline and on release tags (first and second include).
+# Kept on tag pipelines: software_composition_analysis, container scanning, build, push, sign and attest.
+# Nothing `needs:` the three switched-off jobs (devguard-ci-components v1.6.0 templates/full.yml).
 #
-# The include's own `rules:` above only match on main, so on every other
-# pipeline (schedule, MRs, release/*) the component isn't pulled in at all and
-# this override is this job's ONLY definition. GitLab requires
-# script:/run:/trigger: on every job regardless of its rules:, so a bare
-# `rules: when: never` is invalid in that case — hence the no-op script here.
-devguard:infrastructure_as_code_scanning:
+# Switching off: the include exposes no input to disable a job, so the job is overridden by name after the
+# include. The no-op script keeps the definition valid on pipelines where the include is not pulled in.
+devguard:secret_scanning-release:
   script:
-    - 'echo "Skipped: deploy/ is example/recommended IaC (ADR-012), not real infrastructure."'
+    - 'echo "Skipped: code-risk scanning runs in merge request pipelines, not in tag pipelines."'
   rules:
     - when: never
+devguard:static-application-security-testing-release:
+  script:
+    - 'echo "Skipped: code-risk scanning runs in merge request pipelines, not in tag pipelines."'
+  rules:
+    - when: never
+devguard:infrastructure_as_code_scanning-release:
+  script:
+    - 'echo "Skipped: code-risk scanning runs in merge request pipelines, not in tag pipelines."'
+  rules:
+    - when: never
+# The merge request instances: same scanner image and commands as the devguard-ci-components v1.6.0 jobs of
+# the same name (keep the image tag in step with the `include:` version). `needs: []` starts them at once
+# instead of after the integration stage. DEVGUARD_* are unprotected CI variables, so they exist in MR pipelines.
+# A job fails the pipeline on findings DevGuard has not triaged (same as on main): fix, skip in `.checkov.yml`,
+# or triage in DevGuard before the merge.
+.devguard-code-risk-mr:
+  stage: test
+  needs: []
+  interruptible: true
+  image:
+    name: ghcr.io/l3montree-dev/devguard/scanner:v1.6.0
+    entrypoint: [""]
+  variables:
+    GIT_STRATEGY: fetch
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  script:
+    - echo "Running DevGuard ${DEVGUARD_SCAN} (merge request)..."
+    - devguard-scanner ${DEVGUARD_SCAN} --assetName="$DEVGUARD_ASSET_NAME" --apiUrl="$DEVGUARD_API_URL" --token="$DEVGUARD_TOKEN" --path="$CI_PROJECT_DIR" --defaultRef="$CI_DEFAULT_BRANCH" --ref="$CI_COMMIT_REF_NAME" --isTag="false" --webUI=https://devguard.opencode.de
+devguard:secret_scanning-mr:
+  extends: .devguard-code-risk-mr
+  variables:
+    GIT_STRATEGY: clone # gitleaks reads the git history
+    DEVGUARD_SCAN: secret-scanning
+devguard:static-application-security-testing-mr:
+  extends: .devguard-code-risk-mr
+  variables:
+    DEVGUARD_SCAN: sast
+devguard:infrastructure_as_code_scanning-mr:
+  extends: .devguard-code-risk-mr
+  variables:
+    DEVGUARD_SCAN: iac
