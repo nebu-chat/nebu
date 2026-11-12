@@ -70,6 +70,9 @@ COPY --from=builder --chown=53111:53111 /app/_build/prod/rel/nebu ./
 COPY --chown=53111:53111 --chmod=0555 healthcheck.sh /app/healthcheck
 # Hardened-container baseline: non-root, no login shell, nothing else runs as root.
 USER 53111:53111
+# Same probe as docker-compose and cloud-init (CKV_DOCKER_2). Kubernetes ignores HEALTHCHECK and uses its httpGet probes.
+# The probe boots a throw-away Erlang VM, hence the generous timeout and start period.
+HEALTHCHECK --interval=10s --timeout=15s --start-period=30s --retries=3 CMD ["/app/healthcheck"]
 # go-removal-cleanup (full-elixir-stack): the server now owns DB migrations (formerly run
 # by the Go gateway). Run Nebu.Release.migrate/0 before booting the server. `exec`
 # replaces the shell so OTP receives SIGTERM/SIGINT for graceful shutdown.
