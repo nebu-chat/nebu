@@ -39,7 +39,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # Public docker.io images so the script works on a fresh clone without
 # access to the GitLab Container Registry.
 # ---------------------------------------------------------------------------
-ELIXIR_IMAGE="elixir:1.19-alpine"
+ELIXIR_IMAGE="elixir:1.20.5-otp-29-alpine"
 
 # ---------------------------------------------------------------------------
 # Pre-flight: Docker must be in PATH
@@ -163,7 +163,7 @@ Modes:
   --help, -h       show this message
 
 CI jobs (--all, --test-elixir, --scan, --verify): require Docker in PATH.
-  Uses public docker.io image: elixir:1.19-alpine.
+  Uses public docker.io image: elixir:1.20.5-otp-29-alpine.
   --no-go runs without Docker.
 
 Docs jobs (--docs, --docs-watch): require Node.js + npx in PATH.

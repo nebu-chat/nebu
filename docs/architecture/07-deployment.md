@@ -1025,11 +1025,11 @@ pipeline is the one pipeline of a push: no duplicate branch + merge request pipe
 (the former rules created no pipeline at all for such a branch, so the unit tests silently did not run). A branch pipeline that was started by the push before the merge request was opened can still
 finish next to the first merge request pipeline; both test the same commit.
 
-**Elixir image.** `CI_ELIXIR_IMAGE` is `$CI_REGISTRY_IMAGE/ci-elixir:1.20`, built by `build-ci-elixir` from `docker/Dockerfile.ci.elixir` (`FROM elixir:1.20-alpine`, the same base as the production
-image `server/Dockerfile`). The tag used to say 1.19 while the image contained 1.20. Every job uses the variable. To bump the Elixir minor, change the `FROM` and the variable in ONE commit: the changed Dockerfile
+**Elixir image.** `CI_ELIXIR_IMAGE` is `$CI_REGISTRY_IMAGE/ci-elixir:1.20.5`, built by `build-ci-elixir` from `docker/Dockerfile.ci.elixir` (`FROM elixir:1.20.5-otp-29-alpine`, pinned by digest, the same Elixir patch and OTP major as the production
+image `server/Dockerfile`). The tag names the exact Elixir version the image contains. Every job uses the variable; the Makefile (`ELIXIR_IMAGE`), `scripts/ci-local.sh` and the Podman integration job use the public `elixir:1.20.5-otp-29-alpine`. To bump the Elixir version, change the `FROM`, the variable and these image names in ONE commit: the changed Dockerfile
 makes the merge request / branch / main pipeline build the image in the `build-ci-images` stage, before the `unit` stage pulls it. If the tag does not exist in the registry yet (new project, registry
 cleanup), run **Run pipeline** on the branch (or main) and start the manual jobs `build-ci-elixir` and `build-ci-dex` once. `test-unit-elixir` compiles with `--force --warnings-as-errors` (a restored
-`_build` cache would otherwise hide warnings) and needs no database; `test-unit-elixir-1-19` is a non-blocking compatibility lane on the public `elixir:1.19-alpine` image (`mix.exs` promises `~> 1.19`).
+`_build` cache would otherwise hide warnings) and needs no database. `mix.exs` requires `~> 1.20`; the former non-blocking 1.19 compatibility lane (`test-unit-elixir-1-19`) was removed with the bump to 1.20.5.
 
 **Browser e2e jobs** (docker-tagged DinD runner, amd64, `scripts/e2e-ci.sh`, all `allow_failure: true` until the first green runs on the runner confirm the setup):
 
@@ -1131,7 +1131,7 @@ There is a single image — the Elixir/OTP release. No Go build stage exists any
 
 **Elixir application pattern:**
 ```dockerfile
-FROM elixir:1.19-alpine AS builder
+FROM elixir:1.20.5-otp-29 AS builder
 RUN MIX_ENV=prod mix release
 
 FROM alpine:3.23 AS runtime

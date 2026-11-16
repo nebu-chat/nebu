@@ -6,7 +6,7 @@
 
 | Goal | Technology Choice | Rationale |
 |---|---|---|
-| Single application runtime (HTTP + stateful chat logic) | Elixir/OTP 1.19 (Erlang/OTP 27) | OTP Supervisor trees, Horde CRDT clustering, ETS in-memory state; one BEAM node serves everything |
+| Single application runtime (HTTP + stateful chat logic) | Elixir 1.20.5 (Erlang/OTP 29) | OTP Supervisor trees, Horde CRDT clustering, ETS in-memory state; one BEAM node serves everything |
 | HTTP surface (Matrix C-S API + media) | Bandit + Plug | Pure-Elixir HTTP server; in-process dispatch to domain functions |
 | Admin UI | Phoenix HTTP controllers + Phoenix LiveView (Dashboard, AuditLog, Bootstrap) | Server-rendered admin pages on the same Bandit listener; CRUD pages use PRG HTTP controllers, real-time pages remain LiveViews |
 | Reliable event log + schema authority | PostgreSQL 16 | Append-only event log, raw-SQL migrations via `Nebu.Release.migrate/0` (ADR-018), RLS policies |

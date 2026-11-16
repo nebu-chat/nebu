@@ -9,7 +9,7 @@
 [![GitLab CI](https://gitlab.opencode.de/nebu/nebu-server/badges/main/pipeline.svg)](https://gitlab.opencode.de/nebu/nebu-server/-/pipelines)
 
 <!-- Tech stack -->
-[![Elixir](https://img.shields.io/badge/Elixir-1.19+-4B275F?style=flat-square&logo=elixir&logoColor=white)](https://elixir-lang.org)
+[![Elixir](https://img.shields.io/badge/Elixir-1.20+-4B275F?style=flat-square&logo=elixir&logoColor=white)](https://elixir-lang.org)
 [![OTP](https://img.shields.io/badge/Erlang%2FOTP-27+-A90533?style=flat-square&logo=erlang&logoColor=white)](https://www.erlang.org)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16+-336791?style=flat-square&logo=postgresql&logoColor=white)](https://postgresql.org)
 [![Docker](https://img.shields.io/badge/Docker-compose-2496ED?style=flat-square&logo=docker&logoColor=white)](docker-compose.yml)
@@ -207,7 +207,7 @@ Full endpoint list: [`docs/matrix-api-scope.md`](docs/matrix-api-scope.md)
 
 | Layer               | Technology                                        |
 |---------------------|---------------------------------------------------|
-| Application         | Elixir/OTP 1.19+ (single OTP app, libcluster, Horde) |
+| Application         | Elixir 1.20+ / OTP 27+ (single OTP app, libcluster, Horde) |
 | HTTP / Web          | Bandit + Plug (Matrix API & media); Phoenix LiveView (Admin UI) |
 | Domains             | `Nebu.Matrix` · `Nebu.Media` · `Nebu.Admin` (module namespaces) |
 | Database            | PostgreSQL 16+ (pgcrypto, tsvector)               |

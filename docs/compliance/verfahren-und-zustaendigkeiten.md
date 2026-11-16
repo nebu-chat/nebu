@@ -67,7 +67,7 @@ Aufgaben je Praktik:
   Review durch einen Maintainer, Verknüpfung mit Issue/Story.
 - **Merge-Blocker** (nach `CONTRIBUTING.md`): fehlschlagende CI, offene Review-Kommentare, fehlende
   Tests, fehlende Dokumentation, sicherheitsrelevante Änderung ohne Security-Review.
-- **Teststufen:** Unit-Tests (`test-unit-elixir`, auch gegen Elixir 1.19), Integrationstests
+- **Teststufen:** Unit-Tests (`test-unit-elixir`), Integrationstests
   (`integration-test`, Varianten für Podman und Kubernetes), E2E-Tests (`e2e-element-web`,
   `e2e-admin-ui`, `e2e-oauth-https`), Dokumentationsprüfung (`verify-docs`),
   Validierung von IaC und Helm-Chart (`validate-iac`, `validate-helm`).
