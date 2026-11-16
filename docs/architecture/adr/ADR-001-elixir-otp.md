@@ -7,7 +7,7 @@ Accepted - 2026-03-18
 > **Amended 2026-11-02.** The decision (Elixir/OTP as runtime) stands and is now the *only*
 > runtime: the Go gateway was removed (ADR-021) and the whole stack is one OTP app `:nebu`
 > (ADR-019). The `GRPC` library listed below is **no longer a dependency** — gRPC was fully
-> removed (`grpc-removal` epic, see ADR-005). Current pins: Elixir 1.19 / OTP 27, see
+> removed (`grpc-removal` epic, see ADR-005). Current pins: Elixir 1.20.5 / OTP 29, see
 > [02-constraints](../02-constraints.md).
 
 ## Context
@@ -37,7 +37,7 @@ We use **Elixir/OTP** (not bare Erlang/OTP) as the messaging core runtime.
 Key libraries: `libcluster` (automatic node discovery), `Horde` (distributed GenServer supervision),
 `Ecto` (PostgreSQL access), `GRPC` (gRPC server implementation).
 
-Elixir version: 1.19 on Erlang/OTP 27.
+Elixir version: 1.20.5 on Erlang/OTP 29 (originally 1.19 on OTP 27; `mix.exs` requires `~> 1.20` since the bump).
 
 ## Consequences
 

@@ -27,8 +27,8 @@
 
 | Component | Version | Notes |
 |---|---|---|
-| Elixir | 1.19 | `elixir:1.19-alpine` base image; single Mix app `:nebu` |
-| Erlang/OTP | 27 | Bundled with Elixir 1.19; native Ed25519/X25519 via `:crypto` |
+| Elixir | 1.20.5 | `elixir:1.20.5-otp-29` release builder (`server/Dockerfile`), `elixir:1.20.5-otp-29-alpine` for dev and CI; `mix.exs` requires `~> 1.20`; single Mix app `:nebu` |
+| Erlang/OTP | 29 | Bundled with the Elixir image (Elixir 1.20 runs on OTP 27+); native Ed25519/X25519 via `:crypto` |
 | Bandit + Plug | current | HTTP server for Matrix C-S API and media |
 | Phoenix LiveView | 1.8 / 1.2 | Admin UI (`Nebu.Admin.*`) |
 | Alpine | 3.23 | Builder and runtime must match to avoid OpenSSL crashes |

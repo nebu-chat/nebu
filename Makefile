@@ -4,7 +4,11 @@
 
 # go-removal-cleanup (full-elixir-stack): DOCKER_GO / DOCKER_NODE / DOCKER_BUF were used
 # only by the now-removed Go gateway build and admin asset pipeline.
-DOCKER_ELIXIR = docker run --rm -v $(PWD):/workspace -w /workspace elixir:1.20-alpine
+# One Elixir image for every target (build, unit and integration tests): the exact Elixir patch AND the OTP major of the production
+# image (server/Dockerfile: elixir:1.20.5-otp-29). Keep in sync with scripts/ci-local.sh, docker/Dockerfile.ci.elixir and the
+# integration-test-k8s job in .gitlab-ci.yml; Renovate bumps them together.
+ELIXIR_IMAGE ?= elixir:1.20.5-otp-29-alpine
+DOCKER_ELIXIR = docker run --rm -v $(PWD):/workspace -w /workspace $(ELIXIR_IMAGE)
 DOCKER_TOFU   = docker run --rm --entrypoint sh -v $(PWD):/workspace -w /workspace ghcr.io/opentofu/opentofu:1.9
 DOCKER_HELM   = docker run --rm --entrypoint sh -v $(PWD):/workspace -w /workspace alpine/helm:3.17
 
@@ -193,7 +197,7 @@ test-integration: setup
 		-e NEBU_TEST_MATRIX_URL=http://server:8008 \
 		-e NEBU_TEST_SERVER_URL=http://server:4000 \
 		-e NEBU_TEST_DEX_URL=http://dex:5556 \
-		elixir:1.19-alpine \
+		$(ELIXIR_IMAGE) \
 		sh -c "cd server && mix local.hex --force && mix deps.get && mix test --include integration --warnings-as-errors"; \
 	ELIXIR_EXIT=$$?; \
 	docker compose down; \
@@ -208,7 +212,7 @@ test-integration-elixir: setup
 		--network=nebu_default \
 		-e NEBU_DB_URL=postgresql://nebu_app:nebu_app_dev_pw@postgres:5432/nebu \
 		-e NEBU_DB_URL_MIGRATE=postgresql://nebu_migrate:nebu_migrate_dev_pw@postgres:5432/nebu \
-		elixir:1.19-alpine \
+		$(ELIXIR_IMAGE) \
 		sh -c "cd server && mix local.hex --force && mix deps.get && mix test --include integration --warnings-as-errors"; \
 	EXIT=$$?; docker compose down; exit $$EXIT
 
@@ -226,7 +230,7 @@ test-integration-ci: setup
 		-e NEBU_TEST_MATRIX_URL=http://server:8008 \
 		-e NEBU_TEST_SERVER_URL=http://server:4000 \
 		-e NEBU_TEST_DEX_URL=http://dex:5556 \
-		elixir:1.19-alpine \
+		$(ELIXIR_IMAGE) \
 		sh -c "cd server && mix local.hex --force && mix deps.get && mix test --include integration --warnings-as-errors"; \
 	EXIT=$$?; docker compose -f docker-compose.yml -f docker-compose.ci.yml down; exit $$EXIT
 
@@ -243,7 +247,7 @@ test-perf: setup
 		-e NEBU_TEST_MATRIX_URL=http://server:8008 \
 		-e NEBU_TEST_SERVER_URL=http://server:4000 \
 		-e NEBU_TEST_DEX_URL=http://dex:5556 \
-		elixir:1.19-alpine \
+		$(ELIXIR_IMAGE) \
 		sh -c "cd server && mix local.hex --force && mix deps.get && mix test --only perf --warnings-as-errors"; \
 	ELIXIR_EXIT=$$?; \
 	docker compose down; \

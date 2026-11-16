@@ -82,7 +82,7 @@ description:
 
 
       **Technologie-Stack:**
-      Elixir/OTP 1.19+ (Bandit, Plug, Phoenix LiveView), PostgreSQL 16+, Docker.
+      Elixir 1.20+ / OTP 27+ (Bandit, Plug, Phoenix LiveView), PostgreSQL 16+, Docker.
     features:
       - Matrix Client-Server API kompatibel (Element, Cinny, FluffyChat)
       - OIDC-Authentifizierung (Keycloak, Azure AD, Dex)
@@ -153,7 +153,7 @@ description:
 
 
       **Tech Stack:**
-      Elixir/OTP 1.19+ (Bandit, Plug, Phoenix LiveView), PostgreSQL 16+, Docker.
+      Elixir 1.20+ / OTP 27+ (Bandit, Plug, Phoenix LiveView), PostgreSQL 16+, Docker.
     features:
       - Matrix Client-Server API compatible (Element, Cinny, FluffyChat)
       - OIDC authentication (Keycloak, Azure AD, Dex)

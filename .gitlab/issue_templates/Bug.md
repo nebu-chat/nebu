@@ -28,5 +28,5 @@
 <!-- Go version, Elixir/OTP version, OS.
 Example:
 Go: 1.26
-Elixir: 1.19 / OTP 27
+Elixir: 1.20.5 / OTP 29
 OS: Ubuntu 24.04 -->
