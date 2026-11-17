@@ -176,11 +176,20 @@ build-ci-dex:
 # The unit suite needs NO database (the DB-bound tests are tagged :integration and excluded; `test/test_helper.exs` decides). `compile --force`
 # first: a restored `_build` cache would otherwise not recompile, and `--warnings-as-errors` can only fail on warnings of a compile that happened.
 # Cache: `deps` / `_build` only (paths outside the project directory such as ~/.hex are never cached by GitLab; Hex and rebar are baked into the image).
+# Sharding: the pod runners give one job too little CPU for ExUnit's own parallelism (the whole suite took 480-3300 s on the same runner, and two
+# tests hit the 60 s ExUnit timeout inside `:code_server` = a starved pod, not a logic error; locally the suite needs ~4 min), so the suite is split over
+# `parallel: 4` jobs instead: GitLab starts 4 pods with CI_NODE_INDEX 1..4 / CI_NODE_TOTAL 4, and `mix test --partitions` runs the test FILES whose hash
+# falls into this partition (MIX_TEST_PARTITION is 1-based like CI_NODE_INDEX). The unit suite owns no database and no fixed port, so partitions never
+# share a resource. Every partition compiles on its own (`compile --force` is what makes `--warnings-as-errors` meaningful, see above), that is the
+# fixed cost per job. More / fewer shards = change `parallel:` (it takes a literal integer, no variable).
 test-unit-elixir:
   stage: unit
   image: $CI_ELIXIR_IMAGE
+  parallel: 4
   script:
-    - cd server && mix deps.get && MIX_ENV=test mix compile --force --warnings-as-errors && mix test --warnings-as-errors
+    - echo "partition ${CI_NODE_INDEX}/${CI_NODE_TOTAL} nproc=$(nproc) cgroup_cpu=$(cat /sys/fs/cgroup/cpu.max 2>/dev/null || echo n/a)"
+    - cd server && mix deps.get && MIX_ENV=test mix compile --force --warnings-as-errors
+    - MIX_TEST_PARTITION="${CI_NODE_INDEX}" mix test --warnings-as-errors --partitions "${CI_NODE_TOTAL}"
   cache:
     key: "mix-${CI_COMMIT_REF_SLUG}"
     paths:
